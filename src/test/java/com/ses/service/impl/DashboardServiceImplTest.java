@@ -1,0 +1,152 @@
+package com.ses.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.ses.dto.dashboard.ContractProfitDto;
+import com.ses.entity.Contract;
+import com.ses.entity.Engineer;
+import com.ses.entity.Project;
+import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ProjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDate;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class DashboardServiceImplTest {
+
+    @Mock
+    private EngineerMapper engineerMapper;
+
+    @Mock
+    private ContractMapper contractMapper;
+
+    @Mock
+    private ProjectMapper projectMapper;
+
+    @InjectMocks
+    private DashboardServiceImpl dashboardService;
+
+    private Contract createContract(Long id, String contractNo, Integer sellingPrice, Integer costPrice, LocalDate startDate) {
+        Contract c = new Contract();
+        c.setId(id);
+        c.setContractNo(contractNo);
+        c.setEngineerId(id);
+        c.setProjectId(id);
+        c.setSellingPrice(sellingPrice != null ? java.math.BigDecimal.valueOf(sellingPrice) : null);
+        c.setCostPrice(costPrice != null ? java.math.BigDecimal.valueOf(costPrice) : null);
+        c.setStartDate(startDate);
+        return c;
+    }
+
+    private Engineer createEngineer(Long id, String name) {
+        Engineer e = new Engineer();
+        e.setId(id);
+        e.setFullName(name);
+        return e;
+    }
+
+    private Project createProject(Long id, String name) {
+        Project p = new Project();
+        p.setId(id);
+        p.setProjectName(name);
+        return p;
+    }
+
+    @Test
+    void testGetProfitAnalysis_Success() {
+        Contract c1 = createContract(1L, "C001", 1000000, 600000, LocalDate.of(2026, 7, 1));
+        Engineer e1 = createEngineer(1L, "Test Engineer 1");
+        Project p1 = createProject(1L, "Test Project 1");
+
+        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        when(engineerMapper.selectById(1L)).thenReturn(e1);
+        when(projectMapper.selectById(1L)).thenReturn(p1);
+
+        List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
+
+        assertEquals(1, result.size());
+        ContractProfitDto dto = result.get(0);
+        assertEquals("C001", dto.getContractNo());
+        assertEquals("Test Engineer 1", dto.getEngineerName());
+        assertEquals("Test Project 1", dto.getProjectName());
+        assertEquals(1000000, dto.getSellingPrice());
+        assertEquals(600000, dto.getCostPrice());
+        assertEquals(400000, dto.getGrossProfitAmount());
+        assertEquals("40.0%", dto.getGrossProfitRate());
+    }
+
+    @Test
+    void testGetProfitAnalysis_ZeroSellingPrice() {
+        Contract c1 = createContract(1L, "C001", 0, 600000, LocalDate.of(2026, 7, 1));
+        Engineer e1 = createEngineer(1L, "Test Engineer 1");
+        Project p1 = createProject(1L, "Test Project 1");
+
+        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        when(engineerMapper.selectById(1L)).thenReturn(e1);
+        when(projectMapper.selectById(1L)).thenReturn(p1);
+
+        List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
+
+        assertEquals(1, result.size());
+        assertEquals(0, result.get(0).getSellingPrice());
+        assertEquals(-600000, result.get(0).getGrossProfitAmount());
+        assertEquals("N/A", result.get(0).getGrossProfitRate());
+    }
+
+    @Test
+    void testGetProfitAnalysis_SortDesc() {
+        Contract c1 = createContract(1L, "C001", 1000000, 600000, LocalDate.of(2026, 7, 1)); // Older
+        Contract c2 = createContract(2L, "C002", 800000, 500000, LocalDate.of(2026, 8, 1)); // Newer
+        
+        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1, c2));
+        when(engineerMapper.selectById(any())).thenReturn(createEngineer(1L, "Eng"));
+        when(projectMapper.selectById(any())).thenReturn(createProject(1L, "Proj"));
+
+        List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
+
+        assertEquals(2, result.size());
+        assertEquals("C002", result.get(0).getContractNo()); // Newer first
+        assertEquals("C001", result.get(1).getContractNo());
+    }
+
+    @Test
+    void testGetProfitAnalysis_Empty() {
+        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testGetSummary_WithYear() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        var result = dashboardService.getSummary(2026);
+        assertNotNull(result);
+        assertEquals(12, result.getCharts().getRevenue().getLabels().size());
+        assertEquals("4月", result.getCharts().getRevenue().getLabels().get(0));
+        assertEquals("3月", result.getCharts().getRevenue().getLabels().get(11));
+    }
+
+    @Test
+    void testGetSummary_WithoutYear() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        var result = dashboardService.getSummary(null);
+        assertNotNull(result);
+        assertEquals(6, result.getCharts().getRevenue().getLabels().size());
+    }
+}

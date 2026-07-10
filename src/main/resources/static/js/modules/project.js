@@ -113,10 +113,10 @@ function renderProjects(records) {
         else remoteIcon = '<i class="bi bi-x-circle text-danger" title="不可"></i> 不可';
 
         // Status Badge
-        let statusBadge = `<span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">${proj.status || '-'}</span>`;
-        if (proj.status === '募集中') statusBadge = '<span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">募集中</span>';
-        else if (proj.status === '選考中' || proj.status === '面談調整中') statusBadge = '<span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">選考中</span>';
-        else if (proj.status === '充足' || proj.status === '参画決定') statusBadge = '<span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-50 px-2 py-1">参画決定</span>';
+        let statusBadge = `<span class="status-badge status-secondary">${proj.status || '-'}</span>`;
+        if (proj.status === '募集中') statusBadge = '<span class="status-badge status-success">募集中</span>';
+        else if (proj.status === '選考中' || proj.status === '面談調整中') statusBadge = '<span class="status-badge status-warning">選考中</span>';
+        else if (proj.status === '充足' || proj.status === '参画決定') statusBadge = '<span class="status-badge status-primary">参画決定</span>';
 
         const min = proj.unitPriceMin ? (proj.unitPriceMin / 10000) + '万' : '-';
         const max = proj.unitPriceMax ? (proj.unitPriceMax / 10000) + '万' : '-';
@@ -213,18 +213,33 @@ function saveProject() {
 }
 
 function deleteProject(id) {
-    if (!confirm('本当に削除しますか？')) return;
-    
-    $.ajax({
-        url: '/api/projects/' + id,
-        method: 'DELETE',
-        success: function(res) {
-            if (res.code === 200) {
-                Toast.success('削除しました');
-                loadProjects();
-            } else {
-                Toast.error(res.message || '削除に失敗しました');
-            }
+    Swal.fire({
+        title: '削除確認',
+        text: 'この案件データを削除しますか？この操作は元に戻せません。',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: '削除する',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/projects/' + id,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success('削除しました');
+                        loadProjects();
+                    } else {
+                        Toast.error(res.message || '削除に失敗しました');
+                    }
+                },
+                error: function(err) {
+                    console.error(err);
+                    Toast.error('通信エラーが発生しました');
+                }
+            });
         }
     });
 }

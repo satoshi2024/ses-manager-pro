@@ -94,12 +94,12 @@ function renderContracts(list) {
 }
 
 function getStatusBadge(status) {
-    let bg = 'bg-secondary';
-    if(status === '稼動中') bg = 'bg-success';
-    if(status === '準備中') bg = 'bg-primary';
-    if(status === '終了') bg = 'bg-secondary';
-    if(status === '解約') bg = 'bg-danger';
-    return `<span class="badge ${bg}">${status || '準備中'}</span>`;
+    let bg = 'status-secondary';
+    if(status === '稼動中') bg = 'status-success';
+    if(status === '準備中') bg = 'status-primary';
+    if(status === '終了') bg = 'status-secondary';
+    if(status === '解約') bg = 'status-danger';
+    return `<span class="status-badge ${bg}">${status || '準備中'}</span>`;
 }
 
 function saveContract() {
@@ -145,18 +145,33 @@ function saveContract() {
 }
 
 function deleteContract(id) {
-    if (!confirm('本当に削除しますか？')) return;
-    
-    $.ajax({
-        url: '/api/contracts/' + id,
-        method: 'DELETE',
-        success: function(res) {
-            if (res.code === 200) {
-                Toast.success('削除しました');
-                loadContracts();
-            } else {
-                Toast.error(res.message || '削除に失敗しました');
-            }
+    Swal.fire({
+        title: '削除確認',
+        text: 'この契約データを削除しますか？この操作は元に戻せません。',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: '削除する',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/contracts/' + id,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success('削除しました');
+                        loadContracts();
+                    } else {
+                        Toast.error(res.message || '削除に失敗しました');
+                    }
+                },
+                error: function(err) {
+                    console.error(err);
+                    Toast.error('通信エラーが発生しました');
+                }
+            });
         }
     });
 }

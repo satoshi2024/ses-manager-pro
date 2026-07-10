@@ -100,7 +100,7 @@ const SES = {
             const borderClass = `border-${type}`;
             
             const html = `
-                <div id="${toastId}" class="toast align-items-center ${bgClass} ${borderClass} border text-white" role="alert" aria-live="assertive" aria-atomic="true">
+                <div id="${toastId}" class="toast align-items-center ${bgClass} ${borderClass} border text-white" role="alert" aria-live="assertive" aria-atomic="true" style="pointer-events: auto;">
                     <div class="d-flex">
                         <div class="toast-body d-flex align-items-center">
                             <i class="bi ${iconClass} ${textClass} fs-5 me-2"></i>
@@ -190,8 +190,61 @@ const SES = {
                 }
             });
         }
+    },
+    
+    /**
+     * 通知制御
+     */
+    notification: {
+        load: function() {
+            const container = document.getElementById('notification-list');
+            if (!container) return;
+
+            $.ajax({
+                url: '/api/notifications',
+                method: 'GET',
+                success: function(res) {
+                    if (res.code === 200) {
+                        SES.notification.render(res.data || []);
+                    } else {
+                        SES.notification.renderError();
+                    }
+                },
+                error: function() {
+                    SES.notification.renderError();
+                }
+            });
+        },
+
+        render: function(list) {
+            const container = $('#notification-list');
+            if (!list || list.length === 0) {
+                container.html('<span class="dropdown-item-text text-muted small py-2">新しい通知はありません</span>');
+                return;
+            }
+            const iconColorMap = {
+                'RETIRING_ENGINEER': 'text-accent-yellow',
+                'AI_MATCHING': 'text-accent-blue'
+            };
+            const html = list.map(function(n) {
+                const colorClass = iconColorMap[n.type] || 'text-accent-blue';
+                return `<a class="dropdown-item py-2" href="#">
+                            <i class="bi ${n.icon} ${colorClass} me-2"></i>${n.message}
+                            <div class="small text-muted ms-4">${n.date}</div>
+                        </a>`;
+            }).join('');
+            container.html(html);
+        },
+
+        renderError: function() {
+            $('#notification-list').html(
+                '<span class="dropdown-item-text text-danger small py-2">通知を読み込めませんでした</span>'
+            );
+        }
     }
 };
+
+window.Toast = SES.toast;
 
 // ================== 初期化処理 ==================
 document.addEventListener('DOMContentLoaded', function() {
@@ -202,7 +255,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // 2. サイドバー初期化（モバイルトグル等）
     SES.sidebar.init();
     
-    // 3. ツールチップの初期化 (Bootstrap)
+    // 3. 通知の初期化
+    SES.notification.load();
+    
+    // 4. ツールチップの初期化 (Bootstrap)
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
     [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
     
@@ -223,3 +279,33 @@ window.matchAI = function(engineerId) {
         SES.toast.success('マッチングが完了しました。最適な案件が見つかりました。');
     }, 2000);
 };
+
+// ================== jQuery グローバルAjaxハンドラー ==================
+// セッション切れ・未認証時に自動でログインページへリダイレクトする
+$(function() {
+    $.ajaxSetup({
+        complete: function(xhr, status) {
+            // レスポンスが JSON ではなく HTML (ログインページ) だった場合
+            // → セッション切れの可能性が高い
+            const contentType = xhr.getResponseHeader('Content-Type') || '';
+            if (xhr.status === 200 && contentType.indexOf('text/html') !== -1) {
+                // APIエンドポイントへのリクエストがHTMLを返した = ログインへリダイレクトされた
+                const url = this.url || '';
+                if (url.indexOf('/api/') !== -1 || url.indexOf('/login') === -1) {
+                    Toast.error('セッションが切れました。再ログインしてください。');
+                    setTimeout(function() {
+                        window.location.href = '/login';
+                    }, 1500);
+                }
+            }
+            // 401 Unauthorized
+            if (xhr.status === 401) {
+                Toast.error('セッションが切れました。再ログインしてください。');
+                setTimeout(function() {
+                    window.location.href = '/login';
+                }, 1500);
+            }
+        }
+    });
+});
+

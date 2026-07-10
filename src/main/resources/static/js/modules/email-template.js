@@ -36,15 +36,15 @@ function renderTemplates(list) {
     }
     
     list.forEach(t => {
-        let typeBadge = 'bg-secondary';
-        if (t.templateType === '提案') typeBadge = 'bg-primary';
-        if (t.templateType === '面接依頼') typeBadge = 'bg-info text-dark';
-        if (t.templateType === 'お礼') typeBadge = 'bg-success';
+        let typeBadge = 'status-secondary';
+        if (t.templateType === '提案') typeBadge = 'status-primary';
+        if (t.templateType === '面接依頼') typeBadge = 'status-warning';
+        if (t.templateType === 'お礼') typeBadge = 'status-success';
         
         const tr = `
             <tr>
                 <td class="px-4 py-3 text-white fw-bold">${t.templateName}</td>
-                <td class="py-3"><span class="badge ${typeBadge}">${t.templateType}</span></td>
+                <td class="py-3"><span class="status-badge ${typeBadge}">${t.templateType}</span></td>
                 <td class="py-3 text-muted text-truncate" style="max-width:300px;">${t.subjectTemplate}</td>
                 <td class="px-4 py-3 text-end">
                     <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick='editTemplate(${JSON.stringify(t)})'>
@@ -97,21 +97,23 @@ function saveTemplate() {
         data.id = id;
     }
 
-    // Mock API call behavior for now
     $.ajax({
         url: isNew ? '/api/email-templates' : `/api/email-templates/${id}`,
         method: isNew ? 'POST' : 'PUT',
         contentType: 'application/json',
         data: JSON.stringify(data),
         success: function(res) {
-            Toast.success('テンプレートを保存しました');
-            templateModal.hide();
-            loadTemplates();
+            if (res.code === 200) {
+                Toast.success('テンプレートを保存しました');
+                templateModal.hide();
+                loadTemplates();
+            } else {
+                Toast.error(res.message || '保存に失敗しました');
+            }
         },
-        error: function() {
-            Toast.success('【モック】テンプレートを保存しました');
-            templateModal.hide();
-            loadTemplates();
+        error: function(err) {
+            console.error(err);
+            Toast.error('通信エラーが発生しました');
         }
     });
 }
@@ -131,13 +133,17 @@ function deleteTemplate(id) {
             $.ajax({
                 url: `/api/email-templates/${id}`,
                 method: 'DELETE',
-                success: function() {
-                    Toast.success('削除しました');
-                    loadTemplates();
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success('削除しました');
+                        loadTemplates();
+                    } else {
+                        Toast.error(res.message || '削除に失敗しました');
+                    }
                 },
-                error: function() {
-                    Toast.success('【モック】削除しました');
-                    loadTemplates();
+                error: function(err) {
+                    console.error(err);
+                    Toast.error('通信エラーが発生しました');
                 }
             });
         }

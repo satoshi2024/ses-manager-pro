@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.ses.dto.dashboard.ContractProfitDto;
 import com.ses.dto.dashboard.DashboardSummaryDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
@@ -13,10 +14,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -29,7 +32,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final ProjectMapper projectMapper;
 
     @Override
-    public DashboardSummaryDto getSummary() {
+    public DashboardSummaryDto getSummary(Integer year) {
         // 1. Calculate KPIs
         List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
         long totalEngineers = allEngineers.size();
@@ -58,20 +61,20 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
 
         // 2. Calculate Charts (Dynamic)
+        List<YearMonth> targetMonths = (year != null)
+                ? buildFiscalYearMonths(year)
+                : buildTrailingMonths(6);
+
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();
         List<Long> profitData = new ArrayList<>();
 
-        LocalDate today = LocalDate.now();
         List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
 
-        for (int i = 5; i >= 0; i--) {
-            LocalDate monthDate = today.minusMonths(i);
-            LocalDate monthStart = monthDate.withDayOfMonth(1);
-            LocalDate monthEnd = monthDate.withDayOfMonth(monthDate.lengthOfMonth());
-            
-            String label = monthDate.getMonthValue() + "月";
-            monthLabels.add(label);
+        for (YearMonth ym : targetMonths) {
+            LocalDate monthStart = ym.atDay(1);
+            LocalDate monthEnd = ym.atEndOfMonth();
+            monthLabels.add(ym.getMonthValue() + "月");
 
             long monthSales = 0;
             long monthProfit = 0;
@@ -145,5 +148,66 @@ public class DashboardServiceImpl implements DashboardService {
                 .charts(charts)
                 .retiring(retiringList)
                 .build();
+    }
+
+    private List<YearMonth> buildFiscalYearMonths(int fiscalYear) {
+        List<YearMonth> months = new ArrayList<>();
+        YearMonth start = YearMonth.of(fiscalYear, 4);
+        for (int i = 0; i < 12; i++) {
+            months.add(start.plusMonths(i));
+        }
+        return months;
+    }
+
+    private List<YearMonth> buildTrailingMonths(int count) {
+        List<YearMonth> months = new ArrayList<>();
+        YearMonth current = YearMonth.from(LocalDate.now());
+        for (int i = count - 1; i >= 0; i--) {
+            months.add(current.minusMonths(i));
+        }
+        return months;
+    }
+
+    @Override
+    public List<ContractProfitDto> getProfitAnalysis() {
+        List<Contract> contracts = contractMapper.selectList(new QueryWrapper<>());
+        List<ContractProfitDto> result = new ArrayList<>();
+
+        for (Contract c : contracts) {
+            Engineer e = c.getEngineerId() != null ? engineerMapper.selectById(c.getEngineerId()) : null;
+            Project p = c.getProjectId() != null ? projectMapper.selectById(c.getProjectId()) : null;
+
+            int sell = c.getSellingPrice() != null ? c.getSellingPrice().intValue() : 0;
+            int cost = c.getCostPrice() != null ? c.getCostPrice().intValue() : 0;
+            int grossProfit = sell - cost;
+            String rateStr = "N/A";
+
+            if (sell > 0) {
+                double rate = (double) grossProfit / sell * 100;
+                rateStr = String.format("%.1f%%", rate);
+            }
+
+            ContractProfitDto dto = new ContractProfitDto();
+            dto.setContractNo(c.getContractNo());
+            dto.setEngineerName(e != null ? e.getFullName() : "不明");
+            dto.setProjectName(p != null ? p.getProjectName() : "不明");
+            dto.setSellingPrice(sell);
+            dto.setCostPrice(cost);
+            dto.setGrossProfitAmount(grossProfit);
+            dto.setGrossProfitRate(rateStr);
+
+            result.add(dto);
+        }
+
+        // Sort by StartDate desc
+        result.sort((d1, d2) -> {
+            Contract c1 = contracts.stream().filter(c -> c.getContractNo().equals(d1.getContractNo())).findFirst().orElse(null);
+            Contract c2 = contracts.stream().filter(c -> c.getContractNo().equals(d2.getContractNo())).findFirst().orElse(null);
+            LocalDate date1 = c1 != null && c1.getStartDate() != null ? c1.getStartDate() : LocalDate.MIN;
+            LocalDate date2 = c2 != null && c2.getStartDate() != null ? c2.getStartDate() : LocalDate.MIN;
+            return date2.compareTo(date1);
+        });
+
+        return result;
     }
 }

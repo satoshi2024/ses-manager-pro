@@ -9,7 +9,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * SES（システムエンジニアリングサービス）会社管理システム
  */
 @SpringBootApplication
-@MapperScan("com.ses.mapper")
 public class SesManagerApplication {
     public static void main(String[] args) {
         SpringApplication.run(SesManagerApplication.class, args);

@@ -39,4 +39,9 @@ public class LoginPageController {
     public String dashboard() {
         return "dashboard/index";
     }
+
+    @GetMapping("/dashboard/profit")
+    public String dashboardProfit() {
+        return "dashboard/profit";
+    }
 }

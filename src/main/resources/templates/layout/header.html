@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
 </head>
 <body>
-    <header th:fragment="header" class="top-header sticky-top bg-primary border-bottom border-dark d-flex align-items-center px-4 py-2 transition-base">
+    <header th:fragment="header" class="top-header sticky-top bg-primary border-bottom border-dark d-flex align-items-center px-4 py-2 transition-base no-print">
         
         <!-- Mobile Toggle Button -->
         <button class="btn btn-link text-white d-md-none me-3 p-0 border-0" id="sidebar-toggle-btn">
@@ -37,8 +37,10 @@
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="notificationDropdown" style="width: 300px;">
                     <li><h6 class="dropdown-header text-white border-bottom border-dark pb-2">通知</h6></li>
-                    <li><a class="dropdown-item py-2" href="#"><i class="bi bi-info-circle text-accent-blue me-2"></i>【AI】マッチング処理が完了しました</a></li>
-                    <li><a class="dropdown-item py-2" href="#"><i class="bi bi-exclamation-triangle text-accent-yellow me-2"></i>T.S氏の退場日が近づいています</a></li>
+                    <li id="notification-list">
+                        <!-- JSにより動的生成。ロード中/空/エラー時のメッセージもここに描画 -->
+                        <span class="dropdown-item-text text-muted small py-2">読み込み中...</span>
+                    </li>
                     <li><hr class="dropdown-divider border-dark"></li>
                     <li><a class="dropdown-item text-center small text-muted hover-text-white" href="#">すべての通知を見る</a></li>
                 </ul>

@@ -14,7 +14,7 @@
             <p class="text-muted small mb-0">当月の経営指標とシステム全体のサマリ状況</p>
         </div>
         <div>
-            <button class="btn btn-outline-secondary btn-sm rounded-pill text-muted hover-text-white border-dark">
+            <button id="btn-print-report" class="btn btn-outline-secondary btn-sm rounded-pill text-muted hover-text-white border-dark no-print">
                 <i class="bi bi-cloud-download me-1"></i>レポート出力
             </button>
         </div>
@@ -118,7 +118,7 @@
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i>月次売上・粗利推移</h6>
-                    <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto">
+                    <select id="fiscal-year-selector" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto">
                         <option>2026年度</option>
                         <option>2025年度</option>
                     </select>

@@ -275,10 +275,11 @@ a:hover {
     border: 1px solid transparent;
 }
 
-.status-active { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border-color: rgba(16, 185, 129, 0.3); }
-.status-bench { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3); }
-.status-retiring { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); border-color: rgba(245, 158, 11, 0.3); }
-.status-proposal { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); border-color: rgba(59, 130, 246, 0.3); }
+.status-success { background: rgba(16, 185, 129, 0.15) !important; color: var(--accent-green) !important; border-color: rgba(16, 185, 129, 0.3) !important; }
+.status-danger { background: rgba(239, 68, 68, 0.15) !important; color: var(--accent-red) !important; border-color: rgba(239, 68, 68, 0.3) !important; }
+.status-warning { background: rgba(245, 158, 11, 0.15) !important; color: var(--accent-yellow) !important; border-color: rgba(245, 158, 11, 0.3) !important; }
+.status-primary { background: rgba(59, 130, 246, 0.15) !important; color: var(--accent-blue) !important; border-color: rgba(59, 130, 246, 0.3) !important; }
+.status-secondary { background: rgba(156, 163, 175, 0.15) !important; color: var(--text-secondary) !important; border-color: rgba(156, 163, 175, 0.3) !important; }
 
 .badge.bg-purple { background-color: var(--accent-purple) !important; }
 
@@ -320,5 +321,32 @@ a:hover {
     
     .main-wrapper {
         margin-left: 0;
+    }
+}
+
+/* ================== PRINT STYLES ================== */
+@media print {
+    body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+    .sidebar, .top-header, .sidebar-footer, .no-print {
+        display: none !important;
+    }
+    .main-wrapper {
+        margin-left: 0 !important;
+    }
+    .card, .card-header, .card-footer, .table-dark, .table-secondary, .badge {
+        background-color: #ffffff !important;
+        border-color: #000000 !important;
+        color: #000000 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .card, table, tr, th, td {
+        page-break-inside: avoid !important;
+    }
+    h1, h2, h3, h4, h5, h6, p, span, div {
+        color: #000000 !important;
     }
 }
