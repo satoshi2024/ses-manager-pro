@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>案件管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-briefcase me-2 text-success"></i>案件管理</h2>
+        <a href="/project/form" class="btn btn-success shadow-sm">
+            <i class="bi bi-plus-lg me-1"></i>新規登録
+        </a>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form action="/project/list" method="get" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label for="searchProjectName" class="form-label text-muted small">案件名</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-success" id="searchProjectName" name="projectName" placeholder="金融系システム移行など">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchCustomer" class="form-label text-muted small">顧客</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchCustomer" name="customer" placeholder="会社名">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchStatus" class="form-label text-muted small">ステータス</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchStatus" name="status">
+                        <option value="">すべて</option>
+                        <option value="1">募集中</option>
+                        <option value="2">面談調整中</option>
+                        <option value="3">参画決定</option>
+                        <option value="4">終了</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-success w-100">
+                        <i class="bi bi-filter me-1"></i>絞り込み
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 一覧データテーブル -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4">案件名</th>
+                            <th scope="col">顧客</th>
+                            <th scope="col">単価(下限-上限)</th>
+                            <th scope="col" class="text-center">募集人数</th>
+                            <th scope="col" class="text-center">リモート</th>
+                            <th scope="col">ステータス</th>
+                            <th scope="col" class="text-end pe-4">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- モックデータ -->
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">大手メガバンク向け次世代システム開発</div>
+                                <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>Java, Spring Boot, AWS</div>
+                            </td>
+                            <td>株式会社テクノロジーソリューションズ</td>
+                            <td class="font-monospace">70万 〜 90万</td>
+                            <td class="text-center">3名</td>
+                            <td class="text-center"><i class="bi bi-x-circle text-danger" title="不可"></i></td>
+                            <td><span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">募集中</span></td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">ECサイトリプレイス案件</div>
+                                <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>React, Node.js, GCP</div>
+                            </td>
+                            <td>グローバルシステムズ株式会社</td>
+                            <td class="font-monospace">80万 〜 100万</td>
+                            <td class="text-center">1名</td>
+                            <td class="text-center"><i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル</td>
+                            <td><span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">面談調整中</span></td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">社内基幹システム保守・運用</div>
+                                <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>C#, .NET, SQL Server</div>
+                            </td>
+                            <td>フューチャーITネット</td>
+                            <td class="font-monospace">50万 〜 65万</td>
+                            <td class="text-center">2名</td>
+                            <td class="text-center"><i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部</td>
+                            <td><span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-50 px-2 py-1">参画決定</span></td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">スマートフォン向けゲームAPI開発</div>
+                                <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>Go, MySQL, Redis</div>
+                            </td>
+                            <td>株式会社ネクスト・デベロップメント</td>
+                            <td class="font-monospace">90万 〜 120万</td>
+                            <td class="text-center">5名</td>
+                            <td class="text-center"><i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル</td>
+                            <td><span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">終了</span></td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- ページネーション -->
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                <div class="text-muted small ps-2">
+                    全 24 件中 1-4 件を表示
+                </div>
+                <nav aria-label="Page navigation">
+                    <ul class="pagination pagination-sm mb-0 pe-2">
+                        <li class="page-item disabled">
+                            <a class="page-link bg-dark border-secondary text-muted" href="#" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left"></i></a>
+                        </li>
+                        <li class="page-item active" aria-current="page">
+                            <a class="page-link bg-success border-success text-white" href="#">1</a>
+                        </li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">2</a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">3</a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light disabled border-0"><span class="bg-transparent border-0 text-muted">...</span></a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">6</a></li>
+                        <li class="page-item">
+                            <a class="page-link bg-dark border-secondary text-light" href="#"><i class="bi bi-chevron-right"></i></a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

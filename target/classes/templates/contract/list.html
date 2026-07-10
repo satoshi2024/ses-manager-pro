@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title>契約一覧</title>
+</head>
+<body>
+
+<div layout:fragment="content">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-file-earmark-text me-2 text-accent-green"></i>契約一覧</h4>
+            <p class="text-muted small mb-0">すべての稼動・終了契約の管理と確認</p>
+        </div>
+        <div>
+            <a href="/contract/gantt" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2">
+                <i class="bi bi-bar-chart-steps me-1"></i>ガントチャート
+            </a>
+            <a href="/contract/form" class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3">
+                <i class="bi bi-plus-lg me-1"></i>新規契約
+            </a>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body p-3">
+            <form class="row g-3 align-items-end" id="search-form">
+                <div class="col-md-3">
+                    <label class="form-label text-muted small mb-1">ステータス</label>
+                    <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" name="status">
+                        <option value="">すべて</option>
+                        <option value="準備中">準備中</option>
+                        <option value="稼動中" selected>稼動中</option>
+                        <option value="終了">終了</option>
+                        <option value="解約">解約</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label text-muted small mb-1">契約先顧客</label>
+                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="customerName" placeholder="顧客名で検索">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label text-muted small mb-1">要員名・案件名</label>
+                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="keyword" placeholder="キーワード検索">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="loadContracts()">
+                        <i class="bi bi-search me-1"></i>検索
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-secondary border-dark">
+                        <tr>
+                            <th class="px-4 py-3 text-muted small text-uppercase">契約番号</th>
+                            <th class="py-3 text-muted small text-uppercase">稼動要員</th>
+                            <th class="py-3 text-muted small text-uppercase">顧客・案件</th>
+                            <th class="py-3 text-muted small text-uppercase">期間</th>
+                            <th class="py-3 text-muted small text-uppercase">単価(売/原)</th>
+                            <th class="py-3 text-muted small text-uppercase">ステータス</th>
+                            <th class="px-4 py-3 text-end text-muted small text-uppercase">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody class="border-top-0" id="contract-table-body">
+                        <!-- JS renders this -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/contract.js}"></script>
+</th:block>
+
+</body>
+</html>

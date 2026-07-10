@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <header th:fragment="header" class="top-header sticky-top bg-primary border-bottom border-dark d-flex align-items-center px-4 py-2 transition-base">
+        
+        <!-- Mobile Toggle Button -->
+        <button class="btn btn-link text-white d-md-none me-3 p-0 border-0" id="sidebar-toggle-btn">
+            <i class="bi bi-list fs-3"></i>
+        </button>
+
+        <!-- Breadcrumb Area (Dynamic based on page title if needed, placeholder for now) -->
+        <div class="breadcrumb-area flex-grow-1 d-none d-md-block">
+            <h5 class="mb-0 text-white fw-bold page-title-header">
+               <!-- Will be populated by JS or Thymeleaf page fragments -->
+            </h5>
+        </div>
+
+        <!-- Right Side Tools -->
+        <div class="header-tools d-flex align-items-center ms-auto gap-3">
+            
+            <!-- Current Date/Time -->
+            <div class="datetime-display d-none d-lg-block text-muted small me-2" id="header-datetime">
+                <!-- Populated by JS -->
+                2026年07月10日 (金) 19:00
+            </div>
+
+            <!-- Notifications -->
+            <div class="dropdown">
+                <button class="btn btn-link text-secondary hover-text-white p-1 position-relative border-0" type="button" id="notificationDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-bell fs-5"></i>
+                    <span class="position-absolute top-0 start-100 translate-middle p-1 bg-accent-red border border-primary rounded-circle">
+                        <span class="visually-hidden">New alerts</span>
+                    </span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="notificationDropdown" style="width: 300px;">
+                    <li><h6 class="dropdown-header text-white border-bottom border-dark pb-2">通知</h6></li>
+                    <li><a class="dropdown-item py-2" href="#"><i class="bi bi-info-circle text-accent-blue me-2"></i>【AI】マッチング処理が完了しました</a></li>
+                    <li><a class="dropdown-item py-2" href="#"><i class="bi bi-exclamation-triangle text-accent-yellow me-2"></i>T.S氏の退場日が近づいています</a></li>
+                    <li><hr class="dropdown-divider border-dark"></li>
+                    <li><a class="dropdown-item text-center small text-muted hover-text-white" href="#">すべての通知を見る</a></li>
+                </ul>
+            </div>
+
+            <!-- Quick Add Button -->
+            <button class="btn btn-primary btn-sm rounded-pill shadow-sm bg-gradient-blue border-0 px-3 py-1">
+                <i class="bi bi-plus-lg me-1"></i>新規登録
+            </button>
+
+        </div>
+    </header>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>顧客管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-building me-2 text-info"></i>顧客管理</h2>
+        <a href="/customer/form" class="btn btn-info text-white shadow-sm">
+            <i class="bi bi-plus-lg me-1"></i>新規登録
+        </a>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form action="/customer/list" method="get" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label for="searchCompanyName" class="form-label text-muted small">会社名</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-info" id="searchCompanyName" name="companyName" placeholder="株式会社〇〇">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchFlow" class="form-label text-muted small">商流</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchFlow" name="flow">
+                        <option value="">すべて</option>
+                        <option value="1">エンド直</option>
+                        <option value="2">元請け</option>
+                        <option value="3">二次請け</option>
+                        <option value="4">それ以降</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchRank" class="form-label text-muted small">信頼度</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchRank" name="rank">
+                        <option value="">すべて</option>
+                        <option value="S">Sランク (優良)</option>
+                        <option value="A">Aランク (良好)</option>
+                        <option value="B">Bランク (普通)</option>
+                        <option value="C">Cランク (注意)</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-info w-100">
+                        <i class="bi bi-filter me-1"></i>絞り込み
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 一覧データテーブル -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4">会社名</th>
+                            <th scope="col">商流</th>
+                            <th scope="col">信頼度ランク</th>
+                            <th scope="col">担当者</th>
+                            <th scope="col">電話番号</th>
+                            <th scope="col" class="text-end pe-4">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- モックデータ -->
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">株式会社テクノロジーソリューションズ</div>
+                                <div class="text-muted small">東京都渋谷区...</div>
+                            </td>
+                            <td><span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-50 px-2 py-1">エンド直</span></td>
+                            <td>
+                                <div class="d-flex text-warning align-items-center">
+                                    <i class="bi bi-star-fill me-1"></i>S
+                                </div>
+                            </td>
+                            <td>田中 康夫</td>
+                            <td class="font-monospace">03-1234-5678</td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">グローバルシステムズ株式会社</div>
+                                <div class="text-muted small">東京都新宿区...</div>
+                            </td>
+                            <td><span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">元請け</span></td>
+                            <td>
+                                <div class="d-flex text-info align-items-center">
+                                    <i class="bi bi-star-half me-1"></i>A
+                                </div>
+                            </td>
+                            <td>伊藤 美咲</td>
+                            <td class="font-monospace">03-9876-5432</td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">フューチャーITネット</div>
+                                <div class="text-muted small">東京都品川区...</div>
+                            </td>
+                            <td><span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">二次請け</span></td>
+                            <td>
+                                <div class="d-flex text-secondary align-items-center">
+                                    <i class="bi bi-star me-1"></i>B
+                                </div>
+                            </td>
+                            <td>渡辺 健司</td>
+                            <td class="font-monospace">03-5555-1111</td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3">
+                                <div class="fw-bold text-light">株式会社ネクスト・デベロップメント</div>
+                                <div class="text-muted small">神奈川県横浜市...</div>
+                            </td>
+                            <td><span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">それ以降</span></td>
+                            <td>
+                                <div class="d-flex text-danger align-items-center">
+                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>C
+                                </div>
+                            </td>
+                            <td>木村 さくら</td>
+                            <td class="font-monospace">045-222-3333</td>
+                            <td class="text-end pe-4">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
+                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- ページネーション -->
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                <div class="text-muted small ps-2">
+                    全 128 件中 1-4 件を表示
+                </div>
+                <nav aria-label="Page navigation">
+                    <ul class="pagination pagination-sm mb-0 pe-2">
+                        <li class="page-item disabled">
+                            <a class="page-link bg-dark border-secondary text-muted" href="#" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left"></i></a>
+                        </li>
+                        <li class="page-item active" aria-current="page">
+                            <a class="page-link bg-info border-info text-dark fw-bold" href="#">1</a>
+                        </li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">2</a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">3</a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light disabled border-0"><span class="bg-transparent border-0 text-muted">...</span></a></li>
+                        <li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="#">32</a></li>
+                        <li class="page-item">
+                            <a class="page-link bg-dark border-secondary text-light" href="#"><i class="bi bi-chevron-right"></i></a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

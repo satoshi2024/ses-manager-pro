@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title>要員詳細</title>
+</head>
+<body>
+
+<div layout:fragment="content">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1">
+                <i class="bi bi-person-badge me-2 text-accent-blue"></i>
+                <span id="eng-name">田中 太郎</span> 
+                <span class="fs-6 text-muted ms-2" id="eng-initial">(T.T)</span>
+            </h4>
+            <p class="text-muted small mb-0">エンジニア詳細情報およびAIマッチング</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/engineer/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
+                <i class="bi bi-arrow-left me-1"></i>戻る
+            </a>
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" onclick="generateSkillSheet(1)">
+                <i class="bi bi-file-earmark-pdf me-1"></i>スキルシート自動生成
+            </button>
+            <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(1, '田中 太郎')">
+                <i class="bi bi-robot me-1"></i>AIマッチング実行
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Profile Card -->
+        <div class="col-md-4">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-body p-4 text-center">
+                    <div class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center mx-auto mb-3 shadow" style="width: 100px; height: 100px; font-size: 2.5rem;">
+                        T.T
+                    </div>
+                    <h5 class="text-white fw-bold mb-1">田中 太郎</h5>
+                    <div class="text-accent-green mb-3"><i class="bi bi-check-circle-fill me-1"></i>稼動中 (2026/09退場予定)</div>
+                    
+                    <div class="d-flex flex-wrap justify-content-center gap-2 mb-4">
+                        <span class="badge bg-secondary border border-dark text-light">Java</span>
+                        <span class="badge bg-secondary border border-dark text-light">Spring Boot</span>
+                        <span class="badge bg-secondary border border-dark text-light">AWS</span>
+                    </div>
+
+                    <ul class="list-group list-group-flush text-start border-top border-dark pt-3">
+                        <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
+                            <span>経験年数</span>
+                            <span class="text-white fw-bold">10年</span>
+                        </li>
+                        <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
+                            <span>希望単価</span>
+                            <span class="text-white fw-bold">¥850,000 / 月</span>
+                        </li>
+                        <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
+                            <span>最寄り駅</span>
+                            <span class="text-white fw-bold">新宿駅</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Career History -->
+        <div class="col-md-8">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-transparent border-dark px-4 py-3">
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-journal-text me-2 text-muted"></i>経歴サマリ</h6>
+                </div>
+                <div class="card-body p-4">
+                    <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2">
+                        <!-- Item 1 -->
+                        <div class="position-relative mb-4">
+                            <div class="position-absolute bg-accent-blue rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
+                            <div class="text-muted small mb-1">2023/04 - 現在</div>
+                            <h6 class="text-white fw-bold mb-2">金融系基盤システム刷新プロジェクト</h6>
+                            <p class="text-muted small mb-2">老朽化したオンプレミス環境からAWSへのマイグレーションおよびSpring Bootを用いたバックエンドAPIの開発を担当。</p>
+                            <div class="d-flex gap-2 small text-secondary">
+                                <span><i class="bi bi-tag me-1"></i>SE/PG</span>
+                                <span><i class="bi bi-people me-1"></i>8名</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Item 2 -->
+                        <div class="position-relative">
+                            <div class="position-absolute bg-secondary rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
+                            <div class="text-muted small mb-1">2020/06 - 2023/03</div>
+                            <h6 class="text-white fw-bold mb-2">大手ECサイトリプレイス</h6>
+                            <p class="text-muted small mb-2">ReactとJavaを使用したフルスタック開発。決済モジュールの設計と実装を主導。</p>
+                            <div class="d-flex gap-2 small text-secondary">
+                                <span><i class="bi bi-tag me-1"></i>PG</span>
+                                <span><i class="bi bi-people me-1"></i>15名</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Match Modal -->
+    <div class="modal fade" id="aiMatchModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold">
+                        <i class="bi bi-robot text-accent-purple me-2"></i>AIマッチング分析
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <!-- Loading State -->
+                    <div id="ai-loading" class="text-center p-5">
+                        <div class="spinner-grow text-accent-purple mb-3" role="status" style="width: 3rem; height: 3rem;"></div>
+                        <h6 class="text-white">AIが最適な案件を探索しています...</h6>
+                        <p class="text-muted small mb-0">技術者のスキル、経歴、希望単価と市場の案件要件を照合中</p>
+                    </div>
+                    
+                    <!-- Results List -->
+                    <div id="ai-results" class="d-none p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="text-white fw-bold mb-0">おすすめ案件 (Top 3)</h6>
+                            <span class="badge bg-secondary text-light">Azure OpenAI</span>
+                        </div>
+                        
+                        <div class="list-group list-group-flush gap-3" id="match-list-container">
+                            <!-- JS will populate results here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/ai-matching.js}"></script>
+    <script th:src="@{/js/modules/ai-skillsheet.js}"></script>
+</th:block>
+
+</body>
+</html>

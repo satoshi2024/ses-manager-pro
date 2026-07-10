@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{login.title} + ' | SES Manager Pro'">ログイン | SES Manager Pro</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    
+    <!-- Custom CSS -->
+    <link th:href="@{/css/common.css}" rel="stylesheet">
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Noto Sans JP', sans-serif;
+            color: var(--text-primary);
+        }
+        
+        .login-card {
+            background: rgba(30, 42, 58, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 420px;
+            padding: 3rem 2.5rem;
+            animation: fadeInUP 0.6s ease-out forwards;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        
+        @keyframes fadeInUP {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .brand-icon {
+            font-size: 3rem;
+            background: linear-gradient(45deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-control-dark {
+            background-color: rgba(15, 25, 35, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            border-radius: var(--radius-sm);
+        }
+        
+        .form-control-dark:focus {
+            background-color: rgba(15, 25, 35, 0.8);
+            border-color: var(--accent-blue);
+            color: white;
+            box-shadow: 0 0 0 0.25rem rgba(74, 158, 255, 0.25);
+        }
+        
+        .input-icon {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            z-index: 10;
+        }
+        
+        .form-control-dark::placeholder {
+            color: var(--text-muted);
+        }
+        
+        .btn-login {
+            background: linear-gradient(45deg, #2563eb, #4f46e5);
+            border: none;
+            padding: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-login:hover {
+            background: linear-gradient(45deg, #1d4ed8, #4338ca);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <div class="text-center mb-5">
+            <i class="bi bi-briefcase-fill brand-icon"></i>
+            <h3 class="fw-bold text-white tracking-tight mb-1" th:text="#{app.name}">SES Manager Pro</h3>
+            <p class="text-muted small" th:text="#{app.title}">社内管理システム</p>
+        </div>
+        
+        <!-- Error Message -->
+        <div th:if="${param.error}" class="alert alert-danger bg-danger bg-opacity-10 border border-danger text-danger py-2 px-3 small d-flex align-items-center mb-4 rounded-sm">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <span th:text="#{login.error}">ユーザーIDまたはパスワードが正しくありません</span>
+        </div>
+        
+        <!-- Logout Message -->
+        <div th:if="${param.logout}" class="alert alert-success bg-success bg-opacity-10 border border-success text-success py-2 px-3 small d-flex align-items-center mb-4 rounded-sm">
+            <i class="bi bi-check-circle-fill me-2"></i>
+            <span th:text="#{login.logout}">ログアウトしました</span>
+        </div>
+
+        <form th:action="@{/login}" method="post">
+            <div class="mb-4 position-relative">
+                <i class="bi bi-person-fill input-icon"></i>
+                <input type="text" class="form-control form-control-dark" id="username" name="username" th:placeholder="#{login.username}" required autofocus autocomplete="username">
+            </div>
+            
+            <div class="mb-5 position-relative">
+                <i class="bi bi-shield-lock-fill input-icon"></i>
+                <input type="password" class="form-control form-control-dark" id="password" name="password" th:placeholder="#{login.password}" required autocomplete="current-password">
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-login w-100 rounded-sm text-white">
+                <i class="bi bi-box-arrow-in-right me-2"></i><span th:text="#{login.button}">ログイン</span>
+            </button>
+        </form>
+        
+        <div class="text-center mt-5 text-muted small">
+            &copy; 2026 SES Manager Pro
+        </div>
+    </div>
+
+</body>
+</html>
