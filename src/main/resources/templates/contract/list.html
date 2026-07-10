@@ -117,11 +117,11 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small">売上単価 (円)</label>
-                                <input type="number" id="cont-sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" required>
+                                <input type="number" id="cont-sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">原価単価 (円)</label>
-                                <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000" required>
+                                <label class="form-label text-muted small">原価 (円) <span class="text-danger">*</span></label>
+                                <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000" min="0" required>
                             </div>
                         </div>
                     </form>

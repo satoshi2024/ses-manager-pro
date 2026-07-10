@@ -17,7 +17,7 @@
     <!-- 検索フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <form action="/customer/list" method="get" class="row g-3 align-items-end">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadCustomers(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
                     <label for="searchCompanyName" class="form-label text-muted small">会社名</label>
                     <div class="input-group">
@@ -29,10 +29,10 @@
                     <label for="searchFlow" class="form-label text-muted small">商流</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchFlow" name="flow">
                         <option value="">すべて</option>
-                        <option value="1">エンド直</option>
-                        <option value="2">元請け</option>
-                        <option value="3">二次請け</option>
-                        <option value="4">それ以降</option>
+                        <option value="エンド直">エンド直</option>
+                        <option value="元請け">元請け</option>
+                        <option value="二次請け">二次請け</option>
+                        <option value="それ以降">それ以降</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -111,6 +111,7 @@
                 </div>
                 <div class="modal-body p-4">
                     <form id="customer-form">
+                        <input type="hidden" id="cust-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small">会社名 <span class="text-danger">*</span></label>
                             <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 株式会社〇〇" required>
@@ -158,6 +159,12 @@
 
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/customer.js}"></script>
+    <script>
+        document.getElementById('customerModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('customer-form').reset();
+            document.getElementById('cust-id').value = '';
+        });
+    </script>
 </th:block>
 </body>
 </html>

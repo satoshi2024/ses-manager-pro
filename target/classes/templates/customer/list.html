@@ -9,15 +9,15 @@
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light"><i class="bi bi-building me-2 text-info"></i>顧客管理</h2>
-        <a href="/customer/form" class="btn btn-info text-white shadow-sm">
+        <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#customerModal">
             <i class="bi bi-plus-lg me-1"></i>新規登録
-        </a>
+        </button>
     </div>
 
     <!-- 検索フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <form action="/customer/list" method="get" class="row g-3 align-items-end">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadCustomers(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
                     <label for="searchCompanyName" class="form-label text-muted small">会社名</label>
                     <div class="input-group">
@@ -29,10 +29,10 @@
                     <label for="searchFlow" class="form-label text-muted small">商流</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchFlow" name="flow">
                         <option value="">すべて</option>
-                        <option value="1">エンド直</option>
-                        <option value="2">元請け</option>
-                        <option value="3">二次請け</option>
-                        <option value="4">それ以降</option>
+                        <option value="エンド直">エンド直</option>
+                        <option value="元請け">元請け</option>
+                        <option value="二次請け">二次請け</option>
+                        <option value="それ以降">それ以降</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -69,92 +69,8 @@
                             <th scope="col" class="text-end pe-4">アクション</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <!-- モックデータ -->
-                        <tr>
-                            <td class="ps-4 py-3">
-                                <div class="fw-bold text-light">株式会社テクノロジーソリューションズ</div>
-                                <div class="text-muted small">東京都渋谷区...</div>
-                            </td>
-                            <td><span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-50 px-2 py-1">エンド直</span></td>
-                            <td>
-                                <div class="d-flex text-warning align-items-center">
-                                    <i class="bi bi-star-fill me-1"></i>S
-                                </div>
-                            </td>
-                            <td>田中 康夫</td>
-                            <td class="font-monospace">03-1234-5678</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4 py-3">
-                                <div class="fw-bold text-light">グローバルシステムズ株式会社</div>
-                                <div class="text-muted small">東京都新宿区...</div>
-                            </td>
-                            <td><span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">元請け</span></td>
-                            <td>
-                                <div class="d-flex text-info align-items-center">
-                                    <i class="bi bi-star-half me-1"></i>A
-                                </div>
-                            </td>
-                            <td>伊藤 美咲</td>
-                            <td class="font-monospace">03-9876-5432</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4 py-3">
-                                <div class="fw-bold text-light">フューチャーITネット</div>
-                                <div class="text-muted small">東京都品川区...</div>
-                            </td>
-                            <td><span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">二次請け</span></td>
-                            <td>
-                                <div class="d-flex text-secondary align-items-center">
-                                    <i class="bi bi-star me-1"></i>B
-                                </div>
-                            </td>
-                            <td>渡辺 健司</td>
-                            <td class="font-monospace">03-5555-1111</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4 py-3">
-                                <div class="fw-bold text-light">株式会社ネクスト・デベロップメント</div>
-                                <div class="text-muted small">神奈川県横浜市...</div>
-                            </td>
-                            <td><span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">それ以降</span></td>
-                            <td>
-                                <div class="d-flex text-danger align-items-center">
-                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>C
-                                </div>
-                            </td>
-                            <td>木村 さくら</td>
-                            <td class="font-monospace">045-222-3333</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
+                    <tbody id="customer-table-body">
+                        <!-- JS will populate results here -->
                     </tbody>
                 </table>
             </div>
@@ -184,6 +100,71 @@
             </div>
         </div>
     </div>
+
+    <!-- Customer Registration Modal -->
+    <div class="modal fade" id="customerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building-add me-2 text-info"></i>顧客登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="customer-form">
+                        <input type="hidden" id="cust-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">会社名 <span class="text-danger">*</span></label>
+                            <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 株式会社〇〇" required>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">商流</label>
+                                <select id="cust-commercialFlow" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="エンド直">エンド直</option>
+                                    <option value="元請け">元請け</option>
+                                    <option value="二次請け">二次請け</option>
+                                    <option value="それ以降">それ以降</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">信頼度</label>
+                                <select id="cust-trustLevel" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="S">Sランク (優良)</option>
+                                    <option value="A">Aランク (良好)</option>
+                                    <option value="B">Bランク (普通)</option>
+                                    <option value="C">Cランク (注意)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">担当者名</label>
+                            <input type="text" id="cust-contactPerson" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 田中 康夫">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">電話番号</label>
+                            <input type="text" id="cust-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 03-1234-5678">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveCustomer()">
+                        <i class="bi bi-check-lg me-1"></i>登録
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/customer.js}"></script>
+    <script>
+        document.getElementById('customerModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('customer-form').reset();
+            document.getElementById('cust-id').value = '';
+        });
+    </script>
+</th:block>
 </body>
 </html>

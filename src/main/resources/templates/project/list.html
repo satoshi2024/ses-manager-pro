@@ -17,7 +17,7 @@
     <!-- 検索フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <form action="/project/list" method="get" class="row g-3 align-items-end">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadProjects(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
                     <label for="searchProjectName" class="form-label text-muted small">案件名</label>
                     <div class="input-group">
@@ -33,10 +33,10 @@
                     <label for="searchStatus" class="form-label text-muted small">ステータス</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchStatus" name="status">
                         <option value="">すべて</option>
-                        <option value="1">募集中</option>
-                        <option value="2">面談調整中</option>
-                        <option value="3">参画決定</option>
-                        <option value="4">終了</option>
+                        <option value="募集中">募集中</option>
+                        <option value="選考中">面談調整中 (選考中)</option>
+                        <option value="充足">参画決定 (充足)</option>
+                        <option value="クローズ">クローズ</option>
                     </select>
                 </div>
                 <div class="col-md-2">
@@ -106,6 +106,7 @@
                 </div>
                 <div class="modal-body p-4">
                     <form id="project-form">
+                        <input type="hidden" id="proj-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small">案件名 <span class="text-danger">*</span></label>
                             <input type="text" id="proj-projectName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 〇〇システム開発" required>
@@ -120,11 +121,11 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small">単価下限 (万円)</label>
-                                <input type="number" id="proj-unitPriceMin" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000">
+                                <input type="number" id="proj-unitPriceMin" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000" min="0">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label text-muted small">単価上限 (万円)</label>
-                                <input type="number" id="proj-unitPriceMax" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000">
+                                <input type="number" id="proj-unitPriceMax" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
                             </div>
                         </div>
                         <div class="row g-3 mb-3">
@@ -161,6 +162,12 @@
 
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/project.js}"></script>
+    <script>
+        document.getElementById('projectModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('project-form').reset();
+            document.getElementById('proj-id').value = '';
+        });
+    </script>
 </th:block>
 </body>
 </html>

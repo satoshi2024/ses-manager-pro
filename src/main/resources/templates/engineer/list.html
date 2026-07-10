@@ -17,7 +17,7 @@
     <!-- 検索フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <form action="/engineer/list" method="get" class="row g-3 align-items-end">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadEngineers(1);" class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label for="searchName" class="form-label text-muted small">名前</label>
                     <div class="input-group">
@@ -29,20 +29,19 @@
                     <label for="searchStatus" class="form-label text-muted small">ステータス</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchStatus" name="status">
                         <option value="">すべて</option>
-                        <option value="1">稼働中</option>
-                        <option value="2">待機中</option>
-                        <option value="3">提案中</option>
-                        <option value="4">離任予定</option>
+                        <option value="稼動中">稼働中</option>
+                        <option value="Bench">待機中 (Bench)</option>
+                        <option value="提案中">提案中</option>
+                        <option value="退場予定">離任予定</option>
                     </select>
                 </div>
                 <div class="col-md-2">
                     <label for="searchEmpType" class="form-label text-muted small">雇用形態</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchEmpType" name="empType">
                         <option value="">すべて</option>
-                        <option value="1">正社員</option>
-                        <option value="2">契約社員</option>
-                        <option value="3">フリーランス</option>
-                        <option value="4">パートナー</option>
+                        <option value="正社員">正社員</option>
+                        <option value="契約社員">契約社員</option>
+                        <option value="BP">フリーランス/BP</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -115,6 +114,7 @@
                 </div>
                 <div class="modal-body p-4">
                     <form id="engineer-form">
+                        <input type="hidden" id="eng-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small">氏名 <span class="text-danger">*</span></label>
                             <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 山田 太郎" required>
@@ -144,11 +144,11 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small">経験年数 (年)</label>
-                            <input type="number" id="eng-experienceYears" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 5">
+                            <input type="number" id="eng-experienceYears" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 5" min="0">
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small">希望単価 (円)</label>
-                            <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000">
+                            <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
                         </div>
                     </form>
                 </div>
@@ -165,6 +165,12 @@
 
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/engineer.js}"></script>
+    <script>
+        document.getElementById('engineerModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('engineer-form').reset();
+            document.getElementById('eng-id').value = '';
+        });
+    </script>
 </th:block>
 </body>
 </html>

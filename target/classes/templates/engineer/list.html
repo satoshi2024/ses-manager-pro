@@ -9,15 +9,15 @@
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i>要員管理</h2>
-        <a href="/engineer/form" class="btn btn-primary shadow-sm">
+        <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
             <i class="bi bi-plus-lg me-1"></i>新規登録
-        </a>
+        </button>
     </div>
 
     <!-- 検索フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <form action="/engineer/list" method="get" class="row g-3 align-items-end">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadEngineers(1);" class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label for="searchName" class="form-label text-muted small">名前</label>
                     <div class="input-group">
@@ -29,20 +29,19 @@
                     <label for="searchStatus" class="form-label text-muted small">ステータス</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchStatus" name="status">
                         <option value="">すべて</option>
-                        <option value="1">稼働中</option>
-                        <option value="2">待機中</option>
-                        <option value="3">提案中</option>
-                        <option value="4">離任予定</option>
+                        <option value="稼動中">稼働中</option>
+                        <option value="Bench">待機中 (Bench)</option>
+                        <option value="提案中">提案中</option>
+                        <option value="退場予定">離任予定</option>
                     </select>
                 </div>
                 <div class="col-md-2">
                     <label for="searchEmpType" class="form-label text-muted small">雇用形態</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchEmpType" name="empType">
                         <option value="">すべて</option>
-                        <option value="1">正社員</option>
-                        <option value="2">契約社員</option>
-                        <option value="3">フリーランス</option>
-                        <option value="4">パートナー</option>
+                        <option value="正社員">正社員</option>
+                        <option value="契約社員">契約社員</option>
+                        <option value="BP">フリーランス/BP</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -73,96 +72,8 @@
                             <th scope="col" class="text-end pe-4">アクション</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <!-- モックデータ -->
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center py-1">
-                                    <div class="avatar bg-primary text-white rounded-circle me-3 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">山</div>
-                                    <div>
-                                        <div class="fw-bold">山田 太郎</div>
-                                        <div class="text-muted small">ヤマダ タロウ</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td><span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">稼働中</span></td>
-                            <td>正社員</td>
-                            <td>5年</td>
-                            <td>80万</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center py-1">
-                                    <div class="avatar bg-info text-white rounded-circle me-3 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">鈴</div>
-                                    <div>
-                                        <div class="fw-bold">鈴木 一郎</div>
-                                        <div class="text-muted small">スズキ イチロウ</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td><span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">提案中</span></td>
-                            <td>フリーランス</td>
-                            <td>12年</td>
-                            <td>120万</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center py-1">
-                                    <div class="avatar bg-secondary text-white rounded-circle me-3 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">佐</div>
-                                    <div>
-                                        <div class="fw-bold">佐藤 花子</div>
-                                        <div class="text-muted small">サトウ ハナコ</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td><span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">待機中</span></td>
-                            <td>契約社員</td>
-                            <td>3年</td>
-                            <td>60万</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center py-1">
-                                    <div class="avatar bg-success text-white rounded-circle me-3 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">高</div>
-                                    <div>
-                                        <div class="fw-bold">高橋 健太</div>
-                                        <div class="text-muted small">タカハシ ケンタ</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td><span class="badge bg-danger bg-opacity-20 text-danger border border-danger border-opacity-50 px-2 py-1">離任予定</span></td>
-                            <td>パートナー</td>
-                            <td>8年</td>
-                            <td>95万</td>
-                            <td class="text-end pe-4">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <a href="#" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                                    <a href="#" class="btn btn-outline-info text-info border-info"><i class="bi bi-pencil"></i></a>
-                                    <button type="button" class="btn btn-outline-danger text-danger border-danger"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </td>
-                        </tr>
+                    <tbody id="engineer-table-body">
+                        <!-- JS will populate results here -->
                     </tbody>
                 </table>
             </div>
@@ -192,6 +103,74 @@
             </div>
         </div>
     </div>
+
+    <!-- Engineer Registration Modal -->
+    <div class="modal fade" id="engineerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-accent-blue"></i>要員登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="engineer-form">
+                        <input type="hidden" id="eng-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">氏名 <span class="text-danger">*</span></label>
+                            <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 山田 太郎" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">フリガナ</label>
+                            <input type="text" id="eng-fullNameKana" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: ヤマダ タロウ">
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">稼動状態</label>
+                                <select id="eng-status" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="Bench">待機中 (Bench)</option>
+                                    <option value="稼動中">稼動中</option>
+                                    <option value="提案中">提案中</option>
+                                    <option value="退場予定">退場予定</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">雇用形態</label>
+                                <select id="eng-employmentType" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="正社員">正社員</option>
+                                    <option value="契約社員">契約社員</option>
+                                    <option value="BP">フリーランス/BP</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">経験年数 (年)</label>
+                            <input type="number" id="eng-experienceYears" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 5" min="0">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">希望単価 (円)</label>
+                            <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveEngineer()">
+                        <i class="bi bi-check-lg me-1"></i>登録
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/engineer.js}"></script>
+    <script>
+        document.getElementById('engineerModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('engineer-form').reset();
+            document.getElementById('eng-id').value = '';
+        });
+    </script>
+</th:block>
 </body>
 </html>

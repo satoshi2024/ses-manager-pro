@@ -27,6 +27,7 @@ $(document).ready(function() {
 
     // --- Load Data ---
     loadKanbanData();
+    loadSelectOptions();
 
     // Horizontal Scrolling for Kanban Board by dragging the background
     const slider = document.querySelector('.kanban-board-container');
@@ -77,8 +78,24 @@ function loadKanbanData() {
         error: function(err) {
             console.error(err);
             Toast.error('通信エラーが発生しました');
-            // Inject mock data for UI demo purposes if API fails/isn't ready
-            renderKanbanBoard(getMockKanbanData());
+            $('.kanban-column-body').empty();
+        }
+    });
+}
+
+function loadSelectOptions() {
+    $.get('/api/engineers', function(res) {
+        if(res.code === 200 && res.data) {
+            const select = $('#prop-engineerId');
+            select.empty().append('<option value="">要員を選択...</option>');
+            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${e.fullName}</option>`));
+        }
+    });
+    $.get('/api/projects', function(res) {
+        if(res.code === 200 && res.data) {
+            const select = $('#prop-projectId');
+            select.empty().append('<option value="">案件を選択...</option>');
+            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${p.projectName}</option>`));
         }
     });
 }
@@ -233,16 +250,43 @@ function viewProposalDetail(id) {
     // Toast.info('提案詳細画面へ遷移します(ID: ' + id + ')');
     
     // For MVP demo, show a quick modal or toast
-    Toast.info('提案詳細画面モック（ID: ' + id + '）');
+    Toast.info('提案詳細画面（ID: ' + id + '）');
 }
 
-function getMockKanbanData() {
-    return [
-        { id: 1, engineerName: '田中 太郎', engineerInitial: 'T.T', projectName: '金融基盤システム刷新', customerName: '株式会社メガバンク', proposedUnitPrice: 85, status: '書類選考中', aiMatchScore: 92 },
-        { id: 2, engineerName: '鈴木 花子', engineerInitial: 'H.S', projectName: 'ECサイトリプレイス', customerName: 'ECソリューションズ', proposedUnitPrice: 70, status: '書類選考中', aiMatchScore: 78 },
-        { id: 3, engineerName: '佐藤 次郎', engineerInitial: 'J.S', projectName: '社内業務DX推進', customerName: '株式会社商事', proposedUnitPrice: 65, status: '一次面接', aiMatchScore: 85 },
-        { id: 4, engineerName: '高橋 健太', engineerInitial: 'K.T', projectName: 'SaaSプラットフォーム開発', customerName: 'テックベンチャー', proposedUnitPrice: 90, status: '二次面接', aiMatchScore: 95 },
-        { id: 5, engineerName: '伊藤 美咲', engineerInitial: 'M.I', projectName: '物流管理システム構築', customerName: 'ロジスティクスG', proposedUnitPrice: 75, status: '結果待ち', aiMatchScore: 88 },
-        { id: 6, engineerName: '渡辺 浩', engineerInitial: 'H.W', projectName: 'AIチャットボット開発', customerName: 'AIスタートアップ', proposedUnitPrice: 100, status: '成約', aiMatchScore: 98 }
-    ];
+function saveProposal() {
+    const engineerId = $('#prop-engineerId').val();
+    const projectId = $('#prop-projectId').val();
+    
+    if (!engineerId || !projectId) {
+        Toast.error('要員と案件は必須です');
+        return;
+    }
+    
+    const data = {
+        engineerId: parseInt(engineerId),
+        projectId: parseInt(projectId),
+        proposedUnitPrice: $('#prop-proposedUnitPrice').val() ? parseInt($('#prop-proposedUnitPrice').val()) : null,
+        status: $('#prop-status').val() || '書類選考中'
+    };
+
+    $.ajax({
+        url: '/api/proposals',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success('提案を登録しました');
+                bootstrap.Modal.getInstance(document.getElementById('proposalModal')).hide();
+                $('#proposal-form')[0].reset();
+                loadKanbanData(); // Refresh board
+            } else {
+                Toast.error(res.message || '登録に失敗しました');
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            Toast.error('通信エラーが発生しました');
+        }
+    });
 }

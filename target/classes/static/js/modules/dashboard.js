@@ -7,59 +7,26 @@ $(document).ready(function() {
 });
 
 function loadDashboardData() {
-    // Attempt to fetch from API, but since Phase 4 backend might not be fully wired up,
-    // we use a robust fallback to mock data directly.
     $.ajax({
         url: '/api/dashboard/summary',
         method: 'GET',
         success: function(res) {
-            if (res.code === 200) {
+            if (res.code === 200 && res.data) {
                 renderKPIs(res.data.kpi);
                 renderCharts(res.data.charts);
                 renderRetiringList(res.data.retiring);
             } else {
-                useMockData();
+                Toast.error(res.message || 'ダッシュボードデータの取得に失敗しました');
             }
         },
-        error: function() {
-            useMockData();
+        error: function(err) {
+            console.error(err);
+            Toast.error('通信エラーが発生しました');
         }
     });
 }
 
-function useMockData() {
-    const mockData = {
-        kpi: {
-            utilization: 85.5,
-            utilizationTrend: '+2.1%',
-            benchCount: 8,
-            revenue: 4250,
-            revenueTrend: '+5.4%',
-            profitMargin: 28.5,
-            profitTrend: '-1.2%'
-        },
-        charts: {
-            revenue: {
-                labels: ['4月', '5月', '6月', '7月', '8月', '9月'],
-                sales: [3800, 3950, 4100, 4250, 4300, 4500],
-                profit: [1100, 1150, 1200, 1210, 1250, 1350]
-            },
-            status: {
-                labels: ['稼動中', 'Bench', '退場予定', '提案中'],
-                data: [65, 8, 12, 15]
-            }
-        },
-        retiring: [
-            { id: 1, name: '田中 太郎', initial: 'T.T', skill: 'Java / Spring Boot', project: '大手金融基盤刷新プロジェクト', date: '2026/07/31', daysLeft: 21, proposals: 2 },
-            { id: 2, name: '鈴木 花子', initial: 'H.S', skill: 'React / TypeScript', project: 'ECサイトフロントエンド開発', date: '2026/08/15', daysLeft: 36, proposals: 0 },
-            { id: 3, name: '佐藤 次郎', initial: 'J.S', skill: 'AWS / Terraform', project: 'クラウドインフラ構築', date: '2026/08/31', daysLeft: 52, proposals: 1 }
-        ]
-    };
 
-    renderKPIs(mockData.kpi);
-    renderCharts(mockData.charts);
-    renderRetiringList(mockData.retiring);
-}
 
 function renderKPIs(kpi) {
     $('#kpi-utilization').text(kpi.utilization + '%');
@@ -145,6 +112,11 @@ function renderRetiringList(list) {
     const tbody = $('#retiring-table-body');
     tbody.empty();
     
+    if (!list || list.length === 0) {
+        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">直近の退場予定者はいません</td></tr>');
+        return;
+    }
+    
     list.forEach(item => {
         const propBadgeClass = item.proposals > 0 ? 'bg-primary' : 'bg-secondary';
         const propText = item.proposals > 0 ? `提案中 (${item.proposals}件)` : '未提案';
@@ -158,15 +130,15 @@ function renderRetiringList(list) {
                 <td class="px-4 py-3">
                     <div class="d-flex align-items-center">
                         <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-3" style="width: 32px; height: 32px; font-size: 0.8rem;">
-                            ${item.initial}
+                            ${item.initial || '?'}
                         </div>
                         <div>
                             <div class="fw-bold text-white mb-0">${item.name}</div>
-                            <div class="small text-muted">${item.skill}</div>
+                            <div class="small text-muted">${item.skill || 'スキル情報なし'}</div>
                         </div>
                     </div>
                 </td>
-                <td class="py-3 text-white">${item.project}</td>
+                <td class="py-3 text-white">${item.project || '-'}</td>
                 <td class="py-3">
                     <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${item.date}</span>
                     <div class="small text-muted">残り ${item.daysLeft} 日</div>

@@ -23,9 +23,26 @@ public class EngineerApiController {
     @GetMapping
     public ApiResult<Page<Engineer>> page(
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "10") long size) {
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) String fullName,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String employmentType) {
+        
         Page<Engineer> page = new Page<>(current, size);
-        return ApiResult.success(engineerService.page(page));
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        
+        if (org.springframework.util.StringUtils.hasText(fullName)) {
+            queryWrapper.like(Engineer::getFullName, fullName);
+        }
+        if (org.springframework.util.StringUtils.hasText(status)) {
+            queryWrapper.eq(Engineer::getStatus, status);
+        }
+        if (org.springframework.util.StringUtils.hasText(employmentType)) {
+            queryWrapper.eq(Engineer::getEmploymentType, employmentType);
+        }
+        
+        queryWrapper.orderByDesc(Engineer::getId);
+        return ApiResult.success(engineerService.page(page, queryWrapper));
     }
 
     /**

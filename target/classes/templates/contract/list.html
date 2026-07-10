@@ -16,9 +16,9 @@
             <a href="/contract/gantt" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2">
                 <i class="bi bi-bar-chart-steps me-1"></i>ガントチャート
             </a>
-            <a href="/contract/form" class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3">
+            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#contractModal">
                 <i class="bi bi-plus-lg me-1"></i>新規契約
-            </a>
+            </button>
         </div>
     </div>
 
@@ -73,6 +73,65 @@
                         <!-- JS renders this -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+    <!-- Contract Registration Modal -->
+    <div class="modal fade" id="contractModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i>契約登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="contract-form">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">稼働要員 <span class="text-danger">*</span></label>
+                            <select id="cont-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
+                                <option value="1">システム登録済みの要員を選択...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">案件 <span class="text-danger">*</span></label>
+                            <select id="cont-projectId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
+                                <option value="1">システム登録済みの案件を選択...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">顧客</label>
+                            <select id="cont-customerId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="1">顧客を選択...</option>
+                            </select>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">開始日</label>
+                                <input type="date" id="cont-startDate" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">終了予定日</label>
+                                <input type="date" id="cont-endDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">売上単価 (円)</label>
+                                <input type="number" id="cont-sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">原価 (円) <span class="text-danger">*</span></label>
+                                <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000" min="0" required>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveContract()">
+                        <i class="bi bi-check-lg me-1"></i>登録
+                    </button>
+                </div>
             </div>
         </div>
     </div>

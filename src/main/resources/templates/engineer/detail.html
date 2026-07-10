@@ -20,10 +20,10 @@
             <a href="/engineer/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
                 <i class="bi bi-arrow-left me-1"></i>戻る
             </a>
-            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" onclick="generateSkillSheet(1)">
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" onclick="generateSkillSheet(currentEngineerId)">
                 <i class="bi bi-file-earmark-pdf me-1"></i>スキルシート自動生成
             </button>
-            <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(1, '田中 太郎')">
+            <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(currentEngineerId, currentEngineerName)">
                 <i class="bi bi-robot me-1"></i>AIマッチング実行
             </button>
         </div>
@@ -37,27 +37,25 @@
                     <div class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center mx-auto mb-3 shadow" style="width: 100px; height: 100px; font-size: 2.5rem;">
                         T.T
                     </div>
-                    <h5 class="text-white fw-bold mb-1">田中 太郎</h5>
-                    <div class="text-accent-green mb-3"><i class="bi bi-check-circle-fill me-1"></i>稼動中 (2026/09退場予定)</div>
+                    <h5 class="text-white fw-bold mb-1" id="det-name">名前</h5>
+                    <div class="mb-3" id="det-status"><i class="bi bi-check-circle-fill me-1"></i>ステータス</div>
                     
-                    <div class="d-flex flex-wrap justify-content-center gap-2 mb-4">
-                        <span class="badge bg-secondary border border-dark text-light">Java</span>
-                        <span class="badge bg-secondary border border-dark text-light">Spring Boot</span>
-                        <span class="badge bg-secondary border border-dark text-light">AWS</span>
+                    <div class="d-flex flex-wrap justify-content-center gap-2 mb-4" id="det-skills">
+                        <span class="badge bg-secondary border border-dark text-light">スキルなし</span>
                     </div>
 
                     <ul class="list-group list-group-flush text-start border-top border-dark pt-3">
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
                             <span>経験年数</span>
-                            <span class="text-white fw-bold">10年</span>
+                            <span class="text-white fw-bold" id="det-experience">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
                             <span>希望単価</span>
-                            <span class="text-white fw-bold">¥850,000 / 月</span>
+                            <span class="text-white fw-bold" id="det-price">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
                             <span>最寄り駅</span>
-                            <span class="text-white fw-bold">新宿駅</span>
+                            <span class="text-white fw-bold" id="det-station">-</span>
                         </li>
                     </ul>
                 </div>
@@ -71,30 +69,8 @@
                     <h6 class="mb-0 text-white fw-bold"><i class="bi bi-journal-text me-2 text-muted"></i>経歴サマリ</h6>
                 </div>
                 <div class="card-body p-4">
-                    <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2">
-                        <!-- Item 1 -->
-                        <div class="position-relative mb-4">
-                            <div class="position-absolute bg-accent-blue rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
-                            <div class="text-muted small mb-1">2023/04 - 現在</div>
-                            <h6 class="text-white fw-bold mb-2">金融系基盤システム刷新プロジェクト</h6>
-                            <p class="text-muted small mb-2">老朽化したオンプレミス環境からAWSへのマイグレーションおよびSpring Bootを用いたバックエンドAPIの開発を担当。</p>
-                            <div class="d-flex gap-2 small text-secondary">
-                                <span><i class="bi bi-tag me-1"></i>SE/PG</span>
-                                <span><i class="bi bi-people me-1"></i>8名</span>
-                            </div>
-                        </div>
-                        
-                        <!-- Item 2 -->
-                        <div class="position-relative">
-                            <div class="position-absolute bg-secondary rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
-                            <div class="text-muted small mb-1">2020/06 - 2023/03</div>
-                            <h6 class="text-white fw-bold mb-2">大手ECサイトリプレイス</h6>
-                            <p class="text-muted small mb-2">ReactとJavaを使用したフルスタック開発。決済モジュールの設計と実装を主導。</p>
-                            <div class="d-flex gap-2 small text-secondary">
-                                <span><i class="bi bi-tag me-1"></i>PG</span>
-                                <span><i class="bi bi-people me-1"></i>15名</span>
-                            </div>
-                        </div>
+                    <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2" id="det-resume">
+                        <div class="text-muted small">経歴情報がありません。</div>
                     </div>
                 </div>
             </div>
@@ -170,6 +146,7 @@
 </div>
 
 <th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/engineer-detail.js}"></script>
     <script th:src="@{/js/modules/ai-matching.js}"></script>
     <script th:src="@{/js/modules/ai-skillsheet.js}"></script>
 </th:block>

@@ -13,7 +13,7 @@
             <p class="text-muted small mb-0">ドラッグ＆ドロップで提案ステータスを更新できます</p>
         </div>
         <div>
-            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3">
+            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#proposalModal">
                 <i class="bi bi-plus-lg me-1"></i>新規提案
             </button>
         </div>
@@ -96,6 +96,56 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+    <!-- Proposal Registration Modal -->
+    <div class="modal fade" id="proposalModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-kanban me-2 text-accent-purple"></i>提案登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="proposal-form">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">対象要員 <span class="text-danger">*</span></label>
+                            <select id="prop-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
+                                <option value="">要員を選択...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">提案先案件 <span class="text-danger">*</span></label>
+                            <select id="prop-projectId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
+                                <option value="">案件を選択...</option>
+                            </select>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">提案単価 (円)</label>
+                                <input type="number" id="prop-proposedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">ステータス</label>
+                                <select id="prop-status" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="書類選考中">書類選考中</option>
+                                    <option value="一次面接">一次面接</option>
+                                    <option value="二次面接">二次面接</option>
+                                    <option value="結果待ち">結果待ち</option>
+                                    <option value="成約">成約</option>
+                                    <option value="見送り">見送り</option>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-purple border-0 shadow-sm px-4" onclick="saveProposal()">
+                        <i class="bi bi-check-lg me-1"></i>登録
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>

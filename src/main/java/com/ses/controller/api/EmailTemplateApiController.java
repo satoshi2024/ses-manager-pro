@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.result.ApiResult;
 import com.ses.entity.EmailTemplate;
 import com.ses.service.EmailTemplateService;
 import lombok.RequiredArgsConstructor;
@@ -21,42 +22,40 @@ public class EmailTemplateApiController {
      * 全てのテンプレートを取得する
      */
     @GetMapping
-    public List<EmailTemplate> getAllTemplates() {
-        return emailTemplateService.list();
+    public ApiResult<List<EmailTemplate>> getAllTemplates() {
+        return ApiResult.success(emailTemplateService.list());
     }
 
     /**
      * IDでテンプレートを取得する
      */
     @GetMapping("/{id}")
-    public EmailTemplate getTemplateById(@PathVariable Long id) {
-        return emailTemplateService.getById(id);
+    public ApiResult<EmailTemplate> getTemplateById(@PathVariable Long id) {
+        return ApiResult.success(emailTemplateService.getById(id));
     }
 
     /**
      * テンプレートを作成する
      */
     @PostMapping
-    public EmailTemplate createTemplate(@RequestBody EmailTemplate emailTemplate) {
-        emailTemplateService.save(emailTemplate);
-        return emailTemplate;
+    public ApiResult<Boolean> createTemplate(@RequestBody EmailTemplate emailTemplate) {
+        return ApiResult.success(emailTemplateService.save(emailTemplate));
     }
 
     /**
      * テンプレートを更新する
      */
     @PutMapping("/{id}")
-    public EmailTemplate updateTemplate(@PathVariable Long id, @RequestBody EmailTemplate emailTemplate) {
+    public ApiResult<Boolean> updateTemplate(@PathVariable Long id, @RequestBody EmailTemplate emailTemplate) {
         emailTemplate.setId(id);
-        emailTemplateService.updateById(emailTemplate);
-        return emailTemplate;
+        return ApiResult.success(emailTemplateService.updateById(emailTemplate));
     }
 
     /**
      * テンプレートを削除する
      */
     @DeleteMapping("/{id}")
-    public void deleteTemplate(@PathVariable Long id) {
-        emailTemplateService.removeById(id);
+    public ApiResult<Boolean> deleteTemplate(@PathVariable Long id) {
+        return ApiResult.success(emailTemplateService.removeById(id));
     }
 }

@@ -23,9 +23,22 @@ public class ProjectApiController {
     @GetMapping
     public ApiResult<Page<Project>> page(
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "10") long size) {
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) String projectName,
+            @RequestParam(required = false) String status) {
+        
         Page<Project> page = new Page<>(current, size);
-        return ApiResult.success(projectService.page(page));
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        
+        if (org.springframework.util.StringUtils.hasText(projectName)) {
+            queryWrapper.like(Project::getProjectName, projectName);
+        }
+        if (org.springframework.util.StringUtils.hasText(status)) {
+            queryWrapper.eq(Project::getStatus, status);
+        }
+        
+        queryWrapper.orderByDesc(Project::getId);
+        return ApiResult.success(projectService.page(page, queryWrapper));
     }
 
     /**

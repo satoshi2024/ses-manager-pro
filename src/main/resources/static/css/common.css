@@ -16,7 +16,7 @@
   /* Text Colors */
   --text-primary: #e8eaed;    /* Main text */
   --text-secondary: #9aa0a6;  /* Secondary text */
-  --text-muted: #5f6368;      /* Disabled/Muted */
+  --text-muted: #9ca3af;      /* Disabled/Muted (Lighter for dark mode visibility) */
   
   /* Accent Colors */
   --accent-blue: #3b82f6;     /* Primary buttons, links */
@@ -106,6 +106,7 @@ a:hover {
 .text-accent-red { color: var(--accent-red) !important; }
 .text-accent-yellow { color: var(--accent-yellow) !important; }
 .text-accent-purple { color: var(--accent-purple) !important; }
+.text-muted { color: var(--text-muted) !important; }
 
 /* Gradients */
 .bg-gradient-blue { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important; color: white; }

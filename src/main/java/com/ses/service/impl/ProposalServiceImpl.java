@@ -26,18 +26,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
 
     @Override
     public List<ProposalKanbanDto> getKanbanList() {
-        // TODO: 要件に応じてMyBatisのXML等でJOINしたクエリを作成して取得する
-        // 現時点ではモックデータを返す
-        List<ProposalKanbanDto> list = new ArrayList<>();
-        ProposalKanbanDto mock1 = new ProposalKanbanDto();
-        mock1.setId(1L);
-        mock1.setEngineerName("山田 太郎");
-        mock1.setEngineerInitial("Y.T");
-        mock1.setProjectName("Webアプリケーション開発");
-        mock1.setCustomerName("株式会社サンプル");
-        mock1.setStatus("書類選考中");
-        list.add(mock1);
-        return list;
+        return this.baseMapper.selectKanbanList();
     }
 
     @Override

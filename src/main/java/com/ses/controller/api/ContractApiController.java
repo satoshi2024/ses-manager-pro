@@ -1,12 +1,11 @@
 package com.ses.controller.api;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.result.ApiResult;
 import com.ses.entity.Contract;
 import com.ses.service.ContractService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * 契約APIコントローラー
@@ -24,8 +23,11 @@ public class ContractApiController {
      * @return 契約リスト
      */
     @GetMapping
-    public ResponseEntity<List<Contract>> list() {
-        return ResponseEntity.ok(contractService.list());
+    public ApiResult<Page<Contract>> page(
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "100") long size) {
+        Page<Contract> page = new Page<>(current, size);
+        return ApiResult.success(contractService.page(page));
     }
 
     /**
@@ -35,8 +37,8 @@ public class ContractApiController {
      * @return 契約情報
      */
     @GetMapping("/{id}")
-    public ResponseEntity<Contract> getById(@PathVariable Long id) {
-        return ResponseEntity.ok(contractService.getById(id));
+    public ApiResult<Contract> getById(@PathVariable Long id) {
+        return ApiResult.success(contractService.getById(id));
     }
 
     /**
@@ -46,8 +48,8 @@ public class ContractApiController {
      * @return 結果
      */
     @PostMapping
-    public ResponseEntity<Boolean> create(@RequestBody Contract contract) {
-        return ResponseEntity.ok(contractService.save(contract));
+    public ApiResult<Boolean> create(@RequestBody Contract contract) {
+        return ApiResult.success(contractService.save(contract));
     }
 
     /**
@@ -58,9 +60,9 @@ public class ContractApiController {
      * @return 結果
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Boolean> update(@PathVariable Long id, @RequestBody Contract contract) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @RequestBody Contract contract) {
         contract.setId(id);
-        return ResponseEntity.ok(contractService.updateById(contract));
+        return ApiResult.success(contractService.updateById(contract));
     }
 
     /**
@@ -70,7 +72,7 @@ public class ContractApiController {
      * @return 結果
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Boolean> delete(@PathVariable Long id) {
-        return ResponseEntity.ok(contractService.removeById(id));
+    public ApiResult<Boolean> delete(@PathVariable Long id) {
+        return ApiResult.success(contractService.removeById(id));
     }
 }

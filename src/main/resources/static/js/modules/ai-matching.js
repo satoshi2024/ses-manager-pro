@@ -8,8 +8,15 @@ $(document).ready(function() {
     // Check URL params for auto-open
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('action') === 'ai-match') {
-        const id = urlParams.get('id') || 1;
-        showAiMatchModal(id, '田中 太郎'); // Mock name for now, in real app fetch from DOM or API
+        const id = urlParams.get('id');
+        if (id) {
+            // Wait slightly for engineer-detail.js to load data, or rely on its callback
+            setTimeout(() => {
+                if (currentEngineerName) {
+                    showAiMatchModal(id, currentEngineerName);
+                }
+            }, 500);
+        }
     }
     
     // Chat input Enter key handling

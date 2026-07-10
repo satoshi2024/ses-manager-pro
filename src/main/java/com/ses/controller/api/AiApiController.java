@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.result.ApiResult;
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.dto.ai.SkillSheetDto;
 import com.ses.service.ai.AiMatchingService;
@@ -25,17 +26,17 @@ public class AiApiController {
      * エンジニアと案件のマッチングを行う
      */
     @PostMapping("/match/engineer-to-projects")
-    public List<MatchResultDto> matchEngineerToProjects(@RequestBody Map<String, Long> payload) {
+    public ApiResult<List<MatchResultDto>> matchEngineerToProjects(@RequestBody Map<String, Long> payload) {
         Long engineerId = payload.get("engineerId");
-        return aiMatchingService.findMatchingProjects(engineerId);
+        return ApiResult.success(aiMatchingService.findMatchingProjects(engineerId));
     }
 
     /**
      * スキルシートを生成する
      */
     @PostMapping("/skill-sheet/generate")
-    public SkillSheetDto generateSkillSheet(@RequestBody Map<String, Long> payload) {
+    public ApiResult<SkillSheetDto> generateSkillSheet(@RequestBody Map<String, Long> payload) {
         Long engineerId = payload.get("engineerId");
-        return aiSkillSheetService.generateSkillSheet(engineerId);
+        return ApiResult.success(aiSkillSheetService.generateSkillSheet(engineerId));
     }
 }

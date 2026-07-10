@@ -23,9 +23,26 @@ public class CustomerApiController {
     @GetMapping
     public ApiResult<Page<Customer>> page(
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "10") long size) {
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String commercialFlow,
+            @RequestParam(required = false) String trustLevel) {
+        
         Page<Customer> page = new Page<>(current, size);
-        return ApiResult.success(customerService.page(page));
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Customer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        
+        if (org.springframework.util.StringUtils.hasText(companyName)) {
+            queryWrapper.like(Customer::getCompanyName, companyName);
+        }
+        if (org.springframework.util.StringUtils.hasText(commercialFlow)) {
+            queryWrapper.eq(Customer::getCommercialFlow, commercialFlow);
+        }
+        if (org.springframework.util.StringUtils.hasText(trustLevel)) {
+            queryWrapper.eq(Customer::getTrustLevel, trustLevel);
+        }
+        
+        queryWrapper.orderByDesc(Customer::getId);
+        return ApiResult.success(customerService.page(page, queryWrapper));
     }
 
     /**

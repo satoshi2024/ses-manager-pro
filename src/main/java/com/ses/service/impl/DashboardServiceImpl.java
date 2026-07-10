@@ -42,8 +42,8 @@ public class DashboardServiceImpl implements DashboardService {
         double utilization = totalEngineers > 0 ? (double) activeCount / totalEngineers * 100 : 0.0;
 
         List<Contract> activeContracts = contractMapper.selectList(new QueryWrapper<Contract>().eq("status", "稼動中"));
-        long totalRevenue = activeContracts.stream().mapToLong(Contract::getSellingPrice).sum();
-        long totalCost = activeContracts.stream().mapToLong(Contract::getCostPrice).sum();
+        long totalRevenue = activeContracts.stream().mapToLong(c -> c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0).sum();
+        long totalCost = activeContracts.stream().mapToLong(c -> c.getCostPrice() != null ? c.getCostPrice().longValue() : 0).sum();
         long grossProfit = totalRevenue - totalCost;
         double profitMargin = totalRevenue > 0 ? (double) grossProfit / totalRevenue * 100 : 0.0;
 
@@ -57,12 +57,43 @@ public class DashboardServiceImpl implements DashboardService {
                 .profitTrend("-0.0%") // Mock trend
                 .build();
 
-        // 2. Calculate Charts
-        // Mock revenue chart for MVP, we only do status chart correctly
+        // 2. Calculate Charts (Dynamic)
+        List<String> monthLabels = new ArrayList<>();
+        List<Long> salesData = new ArrayList<>();
+        List<Long> profitData = new ArrayList<>();
+
+        LocalDate today = LocalDate.now();
+        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+
+        for (int i = 5; i >= 0; i--) {
+            LocalDate monthDate = today.minusMonths(i);
+            LocalDate monthStart = monthDate.withDayOfMonth(1);
+            LocalDate monthEnd = monthDate.withDayOfMonth(monthDate.lengthOfMonth());
+            
+            String label = monthDate.getMonthValue() + "月";
+            monthLabels.add(label);
+
+            long monthSales = 0;
+            long monthProfit = 0;
+
+            for (Contract c : allContracts) {
+                if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
+                    if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
+                        long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
+                        long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
+                        monthSales += sell;
+                        monthProfit += (sell - cost);
+                    }
+                }
+            }
+            salesData.add(monthSales);
+            profitData.add(monthProfit);
+        }
+
         DashboardSummaryDto.RevenueChartDto revenueChart = DashboardSummaryDto.RevenueChartDto.builder()
-                .labels(Arrays.asList("4月", "5月", "6月", "7月", "8月", "9月"))
-                .sales(Arrays.asList(3800L, 3950L, 4100L, 4250L, 4300L, totalRevenue))
-                .profit(Arrays.asList(1100L, 1150L, 1200L, 1210L, 1250L, grossProfit))
+                .labels(monthLabels)
+                .sales(salesData)
+                .profit(profitData)
                 .build();
 
         DashboardSummaryDto.StatusChartDto statusChart = DashboardSummaryDto.StatusChartDto.builder()
