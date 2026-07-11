@@ -11,6 +11,8 @@ CREATE TABLE t_engineer (
   birth_date          DATE,
   nationality         VARCHAR(50),
   nearest_station     VARCHAR(100),
+  prefecture          VARCHAR(50),
+  railway_company     VARCHAR(150),
   employment_type     VARCHAR(20),
   status              VARCHAR(20),
   expected_unit_price DECIMAL(10,0),

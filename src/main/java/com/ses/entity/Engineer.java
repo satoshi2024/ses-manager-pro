@@ -25,7 +25,13 @@ public class Engineer extends BaseEntity {
     private LocalDate birthDate;
     private String nationality;
     private String nearestStation;
-    
+
+    /** 最寄り駅の都道府県 */
+    private String prefecture;
+
+    /** 最寄り駅の鉄道会社・路線 */
+    private String railwayCompany;
+
     /**
      * 雇用形態: 正社員, 契約社員, BP
      */

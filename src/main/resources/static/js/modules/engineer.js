@@ -1,9 +1,19 @@
+// 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
+window.stationIndex = {};
+
 $(document).ready(function() {
     // Load engineers on page load
     loadEngineers();
-    
+
     // Load station names for autocomplete
     loadAllStations();
+
+    // 最寄り駅を入力/選択したら、その駅の路線候補を絞り込む
+    $('#eng-nearestStation').on('input change', function() {
+        populateRailwayLines($(this).val(), null);
+    });
+    // 路線（鉄道会社）を選択したら、都道府県と鉄道会社を自動設定する
+    $('#eng-railwayLine').on('change', applyRailwaySelection);
 });
 
 function loadAllStations() {
@@ -18,9 +28,20 @@ function loadAllStations() {
                 // To prevent browser lag with 10k elements, modern browsers handle datalists very well,
                 // but we can just append them as strings.
                 let html = '';
+                const seenNames = {};
+                window.stationIndex = {};
                 res.forEach(item => {
-                    // Setting text content of <option> shows as lighter text on the right side in Chrome
-                    html += `<option value="${item.name}">${item.pref}</option>`;
+                    // 駅名 -> pref のインデックスを構築（重複 pref は除外）
+                    if (!window.stationIndex[item.name]) window.stationIndex[item.name] = [];
+                    if (window.stationIndex[item.name].indexOf(item.pref) === -1) {
+                        window.stationIndex[item.name].push(item.pref);
+                    }
+                    // datalist は駅名の重複を避けて 1 件だけ出す
+                    if (!seenNames[item.name]) {
+                        seenNames[item.name] = true;
+                        // Setting text content of <option> shows as lighter text on the right side in Chrome
+                        html += `<option value="${item.name}">${item.pref}</option>`;
+                    }
                 });
                 datalist.html(html);
             }
@@ -29,6 +50,70 @@ function loadAllStations() {
             console.error("Failed to load station names", err);
         }
     });
+}
+
+// pref（「都道府県 路線」形式）を都道府県と路線に分割する
+function splitPref(pref) {
+    if (!pref) return { prefecture: '', line: '' };
+    const m = String(pref).match(/^(\S+)\s+([\s\S]+)$/);
+    if (m) return { prefecture: m[1], line: m[2] };
+    return { prefecture: pref, line: '' };
+}
+
+// 指定した駅名に紐づく路線を路線セレクトに展開する。
+// selectedPref があればそれを初期選択にする（編集時の復元用、「都道府県 路線」形式）。
+function populateRailwayLines(stationName, selectedPref) {
+    const select = $('#eng-railwayLine');
+    const entries = (window.stationIndex && window.stationIndex[stationName]) || [];
+    select.empty();
+
+    if (entries.length === 0) {
+        // JSON に無い駅名。編集時に保存済みの値があれば表示できるようにする。
+        if (selectedPref) {
+            select.append(`<option value="${selectedPref}" selected>${splitPref(selectedPref).line || selectedPref}</option>`);
+            select.prop('disabled', false);
+        } else {
+            select.append('<option value="">路線情報がありません</option>');
+            select.prop('disabled', true);
+        }
+        applyRailwaySelection();
+        return;
+    }
+
+    select.append('<option value="">路線を選択...</option>');
+    entries.forEach(pref => {
+        const line = splitPref(pref).line;
+        select.append(`<option value="${pref}">${line}</option>`);
+    });
+
+    if (selectedPref) {
+        select.val(selectedPref);
+        // 候補一覧に無い保存値だった場合は選択肢として補って選択状態にする
+        if (!select.val()) {
+            select.append(`<option value="${selectedPref}" selected>${splitPref(selectedPref).line || selectedPref}</option>`);
+            select.val(selectedPref);
+        }
+    } else if (entries.length === 1) {
+        // 候補が 1 つだけなら自動選択
+        select.val(entries[0]);
+    }
+    select.prop('disabled', false);
+    applyRailwaySelection();
+}
+
+// 路線セレクトの選択値から、都道府県と鉄道会社（保存用hidden）と表示を更新する
+function applyRailwaySelection() {
+    const val = $('#eng-railwayLine').val();
+    if (!val) {
+        $('#eng-prefecture').val('');
+        $('#eng-railwayCompany').val('');
+        $('#eng-prefecture-text').text('-');
+        return;
+    }
+    const parts = splitPref(val);
+    $('#eng-prefecture').val(parts.prefecture);
+    $('#eng-railwayCompany').val(parts.line);
+    $('#eng-prefecture-text').text(parts.prefecture || '-');
 }
 
 function loadEngineers(page = 1) {
@@ -177,9 +262,17 @@ function editEngineer(id) {
                 $('#eng-experienceYears').val(eng.experienceYears);
                 $('#eng-expectedUnitPrice').val(eng.expectedUnitPrice);
                 
-                // Parse nearestStation
+                // 最寄り駅・都道府県・鉄道会社を復元
                 $('#eng-nearestStation').val(eng.nearestStation || '');
-                
+                $('#eng-prefecture').val(eng.prefecture || '');
+                $('#eng-railwayCompany').val(eng.railwayCompany || '');
+                // 保存済みの「都道府県 路線」を再構築して路線セレクトを初期選択にする
+                const selectedPref = eng.prefecture
+                    ? (eng.prefecture + (eng.railwayCompany ? ' ' + eng.railwayCompany : ''))
+                    : (eng.railwayCompany || '');
+                populateRailwayLines(eng.nearestStation || '', selectedPref);
+                $('#eng-prefecture-text').text(eng.prefecture || '-');
+
                 // モーダル表示（既存インスタンスを再利用し、二重生成・バックドロップ残りを防ぐ）
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).show();
             } else {
@@ -206,7 +299,9 @@ function saveEngineer() {
         status: $('#eng-status').val(),
         experienceYears: $('#eng-experienceYears').val() ? parseInt($('#eng-experienceYears').val()) : null,
         expectedUnitPrice: $('#eng-expectedUnitPrice').val() ? parseInt($('#eng-expectedUnitPrice').val()) : null,
-        nearestStation: nearestStation
+        nearestStation: nearestStation,
+        prefecture: $('#eng-prefecture').val() || null,
+        railwayCompany: $('#eng-railwayCompany').val() || null
     };
 
     if (id) {

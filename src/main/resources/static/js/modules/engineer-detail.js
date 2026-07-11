@@ -58,8 +58,10 @@ function renderEngineerDetail(eng) {
     const priceStr = eng.expectedUnitPrice ? '¥' + eng.expectedUnitPrice.toLocaleString() + ' / 月' : '-';
     $('#det-price').text(priceStr);
     
-    // Station
+    // Station / Prefecture / Railway
     $('#det-station').text(eng.nearestStation || '-');
+    $('#det-prefecture').text(eng.prefecture || '-');
+    $('#det-railway').text(eng.railwayCompany || '-');
     
     // Skills (mock logic: parse from resumeSummary if available, else show default)
     let skillsHtml = '';
