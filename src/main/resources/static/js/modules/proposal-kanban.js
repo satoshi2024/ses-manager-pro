@@ -277,7 +277,7 @@ function saveProposal() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success('提案を登録しました');
-                bootstrap.Modal.getInstance(document.getElementById('proposalModal')).hide();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('proposalModal')).hide();
                 $('#proposal-form')[0].reset();
                 loadKanbanData(); // Refresh board
             } else {

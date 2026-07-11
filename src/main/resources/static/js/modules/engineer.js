@@ -180,8 +180,8 @@ function editEngineer(id) {
                 // Parse nearestStation
                 $('#eng-nearestStation').val(eng.nearestStation || '');
                 
-                // Show modal
-                new bootstrap.Modal(document.getElementById('engineerModal')).show();
+                // モーダル表示（既存インスタンスを再利用し、二重生成・バックドロップ残りを防ぐ）
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).show();
             } else {
                 Toast.error('データの取得に失敗しました');
             }
@@ -221,7 +221,8 @@ function saveEngineer() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(id ? '要員を更新しました' : '要員を登録しました');
-                bootstrap.Modal.getInstance(document.getElementById('engineerModal')).hide();
+                // getInstance は未生成時に null を返し .hide() で例外→モーダルが閉じない不具合になるため getOrCreateInstance を使う
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).hide();
                 $('#engineer-form')[0].reset();
                 $('#eng-id').val('');
                 loadEngineers(1);

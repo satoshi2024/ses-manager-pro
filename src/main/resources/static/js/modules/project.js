@@ -160,7 +160,7 @@ function editProject(id) {
                 $('#proj-remoteType').val(proj.remoteType);
                 $('#proj-status').val(proj.status);
                 
-                new bootstrap.Modal(document.getElementById('projectModal')).show();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).show();
             } else {
                 Toast.error('データの取得に失敗しました');
             }
@@ -197,7 +197,7 @@ function saveProject() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(id ? '案件を更新しました' : '案件を登録しました');
-                bootstrap.Modal.getInstance(document.getElementById('projectModal')).hide();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).hide();
                 $('#project-form')[0].reset();
                 $('#proj-id').val('');
                 loadProjects(1);
