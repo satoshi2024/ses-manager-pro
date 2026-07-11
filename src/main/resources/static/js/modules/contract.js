@@ -130,7 +130,7 @@ function saveContract() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success('契約を登録しました');
-                bootstrap.Modal.getInstance(document.getElementById('contractModal')).hide();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).hide();
                 $('#contract-form')[0].reset();
                 loadContracts();
             } else {

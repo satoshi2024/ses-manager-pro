@@ -137,7 +137,7 @@ function editCustomer(id) {
                 $('#cust-contactPerson').val(cust.contactPerson);
                 $('#cust-contactPhone').val(cust.contactPhone);
                 
-                new bootstrap.Modal(document.getElementById('customerModal')).show();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).show();
             } else {
                 Toast.error('データの取得に失敗しました');
             }
@@ -173,7 +173,7 @@ function saveCustomer() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(id ? '顧客を更新しました' : '顧客を登録しました');
-                bootstrap.Modal.getInstance(document.getElementById('customerModal')).hide();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).hide();
                 $('#customer-form')[0].reset();
                 $('#cust-id').val('');
                 loadCustomers(1);
