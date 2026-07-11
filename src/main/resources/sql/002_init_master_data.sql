@@ -21,6 +21,32 @@ VALUES (
 
 
 -- ============================================================
+-- 1b. m_menu / t_role_menu - メニュー権限マスタ
+-- ============================================================
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, sort_order) VALUES
+  ('dashboard', 'ダッシュボード',       '/dashboard',      1),
+  ('engineer',  '要員管理',             '/engineer',       2),
+  ('customer',  '顧客管理',             '/customer',       3),
+  ('project',   '案件管理',             '/project',        4),
+  ('proposal',  '提案管理',             '/proposal',       5),
+  ('contract',  '契約管理',             '/contract',       6),
+  ('ai',        'AI機能',               '/ai',             7),
+  ('email',     'メールテンプレート',   '/email/template', 8),
+  ('user',      'ユーザー管理',         '/user',           9);
+
+-- 管理者: 全メニュー
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '管理者', id FROM m_menu;
+
+-- 営業/HR/マネージャー: ユーザー管理以外の全メニュー
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM m_menu m
+CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
+WHERE m.menu_key <> 'user';
+
+
+-- ============================================================
 -- 2. m_skill_tag - スキルタグマスタ
 -- ============================================================
 

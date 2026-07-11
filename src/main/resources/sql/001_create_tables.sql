@@ -9,6 +9,8 @@
 -- ============================================================
 -- テーブル削除（依存関係の逆順）
 -- ============================================================
+DROP TABLE IF EXISTS t_role_menu;
+DROP TABLE IF EXISTS m_menu;
 DROP TABLE IF EXISTS m_system_config;
 DROP TABLE IF EXISTS m_email_template;
 DROP TABLE IF EXISTS t_ai_log;
@@ -377,6 +379,34 @@ CREATE TABLE m_system_config (
   config_value TEXT                       COMMENT '設定値',
   description  VARCHAR(200)              COMMENT '説明'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='システム設定';
+
+
+-- ============================================================
+-- 15. m_menu (メニューマスタ)
+-- ============================================================
+CREATE TABLE m_menu (
+  id          BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  menu_key    VARCHAR(50)  NOT NULL UNIQUE             COMMENT '画面識別子 (例: engineer, customer, user)',
+  menu_name   VARCHAR(100) NOT NULL                    COMMENT '表示名',
+  path_prefix VARCHAR(100) NOT NULL                    COMMENT 'アクセス制御対象のURLプレフィックス (例: /engineer)',
+  sort_order  INT          DEFAULT 0                   COMMENT '表示順',
+  created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='メニューマスタ';
+
+
+-- ============================================================
+-- 16. t_role_menu (ロール別メニュー権限)
+-- ============================================================
+CREATE TABLE t_role_menu (
+  id      BIGINT      AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  role    VARCHAR(50) NOT NULL                   COMMENT 'sys_user.role と同じ値',
+  menu_id BIGINT      NOT NULL                   COMMENT 'm_menu.id',
+
+  UNIQUE KEY uk_role_menu (role, menu_id),
+  FOREIGN KEY (menu_id) REFERENCES m_menu(id)
+  ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ロール別メニュー権限';
 
 
 -- ============================================================

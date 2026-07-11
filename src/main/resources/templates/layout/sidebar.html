@@ -29,47 +29,47 @@
                     <span class="text-muted small fw-bold text-uppercase">業務管理</span>
                 </li>
                 
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
                     <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
                         <span th:text="#{menu.engineer}">要員管理</span>
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">
                     <a th:href="@{/customer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/customer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-building me-2"></i>
                         <span th:text="#{menu.customer}">顧客管理</span>
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
                     <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-folder me-2"></i>
                         <span th:text="#{menu.project}">案件管理</span>
                     </a>
                 </li>
-                
+
                 <li class="nav-item mt-3 mb-1 px-3">
                     <span class="text-muted small fw-bold text-uppercase">営業・契約</span>
                 </li>
-                
-                <li class="nav-item">
+
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('proposal')}">
                     <a th:href="@{/proposal/kanban}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/proposal') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-kanban me-2"></i>
                         <span th:text="#{menu.proposal}">提案管理</span>
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract')}">
                     <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-text me-2"></i>
                         <span th:text="#{menu.contract}">契約管理</span>
                     </a>
                 </li>
-                
+
                 <li class="nav-item mt-3 mb-1 px-3">
                     <span class="text-muted small fw-bold text-uppercase">高度な機能</span>
                 </li>
-                
-                <li class="nav-item">
+
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('ai')}">
                     <a th:href="@{/ai/matching}" class="nav-link px-3 py-2 rounded-md d-flex justify-content-between align-items-center" th:classappend="${#strings.startsWith(currentUri, '/ai') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <div>
                             <i class="bi bi-robot me-2 text-accent-purple"></i>
@@ -78,10 +78,20 @@
                         <span class="badge bg-purple rounded-pill shadow-sm">AI</span>
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('email')}">
                     <a th:href="@{/email/template/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/email') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-envelope-paper me-2"></i>
                         <span th:text="#{menu.email.template}">メールテンプレート</span>
+                    </a>
+                </li>
+
+                <li class="nav-item mt-3 mb-1 px-3" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
+                    <span class="text-muted small fw-bold text-uppercase">システム管理</span>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
+                    <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/user') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-person-gear me-2"></i>
+                        <span th:text="#{menu.user}">ユーザー管理</span>
                     </a>
                 </li>
             </ul>

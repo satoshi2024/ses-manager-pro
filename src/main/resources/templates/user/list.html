@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>ユーザー管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-gear me-2 text-info"></i>ユーザー管理</h2>
+        <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#userModal">
+            <i class="bi bi-plus-lg me-1"></i>新規登録
+        </button>
+    </div>
+
+    <ul class="nav nav-tabs mb-4" id="userTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="accounts-tab" data-bs-toggle="tab" data-bs-target="#accounts-pane" type="button" role="tab">
+                <i class="bi bi-people me-1"></i>アカウント
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="permissions-tab" data-bs-toggle="tab" data-bs-target="#permissions-pane" type="button" role="tab">
+                <i class="bi bi-shield-lock me-1"></i>ロール別メニュー権限
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- アカウント一覧タブ -->
+        <div class="tab-pane fade show active" id="accounts-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-body">
+                    <form id="searchForm" onsubmit="event.preventDefault(); loadUsers(1);" class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label for="searchUsername" class="form-label text-muted small">ログインID</label>
+                            <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" placeholder="例: yamada">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="searchRole" class="form-label text-muted small">ロール</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="searchRole">
+                                <option value="">すべて</option>
+                                <option value="管理者">管理者</option>
+                                <option value="営業">営業</option>
+                                <option value="HR">HR</option>
+                                <option value="マネージャー">マネージャー</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="searchStatus" class="form-label text-muted small">ステータス</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="searchStatus">
+                                <option value="">すべて</option>
+                                <option value="1">有効</option>
+                                <option value="0">無効</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-outline-info w-100">
+                                <i class="bi bi-filter me-1"></i>絞り込み
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4">ログインID</th>
+                                    <th scope="col">氏名</th>
+                                    <th scope="col">ロール</th>
+                                    <th scope="col">メールアドレス</th>
+                                    <th scope="col">ステータス</th>
+                                    <th scope="col" class="text-end pe-4">アクション</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-table-body">
+                                <!-- JS will populate results here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ロール別メニュー権限タブ -->
+        <div class="tab-pane fade" id="permissions-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <div class="mb-3" style="max-width: 260px;">
+                        <label for="permissionRole" class="form-label text-muted small">ロールを選択</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="permissionRole" onchange="loadRoleMenus()">
+                            <option value="管理者">管理者</option>
+                            <option value="営業">営業</option>
+                            <option value="HR">HR</option>
+                            <option value="マネージャー">マネージャー</option>
+                        </select>
+                    </div>
+                    <div id="role-menu-checkboxes" class="d-flex flex-column gap-2 mb-3">
+                        <!-- JS will populate checkboxes here -->
+                    </div>
+                    <button type="button" class="btn btn-info text-white shadow-sm" onclick="saveRoleMenus()">
+                        <i class="bi bi-check-lg me-1"></i>保存
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Registration Modal -->
+    <div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-info"></i>ユーザー登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="user-form">
+                        <input type="hidden" id="user-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">ログインID <span class="text-danger">*</span></label>
+                            <input type="text" id="user-username" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: yamada" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" id="user-password-label">パスワード <span class="text-danger">*</span></label>
+                            <input type="password" id="user-password" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="パスワード">
+                            <div class="form-text text-muted" id="user-password-hint" style="display:none;">編集時は空欄のままにすると既存のパスワードを維持します</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">氏名</label>
+                            <input type="text" id="user-realName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 山田 花子">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">ロール</label>
+                            <select id="user-role" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="管理者">管理者</option>
+                                <option value="営業">営業</option>
+                                <option value="HR">HR</option>
+                                <option value="マネージャー">マネージャー</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">メールアドレス</label>
+                            <input type="email" id="user-email" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: yamada@ses.local">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveUser()">
+                        <i class="bi bi-check-lg me-1"></i>登録
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/user.js}"></script>
+    <script>
+        document.getElementById('userModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('user-form').reset();
+            document.getElementById('user-id').value = '';
+            document.getElementById('user-password-hint').style.display = 'none';
+        });
+    </script>
+</th:block>
+</body>
+</html>
