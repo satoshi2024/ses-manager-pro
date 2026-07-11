@@ -309,19 +309,109 @@ a:hover {
 }
 
 /* ================== RESPONSIVE DESIGN ================== */
-@media (max-width: 768px) {
+
+/* Sidebar backdrop (mobile drawer dimming) */
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1025; /* below .sidebar (1030), above content */
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.sidebar-backdrop.show {
+    display: block;
+    opacity: 1;
+}
+
+@media (max-width: 992px) {
     .sidebar {
         transform: translateX(-100%);
         transition: transform 0.3s ease;
     }
-    
+
     .sidebar.show {
         transform: translateX(0);
     }
-    
+
     .main-wrapper {
         margin-left: 0;
     }
+}
+
+/* Tablet & phone: tighten spacing, shrink header chrome */
+@media (max-width: 768px) {
+    .content-area {
+        padding: 1rem !important;
+    }
+
+    .top-header {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    .header-tools {
+        gap: 0.5rem !important;
+    }
+
+    #quickAddDropdown .quick-add-label {
+        display: none;
+    }
+    #quickAddDropdown {
+        padding-left: 0.6rem;
+        padding-right: 0.6rem;
+    }
+    #quickAddDropdown i {
+        margin-right: 0 !important;
+    }
+
+    /* Page header bars (title + action buttons) wrap instead of overflowing */
+    .content-area > .d-flex.justify-content-between,
+    .card-header .d-flex {
+        flex-wrap: wrap;
+        row-gap: 0.75rem;
+    }
+    .content-area > .d-flex.justify-content-between > div:last-child {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    h1, .h1 { font-size: 1.35rem; }
+    h2, .h2 { font-size: 1.15rem; }
+
+    /* Data tables: compact type + comfortable tap targets, still horizontally scrollable */
+    .table-responsive {
+        -webkit-overflow-scrolling: touch;
+    }
+    .table-responsive table {
+        font-size: 0.82rem;
+    }
+    .table-responsive .btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.78rem;
+    }
+
+    /* Kanban board: narrower columns + scroll-snap for one-thumb swiping */
+    .kanban-board-container {
+        height: calc(100vh - 260px);
+        scroll-snap-type: x mandatory;
+    }
+    .kanban-column {
+        width: 82vw;
+        max-width: 300px;
+        scroll-snap-align: start;
+    }
+
+    /* Modals: use full viewport height comfortably, avoid clipped footers */
+    .modal-dialog {
+        margin: 0.75rem;
+    }
+}
+
+@media (max-width: 420px) {
+    .datetime-display { display: none !important; }
+    .kanban-column { width: 88vw; }
 }
 
 /* ================== PRINT STYLES ================== */
