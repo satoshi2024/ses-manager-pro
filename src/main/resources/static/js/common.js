@@ -168,27 +168,51 @@ const SES = {
             const toggleBtn = document.getElementById('sidebar-toggle-btn');
             const closeBtn = document.getElementById('sidebar-close-btn');
             const sidebar = document.getElementById('sidebar');
-            
+            const backdrop = document.getElementById('sidebar-backdrop');
+
+            const openSidebar = () => {
+                sidebar.classList.add('show');
+                if (backdrop) backdrop.classList.add('show');
+            };
+            const closeSidebar = () => {
+                sidebar.classList.remove('show');
+                if (backdrop) backdrop.classList.remove('show');
+            };
+
             if (toggleBtn && sidebar) {
-                toggleBtn.addEventListener('click', () => {
-                    sidebar.classList.add('show');
-                });
+                toggleBtn.addEventListener('click', openSidebar);
             }
-            
+
             if (closeBtn && sidebar) {
-                closeBtn.addEventListener('click', () => {
-                    sidebar.classList.remove('show');
-                });
+                closeBtn.addEventListener('click', closeSidebar);
             }
-            
-            // モバイル時の画面外クリックで閉じる
+
+            if (backdrop) {
+                backdrop.addEventListener('click', closeSidebar);
+            }
+
+            // モバイル/タブレット時の画面外クリックで閉じる（サイドバーのドロワー化は992px以下）
             document.addEventListener('click', (e) => {
-                if (window.innerWidth <= 768 && sidebar && sidebar.classList.contains('show')) {
-                    if (!sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
-                        sidebar.classList.remove('show');
+                if (window.innerWidth <= 992 && sidebar && sidebar.classList.contains('show')) {
+                    if (!sidebar.contains(e.target) && (!toggleBtn || !toggleBtn.contains(e.target))) {
+                        closeSidebar();
                     }
                 }
             });
+
+            // デスクトップ幅に戻したときにドロワー状態(と背景オーバーレイ)を解除
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 992) closeSidebar();
+            });
+
+            // ナビリンクをタップしたら自動で閉じる（モバイル/タブレット）
+            if (sidebar) {
+                sidebar.querySelectorAll('.nav-link').forEach(link => {
+                    link.addEventListener('click', () => {
+                        if (window.innerWidth <= 992) closeSidebar();
+                    });
+                });
+            }
         }
     },
     
