@@ -191,20 +191,25 @@ const SES = {
                 backdrop.addEventListener('click', closeSidebar);
             }
 
-            // モバイル時の画面外クリックで閉じる
+            // モバイル/タブレット時の画面外クリックで閉じる（サイドバーのドロワー化は992px以下）
             document.addEventListener('click', (e) => {
-                if (window.innerWidth <= 768 && sidebar && sidebar.classList.contains('show')) {
-                    if (!sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+                if (window.innerWidth <= 992 && sidebar && sidebar.classList.contains('show')) {
+                    if (!sidebar.contains(e.target) && (!toggleBtn || !toggleBtn.contains(e.target))) {
                         closeSidebar();
                     }
                 }
             });
 
-            // ナビリンクをタップしたら自動で閉じる（モバイル）
+            // デスクトップ幅に戻したときにドロワー状態(と背景オーバーレイ)を解除
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 992) closeSidebar();
+            });
+
+            // ナビリンクをタップしたら自動で閉じる（モバイル/タブレット）
             if (sidebar) {
                 sidebar.querySelectorAll('.nav-link').forEach(link => {
                     link.addEventListener('click', () => {
-                        if (window.innerWidth <= 768) closeSidebar();
+                        if (window.innerWidth <= 992) closeSidebar();
                     });
                 });
             }
