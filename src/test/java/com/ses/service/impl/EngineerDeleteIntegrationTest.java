@@ -64,4 +64,22 @@ class EngineerDeleteIntegrationTest {
                 "SELECT deleted_flag FROM t_engineer WHERE id = ?", Integer.class, id);
         assertEquals(1, flag, "deleted_flag が 1 に更新されていること（ソフトデリート）");
     }
+
+    @Test
+    void 最寄り駅の都道府県と鉄道会社が保存_取得できる() {
+        Engineer e = new Engineer();
+        e.setFullName("駅太郎");
+        e.setEmploymentType("正社員");
+        e.setStatus("Bench");
+        e.setNearestStation("ＪＲ河内永和");
+        e.setPrefecture("大阪府");
+        e.setRailwayCompany("JRおおさか東線");
+        assertTrue(engineerService.save(e), "都道府県・鉄道会社付きで保存できること");
+
+        Engineer saved = engineerService.getById(e.getId());
+        assertNotNull(saved);
+        assertEquals("ＪＲ河内永和", saved.getNearestStation());
+        assertEquals("大阪府", saved.getPrefecture(), "都道府県が永続化されること");
+        assertEquals("JRおおさか東線", saved.getRailwayCompany(), "鉄道会社・路線が永続化されること");
+    }
 }

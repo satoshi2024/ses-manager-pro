@@ -1,5 +1,6 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import lombok.Data;
@@ -15,6 +16,14 @@ import java.time.LocalDateTime;
 @EqualsAndHashCode(callSuper = true)
 @TableName("t_proposal")
 public class Proposal extends BaseEntity {
+
+    /**
+     * t_proposal には created_at 列が存在しない（作成日時は proposed_at 列で管理）ため、
+     * BaseEntity 由来の共通「作成日時」カラムはマッピング対象外にする。
+     * これを無効化しないと INSERT 時に「Unknown column 'created_at'」で保存に失敗する。
+     */
+    @TableField(exist = false)
+    private LocalDateTime createdAt;
 
     /** エンジニアID */
     private Long engineerId;

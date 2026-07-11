@@ -117,6 +117,7 @@ public class DashboardServiceImpl implements DashboardService {
         List<Contract> retiringContracts = contractMapper.selectList(new QueryWrapper<Contract>()
                 .eq("status", "稼動中")
                 .isNotNull("end_date")
+                .ge("end_date", now)
                 .le("end_date", next30Days));
 
         List<DashboardSummaryDto.RetiringEngineerDto> retiringList = new ArrayList<>();
@@ -201,8 +202,8 @@ public class DashboardServiceImpl implements DashboardService {
 
         // Sort by StartDate desc
         result.sort((d1, d2) -> {
-            Contract c1 = contracts.stream().filter(c -> c.getContractNo().equals(d1.getContractNo())).findFirst().orElse(null);
-            Contract c2 = contracts.stream().filter(c -> c.getContractNo().equals(d2.getContractNo())).findFirst().orElse(null);
+            Contract c1 = contracts.stream().filter(c -> java.util.Objects.equals(c.getContractNo(), d1.getContractNo())).findFirst().orElse(null);
+            Contract c2 = contracts.stream().filter(c -> java.util.Objects.equals(c.getContractNo(), d2.getContractNo())).findFirst().orElse(null);
             LocalDate date1 = c1 != null && c1.getStartDate() != null ? c1.getStartDate() : LocalDate.MIN;
             LocalDate date2 = c2 != null && c2.getStartDate() != null ? c2.getStartDate() : LocalDate.MIN;
             return date2.compareTo(date1);

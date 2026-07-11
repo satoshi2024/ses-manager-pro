@@ -77,6 +77,8 @@ CREATE TABLE t_engineer (
   birth_date         DATE                                    COMMENT '生年月日',
   nationality        VARCHAR(50)                             COMMENT '国籍',
   nearest_station    VARCHAR(100)                            COMMENT '最寄り駅',
+  prefecture         VARCHAR(50)                             COMMENT '最寄り駅の都道府県',
+  railway_company    VARCHAR(150)                            COMMENT '最寄り駅の鉄道会社・路線',
   employment_type    ENUM('正社員','契約社員','BP') NOT NULL    COMMENT '雇用形態',
   status             ENUM('稼動中','退場予定','Bench','提案中') NOT NULL DEFAULT 'Bench' COMMENT '稼動ステータス',
   expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(万円)',

@@ -159,6 +159,20 @@
                                     <!-- Populated via API -->
                                 </datalist>
                             </div>
+                            <!-- 駅名に紐づく路線（鉄道会社）を選択。同名駅が複数路線に存在するため選択式にする -->
+                            <div class="input-group input-group-sm mt-2">
+                                <span class="input-group-text bg-dark border-dark text-muted"><i class="bi bi-signpost-split"></i></span>
+                                <select id="eng-railwayLine" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" disabled>
+                                    <option value="">駅名を入力すると路線を選択できます</option>
+                                </select>
+                            </div>
+                            <div class="form-text text-muted small mt-1">
+                                <i class="bi bi-geo-alt me-1"></i>都道府県:
+                                <span id="eng-prefecture-text" class="text-light">-</span>
+                            </div>
+                            <!-- 保存対象の実値（路線選択から自動設定） -->
+                            <input type="hidden" id="eng-prefecture">
+                            <input type="hidden" id="eng-railwayCompany">
                         </div>
                     </form>
                 </div>
@@ -179,6 +193,13 @@
         document.getElementById('engineerModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('engineer-form').reset();
             document.getElementById('eng-id').value = '';
+            // 最寄り駅まわりの派生表示・hidden値もリセットする
+            document.getElementById('eng-prefecture').value = '';
+            document.getElementById('eng-railwayCompany').value = '';
+            document.getElementById('eng-prefecture-text').textContent = '-';
+            const lineSel = document.getElementById('eng-railwayLine');
+            lineSel.innerHTML = '<option value="">駅名を入力すると路線を選択できます</option>';
+            lineSel.disabled = true;
         });
     </script>
 </th:block>
