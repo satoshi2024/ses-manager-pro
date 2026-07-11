@@ -1,8 +1,11 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import lombok.*;
+
+import java.time.LocalDateTime;
 
 /**
  * スキルタグマスタエンティティ
@@ -14,6 +17,17 @@ import lombok.*;
 @AllArgsConstructor
 @TableName("m_skill_tag")
 public class SkillTag extends BaseEntity {
+
+    /**
+     * m_skill_tag には updated_at / deleted_flag 列が存在しないため、
+     * BaseEntity 由来の共通カラムをマッピング対象外にする。
+     * これを無効化しないと一覧取得・保存・削除が SQL エラーになる。
+     */
+    @TableField(exist = false)
+    private LocalDateTime updatedAt;
+
+    @TableField(exist = false)
+    private Integer deletedFlag;
 
     /**
      * スキル名 (Java, React 等)

@@ -149,4 +149,26 @@ class DashboardServiceImplTest {
         assertNotNull(result);
         assertEquals(6, result.getCharts().getRevenue().getLabels().size());
     }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void testGetSummary_退場予定クエリは終了日の下限も条件に含む() {
+        // 退場予定リストは「本日〜30日以内に終了する」契約が対象であり、
+        // 既に終了済み（end_date < 本日）の契約を含めてはならない。
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        dashboardService.getSummary(null);
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        org.mockito.Mockito.verify(contractMapper, org.mockito.Mockito.atLeastOnce()).selectList(captor.capture());
+
+        boolean hasBoundedEndDateQuery = captor.getAllValues().stream()
+                .map(w -> w.getCustomSqlSegment() == null ? "" : w.getCustomSqlSegment())
+                .anyMatch(sql -> sql.contains("end_date >=") && sql.contains("end_date <="));
+
+        assertTrue(hasBoundedEndDateQuery,
+                "退場予定の抽出クエリが end_date の下限(>=)と上限(<=)の両方を条件に含むこと");
+    }
 }
