@@ -150,6 +150,16 @@
                             <label class="form-label text-muted small">希望単価 (円)</label>
                             <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">最寄り駅</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-dark text-muted"><i class="bi bi-train-front"></i></span>
+                                <input type="text" id="eng-nearestStation" class="form-control form-control-dark bg-secondary text-white border-dark" list="station-list" placeholder="駅名を入力してください（例: 東京）" autocomplete="off">
+                                <datalist id="station-list">
+                                    <!-- Populated via API -->
+                                </datalist>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">

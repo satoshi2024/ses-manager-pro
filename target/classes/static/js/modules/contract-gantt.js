@@ -10,7 +10,12 @@ $(document).ready(function() {
             
             // Format data for Frappe Gantt
             let tasks = [];
-            let list = res.data && res.data.length > 0 ? res.data : getMockData();
+            let list = [];
+            if (res.code === 200 && res.data) {
+                list = res.data.records || res.data;
+            }
+            if (!list || list.length === 0) list = getMockData();
+
             
             list.forEach((c, index) => {
                 let pClass = 'bar-wrapper';

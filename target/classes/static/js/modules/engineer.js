@@ -1,7 +1,35 @@
 $(document).ready(function() {
     // Load engineers on page load
     loadEngineers();
+    
+    // Load station names for autocomplete
+    loadAllStations();
 });
+
+function loadAllStations() {
+    $.ajax({
+        url: '/data/station_names.json',
+        method: 'GET',
+        dataType: 'json',
+        success: function(res) {
+            if (res && res.length > 0) {
+                const datalist = $('#station-list');
+                datalist.empty();
+                // To prevent browser lag with 10k elements, modern browsers handle datalists very well,
+                // but we can just append them as strings.
+                let html = '';
+                res.forEach(item => {
+                    // Setting text content of <option> shows as lighter text on the right side in Chrome
+                    html += `<option value="${item.name}">${item.pref}</option>`;
+                });
+                datalist.html(html);
+            }
+        },
+        error: function(err) {
+            console.error("Failed to load station names", err);
+        }
+    });
+}
 
 function loadEngineers(page = 1) {
     const data = {
@@ -98,10 +126,10 @@ function renderEngineers(records) {
         
         // Status Badge
         let statusBadge = '';
-        if (eng.status === '稼動中') statusBadge = '<span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">稼動中</span>';
-        else if (eng.status === '提案中') statusBadge = '<span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">提案中</span>';
-        else if (eng.status === '退場予定') statusBadge = '<span class="badge bg-danger bg-opacity-20 text-danger border border-danger border-opacity-50 px-2 py-1">退場予定</span>';
-        else statusBadge = '<span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">Bench</span>';
+        if (eng.status === '稼動中') statusBadge = '<span class="status-badge status-success">稼動中</span>';
+        else if (eng.status === '提案中') statusBadge = '<span class="status-badge status-warning">提案中</span>';
+        else if (eng.status === '退場予定') statusBadge = '<span class="status-badge status-danger">退場予定</span>';
+        else statusBadge = '<span class="status-badge status-secondary">Bench</span>';
 
         const priceStr = eng.expectedUnitPrice ? eng.expectedUnitPrice.toLocaleString() + '円' : '-';
         const expStr = eng.experienceYears ? eng.experienceYears + '年' : '-';
@@ -149,6 +177,9 @@ function editEngineer(id) {
                 $('#eng-experienceYears').val(eng.experienceYears);
                 $('#eng-expectedUnitPrice').val(eng.expectedUnitPrice);
                 
+                // Parse nearestStation
+                $('#eng-nearestStation').val(eng.nearestStation || '');
+                
                 // Show modal
                 new bootstrap.Modal(document.getElementById('engineerModal')).show();
             } else {
@@ -166,13 +197,16 @@ function saveEngineer() {
     }
     
     const id = $('#eng-id').val();
+    const nearestStation = $('#eng-nearestStation').val() || '';
+
     const data = {
         fullName: fullName,
         fullNameKana: $('#eng-fullNameKana').val(),
         employmentType: $('#eng-employmentType').val(),
         status: $('#eng-status').val(),
         experienceYears: $('#eng-experienceYears').val() ? parseInt($('#eng-experienceYears').val()) : null,
-        expectedUnitPrice: $('#eng-expectedUnitPrice').val() ? parseInt($('#eng-expectedUnitPrice').val()) : null
+        expectedUnitPrice: $('#eng-expectedUnitPrice').val() ? parseInt($('#eng-expectedUnitPrice').val()) : null,
+        nearestStation: nearestStation
     };
 
     if (id) {
@@ -203,18 +237,34 @@ function saveEngineer() {
 }
 
 function deleteEngineer(id) {
-    if (!confirm('本当に削除しますか？')) return;
-    
-    $.ajax({
-        url: '/api/engineers/' + id,
-        method: 'DELETE',
-        success: function(res) {
-            if (res.code === 200) {
-                Toast.success('削除しました');
-                loadEngineers();
-            } else {
-                Toast.error(res.message || '削除に失敗しました');
-            }
+    Swal.fire({
+        title: '削除確認',
+        text: 'この要員データを削除しますか？この操作は元に戻せません。',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: '削除する',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/engineers/' + id,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success('削除しました');
+                        loadEngineers();
+                    } else {
+                        Toast.error(res.message || '削除に失敗しました');
+                    }
+                },
+                error: function(err) {
+                    console.error(err);
+                    Toast.error('通信エラーが発生しました');
+                }
+            });
         }
     });
 }
+

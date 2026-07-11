@@ -1,15 +1,44 @@
+let revenueChartInstance = null;
+let statusChartInstance = null;
+
 $(document).ready(function() {
     // Set default defaults for Chart.js in dark mode
     Chart.defaults.color = '#adb5bd';
     Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
 
-    loadDashboardData();
+    $('#btn-print-report').on('click', function() { window.print(); });
+
+    const currentFiscalYear = getCurrentFiscalYear();
+    populateFiscalYearSelector(currentFiscalYear);
+    $('#fiscal-year-selector').val(currentFiscalYear);
+
+    loadDashboardData(currentFiscalYear);
+
+    $('#fiscal-year-selector').on('change', function() {
+        loadDashboardData($(this).val());
+    });
 });
 
-function loadDashboardData() {
+function getCurrentFiscalYear() {
+    const now = new Date();
+    const month = now.getMonth() + 1; // 1-12
+    return month >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function populateFiscalYearSelector(currentYear) {
+    const selector = $('#fiscal-year-selector');
+    selector.empty();
+    for (let i = 0; i < 5; i++) {
+        const y = currentYear - i;
+        selector.append(`<option value="${y}">${y}年度</option>`);
+    }
+}
+
+function loadDashboardData(year) {
     $.ajax({
         url: '/api/dashboard/summary',
         method: 'GET',
+        data: { year: year },
         success: function(res) {
             if (res.code === 200 && res.data) {
                 renderKPIs(res.data.kpi);
@@ -42,9 +71,16 @@ function renderKPIs(kpi) {
 }
 
 function renderCharts(chartsData) {
+    if (revenueChartInstance) {
+        revenueChartInstance.destroy();
+    }
+    if (statusChartInstance) {
+        statusChartInstance.destroy();
+    }
+
     // Revenue Chart
     const revCtx = document.getElementById('revenueChart').getContext('2d');
-    new Chart(revCtx, {
+    revenueChartInstance = new Chart(revCtx, {
         type: 'bar',
         data: {
             labels: chartsData.revenue.labels,
@@ -81,7 +117,7 @@ function renderCharts(chartsData) {
 
     // Status Chart
     const statusCtx = document.getElementById('statusChart').getContext('2d');
-    new Chart(statusCtx, {
+    statusChartInstance = new Chart(statusCtx, {
         type: 'doughnut',
         data: {
             labels: chartsData.status.labels,

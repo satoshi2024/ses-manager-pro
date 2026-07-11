@@ -7,6 +7,7 @@ C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\common\result\ApiRes
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\AiConfig.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\CustomUserDetailsService.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\GlobalControllerAdvice.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\MybatisConfig.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\MyBatisPlusConfig.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\SecurityConfig.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\config\WebConfig.java
@@ -18,6 +19,7 @@ C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\Custo
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\DashboardApiController.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\EmailTemplateApiController.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\EngineerApiController.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\NotificationApiController.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\ProjectApiController.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\ProposalApiController.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api\SkillTagApiController.java
@@ -31,7 +33,9 @@ C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\page\Prop
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\ai\MatchResultDto.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\ai\SalesEmailDto.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\ai\SkillSheetDto.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\dashboard\ContractProfitDto.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\dashboard\DashboardSummaryDto.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\notification\NotificationDto.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\dto\proposal\ProposalKanbanDto.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\entity\AiLog.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\entity\Contract.java
@@ -68,9 +72,11 @@ C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\Custome
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\DashboardServiceImpl.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\EmailTemplateServiceImpl.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\EngineerServiceImpl.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\NotificationServiceImpl.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\ProjectServiceImpl.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\ProposalServiceImpl.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\impl\SkillTagServiceImpl.java
+C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\NotificationService.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\ProjectService.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\ProposalService.java
 C:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\service\SkillTagService.java

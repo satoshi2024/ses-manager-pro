@@ -27,6 +27,7 @@ com\ses\mapper\ContractMapper.class
 com\ses\service\ProposalService.class
 com\ses\controller\api\AiRestController$AiChatRequest.class
 com\ses\dto\dashboard\DashboardSummaryDto$RevenueChartDto$RevenueChartDtoBuilder.class
+com\ses\service\impl\NotificationServiceImpl.class
 com\ses\controller\api\AiRestController.class
 com\ses\service\EngineerService.class
 com\ses\service\impl\EngineerServiceImpl.class
@@ -35,6 +36,7 @@ com\ses\dto\dashboard\DashboardSummaryDto$KpiDto.class
 com\ses\mapper\SkillTagMapper.class
 com\ses\service\ContractService.class
 com\ses\service\ai\impl\AiMatchingServiceImpl.class
+com\ses\dto\notification\NotificationDto.class
 com\ses\common\constant\MessageConstants.class
 com\ses\config\AiConfig.class
 com\ses\controller\api\EngineerApiController.class
@@ -54,6 +56,7 @@ com\ses\controller\AiController.class
 com\ses\service\impl\DashboardServiceImpl.class
 com\ses\entity\SysUser$SysUserBuilder.class
 com\ses\dto\dashboard\DashboardSummaryDto$DashboardSummaryDtoBuilder.class
+com\ses\dto\notification\NotificationDto$NotificationDtoBuilder.class
 com\ses\dto\dashboard\DashboardSummaryDto$ChartsDto$ChartsDtoBuilder.class
 com\ses\service\impl\ProposalServiceImpl.class
 com\ses\entity\Customer.class
@@ -66,11 +69,14 @@ com\ses\common\exception\GlobalExceptionHandler.class
 com\ses\common\result\ApiResult.class
 com\ses\service\GeminiService.class
 com\ses\controller\api\AiApiController.class
+com\ses\dto\dashboard\ContractProfitDto.class
 com\ses\config\MyBatisPlusConfig.class
+com\ses\service\NotificationService.class
 com\ses\controller\page\ProjectPageController.class
 com\ses\service\impl\CustomerServiceImpl.class
 com\ses\common\base\BaseEntity.class
 com\ses\entity\Proposal.class
+com\ses\controller\api\NotificationApiController.class
 com\ses\controller\page\EngineerPageController.class
 com\ses\dto\dashboard\DashboardSummaryDto$RetiringEngineerDto.class
 com\ses\service\EmailTemplateService.class
@@ -87,6 +93,7 @@ com\ses\service\ai\impl\AiSkillSheetServiceImpl.class
 com\ses\controller\page\CustomerPageController.class
 com\ses\dto\dashboard\DashboardSummaryDto$StatusChartDto.class
 com\ses\SesManagerApplication.class
+com\ses\config\MybatisConfig.class
 com\ses\service\DashboardService.class
 com\ses\dto\dashboard\DashboardSummaryDto$ChartsDto.class
 com\ses\service\ProjectService.class

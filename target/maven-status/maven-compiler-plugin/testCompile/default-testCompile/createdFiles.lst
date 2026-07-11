@@ -1,0 +1,5 @@
+com\ses\controller\api\DashboardApiControllerTest.class
+com\ses\controller\api\NotificationApiControllerTest.class
+com\ses\service\impl\NotificationServiceImplTest.class
+com\ses\service\impl\DashboardServiceImplTest.class
+com\ses\SesManagerApplicationTests.class

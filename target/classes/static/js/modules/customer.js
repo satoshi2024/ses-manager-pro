@@ -89,10 +89,10 @@ function renderCustomers(records) {
     
     records.forEach(cust => {
         // Commercial Flow Badge
-        let flowBadge = `<span class="badge bg-secondary bg-opacity-20 text-secondary border border-secondary border-opacity-50 px-2 py-1">${cust.commercialFlow || '-'}</span>`;
-        if (cust.commercialFlow === 'エンド直') flowBadge = '<span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-50 px-2 py-1">エンド直</span>';
-        else if (cust.commercialFlow === '元請け') flowBadge = '<span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 px-2 py-1">元請け</span>';
-        else if (cust.commercialFlow === '二次請け') flowBadge = '<span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 px-2 py-1">二次請け</span>';
+        let flowBadge = `<span class="status-badge status-secondary">${cust.commercialFlow || '-'}</span>`;
+        if (cust.commercialFlow === 'エンド直') flowBadge = '<span class="status-badge status-primary">エンド直</span>';
+        else if (cust.commercialFlow === '元請け') flowBadge = '<span class="status-badge status-success">元請け</span>';
+        else if (cust.commercialFlow === '二次請け') flowBadge = '<span class="status-badge status-warning">二次請け</span>';
 
         // Trust Level
         let trustIcon = '';
@@ -189,18 +189,34 @@ function saveCustomer() {
 }
 
 function deleteCustomer(id) {
-    if (!confirm('本当に削除しますか？')) return;
-    
-    $.ajax({
-        url: '/api/customers/' + id,
-        method: 'DELETE',
-        success: function(res) {
-            if (res.code === 200) {
-                Toast.success('削除しました');
-                loadCustomers();
-            } else {
-                Toast.error(res.message || '削除に失敗しました');
-            }
+    Swal.fire({
+        title: '削除確認',
+        text: 'この顧客データを削除しますか？この操作は元に戻せません。',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: '削除する',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/customers/' + id,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success('削除しました');
+                        loadCustomers();
+                    } else {
+                        Toast.error(res.message || '削除に失敗しました');
+                    }
+                },
+                error: function(err) {
+                    console.error(err);
+                    Toast.error('通信エラーが発生しました');
+                }
+            });
         }
     });
 }
+
