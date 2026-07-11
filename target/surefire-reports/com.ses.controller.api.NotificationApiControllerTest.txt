@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.ses.controller.api.NotificationApiControllerTest
--------------------------------------------------------------------------------
-Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.632 s -- in com.ses.controller.api.NotificationApiControllerTest

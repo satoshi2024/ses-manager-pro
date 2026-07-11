@@ -65,7 +65,21 @@
 本プロジェクトにはMavenラッパー (`mvnw`) が同梱されています。ローカル環境で起動する場合は以下の手順を実行してください。
 
 1. **環境の準備**: Java 17以上がインストールされており、`JAVA_HOME` が正しく設定されていることを確認してください。
-2. **プロジェクトのビルドと起動**:
+
+2. **データベースの準備 (MySQL)**:
+   アプリ本体はMySQLに接続します（`application.yml` の `jdbc:mysql://localhost:3306/ses_manager_db`）。**起動前に**以下を実施してください。DBが起動していないと、ログインやCRUDが「認証エラー」のように見える現象が起こるため注意してください。
+   1. MySQLを起動する（未インストールの場合は導入、またはDockerで `mysql:8` を起動）。
+   2. データベースを作成する: `CREATE DATABASE ses_manager_db;`
+   3. 初期スキーマとマスタデータを投入する（**この順番で**実行）:
+      ```sql
+      -- 例: mysql -u root ses_manager_db < sql/001_create_tables.sql
+      sql/001_create_tables.sql   -- テーブル定義
+      sql/002_init_master_data.sql -- 初期管理者(admin/admin123)等のマスタデータ
+      ```
+
+   > 💡 **テスト実行時はMySQL不要**です。`mvn test` は `src/test/resources/application-test.yml` によりH2インメモリDB（MySQL互換モード）を使用します。
+
+3. **プロジェクトのビルドと起動**:
    プロジェクトのルートディレクトリで以下のコマンドを実行します。
    
    **Windows (PowerShell/CMD):**
@@ -74,10 +88,11 @@
    ```
    *(※環境によっては `.\mvnw.cmd spring-boot:run` が利用可能です)*
 
-3. **アクセス**:
+4. **アクセス**:
    アプリケーション起動後、ブラウザで以下にアクセスしてください。
    - URL: `http://localhost:8080/`
-   - 初期ログイン情報: （`sys_user` テーブルのデータに準拠）
+   - ログインページ: `http://localhost:8080/login`
+   - 初期ログイン情報: `admin` / `admin123`（`sql/002_init_master_data.sql` の初期データに準拠）
 
 ---
 
