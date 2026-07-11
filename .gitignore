@@ -1,0 +1,23 @@
+# ===== ビルド成果物 =====
+target/
+*.class
+*.jar
+*.war
+
+# ===== ログ =====
+*.log
+logs/
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
