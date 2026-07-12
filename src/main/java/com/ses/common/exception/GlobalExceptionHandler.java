@@ -12,10 +12,14 @@ import java.util.stream.Collectors;
 
 /**
  * グローバル例外ハンドラー
- * アプリケーション全体の例外を統一的に処理する
+ * REST API（com.ses.controller.api 配下）の例外を ApiResult(JSON) に統一変換する。
+ *
+ * 対象を api パッケージに限定しているのは、画面（Thymeleaf）コントローラーの例外まで
+ * JSON化するとブラウザに生のJSONが表示されてしまうため。画面側の例外は本ハンドラーで
+ * 捕捉せず、エラーディスパッチ経由で CustomErrorController がエラーページを描画する。
  */
 @Slf4j
-@RestControllerAdvice
+@RestControllerAdvice(basePackages = "com.ses.controller.api")
 public class GlobalExceptionHandler {
 
     /**
