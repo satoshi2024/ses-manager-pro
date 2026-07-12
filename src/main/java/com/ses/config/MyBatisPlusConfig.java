@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.ses.common.util.SecurityUtils;
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,14 +48,17 @@ public class MyBatisPlusConfig {
 
     /**
      * 自動フィールド入力ハンドラー内部クラス
-     * INSERT時にcreatedAtとupdatedAtを設定
+     * INSERT時にcreatedAt・updatedAt・createdByを設定
      * UPDATE時にupdatedAtを設定
      */
     static class AutoFillMetaObjectHandler implements MetaObjectHandler {
 
         /**
          * INSERT時の自動フィールド入力処理
-         * 作成日時と更新日時に現在日時を設定する
+         * 作成日時・更新日時に現在日時を設定し、登録者IDにログイン中ユーザーを設定する。
+         * strictInsertFillは対象フィールド（@TableField(fill=INSERT)）が未設定(null)の場合のみ
+         * 値を埋めるため、コントローラー側で明示設定済みの値は上書きしない。
+         * バッチ等の非リクエスト文脈ではcurrentUserId()がnullを返すため、その場合は何も設定されない。
          *
          * @param metaObject メタオブジェクト
          */
@@ -63,6 +67,7 @@ public class MyBatisPlusConfig {
             LocalDateTime now = LocalDateTime.now();
             this.strictInsertFill(metaObject, "createdAt", LocalDateTime.class, now);
             this.strictInsertFill(metaObject, "updatedAt", LocalDateTime.class, now);
+            this.strictInsertFill(metaObject, "createdBy", Long.class, SecurityUtils.currentUserId());
         }
 
         /**

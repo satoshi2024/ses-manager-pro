@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import lombok.*;
@@ -27,6 +29,7 @@ public class SalesActivity extends BaseEntity {
     private LocalDate nextActionDate;
     
     private Integer completedFlag;
-    
+
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 }

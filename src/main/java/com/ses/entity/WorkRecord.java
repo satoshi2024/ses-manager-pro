@@ -1,6 +1,8 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -20,6 +22,7 @@ public class WorkRecord {
     private BigDecimal paymentAmount;
     private String status;
     private String remarks;
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -8,7 +8,7 @@
   - **テスト要件**: 氏名空の Engineer POST が code=400 + 日本語メッセージ。
   - **Demo**: 画面から氏名空で保存 → エラー Toast に「氏名は必須です」。
 
-- [ ] 2. `MetaObjectHandler` による created_by 自動設定 + 操作ログ
+- [x] 2. `MetaObjectHandler` による created_by 自動設定 + 操作ログ
   - **Objective**: 監査情報の自動化。
   - **実装ガイダンス**: design.md 4章。P2 Task1 の `SecurityUtils` が前提(未実装なら先に実施)。`@TableField(fill = FieldFill.INSERT)` を対象エンティティに付与。`ApiAuditFilter` 追加。
   - **テスト要件**: H2 で insert 後 createdBy が入っていること。

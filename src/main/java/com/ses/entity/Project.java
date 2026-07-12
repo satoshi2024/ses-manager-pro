@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ses.common.base.BaseEntity;
@@ -97,6 +99,7 @@ public class Project extends BaseEntity {
     /**
      * 登録者ID
      */
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 
     /**

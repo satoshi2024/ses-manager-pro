@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 public class SecurityConfig {
 
     private final MenuPermissionFilter menuPermissionFilter;
+    private final ApiAuditFilter apiAuditFilter;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -33,6 +34,17 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<MenuPermissionFilter> disableAutoRegistration(MenuPermissionFilter filter) {
         FilterRegistrationBean<MenuPermissionFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * ApiAuditFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で明示的に addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<ApiAuditFilter> disableAuditAutoRegistration(ApiAuditFilter filter) {
+        FilterRegistrationBean<ApiAuditFilter> registrationBean = new FilterRegistrationBean<>(filter);
         registrationBean.setEnabled(false);
         return registrationBean;
     }
@@ -50,6 +62,8 @@ public class SecurityConfig {
         http
             // ロール別メニューアクセス制御フィルター（認証フィルターの後、認可判定の前に実行）
             .addFilterAfter(menuPermissionFilter, UsernamePasswordAuthenticationFilter.class)
+            // API操作ログフィルター（メニュー権限フィルターの後に実行）
+            .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // アクセス制御の設定
             .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）

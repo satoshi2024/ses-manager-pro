@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
@@ -57,5 +59,6 @@ public class Engineer extends BaseEntity {
     private String resumeSummary;
     private String photoUrl;
     private String remarks;
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 }

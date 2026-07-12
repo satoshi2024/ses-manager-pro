@@ -3,7 +3,6 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
-import com.ses.common.util.SecurityUtils;
 import com.ses.entity.SalesActivity;
 import com.ses.service.SalesActivityService;
 import lombok.RequiredArgsConstructor;
@@ -42,11 +41,7 @@ public class SalesActivityApiController {
     @PostMapping("/{id}/activities")
     public ApiResult<Boolean> createActivity(@PathVariable Long id, @RequestBody SalesActivity activity) {
         activity.setCustomerId(id);
-        // Ensure created_by is set to the current user
-        Long currentUserId = SecurityUtils.currentUserId();
-        if (currentUserId != null) {
-            activity.setCreatedBy(currentUserId);
-        }
+        // created_by は MyBatis-Plus の MetaObjectHandler がログイン中ユーザーを自動設定する
         return ApiResult.success(salesActivityService.save(activity));
     }
 

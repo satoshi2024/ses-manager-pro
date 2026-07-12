@@ -1,6 +1,8 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.TableLogic;
@@ -25,6 +27,7 @@ public class Invoice {
     private LocalDate issuedDate;
     private LocalDate paidDate;
     private String remarks;
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
