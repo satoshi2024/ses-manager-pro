@@ -5,6 +5,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.entity.Contract;
 import com.ses.service.ContractService;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -48,7 +49,7 @@ public class ContractApiController {
      * @return 結果
      */
     @PostMapping
-    public ApiResult<Boolean> create(@RequestBody Contract contract) {
+    public ApiResult<Boolean> create(@Valid @RequestBody Contract contract) {
         contractService.saveWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
                 && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
@@ -65,7 +66,7 @@ public class ContractApiController {
      * @return 結果
      */
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @RequestBody Contract contract) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Contract contract) {
         contract.setId(id);
         contractService.updateWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 

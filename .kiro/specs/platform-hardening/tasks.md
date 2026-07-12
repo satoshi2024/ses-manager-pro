@@ -2,7 +2,7 @@
 
 タスク1・2 は他フェーズより先行実施を推奨(P2 以降が楽になる)。それ以外は独立しており並行可。
 
-- [ ] 1. Bean Validation 導入
+- [x] 1. Bean Validation 導入
   - **Objective**: 全 CRUD API に入力検証を効かせる。
   - **実装ガイダンス**: design.md 1章。starter-validation 追加 → エンティティ注釈 → `@Valid` 付与 → `GlobalExceptionHandler` に `MethodArgumentNotValidException` ハンドラ。
   - **テスト要件**: 氏名空の Engineer POST が code=400 + 日本語メッセージ。

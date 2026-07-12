@@ -16,6 +16,7 @@ import com.ses.service.ProposalService;
 import com.ses.service.SalesActivityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -76,7 +77,7 @@ public class CustomerApiController {
      * 顧客登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody Customer customer) {
+    public ApiResult<Boolean> save(@Valid @RequestBody Customer customer) {
         return ApiResult.success(customerService.save(customer));
     }
 
@@ -84,7 +85,7 @@ public class CustomerApiController {
      * 顧客更新
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody Customer customer) {
+    public ApiResult<Boolean> update(@Valid @RequestBody Customer customer) {
         return ApiResult.success(customerService.updateById(customer));
     }
 

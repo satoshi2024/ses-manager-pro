@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -70,7 +71,7 @@ public class UserApiController {
      * ユーザー登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody SysUser sysUser) {
+    public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser) {
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw new BusinessException("ログインIDとパスワードは必須です");
         }
@@ -88,7 +89,7 @@ public class UserApiController {
      * パスワードが空の場合は既存パスワードを維持する
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody SysUser sysUser, Authentication authentication) {
+    public ApiResult<Boolean> update(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, sysUser.getUsername())

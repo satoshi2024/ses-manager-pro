@@ -2,6 +2,8 @@ package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -18,6 +20,7 @@ import java.time.LocalDate;
 @TableName("t_engineer")
 public class Engineer extends BaseEntity {
 
+    @NotBlank(message = "氏名は必須です")
     private String fullName;
     private String fullNameKana;
     private String initialName;
@@ -45,6 +48,7 @@ public class Engineer extends BaseEntity {
     /**
      * 希望単価(万円/月)
      */
+    @PositiveOrZero(message = "希望単価は0以上で入力してください")
     private BigDecimal expectedUnitPrice;
     
     private LocalDate availableDate;

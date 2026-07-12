@@ -5,6 +5,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.entity.Project;
 import com.ses.service.ProjectService;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -53,7 +54,7 @@ public class ProjectApiController {
      * 案件登録
      */
     @PostMapping
-    public ApiResult<Project> save(@RequestBody Project project) {
+    public ApiResult<Project> save(@Valid @RequestBody Project project) {
         projectService.save(project);
         return ApiResult.success(project);
     }
@@ -62,7 +63,7 @@ public class ProjectApiController {
      * 案件更新
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody Project project) {
+    public ApiResult<Boolean> update(@Valid @RequestBody Project project) {
         return ApiResult.success(projectService.updateById(project));
     }
 

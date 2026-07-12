@@ -2,6 +2,7 @@ package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -23,12 +24,15 @@ public class Contract extends BaseEntity {
     private Long proposalId;
 
     /** エンジニアID */
+    @NotNull(message = "要員は必須です")
     private Long engineerId;
 
     /** 案件ID */
+    @NotNull(message = "案件は必須です")
     private Long projectId;
 
     /** 顧客ID */
+    @NotNull(message = "顧客は必須です")
     private Long customerId;
 
     /**
@@ -38,15 +42,18 @@ public class Contract extends BaseEntity {
     private String contractType;
 
     /** 契約開始日 */
+    @NotNull(message = "契約開始日は必須です")
     private LocalDate startDate;
 
     /** 契約終了日 */
     private LocalDate endDate;
 
     /** 売上単価 */
+    @NotNull(message = "売上単価は必須です")
     private BigDecimal sellingPrice;
 
     /** 原価 */
+    @NotNull(message = "原価は必須です")
     private BigDecimal costPrice;
 
     /** 精算基準時間（下限） */
