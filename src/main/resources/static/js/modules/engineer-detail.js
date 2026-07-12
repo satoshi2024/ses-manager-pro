@@ -28,7 +28,12 @@ function loadEngineerDetail(id) {
     });
 }
 
+// 現在表示中の要員（写真アップロード等で参照）
+let detailEngineer = null;
+
 function renderEngineerDetail(eng) {
+    detailEngineer = eng;
+
     // Update global variables for AI matching
     if (typeof currentEngineerId !== 'undefined') {
         currentEngineerId = eng.id;
@@ -38,9 +43,12 @@ function renderEngineerDetail(eng) {
     // Update Header
     $('#eng-name').text(eng.fullName);
     $('#eng-initial').text(`(${eng.initialName || '-'})`);
-    
+
     // Update Profile Card
     $('#det-name').text(eng.fullName);
+
+    // Photo / Avatar
+    renderAvatar(eng);
     
     let statusColor = 'text-muted';
     let statusIcon = 'bi-circle';
@@ -82,6 +90,68 @@ function renderEngineerDetail(eng) {
     } else {
         $('#det-resume').html('<div class="text-muted small">経歴情報が登録されていません。</div>');
     }
+}
+
+// ==========================================
+// Photo / Avatar
+// ==========================================
+function renderAvatar(eng) {
+    const $avatar = $('#det-avatar');
+    if (eng.photoUrl) {
+        $avatar.html(`<img src="/api/files/${eng.photoUrl}" alt="顔写真" style="width:100%;height:100%;object-fit:cover;">`);
+    } else {
+        // 写真が無い場合はイニシャル or 氏名先頭文字
+        const label = (eng.initialName && eng.initialName.trim())
+            ? eng.initialName
+            : (eng.fullName ? eng.fullName.charAt(0) : '?');
+        $avatar.text(label);
+    }
+}
+
+function uploadPhoto(input) {
+    if (!input.files || input.files.length === 0) return;
+    if (!detailEngineer) { Toast.error('要員情報が読み込まれていません'); return; }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+    formData.append('kind', 'PHOTO');
+
+    $.ajax({
+        url: '/api/files',
+        method: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                // 要員の photoUrl を保存名で更新
+                const updated = Object.assign({}, detailEngineer, { photoUrl: res.data.storedName });
+                $.ajax({
+                    url: '/api/engineers',
+                    method: 'PUT',
+                    contentType: 'application/json',
+                    data: JSON.stringify(updated),
+                    success: function(r2) {
+                        if (r2.code === 200) {
+                            detailEngineer = updated;
+                            renderAvatar(updated);
+                            Toast.success('写真を更新しました');
+                        } else {
+                            Toast.error(r2.message || '写真の保存に失敗しました');
+                        }
+                    },
+                    error: function() { Toast.error('写真の保存に失敗しました'); }
+                });
+            } else {
+                Toast.error(res.message || 'アップロードに失敗しました');
+            }
+        },
+        error: function(xhr) {
+            const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'アップロードに失敗しました';
+            Toast.error(msg);
+        },
+        complete: function() { input.value = ''; }
+    });
 }
 
 // ==========================================
