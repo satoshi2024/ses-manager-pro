@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>システム設定 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-sliders me-2 text-info"></i>システム設定</h2>
+        <button class="btn btn-primary shadow-sm" onclick="saveConfigs()">
+            <i class="bi bi-save me-1"></i>保存
+        </button>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                <i class="bi bi-info-circle me-1"></i>通知の日数閾値・消費税率・会社情報などを変更できます。保存後は即時反映されます。
+            </p>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead>
+                        <tr class="text-muted small">
+                            <th style="width: 28%;">キー</th>
+                            <th style="width: 30%;">値</th>
+                            <th>説明</th>
+                        </tr>
+                    </thead>
+                    <tbody id="configTableBody">
+                        <tr><td colspan="3" class="text-center text-muted py-4">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/system-config.js}"></script>
+</th:block>
+</body>
+</html>

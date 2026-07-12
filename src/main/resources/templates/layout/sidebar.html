@@ -108,6 +108,12 @@
                         <span th:text="#{menu.user}">ユーザー管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('system-config')}">
+                    <a th:href="@{/system-config}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/system-config') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-sliders me-2"></i>
+                        <span>システム設定</span>
+                    </a>
+                </li>
             </ul>
         </div>
         

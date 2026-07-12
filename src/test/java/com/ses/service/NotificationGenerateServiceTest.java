@@ -40,6 +40,9 @@ class NotificationGenerateServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private SystemConfigService systemConfigService;
+
     @InjectMocks
     private NotificationGenerateService notificationGenerateService;
 

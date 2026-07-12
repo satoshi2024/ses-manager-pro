@@ -92,7 +92,9 @@ public class SecurityConfig {
                     "/user/**",
                     "/api/users/**",
                     "/api/role-menus/**",
-                    "/api/notifications/generate"
+                    "/api/notifications/generate",
+                    "/system-config/**",
+                    "/api/system-configs/**"
                 ).hasRole("管理者")
                 // その他のリクエストは認証が必要
                 .anyRequest().authenticated()
