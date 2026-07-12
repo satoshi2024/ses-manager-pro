@@ -80,8 +80,19 @@ public class UserApiController {
         if (duplicated > 0) {
             throw new BusinessException("このログインIDは既に使用されています");
         }
+        validatePasswordPolicy(sysUser.getPassword());
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         return ApiResult.success(sysUserService.save(sysUser));
+    }
+
+    /**
+     * パスワードポリシー検証: 8文字以上・英字と数字を含む。
+     */
+    private void validatePasswordPolicy(String password) {
+        if (password == null || password.length() < 8
+                || !password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
+            throw new BusinessException("パスワードは8文字以上で英字と数字を含めてください");
+        }
     }
 
     /**
@@ -105,6 +116,7 @@ public class UserApiController {
             throw new BusinessException("自分自身のロールは変更できません");
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
+            validatePasswordPolicy(sysUser.getPassword());
             sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         } else {
             sysUser.setPassword(null);

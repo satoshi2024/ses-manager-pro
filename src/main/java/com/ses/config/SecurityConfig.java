@@ -35,6 +35,8 @@ public class SecurityConfig {
 
     private final MenuPermissionFilter menuPermissionFilter;
     private final ApiAuditFilter apiAuditFilter;
+    private final LoginSuccessHandler loginSuccessHandler;
+    private final LoginFailureHandler loginFailureHandler;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -99,8 +101,8 @@ public class SecurityConfig {
             .formLogin(form -> form
                 .loginPage("/login")
                 .loginProcessingUrl("/login")
-                .defaultSuccessUrl("/dashboard", true)
-                .failureUrl("/login?error")
+                .successHandler(loginSuccessHandler)
+                .failureHandler(loginFailureHandler)
                 .permitAll()
             )
             // ログアウトの設定

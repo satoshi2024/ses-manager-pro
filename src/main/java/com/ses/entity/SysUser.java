@@ -59,4 +59,14 @@ public class SysUser extends BaseEntity {
      */
     @Builder.Default
     private Integer status = 1;
+
+    /**
+     * ログイン失敗回数
+     */
+    private Integer failedCount;
+
+    /**
+     * アカウントロック解除日時（未来日時ならロック中）
+     */
+    private java.time.LocalDateTime lockedUntil;
 }
