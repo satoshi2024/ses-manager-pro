@@ -388,7 +388,8 @@ CREATE TABLE m_menu (
   id          BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   menu_key    VARCHAR(50)  NOT NULL UNIQUE             COMMENT '画面識別子 (例: engineer, customer, user)',
   menu_name   VARCHAR(100) NOT NULL                    COMMENT '表示名',
-  path_prefix VARCHAR(100) NOT NULL                    COMMENT 'アクセス制御対象のURLプレフィックス (例: /engineer)',
+  path_prefix VARCHAR(100) NOT NULL                    COMMENT '画面アクセス制御対象のURLプレフィックス (例: /engineer)',
+  api_prefix  VARCHAR(100)                             COMMENT 'API アクセス制御対象のURLプレフィックス (例: /api/engineers)',
   sort_order  INT          DEFAULT 0                   COMMENT '表示順',
   created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
   updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時'

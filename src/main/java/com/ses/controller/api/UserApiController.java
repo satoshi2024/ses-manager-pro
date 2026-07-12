@@ -88,7 +88,7 @@ public class UserApiController {
      * パスワードが空の場合は既存パスワードを維持する
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody SysUser sysUser) {
+    public ApiResult<Boolean> update(@RequestBody SysUser sysUser, Authentication authentication) {
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, sysUser.getUsername())
@@ -96,6 +96,12 @@ public class UserApiController {
             if (duplicated > 0) {
                 throw new BusinessException("このログインIDは既に使用されています");
             }
+        }
+        // 自分自身のロール変更を禁止（自己降格による管理者権限の喪失・ロックアウトを防ぐ）
+        SysUser current = currentUser(authentication);
+        if (current != null && sysUser.getId() != null && current.getId().equals(sysUser.getId())
+                && StringUtils.hasText(sysUser.getRole()) && !sysUser.getRole().equals(current.getRole())) {
+            throw new BusinessException("自分自身のロールは変更できません");
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
             sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
@@ -127,10 +133,20 @@ public class UserApiController {
     }
 
     private void guardNotSelf(Long id, Authentication authentication, String message) {
-        SysUser current = sysUserService.getOne(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, authentication.getName()));
+        SysUser current = currentUser(authentication);
         if (current != null && current.getId().equals(id)) {
             throw new BusinessException(message);
         }
+    }
+
+    /**
+     * ログイン中ユーザーのエンティティを取得する
+     */
+    private SysUser currentUser(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+        return sysUserService.getOne(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, authentication.getName()));
     }
 }

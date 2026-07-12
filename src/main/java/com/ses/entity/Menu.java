@@ -34,6 +34,9 @@ public class Menu implements Serializable {
     @TableField("path_prefix")
     private String pathPrefix;
 
+    @TableField("api_prefix")
+    private String apiPrefix;
+
     @TableField("sort_order")
     private Integer sortOrder;
 

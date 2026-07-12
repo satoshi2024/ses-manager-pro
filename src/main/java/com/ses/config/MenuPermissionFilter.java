@@ -67,9 +67,11 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         Optional<Menu> matchedMenu;
         List<String> allowedMenuKeys;
         try {
+            // 画面プレフィックス・APIプレフィックスのどちらかに前方一致するメニューのうち、
+            // 一致した長さが最長のもの（最も具体的なもの）を対象メニューとする
             matchedMenu = menuMapper.selectList(null).stream()
-                    .filter(menu -> uri.startsWith(menu.getPathPrefix()))
-                    .max((a, b) -> Integer.compare(a.getPathPrefix().length(), b.getPathPrefix().length()));
+                    .filter(menu -> matchedPrefixLength(menu, uri) > 0)
+                    .max((a, b) -> Integer.compare(matchedPrefixLength(a, uri), matchedPrefixLength(b, uri)));
 
             if (matchedMenu.isEmpty()) {
                 filterChain.doFilter(request, response);
@@ -97,6 +99,24 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
     private boolean isMenuControlledPath(String uri) {
         return !uri.equals("/logout") && !uri.equals("/") && (uri.startsWith("/api/") || !uri.contains("."));
+    }
+
+    /**
+     * URIがメニューの画面プレフィックスまたはAPIプレフィックスに前方一致する場合、
+     * 一致したプレフィックスの長さを返す（一致しなければ0）。
+     * 一致長が長いほど具体的なメニューとみなす。
+     */
+    private int matchedPrefixLength(Menu menu, String uri) {
+        int length = 0;
+        String pathPrefix = menu.getPathPrefix();
+        if (pathPrefix != null && !pathPrefix.isEmpty() && uri.startsWith(pathPrefix)) {
+            length = pathPrefix.length();
+        }
+        String apiPrefix = menu.getApiPrefix();
+        if (apiPrefix != null && !apiPrefix.isEmpty() && uri.startsWith(apiPrefix)) {
+            length = Math.max(length, apiPrefix.length());
+        }
+        return length;
     }
 
     private String currentRole(Authentication authentication) {
