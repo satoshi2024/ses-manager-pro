@@ -10,6 +10,13 @@ server:
       force: true
     session:
       timeout: 30m
+  # ===== エラー表示（顧客に生の情報を見せない） =====
+  error:
+    whitelabel:
+      enabled: false
+    include-message: never
+    include-stacktrace: never
+    include-exception: false
 
 spring:
   profiles:

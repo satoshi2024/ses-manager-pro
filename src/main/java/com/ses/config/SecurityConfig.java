@@ -55,6 +55,7 @@ public class SecurityConfig {
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
                 .requestMatchers(
                     "/login",
+                    "/error",
                     "/css/**",
                     "/js/**",
                     "/lib/**",

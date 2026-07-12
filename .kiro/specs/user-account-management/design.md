@@ -33,6 +33,17 @@
 - `static/js/modules/user.js`: `customer.js` と同型のCRUD一式に加え、`loadMenus()`/`loadRoleMenus()`/`saveRoleMenus()` を追加。
 - `templates/layout/sidebar.html`: 各メニュー項目の `<li>` に `th:if="${allowedMenus.contains('xxx')}"` を追加。「ユーザー管理」メニューを `user` キーで新設。
 
+## エラーハンドリング（統一）
+
+顧客に生のスタックトレースやSpring BootのWhitelabelページを見せないため、エラー表示を一元化する。
+
+- `common/exception/GlobalExceptionHandler`: `@RestControllerAdvice(basePackages = "com.ses.controller.api")` に限定。REST APIの例外のみ `ApiResult(JSON)` に変換する。画面コントローラーの例外までJSON化するとブラウザに生JSONが出てしまうため、対象をapiパッケージに絞る。
+- `controller/CustomErrorController` (`implements ErrorController`, `/error`): エラーディスパッチ（404・403・500や未捕捉例外）を一元処理。リクエストが `/api/**` もしくは `X-Requested-With: XMLHttpRequest`／`Accept: application/json` の場合は `ApiResult(JSON)` を返し、それ以外（ブラウザ画面遷移）は深色テーマの統一エラーページ `templates/error.html` を描画する。ステータスコードに応じてタイトル・メッセージ・アイコンを出し分ける。
+- `templates/error.html`: `layout/base` に依存しない自己完結ページ（サイドバー・DB・認証が壊れていても描画できるようにするため）。ログイン画面と同じCDN＋`common.css`で統一感を出す。
+- `config/MenuPermissionFilter`: 画面遷移の403は `response.sendError(403)` でエラーディスパッチに載せ、統一エラーページを描画する（API呼び出しは従来通りJSONを直接書き込む）。
+- `application.yml` `server.error`: `whitelabel.enabled=false`、`include-message/​stacktrace=never`、`include-exception=false` でエラー詳細の漏洩を防ぐ。
+- `SecurityConfig`: `/error` を `permitAll` に追加し、未認証時のエラーディスパッチもエラーページを描画できるようにする。
+
 ## シードデータ
 
 `002_init_master_data.sql` に `m_menu` の9件（dashboard, engineer, customer, project, proposal, contract, ai, email, user）と、管理者=全メニュー、営業/HR/マネージャー=user以外全メニュー、という初期 `t_role_menu` を投入する。

@@ -90,10 +90,13 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             return;
         }
 
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         if (uri.startsWith("/api/")) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":403,\"message\":\"このメニューへのアクセス権限がありません\",\"data\":null}");
+        } else {
+            // 画面遷移はエラーディスパッチ経由で統一エラーページ(CustomErrorController)を描画する
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
         }
     }
 
