@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.hamcrest.Matchers.*;
@@ -63,6 +64,7 @@ public class SalesActivityApiControllerTest {
         activity.setContent("Test Content");
 
         mockMvc.perform(post("/api/customers/" + testCustomer.getId() + "/activities")
+                .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(activity)))
                 .andExpect(status().isOk())
@@ -100,7 +102,8 @@ public class SalesActivityApiControllerTest {
         activity.setTitle("To Complete");
         salesActivityService.save(activity);
 
-        mockMvc.perform(put("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId() + "/complete"))
+        mockMvc.perform(put("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId() + "/complete")
+                .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));
@@ -119,7 +122,8 @@ public class SalesActivityApiControllerTest {
         activity.setTitle("To Delete");
         salesActivityService.save(activity);
 
-        mockMvc.perform(delete("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId()))
+        mockMvc.perform(delete("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId())
+                .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));

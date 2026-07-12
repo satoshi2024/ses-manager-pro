@@ -40,15 +40,16 @@ const SES = {
         },
         
         _fetch: async function(url, options) {
-            // CSRF Token - if using Spring Security default CSRF (disabled for REST in this app, but good practice)
-            const csrfToken = document.querySelector('meta[name="_csrf"]')?.content;
-            const csrfHeader = document.querySelector('meta[name="_csrf_header"]')?.content;
-            
-            if (csrfToken && csrfHeader) {
-                options.headers = options.headers || {};
-                options.headers[csrfHeader] = csrfToken;
+            // CSRF: 更新系リクエストで XSRF-TOKEN Cookie を X-XSRF-TOKEN ヘッダーへ複製
+            const method = (options.method || 'GET').toUpperCase();
+            if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(method)) {
+                const token = SES.csrf && SES.csrf.token();
+                if (token) {
+                    options.headers = options.headers || {};
+                    options.headers['X-XSRF-TOKEN'] = token;
+                }
             }
-            
+
             try {
                 const response = await fetch(url, options);
                 
@@ -344,10 +345,34 @@ window.matchAI = function(engineerId) {
     }, 2000);
 };
 
+// ================== CSRF (Cookie → ヘッダー) ==================
+// CookieCsrfTokenRepository が発行する XSRF-TOKEN Cookie を読み、
+// 更新系リクエストで X-XSRF-TOKEN ヘッダーへ複製する。
+SES.csrf = {
+    token: function() {
+        const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : null;
+    },
+    header: function() {
+        const t = this.token();
+        return t ? { 'X-XSRF-TOKEN': t } : {};
+    }
+};
+
 // ================== jQuery グローバルAjaxハンドラー ==================
 // セッション切れ・未認証時に自動でログインページへリダイレクトする
 $(function() {
     $.ajaxSetup({
+        beforeSend: function(xhr, settings) {
+            // GET/HEAD/OPTIONS 以外にCSRFヘッダーを付与
+            const method = (settings.type || settings.method || 'GET').toUpperCase();
+            if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(method)) {
+                const token = SES.csrf.token();
+                if (token) {
+                    xhr.setRequestHeader('X-XSRF-TOKEN', token);
+                }
+            }
+        },
         complete: function(xhr, status) {
             // レスポンスが JSON ではなく HTML (ログインページ) だった場合
             // → セッション切れの可能性が高い

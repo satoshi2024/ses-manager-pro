@@ -11,8 +11,17 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -102,10 +111,14 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .permitAll()
             )
-            // REST API向けにCSRFを無効化（/api/** パス）
+            // CSRF: Cookie(XSRF-TOKEN)→ヘッダー(X-XSRF-TOKEN)方式に移行。
+            // 生トークンをCookieに載せ、JSがヘッダーへ複製する（SPA/AJAX向け標準構成）。
             .csrf(csrf -> csrf
-                .ignoringRequestMatchers("/api/**")
-            );
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+            )
+            // CSRFトークンを毎リクエストで解決し、XSRF-TOKEN Cookieを確実に発行する
+            .addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class);
 
         return http.build();
     }
@@ -132,5 +145,23 @@ public class SecurityConfig {
     @Profile("prod")
     public PasswordEncoder prodPasswordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * CSRFトークンを解決してCookie(XSRF-TOKEN)を確実に発行するためのフィルター。
+     * CookieCsrfTokenRepositoryはトークンが読み出された時にCookieを書き込むため、
+     * 各リクエストでgetToken()を呼び出してCookie発行をトリガーする。
+     */
+    static class CsrfCookieFilter extends OncePerRequestFilter {
+        @Override
+        protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                        FilterChain filterChain) throws ServletException, IOException {
+            CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+            if (csrfToken != null) {
+                // getToken() の呼び出しでCookieへの書き込みが行われる
+                csrfToken.getToken();
+            }
+            filterChain.doFilter(request, response);
+        }
     }
 }
