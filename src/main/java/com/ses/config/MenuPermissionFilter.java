@@ -34,6 +34,9 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class MenuPermissionFilter extends OncePerRequestFilter {
 
+    /** 全メニューにアクセス可能な特権ロール（メニュー権限設定によらず遮断しない） */
+    private static final String ADMIN_ROLE = "管理者";
+
     private final ObjectProvider<MenuMapper> menuMapperProvider;
     private final ObjectProvider<RoleMenuService> roleMenuServiceProvider;
 
@@ -53,6 +56,14 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             return;
         }
 
+        String role = currentRole(authentication);
+        // 管理者は全メニューにアクセス可能。メニュー権限設定で誤って自ロールの
+        // メニューを外しても管理画面から締め出されないよう、必ず素通しする。
+        if (ADMIN_ROLE.equals(role)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         Optional<Menu> matchedMenu;
         List<String> allowedMenuKeys;
         try {
@@ -65,7 +76,6 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
                 return;
             }
 
-            String role = currentRole(authentication);
             allowedMenuKeys = role == null ? List.of() : roleMenuService.getMenuKeysByRole(role);
         } catch (Exception e) {
             log.warn("メニュー権限の判定に失敗しました。アクセスを許可します: uri={}", uri, e);

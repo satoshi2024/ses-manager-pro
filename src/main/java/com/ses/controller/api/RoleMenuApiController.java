@@ -7,6 +7,7 @@ import com.ses.entity.RoleMenu;
 import com.ses.mapper.MenuMapper;
 import com.ses.service.RoleMenuService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,8 +43,10 @@ public class RoleMenuApiController {
 
     /**
      * 指定ロールのメニュー許可を置き換える
+     * 全削除→再登録を1トランザクションで行い、途中失敗時に権限が消えたままにならないようにする
      */
     @PutMapping
+    @Transactional
     public ApiResult<Boolean> update(@RequestParam String role, @RequestBody List<Long> menuIds) {
         roleMenuService.remove(new LambdaQueryWrapper<RoleMenu>().eq(RoleMenu::getRole, role));
         if (menuIds != null && !menuIds.isEmpty()) {

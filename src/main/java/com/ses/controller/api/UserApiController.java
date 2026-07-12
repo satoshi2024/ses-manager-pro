@@ -74,6 +74,11 @@ public class UserApiController {
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw new BusinessException("ログインIDとパスワードは必須です");
         }
+        long duplicated = sysUserService.count(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, sysUser.getUsername()));
+        if (duplicated > 0) {
+            throw new BusinessException("このログインIDは既に使用されています");
+        }
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         return ApiResult.success(sysUserService.save(sysUser));
     }
@@ -84,6 +89,14 @@ public class UserApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@RequestBody SysUser sysUser) {
+        if (StringUtils.hasText(sysUser.getUsername())) {
+            long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
+                    .eq(SysUser::getUsername, sysUser.getUsername())
+                    .ne(sysUser.getId() != null, SysUser::getId, sysUser.getId()));
+            if (duplicated > 0) {
+                throw new BusinessException("このログインIDは既に使用されています");
+            }
+        }
         if (StringUtils.hasText(sysUser.getPassword())) {
             sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         } else {
