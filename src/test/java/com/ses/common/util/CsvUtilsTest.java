@@ -66,6 +66,20 @@ class CsvUtilsTest {
         assertEquals(List.of("a,b", "c\"d", "e\nf"), rows.get(0));
     }
 
+    @Test
+    void appendLine_数式インジェクション文字はクォート前置で無害化される() {
+        StringBuilder sb = new StringBuilder();
+        CsvUtils.appendLine(sb, "=SUM(A1:A9)", "@cmd", "+1", "山田");
+        assertEquals("'=SUM(A1:A9),'@cmd,'+1,山田\r\n", sb.toString());
+    }
+
+    @Test
+    void sanitizeForSpreadsheet_通常文字列は変更されない() {
+        assertEquals("山田太郎", CsvUtils.sanitizeForSpreadsheet("山田太郎"));
+        assertEquals("", CsvUtils.sanitizeForSpreadsheet(""));
+        assertEquals("'-備考", CsvUtils.sanitizeForSpreadsheet("-備考"));
+    }
+
     private List<List<String>> parse(String content) throws IOException {
         try (InputStream in = new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8))) {
             return CsvUtils.parse(in);

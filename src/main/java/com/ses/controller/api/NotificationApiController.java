@@ -75,6 +75,12 @@ public class NotificationApiController {
     }
 
     private Long getCurrentUserId(Authentication authentication) {
+        // 通常ログイン時は LoginUser プリンシパルから直接取得する（ベルのポーリング毎のDB照会を避ける）
+        Long principalUserId = com.ses.common.util.SecurityUtils.currentUserId();
+        if (principalUserId != null) {
+            return principalUserId;
+        }
+        // プリンシパルが LoginUser でない場合（@WithMockUser を使うテスト等）のみDBから解決する
         Authentication auth = authentication != null ? authentication : org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || auth.getName() == null) {
             return null;

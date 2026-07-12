@@ -22,15 +22,32 @@ public final class CsvUtils {
 
     /**
      * 1行分のフィールドをエスケープしてCSV行（末尾CRLF付き）としてappendする。
+     * エクスポート専用の経路のため、Excelでの数式実行（CSVインジェクション）対策として
+     * 危険な先頭文字を持つフィールドはシングルクォートを前置して無害化する。
      */
     public static void appendLine(StringBuilder sb, String... fields) {
         for (int i = 0; i < fields.length; i++) {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append(escape(fields[i]));
+            sb.append(escape(sanitizeForSpreadsheet(fields[i])));
         }
         sb.append("\r\n");
+    }
+
+    /**
+     * Excel等の表計算ソフトが数式として解釈しうる先頭文字（= + - @ タブ CR）を持つ場合、
+     * シングルクォートを前置して文字列として扱わせる（CWE-1236対策）。
+     */
+    static String sanitizeForSpreadsheet(String field) {
+        if (field == null || field.isEmpty()) {
+            return field;
+        }
+        char c = field.charAt(0);
+        if (c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' || c == '\r') {
+            return "'" + field;
+        }
+        return field;
     }
 
     /**

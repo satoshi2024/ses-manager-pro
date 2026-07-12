@@ -1,10 +1,10 @@
 package com.ses.controller.api;
 
+import com.ses.common.result.ApiResult;
 import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.WorkRecord;
 import com.ses.service.WorkRecordService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,30 +20,34 @@ public class WorkRecordApiController {
     private final WorkRecordService workRecordService;
 
     @GetMapping("/grid")
-    public List<WorkRecordGridDto> getGrid(@RequestParam String month) {
-        return workRecordService.monthlyGrid(month);
+    public ApiResult<List<WorkRecordGridDto>> getGrid(@RequestParam String month) {
+        return ApiResult.success(workRecordService.monthlyGrid(month));
     }
 
     @PutMapping
-    public WorkRecord saveHours(@RequestBody Map<String, Object> body) {
+    public ApiResult<WorkRecord> saveHours(@RequestBody Map<String, Object> body) {
         Long contractId = Long.valueOf(body.get("contractId").toString());
         String workMonth = body.get("workMonth").toString();
         BigDecimal actualHours = new BigDecimal(body.get("actualHours").toString());
         String remarks = body.get("remarks") != null ? body.get("remarks").toString() : null;
 
-        return workRecordService.saveHours(contractId, workMonth, actualHours, remarks);
+        return ApiResult.success(workRecordService.saveHours(contractId, workMonth, actualHours, remarks));
     }
 
     @PostMapping("/confirm")
-    public ResponseEntity<Void> confirmMonth(@RequestParam String month) {
+    public ApiResult<Void> confirmMonth(@RequestParam String month) {
         workRecordService.confirmMonth(month);
-        return ResponseEntity.ok().build();
+        return ApiResult.success(null);
     }
 
+    /**
+     * 月次確定の解除（管理者のみ）。
+     * SecurityConfig の requestMatchers でも管理者に制限しており二重防御。
+     */
     @PostMapping("/reopen")
     @PreAuthorize("hasRole('管理者')")
-    public ResponseEntity<Void> reopenMonth(@RequestParam String month) {
+    public ApiResult<Void> reopenMonth(@RequestParam String month) {
         workRecordService.reopenMonth(month);
-        return ResponseEntity.ok().build();
+        return ApiResult.success(null);
     }
 }

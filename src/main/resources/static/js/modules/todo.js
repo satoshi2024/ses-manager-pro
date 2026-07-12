@@ -56,14 +56,16 @@ function renderTable(records) {
             ? '<span class="badge bg-secondary">既読</span>' 
             : '<span class="badge bg-accent-red">未読</span>';
 
+        // message には要員名等の利用者入力が含まれるため必ずエスケープする（XSS対策）
+        const safeUrl = SES.escapeHtml(item.linkUrl || '#');
         html += `
-            <tr class="${rowClass} cursor-pointer" onclick="handleRowClick(event, ${item.id}, '${item.linkUrl || '#'}')">
+            <tr class="${rowClass} cursor-pointer" onclick="handleRowClick(event, ${item.id}, this.dataset.url)" data-url="${safeUrl}">
                 <td class="ps-4">${badgeHtml}</td>
-                <td class="small text-muted">${item.date || ''}</td>
+                <td class="small text-muted">${SES.escapeHtml(item.date || '')}</td>
                 <td>
                     <div class="d-flex align-items-center">
-                        <i class="bi ${item.icon} ${colorClass} me-2 fs-5"></i>
-                        <span>${item.message}</span>
+                        <i class="bi ${SES.escapeHtml(item.icon)} ${colorClass} me-2 fs-5"></i>
+                        <span>${SES.escapeHtml(item.message)}</span>
                     </div>
                 </td>
                 <td class="text-end pe-4">

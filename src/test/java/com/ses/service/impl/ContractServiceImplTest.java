@@ -121,4 +121,37 @@ class ContractServiceImplTest {
 
         verify(engineerStatusService, times(1)).releaseIfIdle(200L);
     }
+
+    @Test
+    void updateWithBusinessRules_activatesEngineerWhenStatusBecomesActive() {
+        Contract oldContract = new Contract();
+        oldContract.setId(1L);
+        oldContract.setStatus("準備中");
+
+        Contract newContract = new Contract();
+        newContract.setId(1L);
+        newContract.setStatus("稼動中");
+        newContract.setEngineerId(300L);
+
+        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.updateById(newContract)).thenReturn(1);
+
+        contractService.updateWithBusinessRules(newContract);
+
+        // 更新経由の 準備中→稼動中 でも要員を稼動中に連動させること
+        verify(engineerStatusService, times(1)).onContractActive(300L);
+    }
+
+    @Test
+    void updateWithBusinessRules_notFoundThrowsBusinessException() {
+        Contract newContract = new Contract();
+        newContract.setId(999L);
+        newContract.setStatus("稼動中");
+
+        when(contractMapper.selectById(999L)).thenReturn(null);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> contractService.updateWithBusinessRules(newContract));
+    }
 }

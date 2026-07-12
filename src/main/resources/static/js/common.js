@@ -217,6 +217,16 @@ const SES = {
         }
     },
     
+    /**
+     * HTMLエスケープ（XSS対策）。ユーザー入力由来の文字列をHTMLへ埋め込む際は必ず通すこと。
+     */
+    escapeHtml: function(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    },
+
     notification: {
         load: async function() {
             const container = document.getElementById('notification-list');
@@ -264,9 +274,10 @@ const SES = {
             html += list.map(function(n) {
                 const colorClass = iconColorMap[n.type] || 'text-accent-blue';
                 const bgClass = !n.isRead ? 'bg-secondary bg-opacity-50 fw-bold' : '';
-                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${n.linkUrl || '#'}">
-                            <i class="bi ${n.icon} ${colorClass} me-2"></i>${n.message}
-                            <div class="small text-muted ms-4">${n.date}</div>
+                // message には要員名等の利用者入力が含まれるため必ずエスケープする（XSS対策）
+                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${SES.escapeHtml(n.linkUrl || '#')}">
+                            <i class="bi ${SES.escapeHtml(n.icon)} ${colorClass} me-2"></i>${SES.escapeHtml(n.message)}
+                            <div class="small text-muted ms-4">${SES.escapeHtml(n.date)}</div>
                         </a>`;
             }).join('');
             

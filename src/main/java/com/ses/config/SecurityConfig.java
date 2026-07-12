@@ -30,6 +30,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Configuration
 @EnableWebSecurity
+@org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -94,7 +95,8 @@ public class SecurityConfig {
                     "/api/role-menus/**",
                     "/api/notifications/generate",
                     "/system-config/**",
-                    "/api/system-configs/**"
+                    "/api/system-configs/**",
+                    "/api/work-records/reopen"
                 ).hasRole("管理者")
                 // その他のリクエストは認証が必要
                 .anyRequest().authenticated()
