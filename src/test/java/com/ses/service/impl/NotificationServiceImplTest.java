@@ -14,7 +14,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -90,16 +89,9 @@ class NotificationServiceImplTest {
 
     @Test
     void testMarkAllRead() {
-        NotificationDto unread1 = new NotificationDto();
-        unread1.setId(101L);
-        unread1.setIsRead(false);
-        NotificationDto read1 = new NotificationDto();
-        read1.setId(102L);
-        read1.setIsRead(true);
-
-        when(notificationMapper.selectPageForUser(1L, null, true, 1000, 0)).thenReturn(Arrays.asList(unread1, read1));
-
+        // 1回のINSERT..SELECTで完結するため、件数取得や1件ずつのinsertは発生しない
         notificationService.markAllRead(1L);
-        verify(notificationReadMapper, times(1)).insert(any(NotificationRead.class));
+        verify(notificationMapper, times(1)).markAllReadForUser(1L);
+        verify(notificationReadMapper, never()).insert(any(NotificationRead.class));
     }
 }

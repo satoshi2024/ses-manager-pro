@@ -58,12 +58,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void markAllRead(Long userId) {
-        List<NotificationDto> unreadList = notificationMapper.selectPageForUser(userId, null, true, 1000, 0);
-        for (NotificationDto dto : unreadList) {
-            if (dto.getIsRead() == null || !dto.getIsRead()) {
-                markRead(dto.getId(), userId);
-            }
-        }
+        notificationMapper.markAllReadForUser(userId);
     }
 
     @Override
