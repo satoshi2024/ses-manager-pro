@@ -144,6 +144,18 @@ function saveContract() {
     });
 }
 
+// 現在の検索条件(#search-form)を反映してExcel出力する。
+// バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる
+// (common.js の ajaxSetup complete ハンドラが非JSONレスポンスをセッション切れと誤検知するのを避けるため)
+function exportContracts() {
+    const params = {
+        status: $('#search-form [name="status"]').val(),
+        customerName: $('#search-form [name="customerName"]').val(),
+        keyword: $('#search-form [name="keyword"]').val()
+    };
+    window.location.href = '/api/contracts/export?' + $.param(params, true);
+}
+
 function deleteContract(id) {
     Swal.fire({
         title: '削除確認',

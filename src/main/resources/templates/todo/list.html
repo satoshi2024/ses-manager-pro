@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>ToDo・通知 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-bell me-2 text-primary"></i>ToDo・通知</h2>
+        <button class="btn btn-outline-secondary text-muted hover-text-white border-dark shadow-sm" onclick="markAllAsRead()">
+            <i class="bi bi-check-all me-1"></i>すべて既読にする
+        </button>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadTodos(1);" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="searchType" class="form-label text-muted small">通知種別</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchType" name="type">
+                        <option value="">すべて</option>
+                        <option value="CONTRACT_END">契約終了</option>
+                        <option value="PROPOSAL_STALE">提案滞留</option>
+                        <option value="BENCH_LONG">長期待機</option>
+                        <option value="PROJECT_URGENT">急募案件</option>
+                        <option value="RETIRING_ENGINEER">退場予定</option>
+                        <option value="AI_MATCHING">AIマッチング完了</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check mt-4 pt-1">
+                        <input class="form-check-input" type="checkbox" id="unreadOnly" name="unreadOnly" checked>
+                        <label class="form-check-label text-light" for="unreadOnly">
+                            未読のみ表示
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-filter me-1"></i>絞り込み
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 一覧データテーブル -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4" style="width: 60px;">状態</th>
+                            <th scope="col" style="width: 150px;">日時</th>
+                            <th scope="col">内容</th>
+                            <th scope="col" class="text-end pe-4" style="width: 120px;">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody id="todo-table-body">
+                        <!-- JS will populate results here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- ページネーション -->
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                <div class="text-muted small ps-2" id="pagination-info">
+                    <!-- Populated by JS -->
+                </div>
+                <nav aria-label="Page navigation">
+                    <ul class="pagination pagination-sm mb-0 pe-2" id="pagination-controls">
+                        <!-- Populated by JS -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/todo.js}"></script>
+</th:block>
+</body>
+</html>

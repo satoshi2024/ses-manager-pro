@@ -32,6 +32,14 @@ public class AiApiController {
     }
 
     /**
+     * 案件にマッチする要員を検索する（逆方向推薦）
+     */
+    @GetMapping("/matching/project/{projectId}")
+    public ApiResult<List<MatchResultDto>> findMatchingEngineers(@PathVariable Long projectId) {
+        return ApiResult.success(aiMatchingService.findMatchingEngineers(projectId));
+    }
+
+    /**
      * スキルシートを生成する
      */
     @PostMapping("/skill-sheet/generate")

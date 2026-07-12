@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title>稼動分析</title>
+</head>
+<body>
+
+<div layout:fragment="content">
+
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-graph-up me-2 text-accent-blue"></i>稼動分析</h4>
+            <p class="text-muted small mb-0">直近12ヶ月の稼動率推移とBench要員の状況</p>
+        </div>
+    </div>
+
+    <!-- Utilization Trend Chart -->
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-transparent border-dark px-4 py-3">
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i>月次稼動率推移（直近12ヶ月）</h6>
+                </div>
+                <div class="card-body p-4">
+                    <div class="chart-container" style="position: relative; height:320px; width:100%">
+                        <canvas id="utilizationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bench List -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-person-x me-2 text-accent-red"></i>Bench一覧</h6>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-secondary border-dark">
+                                <tr>
+                                    <th class="px-4 py-3 text-muted small text-uppercase">氏名</th>
+                                    <th class="py-3 text-muted small text-uppercase">Bench経過日数</th>
+                                    <th class="py-3 text-muted small text-uppercase">希望単価</th>
+                                    <th class="py-3 text-muted small text-uppercase">稼動可能日</th>
+                                    <th class="py-3 text-muted small text-uppercase">スキル</th>
+                                    <th class="px-4 py-3 text-end text-muted small text-uppercase">アクション</th>
+                                </tr>
+                            </thead>
+                            <tbody class="border-top-0" id="bench-table-body">
+                                <!-- JS will populate this -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/analytics.js}"></script>
+</th:block>
+
+</body>
+</html>

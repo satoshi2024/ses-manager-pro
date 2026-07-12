@@ -1,106 +1,105 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.notification.NotificationDto;
-import com.ses.entity.AiLog;
-import com.ses.entity.Contract;
-import com.ses.entity.Engineer;
-import com.ses.mapper.AiLogMapper;
-import com.ses.mapper.ContractMapper;
-import com.ses.mapper.EngineerMapper;
+import com.ses.entity.Notification;
+import com.ses.entity.NotificationRead;
+import com.ses.mapper.NotificationMapper;
+import com.ses.mapper.NotificationReadMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceImplTest {
 
     @Mock
-    private ContractMapper contractMapper;
+    private NotificationMapper notificationMapper;
 
     @Mock
-    private EngineerMapper engineerMapper;
-
-    @Mock
-    private AiLogMapper aiLogMapper;
+    private NotificationReadMapper notificationReadMapper;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
 
     @Test
-    void testGetRecentNotifications_Empty() {
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(aiLogMapper.selectList(any())).thenReturn(Collections.emptyList());
+    void testGetRecentNotifications() {
+        NotificationDto dto = new NotificationDto();
+        dto.setId(1L);
+        when(notificationMapper.selectPageForUser(1L, null, null, 10, 0)).thenReturn(Collections.singletonList(dto));
 
-        List<NotificationDto> result = notificationService.getRecentNotifications();
-        assertTrue(result.isEmpty());
-    }
-
-    @Test
-    void testGetRecentNotifications_RetiringEngineer() {
-        Contract c1 = new Contract();
-        c1.setEngineerId(1L);
-        c1.setEndDate(LocalDate.now().plusDays(10));
-        
-        when(contractMapper.selectList(any())).thenReturn(Collections.singletonList(c1));
-        
-        Engineer e1 = new Engineer();
-        e1.setInitialName("T.S");
-        when(engineerMapper.selectById(1L)).thenReturn(e1);
-        
-        when(aiLogMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        List<NotificationDto> result = notificationService.getRecentNotifications();
+        List<NotificationDto> result = notificationService.getRecentNotifications(1L);
         assertEquals(1, result.size());
-        assertEquals("RETIRING_ENGINEER", result.get(0).getType());
-        assertEquals("T.S氏の退場日が近づいています", result.get(0).getMessage());
     }
 
     @Test
-    void testGetRecentNotifications_AiMatching() {
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        
-        AiLog log1 = new AiLog();
-        log1.setCreatedAt(LocalDateTime.now().minusHours(2));
-        
-        when(aiLogMapper.selectList(any())).thenReturn(Collections.singletonList(log1));
+    void testPageForUser() {
+        NotificationDto dto = new NotificationDto();
+        when(notificationMapper.selectPageForUser(1L, null, false, 10, 0)).thenReturn(Collections.singletonList(dto));
+        when(notificationMapper.countPageForUser(1L, null, false)).thenReturn(1L);
 
-        List<NotificationDto> result = notificationService.getRecentNotifications();
-        assertEquals(1, result.size());
-        assertEquals("AI_MATCHING", result.get(0).getType());
-        assertEquals("2時間前", result.get(0).getDate());
+        Page<NotificationDto> result = notificationService.pageForUser(1L, 1, 10, null, false);
+        assertEquals(1, result.getRecords().size());
+        assertEquals(1L, result.getTotal());
     }
 
     @Test
-    void testGetRecentNotifications_LimitAndSort() {
-        Contract c1 = new Contract();
-        c1.setEngineerId(1L);
-        c1.setEndDate(LocalDate.now().plusDays(5));
-        
-        when(contractMapper.selectList(any())).thenReturn(Arrays.asList(c1, c1, c1, c1, c1, c1));
-        
-        Engineer e1 = new Engineer();
-        e1.setInitialName("T.S");
-        when(engineerMapper.selectById(1L)).thenReturn(e1);
-        
-        AiLog log1 = new AiLog();
-        log1.setCreatedAt(LocalDateTime.now().minusHours(1));
-        
-        when(aiLogMapper.selectList(any())).thenReturn(Arrays.asList(log1, log1, log1, log1, log1, log1));
+    void testUnreadCount() {
+        when(notificationMapper.countUnread(1L)).thenReturn(5L);
+        long count = notificationService.unreadCount(1L);
+        assertEquals(5L, count);
+    }
 
-        List<NotificationDto> result = notificationService.getRecentNotifications();
-        assertEquals(10, result.size());
+    @Test
+    void testMarkRead_Success() {
+        notificationService.markRead(10L, 1L);
+        verify(notificationReadMapper, times(1)).insert(any(NotificationRead.class));
+    }
+
+    @Test
+    void testMarkRead_Duplicate() {
+        doThrow(new DuplicateKeyException("Duplicate")).when(notificationReadMapper).insert(any(NotificationRead.class));
+        assertDoesNotThrow(() -> notificationService.markRead(10L, 1L));
+    }
+
+    @Test
+    void testPublish_Success() {
+        notificationService.publish("TYPE", "Title", "Msg", "Url", "Key");
+        verify(notificationMapper, times(1)).insert(any(Notification.class));
+    }
+
+    @Test
+    void testPublish_Duplicate() {
+        doThrow(new DuplicateKeyException("Duplicate")).when(notificationMapper).insert(any(Notification.class));
+        assertDoesNotThrow(() -> notificationService.publish("TYPE", "Title", "Msg", "Url", "Key"));
+    }
+
+    @Test
+    void testMarkAllRead() {
+        NotificationDto unread1 = new NotificationDto();
+        unread1.setId(101L);
+        unread1.setIsRead(false);
+        NotificationDto read1 = new NotificationDto();
+        read1.setId(102L);
+        read1.setIsRead(true);
+
+        when(notificationMapper.selectPageForUser(1L, null, true, 1000, 0)).thenReturn(Arrays.asList(unread1, read1));
+
+        notificationService.markAllRead(1L);
+        verify(notificationReadMapper, times(1)).insert(any(NotificationRead.class));
     }
 }

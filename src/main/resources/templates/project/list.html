@@ -60,6 +60,7 @@
                             <th scope="col">単価(下限-上限)</th>
                             <th scope="col" class="text-center">募集人数</th>
                             <th scope="col" class="text-center">リモート</th>
+                            <th scope="col">要求スキル</th>
                             <th scope="col">ステータス</th>
                             <th scope="col" class="text-end pe-4">アクション</th>
                         </tr>
@@ -147,6 +148,15 @@
                                 </select>
                             </div>
                         </div>
+
+                        <hr class="border-secondary my-4">
+                        <h6 class="text-light mb-3"><i class="bi bi-tools me-2 text-success"></i>要求スキル</h6>
+                        <div id="project-skills-container">
+                            <!-- JS will populate skill rows here -->
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-success mt-2" onclick="addProjectSkillRow()">
+                            <i class="bi bi-plus"></i> スキル追加
+                        </button>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
@@ -154,6 +164,21 @@
                     <button type="button" class="btn btn-success text-white border-0 shadow-sm px-4" onclick="saveProject()">
                         <i class="bi bi-check-lg me-1"></i>登録
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Matching Result Modal -->
+    <div class="modal fade" id="matchingResultModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-robot me-2 text-accent-purple"></i>候補要員 (AIマッチング)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 bg-tertiary" id="matchingResultModalBody">
+                    <div class="text-center text-muted py-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">AIマッチング実行中...</div></div>
                 </div>
             </div>
         </div>
@@ -166,6 +191,7 @@
         document.getElementById('projectModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('project-form').reset();
             document.getElementById('proj-id').value = '';
+            document.getElementById('project-skills-container').innerHTML = '';
         });
     </script>
 </th:block>

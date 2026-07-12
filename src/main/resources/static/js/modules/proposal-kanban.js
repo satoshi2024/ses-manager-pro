@@ -166,69 +166,127 @@ function createKanbanCard(item) {
 }
 
 function updateProposalStatus(proposalId, newStatus, itemEl, fromCol) {
-    // Prevent UI flicker by keeping it in the new column optimistically
-    
-    // Check if moved to "成約" -> prompt for contract creation
     if (newStatus === '成約') {
-        Swal.fire({
-            title: '成約おめでとうございます！',
-            text: "この提案から自動的に契約レコードを作成しますか？",
-            icon: 'success',
-            showCancelButton: true,
-            confirmButtonColor: '#20c997',
-            cancelButtonColor: '#6c757d',
-            confirmButtonText: 'はい、作成する',
-            cancelButtonText: '後で'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                // Call API to change status AND create contract
-                executeStatusChange(proposalId, newStatus, itemEl, fromCol, true);
-            } else {
-                executeStatusChange(proposalId, newStatus, itemEl, fromCol, false);
-            }
-        });
+        executeStatusChange(proposalId, newStatus, itemEl, fromCol, true);
     } else {
         executeStatusChange(proposalId, newStatus, itemEl, fromCol, false);
     }
 }
 
-function executeStatusChange(proposalId, newStatus, itemEl, fromCol, createContract) {
+function executeStatusChange(proposalId, newStatus, itemEl, fromCol, isWon) {
     $.ajax({
         url: `/api/proposals/${proposalId}/status`,
         method: 'PUT',
         contentType: 'application/json',
-        data: JSON.stringify({ 
-            status: newStatus,
-            createContract: createContract
-        }),
+        data: JSON.stringify({ status: newStatus }),
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(`ステータスを「${newStatus}」に更新しました`);
-                // Update badge counts
                 updateBadgeCounts();
                 
-                if (createContract && res.data && res.data.contractId) {
-                    // Redirect to contract edit page
-                    window.location.href = `/contract/form?id=${res.data.contractId}`;
+                if (isWon) {
+                    openContractCreateModal(proposalId);
                 }
             } else {
                 Toast.error(res.message);
-                // Revert DOM
                 $(fromCol).append(itemEl);
                 updateBadgeCounts();
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('ステータス更新に失敗しました（モック動作）');
-            // Normally revert, but for mock we just update counts
+            Toast.error('通信エラーが発生しました');
+            $(fromCol).append(itemEl);
             updateBadgeCounts();
+        }
+    });
+}
+
+function openContractCreateModal(proposalId) {
+    $.get(`/api/proposals/${proposalId}`, function(res) {
+        if (res.code === 200 && res.data) {
+            const prop = res.data;
+            $('#cont-proposalId').val(prop.id);
             
-            if (createContract) {
-                // Mock redirect
-                Toast.success('【モック】契約作成画面へ遷移します');
-                setTimeout(() => window.location.href = '/contract/list', 1000);
+            if ($(`#cont-engineerId option[value="${prop.engineerId}"]`).length === 0) {
+                $('#cont-engineerId').append(`<option value="${prop.engineerId}">${prop.engineerName}</option>`);
             }
+            $('#cont-engineerId').val(prop.engineerId);
+            
+            if ($(`#cont-projectId option[value="${prop.projectId}"]`).length === 0) {
+                $('#cont-projectId').append(`<option value="${prop.projectId}">${prop.projectName}</option>`);
+            }
+            $('#cont-projectId').val(prop.projectId);
+            
+            if (prop.customerId) {
+                if ($(`#cont-customerId option[value="${prop.customerId}"]`).length === 0) {
+                    $('#cont-customerId').append(`<option value="${prop.customerId}">${prop.customerName || '顧客'}</option>`);
+                }
+                $('#cont-customerId').val(prop.customerId);
+            }
+            
+            $('#cont-sellingPrice').val(prop.proposedUnitPrice || '');
+            if (prop.projectStartDate) {
+                $('#cont-startDate').val(prop.projectStartDate);
+            }
+            
+            // check active contract
+            $.get(`/api/contracts/check-active?engineerId=${prop.engineerId}`, function(checkRes) {
+                if (checkRes.code === 200 && checkRes.data) {
+                    Swal.fire({
+                        title: '稼動中契約あり',
+                        text: "この要員は既に稼動中の契約があります。続行しますか？",
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'はい',
+                        cancelButtonText: 'キャンセル'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            bootstrap.Modal.getOrCreateInstance(document.getElementById('contractCreateModal')).show();
+                        }
+                    });
+                } else {
+                    bootstrap.Modal.getOrCreateInstance(document.getElementById('contractCreateModal')).show();
+                }
+            }).fail(function() {
+                // Ignore failure and show modal anyway
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('contractCreateModal')).show();
+            });
+        } else {
+            Toast.error('提案詳細の取得に失敗しました');
+        }
+    });
+}
+
+function saveContractFromKanban() {
+    const data = {
+        proposalId: $('#cont-proposalId').val() ? parseInt($('#cont-proposalId').val()) : null,
+        engineerId: parseInt($('#cont-engineerId').val()),
+        projectId: parseInt($('#cont-projectId').val()),
+        customerId: $('#cont-customerId').val() ? parseInt($('#cont-customerId').val()) : null,
+        startDate: $('#cont-startDate').val(),
+        endDate: $('#cont-endDate').val() || null,
+        sellingPrice: parseInt($('#cont-sellingPrice').val()),
+        costPrice: parseInt($('#cont-costPrice').val())
+    };
+
+    $.ajax({
+        url: '/api/contracts',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(res.message || '契約を登録しました');
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('contractCreateModal')).hide();
+                setTimeout(() => window.location.href = '/contract/list', 1500);
+            } else {
+                Toast.error(res.message || '登録に失敗しました');
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            Toast.error('通信エラーが発生しました');
         }
     });
 }

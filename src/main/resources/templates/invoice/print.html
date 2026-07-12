@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>請求書印刷</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .invoice-box { max-width: 800px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, 0.15); font-size: 16px; line-height: 24px; color: #555; }
+        .invoice-box table { width: 100%; line-height: inherit; text-align: left; border-collapse: collapse; }
+        .invoice-box table td { padding: 5px; vertical-align: top; }
+        .invoice-box table tr.top table td { padding-bottom: 20px; }
+        .invoice-box table tr.information table td { padding-bottom: 40px; }
+        .invoice-box table tr.heading td { background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; }
+        .invoice-box table tr.item td { border-bottom: 1px solid #eee; }
+        .invoice-box table tr.item.last td { border-bottom: none; }
+        .invoice-box table tr.total td:nth-child(2) { border-top: 2px solid #eee; font-weight: bold; }
+        @media print {
+            .no-print { display: none; }
+            .invoice-box { box-shadow: none; border: none; }
+        }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="no-print text-center" style="margin-bottom: 20px;">
+        <button onclick="window.print()" style="padding: 10px 20px; font-size: 16px;">印刷</button>
+    </div>
+
+    <div class="invoice-box" id="invoiceContent">
+        <!-- JSで内容を描画 -->
+    </div>
+
+    <script>
+        const invoiceId = /*[[${invoiceId}]]*/ [[${invoiceId}]];
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            fetch(`/api/invoices/${invoiceId}`)
+                .then(r => r.json())
+                .then(res => {
+                    if (res.code === 200) {
+                        const data = res.data;
+                        renderInvoice(data);
+                    } else {
+                        alert(res.message);
+                    }
+                });
+        });
+
+        function renderInvoice(data) {
+            const date = new Date();
+            const today = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+            
+            let itemsHtml = '';
+            if (data.items) {
+                data.items.forEach(item => {
+                    itemsHtml += `
+                        <tr class="item">
+                            <td>${item.description || ''}</td>
+                            <td class="text-right">￥${item.amount.toLocaleString()}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            const html = `
+                <table cellpadding="0" cellspacing="0">
+                    <tr class="top">
+                        <td colspan="2">
+                            <table>
+                                <tr>
+                                    <td class="title">
+                                        <h2>請求書</h2>
+                                    </td>
+                                    <td class="text-right">
+                                        請求書番号: ${data.invoiceNo}<br>
+                                        発行日: ${data.issuedDate || today}<br>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr class="information">
+                        <td colspan="2">
+                            <table>
+                                <tr>
+                                    <td>
+                                        ${data.customer ? data.customer.companyName : ''} 御中<br>
+                                    </td>
+                                    <td class="text-right">
+                                        株式会社KIRO<br>
+                                        東京都XXX<br>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+                <table>
+                    <tr class="heading">
+                        <td>摘要</td>
+                        <td class="text-right">金額</td>
+                    </tr>
+                    ${itemsHtml}
+                    <tr class="total">
+                        <td class="text-right">小計:</td>
+                        <td class="text-right">￥${data.subtotal.toLocaleString()}</td>
+                    </tr>
+                    <tr class="total">
+                        <td class="text-right">消費税(10%):</td>
+                        <td class="text-right">￥${data.tax.toLocaleString()}</td>
+                    </tr>
+                    <tr class="total">
+                        <td class="text-right">合計:</td>
+                        <td class="text-right">￥${data.total.toLocaleString()}</td>
+                    </tr>
+                </table>
+                <div style="margin-top: 40px;">
+                    <strong>振込先:</strong><br>
+                    <span><!-- 未設定なら空欄 --></span>
+                </div>
+            `;
+            document.getElementById('invoiceContent').innerHTML = html;
+        }
+    </script>
+</body>
+</html>

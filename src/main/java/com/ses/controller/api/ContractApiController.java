@@ -49,7 +49,12 @@ public class ContractApiController {
      */
     @PostMapping
     public ApiResult<Boolean> create(@RequestBody Contract contract) {
-        return ApiResult.success(contractService.save(contract));
+        contractService.saveWithBusinessRules(contract);
+        if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
+                && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
+            return ApiResult.<Boolean>success("警告: 粗利がマイナスです", Boolean.TRUE);
+        }
+        return ApiResult.success(Boolean.TRUE);
     }
 
     /**
@@ -62,7 +67,23 @@ public class ContractApiController {
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @RequestBody Contract contract) {
         contract.setId(id);
-        return ApiResult.success(contractService.updateById(contract));
+        contractService.updateWithBusinessRules(contract);
+        if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
+                && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
+            return ApiResult.<Boolean>success("警告: 粗利がマイナスです", Boolean.TRUE);
+        }
+        return ApiResult.success(Boolean.TRUE);
+    }
+
+    /**
+     * 稼働中契約の確認
+     *
+     * @param engineerId エンジニアID
+     * @return 稼働中の契約があればtrue
+     */
+    @GetMapping("/check-active")
+    public ApiResult<Boolean> checkActive(@RequestParam Long engineerId) {
+        return ApiResult.success(contractService.hasActiveContract(engineerId));
     }
 
     /**

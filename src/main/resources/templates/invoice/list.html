@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/base :: layout('請求・支払', ~{::content}, ~{::script})}">
+<head>
+    <meta charset="UTF-8">
+    <title>請求・支払</title>
+</head>
+<body>
+<div th:fragment="content">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="invoiceTabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="invoice-tab" data-bs-toggle="tab" href="#invoice" role="tab" aria-controls="invoice" aria-selected="true">請求書</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="bp-payment-tab" data-bs-toggle="tab" href="#bp-payment" role="tab" aria-controls="bp-payment" aria-selected="false">BP支払</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content" id="invoiceTabsContent">
+                        <!-- 請求書タブ -->
+                        <div class="tab-pane fade show active" id="invoice" role="tabpanel" aria-labelledby="invoice-tab">
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <input type="month" id="billingMonth" class="form-control" placeholder="対象月">
+                                </div>
+                                <div class="col-md-3">
+                                    <button id="btnGenerateInvoice" class="btn btn-primary">請求書生成</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-striped" id="invoiceTable">
+                                    <thead>
+                                        <tr>
+                                            <th>請求書番号</th>
+                                            <th>対象月</th>
+                                            <th>小計</th>
+                                            <th>消費税</th>
+                                            <th>合計</th>
+                                            <th>ステータス</th>
+                                            <th>発行日</th>
+                                            <th>入金日</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- BP支払タブ -->
+                        <div class="tab-pane fade" id="bp-payment" role="tabpanel" aria-labelledby="bp-payment-tab">
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <input type="month" id="bpWorkMonth" class="form-control" placeholder="対象月">
+                                </div>
+                                <div class="col-md-3">
+                                    <button id="btnSearchBpPayment" class="btn btn-secondary">検索</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-striped" id="bpPaymentTable">
+                                    <thead>
+                                        <tr>
+                                            <th>対象月</th>
+                                            <th>要員名</th>
+                                            <th>案件名</th>
+                                            <th>金額</th>
+                                            <th>ステータス</th>
+                                            <th>支払日</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 請求書生成モーダル -->
+    <div class="modal fade" id="generateModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">請求書生成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="generateForm">
+                        <div class="mb-3">
+                            <label class="form-label">顧客ID</label>
+                            <input type="number" class="form-control" name="customerId" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">対象月(YYYY-MM)</label>
+                            <input type="month" class="form-control" name="billingMonth" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btnSubmitGenerate">生成</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block th:fragment="script">
+    <script src="/js/modules/invoice.js"></script>
+</th:block>
+</body>
+</html>

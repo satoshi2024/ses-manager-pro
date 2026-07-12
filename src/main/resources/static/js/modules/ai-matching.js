@@ -225,10 +225,37 @@ function renderMatchResultsHTML(loadingId, results) {
 }
 
 function proposeToProject(projectId, score) {
-    Toast.success('提案レコードを作成しました！（カンバンボードへ移動します）');
-    setTimeout(() => {
-        window.location.href = '/proposal/kanban';
-    }, 1500);
+    const priceText = $('#det-price').text().replace('万', '').trim();
+    const proposedPrice = isNaN(priceText) || priceText === '-' ? null : parseInt(priceText) * 10000;
+
+    const data = {
+        engineerId: currentEngineerId,
+        projectId: projectId,
+        proposedUnitPrice: proposedPrice,
+        status: '書類選考中',
+        aiMatchScore: score,
+        matchReason: 'AIマッチング経由'
+    };
+
+    $.ajax({
+        url: '/api/proposals',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success('提案レコードを作成しました！（カンバンボードへ移動します）');
+                setTimeout(() => {
+                    window.location.href = '/proposal/kanban';
+                }, 1500);
+            } else {
+                Toast.error('提案作成に失敗しました: ' + (res.message || ''));
+            }
+        },
+        error: function() {
+            Toast.error('通信エラーが発生しました');
+        }
+    });
 }
 
 function getMockMatchData() {

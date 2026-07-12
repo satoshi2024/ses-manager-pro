@@ -26,7 +26,8 @@ public class EngineerApiController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String fullName,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String employmentType) {
+            @RequestParam(required = false) String employmentType,
+            @RequestParam(required = false) java.util.List<Long> skillIds) {
         
         Page<Engineer> page = new Page<>(current, size);
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
@@ -39,6 +40,13 @@ public class EngineerApiController {
         }
         if (org.springframework.util.StringUtils.hasText(employmentType)) {
             queryWrapper.eq(Engineer::getEmploymentType, employmentType);
+        }
+        if (skillIds != null && !skillIds.isEmpty()) {
+            for (Long skillId : skillIds) {
+                java.util.Objects.requireNonNull(skillId, "skillId cannot be null");
+                queryWrapper.inSql(Engineer::getId,
+                    "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
+            }
         }
         
         queryWrapper.orderByDesc(Engineer::getId);

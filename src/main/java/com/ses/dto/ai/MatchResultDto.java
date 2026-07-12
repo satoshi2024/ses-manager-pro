@@ -12,4 +12,9 @@ public class MatchResultDto {
     private Integer score;
     private String reason;
     private String sellingPoints;
+    
+    // 逆方向マッチング（案件→要員）用
+    private Long engineerId;
+    private String engineerName;
+    private Integer proposedPrice;
 }

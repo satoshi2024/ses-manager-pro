@@ -6,9 +6,11 @@ import com.ses.dto.dashboard.DashboardSummaryDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
+import com.ses.entity.WorkRecord;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.DashboardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final EngineerMapper engineerMapper;
     private final ContractMapper contractMapper;
     private final ProjectMapper projectMapper;
+    private final WorkRecordMapper workRecordMapper;
 
     @Override
     public DashboardSummaryDto getSummary(Integer year) {
@@ -68,6 +71,7 @@ public class DashboardServiceImpl implements DashboardService {
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();
         List<Long> profitData = new ArrayList<>();
+        List<Boolean> isActualData = new ArrayList<>();
 
         List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
 
@@ -76,27 +80,45 @@ public class DashboardServiceImpl implements DashboardService {
             LocalDate monthEnd = ym.atEndOfMonth();
             monthLabels.add(ym.getMonthValue() + "月");
 
+            String monthStr = ym.toString();
+            List<WorkRecord> confirmedRecords = workRecordMapper.selectList(
+                    new QueryWrapper<WorkRecord>().eq("work_month", monthStr).eq("status", "確定")
+            );
+
             long monthSales = 0;
             long monthProfit = 0;
+            boolean isActual = false;
 
-            for (Contract c : allContracts) {
-                if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
-                    if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
-                        long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
-                        long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
-                        monthSales += sell;
-                        monthProfit += (sell - cost);
+            if (!confirmedRecords.isEmpty()) {
+                isActual = true;
+                for (WorkRecord wr : confirmedRecords) {
+                    long sell = wr.getBillingAmount() != null ? wr.getBillingAmount().longValue() : 0;
+                    long payment = wr.getPaymentAmount() != null ? wr.getPaymentAmount().longValue() : 0;
+                    monthSales += sell;
+                    monthProfit += (sell - payment);
+                }
+            } else {
+                for (Contract c : allContracts) {
+                    if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
+                        if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
+                            long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
+                            long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
+                            monthSales += sell;
+                            monthProfit += (sell - cost);
+                        }
                     }
                 }
             }
             salesData.add(monthSales);
             profitData.add(monthProfit);
+            isActualData.add(isActual);
         }
 
         DashboardSummaryDto.RevenueChartDto revenueChart = DashboardSummaryDto.RevenueChartDto.builder()
                 .labels(monthLabels)
                 .sales(salesData)
                 .profit(profitData)
+                .isActual(isActualData)
                 .build();
 
         DashboardSummaryDto.StatusChartDto statusChart = DashboardSummaryDto.StatusChartDto.builder()

@@ -18,4 +18,12 @@ public class CustomerPageController {
     public String list() {
         return "customer/list";
     }
+
+    /**
+     * 顧客詳細画面
+     */
+    @GetMapping("/{id}")
+    public String detail(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return "customer/detail";
+    }
 }

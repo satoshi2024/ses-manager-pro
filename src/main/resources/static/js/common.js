@@ -216,28 +216,31 @@ const SES = {
         }
     },
     
-    /**
-     * 通知制御
-     */
     notification: {
-        load: function() {
+        load: async function() {
             const container = document.getElementById('notification-list');
             if (!container) return;
 
-            $.ajax({
-                url: '/api/notifications',
-                method: 'GET',
-                success: function(res) {
-                    if (res.code === 200) {
-                        SES.notification.render(res.data || []);
-                    } else {
-                        SES.notification.renderError();
-                    }
-                },
-                error: function() {
-                    SES.notification.renderError();
-                }
-            });
+            try {
+                const list = await SES.api.get('/api/notifications');
+                SES.notification.render(list || []);
+
+                const count = await SES.api.get('/api/notifications/unread-count');
+                SES.notification.updateBadge(count || 0);
+            } catch (e) {
+                SES.notification.renderError();
+            }
+        },
+
+        updateBadge: function(count) {
+            const badge = document.getElementById('notification-badge');
+            if (!badge) return;
+            if (count > 0) {
+                badge.innerHTML = (count > 99 ? '99+' : count) + '<span class="visually-hidden">unread messages</span>';
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
         },
 
         render: function(list) {
@@ -247,17 +250,54 @@ const SES = {
                 return;
             }
             const iconColorMap = {
+                'CONTRACT_END': 'text-accent-red',
+                'PROPOSAL_STALE': 'text-accent-yellow',
+                'BENCH_LONG': 'text-accent-blue',
+                'PROJECT_URGENT': 'text-accent-red',
                 'RETIRING_ENGINEER': 'text-accent-yellow',
                 'AI_MATCHING': 'text-accent-blue'
             };
-            const html = list.map(function(n) {
+            
+            let html = '<div class="d-flex justify-content-end px-3 py-1 border-bottom border-dark"><a href="#" id="mark-all-read" class="small text-muted hover-text-white text-decoration-none">すべて既読にする</a></div>';
+            
+            html += list.map(function(n) {
                 const colorClass = iconColorMap[n.type] || 'text-accent-blue';
-                return `<a class="dropdown-item py-2" href="#">
+                const bgClass = !n.isRead ? 'bg-secondary bg-opacity-50 fw-bold' : '';
+                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${n.linkUrl || '#'}">
                             <i class="bi ${n.icon} ${colorClass} me-2"></i>${n.message}
                             <div class="small text-muted ms-4">${n.date}</div>
                         </a>`;
             }).join('');
+            
+            html += '<div class="dropdown-divider my-0 border-dark"></div><a href="/todo" class="dropdown-item text-center small py-2 text-primary">すべての通知を見る</a>';
+            
             container.html(html);
+
+            container.find('.dropdown-item[data-id]').on('click', async function(e) {
+                e.preventDefault();
+                const id = $(this).data('id');
+                const url = $(this).data('url');
+                try {
+                    await SES.api.put(`/api/notifications/${id}/read`, {});
+                    if (url && url !== '#') {
+                        window.location.href = url;
+                    } else {
+                        SES.notification.load();
+                    }
+                } catch (err) {
+                    console.error(err);
+                }
+            });
+
+            container.find('#mark-all-read').on('click', async function(e) {
+                e.preventDefault();
+                try {
+                    await SES.api.put('/api/notifications/read-all', {});
+                    SES.notification.load();
+                } catch (err) {
+                    console.error(err);
+                }
+            });
         },
 
         renderError: function() {

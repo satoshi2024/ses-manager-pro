@@ -48,6 +48,7 @@ public class DashboardSummaryDto {
         private List<String> labels;
         private List<Long> sales;
         private List<Long> profit;
+        private List<Boolean> isActual;
     }
 
     @Data

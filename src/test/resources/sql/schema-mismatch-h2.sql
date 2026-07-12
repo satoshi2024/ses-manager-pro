@@ -55,3 +55,51 @@ CREATE TABLE m_email_template (
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+DROP TABLE IF EXISTS t_notification;
+CREATE TABLE t_notification (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  type        VARCHAR(30)  NOT NULL,
+  title       VARCHAR(200) NOT NULL,
+  message     VARCHAR(500),
+  link_url    VARCHAR(300),
+  dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_notification_read;
+CREATE TABLE t_notification_read (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  notification_id BIGINT NOT NULL,
+  user_id         BIGINT NOT NULL,
+  read_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_notification_read (notification_id, user_id)
+);
+
+DROP TABLE IF EXISTS t_proposal_history;
+CREATE TABLE t_proposal_history (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  proposal_id     BIGINT NOT NULL,
+  from_status     VARCHAR(30),
+  to_status       VARCHAR(30) NOT NULL,
+  changed_by      BIGINT,
+  changed_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  remarks         TEXT
+);
+
+DROP TABLE IF EXISTS m_menu;
+CREATE TABLE m_menu (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  menu_key   VARCHAR(50) NOT NULL,
+  menu_name  VARCHAR(100),
+  path       VARCHAR(200),
+  parent_id  BIGINT,
+  sort_order INT DEFAULT 0
+);
+
+DROP TABLE IF EXISTS t_role_menu;
+CREATE TABLE t_role_menu (
+  id       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  role     VARCHAR(50) NOT NULL,
+  menu_id  BIGINT NOT NULL
+);

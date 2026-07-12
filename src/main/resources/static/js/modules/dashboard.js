@@ -7,6 +7,7 @@ $(document).ready(function() {
     Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
 
     $('#btn-print-report').on('click', function() { window.print(); });
+    $('#btn-export-revenue').on('click', function() { exportRevenue(); });
 
     const currentFiscalYear = getCurrentFiscalYear();
     populateFiscalYearSelector(currentFiscalYear);
@@ -107,7 +108,23 @@ function renderCharts(chartsData) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { position: 'top' }
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y;
+                            }
+                            const isActual = chartsData.revenue.isActual && chartsData.revenue.isActual[context.dataIndex];
+                            label += isActual ? ' (実績)' : ' (見込み)';
+                            return label;
+                        }
+                    }
+                }
             },
             scales: {
                 y: { beginAtZero: true }
@@ -191,6 +208,14 @@ function renderRetiringList(list) {
         `;
         tbody.append(tr);
     });
+}
+
+// 現在選択中の対象年度を反映して月次売上レポートをExcel出力する。
+// バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる
+// (common.js の ajaxSetup complete ハンドラが非JSONレスポンスをセッション切れと誤検知するのを避けるため)
+function exportRevenue() {
+    const fiscalYear = $('#fiscal-year-selector').val();
+    window.location.href = '/api/dashboard/revenue-export?fiscalYear=' + encodeURIComponent(fiscalYear);
 }
 
 // Reuse the modal from Phase 3 if available, or redirect

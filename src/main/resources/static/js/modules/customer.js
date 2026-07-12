@@ -2,7 +2,37 @@ $(document).ready(function() {
     loadCustomers();
 });
 
+let followUpCounts = {};
+
 function loadCustomers(page = 1) {
+    // まず要フォロー一覧を取得
+    $.ajax({
+        url: '/api/customers/follow-ups',
+        method: 'GET',
+        success: function(res) {
+            followUpCounts = {};
+            if (res.code === 200 && res.data) {
+                let total = 0;
+                res.data.forEach(f => {
+                    followUpCounts[f.customerId] = (followUpCounts[f.customerId] || 0) + 1;
+                    total++;
+                });
+                if (total > 0) {
+                    $('#total-followup-badge').text(`${total}件の要フォロー`).removeClass('d-none');
+                } else {
+                    $('#total-followup-badge').addClass('d-none');
+                }
+            }
+            fetchCustomerList(page);
+        },
+        error: function(err) {
+            console.error('Follow-ups fetch error:', err);
+            fetchCustomerList(page);
+        }
+    });
+}
+
+function fetchCustomerList(page) {
     const data = {
         current: page,
         size: 10,
@@ -101,17 +131,23 @@ function renderCustomers(records) {
         else if (cust.trustLevel === 'B') trustIcon = '<div class="d-flex text-secondary align-items-center"><i class="bi bi-star me-1"></i>B</div>';
         else trustIcon = '<div class="d-flex text-danger align-items-center"><i class="bi bi-exclamation-triangle-fill me-1"></i>C</div>';
 
+        let followUpBadge = '';
+        const count = followUpCounts[cust.id];
+        if (count && count > 0) {
+            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="要フォロー">${count}件の要フォロー</span>`;
+        }
+
         const tr = `
-            <tr>
+            <tr style="cursor: pointer;" onclick="location.href='/customer/${cust.id}'">
                 <td class="ps-4 py-3">
-                    <div class="fw-bold text-light">${cust.companyName}</div>
+                    <div class="fw-bold text-light">${cust.companyName} ${followUpBadge}</div>
                     <div class="text-muted small">${cust.address || ''}</div>
                 </td>
                 <td>${flowBadge}</td>
                 <td>${trustIcon}</td>
                 <td>${cust.contactPerson || '-'}</td>
                 <td class="font-monospace">${cust.contactPhone || '-'}</td>
-                <td class="text-end pe-4">
+                <td class="text-end pe-4" onclick="event.stopPropagation();">
                     <div class="btn-group btn-group-sm" role="group">
                         <button type="button" class="btn btn-outline-info text-info border-info" onclick="editCustomer(${cust.id})"><i class="bi bi-pencil"></i></button>
                         <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteCustomer(${cust.id})"><i class="bi bi-trash"></i></button>

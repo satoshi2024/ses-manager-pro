@@ -9,9 +9,14 @@
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i>要員管理</h2>
-        <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
-            <i class="bi bi-plus-lg me-1"></i>新規登録
-        </button>
+        <div>
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineers()">
+                <i class="bi bi-file-earmark-excel me-1"></i>Excel出力
+            </button>
+            <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
+                <i class="bi bi-plus-lg me-1"></i>新規登録
+            </button>
+        </div>
     </div>
 
     <!-- 検索フィルター -->
@@ -46,7 +51,8 @@
                 </div>
                 <div class="col-md-3">
                     <label for="searchSkill" class="form-label text-muted small">スキル</label>
-                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchSkill" name="skill" placeholder="Java, AWS, Vue.js など">
+                    <select class="form-select bg-dark border-secondary text-light" id="searchSkill" name="skillIds" multiple size="2">
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100">

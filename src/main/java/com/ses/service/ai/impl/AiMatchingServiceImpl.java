@@ -2,6 +2,7 @@ package com.ses.service.ai.impl;
 
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.service.ai.AiMatchingService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -11,6 +12,7 @@ import java.util.List;
  * AIマッチングサービス実装
  */
 @Service
+@ConditionalOnProperty(name = "ai.provider", havingValue = "mock", matchIfMissing = true)
 public class AiMatchingServiceImpl implements AiMatchingService {
 
     @Override
@@ -41,6 +43,23 @@ public class AiMatchingServiceImpl implements AiMatchingService {
         result3.setReason("保守運用の経験がありますが、スキルセットの一部がオーバーキルです。");
         result3.setSellingPoints("安定志向かつ丁寧なドキュメント作成能力があります。");
         results.add(result3);
+        
+        return results;
+    }
+
+    @Override
+    public List<MatchResultDto> findMatchingEngineers(Long projectId) {
+        // モックデータを作成
+        List<MatchResultDto> results = new ArrayList<>();
+        
+        MatchResultDto result1 = new MatchResultDto();
+        result1.setEngineerId(201L);
+        result1.setEngineerName("山田 太郎 (Mock)");
+        result1.setScore(92);
+        result1.setReason("JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。");
+        result1.setSellingPoints("金融系の業務知識が豊富です。");
+        result1.setProposedPrice(75);
+        results.add(result1);
         
         return results;
     }

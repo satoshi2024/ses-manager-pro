@@ -18,19 +18,19 @@
   - **テスト要件**: 各ルールの境界値テスト、二重実行で件数が増えないこと。
   - **Demo**: `curl -X POST /api/notifications/generate`(admin)→ 通知が生成され、再実行しても増えない。
 
-- [ ] 4. API 改修とヘッダーベルの接続
+- [x] 4. API 改修とヘッダーベルの接続
   - **Objective**: ドロップダウンを永続化データ + 既読管理付きにする。
   - **実装ガイダンス**: design.md 4章・5章前半。`common.js` の `SES.notification` を改修(バッジ=unread-count、クリック既読化+遷移、すべて既読)。
   - **テスト要件**: `NotificationApiControllerTest` を新エンドポイントに合わせ更新。
   - **Demo**: ベルに未読数バッジ → 通知クリックで該当画面へ遷移しバッジが減る。
 
-- [ ] 5. ToDo センター画面
+- [x] 5. ToDo センター画面
   - **Objective**: `/todo` の一覧画面(フィルタ+ページネーション)。
   - **実装ガイダンス**: `TodoPageController` + `templates/todo/list.html` + `modules/todo.js`(既存 list 画面パターン)。sidebar に `todo` メニュー追加(`m_menu` シードは Task 1 で投入済み)。
   - **テスト要件**: `@WebMvcTest` でビュー名確認程度。
   - **Demo**: サイドバー「ToDo・通知」→ 種別フィルタ・未読のみ・ページ送りが動く。権限タブで営業から `todo` を外すと 403。
 
-- [ ] 6. 旧実装の削除とテスト整理
+- [x] 6. 旧実装の削除とテスト整理
   - **Objective**: 即時計算ロジックの残骸を消し、既存テストを新仕様に揃える。
   - **実装ガイダンス**: 旧 `getRecentNotifications` の退場30日/AIログ24hロジックはバッチ側に吸収済みであることを確認して削除。
   - **Demo**: `mvn test` 全件グリーン。

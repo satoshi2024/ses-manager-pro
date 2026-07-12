@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title th:text="${title}">勤怠・実績</title>
+</head>
+<body>
+
+<div layout:fragment="content">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-clock-history me-2 text-accent-green"></i>勤怠・実績</h4>
+            <p class="text-muted small mb-0">月次の実績工数入力と確認</p>
+        </div>
+        <div>
+            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" onclick="confirmMonth()">
+                <i class="bi bi-check-circle me-1"></i>月次確定
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body p-3">
+            <form class="row g-3 align-items-end" id="search-form">
+                <div class="col-md-3">
+                    <label class="form-label text-muted small mb-1">対象月</label>
+                    <input type="month" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" id="workMonth" onchange="loadWorkRecords()">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="loadWorkRecords()">
+                        <i class="bi bi-search me-1"></i>検索
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-secondary border-dark">
+                        <tr>
+                            <th class="px-4 py-3 text-muted small text-uppercase">要員・案件</th>
+                            <th class="py-3 text-muted small text-uppercase">契約番号</th>
+                            <th class="py-3 text-muted small text-uppercase">精算幅</th>
+                            <th class="py-3 text-muted small text-uppercase" style="width: 150px;">実績(h)</th>
+                            <th class="py-3 text-muted small text-uppercase">請求額(円)</th>
+                            <th class="py-3 text-muted small text-uppercase">支払額(円)</th>
+                            <th class="py-3 text-muted small text-uppercase">ステータス</th>
+                            <th class="px-4 py-3 text-muted small text-uppercase">備考</th>
+                        </tr>
+                    </thead>
+                    <tbody class="border-top-0" id="work-record-table-body">
+                        <!-- JS renders this -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/work-record.js}"></script>
+</th:block>
+
+</body>
+</html>

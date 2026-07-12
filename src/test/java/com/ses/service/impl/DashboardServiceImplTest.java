@@ -5,9 +5,11 @@ import com.ses.dto.dashboard.ContractProfitDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
+import com.ses.entity.WorkRecord;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.WorkRecordMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +36,9 @@ class DashboardServiceImplTest {
 
     @Mock
     private ProjectMapper projectMapper;
+
+    @Mock
+    private WorkRecordMapper workRecordMapper;
 
     @InjectMocks
     private DashboardServiceImpl dashboardService;
@@ -132,6 +137,7 @@ class DashboardServiceImplTest {
     void testGetSummary_WithYear() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         var result = dashboardService.getSummary(2026);
         assertNotNull(result);
@@ -144,10 +150,29 @@ class DashboardServiceImplTest {
     void testGetSummary_WithoutYear() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         var result = dashboardService.getSummary(null);
         assertNotNull(result);
         assertEquals(6, result.getCharts().getRevenue().getLabels().size());
+    }
+
+    @Test
+    void testGetSummary_WithActuals() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        WorkRecord wr = new WorkRecord();
+        wr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
+        wr.setPaymentAmount(java.math.BigDecimal.valueOf(600000));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
+
+        var result = dashboardService.getSummary(null);
+        assertNotNull(result);
+        assertEquals(6, result.getCharts().getRevenue().getLabels().size());
+        assertEquals(1000000, result.getCharts().getRevenue().getSales().get(0));
+        assertEquals(400000, result.getCharts().getRevenue().getProfit().get(0));
+        assertTrue(result.getCharts().getRevenue().getIsActual().get(0));
     }
 
     @Test

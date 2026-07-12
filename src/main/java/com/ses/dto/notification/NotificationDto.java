@@ -12,6 +12,9 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class NotificationDto {
+    private Long id;
+    private Boolean isRead;
+    private String linkUrl;
     private String type;
     private String icon;
     private String message;

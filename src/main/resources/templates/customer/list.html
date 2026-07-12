@@ -8,7 +8,10 @@
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h3 mb-0 text-light"><i class="bi bi-building me-2 text-info"></i>顧客管理</h2>
+        <h2 class="h3 mb-0 text-light">
+            <i class="bi bi-building me-2 text-info"></i>顧客管理
+            <span id="total-followup-badge" class="badge bg-danger rounded-pill fs-6 ms-3 d-none">0件の要フォロー</span>
+        </h2>
         <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#customerModal">
             <i class="bi bi-plus-lg me-1"></i>新規登録
         </button>

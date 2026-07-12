@@ -8,6 +8,9 @@ $(document).ready(function() {
     // Load station names for autocomplete
     loadAllStations();
 
+    // Load skills for search filter
+    loadSearchSkills();
+
     // 最寄り駅を入力/選択したら、その駅の路線候補を絞り込む
     $('#eng-nearestStation').on('input change', function() {
         populateRailwayLines($(this).val(), null);
@@ -15,6 +18,32 @@ $(document).ready(function() {
     // 路線（鉄道会社）を選択したら、都道府県と鉄道会社を自動設定する
     $('#eng-railwayLine').on('change', applyRailwaySelection);
 });
+
+function loadSearchSkills() {
+    $.ajax({
+        url: '/api/skill-tags',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const select = $('#searchSkill');
+                select.empty();
+                // group by category
+                const groups = {};
+                res.data.forEach(skill => {
+                    if (!groups[skill.category]) groups[skill.category] = [];
+                    groups[skill.category].push(skill);
+                });
+                for (const cat in groups) {
+                    const optgroup = $('<optgroup>').attr('label', cat);
+                    groups[cat].forEach(skill => {
+                        optgroup.append($('<option>').val(skill.id).text(skill.skillName));
+                    });
+                    select.append(optgroup);
+                }
+            }
+        }
+    });
+}
 
 function loadAllStations() {
     $.ajax({
@@ -117,17 +146,25 @@ function applyRailwaySelection() {
 }
 
 function loadEngineers(page = 1) {
+    let skillIdsStr = '';
+    const selectedSkills = $('#searchSkill').val();
+    if (selectedSkills && selectedSkills.length > 0) {
+        skillIdsStr = selectedSkills.join(','); // We can send them as comma separated or multiple parameters depending on Spring Boot setup. Usually Spring MVC binds multiple params nicely if we send them as an array.
+    }
+
     const data = {
         current: page,
         size: 10,
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
-        employmentType: $('#searchEmpType').val()
+        employmentType: $('#searchEmpType').val(),
+        skillIds: selectedSkills // jQuery ajax will format this as skillIds[]=1&skillIds[]=2 or we can set traditional: true
     };
 
     $.ajax({
         url: '/api/engineers',
         method: 'GET',
+        traditional: true, // so it sends skillIds=1&skillIds=2 instead of skillIds[]=1
         data: data,
         success: function(res) {
             if (res.code === 200 && res.data) {
@@ -330,6 +367,20 @@ function saveEngineer() {
             Toast.error('通信エラーが発生しました');
         }
     });
+}
+
+// 現在の検索条件を反映してExcel出力する。
+// バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる
+// (common.js の ajaxSetup complete ハンドラが非JSONレスポンスをセッション切れと誤検知するのを避けるため)
+function exportEngineers() {
+    const selectedSkills = $('#searchSkill').val();
+    const params = {
+        fullName: $('#searchName').val(),
+        status: $('#searchStatus').val(),
+        employmentType: $('#searchEmpType').val(),
+        skillIds: selectedSkills
+    };
+    window.location.href = '/api/engineers/export?' + $.param(params, true);
 }
 
 function deleteEngineer(id) {

@@ -3,7 +3,7 @@ package com.ses.config;
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
+
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -46,19 +46,13 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("ユーザーが見つかりません: " + username);
         }
 
-        // ユーザーステータスの確認（1: 有効, 0: 無効）
-        boolean isEnabled = sysUser.getStatus() != null && sysUser.getStatus() == 1;
+        // ユーザーステータスの確認は LoginUser の isEnabled() で行われます
 
         // ロールをSpring SecurityのGrantedAuthorityにマッピング（ROLE_プレフィックス付き）
         SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + sysUser.getRole());
 
-        return new User(
-            sysUser.getUsername(),
-            sysUser.getPassword(),
-            isEnabled,           // 有効フラグ
-            true,                // アカウント有効期限切れでない
-            true,                // 資格情報有効期限切れでない
-            true,                // アカウントロックされていない
+        return new LoginUser(
+            sysUser,
             Collections.singletonList(authority)
         );
     }

@@ -1,7 +1,22 @@
+let allSkillTags = [];
+
 $(document).ready(function() {
     loadProjects();
     loadCustomersForSelect();
+    loadAllSkillTags();
 });
+
+function loadAllSkillTags() {
+    $.ajax({
+        url: '/api/skill-tags?size=1000',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                allSkillTags = res.data.records || res.data;
+            }
+        }
+    });
+}
 
 function loadProjects(page = 1) {
     const data = {
@@ -132,16 +147,45 @@ function renderProjects(records) {
                 <td class="font-monospace">${priceStr}</td>
                 <td class="text-center">${proj.requiredCount || 1}名</td>
                 <td class="text-center">${remoteIcon}</td>
+                <td id="list-skills-${proj.id}"><div class="spinner-border spinner-border-sm text-secondary" role="status"></div></td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-info text-info border-info" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
+                        <button type="button" class="btn btn-outline-success text-success border-success" title="候補要員を探す" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
+                        <button type="button" class="btn btn-outline-info text-info border-info" title="編集" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
+                        <button type="button" class="btn btn-outline-danger text-danger border-danger" title="削除" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
                     </div>
                 </td>
             </tr>
         `;
         tbody.append(tr);
+        fetchAndRenderProjectSkills(proj.id);
+    });
+}
+
+function fetchAndRenderProjectSkills(projectId) {
+    $.ajax({
+        url: '/api/projects/' + projectId + '/skills',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const skills = res.data;
+                let badges = '';
+                skills.forEach(s => {
+                    if (s.isMust === 1) {
+                        badges += `<span class="badge bg-danger me-1 mb-1">${s.skillName}</span>`;
+                    } else {
+                        badges += `<span class="badge bg-secondary border border-secondary text-light me-1 mb-1">${s.skillName}</span>`;
+                    }
+                });
+                $('#list-skills-' + projectId).html(badges || '<span class="text-muted small">-</span>');
+            } else {
+                $('#list-skills-' + projectId).html('<span class="text-muted small">-</span>');
+            }
+        },
+        error: function() {
+            $('#list-skills-' + projectId).html('<span class="text-muted small">-</span>');
+        }
     });
 }
 
@@ -160,7 +204,18 @@ function editProject(id) {
                 $('#proj-remoteType').val(proj.remoteType);
                 $('#proj-status').val(proj.status);
                 
-                bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).show();
+                // Fetch skills
+                $.ajax({
+                    url: '/api/projects/' + id + '/skills',
+                    method: 'GET',
+                    success: function(skillRes) {
+                        $('#project-skills-container').empty();
+                        if (skillRes.code === 200 && skillRes.data) {
+                            skillRes.data.forEach(s => addProjectSkillRow(s));
+                        }
+                        bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).show();
+                    }
+                });
             } else {
                 Toast.error('データの取得に失敗しました');
             }
@@ -189,6 +244,27 @@ function saveProject() {
         data.id = parseInt(id);
     }
 
+    // Collect skills data
+    const skills = [];
+    let hasError = false;
+    $('#project-skills-container .skill-row').each(function() {
+        const skillId = $(this).find('.skill-select').val();
+        if (!skillId) {
+            hasError = true;
+            return false; // break loop
+        }
+        skills.push({
+            skillId: parseInt(skillId),
+            requiredLevel: $(this).find('.level-select').val(),
+            isMust: $(this).find('.is-must-check').is(':checked') ? 1 : 0
+        });
+    });
+
+    if (hasError) {
+        Toast.error('スキルを選択してください');
+        return;
+    }
+
     $.ajax({
         url: '/api/projects',
         method: id ? 'PUT' : 'POST',
@@ -196,11 +272,17 @@ function saveProject() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(id ? '案件を更新しました' : '案件を登録しました');
-                bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).hide();
-                $('#project-form')[0].reset();
-                $('#proj-id').val('');
-                loadProjects(1);
+                if (id) {
+                    saveProjectSkills(id, skills);
+                } else {
+                    // Use the returned project ID directly
+                    if (res.data && res.data.id) {
+                        saveProjectSkills(res.data.id, skills);
+                    } else {
+                        Toast.success('案件を登録しました');
+                        finishSave();
+                    }
+                }
             } else {
                 Toast.error(res.message || '保存に失敗しました');
             }
@@ -210,6 +292,80 @@ function saveProject() {
             Toast.error('通信エラーが発生しました');
         }
     });
+}
+
+function saveProjectSkills(projectId, skills) {
+    $.ajax({
+        url: '/api/projects/' + projectId + '/skills',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(skills),
+        success: function(res) {
+            Toast.success('案件を保存しました');
+            finishSave();
+        },
+        error: function() {
+            Toast.error('スキルの保存に失敗しました');
+            finishSave();
+        }
+    });
+}
+
+function finishSave() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).hide();
+    $('#project-form')[0].reset();
+    $('#proj-id').val('');
+    $('#project-skills-container').empty();
+    loadProjects(1);
+}
+
+function addProjectSkillRow(skill = null) {
+    const container = $('#project-skills-container');
+    
+    let optionsHtml = '<option value="">選択してください</option>';
+    
+    // Group skills by category
+    const categories = [...new Set(allSkillTags.map(t => t.category))];
+    categories.forEach(cat => {
+        optionsHtml += `<optgroup label="${cat}">`;
+        allSkillTags.filter(t => t.category === cat).forEach(t => {
+            const selected = (skill && skill.skillId === t.id) ? 'selected' : '';
+            optionsHtml += `<option value="${t.id}" ${selected}>${t.skillName}</option>`;
+        });
+        optionsHtml += `</optgroup>`;
+    });
+
+    const level = skill ? skill.requiredLevel : '中級';
+    const isMustChecked = (skill && skill.isMust === 1) ? 'checked' : '';
+
+    const rowHtml = `
+        <div class="row g-2 mb-2 skill-row align-items-center">
+            <div class="col-md-5">
+                <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark skill-select">
+                    ${optionsHtml}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark level-select">
+                    <option value="初級" ${level === '初級' ? 'selected' : ''}>初級</option>
+                    <option value="中級" ${level === '中級' ? 'selected' : ''}>中級</option>
+                    <option value="上級" ${level === '上級' ? 'selected' : ''}>上級</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <div class="form-check form-switch mt-1">
+                    <input class="form-check-input is-must-check" type="checkbox" role="switch" ${isMustChecked}>
+                    <label class="form-check-label text-light small">必須</label>
+                </div>
+            </div>
+            <div class="col-md-1 text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger border-0" onclick="$(this).closest('.skill-row').remove()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    container.append(rowHtml);
 }
 
 function deleteProject(id) {
@@ -240,6 +396,90 @@ function deleteProject(id) {
                     Toast.error('通信エラーが発生しました');
                 }
             });
+        }
+    });
+}
+
+function findMatchingEngineers(projectId) {
+    const modal = new bootstrap.Modal(document.getElementById('matchingResultModal'));
+    modal.show();
+    
+    const body = $('#matchingResultModalBody');
+    body.html('<div class="text-center text-muted py-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">AIマッチング実行中...</div></div>');
+
+    $.ajax({
+        url: '/api/ai/matching/project/' + projectId,
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const results = res.data;
+                if (results.length === 0) {
+                    body.html('<div class="text-center text-muted py-5">条件に合致する要員が見つかりませんでした。</div>');
+                    return;
+                }
+                
+                let html = '<p class="mb-3">AIが以下の要員を推薦しています。</p>';
+                results.forEach(match => {
+                    const scoreColor = match.score >= 90 ? 'text-success' : (match.score >= 70 ? 'text-warning' : 'text-danger');
+                    const priceText = match.proposedPrice ? match.proposedPrice + '万' : '未設定';
+                    const proposalPriceYen = match.proposedPrice ? match.proposedPrice * 10000 : 'null';
+                    html += `
+                        <div class="card bg-secondary border-dark mb-3 shadow-sm">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${match.engineerName}</a></h6>
+                                        <div class="small text-muted">希望単価: ${priceText}</div>
+                                    </div>
+                                    <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
+                                </div>
+                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${match.reason}</p>
+                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${match.sellingPoints || '特記事項なし'}</p>
+                                <div class="text-end">
+                                    <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
+                                        <i class="bi bi-send-fill me-1"></i>この要員を提案
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                body.html(html);
+            } else {
+                body.html('<div class="text-center text-danger py-5">取得に失敗しました: ' + (res.message || '') + '</div>');
+            }
+        },
+        error: function() {
+            body.html('<div class="text-center text-danger py-5">通信エラーが発生しました</div>');
+        }
+    });
+}
+
+function proposeEngineerToProject(engineerId, projectId, score, price) {
+    const data = {
+        engineerId: engineerId,
+        projectId: projectId,
+        proposedUnitPrice: price,
+        status: '書類選考中',
+        aiMatchScore: score,
+        matchReason: 'AIマッチング(要員推薦)経由'
+    };
+
+    $.ajax({
+        url: '/api/proposals',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success('提案を作成しました。カンバンへ移動します。');
+                setTimeout(() => window.location.href = '/proposal/kanban', 1500);
+            } else {
+                Toast.error('作成失敗: ' + (res.message || ''));
+            }
+        },
+        error: function() {
+            Toast.error('通信エラーが発生しました');
         }
     });
 }

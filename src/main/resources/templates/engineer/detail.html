@@ -38,7 +38,10 @@
                         T.T
                     </div>
                     <h5 class="text-white fw-bold mb-1" id="det-name">名前</h5>
-                    <div class="mb-3" id="det-status"><i class="bi bi-check-circle-fill me-1"></i>ステータス</div>
+                    <div class="d-flex justify-content-center align-items-center mb-3 gap-3">
+                        <div id="det-status"><i class="bi bi-check-circle-fill me-1"></i>ステータス</div>
+                        <button class="btn btn-sm btn-outline-info border-0 px-2 py-0" onclick="openSkillModal()" title="スキル編集"><i class="bi bi-pencil"></i></button>
+                    </div>
                     
                     <div class="d-flex flex-wrap justify-content-center gap-2 mb-4" id="det-skills">
                         <span class="badge bg-secondary border border-dark text-light">スキルなし</span>
@@ -70,15 +73,47 @@
             </div>
         </div>
 
-        <!-- Career History -->
+        <!-- Tabs & Details -->
         <div class="col-md-8">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header bg-transparent border-dark px-4 py-3">
-                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-journal-text me-2 text-muted"></i>経歴サマリ</h6>
+                    <ul class="nav nav-tabs card-header-tabs border-dark" id="engineerTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active text-light border-dark bg-dark" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary-tab-pane" type="button" role="tab" aria-controls="summary-tab-pane" aria-selected="true"><i class="bi bi-journal-text me-2"></i>経歴サマリ</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link text-muted border-transparent hover-text-white" id="career-tab" data-bs-toggle="tab" data-bs-target="#career-tab-pane" type="button" role="tab" aria-controls="career-tab-pane" aria-selected="false"><i class="bi bi-building me-2"></i>経歴詳細</button>
+                        </li>
+                    </ul>
                 </div>
                 <div class="card-body p-4">
-                    <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2" id="det-resume">
-                        <div class="text-muted small">経歴情報がありません。</div>
+                    <div class="tab-content" id="engineerTabsContent">
+                        <div class="tab-pane fade show active" id="summary-tab-pane" role="tabpanel" aria-labelledby="summary-tab" tabindex="0">
+                            <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2" id="det-resume">
+                                <div class="text-muted small">経歴情報がありません。</div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="career-tab-pane" role="tabpanel" aria-labelledby="career-tab" tabindex="0">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0 text-white fw-bold">経歴一覧</h6>
+                                <button class="btn btn-sm btn-outline-primary" onclick="openCareerModal()"><i class="bi bi-plus-lg me-1"></i>経歴追加</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-hover align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>期間</th>
+                                            <th>案件名</th>
+                                            <th>役割</th>
+                                            <th class="text-end">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="career-table-body">
+                                        <!-- Populated via JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -147,6 +182,99 @@
                             <i class="bi bi-send-fill"></i>
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skill Edit Modal -->
+    <div class="modal fade" id="skillEditModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-tools me-2 text-info"></i>スキル編集</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-bordered align-middle">
+                            <thead class="table-dark-header">
+                                <tr>
+                                    <th style="width: 40%">スキル</th>
+                                    <th style="width: 25%">習熟度</th>
+                                    <th style="width: 20%">経験年数</th>
+                                    <th style="width: 15%" class="text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="skill-edit-tbody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary w-100 mt-2" onclick="addSkillRow()">
+                        <i class="bi bi-plus-lg me-1"></i>スキルを追加
+                    </button>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveSkills()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Career CRUD Modal -->
+    <div class="modal fade" id="careerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building me-2 text-primary"></i>経歴情報</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="career-form">
+                        <input type="hidden" id="car-id">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">期間(開始) <span class="text-danger">*</span></label>
+                                <input type="date" id="car-periodFrom" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">期間(終了)</label>
+                                <input type="date" id="car-periodTo" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">案件名 <span class="text-danger">*</span></label>
+                            <input type="text" id="car-projectName" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">顧客業種</label>
+                                <input type="text" id="car-clientIndustry" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small">役割</label>
+                                <input type="text" id="car-role" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">チーム規模 (人)</label>
+                            <input type="number" id="car-teamSize" class="form-control form-control-dark bg-secondary text-white border-dark" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">技術スタック</label>
+                            <input type="text" id="car-techStack" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="Java, Spring, MySQL...">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">業務内容・実績</label>
+                            <textarea id="car-description" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveCareer()">保存</button>
                 </div>
             </div>
         </div>

@@ -53,8 +53,9 @@ public class ProjectApiController {
      * 案件登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody Project project) {
-        return ApiResult.success(projectService.save(project));
+    public ApiResult<Project> save(@RequestBody Project project) {
+        projectService.save(project);
+        return ApiResult.success(project);
     }
 
     /**
