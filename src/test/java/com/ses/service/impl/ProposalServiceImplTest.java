@@ -27,6 +27,7 @@ import static org.mockito.Mockito.*;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@org.springframework.test.context.jdbc.Sql(scripts = "/sql/engineer-schema-h2.sql")
 public class ProposalServiceImplTest {
 
     @Autowired
@@ -114,6 +115,19 @@ public class ProposalServiceImplTest {
         assertThrows(BusinessException.class, () -> {
             proposalService.changeStatus(p.getId(), "一次面接");
         });
+    }
+
+    @Test
+    public void testSave_LinksEngineerStatusToProposing() {
+        Proposal p = new Proposal();
+        p.setProjectId(1L);
+        p.setEngineerId(7L);
+        p.setStatus("書類選考中");
+
+        proposalService.save(p);
+
+        // 提案作成時にBench要員を「提案中」へ連動させる呼び出しが行われること
+        verify(engineerStatusService, times(1)).onProposalCreated(7L);
     }
 
     @Test

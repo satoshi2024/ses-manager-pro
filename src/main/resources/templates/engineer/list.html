@@ -13,6 +13,13 @@
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineers()">
                 <i class="bi bi-file-earmark-excel me-1"></i>Excel出力
             </button>
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineersCsv()">
+                <i class="bi bi-filetype-csv me-1"></i>CSV出力
+            </button>
+            <input type="file" id="csvImportInput" accept=".csv" class="d-none" onchange="importEngineersCsv(this)">
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="document.getElementById('csvImportInput').click()">
+                <i class="bi bi-upload me-1"></i>CSVインポート
+            </button>
             <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
                 <i class="bi bi-plus-lg me-1"></i>新規登録
             </button>
@@ -106,6 +113,25 @@
                         </li>
                     </ul>
                 </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Import Result Modal -->
+    <div class="modal fade" id="csvResultModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title text-light"><i class="bi bi-upload me-2"></i>CSVインポート結果</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-light mb-2"><span id="csvSuccessCount" class="fw-bold text-accent-green">0</span> 件を取り込みました。</p>
+                    <div id="csvErrorArea"></div>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="loadEngineers(1)">閉じる</button>
+                </div>
             </div>
         </div>
     </div>

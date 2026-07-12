@@ -43,6 +43,20 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         return this.baseMapper.selectKanbanList();
     }
 
+    /**
+     * 提案の新規作成。
+     * 保存に加えて、Bench中の要員を「提案中」へ連動させる。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Proposal proposal) {
+        boolean result = super.save(proposal);
+        if (result && proposal.getEngineerId() != null) {
+            engineerStatusService.onProposalCreated(proposal.getEngineerId());
+        }
+        return result;
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, String newStatus) {

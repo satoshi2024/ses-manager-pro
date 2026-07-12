@@ -16,7 +16,12 @@ function loadWorkRecords() {
         method: 'GET',
         data: { month: month },
         success: function(res) {
-            renderWorkRecords(res);
+            if (res.code === 200) {
+                renderWorkRecords(res.data);
+            } else {
+                Toast.error(res.message || 'データ取得に失敗しました');
+                $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">データ取得に失敗しました</td></tr>');
+            }
         },
         error: function(err) {
             console.error(err);
@@ -110,12 +115,15 @@ function saveHours(element) {
         contentType: 'application/json',
         data: JSON.stringify(data),
         success: function(res) {
-            // res is WorkRecord object
-            if (res && res.id) {
-                row.find('.billing-amount-' + contractId).text(res.billingAmount ? '¥' + res.billingAmount.toLocaleString() : '-');
-                row.find('.payment-amount-' + contractId).text(res.paymentAmount ? '¥' + res.paymentAmount.toLocaleString() : '-');
-                row.find('.status-cell-' + contractId).html(getStatusBadge(res.status));
+            if (res.code === 200 && res.data) {
+                const rec = res.data;
+                row.find('.billing-amount-' + contractId).text(rec.billingAmount ? '¥' + rec.billingAmount.toLocaleString() : '-');
+                row.find('.payment-amount-' + contractId).text(rec.paymentAmount ? '¥' + rec.paymentAmount.toLocaleString() : '-');
+                row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
                 Toast.success('保存しました');
+            } else {
+                // 確定済み月の編集など業務エラーをユーザーに表示する
+                Toast.error(res.message || '保存に失敗しました');
             }
         },
         error: function(err) {
@@ -148,8 +156,12 @@ function confirmMonth() {
                 url: '/api/work-records/confirm?month=' + month,
                 method: 'POST',
                 success: function(res) {
-                    Toast.success('月次を確定しました');
-                    loadWorkRecords(); // reload to reflect readonly state
+                    if (res.code === 200) {
+                        Toast.success('月次を確定しました');
+                        loadWorkRecords(); // reload to reflect readonly state
+                    } else {
+                        Toast.error(res.message || '確定処理に失敗しました');
+                    }
                 },
                 error: function(err) {
                     console.error(err);

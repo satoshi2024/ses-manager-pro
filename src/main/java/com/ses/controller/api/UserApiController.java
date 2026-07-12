@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -70,7 +71,7 @@ public class UserApiController {
      * ユーザー登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody SysUser sysUser) {
+    public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser) {
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw new BusinessException("ログインIDとパスワードは必須です");
         }
@@ -79,8 +80,19 @@ public class UserApiController {
         if (duplicated > 0) {
             throw new BusinessException("このログインIDは既に使用されています");
         }
+        validatePasswordPolicy(sysUser.getPassword());
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         return ApiResult.success(sysUserService.save(sysUser));
+    }
+
+    /**
+     * パスワードポリシー検証: 8文字以上・英字と数字を含む。
+     */
+    private void validatePasswordPolicy(String password) {
+        if (password == null || password.length() < 8
+                || !password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
+            throw new BusinessException("パスワードは8文字以上で英字と数字を含めてください");
+        }
     }
 
     /**
@@ -88,7 +100,7 @@ public class UserApiController {
      * パスワードが空の場合は既存パスワードを維持する
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody SysUser sysUser, Authentication authentication) {
+    public ApiResult<Boolean> update(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, sysUser.getUsername())
@@ -104,6 +116,7 @@ public class UserApiController {
             throw new BusinessException("自分自身のロールは変更できません");
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
+            validatePasswordPolicy(sysUser.getPassword());
             sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         } else {
             sysUser.setPassword(null);

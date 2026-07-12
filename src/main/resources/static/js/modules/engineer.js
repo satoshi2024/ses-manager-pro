@@ -383,6 +383,60 @@ function exportEngineers() {
     window.location.href = '/api/engineers/export?' + $.param(params, true);
 }
 
+function exportEngineersCsv() {
+    const params = {
+        fullName: $('#searchName').val(),
+        status: $('#searchStatus').val(),
+        employmentType: $('#searchEmpType').val(),
+        skillIds: $('#searchSkill').val()
+    };
+    window.location.href = '/api/engineers/export-csv?' + $.param(params, true);
+}
+
+function importEngineersCsv(input) {
+    if (!input.files || input.files.length === 0) return;
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+
+    $.ajax({
+        url: '/api/engineers/import-csv',
+        method: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                renderCsvResult(res.data);
+            } else {
+                Toast.error(res.message || 'インポートに失敗しました');
+            }
+        },
+        error: function(xhr) {
+            const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'インポートに失敗しました';
+            Toast.error(msg);
+        },
+        complete: function() { input.value = ''; }
+    });
+}
+
+function renderCsvResult(result) {
+    $('#csvSuccessCount').text(result.successCount || 0);
+    const errors = result.errors || [];
+    if (errors.length === 0) {
+        $('#csvErrorArea').html('<div class="text-muted small">エラーはありませんでした。</div>');
+    } else {
+        let html = '<div class="text-danger small mb-1">失敗した行:</div>';
+        html += '<ul class="list-group list-group-flush">';
+        errors.forEach(function(e) {
+            html += `<li class="list-group-item bg-transparent text-light small border-dark py-1">${e.line}行目: ${e.message}</li>`;
+        });
+        html += '</ul>';
+        $('#csvErrorArea').html(html);
+    }
+    const modal = new bootstrap.Modal(document.getElementById('csvResultModal'));
+    modal.show();
+}
+
 function deleteEngineer(id) {
     Swal.fire({
         title: '削除確認',

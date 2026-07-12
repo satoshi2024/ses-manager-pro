@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetch('/api/invoices/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
             body: JSON.stringify({ customerId, billingMonth })
         }).then(res => res.json()).then(data => {
             if (data.code === 200) {
@@ -78,7 +78,7 @@ function updateInvoiceStatus(id, status, requireDate = false) {
 
     fetch(`/api/invoices/${id}/status`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
         body: JSON.stringify({ status, paidDate })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
@@ -122,7 +122,7 @@ function updateBpPaymentStatus(id, status) {
 
     fetch(`/api/invoices/bp-payments/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
         body: JSON.stringify({ status, paidDate })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {

@@ -49,7 +49,7 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("、"));
 
         log.warn("入力バリデーションエラー: {}", errorMessage);
-        return ApiResult.error("入力内容に誤りがあります：" + errorMessage);
+        return ApiResult.error(400, "入力内容に誤りがあります：" + errorMessage);
     }
 
     /**

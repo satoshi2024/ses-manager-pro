@@ -11,8 +11,17 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -21,10 +30,14 @@ import lombok.RequiredArgsConstructor;
  */
 @Configuration
 @EnableWebSecurity
+@org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
     private final MenuPermissionFilter menuPermissionFilter;
+    private final ApiAuditFilter apiAuditFilter;
+    private final LoginSuccessHandler loginSuccessHandler;
+    private final LoginFailureHandler loginFailureHandler;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -33,6 +46,17 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<MenuPermissionFilter> disableAutoRegistration(MenuPermissionFilter filter) {
         FilterRegistrationBean<MenuPermissionFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * ApiAuditFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で明示的に addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<ApiAuditFilter> disableAuditAutoRegistration(ApiAuditFilter filter) {
+        FilterRegistrationBean<ApiAuditFilter> registrationBean = new FilterRegistrationBean<>(filter);
         registrationBean.setEnabled(false);
         return registrationBean;
     }
@@ -50,6 +74,8 @@ public class SecurityConfig {
         http
             // ロール別メニューアクセス制御フィルター（認証フィルターの後、認可判定の前に実行）
             .addFilterAfter(menuPermissionFilter, UsernamePasswordAuthenticationFilter.class)
+            // API操作ログフィルター（メニュー権限フィルターの後に実行）
+            .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // アクセス制御の設定
             .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
@@ -67,7 +93,10 @@ public class SecurityConfig {
                     "/user/**",
                     "/api/users/**",
                     "/api/role-menus/**",
-                    "/api/notifications/generate"
+                    "/api/notifications/generate",
+                    "/system-config/**",
+                    "/api/system-configs/**",
+                    "/api/work-records/reopen"
                 ).hasRole("管理者")
                 // その他のリクエストは認証が必要
                 .anyRequest().authenticated()
@@ -76,8 +105,8 @@ public class SecurityConfig {
             .formLogin(form -> form
                 .loginPage("/login")
                 .loginProcessingUrl("/login")
-                .defaultSuccessUrl("/dashboard", true)
-                .failureUrl("/login?error")
+                .successHandler(loginSuccessHandler)
+                .failureHandler(loginFailureHandler)
                 .permitAll()
             )
             // ログアウトの設定
@@ -88,10 +117,14 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .permitAll()
             )
-            // REST API向けにCSRFを無効化（/api/** パス）
+            // CSRF: Cookie(XSRF-TOKEN)→ヘッダー(X-XSRF-TOKEN)方式に移行。
+            // 生トークンをCookieに載せ、JSがヘッダーへ複製する（SPA/AJAX向け標準構成）。
             .csrf(csrf -> csrf
-                .ignoringRequestMatchers("/api/**")
-            );
+                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+            )
+            // CSRFトークンを毎リクエストで解決し、XSRF-TOKEN Cookieを確実に発行する
+            .addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class);
 
         return http.build();
     }
@@ -118,5 +151,23 @@ public class SecurityConfig {
     @Profile("prod")
     public PasswordEncoder prodPasswordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * CSRFトークンを解決してCookie(XSRF-TOKEN)を確実に発行するためのフィルター。
+     * CookieCsrfTokenRepositoryはトークンが読み出された時にCookieを書き込むため、
+     * 各リクエストでgetToken()を呼び出してCookie発行をトリガーする。
+     */
+    static class CsrfCookieFilter extends OncePerRequestFilter {
+        @Override
+        protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                        FilterChain filterChain) throws ServletException, IOException {
+            CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+            if (csrfToken != null) {
+                // getToken() の呼び出しでCookieへの書き込みが行われる
+                csrfToken.getToken();
+            }
+            filterChain.doFilter(request, response);
+        }
     }
 }

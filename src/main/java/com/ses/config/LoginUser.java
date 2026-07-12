@@ -42,7 +42,9 @@ public class LoginUser implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return true;
+        // locked_until が未来日時ならロック中
+        return sysUser.getLockedUntil() == null
+                || !sysUser.getLockedUntil().isAfter(java.time.LocalDateTime.now());
     }
 
     @Override

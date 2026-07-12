@@ -154,12 +154,16 @@ function createKanbanCard(item) {
             
             <div class="kanban-card-meta">
                 <span class="kanban-card-price">¥${item.proposedUnitPrice ? item.proposedUnitPrice.toLocaleString() : '---'}万</span>
-                
+
                 ${item.aiMatchScore ? `
                 <div class="ai-score-badge small" title="AIマッチングスコア">
                     <i class="bi ${scoreIcon} me-1"></i>${item.aiMatchScore}%
                 </div>
                 ` : ''}
+                <button class="btn btn-sm btn-link text-info p-0 ms-auto" title="提案メール送信"
+                        onclick="event.stopPropagation(); openMailModal(${item.id})">
+                    <i class="bi bi-envelope"></i>
+                </button>
             </div>
         </div>
     `;
@@ -345,6 +349,50 @@ function saveProposal() {
         error: function(err) {
             console.error(err);
             Toast.error('通信エラーが発生しました');
+        }
+    });
+}
+
+// ==========================================
+// 提案メール送信
+// ==========================================
+function openMailModal(proposalId) {
+    $('#mail-proposalId').val(proposalId);
+    $('#mail-to').val('');
+    const $select = $('#mail-template');
+    $select.html('<option value="">読み込み中...</option>');
+    $.get('/api/email-templates', function(res) {
+        const list = res.data && (res.data.records || res.data) || [];
+        $select.empty().append('<option value="">テンプレートを選択</option>');
+        list.forEach(t => $select.append(`<option value="${t.id}">${t.templateName}</option>`));
+    }).fail(function() {
+        $select.html('<option value="">テンプレート取得に失敗</option>');
+    });
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mailModal')).show();
+}
+
+function sendProposalMail() {
+    const proposalId = $('#mail-proposalId').val();
+    const templateId = $('#mail-template').val();
+    const to = $('#mail-to').val();
+    if (!templateId) { Toast.error('テンプレートを選択してください'); return; }
+
+    $.ajax({
+        url: `/api/proposals/${proposalId}/send-mail`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ templateId: templateId, to: to }),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success('メールを送信しました（SMTP未設定時はログ出力）');
+                bootstrap.Modal.getInstance(document.getElementById('mailModal')).hide();
+            } else {
+                Toast.error(res.message || 'メール送信に失敗しました');
+            }
+        },
+        error: function(xhr) {
+            const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'メール送信に失敗しました';
+            Toast.error(msg);
         }
     });
 }

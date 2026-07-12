@@ -34,8 +34,14 @@
         <div class="col-md-4">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-body p-4 text-center">
-                    <div class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center mx-auto mb-3 shadow" style="width: 100px; height: 100px; font-size: 2.5rem;">
+                    <div id="det-avatar" class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center mx-auto mb-2 shadow overflow-hidden" style="width: 100px; height: 100px; font-size: 2.5rem;">
                         T.T
+                    </div>
+                    <div class="mb-3">
+                        <input type="file" id="det-photo-input" accept="image/png,image/jpeg" class="d-none" onchange="uploadPhoto(this)">
+                        <button class="btn btn-sm btn-outline-secondary border-0 px-2 py-0" onclick="document.getElementById('det-photo-input').click()" title="写真を登録・差し替え">
+                            <i class="bi bi-camera me-1"></i>写真
+                        </button>
                     </div>
                     <h5 class="text-white fw-bold mb-1" id="det-name">名前</h5>
                     <div class="d-flex justify-content-center align-items-center mb-3 gap-3">

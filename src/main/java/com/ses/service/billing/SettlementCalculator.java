@@ -28,7 +28,12 @@ public final class SettlementCalculator {
         if (hoursMin == null || hoursMax == null || actualHours == null) {
             return base; // 固定
         }
-        
+
+        // 精算上下限に0以下が入っているとゼロ除算になるため固定扱いにする
+        if (hoursMin.signum() <= 0 || hoursMax.signum() <= 0) {
+            return base;
+        }
+
         if (actualHours.compareTo(hoursMax) > 0) { // 超過
             BigDecimal over = base.divide(hoursMax, 10, RoundingMode.HALF_UP); // 超過単価 = 売上/上限
             return base.add(actualHours.subtract(hoursMax).multiply(over)).setScale(0, RoundingMode.DOWN);

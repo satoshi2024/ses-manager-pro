@@ -1,5 +1,6 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
@@ -44,5 +45,6 @@ public class AiLog extends BaseEntity {
     private BigDecimal costJpy;
 
     /** 作成者ID */
+    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 }

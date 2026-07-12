@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.Engineer;
 import com.ses.service.EngineerService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -65,7 +66,7 @@ public class EngineerApiController {
      * エンジニア登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody Engineer engineer) {
+    public ApiResult<Boolean> save(@Valid @RequestBody Engineer engineer) {
         return ApiResult.success(engineerService.save(engineer));
     }
 
@@ -73,7 +74,7 @@ public class EngineerApiController {
      * エンジニア更新
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody Engineer engineer) {
+    public ApiResult<Boolean> update(@Valid @RequestBody Engineer engineer) {
         return ApiResult.success(engineerService.updateById(engineer));
     }
 

@@ -21,3 +21,6 @@ logs/
 # ===== OS =====
 .DS_Store
 Thumbs.db
+
+# アップロードファイル（ローカル保存先）
+/uploads/

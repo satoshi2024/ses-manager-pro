@@ -30,6 +30,7 @@ public class NotificationGenerateService {
     private final SalesActivityMapper salesActivityMapper;
     private final CustomerMapper customerMapper;
     private final NotificationService notificationService;
+    private final SystemConfigService systemConfigService;
 
     public void generateAll() {
         contractEnding();
@@ -40,34 +41,37 @@ public class NotificationGenerateService {
     }
 
     private void contractEnding() {
+        int days = systemConfigService.getInt("notice.contract-end-days", 30);
         LocalDate today = LocalDate.now();
         QueryWrapper<Contract> qw = new QueryWrapper<>();
         qw.eq("status", "稼動中")
-          .le("end_date", today.plusDays(30))
+          .le("end_date", today.plusDays(days))
           .ge("end_date", today);
         List<Contract> contracts = contractMapper.selectList(qw);
         for (Contract c : contracts) {
             String name = getEngineerName(c.getEngineerId());
             String dedupeKey = "CONTRACT_END:" + c.getId() + ":" + c.getEndDate().toString();
-            String message = name + "氏の稼動終了が30日以内に迫っています（終了日：" + c.getEndDate() + "）";
+            String message = name + "氏の稼動終了が" + days + "日以内に迫っています（終了日：" + c.getEndDate() + "）";
             notificationService.publish("CONTRACT_END", "稼動終了間近", message, "/contract/detail/" + c.getId(), dedupeKey);
         }
     }
 
     private void proposalStale() {
-        LocalDate sevenDaysAgo = LocalDate.now().minusDays(7);
+        int days = systemConfigService.getInt("notice.proposal-stale-days", 7);
+        LocalDate threshold = LocalDate.now().minusDays(days);
         QueryWrapper<Proposal> qw = new QueryWrapper<>();
         qw.in("status", "書類選考中", "一次面接", "二次面接", "結果待ち")
-          .le("updated_at", sevenDaysAgo.atStartOfDay());
+          .le("updated_at", threshold.atStartOfDay());
         List<Proposal> proposals = proposalMapper.selectList(qw);
         for (Proposal p : proposals) {
             String dedupeKey = "PROPOSAL_STALE:" + p.getId() + ":" + todayString();
-            String message = "提案ID " + p.getId() + " のステータスが7日以上更新されていません（現在：" + p.getStatus() + "）";
+            String message = "提案ID " + p.getId() + " のステータスが" + days + "日以上更新されていません（現在：" + p.getStatus() + "）";
             notificationService.publish("PROPOSAL_STALE", "提案ステータス停滞", message, "/proposal", dedupeKey);
         }
     }
 
     private void benchLong() {
+        int days = systemConfigService.getInt("notice.bench-warn-days", 30);
         QueryWrapper<Engineer> qw = new QueryWrapper<>();
         qw.eq("status", "Bench");
         List<Engineer> engineers = engineerMapper.selectList(qw);
@@ -77,10 +81,10 @@ public class NotificationGenerateService {
             cQw.eq("engineer_id", e.getId()).orderByDesc("end_date").last("LIMIT 1");
             Contract lastContract = contractMapper.selectOne(cQw);
             LocalDate dateToCheck = (lastContract != null && lastContract.getEndDate() != null) ? lastContract.getEndDate() : e.getCreatedAt().toLocalDate();
-            if (dateToCheck.plusDays(30).isBefore(LocalDate.now())) {
+            if (dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
                 String name = getEngineerName(e.getId());
                 String dedupeKey = "BENCH_LONG:" + e.getId() + ":" + LocalDate.now().getYear() + "-" + LocalDate.now().getMonthValue();
-                String message = name + "氏の待機期間が30日を超えています";
+                String message = name + "氏の待機期間が" + days + "日を超えています";
                 notificationService.publish("BENCH_LONG", "待機期間警告", message, "/engineer/detail/" + e.getId(), dedupeKey);
             }
         }

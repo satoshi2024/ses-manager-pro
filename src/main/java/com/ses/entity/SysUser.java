@@ -3,6 +3,8 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,6 +29,8 @@ public class SysUser extends BaseEntity {
     /**
      * ユーザー名（ログインID）
      */
+    @NotBlank(message = "ユーザー名は必須です")
+    @Size(min = 4, max = 50, message = "ユーザー名は4〜50文字で入力してください")
     private String username;
 
     /**
@@ -55,4 +59,14 @@ public class SysUser extends BaseEntity {
      */
     @Builder.Default
     private Integer status = 1;
+
+    /**
+     * ログイン失敗回数
+     */
+    private Integer failedCount;
+
+    /**
+     * アカウントロック解除日時（未来日時ならロック中）
+     */
+    private java.time.LocalDateTime lockedUntil;
 }

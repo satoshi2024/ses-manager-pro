@@ -40,15 +40,16 @@ const SES = {
         },
         
         _fetch: async function(url, options) {
-            // CSRF Token - if using Spring Security default CSRF (disabled for REST in this app, but good practice)
-            const csrfToken = document.querySelector('meta[name="_csrf"]')?.content;
-            const csrfHeader = document.querySelector('meta[name="_csrf_header"]')?.content;
-            
-            if (csrfToken && csrfHeader) {
-                options.headers = options.headers || {};
-                options.headers[csrfHeader] = csrfToken;
+            // CSRF: 更新系リクエストで XSRF-TOKEN Cookie を X-XSRF-TOKEN ヘッダーへ複製
+            const method = (options.method || 'GET').toUpperCase();
+            if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(method)) {
+                const token = SES.csrf && SES.csrf.token();
+                if (token) {
+                    options.headers = options.headers || {};
+                    options.headers['X-XSRF-TOKEN'] = token;
+                }
             }
-            
+
             try {
                 const response = await fetch(url, options);
                 
@@ -216,6 +217,16 @@ const SES = {
         }
     },
     
+    /**
+     * HTMLエスケープ（XSS対策）。ユーザー入力由来の文字列をHTMLへ埋め込む際は必ず通すこと。
+     */
+    escapeHtml: function(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>"']/g, function(c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    },
+
     notification: {
         load: async function() {
             const container = document.getElementById('notification-list');
@@ -263,9 +274,10 @@ const SES = {
             html += list.map(function(n) {
                 const colorClass = iconColorMap[n.type] || 'text-accent-blue';
                 const bgClass = !n.isRead ? 'bg-secondary bg-opacity-50 fw-bold' : '';
-                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${n.linkUrl || '#'}">
-                            <i class="bi ${n.icon} ${colorClass} me-2"></i>${n.message}
-                            <div class="small text-muted ms-4">${n.date}</div>
+                // message には要員名等の利用者入力が含まれるため必ずエスケープする（XSS対策）
+                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${SES.escapeHtml(n.linkUrl || '#')}">
+                            <i class="bi ${SES.escapeHtml(n.icon)} ${colorClass} me-2"></i>${SES.escapeHtml(n.message)}
+                            <div class="small text-muted ms-4">${SES.escapeHtml(n.date)}</div>
                         </a>`;
             }).join('');
             
@@ -344,10 +356,34 @@ window.matchAI = function(engineerId) {
     }, 2000);
 };
 
+// ================== CSRF (Cookie → ヘッダー) ==================
+// CookieCsrfTokenRepository が発行する XSRF-TOKEN Cookie を読み、
+// 更新系リクエストで X-XSRF-TOKEN ヘッダーへ複製する。
+SES.csrf = {
+    token: function() {
+        const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : null;
+    },
+    header: function() {
+        const t = this.token();
+        return t ? { 'X-XSRF-TOKEN': t } : {};
+    }
+};
+
 // ================== jQuery グローバルAjaxハンドラー ==================
 // セッション切れ・未認証時に自動でログインページへリダイレクトする
 $(function() {
     $.ajaxSetup({
+        beforeSend: function(xhr, settings) {
+            // GET/HEAD/OPTIONS 以外にCSRFヘッダーを付与
+            const method = (settings.type || settings.method || 'GET').toUpperCase();
+            if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(method)) {
+                const token = SES.csrf.token();
+                if (token) {
+                    xhr.setRequestHeader('X-XSRF-TOKEN', token);
+                }
+            }
+        },
         complete: function(xhr, status) {
             // レスポンスが JSON ではなく HTML (ログインページ) だった場合
             // → セッション切れの可能性が高い

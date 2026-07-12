@@ -149,19 +149,24 @@ CREATE TABLE t_contract (
 
 DROP TABLE IF EXISTS t_proposal;
 
+-- Proposal エンティティのマッピング（proposed_unit_price / proposed_by 等）と一致させること。
+-- t_proposal に created_at 列は無い（作成日時は proposed_at。エンティティ側も exist=false）。
 CREATE TABLE t_proposal (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  project_id      BIGINT NOT NULL,
-  engineer_id     BIGINT NOT NULL,
-  status          VARCHAR(30) NOT NULL,
-  proposed_price  DECIMAL(10,0),
-  proposed_at     DATETIME,
-  closed_at       DATETIME,
-  remarks         TEXT,
-  created_by      BIGINT,
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag    TINYINT DEFAULT 0
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id          BIGINT NOT NULL,
+  engineer_id         BIGINT NOT NULL,
+  status              VARCHAR(30) NOT NULL,
+  proposed_unit_price DECIMAL(10,0),
+  skill_sheet_path    VARCHAR(500),
+  proposal_email_text TEXT,
+  ai_match_score      DECIMAL(5,2),
+  match_reason        TEXT,
+  proposed_by         BIGINT,
+  proposed_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+  closed_at           DATETIME,
+  remarks             TEXT,
+  updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag        TINYINT DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_proposal_history;

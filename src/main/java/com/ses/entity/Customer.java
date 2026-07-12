@@ -2,6 +2,7 @@ package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
+import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -21,6 +22,7 @@ public class Customer extends BaseEntity {
     /**
      * 会社名
      */
+    @NotBlank(message = "会社名は必須です")
     private String companyName;
 
     /**

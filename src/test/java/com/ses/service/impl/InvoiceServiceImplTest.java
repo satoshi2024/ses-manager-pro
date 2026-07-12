@@ -8,6 +8,7 @@ import com.ses.entity.InvoiceItem;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,9 @@ public class InvoiceServiceImplTest {
     @Mock
     private CustomerMapper customerMapper;
 
+    @Mock
+    private SystemConfigService systemConfigService;
+
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
 
@@ -61,6 +65,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(invoiceMapper.insert(any(Invoice.class))).thenReturn(1);
         when(invoiceItemMapper.insert(any(InvoiceItem.class))).thenReturn(1);
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
 
         Invoice invoice = invoiceService.generate(customerId, billingMonth);
 

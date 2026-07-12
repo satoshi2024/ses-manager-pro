@@ -12,6 +12,7 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.service.InvoiceService;
+import com.ses.service.SystemConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private CustomerMapper customerMapper;
 
+    @Autowired
+    private SystemConfigService systemConfigService;
+
     @Override
     @Transactional
     public Invoice generate(Long customerId, String billingMonth) {
@@ -45,7 +49,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             }
         }
 
-        BigDecimal tax = subtotal.multiply(new BigDecimal("0.1")).setScale(0, RoundingMode.DOWN);
+        BigDecimal taxRate = systemConfigService.getDecimal("billing.tax-rate", new BigDecimal("0.10"));
+        BigDecimal tax = subtotal.multiply(taxRate).setScale(0, RoundingMode.DOWN);
         BigDecimal total = subtotal.add(tax);
 
         Invoice invoice = new Invoice();

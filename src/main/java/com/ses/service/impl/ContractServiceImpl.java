@@ -79,13 +79,21 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public void updateWithBusinessRules(Contract contract) {
         validate(contract);
-        
+
         Contract old = this.baseMapper.selectById(contract.getId());
+        if (old == null) {
+            throw new BusinessException("更新対象の契約が見つかりません");
+        }
         this.baseMapper.updateById(contract);
 
         String newStatus = contract.getStatus();
-        if (("終了".equals(newStatus) || "解約".equals(newStatus)) 
-                && !newStatus.equals(old.getStatus())) {
+        if (newStatus == null || newStatus.equals(old.getStatus())) {
+            return;
+        }
+        if ("稼動中".equals(newStatus)) {
+            // 準備中→稼動中 などの更新経由でも要員ステータスを連動させる
+            engineerStatusService.onContractActive(contract.getEngineerId());
+        } else if ("終了".equals(newStatus) || "解約".equals(newStatus)) {
             engineerStatusService.releaseIfIdle(contract.getEngineerId());
         }
     }

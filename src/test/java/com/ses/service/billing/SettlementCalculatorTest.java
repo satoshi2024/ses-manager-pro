@@ -65,4 +65,18 @@ class SettlementCalculatorTest {
         BigDecimal amount = SettlementCalculator.calc(unitPrice, hoursMin, hoursMax, actualHours);
         assertThat(amount).isEqualByComparingTo("557142");
     }
+
+    @Test
+    void 上限が0の場合はゼロ除算せず固定扱いになる() {
+        BigDecimal amount = SettlementCalculator.calc(
+                new BigDecimal("50"), new BigDecimal("0"), new BigDecimal("0"), new BigDecimal("200"));
+        assertThat(amount).isEqualByComparingTo("500000");
+    }
+
+    @Test
+    void 下限が0で実績が下回る場合も固定扱いになる() {
+        BigDecimal amount = SettlementCalculator.calc(
+                new BigDecimal("50"), new BigDecimal("0"), new BigDecimal("180"), new BigDecimal("100"));
+        assertThat(amount).isEqualByComparingTo("500000");
+    }
 }
