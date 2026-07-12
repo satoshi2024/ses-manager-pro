@@ -44,7 +44,9 @@ public class EngineerApiController {
         }
         if (skillIds != null && !skillIds.isEmpty()) {
             for (Long skillId : skillIds) {
-                java.util.Objects.requireNonNull(skillId, "skillId cannot be null");
+                if (skillId == null) {
+                    continue;
+                }
                 queryWrapper.inSql(Engineer::getId,
                     "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
             }

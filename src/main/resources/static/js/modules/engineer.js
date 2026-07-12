@@ -27,6 +27,7 @@ function loadSearchSkills() {
             if (res.code === 200 && res.data) {
                 const select = $('#searchSkill');
                 select.empty();
+                select.append('<option value="">すべて</option>');
                 // group by category
                 const groups = {};
                 res.data.forEach(skill => {
@@ -147,9 +148,14 @@ function applyRailwaySelection() {
 
 function loadEngineers(page = 1) {
     let skillIdsStr = '';
-    const selectedSkills = $('#searchSkill').val();
-    if (selectedSkills && selectedSkills.length > 0) {
-        skillIdsStr = selectedSkills.join(','); // We can send them as comma separated or multiple parameters depending on Spring Boot setup. Usually Spring MVC binds multiple params nicely if we send them as an array.
+    let selectedSkills = $('#searchSkill').val();
+    if (selectedSkills) {
+        if (!Array.isArray(selectedSkills)) {
+            selectedSkills = [selectedSkills];
+        }
+        if (selectedSkills.length > 0) {
+            skillIdsStr = selectedSkills.join(','); // We can send them as comma separated or multiple parameters depending on Spring Boot setup. Usually Spring MVC binds multiple params nicely if we send them as an array.
+        }
     }
 
     const data = {
@@ -243,7 +249,7 @@ function renderEngineers(records) {
     
     records.forEach(eng => {
         // Build avatar
-        const initial = eng.fullName ? eng.fullName.charAt(0) : '?';
+        const initial = eng.initialName || (eng.fullName ? eng.fullName.charAt(0) : '?');
         const kana = eng.fullNameKana || '';
         
         // Status Badge
@@ -298,6 +304,7 @@ function editEngineer(id) {
                 $('#eng-status').val(eng.status);
                 $('#eng-experienceYears').val(eng.experienceYears);
                 $('#eng-expectedUnitPrice').val(eng.expectedUnitPrice);
+                $('#eng-resumeSummary').val(eng.resumeSummary || '');
                 
                 // 最寄り駅・都道府県・鉄道会社を復元
                 $('#eng-nearestStation').val(eng.nearestStation || '');
@@ -319,6 +326,48 @@ function editEngineer(id) {
     });
 }
 
+const KANA_TO_ROMAJI = {
+    'ア':'A', 'イ':'I', 'ウ':'U', 'エ':'E', 'オ':'O',
+    'カ':'K', 'キ':'K', 'ク':'K', 'ケ':'K', 'コ':'K',
+    'ガ':'G', 'ギ':'G', 'グ':'G', 'ゲ':'G', 'ゴ':'G',
+    'サ':'S', 'シ':'S', 'ス':'S', 'セ':'S', 'ソ':'S',
+    'ザ':'Z', 'ジ':'Z', 'ズ':'Z', 'ゼ':'Z', 'ゾ':'Z',
+    'タ':'T', 'チ':'T', 'ツ':'T', 'テ':'T', 'ト':'T',
+    'ダ':'D', 'ヂ':'D', 'ヅ':'D', 'デ':'D', 'ド':'D',
+    'ナ':'N', 'ニ':'N', 'ヌ':'N', 'ネ':'N', 'ノ':'N',
+    'ハ':'H', 'ヒ':'H', 'フ':'H', 'ヘ':'H', 'ホ':'H',
+    'バ':'B', 'ビ':'B', 'ブ':'B', 'ベ':'B', 'ボ':'B',
+    'パ':'P', 'ピ':'P', 'プ':'P', 'ペ':'P', 'ポ':'P',
+    'マ':'M', 'ミ':'M', 'ム':'M', 'メ':'M', 'モ':'M',
+    'ヤ':'Y', 'ユ':'Y', 'ヨ':'Y',
+    'ラ':'R', 'リ':'R', 'ル':'R', 'レ':'R', 'ロ':'R',
+    'ワ':'W', 'ヲ':'W', 'ン':'N'
+};
+
+function extractInitials(fullName, kanaName) {
+    let nameToProcess = kanaName || fullName;
+    if (!nameToProcess) return '?';
+    
+    // Convert half-width kana to full-width or deal with it (simplification: assume full-width or Kanji)
+    // Split by spaces (half or full width)
+    const parts = nameToProcess.trim().split(/[\s　]+/);
+    let initials = [];
+    
+    for (let p of parts) {
+        if (p.length > 0) {
+            const firstChar = p.charAt(0);
+            const romaji = KANA_TO_ROMAJI[firstChar];
+            if (romaji) {
+                initials.push(romaji);
+            } else {
+                initials.push(firstChar.toUpperCase()); // Fallback to Kanji or English letter
+            }
+        }
+    }
+    
+    return initials.length > 0 ? initials.join('.') : '?';
+}
+
 function saveEngineer() {
     const fullName = $('#eng-fullName').val();
     if (!fullName) {
@@ -328,17 +377,21 @@ function saveEngineer() {
     
     const id = $('#eng-id').val();
     const nearestStation = $('#eng-nearestStation').val() || '';
+    const fullNameKana = $('#eng-fullNameKana').val();
+    const computedInitial = extractInitials(fullName, fullNameKana);
 
     const data = {
         fullName: fullName,
-        fullNameKana: $('#eng-fullNameKana').val(),
+        fullNameKana: fullNameKana,
+        initialName: computedInitial,
         employmentType: $('#eng-employmentType').val(),
         status: $('#eng-status').val(),
         experienceYears: $('#eng-experienceYears').val() ? parseInt($('#eng-experienceYears').val()) : null,
         expectedUnitPrice: $('#eng-expectedUnitPrice').val() ? parseInt($('#eng-expectedUnitPrice').val()) : null,
         nearestStation: nearestStation,
         prefecture: $('#eng-prefecture').val() || null,
-        railwayCompany: $('#eng-railwayCompany').val() || null
+        railwayCompany: $('#eng-railwayCompany').val() || null,
+        resumeSummary: $('#eng-resumeSummary').val() || null
     };
 
     if (id) {

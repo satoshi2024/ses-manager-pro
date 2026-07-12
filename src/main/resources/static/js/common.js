@@ -216,6 +216,32 @@ const SES = {
             }
         }
     },
+    autocomplete: {
+        init: function() {
+            this.loadDatalist('/api/autocomplete/engineers', 'engineer-list');
+            this.loadDatalist('/api/autocomplete/customers', 'customer-list');
+            this.loadDatalist('/api/autocomplete/projects', 'project-list');
+            this.loadDatalist('/api/autocomplete/users', 'user-list');
+        },
+        loadDatalist: async function(url, listId) {
+            const datalist = document.getElementById(listId);
+            if (!datalist) return;
+            try {
+                const names = await SES.api.get(url);
+                if (names && names.length > 0) {
+                    let html = '';
+                    names.forEach(name => {
+                        // Escape quotes for safe HTML insertion
+                        const safeName = name.replace(/"/g, '&quot;');
+                        html += `<option value="${safeName}"></option>`;
+                    });
+                    datalist.innerHTML = html;
+                }
+            } catch (e) {
+                console.error(`Failed to load autocomplete data for ${listId}`, e);
+            }
+        }
+    },
     
     /**
      * HTMLエスケープ（XSS対策）。ユーザー入力由来の文字列をHTMLへ埋め込む際は必ず通すこと。
@@ -334,7 +360,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // 3. 通知の初期化
     SES.notification.load();
     
-    // 4. ツールチップの初期化 (Bootstrap)
+    // 4. サジェストの初期化
+    SES.autocomplete.init();
+    
+    // 5. ツールチップの初期化 (Bootstrap)
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
     [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
     

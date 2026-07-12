@@ -35,7 +35,8 @@
                     <form id="searchForm" onsubmit="event.preventDefault(); loadUsers(1);" class="row g-3 align-items-end">
                         <div class="col-md-4">
                             <label for="searchUsername" class="form-label text-muted small">ログインID</label>
-                            <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" placeholder="例: yamada">
+                            <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" placeholder="例: yamada" list="user-list">
+                            <datalist id="user-list"></datalist>
                         </div>
                         <div class="col-md-3">
                             <label for="searchRole" class="form-label text-muted small">ロール</label>

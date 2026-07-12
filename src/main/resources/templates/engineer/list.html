@@ -34,7 +34,8 @@
                     <label for="searchName" class="form-label text-muted small">名前</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" placeholder="山田 太郎">
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" placeholder="山田 太郎" list="engineer-list">
+                        <datalist id="engineer-list"></datalist>
                     </div>
                 </div>
                 <div class="col-md-2">
@@ -58,7 +59,8 @@
                 </div>
                 <div class="col-md-3">
                     <label for="searchSkill" class="form-label text-muted small">スキル</label>
-                    <select class="form-select bg-dark border-secondary text-light" id="searchSkill" name="skillIds" multiple size="2">
+                    <select class="form-select bg-dark border-secondary text-light" id="searchSkill" name="skillId">
+                        <option value="">すべて</option>
                     </select>
                 </div>
                 <div class="col-md-2">
@@ -206,6 +208,10 @@
                             <input type="hidden" id="eng-prefecture">
                             <input type="hidden" id="eng-railwayCompany">
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">経歴サマリ</label>
+                            <textarea id="eng-resumeSummary" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3" placeholder="経歴の要約を入力してください"></textarea>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
@@ -225,6 +231,7 @@
         document.getElementById('engineerModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('engineer-form').reset();
             document.getElementById('eng-id').value = '';
+            document.getElementById('eng-resumeSummary').value = '';
             // 最寄り駅まわりの派生表示・hidden値もリセットする
             document.getElementById('eng-prefecture').value = '';
             document.getElementById('eng-railwayCompany').value = '';

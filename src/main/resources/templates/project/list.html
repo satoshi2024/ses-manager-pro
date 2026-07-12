@@ -22,12 +22,14 @@
                     <label for="searchProjectName" class="form-label text-muted small">案件名</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-success" id="searchProjectName" name="projectName" placeholder="金融系システム移行など">
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-success" id="searchProjectName" name="projectName" placeholder="金融系システム移行など" list="project-list">
+                        <datalist id="project-list"></datalist>
                     </div>
                 </div>
                 <div class="col-md-3">
                     <label for="searchCustomer" class="form-label text-muted small">顧客</label>
-                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchCustomer" name="customer" placeholder="会社名">
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchCustomer" name="customer" placeholder="会社名" list="customer-list">
+                    <datalist id="customer-list"></datalist>
                 </div>
                 <div class="col-md-3">
                     <label for="searchStatus" class="form-label text-muted small">ステータス</label>

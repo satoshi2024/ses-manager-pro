@@ -1,4 +1,4 @@
-package com.ses.controller;
+package com.ses.controller.page;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
  */
 @Controller
 @RequestMapping("/ai")
-public class AiController {
+public class AiPageController {
 
     /**
      * AIマッチング画面

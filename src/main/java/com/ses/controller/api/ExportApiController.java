@@ -80,6 +80,9 @@ public class ExportApiController {
         }
         if (skillIds != null && !skillIds.isEmpty()) {
             for (Long skillId : skillIds) {
+                if (skillId == null) {
+                    continue;
+                }
                 queryWrapper.inSql(Engineer::getId,
                         "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
             }

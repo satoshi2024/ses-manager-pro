@@ -43,7 +43,7 @@ function renderEngineerDetail(eng) {
     // Update Header
     $('#eng-name').text(eng.fullName);
     $('#eng-initial').text(`(${eng.initialName || '-'})`);
-
+    $('#eng-avatar-initial').text(eng.initialName || '-');
     // Update Profile Card
     $('#det-name').text(eng.fullName);
 
