@@ -72,6 +72,16 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- ========== Flyway (DBマイグレーション管理) ========== -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <!-- H2 Database (for local rapid prototyping) -->
         <dependency>
             <groupId>com.h2database</groupId>

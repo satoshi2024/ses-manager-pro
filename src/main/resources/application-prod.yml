@@ -1,0 +1,18 @@
+# ========================================
+# SES Manager Pro - 本番環境プロファイル設定
+# `--spring.profiles.active=prod` または `SPRING_PROFILES_ACTIVE=prod` で有効化。
+# application.yml の値をこのファイルで上書きする。
+# ========================================
+
+spring:
+  # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
+  flyway:
+    locations: classpath:db/migration,classpath:db/migration-prod
+
+# ===== ログ（本番はSQL・パラメータ・パスワードハッシュ等の機密情報を残さない） =====
+logging:
+  level:
+    root: WARN
+    com.ses: INFO
+    com.baomidou.mybatisplus: WARN
+    org.springframework.security: WARN
