@@ -6,5 +6,7 @@
 -- ============================================================
 
 ALTER TABLE t_engineer
-  ADD COLUMN prefecture      VARCHAR(50)  COMMENT '最寄り駅の都道府県'        AFTER nearest_station,
+  ADD COLUMN prefecture      VARCHAR(50)  COMMENT '最寄り駅の都道府県'        AFTER nearest_station;
+
+ALTER TABLE t_engineer
   ADD COLUMN railway_company VARCHAR(150) COMMENT '最寄り駅の鉄道会社・路線'  AFTER prefecture;

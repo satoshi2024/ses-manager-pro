@@ -36,7 +36,7 @@ class CsrfProtectionTest {
             "{\"fullName\":\"山田太郎\",\"employmentType\":\"正社員\",\"status\":\"Bench\"}";
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void post_トークン無しは403() throws Exception {
         mockMvc.perform(post("/api/engineers")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -45,7 +45,7 @@ class CsrfProtectionTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void post_トークン付きは通過する() throws Exception {
         when(engineerService.save(any())).thenReturn(true);
         mockMvc.perform(post("/api/engineers").with(csrf())

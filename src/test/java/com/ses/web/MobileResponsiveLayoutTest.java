@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
-@WithMockUser(username = "admin")
+@WithMockUser(username = "admin", roles = "管理者")
 class MobileResponsiveLayoutTest {
 
     @Autowired

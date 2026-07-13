@@ -5,8 +5,8 @@
 --   m_skill_tag       : updated_at / deleted_flag 列を持たない
 --   m_email_template  : deleted_flag 列を持たない
 -- H2(MySQLモード)が解釈できない ENUM / ENGINE / インライン INDEX は使用しない。
-
-DROP TABLE IF EXISTS t_proposal;
+SET REFERENTIAL_INTEGRITY FALSE;
+DROP TABLE IF EXISTS t_proposal CASCADE;
 CREATE TABLE t_proposal (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   engineer_id         BIGINT,
@@ -25,7 +25,7 @@ CREATE TABLE t_proposal (
   deleted_flag        TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_ai_log;
+DROP TABLE IF EXISTS t_ai_log CASCADE;
 CREATE TABLE t_ai_log (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_type   VARCHAR(20),
@@ -37,7 +37,7 @@ CREATE TABLE t_ai_log (
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS m_skill_tag;
+DROP TABLE IF EXISTS m_skill_tag CASCADE;
 CREATE TABLE m_skill_tag (
   id         BIGINT AUTO_INCREMENT PRIMARY KEY,
   skill_name VARCHAR(100),
@@ -45,7 +45,7 @@ CREATE TABLE m_skill_tag (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS m_email_template;
+DROP TABLE IF EXISTS m_email_template CASCADE;
 CREATE TABLE m_email_template (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
   template_name    VARCHAR(100),
@@ -56,7 +56,7 @@ CREATE TABLE m_email_template (
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS t_notification;
+DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
   type        VARCHAR(30)  NOT NULL,
@@ -67,7 +67,7 @@ CREATE TABLE t_notification (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS t_notification_read;
+DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   notification_id BIGINT NOT NULL,
@@ -76,7 +76,7 @@ CREATE TABLE t_notification_read (
   UNIQUE KEY uk_notification_read (notification_id, user_id)
 );
 
-DROP TABLE IF EXISTS t_proposal_history;
+DROP TABLE IF EXISTS t_proposal_history CASCADE;
 CREATE TABLE t_proposal_history (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   proposal_id     BIGINT NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE t_proposal_history (
   remarks         TEXT
 );
 
-DROP TABLE IF EXISTS m_menu;
+DROP TABLE IF EXISTS m_menu CASCADE;
 CREATE TABLE m_menu (
   id         BIGINT AUTO_INCREMENT PRIMARY KEY,
   menu_key   VARCHAR(50) NOT NULL,
@@ -97,7 +97,7 @@ CREATE TABLE m_menu (
   sort_order INT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_role_menu;
+DROP TABLE IF EXISTS t_role_menu CASCADE;
 CREATE TABLE t_role_menu (
   id       BIGINT AUTO_INCREMENT PRIMARY KEY,
   role     VARCHAR(50) NOT NULL,

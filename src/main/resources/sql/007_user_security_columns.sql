@@ -5,5 +5,7 @@
 -- ============================================================
 
 ALTER TABLE sys_user
-  ADD COLUMN failed_count INT      DEFAULT 0 COMMENT 'ログイン失敗回数',
+  ADD COLUMN failed_count INT      DEFAULT 0 COMMENT 'ログイン失敗回数';
+
+ALTER TABLE sys_user
   ADD COLUMN locked_until DATETIME NULL      COMMENT 'アカウントロック解除日時';

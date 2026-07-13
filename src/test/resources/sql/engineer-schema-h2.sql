@@ -1,8 +1,8 @@
 -- 削除機能検証用の最小スキーマ（H2 / MySQLモード互換）
 -- 本番の 001_create_tables.sql は ENUM / ENGINE=InnoDB / インライン INDEX など
 -- H2 が解釈できない構文を含むため、検証に必要な列だけを持つ簡易版を用意する。
-
-DROP TABLE IF EXISTS m_customer;
+SET REFERENTIAL_INTEGRITY FALSE;
+DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   company_name      VARCHAR(200) NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE m_customer (
   deleted_flag      TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_engineer;
+DROP TABLE IF EXISTS t_engineer CASCADE;
 
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -47,7 +47,7 @@ CREATE TABLE t_engineer (
   deleted_flag        TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS m_skill_tag;
+DROP TABLE IF EXISTS m_skill_tag CASCADE;
 CREATE TABLE m_skill_tag (
   id         BIGINT       AUTO_INCREMENT PRIMARY KEY,
   skill_name VARCHAR(100) NOT NULL,
@@ -55,7 +55,7 @@ CREATE TABLE m_skill_tag (
   created_at DATETIME
 );
 
-DROP TABLE IF EXISTS t_engineer_skill;
+DROP TABLE IF EXISTS t_engineer_skill CASCADE;
 CREATE TABLE t_engineer_skill (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
   engineer_id      BIGINT NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE t_engineer_skill (
   experience_years INT
 );
 
-DROP TABLE IF EXISTS t_engineer_career;
+DROP TABLE IF EXISTS t_engineer_career CASCADE;
 CREATE TABLE t_engineer_career (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
   engineer_id     BIGINT       NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE t_engineer_career (
   team_size       INT
 );
 
-DROP TABLE IF EXISTS t_project_skill;
+DROP TABLE IF EXISTS t_project_skill CASCADE;
 CREATE TABLE t_project_skill (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   project_id     BIGINT NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE t_project_skill (
   is_must        TINYINT DEFAULT 1
 );
 
-DROP TABLE IF EXISTS t_notification;
+DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
   type        VARCHAR(30)  NOT NULL,
@@ -98,7 +98,7 @@ CREATE TABLE t_notification (
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS t_notification_read;
+DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   notification_id BIGINT NOT NULL,
@@ -107,12 +107,20 @@ CREATE TABLE t_notification_read (
   UNIQUE KEY uk_notification_read (notification_id, user_id)
 );
 
-DROP TABLE IF EXISTS t_project;
+DROP TABLE IF EXISTS t_project CASCADE;
 CREATE TABLE t_project (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   project_name      VARCHAR(200) NOT NULL,
   customer_id       BIGINT,
   status            VARCHAR(30) DEFAULT '募集中',
+  commercial_flow   VARCHAR(50),
+  description       TEXT,
+  required_count    INT,
+  unit_price_min    DECIMAL(10,0),
+  unit_price_max    DECIMAL(10,0),
+  work_location     VARCHAR(200),
+  remote_type       VARCHAR(50),
+  priority          VARCHAR(20),
   start_date        DATE,
   end_date          DATE,
   remarks           TEXT,
@@ -122,7 +130,7 @@ CREATE TABLE t_project (
   deleted_flag      TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_contract;
+DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
   contract_no             VARCHAR(50),
@@ -147,7 +155,7 @@ CREATE TABLE t_contract (
   deleted_flag            TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_proposal;
+DROP TABLE IF EXISTS t_proposal CASCADE;
 
 -- Proposal エンティティのマッピング（proposed_unit_price / proposed_by 等）と一致させること。
 -- t_proposal に created_at 列は無い（作成日時は proposed_at。エンティティ側も exist=false）。
@@ -169,7 +177,7 @@ CREATE TABLE t_proposal (
   deleted_flag        TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_proposal_history;
+DROP TABLE IF EXISTS t_proposal_history CASCADE;
 CREATE TABLE t_proposal_history (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   proposal_id     BIGINT NOT NULL,
@@ -180,7 +188,7 @@ CREATE TABLE t_proposal_history (
   remarks         TEXT
 );
 
-DROP TABLE IF EXISTS t_work_record;
+DROP TABLE IF EXISTS t_work_record CASCADE;
 CREATE TABLE t_work_record (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   contract_id    BIGINT NOT NULL,
@@ -196,7 +204,7 @@ CREATE TABLE t_work_record (
   UNIQUE KEY uk_work_record (contract_id, work_month)
 );
 
-DROP TABLE IF EXISTS t_invoice;
+DROP TABLE IF EXISTS t_invoice CASCADE;
 CREATE TABLE t_invoice (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   invoice_no    VARCHAR(30) NOT NULL UNIQUE,
@@ -215,7 +223,7 @@ CREATE TABLE t_invoice (
   deleted_flag  TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_invoice_item;
+DROP TABLE IF EXISTS t_invoice_item CASCADE;
 CREATE TABLE t_invoice_item (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   invoice_id     BIGINT NOT NULL,
@@ -224,7 +232,7 @@ CREATE TABLE t_invoice_item (
   amount         DECIMAL(12,0) NOT NULL
 );
 
-DROP TABLE IF EXISTS t_bp_payment;
+DROP TABLE IF EXISTS t_bp_payment CASCADE;
 CREATE TABLE t_bp_payment (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   work_record_id BIGINT NOT NULL UNIQUE,
@@ -236,7 +244,7 @@ CREATE TABLE t_bp_payment (
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-DROP TABLE IF EXISTS t_sales_activity;
+DROP TABLE IF EXISTS t_sales_activity CASCADE;
 CREATE TABLE t_sales_activity (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
   customer_id      BIGINT NOT NULL,
@@ -252,7 +260,7 @@ CREATE TABLE t_sales_activity (
   deleted_flag     TINYINT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS m_menu;
+DROP TABLE IF EXISTS m_menu CASCADE;
 CREATE TABLE m_menu (
   id         BIGINT AUTO_INCREMENT PRIMARY KEY,
   menu_key   VARCHAR(50) NOT NULL,
@@ -262,7 +270,7 @@ CREATE TABLE m_menu (
   sort_order INT DEFAULT 0
 );
 
-DROP TABLE IF EXISTS t_role_menu;
+DROP TABLE IF EXISTS t_role_menu CASCADE;
 CREATE TABLE t_role_menu (
   id       BIGINT AUTO_INCREMENT PRIMARY KEY,
   role     VARCHAR(50) NOT NULL,

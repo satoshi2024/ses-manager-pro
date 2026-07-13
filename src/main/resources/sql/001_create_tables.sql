@@ -9,12 +9,19 @@
 -- ============================================================
 -- テーブル削除（依存関係の逆順）
 -- ============================================================
+DROP TABLE IF EXISTS t_notification_read;
+DROP TABLE IF EXISTS t_notification;
+DROP TABLE IF EXISTS t_sales_activity;
 DROP TABLE IF EXISTS t_role_menu;
 DROP TABLE IF EXISTS m_menu;
 DROP TABLE IF EXISTS m_system_config;
 DROP TABLE IF EXISTS m_email_template;
 DROP TABLE IF EXISTS t_ai_log;
 DROP TABLE IF EXISTS t_proposal_history;
+DROP TABLE IF EXISTS t_bp_payment;
+DROP TABLE IF EXISTS t_invoice_item;
+DROP TABLE IF EXISTS t_invoice;
+DROP TABLE IF EXISTS t_work_record;
 DROP TABLE IF EXISTS t_contract;
 DROP TABLE IF EXISTS t_proposal;
 DROP TABLE IF EXISTS t_project_skill;

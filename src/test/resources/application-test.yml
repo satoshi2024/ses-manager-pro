@@ -1,12 +1,51 @@
 spring:
   datasource:
     url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
-    driverClassName: org.h2.Driver
+    driver-class-name: org.h2.Driver
     username: sa
     password:
   sql:
     init:
       mode: always
+      encoding: UTF-8
+      schema-locations:
+        - classpath:sql/001_create_tables.sql
+        - classpath:sql/002_init_master_data.sql
+        - classpath:sql/004_create_notification.sql
+        - classpath:sql/005_create_work_record_billing.sql
+        - classpath:sql/006_create_sales_activity.sql
+        - classpath:sql/007_create_analytics_report.sql
+        - classpath:sql/007_user_security_columns.sql
+        - classpath:sql/008_system_config_and_menu.sql
+      data-locations:
+        - classpath:sql/dummy.sql
+
+  h2:
+    console:
+      enabled: false
+
+# MyBatis Plus for test
 mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.ses.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deletedFlag
+      logic-delete-value: 1
+      logic-not-delete-value: 0
   configuration:
     map-underscore-to-camel-case: true
+
+app:
+  upload:
+    base-path: ./target/test-uploads
+  mail:
+    from: test@example.com
+
+ai:
+  enabled: false
+
+logging:
+  level:
+    com.ses: DEBUG
