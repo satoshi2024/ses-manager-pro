@@ -48,16 +48,28 @@
                 });
         });
 
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
         function renderInvoice(data) {
             const date = new Date();
             const today = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-            
+            const taxPct = data.taxRatePercent || '10';
+
+            // 発行者(自社)情報: 登録番号は未設定なら行ごと非表示
+            const issuerName = data.companyName || '';
+            const regLine = data.companyRegistrationNumber
+                ? `登録番号: ${esc(data.companyRegistrationNumber)}<br>` : '';
+            const addrLine = data.companyAddress ? `${esc(data.companyAddress)}<br>` : '';
+
             let itemsHtml = '';
             if (data.items) {
                 data.items.forEach(item => {
                     itemsHtml += `
                         <tr class="item">
-                            <td>${item.description || ''}</td>
+                            <td>${esc(item.description || '')}</td>
                             <td class="text-right">￥${item.amount.toLocaleString()}</td>
                         </tr>
                     `;
@@ -74,8 +86,10 @@
                                         <h2>請求書</h2>
                                     </td>
                                     <td class="text-right">
-                                        請求書番号: ${data.invoiceNo}<br>
+                                        請求書番号: ${esc(data.invoiceNo)}<br>
                                         発行日: ${data.issuedDate || today}<br>
+                                        対象月: ${esc(data.billingMonth) || ''}<br>
+                                        ${data.dueDate ? 'お支払期限: ' + esc(data.dueDate) + '<br>' : ''}
                                     </td>
                                 </tr>
                             </table>
@@ -86,11 +100,12 @@
                             <table>
                                 <tr>
                                     <td>
-                                        ${data.customer ? data.customer.companyName : ''} 御中<br>
+                                        ${data.customer ? esc(data.customer.companyName) : ''} 御中<br>
                                     </td>
                                     <td class="text-right">
-                                        株式会社KIRO<br>
-                                        東京都XXX<br>
+                                        ${esc(issuerName)}<br>
+                                        ${addrLine}
+                                        ${regLine}
                                     </td>
                                 </tr>
                             </table>
@@ -104,11 +119,11 @@
                     </tr>
                     ${itemsHtml}
                     <tr class="total">
-                        <td class="text-right">小計:</td>
+                        <td class="text-right">${taxPct}%対象 小計:</td>
                         <td class="text-right">￥${data.subtotal.toLocaleString()}</td>
                     </tr>
                     <tr class="total">
-                        <td class="text-right">消費税(10%):</td>
+                        <td class="text-right">消費税(${taxPct}%):</td>
                         <td class="text-right">￥${data.tax.toLocaleString()}</td>
                     </tr>
                     <tr class="total">

@@ -17,6 +17,8 @@ spring:
         - classpath:db/migration/V7__create_analytics_report.sql
         - classpath:db/migration/V8__user_security_columns.sql
         - classpath:db/migration/V9__system_config_and_menu.sql
+        - classpath:sql/schema-audit-log-h2.sql
+        - classpath:sql/schema-invoice-duedate-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

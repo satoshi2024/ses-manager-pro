@@ -7,16 +7,19 @@ import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.Proposal;
 import com.ses.entity.SalesActivity;
+import com.ses.entity.Invoice;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
+import com.ses.mapper.InvoiceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Service
@@ -29,6 +32,7 @@ public class NotificationGenerateService {
     private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
     private final CustomerMapper customerMapper;
+    private final InvoiceMapper invoiceMapper;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
 
@@ -38,6 +42,28 @@ public class NotificationGenerateService {
         benchLong();
         projectUrgent();
         followUpDue();
+        invoiceOverdue();
+    }
+
+    /**
+     * 支払期限を超過した未入金請求書を通知する。
+     * 冪等性: dedupe_key = INVOICE_OVERDUE:{invoiceId}:{today}
+     * （取消済み請求書は MyBatis-Plus の論理削除フィルタで自動除外される）
+     */
+    public void invoiceOverdue() {
+        LocalDate today = LocalDate.now();
+        QueryWrapper<Invoice> qw = new QueryWrapper<>();
+        qw.ne("status", "入金済")
+          .isNotNull("due_date")
+          .lt("due_date", today);
+        List<Invoice> invoices = invoiceMapper.selectList(qw);
+        for (Invoice inv : invoices) {
+            String customerName = getCustomerName(inv.getCustomerId());
+            long days = ChronoUnit.DAYS.between(inv.getDueDate(), today);
+            String dedupeKey = "INVOICE_OVERDUE:" + inv.getId() + ":" + today;
+            String message = "請求書 " + inv.getInvoiceNo() + "（" + customerName + "）が支払期限を" + days + "日超過しています";
+            notificationService.publish("INVOICE_OVERDUE", "支払期限超過", message, "/invoice/list", dedupeKey);
+        }
     }
 
     private void contractEnding() {

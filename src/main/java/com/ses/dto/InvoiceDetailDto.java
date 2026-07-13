@@ -13,4 +13,11 @@ import java.util.List;
 public class InvoiceDetailDto extends Invoice {
     private Customer customer;
     private List<InvoiceItem> items;
+
+    // 適格請求書(インボイス制度)の記載事項: 発行者情報と適用税率
+    private String companyName;
+    private String companyRegistrationNumber;
+    private String companyAddress;
+    /** 適用税率(パーセント表記の整数文字列。例: "10") */
+    private String taxRatePercent;
 }

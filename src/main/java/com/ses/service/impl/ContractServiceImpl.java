@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
+import com.ses.entity.Project;
+import com.ses.entity.Proposal;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerStatusService;
@@ -14,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import com.ses.entity.WorkRecord;
@@ -27,6 +31,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
+    private final ProjectMapper projectMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -126,5 +131,40 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         return this.baseMapper.selectCount(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, "稼動中")) > 0;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Contract createDraftFromProposal(Proposal proposal) {
+        // 冪等性: 同一提案から生成済みの契約があればそれを返す
+        Contract existing = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
+                .eq(Contract::getProposalId, proposal.getId())
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return existing;
+        }
+
+        Project project = projectMapper.selectById(proposal.getProjectId());
+        if (project == null) {
+            throw new BusinessException("提案の案件が見つかりません");
+        }
+
+        Contract contract = new Contract();
+        contract.setProposalId(proposal.getId());
+        contract.setEngineerId(proposal.getEngineerId());
+        contract.setProjectId(proposal.getProjectId());
+        contract.setCustomerId(project.getCustomerId());
+        contract.setContractType("準委任");
+        // 売上単価は提案の提示単価を引継ぐ。NOT NULL制約のためNULL時は0(ドラフトのため後で編集)。
+        contract.setSellingPrice(proposal.getProposedUnitPrice() != null ? proposal.getProposedUnitPrice() : BigDecimal.ZERO);
+        // 原価単価は提案段階では未確定のため0を仮置き(ドラフトのため後で編集)。
+        contract.setCostPrice(BigDecimal.ZERO);
+        contract.setStartDate(LocalDate.now().plusMonths(1).withDayOfMonth(1));
+        contract.setStatus("準備中");
+        contract.setRemarks("提案#" + proposal.getId() + "の成約により自動生成");
+
+        // saveWithBusinessRules で採番・検証を再利用（準備中のため要員ステータス連動は発火しない）
+        saveWithBusinessRules(contract);
+        return contract;
     }
 }

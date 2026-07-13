@@ -76,7 +76,11 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
             info.setFont(normalFont);
             info.add("請求書番号: " + nz(detail.getInvoiceNo()) + "\n");
             info.add("発行日: " + (detail.getIssuedDate() != null ? detail.getIssuedDate().toString() : "-") + "\n");
-            info.add("対象月: " + nz(detail.getBillingMonth()) + "\n\n");
+            info.add("対象月: " + nz(detail.getBillingMonth()) + "\n");
+            if (detail.getDueDate() != null) {
+                info.add("お支払期限: " + detail.getDueDate() + "\n");
+            }
+            info.add("\n");
             if (detail.getCustomer() != null) {
                 info.add(nz(detail.getCustomer().getCompanyName()) + " 御中\n\n");
             }
@@ -95,6 +99,15 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
             document.add(new Paragraph(" "));
             String companyName = systemConfigService.getString("company.name", "SES Manager Pro");
             document.add(new Paragraph(companyName, normalFont));
+            String companyAddress = systemConfigService.getString("company.address", "");
+            if (StringUtils.hasText(companyAddress)) {
+                document.add(new Paragraph(companyAddress, normalFont));
+            }
+            // 適格請求書発行事業者 登録番号(未設定なら出力しない)
+            String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
+            if (StringUtils.hasText(registrationNo)) {
+                document.add(new Paragraph("登録番号: " + registrationNo, normalFont));
+            }
 
             document.close();
             return baos.toByteArray();
@@ -132,10 +145,11 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
     }
 
     private Paragraph buildTotalsParagraph(InvoiceDetailDto detail, Font normalFont, Font boldFont) {
+        String taxPct = StringUtils.hasText(detail.getTaxRatePercent()) ? detail.getTaxRatePercent() : "10";
         Paragraph totals = new Paragraph();
         totals.setAlignment(Element.ALIGN_RIGHT);
-        totals.add(new Phrase("小計: " + formatYen(detail.getSubtotal()) + " 円\n", normalFont));
-        totals.add(new Phrase("消費税: " + formatYen(detail.getTax()) + " 円\n", normalFont));
+        totals.add(new Phrase(taxPct + "%対象 小計: " + formatYen(detail.getSubtotal()) + " 円\n", normalFont));
+        totals.add(new Phrase("消費税(" + taxPct + "%): " + formatYen(detail.getTax()) + " 円\n", normalFont));
         totals.add(new Phrase("合計: " + formatYen(detail.getTotal()) + " 円", boldFont));
         return totals;
     }

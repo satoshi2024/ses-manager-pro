@@ -3,7 +3,10 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
+import com.ses.entity.Project;
+import com.ses.entity.Proposal;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.service.EngineerStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +29,9 @@ class ContractServiceImplTest {
 
     @Mock
     private EngineerStatusService engineerStatusService;
+
+    @Mock
+    private ProjectMapper projectMapper;
 
     @InjectMocks
     private ContractServiceImpl contractService;
@@ -185,5 +191,81 @@ class ContractServiceImplTest {
         org.junit.jupiter.api.Assertions.assertThrows(
                 com.ses.common.exception.BusinessException.class,
                 () -> contractService.updateWithBusinessRules(newContract));
+    }
+
+    // ===== WS-G: 成約→契約ドラフト自動生成 =====
+
+    private Proposal proposal(Long id, Long engineerId, Long projectId, BigDecimal unitPrice) {
+        Proposal p = new Proposal();
+        p.setId(id);
+        p.setEngineerId(engineerId);
+        p.setProjectId(projectId);
+        p.setProposedUnitPrice(unitPrice);
+        return p;
+    }
+
+    @Test
+    void createDraftFromProposal_generatesDraftInPreparingStatus() {
+        Proposal p = proposal(50L, 2L, 9L, new BigDecimal("650000"));
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        Project prj = new Project();
+        prj.setId(9L);
+        prj.setCustomerId(4L);
+        when(projectMapper.selectById(9L)).thenReturn(prj);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+
+        Contract draft = contractService.createDraftFromProposal(p);
+
+        assertEquals(50L, draft.getProposalId());
+        assertEquals(2L, draft.getEngineerId());
+        assertEquals(9L, draft.getProjectId());
+        assertEquals(4L, draft.getCustomerId());
+        assertEquals("準備中", draft.getStatus());
+        assertEquals(0, new BigDecimal("650000").compareTo(draft.getSellingPrice()));
+        assertNotNull(draft.getContractNo());
+        // 準備中のため要員ステータス連動は発火しない
+        verify(engineerStatusService, never()).onContractActive(any());
+    }
+
+    @Test
+    void createDraftFromProposal_isIdempotent() {
+        Proposal p = proposal(50L, 2L, 9L, null);
+        Contract existing = new Contract();
+        existing.setId(77L);
+        existing.setProposalId(50L);
+        when(contractMapper.selectOne(any())).thenReturn(existing);
+
+        Contract result = contractService.createDraftFromProposal(p);
+
+        assertEquals(77L, result.getId());
+        verify(contractMapper, never()).insert(any(Contract.class));
+    }
+
+    @Test
+    void createDraftFromProposal_projectMissingThrows() {
+        Proposal p = proposal(50L, 2L, 9L, null);
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        when(projectMapper.selectById(9L)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.createDraftFromProposal(p));
+        assertTrue(ex.getMessage().contains("案件が見つかりません"));
+    }
+
+    @Test
+    void createDraftFromProposal_nullUnitPriceDefaultsToZero() {
+        Proposal p = proposal(50L, 2L, 9L, null);
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        Project prj = new Project();
+        prj.setCustomerId(4L);
+        when(projectMapper.selectById(9L)).thenReturn(prj);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+
+        Contract draft = contractService.createDraftFromProposal(p);
+
+        assertEquals(0, BigDecimal.ZERO.compareTo(draft.getSellingPrice()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(draft.getCostPrice()));
     }
 }

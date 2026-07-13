@@ -38,12 +38,20 @@
 ※ `ContractMapper` は WS-B(採番用 `@Select` 追加)と WS-D(一覧用 `@Select` 追加)の両方が触る唯一のファイル。
 どちらも**メソッド追加のみ**なのでコンフリクトしても解決は自明だが、マージ順は B → D を推奨。
 
+## 進捗
+
+- **フェーズ1(A〜E)**: 実装・マージ済み。検証で判明したテスト不備(HTTP規約・テストプロファイル・
+  監査テーブル欠落)を修正し全テストグリーン化済み。
+- **フェーズ2(F, G)**: 実装完了・全325テストグリーン。
+  - WS-F: V13(due_date + 設定シード)、支払期限自動設定、期限超過通知、一覧の期限列、適格請求書出力。
+  - WS-G: **V14 は不要だった**(`t_contract.proposal_id` は V1 に既存)。ドラフト生成のサービス移管のみ実施。
+
 ## マイグレーション採番
 
-| 番号 | ファイル | WS |
-|---|---|---|
-| V13 | `V13__invoice_due_date.sql` | F |
-| V14 | `V14__contract_proposal_link.sql` | G |
+| 番号 | ファイル | WS | 状態 |
+|---|---|---|---|
+| V13 | `V13__invoice_due_date.sql` | F | 作成済み |
+| ~~V14~~ | ~~`V14__contract_proposal_link.sql`~~ | G | **不要**(proposal_id は V1 に既存) |
 
 新マイグレーションは `src/test/resources/application-test.yml` の `spring.sql.init.schema-locations` にも**必ず追記**する
 (テストは Flyway ではなくこのリストで H2 にスキーマ投入している)。H2 の MySQL モードで通る構文にすること。

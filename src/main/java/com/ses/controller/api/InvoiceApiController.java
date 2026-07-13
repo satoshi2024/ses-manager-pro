@@ -40,7 +40,8 @@ public class InvoiceApiController {
                           @RequestParam(defaultValue = "10") long size,
                           @RequestParam(required = false) String month,
                           @RequestParam(required = false) Long customerId,
-                          @RequestParam(required = false) String status) {
+                          @RequestParam(required = false) String status,
+                          @RequestParam(required = false) Boolean overdue) {
         Page<Invoice> page = new Page<>(current, size);
         QueryWrapper<Invoice> query = new QueryWrapper<>();
         if (month != null && !month.isEmpty()) {
@@ -51,6 +52,12 @@ public class InvoiceApiController {
         }
         if (status != null && !status.isEmpty()) {
             query.eq("status", status);
+        }
+        // 支払期限超過(未入金かつ期限日 < 今日)のみに絞り込む
+        if (Boolean.TRUE.equals(overdue)) {
+            query.ne("status", "入金済")
+                 .isNotNull("due_date")
+                 .lt("due_date", java.time.LocalDate.now());
         }
         query.orderByDesc("id");
         return ApiResult.success(invoiceService.page(page, query));

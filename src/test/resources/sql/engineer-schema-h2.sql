@@ -217,6 +217,7 @@ CREATE TABLE t_invoice (
   status        VARCHAR(20) DEFAULT '未送付',
   issued_date   DATE,
   paid_date     DATE,
+  due_date      DATE,
   remarks       VARCHAR(500),
   created_by    BIGINT,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -28,6 +28,12 @@
                                 <div class="col-md-3">
                                     <input type="month" id="billingMonth" class="form-control" placeholder="対象月">
                                 </div>
+                                <div class="col-md-3 d-flex align-items-center">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filterOverdue">
+                                        <label class="form-check-label" for="filterOverdue">期限超過のみ</label>
+                                    </div>
+                                </div>
                                 <div class="col-md-3">
                                     <button id="btnGenerateInvoice" class="btn btn-primary">請求書生成</button>
                                 </div>
@@ -43,6 +49,7 @@
                                             <th>合計</th>
                                             <th>ステータス</th>
                                             <th>発行日</th>
+                                            <th>支払期限</th>
                                             <th>入金日</th>
                                             <th>操作</th>
                                         </tr>

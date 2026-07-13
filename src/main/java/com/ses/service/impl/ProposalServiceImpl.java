@@ -9,6 +9,9 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ProposalHistoryMapper;
 import com.ses.service.EngineerStatusService;
 import com.ses.service.ProposalService;
+import com.ses.service.ContractService;
+import com.ses.service.NotificationService;
+import com.ses.entity.Contract;
 import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,8 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
 
     private final ProposalHistoryMapper proposalHistoryMapper;
     private final EngineerStatusService engineerStatusService;
+    private final ContractService contractService;
+    private final NotificationService notificationService;
 
     private static final Map<String, Set<String>> ALLOWED = Map.of(
         "書類選考中", Set.of("一次面接", "見送り"),
@@ -89,6 +94,18 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         
         if ("見送り".equals(newStatus)) {
             engineerStatusService.releaseIfIdle(proposal.getEngineerId());
+        }
+
+        // 成約時: 契約ドラフト(準備中)を同一トランザクションで自動生成し、確認を促す通知を発行する。
+        // トランザクション失敗時は成約遷移ごとロールバックされる。
+        if ("成約".equals(newStatus)) {
+            Contract draft = contractService.createDraftFromProposal(proposal);
+            notificationService.publish(
+                    "CONTRACT_DRAFT",
+                    "契約ドラフト作成",
+                    "提案の成約により契約ドラフト(" + draft.getContractNo() + ")を作成しました。内容を確認して契約を確定してください",
+                    "/contract/list",
+                    "contract-draft:" + proposal.getId());
         }
     }
 }
