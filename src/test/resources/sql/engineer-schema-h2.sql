@@ -284,7 +284,7 @@ CREATE TABLE t_role_menu (
 );
 
 -- SysUser エンティティ（BaseEntity継承 + failed_count/locked_until）
-DROP TABLE IF EXISTS sys_user;
+DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   username      VARCHAR(50) NOT NULL UNIQUE,
@@ -300,8 +300,14 @@ CREATE TABLE sys_user (
   deleted_flag  TINYINT DEFAULT 0
 );
 
+-- グローバルスキーマ初期化(V2)のadminシードと同一内容を再投入する。
+-- このスクリプトはsys_userを再作成するため、他テストクラスと同一H2インスタンスを
+-- 共有する実行順序次第でadminユーザーが失われる問題を防ぐ。
+INSERT INTO sys_user (username, password, real_name, role, email, status)
+VALUES ('admin', 'admin123', 'システム管理者', '管理者', 'admin@ses.local', 1);
+
 -- SystemConfig エンティティ（文字列PK、BaseEntity非継承）
-DROP TABLE IF EXISTS m_system_config;
+DROP TABLE IF EXISTS m_system_config CASCADE;
 CREATE TABLE m_system_config (
   config_key   VARCHAR(100) PRIMARY KEY,
   config_value TEXT,
@@ -309,7 +315,7 @@ CREATE TABLE m_system_config (
 );
 
 -- AiLog エンティティ（updated_at/deleted_flagはexist=falseで対象外）
-DROP TABLE IF EXISTS t_ai_log;
+DROP TABLE IF EXISTS t_ai_log CASCADE;
 CREATE TABLE t_ai_log (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   request_type   VARCHAR(30),
@@ -322,7 +328,7 @@ CREATE TABLE t_ai_log (
 );
 
 -- EmailTemplate エンティティ（deleted_flagはexist=falseで対象外）
-DROP TABLE IF EXISTS m_email_template;
+DROP TABLE IF EXISTS m_email_template CASCADE;
 CREATE TABLE m_email_template (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
   template_name    VARCHAR(100) NOT NULL,
@@ -334,7 +340,7 @@ CREATE TABLE m_email_template (
 );
 
 -- AuditLog エンティティ（監査ログ、P8フォローアップ）
-DROP TABLE IF EXISTS t_audit_log;
+DROP TABLE IF EXISTS t_audit_log CASCADE;
 CREATE TABLE t_audit_log (
   id         BIGINT AUTO_INCREMENT PRIMARY KEY,
   username   VARCHAR(50),
