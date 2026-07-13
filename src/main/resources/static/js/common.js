@@ -105,7 +105,7 @@ const SES = {
                     <div class="d-flex">
                         <div class="toast-body d-flex align-items-center">
                             <i class="bi ${iconClass} ${textClass} fs-5 me-2"></i>
-                            <span>${message}</span>
+                            <span>${SES.escapeHtml(message)}</span>
                         </div>
                         <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
                     </div>
@@ -231,8 +231,8 @@ const SES = {
                 if (names && names.length > 0) {
                     let html = '';
                     names.forEach(name => {
-                        // Escape quotes for safe HTML insertion
-                        const safeName = name.replace(/"/g, '&quot;');
+                        // 全特殊文字をエスケープ（XSS対策強化）
+                        const safeName = SES.escapeHtml(name);
                         html += `<option value="${safeName}"></option>`;
                     });
                     datalist.innerHTML = html;
@@ -491,8 +491,10 @@ $(function() {
             const contentType = xhr.getResponseHeader('Content-Type') || '';
             if (xhr.status === 200 && contentType.indexOf('text/html') !== -1) {
                 // APIエンドポイントへのリクエストがHTMLを返した = ログインへリダイレクトされた
+                // ※ /api/ を含むリクエストに限定してセッション切れを判定する
+                //   (OR条件の第2項は「/loginを含まないURL全般」を誤判定するため削除)
                 const url = this.url || '';
-                if (url.indexOf('/api/') !== -1 || url.indexOf('/login') === -1) {
+                if (url.indexOf('/api/') !== -1) {
                     Toast.error('セッションが切れました。再ログインしてください。');
                     setTimeout(function() {
                         window.location.href = '/login';

@@ -11,6 +11,7 @@ import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
 import com.ses.service.SysUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,7 +65,9 @@ public class AutocompleteApiController {
                 .collect(Collectors.toList()));
     }
 
+    /** ログインユーザー一覧オートコンプリート。管理者のみ利用可。 */
     @GetMapping("/users")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<List<String>> getUsers() {
         List<String> names = sysUserService.listObjs(
                 new QueryWrapper<SysUser>().select("username"),

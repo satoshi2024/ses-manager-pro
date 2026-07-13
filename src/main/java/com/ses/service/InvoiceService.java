@@ -10,5 +10,7 @@ public interface InvoiceService extends IService<Invoice> {
     Invoice generate(Long customerId, String billingMonth);
     String generateInvoiceNo(String billingMonth);
     void changeStatus(Long id, String status, LocalDate paidDate);
+    void changeBpPaymentStatus(Long id, String status, LocalDate paidDate);
+    void voidInvoice(Long id);
     InvoiceDetailDto detail(Long id);
 }

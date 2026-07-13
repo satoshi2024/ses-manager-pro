@@ -12,6 +12,9 @@ import java.util.List;
 @Mapper
 public interface InvoiceMapper extends BaseMapper<Invoice> {
 
+    @Select("SELECT MAX(invoice_no) FROM t_invoice WHERE invoice_no LIKE CONCAT(#{prefix}, '%')")
+    String selectMaxInvoiceNoIncludingDeleted(@Param("prefix") String prefix);
+
     @Select("""
         SELECT
             w.id AS workRecordId,
@@ -26,7 +29,8 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
           AND w.id NOT IN (
-              SELECT work_record_id FROM t_invoice_item
+              SELECT it.work_record_id FROM t_invoice_item it
+              JOIN t_invoice i ON it.invoice_id = i.id AND i.deleted_flag = 0
           )
     """)
     List<UnbilledWorkRecordDto> selectUnbilledWorkRecords(@Param("customerId") Long customerId, @Param("billingMonth") String billingMonth);

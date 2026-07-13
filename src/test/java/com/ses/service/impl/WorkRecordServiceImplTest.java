@@ -8,6 +8,7 @@ import com.ses.entity.Contract;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.billing.SettlementCalculator;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +42,9 @@ class WorkRecordServiceImplTest {
 
     @Mock
     private BpPaymentMapper bpPaymentMapper;
+
+    @Mock
+    private InvoiceItemMapper invoiceItemMapper;
 
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
@@ -131,5 +135,113 @@ class WorkRecordServiceImplTest {
         workRecordService.confirmMonth(workMonth);
 
         verify(bpPaymentMapper, times(1)).insert(any(BpPayment.class));
+    }
+
+    @Test
+    void testReopenMonth_支払済BP支払ありで例外() {
+        String workMonth = "2026-07";
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+        
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
+
+        assertThatThrownBy(() -> spyService.reopenMonth(workMonth))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("支払済のBP支払が1件あるため解除できません");
+                
+        verify(spyService, never()).updateBatchById(any());
+    }
+
+    @Test
+    void testReopenMonth_未払のみ成功() {
+        String workMonth = "2026-07";
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+        
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(true).when(spyService).updateBatchById(any());
+        
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
+
+        spyService.reopenMonth(workMonth);
+
+        assertThat(r1.getStatus()).isEqualTo("入力中");
+        verify(spyService, times(1)).updateBatchById(any());
+        verify(bpPaymentMapper, times(1)).delete(any());
+    }
+
+    @Test
+    void testReopenMonth_有効請求書の明細ありで例外() {
+        String workMonth = "2026-07";
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+        
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.singletonList("INV-202607-0001"));
+
+        assertThatThrownBy(() -> spyService.reopenMonth(workMonth))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("請求書(INV-202607-0001)に計上済みの実績が含まれるため解除できません");
+    }
+
+    @Test
+    void testReopenMonth_取消済み請求書のみで成功() {
+        String workMonth = "2026-07";
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+        
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(true).when(spyService).updateBatchById(any());
+        
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
+
+        spyService.reopenMonth(workMonth);
+
+        assertThat(r1.getStatus()).isEqualTo("入力中");
+        verify(spyService, times(1)).updateBatchById(any());
+    }
+
+    @Test
+    void testSaveHours_請求済み実績は編集不可() {
+        Long contractId = 1L;
+        String workMonth = "2026-07";
+
+        WorkRecord existingRecord = new WorkRecord();
+        existingRecord.setId(10L);
+        existingRecord.setStatus("入力中");
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existingRecord);
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.singletonList("INV-202607-0001"));
+
+        assertThatThrownBy(() -> workRecordService.saveHours(contractId, workMonth, new BigDecimal("160"), "再入力"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("請求書(INV-202607-0001)に計上済みの実績は編集できません");
+    }
+
+    @Test
+    void testSaveHours_UK衝突時にBusinessException() {
+        Long contractId = 1L;
+        String workMonth = "2026-07";
+
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+
+        Contract contract = new Contract();
+        contract.setId(contractId);
+        contract.setSellingPrice(new BigDecimal("80"));
+        contract.setSettlementHoursMin(new BigDecimal("140"));
+        contract.setSettlementHoursMax(new BigDecimal("180"));
+        when(contractMapper.selectById(contractId)).thenReturn(contract);
+
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doThrow(new org.springframework.dao.DuplicateKeyException("Duplicate entry")).when(spyService).saveOrUpdate(any(WorkRecord.class));
+
+        assertThatThrownBy(() -> spyService.saveHours(contractId, workMonth, new BigDecimal("150"), "テスト"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("他のユーザーが同じ実績を登録しました。再読み込みしてください");
     }
 }

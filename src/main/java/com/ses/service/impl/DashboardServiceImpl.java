@@ -24,6 +24,11 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.Collections;
+import com.ses.mapper.EngineerSkillMapper;
+import com.ses.mapper.ProposalMapper;
+import com.ses.dto.engineer.EngineerSkillDetailDto;
 
 @Service
 @RequiredArgsConstructor
@@ -33,10 +38,70 @@ public class DashboardServiceImpl implements DashboardService {
     private final ContractMapper contractMapper;
     private final ProjectMapper projectMapper;
     private final WorkRecordMapper workRecordMapper;
+    private final EngineerSkillMapper engineerSkillMapper;
+    private final ProposalMapper proposalMapper;
 
     @Override
     public DashboardSummaryDto getSummary(Integer year) {
-        // 1. Calculate KPIs
+        // 1. Calculate Charts (Dynamic) and prepare for KPIs
+        List<YearMonth> targetMonths = (year != null)
+                ? buildFiscalYearMonths(year)
+                : buildTrailingMonths(6);
+
+        YearMonth currentMonth = YearMonth.from(LocalDate.now());
+        YearMonth previousMonth = currentMonth.minusMonths(1);
+
+        List<YearMonth> queryMonths = new ArrayList<>(targetMonths);
+        if (!queryMonths.contains(currentMonth)) queryMonths.add(currentMonth);
+        if (!queryMonths.contains(previousMonth)) queryMonths.add(previousMonth);
+
+        List<String> monthStrs = queryMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
+        Map<String, List<WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
+                new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
+        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth));
+
+        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+
+        List<String> monthLabels = new ArrayList<>();
+        List<Long> salesData = new ArrayList<>();
+        List<Long> profitData = new ArrayList<>();
+        List<Boolean> isActualData = new ArrayList<>();
+
+        for (YearMonth ym : targetMonths) {
+            monthLabels.add(ym.getMonthValue() + "月");
+            long[] amount = calcMonthlyAmount(ym, allContracts, confirmedByMonth);
+            salesData.add(amount[0]);
+            profitData.add(amount[1]);
+            isActualData.add(amount[2] == 1);
+        }
+
+        DashboardSummaryDto.RevenueChartDto revenueChart = DashboardSummaryDto.RevenueChartDto.builder()
+                .labels(monthLabels)
+                .sales(salesData)
+                .profit(profitData)
+                .isActual(isActualData)
+                .build();
+
+        // Calculate actual KPI trends
+        long[] currentAmount = calcMonthlyAmount(currentMonth, allContracts, confirmedByMonth);
+        long[] previousAmount = calcMonthlyAmount(previousMonth, allContracts, confirmedByMonth);
+
+        String revenueTrend = null;
+        if (previousAmount[0] > 0) {
+            double rate = (double) (currentAmount[0] - previousAmount[0]) / (double) previousAmount[0] * 100.0;
+            revenueTrend = String.format("%+.1f%%", rate);
+        }
+
+        String profitTrend = null;
+        if (previousAmount[1] > 0) {
+            double rate = (double) (currentAmount[1] - previousAmount[1]) / (double) previousAmount[1] * 100.0;
+            profitTrend = String.format("%+.1f%%", rate);
+        } else if (previousAmount[1] < 0) {
+            double rate = (double) (currentAmount[1] - previousAmount[1]) / (double) Math.abs(previousAmount[1]) * 100.0;
+            profitTrend = String.format("%+.1f%%", rate);
+        }
+
+        // 2. Base counts and KPI
         List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
         long totalEngineers = allEngineers.size();
         
@@ -47,7 +112,7 @@ public class DashboardServiceImpl implements DashboardService {
 
         double utilization = totalEngineers > 0 ? (double) activeCount / totalEngineers * 100 : 0.0;
 
-        List<Contract> activeContracts = contractMapper.selectList(new QueryWrapper<Contract>().eq("status", "稼動中"));
+        List<Contract> activeContracts = allContracts.stream().filter(c -> "稼動中".equals(c.getStatus())).collect(Collectors.toList());
         long totalRevenue = activeContracts.stream().mapToLong(c -> c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0).sum();
         long totalCost = activeContracts.stream().mapToLong(c -> c.getCostPrice() != null ? c.getCostPrice().longValue() : 0).sum();
         long grossProfit = totalRevenue - totalCost;
@@ -55,70 +120,12 @@ public class DashboardServiceImpl implements DashboardService {
 
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
                 .utilization(Math.round(utilization * 10.0) / 10.0)
-                .utilizationTrend("+0.0%") // Mock trend
+                .utilizationTrend(null)
                 .benchCount((int) benchCount)
                 .revenue(totalRevenue)
-                .revenueTrend("+0.0%") // Mock trend
+                .revenueTrend(revenueTrend)
                 .profitMargin(Math.round(profitMargin * 10.0) / 10.0)
-                .profitTrend("-0.0%") // Mock trend
-                .build();
-
-        // 2. Calculate Charts (Dynamic)
-        List<YearMonth> targetMonths = (year != null)
-                ? buildFiscalYearMonths(year)
-                : buildTrailingMonths(6);
-
-        List<String> monthLabels = new ArrayList<>();
-        List<Long> salesData = new ArrayList<>();
-        List<Long> profitData = new ArrayList<>();
-        List<Boolean> isActualData = new ArrayList<>();
-
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
-
-        for (YearMonth ym : targetMonths) {
-            LocalDate monthStart = ym.atDay(1);
-            LocalDate monthEnd = ym.atEndOfMonth();
-            monthLabels.add(ym.getMonthValue() + "月");
-
-            String monthStr = ym.toString();
-            List<WorkRecord> confirmedRecords = workRecordMapper.selectList(
-                    new QueryWrapper<WorkRecord>().eq("work_month", monthStr).eq("status", "確定")
-            );
-
-            long monthSales = 0;
-            long monthProfit = 0;
-            boolean isActual = false;
-
-            if (!confirmedRecords.isEmpty()) {
-                isActual = true;
-                for (WorkRecord wr : confirmedRecords) {
-                    long sell = wr.getBillingAmount() != null ? wr.getBillingAmount().longValue() : 0;
-                    long payment = wr.getPaymentAmount() != null ? wr.getPaymentAmount().longValue() : 0;
-                    monthSales += sell;
-                    monthProfit += (sell - payment);
-                }
-            } else {
-                for (Contract c : allContracts) {
-                    if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
-                        if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
-                            long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
-                            long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
-                            monthSales += sell;
-                            monthProfit += (sell - cost);
-                        }
-                    }
-                }
-            }
-            salesData.add(monthSales);
-            profitData.add(monthProfit);
-            isActualData.add(isActual);
-        }
-
-        DashboardSummaryDto.RevenueChartDto revenueChart = DashboardSummaryDto.RevenueChartDto.builder()
-                .labels(monthLabels)
-                .sales(salesData)
-                .profit(profitData)
-                .isActual(isActualData)
+                .profitTrend(profitTrend)
                 .build();
 
         DashboardSummaryDto.StatusChartDto statusChart = DashboardSummaryDto.StatusChartDto.builder()
@@ -132,37 +139,53 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
 
         // 3. Retiring Engineers List
-        // Get contracts ending within next 30 days
         LocalDate now = LocalDate.now();
         LocalDate next30Days = now.plusDays(30);
         
-        List<Contract> retiringContracts = contractMapper.selectList(new QueryWrapper<Contract>()
-                .eq("status", "稼動中")
-                .isNotNull("end_date")
-                .ge("end_date", now)
-                .le("end_date", next30Days));
+        List<Contract> retiringContracts = activeContracts.stream()
+                .filter(c -> c.getEndDate() != null && !c.getEndDate().isBefore(now) && !c.getEndDate().isAfter(next30Days))
+                .collect(Collectors.toList());
 
         List<DashboardSummaryDto.RetiringEngineerDto> retiringList = new ArrayList<>();
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
-        for (Contract c : retiringContracts) {
-            Engineer e = engineerMapper.selectById(c.getEngineerId());
-            Project p = projectMapper.selectById(c.getProjectId());
-            
-            if (e != null) {
-                int daysLeft = (int) ChronoUnit.DAYS.between(now, c.getEndDate());
+        if (!retiringContracts.isEmpty()) {
+            List<Long> engineerIds = retiringContracts.stream().map(Contract::getEngineerId).distinct().collect(Collectors.toList());
+            List<Long> projectIds = retiringContracts.stream().map(Contract::getProjectId).distinct().collect(Collectors.toList());
+
+            Map<Long, Engineer> engineerMap = engineerMapper.selectBatchIds(engineerIds).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+            Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() : projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
+
+            List<EngineerSkillDetailDto> topSkills = engineerSkillMapper.selectTopSkillCandidates(engineerIds);
+            Map<Long, String> topSkillMap = topSkills.stream()
+                    .collect(Collectors.toMap(EngineerSkillDetailDto::getEngineerId, EngineerSkillDetailDto::getSkillName, (s1, s2) -> s1));
+
+            Map<Long, Long> proposingMap = proposalMapper.selectList(new QueryWrapper<com.ses.entity.Proposal>()
+                    .in("engineer_id", engineerIds)
+                    .notIn("status", "成約", "見送り")).stream()
+                    .collect(Collectors.groupingBy(com.ses.entity.Proposal::getEngineerId, Collectors.counting()));
+
+            for (Contract c : retiringContracts) {
+                Engineer e = engineerMap.get(c.getEngineerId());
+                Project p = projectMap.get(c.getProjectId());
                 
-                DashboardSummaryDto.RetiringEngineerDto dto = DashboardSummaryDto.RetiringEngineerDto.builder()
-                        .id(e.getId())
-                        .name(e.getFullName())
-                        .initial(e.getInitialName())
-                        .skill("N/A") // In real system, join with skill table
-                        .project(p != null ? p.getProjectName() : "不明")
-                        .date(c.getEndDate().format(dtf))
-                        .daysLeft(Math.max(0, daysLeft))
-                        .proposals(0) // Mock
-                        .build();
-                retiringList.add(dto);
+                if (e != null) {
+                    int daysLeft = (int) ChronoUnit.DAYS.between(now, c.getEndDate());
+                    String skill = topSkillMap.getOrDefault(e.getId(), "-");
+                    long proposals = proposingMap.getOrDefault(e.getId(), 0L);
+                    
+                    DashboardSummaryDto.RetiringEngineerDto dto = DashboardSummaryDto.RetiringEngineerDto.builder()
+                            .id(e.getId())
+                            .name(e.getFullName())
+                            .initial(e.getInitialName())
+                            .skill(skill)
+                            .project(p != null ? p.getProjectName() : "不明")
+                            .date(c.getEndDate().format(dtf))
+                            .daysLeft(Math.max(0, daysLeft))
+                            .proposals((int) proposals)
+                            .build();
+                    retiringList.add(dto);
+                }
             }
         }
 
@@ -171,6 +194,37 @@ public class DashboardServiceImpl implements DashboardService {
                 .charts(charts)
                 .retiring(retiringList)
                 .build();
+    }
+
+    private long[] calcMonthlyAmount(YearMonth ym, List<Contract> allContracts, Map<String, List<WorkRecord>> confirmedByMonth) {
+        long monthSales = 0;
+        long monthProfit = 0;
+        
+        LocalDate monthStart = ym.atDay(1);
+        LocalDate monthEnd = ym.atEndOfMonth();
+        String monthStr = ym.toString();
+        List<WorkRecord> confirmedRecords = confirmedByMonth.getOrDefault(monthStr, Collections.emptyList());
+
+        if (!confirmedRecords.isEmpty()) {
+            for (WorkRecord wr : confirmedRecords) {
+                long sell = wr.getBillingAmount() != null ? wr.getBillingAmount().longValue() : 0;
+                long payment = wr.getPaymentAmount() != null ? wr.getPaymentAmount().longValue() : 0;
+                monthSales += sell;
+                monthProfit += (sell - payment);
+            }
+        } else {
+            for (Contract c : allContracts) {
+                if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
+                    if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
+                        long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
+                        long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
+                        monthSales += sell;
+                        monthProfit += (sell - cost);
+                    }
+                }
+            }
+        }
+        return new long[]{monthSales, monthProfit, confirmedRecords.isEmpty() ? 0 : 1};
     }
 
     private List<YearMonth> buildFiscalYearMonths(int fiscalYear) {
@@ -218,18 +272,14 @@ public class DashboardServiceImpl implements DashboardService {
             dto.setCostPrice(cost);
             dto.setGrossProfitAmount(grossProfit);
             dto.setGrossProfitRate(rateStr);
+            dto.setStartDate(c.getStartDate());
 
             result.add(dto);
         }
 
         // Sort by StartDate desc
-        result.sort((d1, d2) -> {
-            Contract c1 = contracts.stream().filter(c -> java.util.Objects.equals(c.getContractNo(), d1.getContractNo())).findFirst().orElse(null);
-            Contract c2 = contracts.stream().filter(c -> java.util.Objects.equals(c.getContractNo(), d2.getContractNo())).findFirst().orElse(null);
-            LocalDate date1 = c1 != null && c1.getStartDate() != null ? c1.getStartDate() : LocalDate.MIN;
-            LocalDate date2 = c2 != null && c2.getStartDate() != null ? c2.getStartDate() : LocalDate.MIN;
-            return date2.compareTo(date1);
-        });
+        result.sort(Comparator.comparing(ContractProfitDto::getStartDate,
+                Comparator.nullsLast(Comparator.reverseOrder())));
 
         return result;
     }

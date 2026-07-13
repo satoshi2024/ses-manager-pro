@@ -10,6 +10,9 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.EngineerSkillMapper;
+import com.ses.mapper.ProposalMapper;
+import com.ses.dto.engineer.EngineerSkillDetailDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +42,12 @@ class DashboardServiceImplTest {
 
     @Mock
     private WorkRecordMapper workRecordMapper;
+
+    @Mock
+    private EngineerSkillMapper engineerSkillMapper;
+
+    @Mock
+    private ProposalMapper proposalMapper;
 
     @InjectMocks
     private DashboardServiceImpl dashboardService;
@@ -163,6 +172,7 @@ class DashboardServiceImplTest {
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         WorkRecord wr = new WorkRecord();
+        wr.setWorkMonth(java.time.YearMonth.now().minusMonths(5).toString());
         wr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
         wr.setPaymentAmount(java.math.BigDecimal.valueOf(600000));
         when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
@@ -176,24 +186,89 @@ class DashboardServiceImplTest {
     }
 
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    void testGetSummary_退場予定クエリは終了日の下限も条件に含む() {
+    void testGetSummary_退場予定の抽出は終了日の下限も条件に含む() {
         // 退場予定リストは「本日〜30日以内に終了する」契約が対象であり、
         // 既に終了済み（end_date < 本日）の契約を含めてはならない。
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        
+        Contract c1 = new Contract();
+        c1.setId(1L);
+        c1.setEngineerId(1L);
+        c1.setStatus("稼動中");
+        c1.setEndDate(LocalDate.now().minusDays(1)); // 既に終了
+        
+        Contract c2 = new Contract();
+        c2.setId(2L);
+        c2.setEngineerId(2L);
+        c2.setStatus("稼動中");
+        c2.setEndDate(LocalDate.now().plusDays(10)); // 対象
+        
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+
+        Engineer e2 = new Engineer();
+        e2.setId(2L);
+        e2.setFullName("Target Engineer");
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e2));
+
+        var result = dashboardService.getSummary(null);
+
+        assertEquals(1, result.getRetiring().size(), "退場予定リストに既に終了した契約が含まれていないこと");
+        assertEquals(2L, result.getRetiring().get(0).getId());
+    }
+
+    @Test
+    void testGetSummary_トレンド計算() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        
+        WorkRecord currentWr = new WorkRecord();
+        currentWr.setWorkMonth(LocalDate.now().toString().substring(0, 7)); // This won't perfectly match YearMonth.toString() without formatting but it's mock
+        currentWr.setWorkMonth(java.time.YearMonth.now().toString());
+        currentWr.setBillingAmount(java.math.BigDecimal.valueOf(1200000));
+        currentWr.setPaymentAmount(java.math.BigDecimal.valueOf(800000));
 
-        dashboardService.getSummary(null);
+        WorkRecord prevWr = new WorkRecord();
+        prevWr.setWorkMonth(java.time.YearMonth.now().minusMonths(1).toString());
+        prevWr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
+        prevWr.setPaymentAmount(java.math.BigDecimal.valueOf(700000));
 
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
-        org.mockito.Mockito.verify(contractMapper, org.mockito.Mockito.atLeastOnce()).selectList(captor.capture());
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(currentWr, prevWr));
 
-        boolean hasBoundedEndDateQuery = captor.getAllValues().stream()
-                .map(w -> w.getCustomSqlSegment() == null ? "" : w.getCustomSqlSegment())
-                .anyMatch(sql -> sql.contains("end_date >=") && sql.contains("end_date <="));
+        var result = dashboardService.getSummary(null);
+        assertNotNull(result);
+        assertEquals("+20.0%", result.getKpi().getRevenueTrend()); // (120-100)/100 = 20%
+        assertEquals("+33.3%", result.getKpi().getProfitTrend()); // (40-30)/30 = 33.33...
+        assertNull(result.getKpi().getUtilizationTrend());
+    }
 
-        assertTrue(hasBoundedEndDateQuery,
-                "退場予定の抽出クエリが end_date の下限(>=)と上限(<=)の両方を条件に含むこと");
+    @Test
+    void testGetSummary_代表スキル選定と提案数() {
+        Engineer e = createEngineer(1L, "Test Engineer");
+        e.setStatus("稼動中");
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e));
+        
+        Contract c = createContract(1L, "C001", 1000000, 600000, LocalDate.now().minusDays(10));
+        c.setEndDate(LocalDate.now().plusDays(10));
+        c.setStatus("稼動中");
+        when(contractMapper.selectList(any())).thenReturn(List.of(c));
+        
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e));
+
+        EngineerSkillDetailDto skill = new EngineerSkillDetailDto();
+        skill.setEngineerId(1L);
+        skill.setSkillName("Java");
+        when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(List.of(skill));
+
+        com.ses.entity.Proposal p1 = new com.ses.entity.Proposal();
+        p1.setEngineerId(1L);
+        com.ses.entity.Proposal p2 = new com.ses.entity.Proposal();
+        p2.setEngineerId(1L);
+        when(proposalMapper.selectList(any())).thenReturn(List.of(p1, p2));
+
+        var result = dashboardService.getSummary(null);
+        assertNotNull(result.getRetiring());
+        assertEquals(1, result.getRetiring().size());
+        assertEquals("Java", result.getRetiring().get(0).getSkill());
+        assertEquals(2, result.getRetiring().get(0).getProposals());
     }
 }

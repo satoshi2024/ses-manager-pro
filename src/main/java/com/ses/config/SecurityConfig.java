@@ -99,7 +99,8 @@ public class SecurityConfig {
                     "/api/work-records/reopen",
                     "/audit-log/**",
                     "/api/audit-logs/**",
-                    "/api/contracts/generate-renewals"
+                    "/api/contracts/generate-renewals",
+                    "/api/autocomplete/users"
                 ).hasRole("管理者")
                 // その他のリクエストは認証が必要
                 .anyRequest().authenticated()

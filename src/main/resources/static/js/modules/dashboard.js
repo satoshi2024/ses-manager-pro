@@ -67,15 +67,40 @@ function loadDashboardData(year) {
 
 function renderKPIs(kpi) {
     $('#kpi-utilization').text(kpi.utilization + '%');
-    $('#kpi-utilization-trend').text(kpi.utilizationTrend);
+    updateTrendBadge($('#kpi-utilization-trend'), kpi.utilizationTrend);
     
     $('#kpi-bench-count').text(kpi.benchCount);
     
     $('#kpi-revenue').text('¥' + kpi.revenue.toLocaleString() + '万');
-    $('#kpi-revenue-trend').text(kpi.revenueTrend);
+    updateTrendBadge($('#kpi-revenue-trend'), kpi.revenueTrend);
     
     $('#kpi-profit-margin').text(kpi.profitMargin + '%');
-    $('#kpi-profit-trend').text(kpi.profitTrend);
+    updateTrendBadge($('#kpi-profit-trend'), kpi.profitTrend);
+}
+
+function updateTrendBadge($element, value) {
+    const $badge = $element.closest('.badge');
+    if (value == null) {
+        $badge.addClass('d-none');
+    } else {
+        $badge.removeClass('d-none');
+        $element.text(value);
+        
+        const $icon = $badge.find('i');
+        $icon.removeClass('bi-arrow-up-right bi-arrow-down-right bi-dash');
+        $badge.removeClass('bg-success bg-danger bg-secondary');
+        
+        if (value.startsWith('+')) {
+            $badge.addClass('bg-success');
+            $icon.addClass('bi-arrow-up-right');
+        } else if (value.startsWith('-')) {
+            $badge.addClass('bg-danger');
+            $icon.addClass('bi-arrow-down-right');
+        } else {
+            $badge.addClass('bg-secondary');
+            $icon.addClass('bi-dash');
+        }
+    }
 }
 
 function renderCharts(chartsData) {

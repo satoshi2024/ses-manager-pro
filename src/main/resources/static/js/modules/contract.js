@@ -6,9 +6,18 @@ $(document).ready(function() {
 function loadContracts() {
     $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</td></tr>');
     
+    const params = {
+        status: $('#search-form [name="status"]').val(),
+        customerId: $('#search-customerId').val(),
+        contractNo: $('#search-form [name="contractNo"]').val(),
+        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
+        endDateTo: $('#search-form [name="endDateTo"]').val()
+    };
+
     $.ajax({
         url: '/api/contracts',
         method: 'GET',
+        data: params,
         success: function(res) {
             if (res.code === 200 && res.data) {
                 renderContracts(res.data.records || res.data);
@@ -46,8 +55,13 @@ function loadSelectOptions() {
     $.get('/api/customers', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-customerId');
+            const searchSelect = $('#search-customerId');
             select.empty().append('<option value="">顧客を選択...</option>');
-            (res.data.records || res.data).forEach(c => select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`));
+            searchSelect.empty().append('<option value="">顧客で絞り込み</option>');
+            (res.data.records || res.data).forEach(c => {
+                select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+            });
         }
     });
 }
@@ -62,16 +76,21 @@ function renderContracts(list) {
     }
     
     list.forEach(c => {
+        const engineerName = c.engineerName != null ? c.engineerName : '(削除済み)';
+        const customerName = c.customerName != null ? c.customerName : '-';
+        const projectName = c.projectName != null ? c.projectName : '-';
+        const contractNo = c.contractNo != null ? c.contractNo : ('C-' + c.id);
+
         const tr = `
             <tr>
-                <td class="px-4 py-3"><span class="font-monospace text-muted">${c.contractNo || 'C-' + c.id}</span></td>
+                <td class="px-4 py-3"><span class="font-monospace text-muted">${SES.escapeHtml(contractNo)}</span></td>
                 <td class="py-3">
-                    <div class="fw-bold text-white">${c.engineerId || '-'} (ID)</div>
-                    <div class="small text-muted">${c.contractType || '準委任'}</div>
+                    <div class="fw-bold text-white">${SES.escapeHtml(engineerName)}</div>
+                    <div class="small text-muted">${SES.escapeHtml(c.contractType || '準委任')}</div>
                 </td>
                 <td class="py-3">
-                    <div class="text-white">${c.customerId || '-'} (ID)</div>
-                    <div class="small text-muted text-truncate" style="max-width:200px;">${c.projectId || '-'} (ID)</div>
+                    <div class="text-white">${SES.escapeHtml(customerName)}</div>
+                    <div class="small text-muted text-truncate" style="max-width:200px;">${SES.escapeHtml(projectName)}</div>
                 </td>
                 <td class="py-3 text-white small">
                     <div><i class="bi bi-play-circle text-success me-1"></i>${c.startDate || '-'}</div>
@@ -150,8 +169,10 @@ function saveContract() {
 function exportContracts() {
     const params = {
         status: $('#search-form [name="status"]').val(),
-        customerName: $('#search-form [name="customerName"]').val(),
-        keyword: $('#search-form [name="keyword"]').val()
+        customerId: $('#search-customerId').val(),
+        contractNo: $('#search-form [name="contractNo"]').val(),
+        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
+        endDateTo: $('#search-form [name="endDateTo"]').val()
     };
     window.location.href = '/api/contracts/export?' + $.param(params, true);
 }

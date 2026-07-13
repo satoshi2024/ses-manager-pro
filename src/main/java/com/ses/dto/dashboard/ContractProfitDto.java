@@ -11,4 +11,5 @@ public class ContractProfitDto {
     private Integer costPrice;
     private Integer grossProfitAmount;
     private String grossProfitRate;
+    private java.time.LocalDate startDate;
 }

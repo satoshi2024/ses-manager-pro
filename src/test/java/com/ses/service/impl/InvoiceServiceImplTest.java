@@ -5,9 +5,11 @@ import com.ses.common.exception.BusinessException;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoiceItem;
+import com.ses.entity.BpPayment;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,9 @@ public class InvoiceServiceImplTest {
     @Mock
     private SystemConfigService systemConfigService;
 
+    @Mock
+    private BpPaymentMapper bpPaymentMapper;
+
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
 
@@ -62,7 +67,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
                 .thenReturn(Collections.singletonList(dto));
 
-        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
         when(invoiceMapper.insert(any(Invoice.class))).thenReturn(1);
         when(invoiceItemMapper.insert(any(InvoiceItem.class))).thenReturn(1);
         when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
@@ -93,13 +98,21 @@ public class InvoiceServiceImplTest {
     @Test
     void testGenerateInvoiceNo() {
         String billingMonth = "2026-07";
-        Invoice existing = new Invoice();
-        existing.setInvoiceNo("INV-202607-0005");
 
-        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn("INV-202607-0002");
 
         String nextNo = invoiceService.generateInvoiceNo(billingMonth);
-        assertEquals("INV-202607-0006", nextNo);
+        assertEquals("INV-202607-0003", nextNo);
+    }
+
+    @Test
+    void testGenerateInvoiceNo_Empty() {
+        String billingMonth = "2026-07";
+
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
+
+        String nextNo = invoiceService.generateInvoiceNo(billingMonth);
+        assertEquals("INV-202607-0001", nextNo);
     }
 
     @Test
@@ -115,7 +128,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
                 .thenReturn(Collections.singletonList(dto));
         when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
-        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
 
         // 1回目のinsertは同時採番の衝突でDuplicateKeyException、2回目で成功する
         when(invoiceMapper.insert(any(Invoice.class)))
@@ -139,11 +152,123 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
                 .thenReturn(Collections.singletonList(dto));
         when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
-        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
         when(invoiceMapper.insert(any(Invoice.class)))
                 .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate invoice_no"));
 
         assertThrows(BusinessException.class, () -> invoiceService.generate(customerId, billingMonth));
         verify(invoiceMapper, times(3)).insert(any(Invoice.class));
+    }
+
+    @Test
+    void testVoidInvoice_Success() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("未送付");
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceItemMapper.delete(any())).thenReturn(1);
+        when(invoiceMapper.deleteById(invoiceId)).thenReturn(1);
+
+        invoiceService.voidInvoice(invoiceId);
+
+        verify(invoiceItemMapper, times(1)).delete(any());
+        verify(invoiceMapper, times(1)).deleteById(invoiceId);
+    }
+
+    @Test
+    void testVoidInvoice_PaidThrowsException() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("入金済");
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
+        assertTrue(ex.getMessage().contains("入金済の請求書は取消できません"));
+    }
+
+    @Test
+    void testVoidInvoice_NotFoundThrowsException() {
+        Long invoiceId = 1L;
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
+        assertTrue(ex.getMessage().contains("請求書が見つかりません"));
+    }
+
+    @Test
+    void testChangeStatus_InvalidTransition() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("未送付");
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
+        assertTrue(ex.getMessage().contains("変更できません"));
+    }
+
+    @Test
+    void testChangeStatus_PaidRequiresDate() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("送付済");
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
+        assertTrue(ex.getMessage().contains("入金日を指定してください"));
+    }
+
+    @Test
+    void testChangeStatus_ClearPaidDate() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("入金済");
+        invoice.setPaidDate(java.time.LocalDate.now());
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.update(any(), any())).thenReturn(1);
+
+        invoiceService.changeStatus(invoiceId, "送付済", null);
+
+        verify(invoiceMapper, times(1)).update(any(), any());
+    }
+
+    @Test
+    void testChangeBpPaymentStatus_NotFound() {
+        when(bpPaymentMapper.selectById(anyLong())).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "支払済", null));
+        assertTrue(ex.getMessage().contains("BP支払が見つかりません"));
+    }
+
+    @Test
+    void testChangeBpPaymentStatus_ClearPaidDate() {
+        BpPayment bp = new BpPayment();
+        bp.setId(1L);
+        bp.setStatus("支払済");
+        when(bpPaymentMapper.selectById(1L)).thenReturn(bp);
+        when(bpPaymentMapper.update(any(), any())).thenReturn(1);
+
+        invoiceService.changeBpPaymentStatus(1L, "未払", null);
+
+        verify(bpPaymentMapper, times(1)).update(any(), any());
+    }
+
+    @Test
+    void testChangeBpPaymentStatus_InvalidStatus() {
+        BpPayment bp = new BpPayment();
+        bp.setId(1L);
+        when(bpPaymentMapper.selectById(1L)).thenReturn(bp);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "済", null));
+        assertTrue(ex.getMessage().contains("不正なステータスです"));
     }
 }

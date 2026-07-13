@@ -7,6 +7,7 @@ import com.ses.service.WorkRecordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -25,13 +26,13 @@ public class WorkRecordApiController {
     }
 
     @PutMapping
-    public ApiResult<WorkRecord> saveHours(@RequestBody Map<String, Object> body) {
-        Long contractId = Long.valueOf(body.get("contractId").toString());
-        String workMonth = body.get("workMonth").toString();
-        BigDecimal actualHours = new BigDecimal(body.get("actualHours").toString());
-        String remarks = body.get("remarks") != null ? body.get("remarks").toString() : null;
-
-        return ApiResult.success(workRecordService.saveHours(contractId, workMonth, actualHours, remarks));
+    public ApiResult<WorkRecord> saveHours(@Valid @RequestBody com.ses.dto.workrecord.WorkRecordSaveRequest request) {
+        return ApiResult.success(workRecordService.saveHours(
+                request.getContractId(),
+                request.getWorkMonth(),
+                request.getActualHours(),
+                request.getRemarks()
+        ));
     }
 
     @PostMapping("/confirm")

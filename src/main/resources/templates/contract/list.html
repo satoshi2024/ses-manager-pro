@@ -29,24 +29,33 @@
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body p-3">
             <form class="row g-3 align-items-end" id="search-form">
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label text-muted small mb-1">ステータス</label>
                     <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" name="status">
                         <option value="">すべて</option>
                         <option value="準備中">準備中</option>
-                        <option value="稼動中" selected>稼動中</option>
+                        <option value="稼動中">稼動中</option>
                         <option value="終了">終了</option>
                         <option value="解約">解約</option>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label text-muted small mb-1">契約先顧客</label>
-                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="customerName" placeholder="顧客名で検索" list="customer-list">
-                    <datalist id="customer-list"></datalist>
+                    <label class="form-label text-muted small mb-1">顧客</label>
+                    <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" name="customerId" id="search-customerId">
+                        <option value="">顧客で絞り込み</option>
+                    </select>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label text-muted small mb-1">要員名・案件名</label>
-                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="keyword" placeholder="キーワード検索">
+                <div class="col-md-2">
+                    <label class="form-label text-muted small mb-1">契約No</label>
+                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="contractNo" placeholder="契約Noで検索">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label text-muted small mb-1">終了日</label>
+                    <div class="d-flex align-items-center">
+                        <input type="date" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="endDateFrom">
+                        <span class="mx-1 text-muted">〜</span>
+                        <input type="date" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="endDateTo">
+                    </div>
                 </div>
                 <div class="col-md-2">
                     <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="loadContracts()">

@@ -39,7 +39,7 @@ class ContractServiceImplTest {
     @Test
     void generateContractNo_success() {
         LocalDate baseDate = LocalDate.of(2026, 7, 1);
-        when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(5L);
+        when(contractMapper.selectMaxContractNoIncludingDeleted("C-202607-")).thenReturn("C-202607-0005");
 
         String contractNo = contractService.generateContractNo(baseDate);
 
@@ -77,7 +77,7 @@ class ContractServiceImplTest {
         contract.setStatus("稼動中");
         contract.setEngineerId(100L);
 
-        when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(contract)).thenReturn(1);
 
         contractService.saveWithBusinessRules(contract);
@@ -92,15 +92,47 @@ class ContractServiceImplTest {
         Contract contract = new Contract();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         
-        when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString()))
+            .thenReturn("C-202607-0001")
+            .thenReturn("C-202607-0002");
         when(contractMapper.insert(contract))
             .thenThrow(new DuplicateKeyException("Duplicate"))
             .thenReturn(1);
 
         contractService.saveWithBusinessRules(contract);
 
-        assertEquals("C-202607-0002", contract.getContractNo());
+        assertEquals("C-202607-0003", contract.getContractNo());
         verify(contractMapper, times(2)).insert(contract);
+    }
+
+    @Test
+    void generateContractNo_successAfterLogicalDelete() {
+        // (a) C-YYYYMM-0002 を論理削除後の新規作成が一発成功し 0003 が振られる
+        LocalDate baseDate = LocalDate.of(2026, 7, 1);
+        when(contractMapper.selectMaxContractNoIncludingDeleted("C-202607-")).thenReturn("C-202607-0002");
+
+        String contractNo = contractService.generateContractNo(baseDate);
+        assertEquals("C-202607-0003", contractNo);
+    }
+
+    @Test
+    void generateContractNo_successAfter4LogicalDeletes() {
+        // (b) 同月4件削除後でも新規作成が成功する
+        LocalDate baseDate = LocalDate.of(2026, 7, 1);
+        when(contractMapper.selectMaxContractNoIncludingDeleted("C-202607-")).thenReturn("C-202607-0004");
+
+        String contractNo = contractService.generateContractNo(baseDate);
+        assertEquals("C-202607-0005", contractNo);
+    }
+
+    @Test
+    void generateContractNo_successWhenZeroContracts() {
+        // (c) 当月契約ゼロなら 0001
+        LocalDate baseDate = LocalDate.of(2026, 7, 1);
+        when(contractMapper.selectMaxContractNoIncludingDeleted("C-202607-")).thenReturn(null);
+
+        String contractNo = contractService.generateContractNo(baseDate);
+        assertEquals("C-202607-0001", contractNo);
     }
 
     @Test

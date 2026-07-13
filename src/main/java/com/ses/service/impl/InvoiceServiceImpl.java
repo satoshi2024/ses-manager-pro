@@ -11,6 +11,8 @@ import com.ses.entity.InvoiceItem;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.BpPaymentMapper;
+import com.ses.entity.BpPayment;
 import com.ses.service.InvoiceService;
 import com.ses.service.SystemConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,9 +24,18 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
 @Service
 public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> implements InvoiceService {
+
+    private static final Map<String, Set<String>> ALLOWED = Map.of(
+        "未送付", Set.of("送付済"),
+        "送付済", Set.of("入金済", "未送付"),
+        "入金済", Set.of("送付済")
+    );
 
     @Autowired
     private InvoiceItemMapper invoiceItemMapper;
@@ -34,6 +45,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     @Autowired
     private SystemConfigService systemConfigService;
+
+    @Autowired
+    private BpPaymentMapper bpPaymentMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -103,17 +117,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         String monthStr = billingMonth.replace("-", "");
         String prefix = "INV-" + monthStr + "-";
         
-        QueryWrapper<Invoice> queryWrapper = new QueryWrapper<>();
-        queryWrapper.likeRight("invoice_no", prefix);
-        queryWrapper.orderByDesc("invoice_no");
-        queryWrapper.last("LIMIT 1");
-        
-        Invoice maxInvoice = baseMapper.selectOne(queryWrapper);
-        if (maxInvoice == null) {
+        String maxNo = baseMapper.selectMaxInvoiceNoIncludingDeleted(prefix);
+        if (maxNo == null) {
             return prefix + "0001";
         }
         
-        String maxNo = maxInvoice.getInvoiceNo();
         int seq = Integer.parseInt(maxNo.substring(prefix.length()));
         return String.format("%s%04d", prefix, seq + 1);
     }
@@ -124,11 +132,62 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw new BusinessException("請求書が見つかりません");
         }
-        invoice.setStatus(status);
-        if ("入金済".equals(status) && paidDate != null) {
-            invoice.setPaidDate(paidDate);
+
+        String oldStatus = invoice.getStatus();
+        if (!ALLOWED.getOrDefault(oldStatus, Set.of()).contains(status)) {
+            throw new BusinessException("「" + oldStatus + "」から「" + status + "」へは変更できません");
         }
-        this.updateById(invoice);
+
+        if ("入金済".equals(status)) {
+            if (paidDate == null) {
+                throw new BusinessException("入金日を指定してください");
+            }
+            invoice.setStatus(status);
+            invoice.setPaidDate(paidDate);
+            this.updateById(invoice);
+        } else if ("入金済".equals(oldStatus)) {
+            this.update(new UpdateWrapper<Invoice>()
+                    .eq("id", id)
+                    .set("status", status)
+                    .set("paid_date", null));
+        } else {
+            invoice.setStatus(status);
+            this.updateById(invoice);
+        }
+    }
+
+    @Override
+    public void changeBpPaymentStatus(Long id, String status, LocalDate paidDate) {
+        BpPayment bpPayment = bpPaymentMapper.selectById(id);
+        if (bpPayment == null) {
+            throw new BusinessException("BP支払が見つかりません");
+        }
+        if ("支払済".equals(status)) {
+            bpPayment.setStatus(status);
+            bpPayment.setPaidDate(paidDate != null ? paidDate : LocalDate.now());
+            bpPaymentMapper.updateById(bpPayment);
+        } else if ("未払".equals(status)) {
+            bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
+                    .eq("id", id)
+                    .set("status", status)
+                    .set("paid_date", null));
+        } else {
+            throw new BusinessException("不正なステータスです: " + status);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void voidInvoice(Long id) {
+        Invoice invoice = this.getById(id);
+        if (invoice == null) {
+            throw new BusinessException("請求書が見つかりません");
+        }
+        if ("入金済".equals(invoice.getStatus())) {
+            throw new BusinessException("入金済の請求書は取消できません。先に入金を取り消してください");
+        }
+        invoiceItemMapper.delete(new QueryWrapper<InvoiceItem>().eq("invoice_id", id));
+        this.removeById(id);
     }
 
     @Override

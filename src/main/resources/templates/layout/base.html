@@ -39,6 +39,36 @@
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1060; pointer-events: none;"></div>
 
+    <!-- Password Change Modal -->
+    <div class="modal fade" id="passwordChangeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-secondary text-white border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title fw-bold">パスワード変更</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="pw-current" class="form-label text-muted small">現在のパスワード</label>
+                        <input type="password" class="form-control bg-dark text-white border-secondary" id="pw-current" autocomplete="current-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="pw-new" class="form-label text-muted small">新しいパスワード</label>
+                        <input type="password" class="form-control bg-dark text-white border-secondary" id="pw-new" autocomplete="new-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="pw-confirm" class="form-label text-muted small">新しいパスワード(確認)</label>
+                        <input type="password" class="form-control bg-dark text-white border-secondary" id="pw-confirm" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0" id="btn-save-password">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app-wrapper">
         <!-- Sidebar -->
         <aside class="sidebar" th:replace="~{layout/sidebar :: sidebar}"></aside>
@@ -80,6 +110,7 @@
     
     <!-- Custom JS -->
     <script th:src="@{/js/common.js}"></script>
+    <script th:src="@{/js/profile.js}"></script>
     
     <!-- Additional JS from specific pages -->
     <th:block layout:fragment="page-js"></th:block>

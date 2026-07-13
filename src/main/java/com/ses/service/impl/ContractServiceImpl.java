@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerStatusService;
 import lombok.RequiredArgsConstructor;
@@ -12,8 +13,10 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import com.ses.entity.WorkRecord;
 
 /**
  * 契約サービス実装
@@ -23,12 +26,34 @@ import java.time.format.DateTimeFormatter;
 public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> implements ContractService {
 
     private final EngineerStatusService engineerStatusService;
+    private final WorkRecordMapper workRecordMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeById(Serializable id) {
+        Contract target = this.getById(id);
+        if (target == null) return false;
+        if ("稼動中".equals(target.getStatus())) {
+            throw new BusinessException("稼動中の契約は削除できません。先に終了/解約へ変更してください");
+        }
+        Long contractId = Long.valueOf(id.toString());
+        long workRecords = workRecordMapper.selectCount(new LambdaQueryWrapper<WorkRecord>().eq(WorkRecord::getContractId, contractId));
+        if (workRecords > 0) {
+            throw new BusinessException("実績が登録されているため削除できません");
+        }
+        return super.removeById(id);
+    }
 
     @Override
     public String generateContractNo(LocalDate baseDate) {
         String prefix = "C-" + baseDate.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
-        Long count = this.baseMapper.selectCount(new LambdaQueryWrapper<Contract>().likeRight(Contract::getContractNo, prefix));
-        return prefix + String.format("%04d", count + 1);
+        String maxNo = this.baseMapper.selectMaxContractNoIncludingDeleted(prefix);
+        if (maxNo == null) {
+            return prefix + "0001";
+        }
+        String seqStr = maxNo.substring(prefix.length());
+        int nextSeq = Integer.parseInt(seqStr) + 1;
+        return prefix + String.format("%04d", nextSeq);
     }
 
     private void validate(Contract c) {
@@ -48,12 +73,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         
         if (contract.getContractNo() == null || contract.getContractNo().isEmpty()) {
             LocalDate baseDate = contract.getStartDate() != null ? contract.getStartDate() : LocalDate.now();
-            String prefix = "C-" + baseDate.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
             
             boolean success = false;
             for (int i = 0; i < 3; i++) {
-                Long count = this.baseMapper.selectCount(new LambdaQueryWrapper<Contract>().likeRight(Contract::getContractNo, prefix));
-                String no = prefix + String.format("%04d", count + 1 + i);
+                String no = generateContractNo(baseDate);
                 contract.setContractNo(no);
                 try {
                     this.baseMapper.insert(contract);

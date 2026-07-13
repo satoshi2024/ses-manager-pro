@@ -59,6 +59,8 @@ function loadInvoices() {
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">印刷</a>
                         ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">送付済にする</button>` : ''}
                         ${inv.status === '送付済' ? `<button class="btn btn-sm btn-success" onclick="updateInvoiceStatus(${inv.id}, '入金済', true)">入金済にする</button>` : ''}
+                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">取消</button>` : ''}
+                        ${inv.status === '入金済' ? `<button class="btn btn-sm btn-warning" onclick="updateInvoiceStatus(${inv.id}, '送付済', false)">送付済に戻す</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -89,6 +91,39 @@ function updateInvoiceStatus(id, status, requireDate = false) {
     });
 }
 
+function voidInvoice(id, invoiceNo) {
+    Swal.fire({
+        title: '確認',
+        text: `請求書 ${invoiceNo} を取消しますか？対象実績は再請求可能になります`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '取消',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch(`/api/invoices/${id}/void`, {
+                method: 'PUT',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header())
+            }).then(res => res.json()).then(data => {
+                if (data.code === 200) {
+                    if (window.SES && SES.toast) {
+                        SES.toast('請求書を取消しました', 'success');
+                    } else {
+                        alert('請求書を取消しました');
+                    }
+                    loadInvoices();
+                } else {
+                    if (window.SES && SES.toast) {
+                        SES.toast(data.message, 'error');
+                    } else {
+                        alert(data.message);
+                    }
+                }
+            });
+        }
+    });
+}
+
 function loadBpPayments() {
     const month = document.getElementById('bpWorkMonth').value;
     let url = '/api/invoices/bp-payments?month=' + month;
@@ -108,6 +143,7 @@ function loadBpPayments() {
                     <td>${bp.paidDate || ''}</td>
                     <td>
                         ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">支払済にする</button>` : ''}
+                        ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">未払に戻す</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -117,8 +153,13 @@ function loadBpPayments() {
 }
 
 function updateBpPaymentStatus(id, status) {
-    const paidDate = prompt('支払日を入力してください(YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
-    if (!paidDate) return;
+    let paidDate = null;
+    if (status === '支払済') {
+        paidDate = prompt('支払日を入力してください(YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
+        if (!paidDate) return;
+    } else {
+        if (!confirm(`ステータスを「${status}」に変更しますか？`)) return;
+    }
 
     fetch(`/api/invoices/bp-payments/${id}`, {
         method: 'PUT',

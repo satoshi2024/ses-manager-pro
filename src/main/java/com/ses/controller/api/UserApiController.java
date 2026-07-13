@@ -12,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
+import com.ses.common.util.PasswordPolicyValidator;
 
 /**
  * ユーザーAPIコントローラー
@@ -85,14 +86,8 @@ public class UserApiController {
         return ApiResult.success(sysUserService.save(sysUser));
     }
 
-    /**
-     * パスワードポリシー検証: 8文字以上・英字と数字を含む。
-     */
     private void validatePasswordPolicy(String password) {
-        if (password == null || password.length() < 8
-                || !password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
-            throw new BusinessException("パスワードは8文字以上で英字と数字を含めてください");
-        }
+        PasswordPolicyValidator.validate(password);
     }
 
     /**

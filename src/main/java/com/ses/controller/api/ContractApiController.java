@@ -9,6 +9,10 @@ import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.ses.dto.contract.ContractListDto;
+import com.ses.mapper.ContractMapper;
+import org.springframework.format.annotation.DateTimeFormat;
+import java.time.LocalDate;
 
 /**
  * 契約APIコントローラー
@@ -20,6 +24,7 @@ public class ContractApiController {
 
     private final ContractService contractService;
     private final ContractRenewalService contractRenewalService;
+    private final ContractMapper contractMapper;
 
     /**
      * 契約一覧取得
@@ -27,11 +32,18 @@ public class ContractApiController {
      * @return 契約リスト
      */
     @GetMapping
-    public ApiResult<Page<Contract>> page(
+    public ApiResult<Page<ContractListDto>> page(
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "100") long size) {
-        Page<Contract> page = new Page<>(current, size);
-        return ApiResult.success(contractService.page(page));
+            @RequestParam(defaultValue = "100") long size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long engineerId,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) String contractNo,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo) {
+        Page<ContractListDto> page = new Page<>(current, size);
+        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo));
     }
 
     /**

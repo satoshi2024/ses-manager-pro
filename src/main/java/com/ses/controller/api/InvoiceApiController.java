@@ -86,6 +86,12 @@ public class InvoiceApiController {
         return ApiResult.success(null);
     }
 
+    @PutMapping("/{id}/void")
+    public ApiResult<?> voidInvoice(@PathVariable Long id) {
+        invoiceService.voidInvoice(id);
+        return ApiResult.success(null);
+    }
+
     @GetMapping("/bp-payments")
     public ApiResult<?> bpPaymentsList(@RequestParam(required = false) String month,
                                     @RequestParam(required = false) String status) {
@@ -95,14 +101,7 @@ public class InvoiceApiController {
 
     @PutMapping("/bp-payments/{id}")
     public ApiResult<?> updateBpPaymentStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
-        BpPayment bpPayment = bpPaymentMapper.selectById(id);
-        if (bpPayment != null) {
-            bpPayment.setStatus(request.getStatus());
-            if ("支払済".equals(request.getStatus())) {
-                bpPayment.setPaidDate(request.getPaidDate() != null ? request.getPaidDate() : java.time.LocalDate.now());
-            }
-            bpPaymentMapper.updateById(bpPayment);
-        }
+        invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }
 }

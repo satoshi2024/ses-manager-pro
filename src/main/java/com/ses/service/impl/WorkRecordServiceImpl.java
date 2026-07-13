@@ -9,12 +9,14 @@ import com.ses.entity.WorkRecord;
 import com.ses.common.exception.BusinessException;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.WorkRecordService;
 import com.ses.service.billing.SettlementCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -26,6 +28,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     private final ContractMapper contractMapper;
     private final BpPaymentMapper bpPaymentMapper;
+    private final InvoiceItemMapper invoiceItemMapper;
 
     @Override
     public List<WorkRecordGridDto> monthlyGrid(String workMonth) {
@@ -41,6 +44,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         if (record != null && "確定".equals(record.getStatus())) {
             throw new BusinessException("確定済みの月は編集できません");
+        }
+
+        if (record != null) {
+            List<String> nos = invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(List.of(record.getId()));
+            if (!nos.isEmpty()) {
+                throw new BusinessException("請求書(" + nos.get(0) + ")に計上済みの実績は編集できません");
+            }
         }
 
         Contract contract = contractMapper.selectById(contractId);
@@ -77,7 +87,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         record.setPaymentAmount(paymentAmount);
         record.setRemarks(remarks);
 
-        this.saveOrUpdate(record);
+        try {
+            this.saveOrUpdate(record);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException("他のユーザーが同じ実績を登録しました。再読み込みしてください");
+        }
         return record;
     }
 
@@ -127,15 +141,31 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .eq("work_month", workMonth)
                 .eq("status", "確定"));
 
-        if (!records.isEmpty()) {
-            for (WorkRecord record : records) {
-                record.setStatus("入力中");
-            }
-            this.updateBatchById(records);
-            
-            // BP支払を削除
-            List<Long> workRecordIds = records.stream().map(WorkRecord::getId).collect(Collectors.toList());
-            bpPaymentMapper.delete(new QueryWrapper<BpPayment>().in("work_record_id", workRecordIds));
+        if (records.isEmpty()) {
+            return;
         }
+
+        List<Long> ids = records.stream().map(WorkRecord::getId).collect(Collectors.toList());
+
+        List<String> nos = invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(ids);
+        if (!nos.isEmpty()) {
+            throw new BusinessException("請求書(" + String.join(", ", nos) + ")に計上済みの実績が含まれるため解除できません");
+        }
+
+        Long paidCount = bpPaymentMapper.selectCount(new QueryWrapper<BpPayment>()
+                .in("work_record_id", ids)
+                .eq("status", "支払済"));
+        if (paidCount > 0) {
+            throw new BusinessException("支払済のBP支払が" + paidCount + "件あるため解除できません");
+        }
+
+        for (WorkRecord record : records) {
+            record.setStatus("入力中");
+        }
+        this.updateBatchById(records);
+
+        bpPaymentMapper.delete(new QueryWrapper<BpPayment>()
+                .in("work_record_id", ids)
+                .eq("status", "未払"));
     }
 }
