@@ -57,7 +57,7 @@ function renderEngineerDetail(eng) {
     if (eng.status === 'Bench') { statusColor = 'text-warning'; statusIcon = 'bi-pause-circle-fill'; }
     if (eng.status === '退場予定') { statusColor = 'text-danger'; statusIcon = 'bi-exclamation-circle-fill'; }
     
-    $('#det-status').html(`<span class="${statusColor}"><i class="bi ${statusIcon} me-1"></i>${eng.status || '未設定'}</span>`);
+    $('#det-status').html(`<span class="${statusColor}"><i class="bi ${statusIcon} me-1"></i>${SES.escapeHtml(eng.status || '未設定')}</span>`);
     
     // Experience
     $('#det-experience').text(eng.experienceYears ? eng.experienceYears + '年' : '-');
@@ -84,7 +84,7 @@ function renderEngineerDetail(eng) {
             <div class="position-relative mb-4">
                 <div class="position-absolute bg-accent-blue rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
                 <div class="text-muted small mb-1">サマリ</div>
-                <p class="text-light small mb-2" style="white-space: pre-wrap;">${eng.resumeSummary}</p>
+                <p class="text-light small mb-2" style="white-space: pre-wrap;">${SES.escapeHtml(eng.resumeSummary)}</p>
             </div>
         `);
     } else {
@@ -98,7 +98,7 @@ function renderEngineerDetail(eng) {
 function renderAvatar(eng) {
     const $avatar = $('#det-avatar');
     if (eng.photoUrl) {
-        $avatar.html(`<img src="/api/files/${eng.photoUrl}" alt="顔写真" style="width:100%;height:100%;object-fit:cover;">`);
+        $avatar.html(`<img src="/api/files/${SES.escapeHtml(eng.photoUrl)}" alt="顔写真" style="width:100%;height:100%;object-fit:cover;">`);
     } else {
         // 写真が無い場合はイニシャル or 氏名先頭文字
         const label = (eng.initialName && eng.initialName.trim())
@@ -182,7 +182,7 @@ function renderSkills(skills) {
         if (skill.proficiency === '中級') badgeClass = 'bg-primary';
         
         let expText = skill.experienceYears ? ` (${skill.experienceYears}年)` : '';
-        html += `<span class="badge ${badgeClass} border border-dark text-light">${skill.skillName}${expText}</span> `;
+        html += `<span class="badge ${badgeClass} border border-dark text-light">${SES.escapeHtml(skill.skillName)}${expText}</span> `;
     });
     $('#det-skills').html(html);
 }
@@ -206,9 +206,9 @@ function fetchSkillOptions(callback) {
                 
                 skillOptionsHtml = '<option value="">スキルを選択...</option>';
                 for (const cat in groups) {
-                    skillOptionsHtml += `<optgroup label="${cat}">`;
+                    skillOptionsHtml += `<optgroup label="${SES.escapeHtml(cat)}">`;
                     groups[cat].forEach(s => {
-                        skillOptionsHtml += `<option value="${s.id}">${s.skillName}</option>`;
+                        skillOptionsHtml += `<option value="${s.id}">${SES.escapeHtml(s.skillName)}</option>`;
                     });
                     skillOptionsHtml += `</optgroup>`;
                 }
@@ -346,11 +346,11 @@ function renderCareers(careers) {
             <tr>
                 <td>${fromStr} 〜 ${toStr}</td>
                 <td>
-                    <div class="fw-bold">${car.projectName || '-'}</div>
-                    <div class="small text-muted">${car.clientIndustry || ''} ${car.techStack ? ' / ' + car.techStack : ''}</div>
+                    <div class="fw-bold">${SES.escapeHtml(car.projectName || '-')}</div>
+                    <div class="small text-muted">${SES.escapeHtml(car.clientIndustry || '')} ${car.techStack ? ' / ' + SES.escapeHtml(car.techStack) : ''}</div>
                 </td>
                 <td>
-                    <div>${car.role || '-'}</div>
+                    <div>${SES.escapeHtml(car.role || '-')}</div>
                     ${car.teamSize ? '<div class="small text-muted">' + car.teamSize + '名</div>' : ''}
                 </td>
                 <td class="text-end">

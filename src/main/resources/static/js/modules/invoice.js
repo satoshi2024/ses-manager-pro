@@ -101,8 +101,8 @@ function loadBpPayments() {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${bp.workMonth}</td>
-                    <td>${bp.engineerName}</td>
-                    <td>${bp.projectName}</td>
+                    <td>${SES.escapeHtml(bp.engineerName)}</td>
+                    <td>${SES.escapeHtml(bp.projectName)}</td>
                     <td class="text-right">￥${bp.amount.toLocaleString()}</td>
                     <td>${bp.status}</td>
                     <td>${bp.paidDate || ''}</td>

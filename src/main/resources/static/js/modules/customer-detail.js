@@ -123,10 +123,10 @@ function renderActivities(records) {
                     <div class="card-body p-3">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <div>
-                                <h6 class="mb-1 text-light">${act.title} ${followUpBadge}</h6>
+                                <h6 class="mb-1 text-light">${SES.escapeHtml(act.title)} ${followUpBadge}</h6>
                                 <div class="text-muted small">
-                                    <i class="bi bi-calendar3 me-1"></i>${act.activityDate} 
-                                    <span class="ms-2 badge bg-secondary">${act.activityType}</span>
+                                    <i class="bi bi-calendar3 me-1"></i>${act.activityDate}
+                                    <span class="ms-2 badge bg-secondary">${SES.escapeHtml(act.activityType)}</span>
                                 </div>
                             </div>
                             <div class="btn-group btn-group-sm">
@@ -135,7 +135,7 @@ function renderActivities(records) {
                                 <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id})"><i class="bi bi-trash"></i></button>
                             </div>
                         </div>
-                        <div class="text-light text-wrap" style="white-space: pre-wrap;">${act.content || ''}</div>
+                        <div class="text-light text-wrap" style="white-space: pre-wrap;">${SES.escapeHtml(act.content || '')}</div>
                         ${nextActionHtml}
                     </div>
                 </div>

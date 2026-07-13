@@ -104,7 +104,7 @@ function loadCustomersForSelect() {
                 select.empty();
                 select.append('<option value="">顧客を選択してください...</option>');
                 customers.forEach(c => {
-                    select.append(`<option value="${c.id}">${c.companyName}</option>`);
+                    select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
                 });
             }
         }
@@ -140,8 +140,8 @@ function renderProjects(records) {
         const tr = `
             <tr>
                 <td class="ps-4 py-3">
-                    <div class="fw-bold text-light">${proj.projectName}</div>
-                    <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>${proj.description || ''}</div>
+                    <div class="fw-bold text-light">${SES.escapeHtml(proj.projectName)}</div>
+                    <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>${SES.escapeHtml(proj.description || '')}</div>
                 </td>
                 <td>${proj.customerId || '未設定'} (ID)</td> <!-- Ideally we join with Customer table on backend to get name -->
                 <td class="font-monospace">${priceStr}</td>
@@ -172,10 +172,11 @@ function fetchAndRenderProjectSkills(projectId) {
                 const skills = res.data;
                 let badges = '';
                 skills.forEach(s => {
+                    const skillName = SES.escapeHtml(s.skillName);
                     if (s.isMust === 1) {
-                        badges += `<span class="badge bg-danger me-1 mb-1">${s.skillName}</span>`;
+                        badges += `<span class="badge bg-danger me-1 mb-1">${skillName}</span>`;
                     } else {
-                        badges += `<span class="badge bg-secondary border border-secondary text-light me-1 mb-1">${s.skillName}</span>`;
+                        badges += `<span class="badge bg-secondary border border-secondary text-light me-1 mb-1">${skillName}</span>`;
                     }
                 });
                 $('#list-skills-' + projectId).html(badges || '<span class="text-muted small">-</span>');
@@ -327,10 +328,10 @@ function addProjectSkillRow(skill = null) {
     // Group skills by category
     const categories = [...new Set(allSkillTags.map(t => t.category))];
     categories.forEach(cat => {
-        optionsHtml += `<optgroup label="${cat}">`;
+        optionsHtml += `<optgroup label="${SES.escapeHtml(cat)}">`;
         allSkillTags.filter(t => t.category === cat).forEach(t => {
             const selected = (skill && skill.skillId === t.id) ? 'selected' : '';
-            optionsHtml += `<option value="${t.id}" ${selected}>${t.skillName}</option>`;
+            optionsHtml += `<option value="${t.id}" ${selected}>${SES.escapeHtml(t.skillName)}</option>`;
         });
         optionsHtml += `</optgroup>`;
     });
@@ -428,13 +429,13 @@ function findMatchingEngineers(projectId) {
                             <div class="card-body p-3">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
-                                        <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${match.engineerName}</a></h6>
+                                        <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${SES.escapeHtml(match.engineerName)}</a></h6>
                                         <div class="small text-muted">希望単価: ${priceText}</div>
                                     </div>
                                     <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                                 </div>
-                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${match.reason}</p>
-                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${match.sellingPoints || '特記事項なし'}</p>
+                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${SES.escapeHtml(match.reason)}</p>
+                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || '特記事項なし')}</p>
                                 <div class="text-end">
                                     <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
                                         <i class="bi bi-send-fill me-1"></i>この要員を提案

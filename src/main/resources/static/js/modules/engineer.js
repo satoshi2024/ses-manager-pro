@@ -100,7 +100,7 @@ function populateRailwayLines(stationName, selectedPref) {
     if (entries.length === 0) {
         // JSON に無い駅名。編集時に保存済みの値があれば表示できるようにする。
         if (selectedPref) {
-            select.append(`<option value="${selectedPref}" selected>${splitPref(selectedPref).line || selectedPref}</option>`);
+            select.append(`<option value="${SES.escapeHtml(selectedPref)}" selected>${SES.escapeHtml(splitPref(selectedPref).line || selectedPref)}</option>`);
             select.prop('disabled', false);
         } else {
             select.append('<option value="">路線情報がありません</option>');
@@ -113,14 +113,14 @@ function populateRailwayLines(stationName, selectedPref) {
     select.append('<option value="">路線を選択...</option>');
     entries.forEach(pref => {
         const line = splitPref(pref).line;
-        select.append(`<option value="${pref}">${line}</option>`);
+        select.append(`<option value="${SES.escapeHtml(pref)}">${SES.escapeHtml(line)}</option>`);
     });
 
     if (selectedPref) {
         select.val(selectedPref);
         // 候補一覧に無い保存値だった場合は選択肢として補って選択状態にする
         if (!select.val()) {
-            select.append(`<option value="${selectedPref}" selected>${splitPref(selectedPref).line || selectedPref}</option>`);
+            select.append(`<option value="${SES.escapeHtml(selectedPref)}" selected>${SES.escapeHtml(splitPref(selectedPref).line || selectedPref)}</option>`);
             select.val(selectedPref);
         }
     } else if (entries.length === 1) {
@@ -249,8 +249,8 @@ function renderEngineers(records) {
     
     records.forEach(eng => {
         // Build avatar
-        const initial = eng.initialName || (eng.fullName ? eng.fullName.charAt(0) : '?');
-        const kana = eng.fullNameKana || '';
+        const initial = SES.escapeHtml(eng.initialName || (eng.fullName ? eng.fullName.charAt(0) : '?'));
+        const kana = SES.escapeHtml(eng.fullNameKana || '');
         
         // Status Badge
         let statusBadge = '';
@@ -268,13 +268,13 @@ function renderEngineers(records) {
                     <div class="d-flex align-items-center py-1">
                         <div class="avatar bg-primary text-white rounded-circle me-3 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">${initial}</div>
                         <div>
-                            <div class="fw-bold">${eng.fullName || '-'}</div>
+                            <div class="fw-bold">${SES.escapeHtml(eng.fullName || '-')}</div>
                             <div class="text-muted small">${kana}</div>
                         </div>
                     </div>
                 </td>
                 <td>${statusBadge}</td>
-                <td>${eng.employmentType || '-'}</td>
+                <td>${SES.escapeHtml(eng.employmentType || '-')}</td>
                 <td>${expStr}</td>
                 <td>${priceStr}</td>
                 <td class="text-end pe-4">

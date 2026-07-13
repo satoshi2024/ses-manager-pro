@@ -22,9 +22,11 @@ $(document).ready(function() {
                 if(c.status === '準備中') pClass += ' status-warning';
                 if(c.status === '解約') pClass += ' status-danger';
                 
+                // Frappe Gantt はタスク名をポップアップのinnerHTMLへそのまま挿入するため、
+                // ここで事前にHTMLエスケープしておく（要員名・顧客名は自由入力のため）。
                 tasks.push({
                     id: 'Task_' + c.id,
-                    name: (c.engineerName || 'エンジニア') + ' @ ' + (c.customerName || '顧客'),
+                    name: SES.escapeHtml((c.engineerName || 'エンジニア') + ' @ ' + (c.customerName || '顧客')),
                     start: c.startDate || '2026-04-01',
                     end: c.endDate || '2026-09-30',
                     progress: calculateProgress(c.startDate, c.endDate),

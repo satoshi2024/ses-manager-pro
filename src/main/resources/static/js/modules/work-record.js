@@ -48,19 +48,19 @@ function renderWorkRecords(list) {
                                 ${isConfirmed ? 'readonly' : ''} 
                                 onblur="saveHours(this)">`;
                                 
-        const remarksInput = `<input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark remarks-input" 
-                                data-contract-id="${item.contractId}" 
-                                value="${item.remarks || ''}" 
-                                ${isConfirmed ? 'readonly' : ''} 
+        const remarksInput = `<input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark remarks-input"
+                                data-contract-id="${item.contractId}"
+                                value="${SES.escapeHtml(item.remarks || '')}"
+                                ${isConfirmed ? 'readonly' : ''}
                                 onblur="saveHours(this)">`;
 
         const tr = `
             <tr>
                 <td class="px-4 py-3">
-                    <div class="fw-bold text-white">${item.engineerName || '-'}</div>
-                    <div class="small text-muted">${item.projectName || '-'}</div>
+                    <div class="fw-bold text-white">${SES.escapeHtml(item.engineerName || '-')}</div>
+                    <div class="small text-muted">${SES.escapeHtml(item.projectName || '-')}</div>
                 </td>
-                <td class="py-3"><span class="font-monospace text-muted">${item.contractNo || '-'}</span></td>
+                <td class="py-3"><span class="font-monospace text-muted">${SES.escapeHtml(item.contractNo || '-')}</span></td>
                 <td class="py-3 text-muted small">
                     ${item.settlementHoursMin ? item.settlementHoursMin + 'h' : '固定'} ~ ${item.settlementHoursMax ? item.settlementHoursMax + 'h' : '固定'}
                 </td>
