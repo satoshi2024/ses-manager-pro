@@ -7,7 +7,7 @@
     <header th:fragment="header" class="top-header sticky-top bg-primary border-bottom border-dark d-flex align-items-center px-4 py-2 transition-base no-print">
         
         <!-- Mobile Toggle Button -->
-        <button class="btn btn-link text-white d-lg-none me-3 p-0 border-0" id="sidebar-toggle-btn">
+        <button class="btn btn-link text-secondary hover-text-white d-lg-none me-3 p-0 border-0" id="sidebar-toggle-btn">
             <i class="bi bi-list fs-3"></i>
         </button>
 
@@ -26,6 +26,12 @@
                 <!-- Populated by JS -->
                 2026年07月10日 (金) 19:00
             </div>
+
+            <!-- Theme Toggle -->
+            <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="theme-toggle-btn" data-bs-toggle="tooltip" data-bs-placement="bottom" title="テーマ切り替え">
+                <i class="bi bi-sun fs-5 d-none" id="theme-icon-light"></i>
+                <i class="bi bi-moon-stars fs-5" id="theme-icon-dark"></i>
+            </button>
 
             <!-- Notifications -->
             <div class="dropdown">

@@ -46,6 +46,14 @@ function loadBenchList() {
     });
 }
 
+function getChartTheme() {
+    const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
+    return {
+        textColor: isLight ? '#475569' : '#e8eaed',
+        gridColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
+    };
+}
+
 function renderUtilizationChart(points) {
     if (utilizationChartInstance) {
         utilizationChartInstance.destroy();
@@ -56,6 +64,7 @@ function renderUtilizationChart(points) {
     const benchData = points.map(p => p.benchCount);
     const rateData = points.map(p => p.utilizationRate);
 
+    const theme = getChartTheme();
     const ctx = document.getElementById('utilizationChart').getContext('2d');
     utilizationChartInstance = new Chart(ctx, {
         data: {
@@ -99,24 +108,35 @@ function renderUtilizationChart(points) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            color: theme.textColor,
             plugins: {
-                legend: { position: 'top' }
+                legend: { 
+                    position: 'top',
+                    labels: { color: theme.textColor }
+                }
             },
             scales: {
+                x: {
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                },
                 yCount: {
                     type: 'linear',
                     position: 'left',
                     stacked: true,
                     beginAtZero: true,
-                    title: { display: true, text: '要員数' }
+                    title: { display: true, text: '要員数', color: theme.textColor },
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
                 },
                 yRate: {
                     type: 'linear',
                     position: 'right',
                     beginAtZero: true,
                     max: 100,
-                    grid: { drawOnChartArea: false },
-                    title: { display: true, text: '稼動率(%)' }
+                    grid: { drawOnChartArea: false, color: theme.gridColor },
+                    title: { display: true, text: '稼動率(%)', color: theme.textColor },
+                    ticks: { color: theme.textColor }
                 }
             }
         }
@@ -160,17 +180,22 @@ function renderBenchTable(list) {
         const tr = `
             <tr>
                 <td class="px-4 py-3">
-                    <div class="fw-bold text-white">${nameStr}</div>
+                    <div class="d-flex align-items-center">
+                        <div class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center me-3" style="width: 32px; height: 32px; font-size: 0.8rem;">
+                            ${item.initial || '?'}
+                        </div>
+                        <div class="fw-bold">${nameStr}</div>
+                    </div>
                 </td>
                 <td class="py-3">
                     <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${item.benchDays}日</span>
                 </td>
-                <td class="py-3 text-white">${priceStr}</td>
-                <td class="py-3 text-white">${availableStr}</td>
+                <td class="py-3">${priceStr}</td>
+                <td class="py-3">${availableStr}</td>
                 <td class="py-3 text-muted small">${skillStr}</td>
                 <td class="px-4 py-3 text-end">
                     <div class="btn-group btn-group-sm" role="group">
-                        <a href="/engineer/detail?id=${engineerId}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye me-1"></i>詳細</a>
+                        <a href="/engineer/detail?id=${engineerId}" class="btn btn-outline-secondary border-secondary"><i class="bi bi-eye me-1"></i>詳細</a>
                         <a href="/ai/matching?engineerId=${engineerId}" class="btn btn-outline-info text-info border-info"><i class="bi bi-robot me-1"></i>マッチング</a>
                     </div>
                 </td>

@@ -343,6 +343,40 @@ const SES = {
                 '<span class="dropdown-item-text text-danger small py-2">通知を読み込めませんでした</span>'
             );
         }
+    },
+    
+    theme: {
+        init: function() {
+            const savedTheme = localStorage.getItem('ses_theme') || 'light';
+            this.applyTheme(savedTheme);
+
+            const toggleBtn = document.getElementById('theme-toggle-btn');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    const currentTheme = document.documentElement.getAttribute('data-bs-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    this.applyTheme(newTheme);
+                    localStorage.setItem('ses_theme', newTheme);
+                });
+            }
+        },
+        applyTheme: function(theme) {
+            document.documentElement.setAttribute('data-bs-theme', theme);
+            document.body.className = theme + '-theme';
+            
+            const iconLight = document.getElementById('theme-icon-light');
+            const iconDark = document.getElementById('theme-icon-dark');
+            
+            if (iconLight && iconDark) {
+                if (theme === 'light') {
+                    iconLight.classList.remove('d-none');
+                    iconDark.classList.add('d-none');
+                } else {
+                    iconLight.classList.add('d-none');
+                    iconDark.classList.remove('d-none');
+                }
+            }
+        }
     }
 };
 
@@ -359,6 +393,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 3. 通知の初期化
     SES.notification.load();
+    
+    // テーマ設定の初期化
+    SES.theme.init();
     
     // 4. サジェストの初期化
     SES.autocomplete.init();

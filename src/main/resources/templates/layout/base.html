@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org"
+<html lang="ja" data-bs-theme="light" xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
 <head>
@@ -21,10 +21,20 @@
     <!-- Custom CSS -->
     <link th:href="@{/css/common.css}" rel="stylesheet">
     
+    <!-- Theme Initialization Script to prevent FOUC (Flash of Unstyled Content) -->
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('ses_theme') || 'light';
+                document.documentElement.setAttribute('data-bs-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+    
     <!-- Additional CSS from specific pages -->
     <th:block layout:fragment="page-css"></th:block>
 </head>
-<body class="dark-theme">
+<body>
     
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1060; pointer-events: none;"></div>

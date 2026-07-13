@@ -2,12 +2,18 @@ let revenueChartInstance = null;
 let statusChartInstance = null;
 
 $(document).ready(function() {
-    // Set default defaults for Chart.js in dark mode
-    Chart.defaults.color = '#adb5bd';
-    Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
-
     $('#btn-print-report').on('click', function() { window.print(); });
     $('#btn-export-revenue').on('click', function() { exportRevenue(); });
+
+    $('#theme-toggle-btn').on('click', function() {
+        setTimeout(function() {
+            if (revenueChartInstance && statusChartInstance) {
+                applyChartColors();
+                revenueChartInstance.update();
+                statusChartInstance.update();
+            }
+        }, 50);
+    });
 
     const currentFiscalYear = getCurrentFiscalYear();
     populateFiscalYearSelector(currentFiscalYear);
@@ -71,7 +77,17 @@ function renderKPIs(kpi) {
     $('#kpi-profit-trend').text(kpi.profitTrend);
 }
 
+function getChartTheme() {
+    const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
+    return {
+        textColor: isLight ? '#475569' : '#e8eaed',
+        gridColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
+    };
+}
+
 function renderCharts(chartsData) {
+    const theme = getChartTheme();
+
     if (revenueChartInstance) {
         revenueChartInstance.destroy();
     }
@@ -89,8 +105,8 @@ function renderCharts(chartsData) {
                 {
                     label: '売上 (万円)',
                     data: chartsData.revenue.sales,
-                    backgroundColor: 'rgba(13, 202, 240, 0.7)',
-                    borderColor: '#0dcaf0',
+                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    borderColor: '#3b82f6',
                     borderWidth: 1,
                     borderRadius: 4
                 },
@@ -107,8 +123,12 @@ function renderCharts(chartsData) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            color: theme.textColor,
             plugins: {
-                legend: { position: 'top' },
+                legend: { 
+                    position: 'top',
+                    labels: { color: theme.textColor }
+                },
                 tooltip: {
                     callbacks: {
                         label: function(context) {
@@ -127,7 +147,15 @@ function renderCharts(chartsData) {
                 }
             },
             scales: {
-                y: { beginAtZero: true }
+                x: {
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                },
+                y: { 
+                    beginAtZero: true,
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                }
             }
         }
     });
@@ -153,10 +181,14 @@ function renderCharts(chartsData) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '70%',
+            color: theme.textColor,
             plugins: {
-                legend: { position: 'bottom' }
-            }
+                legend: { 
+                    position: 'bottom',
+                    labels: { color: theme.textColor }
+                }
+            },
+            cutout: '70%'
         }
     });
 }
@@ -186,12 +218,12 @@ function renderRetiringList(list) {
                             ${item.initial || '?'}
                         </div>
                         <div>
-                            <div class="fw-bold text-white mb-0">${item.name}</div>
+                            <div class="fw-bold mb-0">${item.name}</div>
                             <div class="small text-muted">${item.skill || 'スキル情報なし'}</div>
                         </div>
                     </div>
                 </td>
-                <td class="py-3 text-white">${item.project || '-'}</td>
+                <td class="py-3">${item.project || '-'}</td>
                 <td class="py-3">
                     <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${item.date}</span>
                     <div class="small text-muted">残り ${item.daysLeft} 日</div>
