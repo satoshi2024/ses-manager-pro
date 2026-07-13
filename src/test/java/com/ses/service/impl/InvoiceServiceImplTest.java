@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -270,5 +271,74 @@ public class InvoiceServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "済", null));
         assertTrue(ex.getMessage().contains("不正なステータスです"));
+    }
+
+    // ===== WS-F: 支払期限・適格請求書対応 =====
+
+    @Test
+    void testCalcDueDate_NextMonthEnd() {
+        assertEquals(LocalDate.of(2026, 8, 31), InvoiceServiceImpl.calcDueDate("2026-07", "next-month-end"));
+    }
+
+    @Test
+    void testCalcDueDate_NextNextMonthEnd() {
+        assertEquals(LocalDate.of(2026, 9, 30), InvoiceServiceImpl.calcDueDate("2026-07", "next-next-month-end"));
+    }
+
+    @Test
+    void testCalcDueDate_InvalidRuleDefaultsToNextMonthEnd() {
+        assertEquals(LocalDate.of(2026, 8, 31), InvoiceServiceImpl.calcDueDate("2026-07", "bogus"));
+    }
+
+    @Test
+    void testCalcDueDate_HandlesMonthEndBoundary() {
+        // 2026-01 の翌月末は 2026-02-28（月末補正）
+        assertEquals(LocalDate.of(2026, 2, 28), InvoiceServiceImpl.calcDueDate("2026-01", "next-month-end"));
+    }
+
+    @Test
+    void testGenerate_SetsDueDate() {
+        Long customerId = 1L;
+        String billingMonth = "2026-07";
+
+        UnbilledWorkRecordDto dto = new UnbilledWorkRecordDto();
+        dto.setWorkRecordId(10L);
+        dto.setBillingAmount(new BigDecimal("100000"));
+        dto.setEngineerName("山田太郎");
+        dto.setProjectName("開発案件");
+        when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
+                .thenReturn(Collections.singletonList(dto));
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
+        when(invoiceMapper.insert(any(Invoice.class))).thenReturn(1);
+        when(invoiceItemMapper.insert(any(InvoiceItem.class))).thenReturn(1);
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+        when(systemConfigService.getString(any(), any())).thenReturn("next-month-end");
+
+        Invoice invoice = invoiceService.generate(customerId, billingMonth);
+
+        assertEquals(LocalDate.of(2026, 8, 31), invoice.getDueDate());
+    }
+
+    @Test
+    void testDetail_PopulatesQualifiedInvoiceInfo() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setCustomerId(5L);
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(systemConfigService.getString("company.name", "")).thenReturn("株式会社テスト");
+        when(systemConfigService.getString("company.invoice-registration-number", "")).thenReturn("T1234567890123");
+        when(systemConfigService.getString("company.address", "")).thenReturn("東京都千代田区");
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.08"));
+
+        var detail = invoiceService.detail(invoiceId);
+
+        assertEquals("株式会社テスト", detail.getCompanyName());
+        assertEquals("T1234567890123", detail.getCompanyRegistrationNumber());
+        assertEquals("東京都千代田区", detail.getCompanyAddress());
+        // 0.08 → "8"（パーセント表記）
+        assertEquals("8", detail.getTaxRatePercent());
     }
 }

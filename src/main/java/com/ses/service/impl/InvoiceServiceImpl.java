@@ -76,6 +76,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         invoice.setTotal(total);
         invoice.setStatus("未送付");
         invoice.setIssuedDate(LocalDate.now());
+        invoice.setDueDate(calcDueDate(billingMonth,
+                systemConfigService.getString("billing.payment-due-rule", "next-month-end")));
 
         insertWithInvoiceNoRetry(invoice, billingMonth);
 
@@ -110,6 +112,16 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             }
         }
         throw new BusinessException("請求書番号の採番に失敗しました。再試行してください。");
+    }
+
+    /**
+     * 請求月と支払期限ルールから支払期限を算出する。
+     * next-next-month-end は翌々月末、それ以外(不正値含む)は翌月末。
+     */
+    static LocalDate calcDueDate(String billingMonth, String rule) {
+        java.time.YearMonth ym = java.time.YearMonth.parse(billingMonth);
+        int plus = "next-next-month-end".equals(rule) ? 2 : 1;
+        return ym.plusMonths(plus).atEndOfMonth();
     }
 
     @Override
@@ -207,6 +219,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         org.springframework.beans.BeanUtils.copyProperties(invoice, dto);
         dto.setCustomer(customer);
         dto.setItems(items);
+
+        // 適格請求書の記載事項(発行者情報・適用税率)をシステム設定から詰める
+        dto.setCompanyName(systemConfigService.getString("company.name", ""));
+        dto.setCompanyRegistrationNumber(systemConfigService.getString("company.invoice-registration-number", ""));
+        dto.setCompanyAddress(systemConfigService.getString("company.address", ""));
+        BigDecimal rate = systemConfigService.getDecimal("billing.tax-rate", new BigDecimal("0.10"));
+        dto.setTaxRatePercent(rate.multiply(new BigDecimal("100")).stripTrailingZeros().toPlainString());
 
         return dto;
     }

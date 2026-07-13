@@ -44,16 +44,23 @@ function loadInvoices() {
         if (data.code === 200) {
             const tbody = document.querySelector('#invoiceTable tbody');
             tbody.innerHTML = '';
+            const todayStr = new Date().toISOString().split('T')[0];
             data.data.records.forEach(inv => {
                 const tr = document.createElement('tr');
+                // 未入金かつ支払期限を過ぎている場合は期限を赤字で強調する
+                const overdue = inv.status !== '入金済' && inv.dueDate && inv.dueDate < todayStr;
+                const dueCell = inv.dueDate
+                    ? `<td class="${overdue ? 'text-danger fw-bold' : ''}">${SES.escapeHtml(inv.dueDate)}</td>`
+                    : '<td>-</td>';
                 tr.innerHTML = `
-                    <td>${inv.invoiceNo}</td>
-                    <td>${inv.billingMonth}</td>
+                    <td>${SES.escapeHtml(inv.invoiceNo)}</td>
+                    <td>${SES.escapeHtml(inv.billingMonth)}</td>
                     <td class="text-right">￥${inv.subtotal.toLocaleString()}</td>
                     <td class="text-right">￥${inv.tax.toLocaleString()}</td>
                     <td class="text-right">￥${inv.total.toLocaleString()}</td>
-                    <td>${inv.status}</td>
+                    <td>${SES.escapeHtml(inv.status)}</td>
                     <td>${inv.issuedDate || ''}</td>
+                    ${dueCell}
                     <td>${inv.paidDate || ''}</td>
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">印刷</a>

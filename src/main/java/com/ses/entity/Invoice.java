@@ -26,6 +26,7 @@ public class Invoice {
     private String status;
     private LocalDate issuedDate;
     private LocalDate paidDate;
+    private LocalDate dueDate;
     private String remarks;
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;

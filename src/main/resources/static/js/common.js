@@ -292,7 +292,8 @@ const SES = {
                 'BENCH_LONG': 'text-accent-blue',
                 'PROJECT_URGENT': 'text-accent-red',
                 'RETIRING_ENGINEER': 'text-accent-yellow',
-                'AI_MATCHING': 'text-accent-blue'
+                'AI_MATCHING': 'text-accent-blue',
+                'INVOICE_OVERDUE': 'text-accent-red'
             };
             
             let html = '<div class="d-flex justify-content-end px-3 py-1 border-bottom border-dark"><a href="#" id="mark-all-read" class="small text-muted hover-text-white text-decoration-none">すべて既読にする</a></div>';
