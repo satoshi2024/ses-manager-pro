@@ -10,10 +10,16 @@ import com.ses.dto.invoice.InvoiceStatusUpdateRequest;
 import com.ses.entity.BpPayment;
 import com.ses.entity.Invoice;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -22,6 +28,9 @@ public class InvoiceApiController {
 
     @Autowired
     private InvoiceService invoiceService;
+
+    @Autowired
+    private InvoicePdfService invoicePdfService;
 
     @Autowired
     private BpPaymentMapper bpPaymentMapper;
@@ -56,6 +65,19 @@ public class InvoiceApiController {
     @GetMapping("/{id}")
     public ApiResult<?> detail(@PathVariable Long id) {
         return ApiResult.success(invoiceService.detail(id));
+    }
+
+    /** 請求書PDFダウンロード。 */
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
+        InvoiceDetailDto detail = invoiceService.detail(id);
+        byte[] bytes = invoicePdfService.generate(detail);
+        String fileName = "請求書_" + detail.getInvoiceNo() + ".pdf";
+        String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encoded)
+                .body(bytes);
     }
 
     @PutMapping("/{id}/status")
