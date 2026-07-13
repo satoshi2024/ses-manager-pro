@@ -84,6 +84,7 @@
 
 /* Hardcoded Bootstrap Utility Overrides for Light Mode */
 [data-bs-theme="light"] .text-white,
+[data-bs-theme="light"] .text-white-50,
 [data-bs-theme="light"] .text-light {
     color: var(--text-primary) !important;
 }
@@ -111,6 +112,34 @@
 [data-bs-theme="light"] .border-dark,
 [data-bs-theme="light"] .border-secondary {
     border-color: var(--border-color) !important;
+}
+
+[data-bs-theme="light"] .dropdown-menu-dark {
+    background-color: var(--dropdown-bg-glass) !important;
+    border-color: var(--border-color) !important;
+}
+
+[data-bs-theme="light"] .dropdown-menu-dark .dropdown-item {
+    color: var(--text-primary) !important;
+}
+
+[data-bs-theme="light"] .dropdown-menu-dark .dropdown-item:hover {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--heading-color) !important;
+}
+
+[data-bs-theme="light"] .dropdown-menu-dark .dropdown-divider {
+    border-color: var(--border-color) !important;
+}
+
+[data-bs-theme="light"] .table-dark {
+    --bs-table-bg: transparent;
+    --bs-table-striped-bg: rgba(0,0,0,0.02);
+    --bs-table-hover-bg: rgba(0,0,0,0.04);
+    --bs-table-color: var(--text-primary);
+    --bs-table-border-color: var(--border-color);
+    color: var(--text-primary);
+    border-color: var(--border-color);
 }
 
 /* Keep buttons, badges, and special gradients readable */

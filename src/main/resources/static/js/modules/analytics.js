@@ -1,12 +1,23 @@
 let utilizationChartInstance = null;
 
 $(document).ready(function() {
-    // Set default defaults for Chart.js in dark mode
-    Chart.defaults.color = '#adb5bd';
-    Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
-
     loadUtilizationTrend();
     loadBenchList();
+
+    $('#theme-toggle-btn').on('click', function() {
+        setTimeout(function() {
+            if (utilizationChartInstance) {
+                const theme = getChartTheme();
+                utilizationChartInstance.options.color = theme.textColor;
+                utilizationChartInstance.options.plugins.legend.labels.color = theme.textColor;
+                utilizationChartInstance.options.scales.x.ticks.color = theme.textColor;
+                utilizationChartInstance.options.scales.x.grid.color = theme.gridColor;
+                utilizationChartInstance.options.scales.y.ticks.color = theme.textColor;
+                utilizationChartInstance.options.scales.y.grid.color = theme.gridColor;
+                utilizationChartInstance.update();
+            }
+        }, 50);
+    });
 });
 
 function loadUtilizationTrend() {

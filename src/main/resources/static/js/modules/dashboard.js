@@ -8,8 +8,17 @@ $(document).ready(function() {
     $('#theme-toggle-btn').on('click', function() {
         setTimeout(function() {
             if (revenueChartInstance && statusChartInstance) {
-                applyChartColors();
+                const theme = getChartTheme();
+                revenueChartInstance.options.color = theme.textColor;
+                revenueChartInstance.options.plugins.legend.labels.color = theme.textColor;
+                revenueChartInstance.options.scales.x.ticks.color = theme.textColor;
+                revenueChartInstance.options.scales.x.grid.color = theme.gridColor;
+                revenueChartInstance.options.scales.y.ticks.color = theme.textColor;
+                revenueChartInstance.options.scales.y.grid.color = theme.gridColor;
                 revenueChartInstance.update();
+
+                statusChartInstance.options.color = theme.textColor;
+                statusChartInstance.options.plugins.legend.labels.color = theme.textColor;
                 statusChartInstance.update();
             }
         }, 50);
