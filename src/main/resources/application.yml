@@ -45,6 +45,18 @@ spring:
     console:
       enabled: false
 
+  # ===== Flyway（DBマイグレーション。旧「001〜009を手動実行」手順を自動化） =====
+  # 既存の手動構築済みDBに対して初めて導入する場合は baseline-on-migrate により
+  # 「既にV9まで適用済み」とみなして以降のマイグレーションのみ実行する。
+  # prod では application-prod.yml が db/migration-prod を追加ロケーションとして
+  # 差し込み、admin初期パスワードのBCrypt化(V10)のみ prod 限定で適用する。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 9
+    baseline-description: "手動SQL(001-009)適用済みベースライン"
+
   # ===== Thymeleaf =====
   thymeleaf:
     prefix: classpath:/templates/
@@ -79,8 +91,9 @@ spring:
             enable: true
 
 # ===== MyBatis Plus =====
+# 本プロジェクトはXMLマッパーを持たない（クエリはLambdaQueryWrapper/@Selectで完結）ため
+# mapper-locations は設定しない。
 mybatis-plus:
-  mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.ses.entity
   configuration:
     map-underscore-to-camel-case: true

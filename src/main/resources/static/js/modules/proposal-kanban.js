@@ -88,14 +88,14 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#prop-engineerId');
             select.empty().append('<option value="">要員を選択...</option>');
-            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${e.fullName}</option>`));
+            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
         }
     });
     $.get('/api/projects', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-projectId');
             select.empty().append('<option value="">案件を選択...</option>');
-            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${p.projectName}</option>`));
+            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
         }
     });
 }
@@ -139,17 +139,17 @@ function createKanbanCard(item) {
     
     return `
         <div class="kanban-card" data-id="${item.id}" onclick="viewProposalDetail(${item.id})">
-            <div class="kanban-card-title">${item.projectName || '案件未定'}</div>
-            
+            <div class="kanban-card-title">${SES.escapeHtml(item.projectName || '案件未定')}</div>
+
             <div class="kanban-card-subtitle">
                 <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 24px; height: 24px; font-size: 0.6rem;">
-                    ${item.engineerInitial || 'N/A'}
+                    ${SES.escapeHtml(item.engineerInitial || 'N/A')}
                 </div>
-                <span class="text-truncate">${item.engineerName || '未指定'}</span>
+                <span class="text-truncate">${SES.escapeHtml(item.engineerName || '未指定')}</span>
             </div>
-            
+
             <div class="kanban-card-subtitle mb-2 small text-truncate">
-                <i class="bi bi-building me-1"></i> ${item.customerName || '顧客未定'}
+                <i class="bi bi-building me-1"></i> ${SES.escapeHtml(item.customerName || '顧客未定')}
             </div>
             
             <div class="kanban-card-meta">
@@ -213,18 +213,18 @@ function openContractCreateModal(proposalId) {
             $('#cont-proposalId').val(prop.id);
             
             if ($(`#cont-engineerId option[value="${prop.engineerId}"]`).length === 0) {
-                $('#cont-engineerId').append(`<option value="${prop.engineerId}">${prop.engineerName}</option>`);
+                $('#cont-engineerId').append(`<option value="${prop.engineerId}">${SES.escapeHtml(prop.engineerName)}</option>`);
             }
             $('#cont-engineerId').val(prop.engineerId);
-            
+
             if ($(`#cont-projectId option[value="${prop.projectId}"]`).length === 0) {
-                $('#cont-projectId').append(`<option value="${prop.projectId}">${prop.projectName}</option>`);
+                $('#cont-projectId').append(`<option value="${prop.projectId}">${SES.escapeHtml(prop.projectName)}</option>`);
             }
             $('#cont-projectId').val(prop.projectId);
-            
+
             if (prop.customerId) {
                 if ($(`#cont-customerId option[value="${prop.customerId}"]`).length === 0) {
-                    $('#cont-customerId').append(`<option value="${prop.customerId}">${prop.customerName || '顧客'}</option>`);
+                    $('#cont-customerId').append(`<option value="${prop.customerId}">${SES.escapeHtml(prop.customerName || '顧客')}</option>`);
                 }
                 $('#cont-customerId').val(prop.customerId);
             }
@@ -364,7 +364,7 @@ function openMailModal(proposalId) {
     $.get('/api/email-templates', function(res) {
         const list = res.data && (res.data.records || res.data) || [];
         $select.empty().append('<option value="">テンプレートを選択</option>');
-        list.forEach(t => $select.append(`<option value="${t.id}">${t.templateName}</option>`));
+        list.forEach(t => $select.append(`<option value="${t.id}">${SES.escapeHtml(t.templateName)}</option>`));
     }).fail(function() {
         $select.html('<option value="">テンプレート取得に失敗</option>');
     });

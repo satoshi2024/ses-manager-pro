@@ -114,6 +114,12 @@
                         <span>システム設定</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('audit-log')}">
+                    <a th:href="@{/audit-log}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/audit-log') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-shield-check me-2"></i>
+                        <span>監査ログ</span>
+                    </a>
+                </li>
             </ul>
         </div>
         

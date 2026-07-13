@@ -3,6 +3,7 @@ package com.ses.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.dto.notification.NotificationDto;
 import com.ses.entity.Notification;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -14,6 +15,16 @@ public interface NotificationMapper extends BaseMapper<Notification> {
     @Select("SELECT COUNT(*) FROM t_notification n WHERE NOT EXISTS " +
             "(SELECT 1 FROM t_notification_read r WHERE r.notification_id = n.id AND r.user_id = #{userId})")
     long countUnread(@Param("userId") Long userId);
+
+    /**
+     * 対象ユーザーの未読通知を一括で既読化する（1回のINSERT..SELECTで完結）。
+     * ループでの1件ずつのINSERTより高速で、旧実装が持っていた1000件上限も無い。
+     */
+    @Insert("INSERT INTO t_notification_read (notification_id, user_id, read_at) " +
+            "SELECT n.id, #{userId}, CURRENT_TIMESTAMP FROM t_notification n " +
+            "WHERE NOT EXISTS (SELECT 1 FROM t_notification_read r " +
+            "WHERE r.notification_id = n.id AND r.user_id = #{userId})")
+    int markAllReadForUser(@Param("userId") Long userId);
 
     @Select("<script>" +
             "SELECT COUNT(*) FROM t_notification n " +

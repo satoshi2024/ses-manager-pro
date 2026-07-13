@@ -101,4 +101,49 @@ public class InvoiceServiceImplTest {
         String nextNo = invoiceService.generateInvoiceNo(billingMonth);
         assertEquals("INV-202607-0006", nextNo);
     }
+
+    @Test
+    void testGenerate_RetriesOnDuplicateInvoiceNoAndSucceeds() {
+        Long customerId = 1L;
+        String billingMonth = "2026-07";
+
+        UnbilledWorkRecordDto dto = new UnbilledWorkRecordDto();
+        dto.setWorkRecordId(10L);
+        dto.setBillingAmount(new BigDecimal("100000"));
+        dto.setEngineerName("山田太郎");
+        dto.setProjectName("開発案件");
+        when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
+                .thenReturn(Collections.singletonList(dto));
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+
+        // 1回目のinsertは同時採番の衝突でDuplicateKeyException、2回目で成功する
+        when(invoiceMapper.insert(any(Invoice.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate invoice_no"))
+                .thenReturn(1);
+
+        Invoice invoice = invoiceService.generate(customerId, billingMonth);
+
+        assertNotNull(invoice);
+        verify(invoiceMapper, times(2)).insert(any(Invoice.class));
+    }
+
+    @Test
+    void testGenerate_FailsAfterMaxRetries() {
+        Long customerId = 1L;
+        String billingMonth = "2026-07";
+
+        UnbilledWorkRecordDto dto = new UnbilledWorkRecordDto();
+        dto.setWorkRecordId(10L);
+        dto.setBillingAmount(new BigDecimal("100000"));
+        when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
+                .thenReturn(Collections.singletonList(dto));
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+        when(invoiceMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(invoiceMapper.insert(any(Invoice.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate invoice_no"));
+
+        assertThrows(BusinessException.class, () -> invoiceService.generate(customerId, billingMonth));
+        verify(invoiceMapper, times(3)).insert(any(Invoice.class));
+    }
 }

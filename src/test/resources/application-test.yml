@@ -9,20 +9,25 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations:
-        - classpath:sql/001_create_tables.sql
-        - classpath:sql/002_init_master_data.sql
-        - classpath:sql/004_create_notification.sql
-        - classpath:sql/005_create_work_record_billing.sql
-        - classpath:sql/006_create_sales_activity.sql
-        - classpath:sql/007_create_analytics_report.sql
-        - classpath:sql/007_user_security_columns.sql
-        - classpath:sql/008_system_config_and_menu.sql
+        - classpath:db/migration/V1__create_tables.sql
+        - classpath:db/migration/V2__init_master_data.sql
+        - classpath:db/migration/V4__create_notification.sql
+        - classpath:db/migration/V5__create_work_record_billing.sql
+        - classpath:db/migration/V6__create_sales_activity.sql
+        - classpath:db/migration/V7__create_analytics_report.sql
+        - classpath:db/migration/V8__user_security_columns.sql
+        - classpath:db/migration/V9__system_config_and_menu.sql
       data-locations:
         - classpath:sql/dummy.sql
 
   h2:
     console:
       enabled: false
+
+  # 001~008(現db/migration/V1~V9)は上のschema-locationsで直接投入するため、
+  # MySQL向けのFlywayマイグレーションは適用しない(二重適用を防止)。
+  flyway:
+    enabled: false
 
 # MyBatis Plus for test
 mybatis-plus:

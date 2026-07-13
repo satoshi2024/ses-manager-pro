@@ -1,4 +1,5 @@
 let templateModal = null;
+let currentTemplates = [];
 
 $(document).ready(function() {
     templateModal = new bootstrap.Modal(document.getElementById('templateModal'));
@@ -27,27 +28,28 @@ function loadTemplates() {
 }
 
 function renderTemplates(list) {
+    currentTemplates = list || [];
     const tbody = $('#template-table-body');
     tbody.empty();
-    
+
     if (!list || list.length === 0) {
         tbody.append('<tr><td colspan="4" class="text-center text-muted py-4">データがありません</td></tr>');
         return;
     }
-    
+
     list.forEach(t => {
         let typeBadge = 'status-secondary';
         if (t.templateType === '提案') typeBadge = 'status-primary';
         if (t.templateType === '面接依頼') typeBadge = 'status-warning';
         if (t.templateType === 'お礼') typeBadge = 'status-success';
-        
+
         const tr = `
             <tr>
-                <td class="px-4 py-3 text-white fw-bold">${t.templateName}</td>
-                <td class="py-3"><span class="status-badge ${typeBadge}">${t.templateType}</span></td>
-                <td class="py-3 text-muted text-truncate" style="max-width:300px;">${t.subjectTemplate}</td>
+                <td class="px-4 py-3 text-white fw-bold">${SES.escapeHtml(t.templateName)}</td>
+                <td class="py-3"><span class="status-badge ${typeBadge}">${SES.escapeHtml(t.templateType)}</span></td>
+                <td class="py-3 text-muted text-truncate" style="max-width:300px;">${SES.escapeHtml(t.subjectTemplate)}</td>
                 <td class="px-4 py-3 text-end">
-                    <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick='editTemplate(${JSON.stringify(t)})'>
+                    <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick="editTemplate(${t.id})">
                         <i class="bi bi-pencil"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-danger border-dark" onclick="deleteTemplate(${t.id})">
@@ -67,7 +69,11 @@ function showTemplateModal() {
     templateModal.show();
 }
 
-function editTemplate(data) {
+function editTemplate(id) {
+    // JSONをonclick属性へ直接埋め込むと値に含まれるクォートで属性を脱出できてしまうため、
+    // idのみを渡してキャッシュ済み一覧から検索する
+    const data = currentTemplates.find(t => t.id === id);
+    if (!data) return;
     $('#template-id').val(data.id);
     $('#template-name').val(data.templateName);
     $('#template-type').val(data.templateType);

@@ -31,7 +31,7 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#cont-engineerId');
             select.empty().append('<option value="">要員を選択...</option>');
-            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${e.fullName}</option>`));
+            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
         }
     });
     // Load Projects
@@ -39,7 +39,7 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#cont-projectId');
             select.empty().append('<option value="">案件を選択...</option>');
-            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${p.projectName}</option>`));
+            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
         }
     });
     // Load Customers
@@ -47,7 +47,7 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#cont-customerId');
             select.empty().append('<option value="">顧客を選択...</option>');
-            (res.data.records || res.data).forEach(c => select.append(`<option value="${c.id}">${c.companyName}</option>`));
+            (res.data.records || res.data).forEach(c => select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`));
         }
     });
 }

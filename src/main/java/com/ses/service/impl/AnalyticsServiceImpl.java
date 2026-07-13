@@ -1,8 +1,9 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.dto.analytics.BenchEngineerDto;
+import com.ses.dto.analytics.ContractDateRangeDto;
+import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.dto.analytics.UtilizationPointDto;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 import com.ses.entity.Contract;
@@ -33,16 +34,17 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AnalyticsServiceImpl implements AnalyticsService {
 
-    private static final List<String> ACTIVE_CONTRACT_STATUSES = List.of("稼動中", "終了");
-
     private final EngineerMapper engineerMapper;
     private final ContractMapper contractMapper;
     private final EngineerSkillMapper engineerSkillMapper;
 
     @Override
     public List<UtilizationPointDto> utilizationTrend(int months) {
-        List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+        // Engineer/Contract の全カラムではなく、集計に必要な列だけを取得する軽量プロジェクション
+        // （remarks等の大きな列を含む全件ロードを避け、大量データ時のメモリ使用量を抑える）。
+        // ステータス絞り込み（稼動中/終了）もSQL側で行う。
+        List<EngineerCreatedAtDto> allEngineers = engineerMapper.selectCreatedAtOnly();
+        List<ContractDateRangeDto> allContracts = contractMapper.selectActiveDateRanges();
 
         List<YearMonth> targetMonths = buildTrailingMonths(months);
         List<UtilizationPointDto> result = new ArrayList<>();
@@ -56,13 +58,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     .count();
 
             Set<Long> activeEngineerIds = new HashSet<>();
-            for (Contract c : allContracts) {
-                if (c.getEngineerId() == null || c.getStartDate() == null) {
-                    continue;
-                }
-                if (!ACTIVE_CONTRACT_STATUSES.contains(c.getStatus())) {
-                    continue;
-                }
+            for (ContractDateRangeDto c : allContracts) {
                 boolean startedByMonthEnd = !c.getStartDate().isAfter(monthEnd);
                 boolean stillActiveAtMonthEnd = c.getEndDate() == null || !c.getEndDate().isBefore(monthEnd);
                 if (startedByMonthEnd && stillActiveAtMonthEnd) {

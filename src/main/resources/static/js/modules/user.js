@@ -93,10 +93,10 @@ function renderUsers(records) {
 
         const tr = `
             <tr>
-                <td class="ps-4 py-3 fw-bold text-light">${user.username}</td>
-                <td>${user.realName || '-'}</td>
-                <td><span class="status-badge status-primary">${user.role}</span></td>
-                <td>${user.email || '-'}</td>
+                <td class="ps-4 py-3 fw-bold text-light">${SES.escapeHtml(user.username)}</td>
+                <td>${SES.escapeHtml(user.realName || '-')}</td>
+                <td><span class="status-badge status-primary">${SES.escapeHtml(user.role)}</span></td>
+                <td>${SES.escapeHtml(user.email || '-')}</td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
@@ -276,7 +276,7 @@ function renderRoleMenuCheckboxes(allowedKeys) {
         container.append(`
             <div class="form-check form-switch">
                 <input class="form-check-input role-menu-checkbox" type="checkbox" role="switch" id="menu-${menu.id}" value="${menu.id}" ${checked}>
-                <label class="form-check-label text-light" for="menu-${menu.id}">${menu.menuName}</label>
+                <label class="form-check-label text-light" for="menu-${menu.id}">${SES.escapeHtml(menu.menuName)}</label>
             </div>
         `);
     });

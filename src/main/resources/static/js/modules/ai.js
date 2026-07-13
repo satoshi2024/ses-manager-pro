@@ -157,7 +157,7 @@ function loadContextData() {
             const records = res.data.records || res.data;
             const select = $('#contextEngineer');
             records.forEach(eng => {
-                select.append(`<option value="${eng.id}">${eng.fullName} (${eng.expectedUnitPrice ? eng.expectedUnitPrice+'万円' : '-'})</option>`);
+                select.append(`<option value="${eng.id}">${SES.escapeHtml(eng.fullName)} (${eng.expectedUnitPrice ? eng.expectedUnitPrice+'万円' : '-'})</option>`);
             });
         }
     });
@@ -168,7 +168,7 @@ function loadContextData() {
             const records = res.data.records || res.data;
             const select = $('#contextProject');
             records.forEach(proj => {
-                select.append(`<option value="${proj.id}">${proj.projectName}</option>`);
+                select.append(`<option value="${proj.id}">${SES.escapeHtml(proj.projectName)}</option>`);
             });
         }
     });

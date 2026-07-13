@@ -53,7 +53,7 @@ function loadTemplatesToSelect() {
                 const select = $('#chat-template-select');
                 select.empty().append('<option value="">(テンプレートを選択...)</option>');
                 res.data.forEach(t => {
-                    select.append(`<option value="${t.id}">${t.templateName}</option>`);
+                    select.append(`<option value="${t.id}">${SES.escapeHtml(t.templateName)}</option>`);
                 });
             }
         }
@@ -64,7 +64,7 @@ function appendUserMessage(text) {
     const html = `
         <div class="d-flex mb-4 justify-content-end">
             <div class="bg-primary bg-gradient rounded p-3 text-white position-relative shadow-sm" style="max-width: 85%;">
-                <p class="mb-0 text-break" style="white-space: pre-wrap;">${text}</p>
+                <p class="mb-0 text-break" style="white-space: pre-wrap;">${SES.escapeHtml(text)}</p>
             </div>
         </div>
     `;
@@ -119,7 +119,7 @@ function sendChatMessage() {
         if (text.includes('マッチ') || text.includes('案件')) {
             renderMatchResultsInChat(loadingId);
         } else if (text.includes('要約') || text.includes('スキル')) {
-            replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${currentEngineerName}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
+            replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${SES.escapeHtml(currentEngineerName)}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
         } else {
             replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">すみません、その指示はよくわかりません。「案件をマッチング」や「スキル要約」と入力するか、下のテンプレートからメールを作成してみてください。</p>`);
         }
@@ -151,7 +151,7 @@ function requestSkillSummary() {
     appendUserMessage('スキルを要約して。');
     const loadingId = appendAiLoading();
     setTimeout(() => {
-        replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${currentEngineerName}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
+        replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${SES.escapeHtml(currentEngineerName)}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
     }, 1200);
 }
 
@@ -168,16 +168,17 @@ function generateEmailDraft() {
     const loadingId = appendAiLoading();
     
     setTimeout(() => {
+        const safeEngineerName = SES.escapeHtml(currentEngineerName);
         const draft = `
             <div class="mb-2 fw-bold text-accent-blue"><i class="bi bi-magic me-2"></i>AI提案文ドラフト</div>
-            <div class="bg-secondary p-3 rounded font-monospace small mb-3 border border-dark text-white" style="white-space: pre-wrap;">件名: 【ご提案】エンジニアのご紹介（${currentEngineerName}）
+            <div class="bg-secondary p-3 rounded font-monospace small mb-3 border border-dark text-white" style="white-space: pre-wrap;">件名: 【ご提案】エンジニアのご紹介（${safeEngineerName}）
 
 ◯◯株式会社
 ご担当者様
 
 お世話になっております。SES Manager Proの営業担当です。
 
-貴社のプロジェクトにつきまして、弊社の${currentEngineerName}をご提案させていただきます。
+貴社のプロジェクトにつきまして、弊社の${safeEngineerName}をご提案させていただきます。
 
 【アピールポイント】
 ・10年以上のJava/Spring Boot開発経験
@@ -208,10 +209,10 @@ function renderMatchResultsHTML(loadingId, results) {
             <div class="card bg-secondary border-dark mb-2 shadow-sm">
                 <div class="card-body p-3">
                     <div class="d-flex justify-content-between align-items-start mb-2">
-                        <h6 class="text-white fw-bold mb-0">${match.projectName}</h6>
+                        <h6 class="text-white fw-bold mb-0">${SES.escapeHtml(match.projectName)}</h6>
                         <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                     </div>
-                    <p class="small text-muted mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${match.reason}</p>
+                    <p class="small text-muted mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${SES.escapeHtml(match.reason)}</p>
                     <div class="text-end">
                         <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeToProject(${match.projectId}, ${match.score})">
                             <i class="bi bi-send-fill me-1"></i>この案件に提案

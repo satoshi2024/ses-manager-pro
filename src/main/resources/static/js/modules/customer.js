@@ -140,13 +140,13 @@ function renderCustomers(records) {
         const tr = `
             <tr style="cursor: pointer;" onclick="location.href='/customer/${cust.id}'">
                 <td class="ps-4 py-3">
-                    <div class="fw-bold text-light">${cust.companyName} ${followUpBadge}</div>
-                    <div class="text-muted small">${cust.address || ''}</div>
+                    <div class="fw-bold text-light">${SES.escapeHtml(cust.companyName)} ${followUpBadge}</div>
+                    <div class="text-muted small">${SES.escapeHtml(cust.address || '')}</div>
                 </td>
                 <td>${flowBadge}</td>
                 <td>${trustIcon}</td>
-                <td>${cust.contactPerson || '-'}</td>
-                <td class="font-monospace">${cust.contactPhone || '-'}</td>
+                <td>${SES.escapeHtml(cust.contactPerson || '-')}</td>
+                <td class="font-monospace">${SES.escapeHtml(cust.contactPhone || '-')}</td>
                 <td class="text-end pe-4" onclick="event.stopPropagation();">
                     <div class="btn-group btn-group-sm" role="group">
                         <button type="button" class="btn btn-outline-info text-info border-info" onclick="editCustomer(${cust.id})"><i class="bi bi-pencil"></i></button>
