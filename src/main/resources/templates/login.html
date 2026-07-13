@@ -17,7 +17,17 @@
     
     <!-- Custom CSS -->
     <link th:href="@{/css/common.css}" rel="stylesheet">
-    
+
+    <!-- 保存済みテーマの適用（FOUC防止のためhead内で同期実行） -->
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('ses_theme') || 'light';
+                document.documentElement.setAttribute('data-bs-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+
     <style>
         body {
             background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
@@ -30,9 +40,9 @@
         }
         
         .login-card {
-            background: rgba(30, 42, 58, 0.7);
+            background: var(--card-bg-glass);
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border-light);
             border-radius: var(--radius-lg);
             box-shadow: var(--shadow-lg);
             width: 100%;
@@ -59,17 +69,17 @@
         }
         
         .form-control-dark {
-            background-color: rgba(15, 25, 35, 0.6);
+            background-color: var(--bg-primary);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
             padding: 0.75rem 1rem 0.75rem 2.5rem;
             border-radius: var(--radius-sm);
         }
-        
+
         .form-control-dark:focus {
-            background-color: rgba(15, 25, 35, 0.8);
+            background-color: var(--bg-primary);
             border-color: var(--accent-blue);
-            color: white;
+            color: var(--text-primary);
             box-shadow: 0 0 0 0.25rem rgba(74, 158, 255, 0.25);
         }
         

@@ -4,19 +4,9 @@ $(document).ready(function() {
     loadUtilizationTrend();
     loadBenchList();
 
-    $('#theme-toggle-btn').on('click', function() {
-        setTimeout(function() {
-            if (utilizationChartInstance) {
-                const theme = getChartTheme();
-                utilizationChartInstance.options.color = theme.textColor;
-                utilizationChartInstance.options.plugins.legend.labels.color = theme.textColor;
-                utilizationChartInstance.options.scales.x.ticks.color = theme.textColor;
-                utilizationChartInstance.options.scales.x.grid.color = theme.gridColor;
-                utilizationChartInstance.options.scales.y.ticks.color = theme.textColor;
-                utilizationChartInstance.options.scales.y.grid.color = theme.gridColor;
-                utilizationChartInstance.update();
-            }
-        }, 50);
+    // テーマ変更時にチャートを再配色する（発火元: SES.theme.applyTheme）
+    document.addEventListener('ses:theme-changed', function() {
+        SES.theme.applyChartTheme(utilizationChartInstance);
     });
 });
 
@@ -57,14 +47,6 @@ function loadBenchList() {
     });
 }
 
-function getChartTheme() {
-    const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
-    return {
-        textColor: isLight ? '#475569' : '#e8eaed',
-        gridColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
-    };
-}
-
 function renderUtilizationChart(points) {
     if (utilizationChartInstance) {
         utilizationChartInstance.destroy();
@@ -75,7 +57,7 @@ function renderUtilizationChart(points) {
     const benchData = points.map(p => p.benchCount);
     const rateData = points.map(p => p.utilizationRate);
 
-    const theme = getChartTheme();
+    const theme = SES.theme.chartColors();
     const ctx = document.getElementById('utilizationChart').getContext('2d');
     utilizationChartInstance = new Chart(ctx, {
         data: {
@@ -193,13 +175,13 @@ function renderBenchTable(list) {
                 <td class="px-4 py-3">
                     <div class="d-flex align-items-center">
                         <div class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center me-3" style="width: 32px; height: 32px; font-size: 0.8rem;">
-                            ${item.initial || '?'}
+                            ${escapeHtml(item.initial || '?')}
                         </div>
                         <div class="fw-bold">${nameStr}</div>
                     </div>
                 </td>
                 <td class="py-3">
-                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${item.benchDays}日</span>
+                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${Number(item.benchDays)}日</span>
                 </td>
                 <td class="py-3">${priceStr}</td>
                 <td class="py-3">${availableStr}</td>
