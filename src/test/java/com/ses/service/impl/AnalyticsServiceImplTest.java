@@ -1,7 +1,8 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.dto.analytics.BenchEngineerDto;
+import com.ses.dto.analytics.ContractDateRangeDto;
+import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.dto.analytics.UtilizationPointDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
@@ -60,6 +61,21 @@ class AnalyticsServiceImplTest {
         return c;
     }
 
+    private EngineerCreatedAtDto createEngineerProjection(Long id, LocalDateTime createdAt) {
+        EngineerCreatedAtDto dto = new EngineerCreatedAtDto();
+        dto.setId(id);
+        dto.setCreatedAt(createdAt);
+        return dto;
+    }
+
+    private ContractDateRangeDto createContractRange(Long engineerId, LocalDate startDate, LocalDate endDate) {
+        ContractDateRangeDto dto = new ContractDateRangeDto();
+        dto.setEngineerId(engineerId);
+        dto.setStartDate(startDate);
+        dto.setEndDate(endDate);
+        return dto;
+    }
+
     private void initService() {
         analyticsService = new AnalyticsServiceImpl(engineerMapper, contractMapper, engineerSkillMapper);
     }
@@ -73,12 +89,13 @@ class AnalyticsServiceImplTest {
         YearMonth targetMonth = YearMonth.from(LocalDate.now());
         LocalDate monthEnd = targetMonth.atEndOfMonth();
 
-        Engineer e1 = createEngineer(1L, "Eng1", "稼動中", monthEnd.minusMonths(6).atStartOfDay());
-        when(engineerMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(e1));
+        EngineerCreatedAtDto e1 = createEngineerProjection(1L, monthEnd.minusMonths(6).atStartOfDay());
+        when(engineerMapper.selectCreatedAtOnly()).thenReturn(List.of(e1));
 
         // Contract starts exactly on the last day of the target month -> should count as active that month
-        Contract c1 = createContract(1L, "稼動中", monthEnd, null);
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        // (稼動中/終了ステータスの絞り込みはSQL側で行うため、このプロジェクションはstatusを持たない)
+        ContractDateRangeDto c1 = createContractRange(1L, monthEnd, null);
+        when(contractMapper.selectActiveDateRanges()).thenReturn(List.of(c1));
 
         List<UtilizationPointDto> result = analyticsService.utilizationTrend(1);
         assertEquals(1, result.size());
@@ -96,12 +113,12 @@ class AnalyticsServiceImplTest {
         YearMonth previousMonth = currentMonth.minusMonths(1);
         LocalDate previousMonthEnd = previousMonth.atEndOfMonth();
 
-        Engineer e1 = createEngineer(1L, "Eng1", "稼動中", previousMonthEnd.minusMonths(6).atStartOfDay());
-        when(engineerMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(e1));
+        EngineerCreatedAtDto e1 = createEngineerProjection(1L, previousMonthEnd.minusMonths(6).atStartOfDay());
+        when(engineerMapper.selectCreatedAtOnly()).thenReturn(List.of(e1));
 
         // Contract ends exactly on the last day of the previous month.
-        Contract c1 = createContract(1L, "終了", previousMonthEnd.minusMonths(3), previousMonthEnd);
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        ContractDateRangeDto c1 = createContractRange(1L, previousMonthEnd.minusMonths(3), previousMonthEnd);
+        when(contractMapper.selectActiveDateRanges()).thenReturn(List.of(c1));
 
         List<UtilizationPointDto> result = analyticsService.utilizationTrend(2);
         assertEquals(2, result.size());
@@ -118,8 +135,8 @@ class AnalyticsServiceImplTest {
     @Test
     void utilizationTrend_zeroEngineers_utilizationRateIsNullNoDivideByZero() {
         initService();
-        when(engineerMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(engineerMapper.selectCreatedAtOnly()).thenReturn(Collections.emptyList());
+        when(contractMapper.selectActiveDateRanges()).thenReturn(Collections.emptyList());
 
         List<UtilizationPointDto> result = analyticsService.utilizationTrend(3);
         assertEquals(3, result.size());
@@ -134,13 +151,13 @@ class AnalyticsServiceImplTest {
     @Test
     void utilizationTrend_singleFetchOfEngineersAndContracts() {
         initService();
-        when(engineerMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(engineerMapper.selectCreatedAtOnly()).thenReturn(Collections.emptyList());
+        when(contractMapper.selectActiveDateRanges()).thenReturn(Collections.emptyList());
 
         analyticsService.utilizationTrend(12);
 
-        org.mockito.Mockito.verify(engineerMapper, org.mockito.Mockito.times(1)).selectList(any(QueryWrapper.class));
-        org.mockito.Mockito.verify(contractMapper, org.mockito.Mockito.times(1)).selectList(any(QueryWrapper.class));
+        org.mockito.Mockito.verify(engineerMapper, org.mockito.Mockito.times(1)).selectCreatedAtOnly();
+        org.mockito.Mockito.verify(contractMapper, org.mockito.Mockito.times(1)).selectActiveDateRanges();
     }
 
     // --- benchList tests ---
