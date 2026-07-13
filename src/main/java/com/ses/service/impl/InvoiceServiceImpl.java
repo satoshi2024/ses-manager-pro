@@ -14,6 +14,7 @@ import com.ses.mapper.InvoiceMapper;
 import com.ses.service.InvoiceService;
 import com.ses.service.SystemConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +36,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     private SystemConfigService systemConfigService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Invoice generate(Long customerId, String billingMonth) {
         List<UnbilledWorkRecordDto> unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
         if (unbilledList == null || unbilledList.isEmpty()) {
@@ -54,7 +55,6 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         BigDecimal total = subtotal.add(tax);
 
         Invoice invoice = new Invoice();
-        invoice.setInvoiceNo(generateInvoiceNo(billingMonth));
         invoice.setCustomerId(customerId);
         invoice.setBillingMonth(billingMonth);
         invoice.setSubtotal(subtotal);
@@ -63,7 +63,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         invoice.setStatus("未送付");
         invoice.setIssuedDate(LocalDate.now());
 
-        this.save(invoice);
+        insertWithInvoiceNoRetry(invoice, billingMonth);
 
         for (UnbilledWorkRecordDto dto : unbilledList) {
             InvoiceItem item = new InvoiceItem();
@@ -77,8 +77,29 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return invoice;
     }
 
+    /**
+     * 採番→INSERTをリトライ付きで行う。invoice_no はUNIQUE制約を持つため、
+     * 複数インスタンス・複数スレッドからの同時採番で番号が衝突しても
+     * DuplicateKeyExceptionを捕捉して再採番することで整合性を保つ
+     * （旧実装は synchronized による単一JVM内のみのロックで、複数インスタンス
+     * 構成では衝突を防げなかった）。
+     */
+    private void insertWithInvoiceNoRetry(Invoice invoice, String billingMonth) {
+        final int maxAttempts = 3;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            invoice.setInvoiceNo(generateInvoiceNo(billingMonth));
+            try {
+                this.baseMapper.insert(invoice);
+                return;
+            } catch (DuplicateKeyException e) {
+                // 同時採番の衝突。次のループで最新の最大値から再採番する
+            }
+        }
+        throw new BusinessException("請求書番号の採番に失敗しました。再試行してください。");
+    }
+
     @Override
-    public synchronized String generateInvoiceNo(String billingMonth) {
+    public String generateInvoiceNo(String billingMonth) {
         String monthStr = billingMonth.replace("-", "");
         String prefix = "INV-" + monthStr + "-";
         
