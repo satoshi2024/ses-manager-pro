@@ -1,18 +1,18 @@
-/* Overrides for Frappe Gantt in Dark Mode */
+/* Frappe Gantt の配色を common.css のテーマ変数に追従させる（ダーク/ライト両対応） */
 .gantt .grid-header {
-    fill: #2b2b2b !important;
+    fill: var(--bg-secondary) !important;
 }
 .gantt .grid-row {
-    fill: #222222 !important;
+    fill: var(--bg-card) !important;
 }
 .gantt .grid-row:nth-child(even) {
-    fill: #1e1e1e !important;
+    fill: var(--bg-primary) !important;
 }
 .gantt .row-line, .gantt .tick {
-    stroke: #444 !important;
+    stroke: var(--border-color) !important;
 }
 .gantt .upper-text, .gantt .lower-text {
-    fill: #adb5bd !important;
+    fill: var(--text-secondary) !important;
 }
 .gantt .bar-wrapper .bar {
     fill: #20c997 !important;
@@ -36,12 +36,12 @@
 }
 /* Tooltip styling */
 .gantt-target .gantt-tooltip {
-    background: #333 !important;
-    color: #fff !important;
-    border: 1px solid #555 !important;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
     border-radius: 4px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: var(--shadow-md);
 }
 .gantt-target .gantt-tooltip::after {
-    border-top-color: #555 !important;
+    border-top-color: var(--border-color) !important;
 }

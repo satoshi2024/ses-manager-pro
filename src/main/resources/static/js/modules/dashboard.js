@@ -5,23 +5,15 @@ $(document).ready(function() {
     $('#btn-print-report').on('click', function() { window.print(); });
     $('#btn-export-revenue').on('click', function() { exportRevenue(); });
 
-    $('#theme-toggle-btn').on('click', function() {
-        setTimeout(function() {
-            if (revenueChartInstance && statusChartInstance) {
-                const theme = getChartTheme();
-                revenueChartInstance.options.color = theme.textColor;
-                revenueChartInstance.options.plugins.legend.labels.color = theme.textColor;
-                revenueChartInstance.options.scales.x.ticks.color = theme.textColor;
-                revenueChartInstance.options.scales.x.grid.color = theme.gridColor;
-                revenueChartInstance.options.scales.y.ticks.color = theme.textColor;
-                revenueChartInstance.options.scales.y.grid.color = theme.gridColor;
-                revenueChartInstance.update();
+    // テーマ変更時にチャートを再配色する（発火元: SES.theme.applyTheme）
+    document.addEventListener('ses:theme-changed', function() {
+        SES.theme.applyChartTheme(revenueChartInstance);
+        SES.theme.applyChartTheme(statusChartInstance);
+    });
 
-                statusChartInstance.options.color = theme.textColor;
-                statusChartInstance.options.plugins.legend.labels.color = theme.textColor;
-                statusChartInstance.update();
-            }
-        }, 50);
+    // 退場予定者リストのAIマッチングボタン（行はAjaxで再描画されるため委譲で捕捉）
+    $('#retiring-table-body').on('click', '.btn-ai-match', function() {
+        matchAI(Number($(this).data('id')), String($(this).data('name')));
     });
 
     const currentFiscalYear = getCurrentFiscalYear();
@@ -86,16 +78,8 @@ function renderKPIs(kpi) {
     $('#kpi-profit-trend').text(kpi.profitTrend);
 }
 
-function getChartTheme() {
-    const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
-    return {
-        textColor: isLight ? '#475569' : '#e8eaed',
-        gridColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
-    };
-}
-
 function renderCharts(chartsData) {
-    const theme = getChartTheme();
+    const theme = SES.theme.chartColors();
 
     if (revenueChartInstance) {
         revenueChartInstance.destroy();
@@ -214,34 +198,37 @@ function renderRetiringList(list) {
     list.forEach(item => {
         const propBadgeClass = item.proposals > 0 ? 'bg-primary' : 'bg-secondary';
         const propText = item.proposals > 0 ? `提案中 (${item.proposals}件)` : '未提案';
-        
+
         let daysColor = 'text-accent-yellow';
         if (item.daysLeft <= 14) daysColor = 'text-danger';
         else if (item.daysLeft > 30) daysColor = 'text-muted';
+
+        // 氏名・スキル・案件名等は要員登録フォーム由来の任意文字列のため必ずエスケープする（XSS対策）
+        const nameStr = SES.escapeHtml(item.name);
 
         const tr = `
             <tr>
                 <td class="px-4 py-3">
                     <div class="d-flex align-items-center">
                         <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-3" style="width: 32px; height: 32px; font-size: 0.8rem;">
-                            ${item.initial || '?'}
+                            ${SES.escapeHtml(item.initial || '?')}
                         </div>
                         <div>
-                            <div class="fw-bold mb-0">${item.name}</div>
-                            <div class="small text-muted">${item.skill || 'スキル情報なし'}</div>
+                            <div class="fw-bold mb-0">${nameStr}</div>
+                            <div class="small text-muted">${SES.escapeHtml(item.skill || 'スキル情報なし')}</div>
                         </div>
                     </div>
                 </td>
-                <td class="py-3">${item.project || '-'}</td>
+                <td class="py-3">${SES.escapeHtml(item.project || '-')}</td>
                 <td class="py-3">
-                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${item.date}</span>
-                    <div class="small text-muted">残り ${item.daysLeft} 日</div>
+                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${SES.escapeHtml(item.date)}</span>
+                    <div class="small text-muted">残り ${Number(item.daysLeft)} 日</div>
                 </td>
                 <td class="py-3">
                     <span class="badge ${propBadgeClass}"><i class="bi bi-file-earmark-person me-1"></i>${propText}</span>
                 </td>
                 <td class="px-4 py-3 text-end">
-                    <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="matchAI(${item.id}, '${item.name}')">
+                    <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm btn-ai-match" data-id="${Number(item.id)}" data-name="${nameStr}">
                         <i class="bi bi-robot me-1"></i>AI案件探索
                     </button>
                 </td>

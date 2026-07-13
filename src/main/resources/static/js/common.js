@@ -362,11 +362,10 @@ const SES = {
         },
         applyTheme: function(theme) {
             document.documentElement.setAttribute('data-bs-theme', theme);
-            document.body.className = theme + '-theme';
-            
+
             const iconLight = document.getElementById('theme-icon-light');
             const iconDark = document.getElementById('theme-icon-dark');
-            
+
             if (iconLight && iconDark) {
                 if (theme === 'light') {
                     iconLight.classList.remove('d-none');
@@ -376,6 +375,42 @@ const SES = {
                     iconDark.classList.remove('d-none');
                 }
             }
+
+            // テーマ変更を各ページモジュールへ通知する（Chart.js の再配色等に利用）
+            document.dispatchEvent(new CustomEvent('ses:theme-changed', { detail: { theme: theme } }));
+        },
+
+        /**
+         * 現在のテーマに応じた Chart.js 用の配色を返す。
+         * チャートを持つ各モジュールはこれを参照し、独自に色を定義しないこと。
+         */
+        chartColors: function() {
+            const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
+            return {
+                textColor: isLight ? '#475569' : '#e8eaed',
+                gridColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
+            };
+        },
+
+        /**
+         * 生成済みチャートへ現在テーマの配色を適用して再描画する。
+         * options.scales を実際に存在する軸だけ走査するため、軸構成に依存しない。
+         */
+        applyChartTheme: function(chart) {
+            if (!chart) return;
+            const colors = this.chartColors();
+            chart.options.color = colors.textColor;
+            if (chart.options.plugins && chart.options.plugins.legend && chart.options.plugins.legend.labels) {
+                chart.options.plugins.legend.labels.color = colors.textColor;
+            }
+            const scales = chart.options.scales || {};
+            Object.keys(scales).forEach(function(key) {
+                const scale = scales[key];
+                if (scale.ticks) scale.ticks.color = colors.textColor;
+                if (scale.grid) scale.grid.color = colors.gridColor;
+                if (scale.title) scale.title.color = colors.textColor;
+            });
+            chart.update();
         }
     }
 };
