@@ -3,9 +3,11 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.Contract;
+import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 public class ContractApiController {
 
     private final ContractService contractService;
+    private final ContractRenewalService contractRenewalService;
 
     /**
      * 契約一覧取得
@@ -96,5 +99,16 @@ public class ContractApiController {
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
         return ApiResult.success(contractService.removeById(id));
+    }
+
+    /**
+     * 自動更新ドラフトの手動生成（管理者のみ。通常は日次バッチで自動実行される）。
+     *
+     * @return 生成件数
+     */
+    @PostMapping("/generate-renewals")
+    @PreAuthorize("hasRole('管理者')")
+    public ApiResult<Integer> generateRenewals() {
+        return ApiResult.success(contractRenewalService.generateRenewalDrafts());
     }
 }

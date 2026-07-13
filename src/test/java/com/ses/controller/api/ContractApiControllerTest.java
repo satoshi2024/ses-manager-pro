@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.Contract;
+import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,8 @@ class ContractApiControllerTest {
     private ObjectMapper objectMapper;
     @MockBean
     private ContractService contractService;
+    @MockBean
+    private ContractRenewalService contractRenewalService;
 
     @Test
     @WithMockUser

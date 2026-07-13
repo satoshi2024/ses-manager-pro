@@ -149,6 +149,7 @@ CREATE TABLE t_contract (
   auto_renew              TINYINT DEFAULT 0,
   status                  VARCHAR(20) DEFAULT '稼動中',
   remarks                 TEXT,
+  renewed_from_contract_id BIGINT,
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
