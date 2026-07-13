@@ -331,3 +331,14 @@ CREATE TABLE m_email_template (
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- AuditLog エンティティ（監査ログ、P8フォローアップ）
+DROP TABLE IF EXISTS t_audit_log;
+CREATE TABLE t_audit_log (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username   VARCHAR(50),
+  method     VARCHAR(10) NOT NULL,
+  uri        VARCHAR(500) NOT NULL,
+  status     INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
