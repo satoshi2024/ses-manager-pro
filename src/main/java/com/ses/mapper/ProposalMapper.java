@@ -22,4 +22,8 @@ public interface ProposalMapper extends BaseMapper<Proposal> {
             "LEFT JOIN t_customer c ON pj.customer_id = c.id " +
             "WHERE p.deleted_flag = 0 AND (e.deleted_flag = 0 OR e.deleted_flag IS NULL) AND (pj.deleted_flag = 0 OR pj.deleted_flag IS NULL)")
     List<ProposalKanbanDto> selectKanbanList();
+
+    /** 孤児ファイル清掃用: 参照中のスキルシート保存名を軽量取得する。 */
+    @Select("SELECT skill_sheet_path FROM t_proposal WHERE deleted_flag = 0 AND skill_sheet_path IS NOT NULL")
+    List<String> selectAllSkillSheetPaths();
 }

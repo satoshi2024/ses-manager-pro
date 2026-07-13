@@ -17,4 +17,8 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
      */
     @Select("SELECT id, created_at FROM t_engineer WHERE deleted_flag = 0")
     List<EngineerCreatedAtDto> selectCreatedAtOnly();
+
+    /** 孤児ファイル清掃用: 参照中の顔写真保存名を軽量取得する。 */
+    @Select("SELECT photo_url FROM t_engineer WHERE deleted_flag = 0 AND photo_url IS NOT NULL")
+    List<String> selectAllPhotoUrls();
 }
