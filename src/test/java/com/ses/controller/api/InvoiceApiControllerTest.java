@@ -54,6 +54,39 @@ class InvoiceApiControllerTest {
 
     @Test
     @WithMockUser
+    void list_overdueフィルタで期限超過条件が付与される() throws Exception {
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        when(invoiceService.page(any(), captor.capture()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
+
+        mockMvc.perform(get("/api/invoices").param("overdue", "true"))
+                .andExpect(status().isOk());
+
+        String sql = captor.getValue().getSqlSegment();
+        org.junit.jupiter.api.Assertions.assertTrue(sql.contains("due_date"),
+                "overdue=true で due_date 条件が付与されること: " + sql);
+        org.junit.jupiter.api.Assertions.assertTrue(sql.contains("status"),
+                "未入金(status <>)条件が付与されること: " + sql);
+    }
+
+    @Test
+    @WithMockUser
+    void list_overdue未指定なら期限条件は付与されない() throws Exception {
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        when(invoiceService.page(any(), captor.capture()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
+
+        mockMvc.perform(get("/api/invoices"))
+                .andExpect(status().isOk());
+
+        org.junit.jupiter.api.Assertions.assertFalse(captor.getValue().getSqlSegment().contains("due_date"),
+                "overdue未指定では due_date 条件が付与されないこと");
+    }
+
+    @Test
+    @WithMockUser
     void voidInvoice_Success() throws Exception {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/invoices/1/void")
                 .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))

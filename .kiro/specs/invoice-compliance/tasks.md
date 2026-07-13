@@ -21,11 +21,12 @@
   - **テスト要件**: `NotificationGenerateServiceTest` — 超過1件→通知1件(メッセージに請求書番号と超過日数)、入金済/期限内/due_date NULL/取消済みは対象外、同日2回実行で増えない(dedupe)。
   - **Demo**: due_date を昨日に更新した未入金請求書を用意 → 管理者で通知バッチ手動実行(`/api/notifications/generate`)→ ベルに赤アイコンの超過通知。
 
-- [x] 4. 一覧の期限列・超過ハイライト(+任意で overdue フィルタ)
-  - **Objective**: R4(R6 は工数が許せば)。
+- [x] 4. 一覧の期限列・超過ハイライト(+ overdue フィルタ R6)
+  - **Objective**: R4 + R6(実施済み)。
   - **実装ガイダンス**: design.md 4章。表示値は `SES.escapeHtml`。超過判定はクライアント側。
-  - **テスト要件**: R6 実施時のみ `InvoiceApiControllerTest` に overdue=true のケース追加。
-  - **Demo**: 一覧で超過請求書の期限が赤字になる。
+    R6: `GET /api/invoices` に `overdue` パラメータ追加 + 一覧に「期限超過のみ」チェックボックス。
+  - **テスト要件**: `InvoiceApiControllerTest` に overdue=true で due_date 条件が付与される/未指定では付かないケースを追加。
+  - **Demo**: 一覧で超過請求書の期限が赤字になる。「期限超過のみ」で絞り込める。
 
 - [x] 5. 適格請求書の記載事項
   - **Objective**: R5。登録番号・税率区分を含む請求書出力。

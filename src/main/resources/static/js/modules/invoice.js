@@ -30,15 +30,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('billingMonth').addEventListener('change', loadInvoices);
-    
+    document.getElementById('filterOverdue').addEventListener('change', loadInvoices);
+
     document.getElementById('btnSearchBpPayment').addEventListener('click', loadBpPayments);
     document.getElementById('bpWorkMonth').addEventListener('change', loadBpPayments);
 });
 
 function loadInvoices() {
     const month = document.getElementById('billingMonth').value;
+    const overdueEl = document.getElementById('filterOverdue');
     let url = '/api/invoices?current=1&size=100';
     if (month) url += `&month=${month}`;
+    if (overdueEl && overdueEl.checked) url += '&overdue=true';
 
     fetch(url).then(res => res.json()).then(data => {
         if (data.code === 200) {

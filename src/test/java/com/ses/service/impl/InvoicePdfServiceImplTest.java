@@ -24,11 +24,26 @@ import static org.mockito.Mockito.when;
 /**
  * 請求書PDF生成サービスのテスト（P8フォローアップ・提案12）。
  * 生成されたバイト列が実際に読み戻し可能なPDFであることをOpenPDFのPdfReaderで検証する。
- * このテスト環境にCJKフォント（fonts-japanese-gothicパッケージ由来）が
- * インストールされていることを前提にする。無い環境ではフォント未検出の
- * BusinessExceptionになることを別テストで確認する。
+ *
+ * PDF生成には日本語(CJK)フォントの埋め込みが必須のため、環境にフォントが
+ * 存在するかどうかで実行するテストを切り替える（Assumptionsでスキップ）:
+ *  - フォントあり → 正常系(有効なPDFを返す)を検証
+ *  - フォントなし(CI等) → フォント未検出でBusinessExceptionになることを検証
+ * どちらの環境でもエラーにならず、片方が実行・片方がスキップされる。
  */
 class InvoicePdfServiceImplTest {
+
+    /** InvoicePdfServiceImpl.DEFAULT_FONT_CANDIDATES と同じ既定候補（,以降のインデックスは除去）。 */
+    private static final List<String> FONT_CANDIDATE_PATHS = List.of(
+            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf"
+    );
+
+    private static boolean cjkFontAvailable() {
+        return FONT_CANDIDATE_PATHS.stream().anyMatch(p -> new java.io.File(p).exists());
+    }
 
     private SystemConfigService systemConfigService() {
         SystemConfigService s = Mockito.mock(SystemConfigService.class);
@@ -59,6 +74,10 @@ class InvoicePdfServiceImplTest {
 
     @Test
     void generate_有効なPDFバイト列を返す() throws Exception {
+        // CJKフォントが無い環境（CI等）ではPDF生成不可のためスキップする
+        org.junit.jupiter.api.Assumptions.assumeTrue(cjkFontAvailable(),
+                "この環境にはCJKフォントが無いため正常系PDF生成テストをスキップ");
+
         InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(new PdfProperties(), systemConfigService());
 
         byte[] bytes = service.generate(sampleDetail());
@@ -84,11 +103,8 @@ class InvoicePdfServiceImplTest {
             // ここでは「指定パスが存在しない」ケースのみを直接検証する。
         };
 
-        // 実行環境にデフォルト候補（ipag.ttf等）が存在する場合はこのテストは成立しないため、
-        // 存在チェックで事前にスキップする。
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-                !new java.io.File("/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf").exists()
-                        && !new java.io.File("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf").exists(),
+        // 実行環境に既定候補フォントが存在する場合はこのテストは成立しないため事前にスキップする。
+        org.junit.jupiter.api.Assumptions.assumeTrue(!cjkFontAvailable(),
                 "この環境には既定のCJKフォントが存在するためスキップ");
 
         assertThrows(BusinessException.class, () -> service.generate(sampleDetail()));
