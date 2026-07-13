@@ -112,15 +112,15 @@ CREATE TABLE t_project (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   project_name      VARCHAR(200) NOT NULL,
   customer_id       BIGINT,
-  status            VARCHAR(30) DEFAULT '募集中',
   commercial_flow   VARCHAR(50),
   description       TEXT,
-  required_count    INT,
+  required_count    INT DEFAULT 1,
   unit_price_min    DECIMAL(10,0),
   unit_price_max    DECIMAL(10,0),
   work_location     VARCHAR(200),
-  remote_type       VARCHAR(50),
-  priority          VARCHAR(20),
+  remote_type       VARCHAR(20),
+  status            VARCHAR(30) DEFAULT '募集中',
+  priority          VARCHAR(20) DEFAULT '通常',
   start_date        DATE,
   end_date          DATE,
   remarks           TEXT,
@@ -260,14 +260,19 @@ CREATE TABLE t_sales_activity (
   deleted_flag     TINYINT DEFAULT 0
 );
 
+-- Menu エンティティは path_prefix/api_prefix/created_at/updated_at にマッピングされる
+-- （旧 path/parent_id 定義は実体と不一致で MenuMapper.selectList() が
+--   「Unknown column」で失敗する潜在バグだったため実スキーマに合わせて修正）。
 DROP TABLE IF EXISTS m_menu CASCADE;
 CREATE TABLE m_menu (
-  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-  menu_key   VARCHAR(50) NOT NULL,
-  menu_name  VARCHAR(100),
-  path       VARCHAR(200),
-  parent_id  BIGINT,
-  sort_order INT DEFAULT 0
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  menu_key    VARCHAR(50) NOT NULL,
+  menu_name   VARCHAR(100),
+  path_prefix VARCHAR(100),
+  api_prefix  VARCHAR(100),
+  sort_order  INT DEFAULT 0,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 DROP TABLE IF EXISTS t_role_menu CASCADE;
@@ -275,4 +280,54 @@ CREATE TABLE t_role_menu (
   id       BIGINT AUTO_INCREMENT PRIMARY KEY,
   role     VARCHAR(50) NOT NULL,
   menu_id  BIGINT NOT NULL
+);
+
+-- SysUser エンティティ（BaseEntity継承 + failed_count/locked_until）
+DROP TABLE IF EXISTS sys_user;
+CREATE TABLE sys_user (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username      VARCHAR(50) NOT NULL UNIQUE,
+  password      VARCHAR(255) NOT NULL,
+  real_name     VARCHAR(50),
+  role          VARCHAR(50) NOT NULL,
+  email         VARCHAR(100),
+  status        TINYINT DEFAULT 1,
+  failed_count  INT DEFAULT 0,
+  locked_until  DATETIME,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT DEFAULT 0
+);
+
+-- SystemConfig エンティティ（文字列PK、BaseEntity非継承）
+DROP TABLE IF EXISTS m_system_config;
+CREATE TABLE m_system_config (
+  config_key   VARCHAR(100) PRIMARY KEY,
+  config_value TEXT,
+  description  VARCHAR(200)
+);
+
+-- AiLog エンティティ（updated_at/deleted_flagはexist=falseで対象外）
+DROP TABLE IF EXISTS t_ai_log;
+CREATE TABLE t_ai_log (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  request_type   VARCHAR(30),
+  request_params TEXT,
+  response_text  TEXT,
+  tokens_used    INT,
+  cost_jpy       DECIMAL(10,4),
+  created_by     BIGINT,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- EmailTemplate エンティティ（deleted_flagはexist=falseで対象外）
+DROP TABLE IF EXISTS m_email_template;
+CREATE TABLE m_email_template (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  template_name    VARCHAR(100) NOT NULL,
+  subject_template VARCHAR(500) NOT NULL,
+  body_template    TEXT NOT NULL,
+  template_type    VARCHAR(30),
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
