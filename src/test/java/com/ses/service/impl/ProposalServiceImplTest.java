@@ -2,9 +2,13 @@ package com.ses.service.impl;
 
 import com.ses.entity.Proposal;
 import com.ses.entity.ProposalHistory;
+import com.ses.entity.Project;
+import com.ses.entity.Contract;
 import com.ses.common.exception.BusinessException;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ProposalHistoryMapper;
+import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.ContractMapper;
 import com.ses.service.EngineerStatusService;
 import com.ses.common.util.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -39,8 +43,23 @@ public class ProposalServiceImplTest {
     @Autowired
     private ProposalHistoryMapper proposalHistoryMapper;
 
+    @Autowired
+    private ProjectMapper projectMapper;
+
+    @Autowired
+    private ContractMapper contractMapper;
+
     @MockBean
     private EngineerStatusService engineerStatusService;
+
+    /** createDraftFromProposal が案件を解決できるよう、指定IDの案件を用意する。 */
+    private Long seedProject(Long customerId) {
+        Project prj = new Project();
+        prj.setProjectName("テスト案件");
+        prj.setCustomerId(customerId);
+        projectMapper.insert(prj);
+        return prj.getId();
+    }
 
     private MockedStatic<SecurityUtils> mockedSecurityUtils;
 
@@ -99,10 +118,12 @@ public class ProposalServiceImplTest {
 
     @Test
     public void testChangeStatusToWon() {
+        Long projectId = seedProject(3L);
         Proposal p = new Proposal();
-        p.setProjectId(1L);
+        p.setProjectId(projectId);
         p.setEngineerId(1L);
         p.setStatus("結果待ち");
+        p.setProposedUnitPrice(new java.math.BigDecimal(700000));
         proposalMapper.insert(p);
 
         proposalService.changeStatus(p.getId(), "成約");
@@ -110,11 +131,41 @@ public class ProposalServiceImplTest {
         Proposal updated = proposalMapper.selectById(p.getId());
         assertEquals("成約", updated.getStatus());
         assertNotNull(updated.getClosedAt());
-        
+
+        // 成約により契約ドラフト(準備中)が自動生成されること
+        Contract draft = contractMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getProposalId, p.getId()));
+        assertNotNull(draft, "契約ドラフトが生成されていること");
+        assertEquals("準備中", draft.getStatus());
+        assertEquals(projectId, draft.getProjectId());
+        assertEquals(3L, draft.getCustomerId());
+        assertEquals(0, new java.math.BigDecimal(700000).compareTo(draft.getSellingPrice()));
+        assertNotNull(draft.getContractNo());
+
         // Cannot transition from terminal state
         assertThrows(BusinessException.class, () -> {
             proposalService.changeStatus(p.getId(), "一次面接");
         });
+    }
+
+    @Test
+    public void testChangeStatusToWon_failsWhenProjectMissing() {
+        Proposal p = new Proposal();
+        p.setProjectId(9999L); // 存在しない案件
+        p.setEngineerId(1L);
+        p.setStatus("結果待ち");
+        proposalMapper.insert(p);
+
+        // 案件が解決できなければ BusinessException。changeStatus は @Transactional(rollbackFor=Exception)
+        // のため、実運用では成約遷移ごとロールバックされる(本テストはテスト側トランザクション内の
+        // read-your-writes のためステータス反転は観測せず、契約が未生成であることを確認する)。
+        assertThrows(BusinessException.class, () -> proposalService.changeStatus(p.getId(), "成約"));
+
+        long count = contractMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getProposalId, p.getId()));
+        assertEquals(0, count);
     }
 
     @Test

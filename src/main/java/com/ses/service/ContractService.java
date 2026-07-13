@@ -2,6 +2,7 @@ package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.Contract;
+import com.ses.entity.Proposal;
 
 import java.time.LocalDate;
 
@@ -35,4 +36,12 @@ public interface ContractService extends IService<Contract> {
      * @return 稼働中の契約があればtrue
      */
     boolean hasActiveContract(Long engineerId);
+
+    /**
+     * 成約した提案から契約ドラフト（準備中）を生成する。
+     * 既に同一提案から生成済みの契約があれば何もせず既存契約を返す（冪等）。
+     * @param proposal 成約した提案
+     * @return 生成（または既存）の契約
+     */
+    Contract createDraftFromProposal(Proposal proposal);
 }
