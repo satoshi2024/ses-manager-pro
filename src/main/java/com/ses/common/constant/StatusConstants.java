@@ -81,4 +81,12 @@ public interface StatusConstants {
 
     /** ユーザーロール: マネージャー */
     String ROLE_MANAGER = "マネージャー";
+
+    // ========== インセンティブ計算基準 ==========
+
+    /** インセンティブ計算基準: 粗利 */
+    String COMMISSION_BASE_PROFIT = "粗利";
+
+    /** インセンティブ計算基準: 売上 */
+    String COMMISSION_BASE_SALES = "売上";
 }
