@@ -129,6 +129,19 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Testcontainers: 実MySQL上でFlywayマイグレーションを検証するスモークテスト用。
+             バージョンは spring-boot-starter-parent の BOM 管理。Docker不在の環境では
+             @Testcontainers(disabledWithoutDocker=true) により自動スキップされる。 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
