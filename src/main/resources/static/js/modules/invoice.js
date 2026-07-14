@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', () => {
+﻿document.addEventListener('DOMContentLoaded', () => {
     loadInvoices();
     
     document.getElementById('btnGenerateInvoice').addEventListener('click', () => {
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const billingMonth = document.querySelector('#generateForm [name="billingMonth"]').value;
 
         if (!customerId || !billingMonth) {
-            alert('顧客IDと対象月を入力してください。');
+            alert(SES.i18n.t('invoice.alert.inputRequired'));
             return;
         }
 
@@ -20,11 +20,11 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ customerId, billingMonth })
         }).then(res => res.json()).then(data => {
             if (data.code === 200) {
-                alert('請求書を生成しました。');
+                alert(SES.i18n.t('invoice.alert.generateSuccess'));
                 bootstrap.Modal.getInstance(document.getElementById('generateModal')).hide();
                 loadInvoices();
             } else {
-                alert(data.message || '生成に失敗しました。');
+                alert(data.message || SES.i18n.t('invoice.alert.generateFail'));
             }
         });
     });
@@ -61,16 +61,16 @@ function loadInvoices() {
                     <td class="text-right">￥${inv.subtotal.toLocaleString()}</td>
                     <td class="text-right">￥${inv.tax.toLocaleString()}</td>
                     <td class="text-right">￥${inv.total.toLocaleString()}</td>
-                    <td>${SES.escapeHtml(inv.status)}</td>
+                    <td>${SES.escapeHtml(SES.i18n.t('invoice.status.' + inv.status, inv.status))}</td>
                     <td>${inv.issuedDate || ''}</td>
                     ${dueCell}
                     <td>${inv.paidDate || ''}</td>
                     <td>
-                        <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">印刷</a>
-                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">送付済にする</button>` : ''}
-                        ${inv.status === '送付済' ? `<button class="btn btn-sm btn-success" onclick="updateInvoiceStatus(${inv.id}, '入金済', true)">入金済にする</button>` : ''}
-                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">取消</button>` : ''}
-                        ${inv.status === '入金済' ? `<button class="btn btn-sm btn-warning" onclick="updateInvoiceStatus(${inv.id}, '送付済', false)">送付済に戻す</button>` : ''}
+                        <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
+                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('invoice.btn.markSent')}</button>` : ''}
+                        ${inv.status === '送付済' ? `<button class="btn btn-sm btn-success" onclick="updateInvoiceStatus(${inv.id}, '入金済', true)">${SES.i18n.t('invoice.btn.markPaid')}</button>` : ''}
+                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.void')}</button>` : ''}
+                        ${inv.status === '入金済' ? `<button class="btn btn-sm btn-warning" onclick="updateInvoiceStatus(${inv.id}, '送付済', false)">${SES.i18n.t('invoice.btn.revertToSent')}</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -82,10 +82,10 @@ function loadInvoices() {
 function updateInvoiceStatus(id, status, requireDate = false) {
     let paidDate = null;
     if (requireDate) {
-        paidDate = prompt('入金日を入力してください(YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paidDate'), new Date().toISOString().split('T')[0]);
         if (!paidDate) return;
     } else {
-        if (!confirm(`ステータスを「${status}」に変更しますか？`)) return;
+        if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
     }
 
     fetch(`/api/invoices/${id}/status`, {
@@ -103,12 +103,12 @@ function updateInvoiceStatus(id, status, requireDate = false) {
 
 function voidInvoice(id, invoiceNo) {
     Swal.fire({
-        title: '確認',
-        text: `請求書 ${invoiceNo} を取消しますか？対象実績は再請求可能になります`,
+        title: SES.i18n.t('common.title.confirm'),
+        text: SES.i18n.t('invoice.confirm.void', { invoiceNo }),
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: '取消',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('invoice.btn.void'),
+        cancelButtonText: SES.i18n.t('common.btn.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             fetch(`/api/invoices/${id}/void`, {
@@ -117,9 +117,9 @@ function voidInvoice(id, invoiceNo) {
             }).then(res => res.json()).then(data => {
                 if (data.code === 200) {
                     if (window.SES && SES.toast) {
-                        SES.toast('請求書を取消しました', 'success');
+                        SES.toast(SES.i18n.t('invoice.toast.voidSuccess'), 'success');
                     } else {
-                        alert('請求書を取消しました');
+                        alert(SES.i18n.t('invoice.toast.voidSuccess'));
                     }
                     loadInvoices();
                 } else {
@@ -149,11 +149,11 @@ function loadBpPayments() {
                     <td>${SES.escapeHtml(bp.engineerName)}</td>
                     <td>${SES.escapeHtml(bp.projectName)}</td>
                     <td class="text-right">￥${bp.amount.toLocaleString()}</td>
-                    <td>${bp.status}</td>
+                    <td>${SES.i18n.t('invoice.status.' + bp.status, bp.status)}</td>
                     <td>${bp.paidDate || ''}</td>
                     <td>
-                        ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">支払済にする</button>` : ''}
-                        ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">未払に戻す</button>` : ''}
+                        ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('invoice.btn.markPaid')}</button>` : ''}
+                        ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">${SES.i18n.t('invoice.btn.revertToUnpaid')}</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -165,10 +165,10 @@ function loadBpPayments() {
 function updateBpPaymentStatus(id, status) {
     let paidDate = null;
     if (status === '支払済') {
-        paidDate = prompt('支払日を入力してください(YYYY-MM-DD)', new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paymentDate'), new Date().toISOString().split('T')[0]);
         if (!paidDate) return;
     } else {
-        if (!confirm(`ステータスを「${status}」に変更しますか？`)) return;
+        if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
     }
 
     fetch(`/api/invoices/bp-payments/${id}`, {

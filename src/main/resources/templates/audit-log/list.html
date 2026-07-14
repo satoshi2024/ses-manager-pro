@@ -1,27 +1,27 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
-    <title>監査ログ - SES Manager Pro</title>
+    <title th:text="#{auditLog.title}">監査ログ - SES Manager Pro</title>
 </head>
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h3 mb-0 text-light"><i class="bi bi-shield-check me-2 text-info"></i>監査ログ</h2>
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-shield-check me-2 text-info"></i><th:block th:text="#{auditLog.title}">監査ログ</th:block></h2>
     </div>
 
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
             <form id="searchForm" onsubmit="event.preventDefault(); loadAuditLogs(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
-                    <label class="form-label text-muted small">実行者</label>
+                    <label class="form-label text-muted small" th:text="#{auditLog.filter.username}">実行者</label>
                     <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" placeholder="ユーザー名">
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label text-muted small">メソッド</label>
+                    <label class="form-label text-muted small" th:text="#{auditLog.filter.method}">メソッド</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchMethod">
-                        <option value="">すべて</option>
+                        <option value="" th:text="#{common.label.all}">すべて</option>
                         <option value="POST">POST</option>
                         <option value="PUT">PUT</option>
                         <option value="DELETE">DELETE</option>
@@ -29,7 +29,7 @@
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100">
-                        <i class="bi bi-search me-1"></i>検索
+                        <i class="bi bi-search me-1"></i><th:block th:text="#{common.btn.search}">検索</th:block>
                     </button>
                 </div>
             </form>
@@ -42,15 +42,15 @@
                 <table class="table table-dark table-hover align-middle mb-0">
                     <thead>
                         <tr class="text-muted small">
-                            <th class="ps-4">実行日時</th>
-                            <th>実行者</th>
-                            <th>メソッド</th>
-                            <th>URI</th>
-                            <th>ステータス</th>
+                            <th class="ps-4" th:text="#{auditLog.table.createdAt}">実行日時</th>
+                            <th th:text="#{auditLog.table.username}">実行者</th>
+                            <th th:text="#{auditLog.table.method}">メソッド</th>
+                            <th th:text="#{auditLog.table.uri}">URI</th>
+                            <th th:text="#{auditLog.table.status}">ステータス</th>
                         </tr>
                     </thead>
                     <tbody id="audit-log-table-body">
-                        <tr><td colspan="5" class="text-center text-muted py-4">読み込み中...</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-4"><th:block th:text="#{common.msg.loading}">読み込み中...</th:block></td></tr>
                     </tbody>
                 </table>
             </div>

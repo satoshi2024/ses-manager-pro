@@ -1,4 +1,4 @@
-let currentEngineerId = null;
+﻿let currentEngineerId = null;
 let currentEngineerName = null;
 let aiMatchModal = null;
 
@@ -51,7 +51,7 @@ function loadTemplatesToSelect() {
         success: function(res) {
             if (res.code === 200 && res.data) {
                 const select = $('#chat-template-select');
-                select.empty().append('<option value="">(テンプレートを選択...)</option>');
+                select.empty().append('<option value="">${SES.i18n.t('ai.select.template')}</option>');
                 res.data.forEach(t => {
                     select.append(`<option value="${t.id}">${SES.escapeHtml(t.templateName)}</option>`);
                 });
@@ -127,7 +127,7 @@ function sendChatMessage() {
 }
 
 function requestAiMatch() {
-    appendUserMessage('最適な案件をマッチングして。');
+    appendUserMessage(SES.i18n.t('ai.msg.requestMatch'));
     const loadingId = appendAiLoading();
     
     $.ajax({
@@ -148,7 +148,7 @@ function requestAiMatch() {
 }
 
 function requestSkillSummary() {
-    appendUserMessage('スキルを要約して。');
+    appendUserMessage(SES.i18n.t('ai.msg.requestSummary'));
     const loadingId = appendAiLoading();
     setTimeout(() => {
         replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${SES.escapeHtml(currentEngineerName)}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
@@ -160,7 +160,7 @@ function generateEmailDraft() {
     const templateName = $('#chat-template-select option:selected').text();
     
     if (!templateId) {
-        Toast.error('テンプレートを選択してください');
+        Toast.error(SES.i18n.t('ai.msg.selectTemplate'));
         return;
     }
     
@@ -170,7 +170,7 @@ function generateEmailDraft() {
     setTimeout(() => {
         const safeEngineerName = SES.escapeHtml(currentEngineerName);
         const draft = `
-            <div class="mb-2 fw-bold text-accent-blue"><i class="bi bi-magic me-2"></i>AI提案文ドラフト</div>
+            <div class="mb-2 fw-bold text-accent-blue"><i class="bi bi-magic me-2"></i>${SES.i18n.t('ai.msg.draftTitle')}</div>
             <div class="bg-secondary p-3 rounded font-monospace small mb-3 border border-dark text-white" style="white-space: pre-wrap;">件名: 【ご提案】エンジニアのご紹介（${safeEngineerName}）
 
 ◯◯株式会社
@@ -187,8 +187,8 @@ function generateEmailDraft() {
 
 スキルシートを添付いたしますので、ご査収のほどよろしくお願いいたします。</div>
             <div class="d-flex justify-content-end gap-2">
-                <button class="btn btn-sm btn-outline-secondary text-light border-dark"><i class="bi bi-clipboard"></i> コピー</button>
-                <button class="btn btn-sm btn-primary bg-gradient-purple border-0" onclick="alert('メールソフトを起動します')"><i class="bi bi-envelope"></i> メールソフトを開く</button>
+                <button class="btn btn-sm btn-outline-secondary text-light border-dark"><i class="bi bi-clipboard"></i> ${SES.i18n.t('common.btn.copy')}</button>
+                <button class="btn btn-sm btn-primary bg-gradient-purple border-0" onclick="alert(SES.i18n.t('ai.msg.openMailer'))"><i class="bi bi-envelope"></i> ${SES.i18n.t('ai.btn.openMailer')}</button>
             </div>
         `;
         replaceAiLoadingWithMessage(loadingId, draft);
@@ -201,7 +201,7 @@ function renderMatchResultsInChat(loadingId) {
 }
 
 function renderMatchResultsHTML(loadingId, results) {
-    let html = `<p class="mb-3">市場の案件を分析し、以下の3件が特にマッチすると判断しました。</p>`;
+    let html = `<p class="mb-3">${SES.i18n.t('ai.msg.matchResult')}</p>`;
     
     results.forEach(match => {
         const scoreColor = match.score >= 90 ? 'text-success' : (match.score >= 70 ? 'text-warning' : 'text-danger');
@@ -212,10 +212,10 @@ function renderMatchResultsHTML(loadingId, results) {
                         <h6 class="text-white fw-bold mb-0">${SES.escapeHtml(match.projectName)}</h6>
                         <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                     </div>
-                    <p class="small text-muted mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${SES.escapeHtml(match.reason)}</p>
+                    <p class="small text-muted mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">${SES.i18n.t('ai.badge.evaluation')}</span>${SES.escapeHtml(match.reason)}</p>
                     <div class="text-end">
                         <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeToProject(${match.projectId}, ${match.score})">
-                            <i class="bi bi-send-fill me-1"></i>この案件に提案
+                            <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('ai.btn.propose')}
                         </button>
                     </div>
                 </div>
@@ -245,16 +245,16 @@ function proposeToProject(projectId, score) {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('提案レコードを作成しました！（カンバンボードへ移動します）');
+                Toast.success(SES.i18n.t('ai.msg.proposeSuccess'));
                 setTimeout(() => {
                     window.location.href = '/proposal/kanban';
                 }, 1500);
             } else {
-                Toast.error('提案作成に失敗しました: ' + (res.message || ''));
+                Toast.error(SES.i18n.t('ai.msg.proposeFail') + (res.message || ''));
             }
         },
         error: function() {
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }

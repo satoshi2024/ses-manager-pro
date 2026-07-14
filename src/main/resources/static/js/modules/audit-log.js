@@ -1,4 +1,4 @@
-// 監査ログ画面
+﻿// 監査ログ画面
 
 $(document).ready(function() {
     loadAuditLogs(1);
@@ -23,12 +23,12 @@ function loadAuditLogs(page = 1) {
                     renderPagination(res.data);
                 }
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('common.msg.fetchFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }
@@ -38,7 +38,7 @@ function renderAuditLogs(records) {
     tbody.empty();
 
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
         return;
     }
 
@@ -60,14 +60,14 @@ function renderAuditLogs(records) {
 function renderPagination(pageData) {
     const container = $('.card-footer');
     if (pageData.total === 0) {
-        container.html('<div class="text-muted small ps-2">全 0 件</div>');
+        container.html('<div class="text-muted small ps-2">${SES.i18n.t('auditLog.pagination.zero')}</div>');
         return;
     }
 
     const start = (pageData.current - 1) * pageData.size + 1;
     const end = Math.min(pageData.current * pageData.size, pageData.total);
 
-    let html = `<div class="text-muted small ps-2">全 ${pageData.total} 件中 ${start}-${end} 件を表示</div>
+    let html = `<div class="text-muted small ps-2">${SES.i18n.t('auditLog.pagination.info', { total: pageData.total, start: start, end: end })}</div>
         <nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
 
     if (pageData.current > 1) {

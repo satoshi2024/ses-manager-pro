@@ -1,4 +1,4 @@
-$(document).ready(function() {
+﻿$(document).ready(function() {
     const now = new Date();
     const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
     $('#workMonth').val(currentMonth);
@@ -9,7 +9,7 @@ function loadWorkRecords() {
     const month = $('#workMonth').val();
     if (!month) return;
 
-    $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</td></tr>');
+    $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>`${SES.i18n.t('common.msg.loading')}`</td></tr>');
     
     $.ajax({
         url: '/api/work-records/grid',
@@ -19,14 +19,14 @@ function loadWorkRecords() {
             if (res.code === 200) {
                 renderWorkRecords(res.data);
             } else {
-                Toast.error(res.message || 'データ取得に失敗しました');
-                $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">データ取得に失敗しました</td></tr>');
+                Toast.error(res.message || SES.i18n.t('common.msg.fetchFail'));
+                $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.fetchFail')}</td></tr>');
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
-            $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">通信エラーが発生しました</td></tr>');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
+            $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.networkError')}</td></tr>');
         }
     });
 }
@@ -36,7 +36,7 @@ function renderWorkRecords(list) {
     tbody.empty();
     
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="8" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
         return;
     }
     
@@ -62,7 +62,7 @@ function renderWorkRecords(list) {
                 </td>
                 <td class="py-3"><span class="font-monospace text-muted">${SES.escapeHtml(item.contractNo || '-')}</span></td>
                 <td class="py-3 text-muted small">
-                    ${item.settlementHoursMin ? item.settlementHoursMin + 'h' : '固定'} ~ ${item.settlementHoursMax ? item.settlementHoursMax + 'h' : '固定'}
+                    ${item.settlementHoursMin ? item.settlementHoursMin + 'h' : SES.i18n.t('workRecord.table.fixed')} ~ ${item.settlementHoursMax ? item.settlementHoursMax + 'h' : SES.i18n.t('workRecord.table.fixed')}
                 </td>
                 <td class="py-3">
                     ${hoursInput}
@@ -86,11 +86,11 @@ function renderWorkRecords(list) {
 }
 
 function getStatusBadge(status) {
-    if (!status) return `<span class="badge bg-secondary text-white">未入力</span>`;
+    if (!status) return `<span class="badge bg-secondary text-white">${SES.i18n.t('workRecord.status.未入力')}</span>`;
     let bg = 'bg-secondary';
     if(status === '入力中') bg = 'bg-primary';
     if(status === '確定') bg = 'bg-success';
-    return `<span class="badge ${bg} text-white">${status}</span>`;
+    return `<span class="badge ${bg} text-white">${SES.i18n.t('workRecord.status.' + status, status)}</span>`;
 }
 
 function saveHours(element) {
@@ -120,10 +120,10 @@ function saveHours(element) {
                 row.find('.billing-amount-' + contractId).text(rec.billingAmount ? '¥' + rec.billingAmount.toLocaleString() : '-');
                 row.find('.payment-amount-' + contractId).text(rec.paymentAmount ? '¥' + rec.paymentAmount.toLocaleString() : '-');
                 row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
-                Toast.success('保存しました');
+                Toast.success(SES.i18n.t('common.msg.saveSuccess'));
             } else {
                 // 確定済み月の編集など業務エラーをユーザーに表示する
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.saveFail'));
             }
         },
         error: function(err) {
@@ -131,7 +131,7 @@ function saveHours(element) {
             if (err.responseJSON && err.responseJSON.message) {
                 Toast.error(err.responseJSON.message);
             } else {
-                Toast.error('保存に失敗しました');
+                Toast.error(SES.i18n.t('common.msg.saveFail'));
             }
         }
     });
@@ -142,14 +142,14 @@ function confirmMonth() {
     if (!month) return;
 
     Swal.fire({
-        title: '月次確定',
-        text: `${month}月の実績を確定しますか？確定後は編集できなくなります。`,
+        title: SES.i18n.t('workRecord.confirm.title'),
+        text: SES.i18n.t('workRecord.confirm.message', { month }),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#198754',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '確定する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.btn.confirm'),
+        cancelButtonText: SES.i18n.t('common.btn.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -157,15 +157,15 @@ function confirmMonth() {
                 method: 'POST',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('月次を確定しました');
+                        Toast.success(SES.i18n.t('workRecord.msg.confirmSuccess'));
                         loadWorkRecords(); // reload to reflect readonly state
                     } else {
-                        Toast.error(res.message || '確定処理に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('workRecord.msg.confirmFail'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('確定処理に失敗しました');
+                    Toast.error(SES.i18n.t('workRecord.msg.confirmFail'));
                 }
             });
         }

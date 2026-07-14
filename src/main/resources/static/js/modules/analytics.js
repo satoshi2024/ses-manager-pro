@@ -1,4 +1,4 @@
-let utilizationChartInstance = null;
+﻿let utilizationChartInstance = null;
 
 $(document).ready(function() {
     loadUtilizationTrend();
@@ -19,12 +19,12 @@ function loadUtilizationTrend() {
             if (res.code === 200 && res.data) {
                 renderUtilizationChart(res.data);
             } else {
-                Toast.error(res.message || '稼動率推移の取得に失敗しました');
+                Toast.error(res.message || SES.i18n.t('analytics.msg.chartFetchFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }
@@ -37,12 +37,12 @@ function loadBenchList() {
             if (res.code === 200 && res.data) {
                 renderBenchTable(res.data);
             } else {
-                Toast.error(res.message || 'Bench一覧の取得に失敗しました');
+                Toast.error(res.message || SES.i18n.t('analytics.msg.benchFetchFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }
@@ -65,7 +65,7 @@ function renderUtilizationChart(points) {
             datasets: [
                 {
                     type: 'bar',
-                    label: '稼動要員数',
+                    label: SES.i18n.t('analytics.chart.activeCount'),
                     data: activeData,
                     backgroundColor: 'rgba(32, 201, 151, 0.7)',
                     borderColor: '#20c997',
@@ -76,7 +76,7 @@ function renderUtilizationChart(points) {
                 },
                 {
                     type: 'bar',
-                    label: 'Bench数',
+                    label: SES.i18n.t('analytics.chart.benchCount'),
                     data: benchData,
                     backgroundColor: 'rgba(220, 53, 69, 0.7)',
                     borderColor: '#dc3545',
@@ -87,7 +87,7 @@ function renderUtilizationChart(points) {
                 },
                 {
                     type: 'line',
-                    label: '稼動率(%)',
+                    label: SES.i18n.t('analytics.chart.rate'),
                     data: rateData,
                     borderColor: '#0dcaf0',
                     backgroundColor: 'rgba(13, 202, 240, 0.2)',
@@ -118,7 +118,7 @@ function renderUtilizationChart(points) {
                     position: 'left',
                     stacked: true,
                     beginAtZero: true,
-                    title: { display: true, text: '要員数', color: theme.textColor },
+                    title: { display: true, text: SES.i18n.t('analytics.chart.yCount'), color: theme.textColor },
                     ticks: { color: theme.textColor },
                     grid: { color: theme.gridColor }
                 },
@@ -128,7 +128,7 @@ function renderUtilizationChart(points) {
                     beginAtZero: true,
                     max: 100,
                     grid: { drawOnChartArea: false, color: theme.gridColor },
-                    title: { display: true, text: '稼動率(%)', color: theme.textColor },
+                    title: { display: true, text: SES.i18n.t('analytics.chart.rate'), color: theme.textColor },
                     ticks: { color: theme.textColor }
                 }
             }
@@ -153,7 +153,7 @@ function renderBenchTable(list) {
     tbody.empty();
 
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">Bench中の要員はいません</td></tr>');
+        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">`${SES.i18n.t('analytics.bench.empty')}</td></tr>');
         return;
     }
 
@@ -162,7 +162,7 @@ function renderBenchTable(list) {
         if (item.benchDays > 60) daysColor = 'text-danger';
         else if (item.benchDays > 30) daysColor = 'text-accent-yellow';
 
-        const priceStr = item.expectedUnitPrice ? Number(item.expectedUnitPrice).toLocaleString() + '円' : '-';
+        const priceStr = item.expectedUnitPrice ? Number(item.expectedUnitPrice).toLocaleString() + SES.i18n.t('common.unit.yen') : '-';
         const availableStr = escapeHtml(item.availableDate || '-');
         const skillStr = (item.skillNames && item.skillNames.length > 0)
             ? escapeHtml(item.skillNames.join(', '))
@@ -181,15 +181,15 @@ function renderBenchTable(list) {
                     </div>
                 </td>
                 <td class="py-3">
-                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${Number(item.benchDays)}日</span>
+                    <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${Number(item.benchDays)}${SES.i18n.t('common.unit.days')}</span>
                 </td>
                 <td class="py-3">${priceStr}</td>
                 <td class="py-3">${availableStr}</td>
                 <td class="py-3 text-muted small">${skillStr}</td>
                 <td class="px-4 py-3 text-end">
                     <div class="btn-group btn-group-sm" role="group">
-                        <a href="/engineer/detail?id=${engineerId}" class="btn btn-outline-secondary border-secondary"><i class="bi bi-eye me-1"></i>詳細</a>
-                        <a href="/ai/matching?engineerId=${engineerId}" class="btn btn-outline-info text-info border-info"><i class="bi bi-robot me-1"></i>マッチング</a>
+                        <a href="/engineer/detail?id=${engineerId}" class="btn btn-outline-secondary border-secondary"><i class="bi bi-eye me-1"></i>${SES.i18n.t('common.btn.detail')}</a>
+                        <a href="/ai/matching?engineerId=${engineerId}" class="btn btn-outline-info text-info border-info"><i class="bi bi-robot me-1"></i>${SES.i18n.t('analytics.btn.matching')}</a>
                     </div>
                 </td>
             </tr>
