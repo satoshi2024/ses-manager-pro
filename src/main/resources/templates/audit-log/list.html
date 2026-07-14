@@ -16,7 +16,7 @@
             <form id="searchForm" onsubmit="event.preventDefault(); loadAuditLogs(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
                     <label class="form-label text-muted small" th:text="#{auditLog.filter.username}">実行者</label>
-                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" placeholder="ユーザー名">
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" th:placeholder="#{auditLog.placeholder.username}" placeholder="ユーザー名">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label text-muted small" th:text="#{auditLog.filter.method}">メソッド</label>
