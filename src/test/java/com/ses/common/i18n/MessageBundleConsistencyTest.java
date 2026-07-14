@@ -3,12 +3,46 @@ package com.ses.common.i18n;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PropertiesLoaderUtils;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class MessageBundleConsistencyTest {
+
+    /**
+     * 各プロパティファイルにキーの重複が無いことを検証する。
+     * java.util.Properties は重複キーを黙って後勝ちで畳むため上のテストでは検出できない。
+     * 並行ブランチのマージで同一キーが二重追記された不具合の再発防止用。
+     */
+    @Test
+    public void testNoDuplicateKeys() throws Exception {
+        for (String file : List.of("messages.properties", "messages_en.properties",
+                "messages_zh_CN.properties", "messages_ko.properties")) {
+            Set<String> seen = new HashSet<>();
+            List<String> dups = new ArrayList<>();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(
+                    new ClassPathResource(file).getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    String t = line.trim();
+                    if (t.isEmpty() || t.startsWith("#") || !t.contains("=")) {
+                        continue;
+                    }
+                    String key = t.substring(0, t.indexOf('=')).trim();
+                    if (key.isEmpty()) {
+                        dups.add("(空キー行) " + t);
+                    } else if (!seen.add(key)) {
+                        dups.add(key);
+                    }
+                }
+            }
+            assertTrue(dups.isEmpty(), file + " に重複/不正キーがあります: " + dups);
+        }
+    }
 
     @Test
     public void testMessageBundleConsistency() throws Exception {

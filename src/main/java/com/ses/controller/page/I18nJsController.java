@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.util.Locale;
 
 @RestController
 public class I18nJsController {
@@ -29,11 +30,16 @@ public class I18nJsController {
         }
     }
 
-    @GetMapping(value = "/js/i18n.js", produces = "application/javascript")
+    @GetMapping(value = "/js/i18n.js", produces = "application/javascript;charset=UTF-8")
     public ResponseEntity<String> getI18nJs(@RequestParam(required = false) String lang, @RequestParam(required = false) String v) {
-        String messagesJson = messagesLoader.getMessagesJson(LocaleContextHolder.getLocale());
-        
-        String js = "window.SES_LANG = '" + LocaleContextHolder.getLocale().toLanguageTag() + "';\n" +
+        // langパラメータを優先(URLの?lang=でキャッシュされるため、配信内容もlangに一致させる)。
+        // 未指定時のみCookie由来のロケールにフォールバックする。
+        Locale locale = (lang != null && !lang.isBlank())
+                ? Locale.forLanguageTag(lang)
+                : LocaleContextHolder.getLocale();
+        String messagesJson = messagesLoader.getMessagesJson(locale);
+
+        String js = "window.SES_LANG = '" + locale.toLanguageTag() + "';\n" +
                     "window.SES_MESSAGES = " + messagesJson + ";\n" +
                     "window.SES_ENUMS = " + enumsJsonCache + ";\n";
 
