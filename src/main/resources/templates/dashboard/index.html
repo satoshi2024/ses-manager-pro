@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
     <title>ダッシュボード</title>
@@ -11,14 +11,14 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h4 class="text-white fw-bold mb-1"><i class="bi bi-speedometer2 me-2 text-accent-blue"></i><span th:text="#{menu.dashboard}">ダッシュボード</span></h4>
-            <p class="text-muted small mb-0">当月の経営指標とシステム全体のサマリ状況</p>
+            <p class="text-muted small mb-0" th:text="#{dashboard.subtitle}">当月の経営指標とシステム全体のサマリ状況</p>
         </div>
         <div>
             <button id="btn-export-revenue" class="btn btn-outline-secondary btn-sm rounded-pill text-muted hover-text-white border-dark no-print me-2">
-                <i class="bi bi-file-earmark-excel me-1"></i>月次売上Excel出力
+                <i class="bi bi-file-earmark-excel me-1"></i><span th:text="#{dashboard.btn.export_revenue}">月次売上Excel出力</span>
             </button>
             <button id="btn-print-report" class="btn btn-outline-secondary btn-sm rounded-pill text-muted hover-text-white border-dark no-print">
-                <i class="bi bi-cloud-download me-1"></i>レポート出力
+                <i class="bi bi-cloud-download me-1"></i><span th:text="#{dashboard.btn.print_report}">レポート出力</span>
             </button>
         </div>
     </div>
@@ -33,17 +33,17 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-activity text-accent-blue" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2">全社稼動率</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.utilization}">全社稼動率</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-utilization">--%</h2>
                         <span class="badge bg-success text-white rounded-pill px-2 py-1 small">
                             <i class="bi bi-arrow-up-right"></i> <span id="kpi-utilization-trend">--</span>
                         </span>
                     </div>
-                    <p class="text-muted small mb-0">前月比</p>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.mom}">前月比</p>
                 </div>
                 <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
-                    <a href="/engineer/list" class="text-accent-blue text-decoration-none small fw-bold">詳細を見る <i class="bi bi-chevron-right ms-1"></i></a>
+                    <a href="/engineer/list" class="text-accent-blue text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_details}">詳細を見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
                 </div>
             </div>
         </div>
@@ -55,15 +55,15 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-person-x text-accent-red" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2">現在のBench数</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.bench_count}">現在のBench数</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-bench-count">--</h2>
-                        <span class="text-white align-bottom pb-1">名</span>
+                        <span class="text-white align-bottom pb-1" th:text="#{dashboard.kpi.person_unit}">名</span>
                     </div>
-                    <p class="text-muted small mb-0">営業リソースの集中投下を推奨</p>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.sales_focus_recommended}">営業リソースの集中投下を推奨</p>
                 </div>
                 <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
-                    <a href="/engineer/list?status=Bench" class="text-accent-red text-decoration-none small fw-bold">リストを見る <i class="bi bi-chevron-right ms-1"></i></a>
+                    <a href="/engineer/list?status=Bench" class="text-accent-red text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_list}">リストを見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
                 </div>
             </div>
         </div>
@@ -75,17 +75,17 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-currency-yen text-accent-green" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2">当月予想売上</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.expected_revenue}">当月予想売上</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-revenue">¥--</h2>
                         <span class="badge bg-success text-white rounded-pill px-2 py-1 small">
                             <i class="bi bi-arrow-up-right"></i> <span id="kpi-revenue-trend">--</span>
                         </span>
                     </div>
-                    <p class="text-muted small mb-0">稼動中契約からの単純合算</p>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.simple_sum}">稼動中契約からの単純合算</p>
                 </div>
                 <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
-                    <a href="/contract/list" class="text-accent-green text-decoration-none small fw-bold">契約一覧を見る <i class="bi bi-chevron-right ms-1"></i></a>
+                    <a href="/contract/list" class="text-accent-green text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_contracts}">契約一覧を見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
                 </div>
             </div>
         </div>
@@ -97,17 +97,17 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-graph-up-arrow text-accent-yellow" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2">全社平均粗利率</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.avg_profit_margin}">全社平均粗利率</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-profit-margin">--%</h2>
                         <span class="badge bg-secondary text-muted rounded-pill px-2 py-1 small border border-dark">
                             <i class="bi bi-dash"></i> <span id="kpi-profit-trend">--</span>
                         </span>
                     </div>
-                    <p class="text-muted small mb-0">目標: 30%以上</p>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.target}">目標: 30%以上</p>
                 </div>
                 <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
-                    <a href="/dashboard/profit" class="text-accent-yellow text-decoration-none small fw-bold">利益分析を見る <i class="bi bi-chevron-right ms-1"></i></a>
+                    <a href="/dashboard/profit" class="text-accent-yellow text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_profit_analysis}">利益分析を見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
                 </div>
             </div>
         </div>
@@ -120,7 +120,7 @@
         <div class="col-12 col-xl-8">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i>月次売上・粗利推移</h6>
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i><span th:text="#{dashboard.chart.revenue_trend}">月次売上・粗利推移</span></h6>
                     <select id="fiscal-year-selector" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto">
                         <option>2026年度</option>
                         <option>2025年度</option>
@@ -138,7 +138,7 @@
         <div class="col-12 col-xl-4">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header bg-transparent border-dark px-4 py-3">
-                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-pie-chart-fill me-2 text-muted"></i>要員ステータス分布</h6>
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-pie-chart-fill me-2 text-muted"></i><span th:text="#{dashboard.chart.status_distribution}">要員ステータス分布</span></h6>
                 </div>
                 <div class="card-body p-4 d-flex align-items-center justify-content-center">
                     <div class="chart-container" style="position: relative; height:250px; width:100%">
@@ -154,19 +154,19 @@
         <div class="col-12">
             <div class="card bg-card border-dark shadow-sm">
                 <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-exclamation-triangle-fill me-2 text-accent-yellow"></i>退場予定リスト（30日以内）</h6>
-                    <a href="/engineer/list?status=退場予定" class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark">すべて見る</a>
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-exclamation-triangle-fill me-2 text-accent-yellow"></i><span th:text="#{dashboard.list.retiring_soon}">退場予定リスト（30日以内）</span></h6>
+                    <a href="/engineer/list?status=退場予定" class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark" th:text="#{dashboard.list.view_all}">すべて見る</a>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-dark table-hover table-striped mb-0 align-middle">
                             <thead class="table-dark-header border-bottom border-dark">
                                 <tr>
-                                    <th class="px-4 py-3 text-muted small text-uppercase">要員名</th>
-                                    <th class="py-3 text-muted small text-uppercase">現在案件</th>
-                                    <th class="py-3 text-muted small text-uppercase">退場予定日</th>
-                                    <th class="py-3 text-muted small text-uppercase">提案状況</th>
-                                    <th class="px-4 py-3 text-end text-muted small text-uppercase">アクション</th>
+                                    <th class="px-4 py-3 text-muted small text-uppercase" th:text="#{dashboard.list.col.engineer}">要員名</th>
+                                    <th class="py-3 text-muted small text-uppercase" th:text="#{dashboard.list.col.project}">現在案件</th>
+                                    <th class="py-3 text-muted small text-uppercase" th:text="#{dashboard.list.col.retiring_date}">退場予定日</th>
+                                    <th class="py-3 text-muted small text-uppercase" th:text="#{dashboard.list.col.proposal_status}">提案状況</th>
+                                    <th class="px-4 py-3 text-end text-muted small text-uppercase" th:text="#{dashboard.list.col.action}">アクション</th>
                                 </tr>
                             </thead>
                             <tbody class="border-top-0" id="retiring-table-body">

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ToDo・通知一覧画面用JavaScript
  */
 
@@ -34,7 +34,7 @@ async function loadTodos(page) {
 function renderTable(records) {
     const tbody = document.getElementById('todo-table-body');
     if (!records || records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-4">該当するデータがありません</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-4"></td></tr>`;
         return;
     }
 
@@ -53,8 +53,8 @@ function renderTable(records) {
         const isRead = item.isRead;
         const rowClass = !isRead ? 'fw-bold bg-secondary bg-opacity-10' : '';
         const badgeHtml = isRead 
-            ? '<span class="badge bg-secondary">既読</span>' 
-            : '<span class="badge bg-accent-red">未読</span>';
+            ? `<span class="badge bg-secondary"></span>` 
+            : `<span class="badge bg-accent-red"></span>`;
 
         // message には要員名等の利用者入力が含まれるため必ずエスケープする（XSS対策）
         const safeUrl = SES.escapeHtml(item.linkUrl || '#');
@@ -69,7 +69,7 @@ function renderTable(records) {
                     </div>
                 </td>
                 <td class="text-end pe-4">
-                    ${!isRead ? `<button class="btn btn-sm btn-outline-primary" onclick="markAsRead(event, ${item.id})">既読にする</button>` : ''}
+                    ${!isRead ? `<button class="btn btn-sm btn-outline-primary" onclick="markAsRead(event, ${item.id})"></button>` : ''}
                 </td>
             </tr>
         `;
@@ -156,7 +156,7 @@ async function markAsRead(e, id) {
 async function markAllAsRead() {
     try {
         await SES.api.put('/api/notifications/read-all', {});
-        SES.toast.success('すべて既読にしました');
+        SES.toast.success(SES.i18n.t('todo.msg.mark_all_read_success'));
         loadTodos(1);
         SES.notification.load();
     } catch (err) {

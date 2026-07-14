@@ -1,4 +1,4 @@
-let revenueChartInstance = null;
+﻿let revenueChartInstance = null;
 let statusChartInstance = null;
 
 $(document).ready(function() {
@@ -53,12 +53,12 @@ function loadDashboardData(year) {
                 renderCharts(res.data.charts);
                 renderRetiringList(res.data.retiring);
             } else {
-                Toast.error(res.message || 'ダッシュボードデータの取得に失敗しました');
+                Toast.error(res.message || SES.i18n.t('dashboard.error.fetch_failed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('dashboard.error.network'));
         }
     });
 }
@@ -121,7 +121,7 @@ function renderCharts(chartsData) {
             labels: chartsData.revenue.labels,
             datasets: [
                 {
-                    label: '売上 (万円)',
+                    label: SES.i18n.t('dashboard.chart.sales_label'),
                     data: chartsData.revenue.sales,
                     backgroundColor: 'rgba(59, 130, 246, 0.7)',
                     borderColor: '#3b82f6',
@@ -129,7 +129,7 @@ function renderCharts(chartsData) {
                     borderRadius: 4
                 },
                 {
-                    label: '粗利 (万円)',
+                    label: SES.i18n.t('dashboard.chart.profit_label'),
                     data: chartsData.revenue.profit,
                     backgroundColor: 'rgba(32, 201, 151, 0.7)',
                     borderColor: '#20c997',
@@ -158,7 +158,7 @@ function renderCharts(chartsData) {
                                 label += context.parsed.y;
                             }
                             const isActual = chartsData.revenue.isActual && chartsData.revenue.isActual[context.dataIndex];
-                            label += isActual ? ' (実績)' : ' (見込み)';
+                            label += isActual ? ' (' + SES.i18n.t('dashboard.chart.actual') + ')' : ' (' + SES.i18n.t('dashboard.chart.estimate') + ')';
                             return label;
                         }
                     }
@@ -216,13 +216,13 @@ function renderRetiringList(list) {
     tbody.empty();
     
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">直近の退場予定者はいません</td></tr>');
+        tbody.append(`<tr><td colspan="5" class="text-center text-muted py-4"></td></tr>`);
         return;
     }
     
     list.forEach(item => {
         const propBadgeClass = item.proposals > 0 ? 'bg-primary' : 'bg-secondary';
-        const propText = item.proposals > 0 ? `提案中 (${item.proposals}件)` : '未提案';
+        const propText = item.proposals > 0 ? SES.i18n.t('dashboard.list.proposing', item.proposals) : SES.i18n.t('dashboard.list.not_proposed');
 
         let daysColor = 'text-accent-yellow';
         if (item.daysLeft <= 14) daysColor = 'text-danger';
@@ -240,21 +240,21 @@ function renderRetiringList(list) {
                         </div>
                         <div>
                             <div class="fw-bold mb-0">${nameStr}</div>
-                            <div class="small text-muted">${SES.escapeHtml(item.skill || 'スキル情報なし')}</div>
+                            <div class="small text-muted">${SES.escapeHtml(item.skill || SES.i18n.t('dashboard.list.skill_missing'))}</div>
                         </div>
                     </div>
                 </td>
-                <td class="py-3">${SES.escapeHtml(item.project || '-')}</td>
+                <td class="py-3">${SES.escapeHtml(item.project || SES.i18n.t('dashboard.list.project_missing'))}</td>
                 <td class="py-3">
                     <span class="${daysColor} fw-bold"><i class="bi bi-clock me-1"></i>${SES.escapeHtml(item.date)}</span>
-                    <div class="small text-muted">残り ${Number(item.daysLeft)} 日</div>
+                    <div class="small text-muted">${SES.i18n.t('dashboard.list.days_left', Number(item.daysLeft))}</div>
                 </td>
                 <td class="py-3">
                     <span class="badge ${propBadgeClass}"><i class="bi bi-file-earmark-person me-1"></i>${propText}</span>
                 </td>
                 <td class="px-4 py-3 text-end">
                     <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm btn-ai-match" data-id="${Number(item.id)}" data-name="${nameStr}">
-                        <i class="bi bi-robot me-1"></i>AI案件探索
+                        <i class="bi bi-robot me-1"></i>${SES.i18n.t('dashboard.list.ai_match')}
                     </button>
                 </td>
             </tr>

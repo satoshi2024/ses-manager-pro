@@ -1,4 +1,4 @@
-$(document).ready(function() {
+﻿$(document).ready(function() {
     loadProfitData();
 });
 
@@ -10,12 +10,12 @@ function loadProfitData() {
             if (res.code === 200) {
                 renderProfitTable(res.data);
             } else {
-                Toast.error(res.message || '利益データの取得に失敗しました');
+                Toast.error(res.message || SES.i18n.t('dashboard.profit.error.fetch_failed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('dashboard.profit.error.network'));
         }
     });
 }
@@ -25,7 +25,7 @@ function renderProfitTable(data) {
     tbody.empty();
 
     if (!data || data.length === 0) {
-        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">契約データがありません</td></tr>');
+        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4"></td></tr>`);
         return;
     }
 
