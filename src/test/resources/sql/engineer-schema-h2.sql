@@ -64,6 +64,20 @@ CREATE TABLE t_engineer_skill (
   experience_years INT
 );
 
+DROP TABLE IF EXISTS t_engineer_sales CASCADE;
+CREATE TABLE t_engineer_sales (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id   BIGINT NOT NULL,
+  sales_user_id BIGINT NOT NULL,
+  primary_flag  TINYINT NOT NULL DEFAULT 0,
+  assigned_at   DATE NOT NULL,
+  released_at   DATE,
+  remarks       VARCHAR(500),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT NOT NULL DEFAULT 0
+);
+
 DROP TABLE IF EXISTS t_engineer_career CASCADE;
 CREATE TABLE t_engineer_career (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
@@ -149,6 +163,9 @@ CREATE TABLE t_contract (
   auto_renew              TINYINT DEFAULT 0,
   status                  VARCHAR(20) DEFAULT '稼動中',
   remarks                 TEXT,
+  sales_user_id           BIGINT,
+  commission_base_type    VARCHAR(10),
+  commission_rate         DECIMAL(5,2),
   renewed_from_contract_id BIGINT,
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,

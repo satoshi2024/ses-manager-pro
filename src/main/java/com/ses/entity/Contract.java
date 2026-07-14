@@ -79,6 +79,15 @@ public class Contract extends BaseEntity {
     /** 備考 */
     private String remarks;
 
+    /** 成約担当営業ID（成約時の主担当を既定値とし変更可） */
+    private Long salesUserId;
+
+    /** インセンティブ基準の個別上書き（粗利/売上、NULL=既定規則適用） */
+    private String commissionBaseType;
+
+    /** インセンティブ率の個別上書き（%、NULL=既定規則適用） */
+    private BigDecimal commissionRate;
+
     /** 自動更新ドラフトの生成元契約ID（このIDから自動生成された更新ドラフトの場合のみ設定） */
     private Long renewedFromContractId;
 
