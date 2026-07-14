@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
-    <title>提案管理 (カンバン)</title>
+    <title th:text="#{kanban.pipeline} + ' - ' + #{app.name}">提案管理 (カンバン)</title>
     <link rel="stylesheet" th:href="@{/css/kanban.css}">
 </head>
 <body>
@@ -9,12 +9,12 @@
 <div layout:fragment="content">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h4 class="text-white fw-bold mb-1"><i class="bi bi-kanban me-2 text-accent-purple"></i>提案パイプライン</h4>
-            <p class="text-muted small mb-0">ドラッグ＆ドロップで提案ステータスを更新できます</p>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-kanban me-2 text-accent-purple"></i><th:block th:text="#{kanban.pipeline}">提案パイプライン</th:block></h4>
+            <p class="text-muted small mb-0" th:text="#{kanban.pipeline.desc}">ドラッグ＆ドロップで提案ステータスを更新できます</p>
         </div>
         <div>
             <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#proposalModal">
-                <i class="bi bi-plus-lg me-1"></i>新規提案
+                <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{kanban.proposal.new}">新規提案</th:block>
             </button>
         </div>
     </div>
@@ -27,7 +27,7 @@
             <div class="kanban-column me-3 flex-shrink-0" data-status="書類選考中">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #6c757d !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">書類選考中</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.document}">書類選考中</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -40,7 +40,7 @@
             <div class="kanban-column me-3 flex-shrink-0" data-status="一次面接">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #0dcaf0 !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">一次面接</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.interview1}">一次面接</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -52,7 +52,7 @@
             <div class="kanban-column me-3 flex-shrink-0" data-status="二次面接">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #fd7e14 !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">二次面接</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.interview2}">二次面接</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -64,7 +64,7 @@
             <div class="kanban-column me-3 flex-shrink-0" data-status="結果待ち">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #ffc107 !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">結果待ち</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.waiting}">結果待ち</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -76,7 +76,7 @@
             <div class="kanban-column me-3 flex-shrink-0" data-status="成約">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #198754 !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">成約</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.won}">成約</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -88,7 +88,7 @@
             <div class="kanban-column flex-shrink-0" data-status="見送り">
                 <div class="kanban-column-header bg-dark border-dark rounded-top px-3 py-2 border-bottom border-3" style="border-bottom-color: #dc3545 !important;">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span class="text-white fw-bold small">見送り</span>
+                        <span class="text-white fw-bold small" th:text="#{kanban.status.lost}">見送り</span>
                         <span class="badge bg-secondary text-light rounded-pill">0</span>
                     </div>
                 </div>
@@ -103,28 +103,28 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark">
                 <div class="modal-header border-dark">
-                    <h5 class="modal-title text-light"><i class="bi bi-envelope me-2"></i>提案メール送信</h5>
+                    <h5 class="modal-title text-light"><i class="bi bi-envelope me-2"></i><th:block th:text="#{kanban.proposal.mail}">提案メール送信</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="mail-proposalId">
                     <div class="mb-3">
-                        <label class="form-label text-muted small">テンプレート</label>
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.mail.template}">テンプレート</label>
                         <select class="form-select bg-dark border-secondary text-light" id="mail-template">
-                            <option value="">テンプレートを選択</option>
+                            <option value="" th:text="#{kanban.proposal.mail.template.select}">テンプレートを選択</option>
                         </select>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label text-muted small">宛先（空欄時は顧客担当者メール）</label>
-                        <input type="email" class="form-control bg-dark border-secondary text-light" id="mail-to" placeholder="client@example.com">
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.mail.to}">宛先（空欄時は顧客担当者メール）</label>
+                        <input type="email" class="form-control bg-dark border-secondary text-light" id="mail-to" th:placeholder="#{kanban.proposal.mail.to.placeholder}" placeholder="client@example.com">
                     </div>
                     <div class="text-muted small">
-                        <i class="bi bi-info-circle me-1"></i>SMTP未設定の場合はログ出力（ドライラン）になります。
+                        <i class="bi bi-info-circle me-1"></i><th:block th:text="#{kanban.proposal.mail.info}">SMTP未設定の場合はログ出力（ドライラン）になります。</th:block>
                     </div>
                 </div>
                 <div class="modal-footer border-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-primary" onclick="sendProposalMail()"><i class="bi bi-send me-1"></i>送信</button>
+                    <button type="button" class="btn btn-primary" onclick="sendProposalMail()"><i class="bi bi-send me-1"></i><th:block th:text="#{kanban.proposal.mail.send}">送信</th:block></button>
                 </div>
             </div>
         </div>
@@ -135,27 +135,27 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-kanban me-2 text-accent-purple"></i>提案登録</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-kanban me-2 text-accent-purple"></i><th:block th:text="#{kanban.proposal.new}">提案登録</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
                     <form id="proposal-form">
                         <div class="mb-3">
-                            <label class="form-label text-muted small">対象要員 <span class="text-danger">*</span></label>
+                            <label class="form-label text-muted small"><th:block th:text="#{proposal.engineer}">対象要員</th:block> <span class="text-danger">*</span></label>
                             <select id="prop-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
-                                <option value="">要員を選択...</option>
+                                <option value="" th:text="#{proposal.engineer.select}">要員を選択...</option>
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">提案先案件 <span class="text-danger">*</span></label>
+                            <label class="form-label text-muted small"><th:block th:text="#{proposal.project}">提案先案件</th:block> <span class="text-danger">*</span></label>
                             <select id="prop-projectId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
-                                <option value="">案件を選択...</option>
+                                <option value="" th:text="#{proposal.project.select}">案件を選択...</option>
                             </select>
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">提案単価 (円)</label>
-                                <input type="number" id="prop-proposedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
+                                <label class="form-label text-muted small" th:text="#{proposal.proposedPrice}">提案単価 (円)</label>
+                                <input type="number" id="prop-proposedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{proposal.unitPrice.placeholder}" placeholder="例: 800000" min="0">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label text-muted small">ステータス</label>

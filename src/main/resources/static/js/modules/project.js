@@ -37,12 +37,12 @@ function loadProjects(page = 1) {
                     renderPagination(res.data, 'loadProjects');
                 }
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('js.common.error_fetch'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
         }
     });
 }
@@ -59,7 +59,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            全 ${pageData.total} 件中 ${start}-${end} 件を表示
+            `${SES.i18n.t('common.page.info', [pageData.total, start, end])}`
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -123,15 +123,15 @@ function renderProjects(records) {
     records.forEach(proj => {
         // Remote Badge
         let remoteIcon = '';
-        if (proj.remoteType === 'フルリモート') remoteIcon = '<i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル';
-        else if (proj.remoteType === 'ハイブリッド' || proj.remoteType === '一部リモート') remoteIcon = '<i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部';
+        if (proj.remoteType === SES.i18n.t('js.project.remote.full')) remoteIcon = '<i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル';
+        else if (proj.remoteType === SES.i18n.t('js.project.remote.hybrid') || proj.remoteType === SES.i18n.t('js.project.remote.hybrid')) remoteIcon = '<i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部';
         else remoteIcon = '<i class="bi bi-x-circle text-danger" title="不可"></i> 不可';
 
         // Status Badge
         let statusBadge = `<span class="status-badge status-secondary">${proj.status || '-'}</span>`;
-        if (proj.status === '募集中') statusBadge = '<span class="status-badge status-success">募集中</span>';
-        else if (proj.status === '選考中' || proj.status === '面談調整中') statusBadge = '<span class="status-badge status-warning">選考中</span>';
-        else if (proj.status === '充足' || proj.status === '参画決定') statusBadge = '<span class="status-badge status-primary">参画決定</span>';
+        if (proj.status === SES.i18n.t('js.project.status.recruiting')) statusBadge = '<span class="status-badge status-success">募集中</span>';
+        else if (proj.status === SES.i18n.t('js.project.status.interviewing') || proj.status === SES.i18n.t('js.project.status.interviewing')) statusBadge = '<span class="status-badge status-warning">選考中</span>';
+        else if (proj.status === SES.i18n.t('js.project.status.filled') || proj.status === SES.i18n.t('js.project.status.filled')) statusBadge = '<span class="status-badge status-primary">参画決定</span>';
 
         const min = proj.unitPriceMin ? (proj.unitPriceMin / 10000) + '万' : '-';
         const max = proj.unitPriceMax ? (proj.unitPriceMax / 10000) + '万' : '-';
@@ -143,7 +143,7 @@ function renderProjects(records) {
                     <div class="fw-bold text-light">${SES.escapeHtml(proj.projectName)}</div>
                     <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>${SES.escapeHtml(proj.description || '')}</div>
                 </td>
-                <td>${proj.customerId || '未設定'} (ID)</td> <!-- Ideally we join with Customer table on backend to get name -->
+                <td>${proj.customerId || SES.i18n.t('js.project.match.expected_price_not_set')} (ID)</td> <!-- Ideally we join with Customer table on backend to get name -->
                 <td class="font-monospace">${priceStr}</td>
                 <td class="text-center">${proj.requiredCount || 1}名</td>
                 <td class="text-center">${remoteIcon}</td>
@@ -151,9 +151,9 @@ function renderProjects(records) {
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-success text-success border-success" title="候補要員を探す" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
-                        <button type="button" class="btn btn-outline-info text-info border-info" title="編集" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger" title="削除" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
+                        <button type="button" class="btn btn-outline-success text-success border-success" title="' + SES.i18n.t('js.project.search_candidate') + '" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
+                        <button type="button" class="btn btn-outline-info text-info border-info" title="' + SES.i18n.t('common.edit') + '" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
+                        <button type="button" class="btn btn-outline-danger text-danger border-danger" title="' + SES.i18n.t('common.delete') + '" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -218,7 +218,7 @@ function editProject(id) {
                     }
                 });
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('js.common.error_fetch'));
             }
         }
     });
@@ -227,7 +227,7 @@ function editProject(id) {
 function saveProject() {
     const projectName = $('#proj-projectName').val();
     if (!projectName) {
-        Toast.error('案件名は必須です');
+        Toast.error(SES.i18n.t('js.project.error.name_required'));
         return;
     }
     
@@ -262,7 +262,7 @@ function saveProject() {
     });
 
     if (hasError) {
-        Toast.error('スキルを選択してください');
+        Toast.error(SES.i18n.t('js.project.error.skill_required'));
         return;
     }
 
@@ -280,17 +280,17 @@ function saveProject() {
                     if (res.data && res.data.id) {
                         saveProjectSkills(res.data.id, skills);
                     } else {
-                        Toast.success('案件を登録しました');
+                        Toast.success(SES.i18n.t('js.project.success.save'));
                         finishSave();
                     }
                 }
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('js.project.error.save'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
         }
     });
 }
@@ -302,11 +302,11 @@ function saveProjectSkills(projectId, skills) {
         contentType: 'application/json',
         data: JSON.stringify(skills),
         success: function(res) {
-            Toast.success('案件を保存しました');
+            Toast.success(SES.i18n.t('js.project.success.save_general'));
             finishSave();
         },
         error: function() {
-            Toast.error('スキルの保存に失敗しました');
+            Toast.error(SES.i18n.t('js.project.error.save_skill'));
             finishSave();
         }
     });
@@ -371,14 +371,14 @@ function addProjectSkillRow(skill = null) {
 
 function deleteProject(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この案件データを削除しますか？この操作は元に戻せません。',
+        title: SES.i18n.t('js.project.delete.title'),
+        text: SES.i18n.t('js.project.delete.text'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('js.project.delete.confirm'),
+        cancelButtonText: SES.i18n.t('js.project.delete.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -386,15 +386,15 @@ function deleteProject(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('js.project.delete.success'));
                         loadProjects();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('js.project.delete.error'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('通信エラーが発生しました');
+                    Toast.error(SES.i18n.t('js.common.error_network'));
                 }
             });
         }
@@ -406,7 +406,7 @@ function findMatchingEngineers(projectId) {
     modal.show();
     
     const body = $('#matchingResultModalBody');
-    body.html('<div class="text-center text-muted py-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">AIマッチング実行中...</div></div>');
+    body.html('<div class="text-center text-muted py-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">' + SES.i18n.t('project.matching.loading') + '</div></div>');
 
     $.ajax({
         url: '/api/ai/matching/project/' + projectId,
@@ -415,14 +415,14 @@ function findMatchingEngineers(projectId) {
             if (res.code === 200 && res.data) {
                 const results = res.data;
                 if (results.length === 0) {
-                    body.html('<div class="text-center text-muted py-5">条件に合致する要員が見つかりませんでした。</div>');
+                    body.html('<div class="text-center text-muted py-5">' + SES.i18n.t('js.project.match.not_found') + '</div>');
                     return;
                 }
                 
-                let html = '<p class="mb-3">AIが以下の要員を推薦しています。</p>';
+                let html = '<p class="mb-3">' + SES.i18n.t('js.project.match.recommend') + '</p>';
                 results.forEach(match => {
                     const scoreColor = match.score >= 90 ? 'text-success' : (match.score >= 70 ? 'text-warning' : 'text-danger');
-                    const priceText = match.proposedPrice ? match.proposedPrice + '万' : '未設定';
+                    const priceText = match.proposedPrice ? match.proposedPrice + '万' : SES.i18n.t('js.project.match.expected_price_not_set');
                     const proposalPriceYen = match.proposedPrice ? match.proposedPrice * 10000 : 'null';
                     html += `
                         <div class="card bg-secondary border-dark mb-3 shadow-sm">
@@ -430,15 +430,15 @@ function findMatchingEngineers(projectId) {
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
                                         <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${SES.escapeHtml(match.engineerName)}</a></h6>
-                                        <div class="small text-muted">希望単価: ${priceText}</div>
+                                        <div class="small text-muted">' + SES.i18n.t('js.project.match.expected_price') + ': ${priceText}</div>
                                     </div>
                                     <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                                 </div>
-                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">AI評価</span>${SES.escapeHtml(match.reason)}</p>
-                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || '特記事項なし')}</p>
+                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">' + SES.i18n.t('js.project.match.ai_eval') + '</span>${SES.escapeHtml(match.reason)}</p>
+                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || '' + SES.i18n.t('js.project.match.no_remarks') + '')}</p>
                                 <div class="text-end">
                                     <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
-                                        <i class="bi bi-send-fill me-1"></i>この要員を提案
+                                        <i class="bi bi-send-fill me-1"></i>' + SES.i18n.t('js.project.match.propose_btn') + '
                                     </button>
                                 </div>
                             </div>
@@ -463,7 +463,7 @@ function proposeEngineerToProject(engineerId, projectId, score, price) {
         proposedUnitPrice: price,
         status: '書類選考中',
         aiMatchScore: score,
-        matchReason: 'AIマッチング(要員推薦)経由'
+        matchReason: SES.i18n.t('proposal.matchReason')
     };
 
     $.ajax({
@@ -473,14 +473,14 @@ function proposeEngineerToProject(engineerId, projectId, score, price) {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('提案を作成しました。カンバンへ移動します。');
+                Toast.success(SES.i18n.t('js.project.propose.success'));
                 setTimeout(() => window.location.href = '/proposal/kanban', 1500);
             } else {
-                Toast.error('作成失敗: ' + (res.message || ''));
+                Toast.error(SES.i18n.t('js.project.propose.error') + ' ' + (res.message || ''));
             }
         },
         error: function() {
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
         }
     });
 }
