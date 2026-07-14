@@ -35,14 +35,18 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, "稼動中"));
         if (active > 0) {
-            throw new BusinessException("稼動中の契約があるため削除できません");
+            throw BusinessException.of("error.engineer.delete.activeContract");
         }
         long openProposals = proposalMapper.selectCount(new LambdaQueryWrapper<Proposal>()
                 .eq(Proposal::getEngineerId, engineerId)
                 .notIn(Proposal::getStatus, List.of("成約", "見送り")));
         if (openProposals > 0) {
-            throw new BusinessException("進行中の提案があるため削除できません");
+            throw BusinessException.of("error.engineer.delete.activeProposal");
         }
         return super.removeById(id);
     }
 }
+
+
+
+

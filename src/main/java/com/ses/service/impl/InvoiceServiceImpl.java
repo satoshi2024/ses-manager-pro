@@ -54,7 +54,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public Invoice generate(Long customerId, String billingMonth) {
         List<UnbilledWorkRecordDto> unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
         if (unbilledList == null || unbilledList.isEmpty()) {
-            throw new BusinessException("請求対象の確定実績がありません");
+            throw BusinessException.of("error.invoice.noWorkRecord");
         }
 
         BigDecimal subtotal = BigDecimal.ZERO;
@@ -111,7 +111,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                 // 同時採番の衝突。次のループで最新の最大値から再採番する
             }
         }
-        throw new BusinessException("請求書番号の採番に失敗しました。再試行してください。");
+        throw BusinessException.of("error.invoice.numberGenerateFailed");
     }
 
     /**
@@ -142,17 +142,17 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public void changeStatus(Long id, String status, LocalDate paidDate) {
         Invoice invoice = this.getById(id);
         if (invoice == null) {
-            throw new BusinessException("請求書が見つかりません");
+            throw BusinessException.of("error.invoice.notFound");
         }
 
         String oldStatus = invoice.getStatus();
         if (!ALLOWED.getOrDefault(oldStatus, Set.of()).contains(status)) {
-            throw new BusinessException("「" + oldStatus + "」から「" + status + "」へは変更できません");
+            throw BusinessException.of("error.invoice.statusTransitionInvalid", oldStatus, status);
         }
 
         if ("入金済".equals(status)) {
             if (paidDate == null) {
-                throw new BusinessException("入金日を指定してください");
+                throw BusinessException.of("error.invoice.paymentDateRequired");
             }
             invoice.setStatus(status);
             invoice.setPaidDate(paidDate);
@@ -172,7 +172,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public void changeBpPaymentStatus(Long id, String status, LocalDate paidDate) {
         BpPayment bpPayment = bpPaymentMapper.selectById(id);
         if (bpPayment == null) {
-            throw new BusinessException("BP支払が見つかりません");
+            throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }
         if ("支払済".equals(status)) {
             bpPayment.setStatus(status);
@@ -184,7 +184,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     .set("status", status)
                     .set("paid_date", null));
         } else {
-            throw new BusinessException("不正なステータスです: " + status);
+            throw BusinessException.of("error.invoice.statusInvalid", status);
         }
     }
 
@@ -193,10 +193,10 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public void voidInvoice(Long id) {
         Invoice invoice = this.getById(id);
         if (invoice == null) {
-            throw new BusinessException("請求書が見つかりません");
+            throw BusinessException.of("error.invoice.notFound");
         }
         if ("入金済".equals(invoice.getStatus())) {
-            throw new BusinessException("入金済の請求書は取消できません。先に入金を取り消してください");
+            throw BusinessException.of("error.invoice.cancelPaidInvoice");
         }
         invoiceItemMapper.delete(new QueryWrapper<InvoiceItem>().eq("invoice_id", id));
         this.removeById(id);
@@ -206,7 +206,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public InvoiceDetailDto detail(Long id) {
         Invoice invoice = this.getById(id);
         if (invoice == null) {
-            throw new BusinessException("請求書が見つかりません");
+            throw BusinessException.of("error.invoice.notFound");
         }
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
@@ -230,3 +230,19 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return dto;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -43,19 +43,19 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .eq("work_month", workMonth));
 
         if (record != null && "確定".equals(record.getStatus())) {
-            throw new BusinessException("確定済みの月は編集できません");
+            throw BusinessException.of("error.workRecord.confirmedEdit2");
         }
 
         if (record != null) {
             List<String> nos = invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(List.of(record.getId()));
             if (!nos.isEmpty()) {
-                throw new BusinessException("請求書(" + nos.get(0) + ")に計上済みの実績は編集できません");
+                throw BusinessException.of("error.workRecord.invoicedEdit2", nos.get(0));
             }
         }
 
         Contract contract = contractMapper.selectById(contractId);
         if (contract == null) {
-            throw new BusinessException("契約が存在しません");
+            throw BusinessException.of("error.workRecord.noContract2");
         }
 
         BigDecimal billingAmount = SettlementCalculator.calc(
@@ -90,7 +90,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         try {
             this.saveOrUpdate(record);
         } catch (DuplicateKeyException e) {
-            throw new BusinessException("他のユーザーが同じ実績を登録しました。再読み込みしてください");
+            throw BusinessException.of("error.workRecord.userNotFound2");
         }
         return record;
     }
@@ -149,14 +149,14 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         List<String> nos = invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(ids);
         if (!nos.isEmpty()) {
-            throw new BusinessException("請求書(" + String.join(", ", nos) + ")に計上済みの実績が含まれるため解除できません");
+            throw BusinessException.of("error.workRecord.invoicedDelete2", String.join(", ", nos));
         }
 
         Long paidCount = bpPaymentMapper.selectCount(new QueryWrapper<BpPayment>()
                 .in("work_record_id", ids)
                 .eq("status", "支払済"));
         if (paidCount > 0) {
-            throw new BusinessException("支払済のBP支払が" + paidCount + "件あるため解除できません");
+            throw BusinessException.of("error.workRecord.paidBpDelete", paidCount);
         }
 
         for (WorkRecord record : records) {
@@ -169,3 +169,20 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .eq("status", "未払"));
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

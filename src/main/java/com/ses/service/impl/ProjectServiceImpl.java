@@ -33,14 +33,18 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         Long projectId = Long.valueOf(id.toString());
         long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, projectId));
         if (contracts > 0) {
-            throw new BusinessException("契約が紐づいているため削除できません");
+            throw BusinessException.of("error.project.delete.hasContract");
         }
         long openProposals = proposalMapper.selectCount(new LambdaQueryWrapper<Proposal>()
                 .eq(Proposal::getProjectId, projectId)
                 .notIn(Proposal::getStatus, List.of("成約", "見送り")));
         if (openProposals > 0) {
-            throw new BusinessException("進行中の提案が紐づいているため削除できません");
+            throw BusinessException.of("error.project.delete.hasProposal");
         }
         return super.removeById(id);
     }
 }
+
+
+
+

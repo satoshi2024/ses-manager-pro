@@ -67,12 +67,12 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     public void changeStatus(Long id, String newStatus) {
         Proposal proposal = this.getById(id);
         if (proposal == null) {
-            throw new BusinessException("提案が見つかりません");
+            throw BusinessException.of("error.proposal.notFound");
         }
         
         String oldStatus = proposal.getStatus();
         if (!ALLOWED.getOrDefault(oldStatus, Set.of()).contains(newStatus)) {
-            throw new BusinessException("「" + oldStatus + "」から「" + newStatus + "」へは変更できません");
+            throw BusinessException.of("error.proposal.statusTransitionInvalid", oldStatus, newStatus);
         }
         
         // 提案ステータスの更新
@@ -109,3 +109,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         }
     }
 }
+
+
+
+

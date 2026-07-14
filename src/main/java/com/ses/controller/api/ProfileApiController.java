@@ -25,11 +25,11 @@ public class ProfileApiController {
                                              Authentication authentication) {
         SysUser user = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getUsername, authentication.getName()));
-        if (user == null) throw new BusinessException("ユーザーが見つかりません");
+        if (user == null) throw BusinessException.of("error.user.notFound");
         if (!passwordEncoder.matches(req.getCurrentPassword(), user.getPassword()))
-            throw new BusinessException("現在のパスワードが正しくありません");
+            throw BusinessException.of("error.password.currentInvalid");
         if (passwordEncoder.matches(req.getNewPassword(), user.getPassword()))
-            throw new BusinessException("現在と同じパスワードは設定できません");
+            throw BusinessException.of("error.password.sameAsCurrent");
         PasswordPolicyValidator.validate(req.getNewPassword());
         SysUser update = new SysUser();
         update.setId(user.getId());
@@ -37,3 +37,9 @@ public class ProfileApiController {
         return ApiResult.success(sysUserService.updateById(update));
     }
 }
+
+
+
+
+
+

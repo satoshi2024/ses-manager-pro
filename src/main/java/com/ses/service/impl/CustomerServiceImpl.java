@@ -35,16 +35,22 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         Long customerId = Long.valueOf(id.toString());
         long projects = projectMapper.selectCount(new LambdaQueryWrapper<Project>().eq(Project::getCustomerId, customerId));
         if (projects > 0) {
-            throw new BusinessException("案件が" + projects + "件紐づいているため削除できません");
+            throw BusinessException.of("error.customer.delete.hasProjects", projects);
         }
         long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getCustomerId, customerId));
         if (contracts > 0) {
-            throw new BusinessException("契約が" + contracts + "件紐づいているため削除できません");
+            throw BusinessException.of("error.customer.delete.hasContracts", contracts);
         }
         long invoices = invoiceMapper.selectCount(new LambdaQueryWrapper<Invoice>().eq(Invoice::getCustomerId, customerId));
         if (invoices > 0) {
-            throw new BusinessException("請求書が" + invoices + "件紐づいているため削除できません");
+            throw BusinessException.of("error.customer.delete.hasInvoices", invoices);
         }
         return super.removeById(id);
     }
 }
+
+
+
+
+
+

@@ -11,3 +11,4 @@ public class PasswordChangeRequest {
     @NotBlank(message = "新しいパスワードは必須です")
     private String newPassword;
 }
+

@@ -113,7 +113,7 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
             return baos.toByteArray();
         } catch (DocumentException e) {
             log.error("請求書PDF生成に失敗しました: invoiceNo={}", detail.getInvoiceNo(), e);
-            throw new BusinessException("PDF生成に失敗しました");
+            throw BusinessException.of("error.invoice.pdfGenerateFailed");
         }
     }
 
@@ -184,3 +184,5 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
                 "PDF生成用の日本語フォントが見つかりません。app.pdf.font-path でフォントファイルのパスを指定してください。");
     }
 }
+
+
