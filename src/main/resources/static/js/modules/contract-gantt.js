@@ -26,7 +26,7 @@ $(document).ready(function() {
                 // ここで事前にHTMLエスケープしておく（要員名・顧客名は自由入力のため）。
                 tasks.push({
                     id: 'Task_' + c.id,
-                    name: SES.escapeHtml((c.engineerName || 'エンジニア') + ' @ ' + (c.customerName || '顧客')),
+                    name: SES.escapeHtml((c.engineerName || SES.i18n.t('js.gantt.engineer')) + ' @ ' + (c.customerName || SES.i18n.t('js.gantt.customer'))),
                     start: c.startDate || '2026-04-01',
                     end: c.endDate || '2026-09-30',
                     progress: calculateProgress(c.startDate, c.endDate),
@@ -36,7 +36,7 @@ $(document).ready(function() {
             });
             
             if (tasks.length === 0) {
-                $('#gantt-target').html('<div class="text-center text-muted p-5">表示できるデータがありません</div>');
+                $('#gantt-target').html('<div class="text-center text-muted p-5">' + SES.i18n.t('js.gantt.empty_data') + '</div>');
                 return;
             }
 
@@ -56,8 +56,8 @@ $(document).ready(function() {
                     return `
                         <div class="p-2">
                             <div class="fw-bold mb-1">${task.name}</div>
-                            <div class="small">期間: ${task.start} ~ ${task.end}</div>
-                            <div class="small mt-1 text-accent-green">経過: ${task.progress}%</div>
+                            <div class="small">' + SES.i18n.t('js.gantt.period') + ': ${task.start} ~ ${task.end}</div>
+                            <div class="small mt-1 text-accent-green">' + SES.i18n.t('js.gantt.progress') + ': ${task.progress}%</div>
                         </div>
                     `;
                 }
@@ -65,7 +65,7 @@ $(document).ready(function() {
         },
         error: function(err) {
             $('#gantt-loading').hide();
-            $('#gantt-target').html('<div class="text-center text-danger p-5">データの読み込みに失敗しました</div>');
+            $('#gantt-target').html('<div class="text-center text-danger p-5">' + SES.i18n.t('js.gantt.error_fetch') + '</div>');
         }
     });
 

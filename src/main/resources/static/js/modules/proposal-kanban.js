@@ -63,7 +63,7 @@ $(document).ready(function() {
 
 function loadKanbanData() {
     // Show loading state
-    $('.kanban-column-body').html('<div class="text-center text-muted p-4"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</div>');
+    $('.kanban-column-body').html('<div class="text-center text-muted p-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</div>');
     
     $.ajax({
         url: '/api/proposals/kanban',
@@ -72,7 +72,7 @@ function loadKanbanData() {
             if (res.code === 200) {
                 renderKanbanBoard(res.data);
             } else {
-                Toast.error(res.message || 'データ取得に失敗しました');
+                Toast.error(res.message || SES.i18n.t('js.kanban.error_fetch'));
             }
         },
         error: function(err) {
@@ -139,28 +139,28 @@ function createKanbanCard(item) {
     
     return `
         <div class="kanban-card" data-id="${item.id}" onclick="viewProposalDetail(${item.id})">
-            <div class="kanban-card-title">${SES.escapeHtml(item.projectName || '案件未定')}</div>
+            <div class="kanban-card-title">${SES.escapeHtml(item.projectName || SES.i18n.t('js.kanban.project_tbd'))}</div>
 
             <div class="kanban-card-subtitle">
                 <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 24px; height: 24px; font-size: 0.6rem;">
                     ${SES.escapeHtml(item.engineerInitial || 'N/A')}
                 </div>
-                <span class="text-truncate">${SES.escapeHtml(item.engineerName || '未指定')}</span>
+                <span class="text-truncate">${SES.escapeHtml(item.engineerName || SES.i18n.t('js.kanban.engineer_not_set'))}</span>
             </div>
 
             <div class="kanban-card-subtitle mb-2 small text-truncate">
-                <i class="bi bi-building me-1"></i> ${SES.escapeHtml(item.customerName || '顧客未定')}
+                <i class="bi bi-building me-1"></i> ${SES.escapeHtml(item.customerName || SES.i18n.t('js.kanban.customer_tbd'))}
             </div>
             
             <div class="kanban-card-meta">
                 <span class="kanban-card-price">¥${item.proposedUnitPrice ? item.proposedUnitPrice.toLocaleString() : '---'}万</span>
 
                 ${item.aiMatchScore ? `
-                <div class="ai-score-badge small" title="AIマッチングスコア">
+                <div class="ai-score-badge small" title="' + SES.i18n.t('js.kanban.ai_score') + '">
                     <i class="bi ${scoreIcon} me-1"></i>${item.aiMatchScore}%
                 </div>
                 ` : ''}
-                <button class="btn btn-sm btn-link text-info p-0 ms-auto" title="提案メール送信"
+                <button class="btn btn-sm btn-link text-info p-0 ms-auto" title="' + SES.i18n.t('js.kanban.mail_send') + '"
                         onclick="event.stopPropagation(); openMailModal(${item.id})">
                     <i class="bi bi-envelope"></i>
                 </button>
@@ -191,19 +191,19 @@ function executeStatusChange(proposalId, newStatus, itemEl, fromCol, isWon) {
                     // 契約ドラフトはサーバー側(成約と同一トランザクション)で自動生成済み。
                     // クライアントからの契約作成は行わず、確認導線のみ提示する。
                     Swal.fire({
-                        title: '成約しました',
-                        text: '契約ドラフトを作成しました。契約一覧を開いて内容を確認しますか？',
+                        title: SES.i18n.t('js.kanban.won.title'),
+                        text: SES.i18n.t('js.kanban.won.text'),
                         icon: 'success',
                         showCancelButton: true,
-                        confirmButtonText: '契約一覧を開く',
-                        cancelButtonText: '後で'
+                        confirmButtonText: SES.i18n.t('js.kanban.won.confirm'),
+                        cancelButtonText: SES.i18n.t('js.kanban.won.cancel')
                     }).then((result) => {
                         if (result.isConfirmed) {
                             window.location.href = '/contract/list';
                         }
                     });
                 } else {
-                    Toast.success(`ステータスを「${newStatus}」に更新しました`);
+                    Toast.success(SES.i18n.t('js.kanban.status.update').replace('{0}', SES.i18n.e(newStatus)));
                 }
             } else {
                 Toast.error(res.message);
@@ -237,7 +237,7 @@ function viewProposalDetail(id) {
     // Toast.info('提案詳細画面へ遷移します(ID: ' + id + ')');
     
     // For MVP demo, show a quick modal or toast
-    Toast.info('提案詳細画面（ID: ' + id + '）');
+    Toast.info(SES.i18n.t('js.kanban.proposal.detail').replace('{0}', id));
 }
 
 function saveProposal() {
@@ -245,7 +245,7 @@ function saveProposal() {
     const projectId = $('#prop-projectId').val();
     
     if (!engineerId || !projectId) {
-        Toast.error('要員と案件は必須です');
+        Toast.error(SES.i18n.t('js.kanban.error.engineer_project'));
         return;
     }
     
@@ -263,12 +263,12 @@ function saveProposal() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('提案を登録しました');
+                Toast.success(SES.i18n.t('js.kanban.success.register'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('proposalModal')).hide();
                 $('#proposal-form')[0].reset();
                 loadKanbanData(); // Refresh board
             } else {
-                Toast.error(res.message || '登録に失敗しました');
+                Toast.error(res.message || SES.i18n.t('js.kanban.error.register'));
             }
         },
         error: function(err) {
@@ -285,7 +285,7 @@ function openMailModal(proposalId) {
     $('#mail-proposalId').val(proposalId);
     $('#mail-to').val('');
     const $select = $('#mail-template');
-    $select.html('<option value="">読み込み中...</option>');
+    $select.html('<option value="">' + SES.i18n.t('js.common.loading') + '</option>');
     $.get('/api/email-templates', function(res) {
         const list = res.data && (res.data.records || res.data) || [];
         $select.empty().append('<option value="">テンプレートを選択</option>');
@@ -300,7 +300,7 @@ function sendProposalMail() {
     const proposalId = $('#mail-proposalId').val();
     const templateId = $('#mail-template').val();
     const to = $('#mail-to').val();
-    if (!templateId) { Toast.error('テンプレートを選択してください'); return; }
+    if (!templateId) { Toast.error(SES.i18n.t('js.kanban.mail.select_template')); return; }
 
     $.ajax({
         url: `/api/proposals/${proposalId}/send-mail`,
@@ -309,14 +309,14 @@ function sendProposalMail() {
         data: JSON.stringify({ templateId: templateId, to: to }),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('メールを送信しました（SMTP未設定時はログ出力）');
+                Toast.success(SES.i18n.t('js.kanban.mail.success'));
                 bootstrap.Modal.getInstance(document.getElementById('mailModal')).hide();
             } else {
-                Toast.error(res.message || 'メール送信に失敗しました');
+                Toast.error(res.message || SES.i18n.t('js.kanban.mail.error'));
             }
         },
         error: function(xhr) {
-            const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'メール送信に失敗しました';
+            const msg = (xhr.responseJSON && xhr.responseJSON.message) || SES.i18n.t('js.kanban.mail.error');
             Toast.error(msg);
         }
     });

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
-    <title>ガントチャート - 稼動状況</title>
+    <title th:text="#{contract.gantt.btn} + ' - ' + #{app.name}">ガントチャート - 稼動状況</title>
     <!-- Frappe Gantt CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/0.6.1/frappe-gantt.css">
     <link rel="stylesheet" th:href="@{/css/gantt.css}">
@@ -12,17 +12,17 @@
     
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h4 class="text-white fw-bold mb-1"><i class="bi bi-bar-chart-steps me-2 text-accent-green"></i>稼動ガントチャート</h4>
-            <p class="text-muted small mb-0">エンジニアの現在および今後のアサイン状況を可視化</p>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-bar-chart-steps me-2 text-accent-green"></i><th:block th:text="#{contract.gantt.btn}">稼動ガントチャート</th:block></h4>
+            <p class="text-muted small mb-0" th:text="#{gantt.desc}">エンジニアの現在および今後のアサイン状況を可視化</p>
         </div>
         <div class="d-flex align-items-center">
             <div class="btn-group btn-group-sm me-3" role="group" id="view-mode-buttons">
-                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark active" data-mode="Day">日</button>
-                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-mode="Week">週</button>
-                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-mode="Month">月</button>
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark active" data-mode="Day" th:text="#{gantt.view.day}">日</button>
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-mode="Week" th:text="#{gantt.view.week}">週</button>
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-mode="Month" th:text="#{gantt.view.month}">月</button>
             </div>
             <a href="/contract/list" class="btn btn-outline-secondary btn-sm text-muted hover-text-white border-dark">
-                <i class="bi bi-list me-1"></i>リスト表示
+                <i class="bi bi-list me-1"></i><th:block th:text="#{gantt.list.btn}">リスト表示</th:block>
             </a>
         </div>
     </div>
@@ -32,7 +32,7 @@
             <div id="gantt-target"></div>
             <!-- Loading indicator -->
             <div id="gantt-loading" class="text-center text-muted p-5">
-                <div class="spinner-border spinner-border-sm me-2"></div>読み込み中...
+                <div class="spinner-border spinner-border-sm me-2"></div><th:block th:text="#{common.loading}">読み込み中...</th:block>
             </div>
         </div>
     </div>

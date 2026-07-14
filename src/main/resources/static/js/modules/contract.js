@@ -4,7 +4,7 @@ $(document).ready(function() {
 });
 
 function loadContracts() {
-    $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</td></tr>');
+    $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</td></tr>');
     
     const params = {
         status: $('#search-form [name="status"]').val(),
@@ -22,13 +22,13 @@ function loadContracts() {
             if (res.code === 200 && res.data) {
                 renderContracts(res.data.records || res.data);
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('js.common.error_fetch'));
                 $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4">データの取得に失敗しました</td></tr>');
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
             $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4">通信エラーが発生しました</td></tr>');
         }
     });
@@ -76,7 +76,7 @@ function renderContracts(list) {
     }
     
     list.forEach(c => {
-        const engineerName = c.engineerName != null ? c.engineerName : '(削除済み)';
+        const engineerName = c.engineerName != null ? c.engineerName : SES.i18n.t('js.contract.engineer_deleted');
         const customerName = c.customerName != null ? c.customerName : '-';
         const projectName = c.projectName != null ? c.projectName : '-';
         const contractNo = c.contractNo != null ? c.contractNo : ('C-' + c.id);
@@ -86,7 +86,7 @@ function renderContracts(list) {
                 <td class="px-4 py-3"><span class="font-monospace text-muted">${SES.escapeHtml(contractNo)}</span></td>
                 <td class="py-3">
                     <div class="fw-bold text-white">${SES.escapeHtml(engineerName)}</div>
-                    <div class="small text-muted">${SES.escapeHtml(c.contractType || '準委任')}</div>
+                    <div class="small text-muted">${SES.escapeHtml(c.contractType || SES.i18n.t('js.contract.type.quasi'))}</div>
                 </td>
                 <td class="py-3">
                     <div class="text-white">${SES.escapeHtml(customerName)}</div>
@@ -114,11 +114,11 @@ function renderContracts(list) {
 
 function getStatusBadge(status) {
     let bg = 'status-secondary';
-    if(status === '稼動中') bg = 'status-success';
-    if(status === '準備中') bg = 'status-primary';
-    if(status === '終了') bg = 'status-secondary';
-    if(status === '解約') bg = 'status-danger';
-    return `<span class="status-badge ${bg}">${status || '準備中'}</span>`;
+    if(status === SES.i18n.t('contract.status.active')) bg = 'status-success';
+    if(status === SES.i18n.t('contract.status.preparing')) bg = 'status-primary';
+    if(status === SES.i18n.t('contract.status.ended')) bg = 'status-secondary';
+    if(status === SES.i18n.t('contract.status.cancelled')) bg = 'status-danger';
+    return `<span class="status-badge ${bg}">${status || SES.i18n.t('contract.status.preparing')}</span>`;
 }
 
 function saveContract() {
@@ -126,7 +126,7 @@ function saveContract() {
     const projectId = $('#cont-projectId').val();
     
     if (!engineerId || !projectId) {
-        Toast.error('要員と案件は必須です');
+        Toast.error(SES.i18n.t('js.contract.error.engineer_project'));
         return;
     }
     
@@ -138,7 +138,7 @@ function saveContract() {
         endDate: $('#cont-endDate').val() || null,
         sellingPrice: $('#cont-sellingPrice').val() ? parseInt($('#cont-sellingPrice').val()) : null,
         costPrice: $('#cont-costPrice').val() ? parseInt($('#cont-costPrice').val()) : null,
-        status: '準備中' // Default status
+        status: SES.i18n.t('contract.status.preparing') // Default status
     };
 
     $.ajax({
@@ -148,17 +148,17 @@ function saveContract() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('契約を登録しました');
+                Toast.success(SES.i18n.t('js.contract.success.register'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).hide();
                 $('#contract-form')[0].reset();
                 loadContracts();
             } else {
-                Toast.error(res.message || '登録に失敗しました');
+                Toast.error(res.message || SES.i18n.t('js.contract.error.register'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
         }
     });
 }
@@ -179,14 +179,14 @@ function exportContracts() {
 
 function deleteContract(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この契約データを削除しますか？この操作は元に戻せません。',
+        title: SES.i18n.t('js.project.delete.title'),
+        text: SES.i18n.t('js.contract.delete.text'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('js.project.delete.confirm'),
+        cancelButtonText: SES.i18n.t('js.project.delete.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -194,15 +194,15 @@ function deleteContract(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('js.project.delete.success'));
                         loadContracts();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('js.project.delete.error'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('通信エラーが発生しました');
+                    Toast.error(SES.i18n.t('js.common.error_network'));
                 }
             });
         }
