@@ -1,7 +1,9 @@
 package com.ses.mapper;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.analytics.ContractDateRangeDto;
 import com.ses.dto.analytics.EngineerCreatedAtDto;
+import com.ses.dto.contract.ContractListDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -78,5 +81,39 @@ class AnalyticsProjectionMapperIntegrationTest {
 
         assertEquals(1, result.size());
         assertEquals(1L, result.get(0).getEngineerId());
+    }
+
+    /**
+     * 契約一覧の担当営業join(sys_user)が実DBで実行できることを検証する。
+     * sys_user の氏名カラムは real_name であり、full_name を参照すると
+     * 「Unknown column」でランタイムエラーになる。単体テストは本SQLをモックするため
+     * 素のSQLで結合先カラム名の誤りを検出できるのはH2実行の本テストのみ。
+     */
+    @Test
+    void selectPageWithNames_担当営業joinが実行でき営業名を取得できる() {
+        Contract contract = new Contract();
+        contract.setEngineerId(1L);
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setSalesUserId(1L); // engineer-schema-h2.sql が seed する admin(id=1)
+        contract.setStatus("稼動中");
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setSellingPrice(java.math.BigDecimal.valueOf(80));
+        contract.setCostPrice(java.math.BigDecimal.valueOf(60));
+        contractMapper.insert(contract);
+
+        Page<ContractListDto> page = contractMapper.selectPageWithNames(
+                new Page<>(1, 10), null, null, null, null, null, null, null, null);
+
+        assertTrue(page.getRecords().stream().anyMatch(r -> r.getId().equals(contract.getId())));
+        ContractListDto row = page.getRecords().stream()
+                .filter(r -> r.getId().equals(contract.getId())).findFirst().orElseThrow();
+        assertEquals(1L, row.getSalesUserId());
+        assertNotNull(row.getSalesUserName(), "担当営業名が取得できること");
+
+        // salesUserId 絞り込みが機能すること
+        Page<ContractListDto> filtered = contractMapper.selectPageWithNames(
+                new Page<>(1, 10), null, null, null, null, null, null, null, 1L);
+        assertTrue(filtered.getRecords().stream().allMatch(r -> Long.valueOf(1L).equals(r.getSalesUserId())));
     }
 }

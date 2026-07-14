@@ -31,7 +31,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.customer_id AS customerId, c.project_id AS projectId,
                c.contract_type AS contractType, c.start_date AS startDate, c.end_date AS endDate,
                c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
-               c.sales_user_id AS salesUserId, su.full_name AS salesUserName,
+               c.sales_user_id AS salesUserId, su.real_name AS salesUserName,
                e.full_name AS engineerName, cu.company_name AS customerName, p.project_name AS projectName
         FROM t_contract c
         LEFT JOIN t_engineer e ON c.engineer_id = e.id AND e.deleted_flag = 0
