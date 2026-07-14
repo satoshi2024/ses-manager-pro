@@ -7,6 +7,30 @@
 const SES = {
     
     /**
+     * i18n (Internationalization)
+     */
+    i18n: {
+        t: function(key, ...args) {
+            let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : key;
+            if (args.length > 0) {
+                for (let i = 0; i < args.length; i++) {
+                    msg = msg.replace(new RegExp('\\{' + i + '\\}', 'g'), args[i]);
+                }
+            }
+            return msg;
+        },
+        e: function(group, dbValue) {
+            if (!dbValue) return '';
+            const code = (window.SES_ENUMS && window.SES_ENUMS[group] && window.SES_ENUMS[group][dbValue]);
+            if (!code) return dbValue;
+            return this.t('enum.' + group + '.' + code);
+        },
+        get lang() {
+            return window.SES_LANG || 'ja';
+        }
+    },
+    
+    /**
      * API呼出ユーティリティ
      * fetch APIのラッパー。CSRF対策、共通エラーハンドリングを含む。
      */
