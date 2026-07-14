@@ -1,4 +1,4 @@
-let allMenus = [];
+﻿let allMenus = [];
 
 $(document).ready(function() {
     loadUsers();
@@ -25,12 +25,12 @@ function loadUsers(page = 1) {
                     renderPagination(res.data, 'loadUsers');
                 }
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('common.msg.fetchFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }
@@ -38,7 +38,7 @@ function loadUsers(page = 1) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('#accounts-pane .card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">全 0 件</div>');
+        paginationContainer.html('<div class="text-muted small ps-2">${SES.i18n.t('user.pagination.zero')}</div>');
         return;
     }
 
@@ -47,7 +47,7 @@ function renderPagination(pageData, loadFuncName) {
 
     let html = `
         <div class="text-muted small ps-2">
-            全 ${pageData.total} 件中 ${start}-${end} 件を表示
+            ${SES.i18n.t('user.pagination.info', { total: pageData.total, start: start, end: end })}
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -82,20 +82,20 @@ function renderUsers(records) {
     tbody.empty();
 
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
         return;
     }
 
     records.forEach(user => {
         const statusBadge = user.status === 1
-            ? '<span class="status-badge status-success">有効</span>'
-            : '<span class="status-badge status-secondary">無効</span>';
+            ? '<span class="status-badge status-success">${SES.i18n.t('user.status.active')}</span>'
+            : '<span class="status-badge status-secondary">${SES.i18n.t('user.status.inactive')}</span>';
 
         const tr = `
             <tr>
                 <td class="ps-4 py-3 fw-bold text-light">${SES.escapeHtml(user.username)}</td>
                 <td>${SES.escapeHtml(user.realName || '-')}</td>
-                <td><span class="status-badge status-primary">${SES.escapeHtml(user.role)}</span></td>
+                <td><span class="status-badge status-primary">${SES.i18n.t('user.role.' + user.role, user.role)}</span></td>
                 <td>${SES.escapeHtml(user.email || '-')}</td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
@@ -129,7 +129,7 @@ function editUser(id) {
 
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).show();
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('common.msg.fetchFail'));
             }
         }
     });
@@ -138,14 +138,14 @@ function editUser(id) {
 function saveUser() {
     const username = $('#user-username').val();
     if (!username) {
-        Toast.error('ログインIDは必須です');
+        Toast.error(SES.i18n.t('user.msg.loginIdRequired'));
         return;
     }
 
     const id = $('#user-id').val();
     const password = $('#user-password').val();
     if (!id && !password) {
-        Toast.error('パスワードは必須です');
+        Toast.error(SES.i18n.t('user.msg.passwordRequired'));
         return;
     }
 
@@ -169,13 +169,13 @@ function saveUser() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(id ? 'ユーザーを更新しました' : 'ユーザーを登録しました');
+                Toast.success(id ? SES.i18n.t('user.msg.updateSuccess') : SES.i18n.t('user.msg.registerSuccess'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('userModal')).hide();
                 $('#user-form')[0].reset();
                 $('#user-id').val('');
                 loadUsers(1);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.saveFail'));
             }
         },
         error: function(err) {
@@ -193,10 +193,10 @@ function toggleUserStatus(id, currentStatus) {
         data: { status: newStatus },
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(newStatus === 1 ? '有効化しました' : '無効化しました');
+                Toast.success(newStatus === 1 ? SES.i18n.t('user.msg.activateSuccess') : SES.i18n.t('user.msg.deactivateSuccess'));
                 loadUsers();
             } else {
-                Toast.error(res.message || '更新に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.updateFail'));
             }
         },
         error: function(err) {
@@ -208,14 +208,14 @@ function toggleUserStatus(id, currentStatus) {
 
 function deleteUser(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'このユーザーを削除しますか？この操作は元に戻せません。',
+        title: SES.i18n.t('user.confirm.deleteTitle'),
+        text: SES.i18n.t('user.confirm.deleteMsg'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.btn.delete'),
+        cancelButtonText: SES.i18n.t('common.btn.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -223,10 +223,10 @@ function deleteUser(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('user.msg.deleteSuccess'));
                         loadUsers();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('common.msg.deleteFail'));
                     }
                 },
                 error: function(err) {
@@ -261,7 +261,7 @@ function loadRoleMenus() {
             if (res.code === 200) {
                 renderRoleMenuCheckboxes(res.data || []);
             } else {
-                Toast.error('権限の取得に失敗しました');
+                Toast.error(SES.i18n.t('user.msg.permissionFetchFail'));
             }
         }
     });
@@ -296,14 +296,14 @@ function saveRoleMenus() {
         data: JSON.stringify(menuIds),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('権限を保存しました');
+                Toast.success(SES.i18n.t('user.msg.permissionSaveSuccess'));
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.saveFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }

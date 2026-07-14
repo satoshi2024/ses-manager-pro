@@ -1,4 +1,4 @@
-// システム設定画面
+﻿// システム設定画面
 
 $(document).ready(function() {
     loadConfigs();
@@ -9,17 +9,17 @@ function loadConfigs() {
         if (res.code === 200 && res.data) {
             renderConfigs(res.data);
         } else {
-            Toast.error(res.message || '取得に失敗しました');
+            Toast.error(res.message || SES.i18n.t('common.msg.fetchFail'));
         }
     }).fail(function() {
-        Toast.error('通信エラーが発生しました');
+        Toast.error(SES.i18n.t('common.msg.networkError'));
     });
 }
 
 function renderConfigs(configs) {
     const $body = $('#configTableBody');
     if (!configs.length) {
-        $body.html('<tr><td colspan="3" class="text-center text-muted py-4">設定がありません</td></tr>');
+        $body.html('<tr><td colspan="3" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
         return;
     }
     let html = '';
@@ -54,13 +54,13 @@ function saveConfigs() {
         data: JSON.stringify(configs),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('システム設定を保存しました');
+                Toast.success(SES.i18n.t('systemConfig.msg.saveSuccess'));
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.saveFail'));
             }
         },
         error: function(xhr) {
-            const msg = (xhr.responseJSON && xhr.responseJSON.message) || '保存に失敗しました';
+            const msg = (xhr.responseJSON && xhr.responseJSON.message) || SES.i18n.t('common.msg.saveFail');
             Toast.error(msg);
         }
     });

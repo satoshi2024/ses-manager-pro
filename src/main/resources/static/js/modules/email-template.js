@@ -1,4 +1,4 @@
-let templateModal = null;
+﻿let templateModal = null;
 let currentTemplates = [];
 
 $(document).ready(function() {
@@ -7,7 +7,7 @@ $(document).ready(function() {
 });
 
 function loadTemplates() {
-    $('#template-table-body').html('<tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>読み込み中...</td></tr>');
+    $('#template-table-body').html('<tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>`${SES.i18n.t('common.msg.loading')}`</td></tr>');
     
     $.ajax({
         url: '/api/email-templates',
@@ -33,7 +33,7 @@ function renderTemplates(list) {
     tbody.empty();
 
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="4" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="4" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
         return;
     }
 
@@ -46,7 +46,7 @@ function renderTemplates(list) {
         const tr = `
             <tr>
                 <td class="px-4 py-3 text-white fw-bold">${SES.escapeHtml(t.templateName)}</td>
-                <td class="py-3"><span class="status-badge ${typeBadge}">${SES.escapeHtml(t.templateType)}</span></td>
+                <td class="py-3"><span class="status-badge ${typeBadge}">${SES.i18n.t('emailTemplate.type.' + t.templateType, t.templateType)}</span></td>
                 <td class="py-3 text-muted text-truncate" style="max-width:300px;">${SES.escapeHtml(t.subjectTemplate)}</td>
                 <td class="px-4 py-3 text-end">
                     <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick="editTemplate(${t.id})">
@@ -110,30 +110,30 @@ function saveTemplate() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('テンプレートを保存しました');
+                Toast.success(SES.i18n.t('emailTemplate.msg.saveSuccess'));
                 templateModal.hide();
                 loadTemplates();
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('common.msg.saveFail'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
 }
 
 function deleteTemplate(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'このテンプレートを削除してもよろしいですか？',
+        title: SES.i18n.t('emailTemplate.confirm.deleteTitle'),
+        text: SES.i18n.t('emailTemplate.confirm.deleteMsg'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.btn.delete'),
+        cancelButtonText: SES.i18n.t('common.btn.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -141,15 +141,15 @@ function deleteTemplate(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('emailTemplate.msg.deleteSuccess'));
                         loadTemplates();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('common.msg.deleteFail'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('通信エラーが発生しました');
+                    Toast.error(SES.i18n.t('common.msg.networkError'));
                 }
             });
         }

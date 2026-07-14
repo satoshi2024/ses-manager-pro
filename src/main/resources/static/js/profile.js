@@ -1,4 +1,4 @@
-$(document).ready(function() {
+﻿$(document).ready(function() {
     $('#open-password-modal').on('click', function(e) {
         e.preventDefault();
         $('#pw-current').val('');
@@ -14,7 +14,7 @@ $(document).ready(function() {
         var confirmPassword = $('#pw-confirm').val();
 
         if (newPassword !== confirmPassword) {
-            SES.toast.error('新しいパスワードが一致しません');
+            SES.toast.error(SES.i18n.t('profile.msg.passwordMismatch'));
             return;
         }
 
@@ -24,7 +24,7 @@ $(document).ready(function() {
         }).then(function(result) {
             if (result) {
                 bootstrap.Modal.getInstance(document.getElementById('passwordChangeModal')).hide();
-                SES.toast.success('パスワードを変更しました');
+                SES.toast.success(SES.i18n.t('profile.msg.passwordChanged'));
             }
         }).catch(function(e) {
             // エラーはSES.api._fetchが処理するため握り潰す

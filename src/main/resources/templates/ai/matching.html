@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
-    <title>AIマッチング・アシスタント - SES Manager Pro</title>
+    <title th:text="#{ai.title}">AIマッチング・アシスタント - SES Manager Pro</title>
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
@@ -92,9 +92,9 @@
 <body>
     <div layout:fragment="content">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2 class="h4 mb-0"><i class="bi bi-robot text-accent-purple me-2"></i>AIマッチング・アシスタント</h2>
+            <h2 class="h4 mb-0"><i class="bi bi-robot text-accent-purple me-2"></i><th:block th:text="#{ai.title}">AIマッチング・アシスタント</th:block></h2>
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#settingsPanel" aria-expanded="false" aria-controls="settingsPanel">
-                <i class="bi bi-gear-fill me-1"></i>設定
+                <i class="bi bi-gear-fill me-1"></i><th:block th:text="#{common.btn.settings}">設定</th:block>
             </button>
         </div>
 
@@ -107,21 +107,21 @@
                         <div class="form-text text-muted small">※APIキーはブラウザにのみ保存され、サーバーには保存されません。</div>
                     </div>
                     <div class="col-md-3">
-                        <label for="contextEngineer" class="form-label"><i class="bi bi-person-badge text-info me-1"></i>対象要員 (コンテキスト)</label>
+                        <label for="contextEngineer" class="form-label"><i class="bi bi-person-badge text-info me-1"></i><th:block th:text="#{ai.label.contextEngineer}">対象要員 (コンテキスト)</th:block></label>
                         <select class="form-select form-select-dark bg-secondary text-white border-dark" id="contextEngineer">
-                            <option value="">-- 指定なし --</option>
+                            <option value="" th:text="#{common.label.unspecified}">-- 指定なし --</option>
                             <!-- Dynamically loaded -->
                         </select>
                     </div>
                     <div class="col-md-3">
-                        <label for="contextProject" class="form-label"><i class="bi bi-folder-fill text-success me-1"></i>対象案件 (コンテキスト)</label>
+                        <label for="contextProject" class="form-label"><i class="bi bi-folder-fill text-success me-1"></i><th:block th:text="#{ai.label.contextProject}">対象案件 (コンテキスト)</th:block></label>
                         <select class="form-select form-select-dark bg-secondary text-white border-dark" id="contextProject">
-                            <option value="">-- 指定なし --</option>
+                            <option value="" th:text="#{common.label.unspecified}">-- 指定なし --</option>
                             <!-- Dynamically loaded -->
                         </select>
                     </div>
                     <div class="col-12 mt-3 text-end">
-                        <button class="btn btn-primary btn-sm px-4" id="saveSettingsBtn">設定を保存</button>
+                        <button class="btn btn-primary btn-sm px-4" id="saveSettingsBtn">th:text="#{common.btn.saveSettings}">設定を保存</button>
                     </div>
                 </div>
             </div>
@@ -143,7 +143,7 @@
 
             <div class="chat-input-area mt-auto">
                 <div class="input-group">
-                    <textarea class="form-control form-control-dark bg-secondary text-white border-dark" id="chatInput" rows="2" placeholder="例: 選択した要員を案件に提案するメール文面を作成して。" style="resize: none;"></textarea>
+                    <textarea class="form-control form-control-dark bg-secondary text-white border-dark" id="chatInput" rows="2" th:placeholder="#{ai.placeholder.chat}" style="resize: none;"></textarea>
                     <button class="btn btn-primary px-4 d-flex align-items-center justify-content-center" id="sendBtn" type="button" style="width: 100px;">
                         <span id="sendIcon"><i class="bi bi-send-fill fs-5"></i></span>
                         <span id="sendSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
