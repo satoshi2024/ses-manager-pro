@@ -35,6 +35,9 @@ class EngineerApiControllerValidationTest {
     @MockBean
     private EngineerService engineerService;
 
+    @MockBean
+    private com.ses.service.EngineerSalesService engineerSalesService;
+
     /** 氏名・雇用形態が揃った正常な要員は登録成功（code=200） */
     @Test
     @WithMockUser

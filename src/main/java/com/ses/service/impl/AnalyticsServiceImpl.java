@@ -11,6 +11,8 @@ import com.ses.entity.Engineer;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
+import com.ses.mapper.EngineerSalesMapper;
+import com.ses.dto.engineersales.EngineerPrimarySalesDto;
 import com.ses.service.AnalyticsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final EngineerMapper engineerMapper;
     private final ContractMapper contractMapper;
     private final EngineerSkillMapper engineerSkillMapper;
+    private final EngineerSalesMapper engineerSalesMapper;
 
     @Override
     public List<UtilizationPointDto> utilizationTrend(int months) {
@@ -101,6 +104,10 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         List<Long> engineerIds = benchEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
         List<Contract> contracts = contractMapper.selectList(
                 new LambdaQueryWrapper<Contract>().in(Contract::getEngineerId, engineerIds));
+        
+        List<EngineerPrimarySalesDto> primarySales = engineerSalesMapper.selectActivePrimaryByEngineerIds(engineerIds);
+        Map<Long, EngineerPrimarySalesDto> primarySalesMap = primarySales.stream()
+                .collect(Collectors.toMap(EngineerPrimarySalesDto::getEngineerId, p -> p));
 
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
                 .filter(c -> c.getEngineerId() != null)
@@ -127,6 +134,13 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             dto.setExpectedUnitPrice(e.getExpectedUnitPrice());
             dto.setAvailableDate(e.getAvailableDate());
             dto.setSkillNames(resolveSkillNames(e.getId()));
+            
+            EngineerPrimarySalesDto salesDto = primarySalesMap.get(e.getId());
+            if (salesDto != null) {
+                dto.setPrimarySalesUserId(salesDto.getSalesUserId());
+                dto.setPrimarySalesUserName(salesDto.getSalesUserName());
+            }
+            
             result.add(dto);
         }
 

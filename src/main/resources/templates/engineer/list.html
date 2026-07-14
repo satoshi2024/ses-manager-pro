@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
@@ -30,7 +30,7 @@
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
             <form id="searchForm" onsubmit="event.preventDefault(); loadEngineers(1);" class="row g-3 align-items-end">
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label for="searchName" class="form-label text-muted small" th:text="#{engineer.name}">名前</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
@@ -44,7 +44,7 @@
                         <option value="" th:text="#{common.all}">すべて</option>
                         <option value="稼動中" th:text="#{enum.engineerStatus.active}"></option>
                         <option value="待機" th:text="#{enum.engineerStatus.bench}"></option>
-                        <option value="提案中" th:text="#{enum.engineerStatus.proposed}"></option>
+                        <option value="提案中" th:text="#{enum.engineerStatus.proposing}"></option>
                         <option value="退場予定" th:text="#{enum.engineerStatus.retiring}"></option>
                     </select>
                 </div>
@@ -57,9 +57,15 @@
                         <option value="BP" th:text="#{engineer.employmentType.bp}">フリーランス/BP</option>
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label for="searchSkill" class="form-label text-muted small" th:text="#{engineer.skills}">スキル</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchSkill" name="skillId">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="searchSalesUser" class="form-label text-muted small" th:text="#{engineerSales.salesUser}">担当営業</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchSalesUser" name="salesUserId">
                         <option value="" th:text="#{common.all}">すべて</option>
                     </select>
                 </div>
@@ -84,6 +90,7 @@
                             <th scope="col" th:text="#{engineer.employmentType}">雇用形態</th>
                             <th scope="col" th:text="#{engineer.experience}">経験年数</th>
                             <th scope="col" th:text="#{engineer.expectedPrice}">単価</th>
+                            <th scope="col" th:text="#{engineerSales.salesUser}">担当営業</th>
                             <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
                         </tr>
                     </thead>
@@ -163,7 +170,7 @@
                                 <select id="eng-status" class="form-select form-select-dark bg-secondary text-white border-dark">
                                     <option value="Bench" th:text="#{enum.engineerStatus.bench}">待機中 (Bench)</option>
                                     <option value="稼動中" th:text="#{enum.engineerStatus.active}">稼動中</option>
-                                    <option value="提案中" th:text="#{enum.engineerStatus.proposed}">提案中</option>
+                                    <option value="提案中" th:text="#{enum.engineerStatus.proposing}">提案中</option>
                                     <option value="退場予定" th:text="#{enum.engineerStatus.retiring}">退場予定</option>
                                 </select>
                             </div>

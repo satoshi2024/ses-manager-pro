@@ -32,6 +32,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
+    private final com.ses.service.EngineerSalesService engineerSalesService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -162,6 +163,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         contract.setStartDate(LocalDate.now().plusMonths(1).withDayOfMonth(1));
         contract.setStatus("準備中");
         contract.setRemarks("提案#" + proposal.getId() + "の成約により自動生成");
+        contract.setSalesUserId(engineerSalesService.findPrimarySalesUserId(proposal.getEngineerId()));
 
         // saveWithBusinessRules で採番・検証を再利用（準備中のため要員ステータス連動は発火しない）
         saveWithBusinessRules(contract);

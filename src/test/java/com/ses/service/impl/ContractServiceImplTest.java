@@ -7,6 +7,7 @@ import com.ses.entity.Project;
 import com.ses.entity.Proposal;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,9 @@ class ContractServiceImplTest {
 
     @Mock
     private EngineerStatusService engineerStatusService;
+
+    @Mock
+    private EngineerSalesService engineerSalesService;
 
     @Mock
     private ProjectMapper projectMapper;
@@ -262,10 +266,28 @@ class ContractServiceImplTest {
         when(projectMapper.selectById(9L)).thenReturn(prj);
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+        when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
 
         Contract draft = contractService.createDraftFromProposal(p);
 
         assertEquals(0, BigDecimal.ZERO.compareTo(draft.getSellingPrice()));
         assertEquals(0, BigDecimal.ZERO.compareTo(draft.getCostPrice()));
+        assertNull(draft.getSalesUserId());
+    }
+
+    @Test
+    void createDraftFromProposal_setsPrimarySalesUserIdIfPresent() {
+        Proposal p = proposal(51L, 3L, 10L, new BigDecimal("700000"));
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        Project prj = new Project();
+        prj.setCustomerId(5L);
+        when(projectMapper.selectById(10L)).thenReturn(prj);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+        when(engineerSalesService.findPrimarySalesUserId(3L)).thenReturn(99L);
+
+        Contract draft = contractService.createDraftFromProposal(p);
+
+        assertEquals(99L, draft.getSalesUserId());
     }
 }

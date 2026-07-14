@@ -9,6 +9,8 @@ import com.ses.entity.Engineer;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
+import com.ses.mapper.EngineerSalesMapper;
+import com.ses.dto.engineersales.EngineerPrimarySalesDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -40,6 +42,9 @@ class AnalyticsServiceImplTest {
 
     @Mock
     private EngineerSkillMapper engineerSkillMapper;
+
+    @Mock
+    private EngineerSalesMapper engineerSalesMapper;
 
     private AnalyticsServiceImpl analyticsService;
 
@@ -77,7 +82,7 @@ class AnalyticsServiceImplTest {
     }
 
     private void initService() {
-        analyticsService = new AnalyticsServiceImpl(engineerMapper, contractMapper, engineerSkillMapper);
+        analyticsService = new AnalyticsServiceImpl(engineerMapper, contractMapper, engineerSkillMapper, engineerSalesMapper);
     }
 
     // --- utilizationTrend boundary tests ---
@@ -172,6 +177,7 @@ class AnalyticsServiceImplTest {
         Contract oldContract = createContract(1L, "終了", endDate.minusMonths(6), endDate);
         when(contractMapper.selectList(any())).thenReturn(List.of(oldContract));
         lenient().when(engineerSkillMapper.selectDetailByEngineerId(anyLong())).thenReturn(Collections.emptyList());
+        lenient().when(engineerSalesMapper.selectActivePrimaryByEngineerIds(any())).thenReturn(Collections.emptyList());
 
         List<BenchEngineerDto> result = analyticsService.benchList();
         assertEquals(1, result.size());
@@ -188,6 +194,7 @@ class AnalyticsServiceImplTest {
         when(engineerMapper.selectList(any())).thenReturn(List.of(bench1));
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
         lenient().when(engineerSkillMapper.selectDetailByEngineerId(anyLong())).thenReturn(Collections.emptyList());
+        lenient().when(engineerSalesMapper.selectActivePrimaryByEngineerIds(any())).thenReturn(Collections.emptyList());
 
         List<BenchEngineerDto> result = analyticsService.benchList();
         assertEquals(1, result.size());
@@ -202,6 +209,7 @@ class AnalyticsServiceImplTest {
         when(engineerMapper.selectList(any())).thenReturn(List.of(e1, e2));
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
         lenient().when(engineerSkillMapper.selectDetailByEngineerId(anyLong())).thenReturn(Collections.emptyList());
+        lenient().when(engineerSalesMapper.selectActivePrimaryByEngineerIds(any())).thenReturn(Collections.emptyList());
 
         List<BenchEngineerDto> result = analyticsService.benchList();
         assertEquals(2, result.size());
@@ -227,10 +235,31 @@ class AnalyticsServiceImplTest {
         when(engineerMapper.selectList(any())).thenReturn(List.of(e1));
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
         lenient().when(engineerSkillMapper.selectDetailByEngineerId(anyLong())).thenReturn(Collections.emptyList());
+        lenient().when(engineerSalesMapper.selectActivePrimaryByEngineerIds(any())).thenReturn(Collections.emptyList());
 
         List<BenchEngineerDto> result = analyticsService.benchList();
         assertEquals(1, result.size());
         assertEquals(BigDecimal.valueOf(650000), result.get(0).getExpectedUnitPrice());
         assertEquals(LocalDate.of(2026, 8, 1), result.get(0).getAvailableDate());
+    }
+
+    @Test
+    void benchList_primarySalesPropagated() {
+        initService();
+        Engineer e1 = createEngineer(1L, "Eng1", "Bench", LocalDate.now().minusDays(1).atStartOfDay());
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e1));
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        lenient().when(engineerSkillMapper.selectDetailByEngineerId(anyLong())).thenReturn(Collections.emptyList());
+
+        EngineerPrimarySalesDto salesDto = new EngineerPrimarySalesDto();
+        salesDto.setEngineerId(1L);
+        salesDto.setSalesUserId(100L);
+        salesDto.setSalesUserName("山田営業");
+        when(engineerSalesMapper.selectActivePrimaryByEngineerIds(any())).thenReturn(List.of(salesDto));
+
+        List<BenchEngineerDto> result = analyticsService.benchList();
+        assertEquals(1, result.size());
+        assertEquals(100L, result.get(0).getPrimarySalesUserId());
+        assertEquals("山田営業", result.get(0).getPrimarySalesUserName());
     }
 }

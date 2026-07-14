@@ -72,7 +72,14 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('analytics')}">
                     <a th:href="@{/analytics}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/analytics') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-graph-up me-2"></i>
-                        <span th:text="#{menu.analytics}">稼動分析</span>
+                        <span th:text="#{menu.analytics}">分析ダッシュボード</span>
+                    </a>
+                </li>
+                
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('sales-performance')}">
+                    <a th:href="@{/sales-performance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/sales-performance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-award me-2"></i>
+                        <span th:text="#{menu.salesPerformance}">営業成績</span>
                     </a>
                 </li>
 

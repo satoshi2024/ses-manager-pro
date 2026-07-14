@@ -92,6 +92,9 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
         draft.setSettlementHoursMax(original.getSettlementHoursMax());
         draft.setFractionRule(original.getFractionRule());
         draft.setAutoRenew(original.getAutoRenew());
+        draft.setSalesUserId(original.getSalesUserId());
+        draft.setCommissionBaseType(original.getCommissionBaseType());
+        draft.setCommissionRate(original.getCommissionRate());
         draft.setStatus("準備中");
         draft.setRemarks("契約 " + original.getContractNo() + " の自動更新ドラフト");
         draft.setRenewedFromContractId(original.getId());

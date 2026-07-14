@@ -19,4 +19,6 @@ public class BenchEngineerDto {
     private LocalDate availableDate;
     /** スキル名一覧(P1未導入・データ無しの場合は空リスト) */
     private List<String> skillNames;
+    private Long primarySalesUserId;
+    private String primarySalesUserName;
 }

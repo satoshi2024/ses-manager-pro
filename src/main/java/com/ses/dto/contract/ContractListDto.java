@@ -22,4 +22,7 @@ public class ContractListDto {
     private String engineerName;
     private String customerName;
     private String projectName;
+
+    private Long salesUserId;
+    private String salesUserName;
 }

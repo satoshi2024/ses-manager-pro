@@ -39,10 +39,16 @@
                         <option value="解約" th:text="#{contract.status.cancelled}">解約</option>
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label text-muted small mb-1" th:text="#{contract.customer}">顧客</label>
                     <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" name="customerId" id="search-customerId">
                         <option value="" th:text="#{contract.customer.filter}">顧客で絞り込み</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label text-muted small mb-1" th:text="#{contract.salesUser}">担当営業</label>
+                    <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" name="salesUserId" id="search-salesUserId">
+                        <option value="" th:text="#{contract.salesRep.filter}">営業で絞り込み</option>
                     </select>
                 </div>
                 <div class="col-md-2">
@@ -57,9 +63,9 @@
                         <input type="date" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" name="endDateTo">
                     </div>
                 </div>
-                <div class="col-md-2">
+                <div class="col-md-1">
                     <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="loadContracts()">
-                        <i class="bi bi-search me-1"></i><th:block th:text="#{common.search}">検索</th:block>
+                        <i class="bi bi-search"></i>
                     </button>
                 </div>
             </form>
@@ -76,6 +82,7 @@
                             <th class="px-4 py-3 text-muted small text-uppercase" th:text="#{contract.table.no}">契約番号</th>
                             <th class="py-3 text-muted small text-uppercase" th:text="#{contract.table.engineer}">稼動要員</th>
                             <th class="py-3 text-muted small text-uppercase" th:text="#{contract.table.customer_project}">顧客・案件</th>
+                            <th class="py-3 text-muted small text-uppercase" th:text="#{contract.salesUser}">担当営業</th>
                             <th class="py-3 text-muted small text-uppercase" th:text="#{contract.table.period}">期間</th>
                             <th class="py-3 text-muted small text-uppercase" th:text="#{contract.table.price}">単価(売/原)</th>
                             <th class="py-3 text-muted small text-uppercase" th:text="#{common.status}">ステータス</th>
@@ -114,7 +121,13 @@
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{contract.customer}">顧客</label>
                             <select id="cont-customerId" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                <option value="1" th:text="#{contract.customer.select}">顧客を選択...</option>
+                                <option value="" th:text="#{contract.customer.select}">顧客を選択...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{contract.salesUser}">担当営業</label>
+                            <select id="cont-salesUserId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="" th:text="#{contract.salesRep.select}">営業を選択...</option>
                             </select>
                         </div>
                         <div class="row g-3 mb-3">
@@ -135,6 +148,29 @@
                             <div class="col-md-6">
                                 <label class="form-label text-muted small"><th:block th:text="#{contract.costPrice}">原価 (円)</th:block> <span class="text-danger">*</span></label>
                                 <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{contract.placeholder.costPrice}" placeholder="例: 600000" min="0" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <a class="text-accent-blue text-decoration-none small" data-bs-toggle="collapse" href="#commissionConfig" role="button" aria-expanded="false" aria-controls="commissionConfig">
+                                <i class="bi bi-gear me-1"></i><th:block th:text="#{contract.commissionSection}">インセンティブ個別設定</th:block>
+                            </a>
+                            <div class="collapse mt-2" id="commissionConfig">
+                                <div class="card card-body bg-dark border-secondary p-3">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small" th:text="#{contract.commissionBaseType}">基準</label>
+                                            <select id="cont-commissionBaseType" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark">
+                                                <option value="" th:text="#{contract.commissionDefault}">既定規則に従う</option>
+                                                <option value="粗利" th:text="#{contract.commissionBase.profit}">粗利</option>
+                                                <option value="売上" th:text="#{contract.commissionBase.sales}">売上</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label text-muted small" th:text="#{contract.commissionRate}">率 (%)</label>
+                                            <input type="number" id="cont-commissionRate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" step="0.1" min="0" max="100" th:placeholder="#{contract.commission.rate.placeholder}" placeholder="例: 5.0">
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </form>

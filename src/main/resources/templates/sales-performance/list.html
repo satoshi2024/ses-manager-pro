@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{salesPerf.title} + ' - ' + #{app.name}">営業成績 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light">
+            <i class="bi bi-award me-2 text-warning"></i><th:block th:text="#{salesPerf.title}">営業成績</th:block>
+        </h2>
+    </div>
+
+    <div class="card bg-secondary border-dark mb-4 shadow-sm">
+        <div class="card-body">
+            <div class="row align-items-end">
+                <div class="col-md-3">
+                    <label for="monthFilter" class="form-label text-light small fw-bold" th:text="#{salesPerf.month}">対象月</label>
+                    <input type="month" id="monthFilter" class="form-control bg-dark text-white border-secondary">
+                </div>
+                <div class="col-md-9 text-end">
+                    <div class="text-muted small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <span id="ruleNoteText"></span><br>
+                        <i class="bi bi-info-circle me-1"></i>
+                        <span th:text="#{salesPerf.assignedNote}">担当要員数は現時点の主担当基準です</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-secondary border-dark shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 align-middle">
+                <thead class="table-dark">
+                <tr>
+                    <th th:text="#{salesPerf.salesUserName}">営業名</th>
+                    <th class="text-end" th:text="#{salesPerf.assignedEngineerCount}">担当要員数</th>
+                    <th class="text-end" th:text="#{salesPerf.contractCount}">成約件数</th>
+                    <th class="text-end" th:text="#{salesPerf.contractRate}">成約率</th>
+                    <th class="text-end" th:text="#{salesPerf.activeContractCount}">稼働中契約数</th>
+                    <th class="text-end" th:text="#{salesPerf.monthlySales}">売上合計</th>
+                    <th class="text-end" th:text="#{salesPerf.monthlyProfit}">粗利合計</th>
+                    <th class="text-end text-warning" th:text="#{salesPerf.commission}">インセンティブ</th>
+                </tr>
+                </thead>
+                <tbody id="performanceTableBody">
+                    <tr><td colspan="8" class="text-center text-muted py-4" th:text="#{salesPerf.noData}">データがありません</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="scripts">
+    <script th:src="@{/js/sales-performance.js}"></script>
+    <script th:inline="javascript">
+        /*<![CDATA[*/
+        const msgRuleNote = /*[[#{salesPerf.ruleNote}]]*/ '既定規則: {0} ・ {1}% (個別設定のある契約は上書き適用)';
+        const msgNoData = /*[[#{salesPerf.noData}]]*/ 'データがありません';
+        /*]]>*/
+    </script>
+</th:block>
+</body>
+</html>

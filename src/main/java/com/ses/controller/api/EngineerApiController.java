@@ -17,18 +17,20 @@ import org.springframework.web.bind.annotation.*;
 public class EngineerApiController {
 
     private final EngineerService engineerService;
+    private final com.ses.service.EngineerSalesService engineerSalesService;
 
     /**
      * エンジニア一覧（ページネーション）
      */
     @GetMapping
-    public ApiResult<Page<Engineer>> page(
+    public ApiResult<Page<com.ses.dto.engineer.EngineerListDto>> page(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String fullName,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String employmentType,
-            @RequestParam(required = false) java.util.List<Long> skillIds) {
+            @RequestParam(required = false) java.util.List<Long> skillIds,
+            @RequestParam(required = false) Long salesUserId) {
         
         Page<Engineer> page = new Page<>(current, size);
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
@@ -51,9 +53,37 @@ public class EngineerApiController {
                     "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
             }
         }
+        if (salesUserId != null) {
+            queryWrapper.inSql(Engineer::getId,
+                "SELECT engineer_id FROM t_engineer_sales WHERE sales_user_id = " + salesUserId + " AND released_at IS NULL AND deleted_flag = 0");
+        }
         
         queryWrapper.orderByDesc(Engineer::getId);
-        return ApiResult.success(engineerService.page(page, queryWrapper));
+        Page<Engineer> resultPage = engineerService.page(page, queryWrapper);
+        
+        // Convert to DTO
+        Page<com.ses.dto.engineer.EngineerListDto> dtoPage = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
+        java.util.List<com.ses.dto.engineer.EngineerListDto> dtoList = new java.util.ArrayList<>();
+        
+        if (resultPage.getRecords() != null && !resultPage.getRecords().isEmpty()) {
+            java.util.List<Long> engineerIds = resultPage.getRecords().stream().map(Engineer::getId).collect(java.util.stream.Collectors.toList());
+            java.util.Map<Long, com.ses.dto.engineersales.EngineerPrimarySalesDto> primarySalesMap = engineerSalesService.mapPrimaryByEngineerIds(engineerIds);
+            
+            for (Engineer eng : resultPage.getRecords()) {
+                com.ses.dto.engineer.EngineerListDto dto = new com.ses.dto.engineer.EngineerListDto();
+                org.springframework.beans.BeanUtils.copyProperties(eng, dto);
+                
+                com.ses.dto.engineersales.EngineerPrimarySalesDto primarySales = primarySalesMap.get(eng.getId());
+                if (primarySales != null) {
+                    dto.setPrimarySalesUserId(primarySales.getSalesUserId());
+                    dto.setPrimarySalesUserName(primarySales.getSalesUserName());
+                }
+                dtoList.add(dto);
+            }
+        }
+        dtoPage.setRecords(dtoList);
+        
+        return ApiResult.success(dtoPage);
     }
 
     /**

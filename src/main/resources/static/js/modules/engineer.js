@@ -1,4 +1,4 @@
-﻿// 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
+// 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
 window.stationIndex = {};
 
 $(document).ready(function() {
@@ -10,6 +10,9 @@ $(document).ready(function() {
 
     // Load skills for search filter
     loadSearchSkills();
+
+    // Load sales users for search filter
+    loadSalesUsers();
 
     // 最寄り駅を入力/選択したら、その駅の路線候補を絞り込む
     $('#eng-nearestStation').on('input change', function() {
@@ -41,6 +44,23 @@ function loadSearchSkills() {
                     });
                     select.append(optgroup);
                 }
+            }
+        }
+    });
+}
+
+function loadSalesUsers() {
+    $.ajax({
+        url: '/api/engineers/sales-user-options',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const select = $('#searchSalesUser');
+                select.empty();
+                select.append('<option value="">' + SES.i18n.t('common.all') + '</option>');
+                res.data.forEach(user => {
+                    select.append($('<option>').val(user.id).text(user.fullName));
+                });
             }
         }
     });
@@ -164,6 +184,7 @@ function loadEngineers(page = 1) {
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
+        salesUserId: $('#searchSalesUser').val(),
         skillIds: selectedSkills // jQuery ajax will format this as skillIds[]=1&skillIds[]=2 or we can set traditional: true
     };
 
@@ -243,7 +264,7 @@ function renderEngineers(records) {
     tbody.empty();
     
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
+        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
         return;
     }
     
@@ -277,6 +298,7 @@ function renderEngineers(records) {
                 <td>${SES.escapeHtml(eng.employmentType || '-')}</td>
                 <td>${expStr}</td>
                 <td>${priceStr}</td>
+                <td class="text-light">${SES.escapeHtml(eng.primarySalesUserName || '-')}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
                         <a href="/engineer/detail?id=${eng.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
@@ -431,6 +453,7 @@ function exportEngineers() {
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
+        salesUserId: $('#searchSalesUser').val(),
         skillIds: selectedSkills
     };
     window.location.href = '/api/engineers/export?' + $.param(params, true);
@@ -441,6 +464,7 @@ function exportEngineersCsv() {
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
+        salesUserId: $('#searchSalesUser').val(),
         skillIds: $('#searchSkill').val()
     };
     window.location.href = '/api/engineers/export-csv?' + $.param(params, true);

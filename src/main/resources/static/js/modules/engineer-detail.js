@@ -1,4 +1,4 @@
-﻿$(document).ready(function() {
+$(document).ready(function() {
     // Get engineer ID from URL
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id');
@@ -76,6 +76,9 @@ function renderEngineerDetail(eng) {
     
     // Load Careers
     loadCareers(eng.id);
+    
+    // Load Sales Reps
+    loadSalesReps(eng.id);
 
     // Resume Summary Timeline
     if (eng.resumeSummary) {
@@ -452,6 +455,167 @@ function deleteCareer(id) {
                     if (res.code === 200) {
                         Toast.success(SES.i18n.t('success.delete'));
                         loadCareers(currentEngineerId);
+                    } else {
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
+                    }
+                }
+            });
+        }
+        }
+    });
+}
+
+// ==========================================
+// Sales Reps
+// ==========================================
+function loadSalesReps(engineerId) {
+    if (!engineerId) return;
+    const history = $('#toggle-sales-history').is(':checked');
+    const url = '/api/engineers/' + engineerId + '/sales-reps' + (history ? '/history' : '');
+    
+    $.ajax({
+        url: url,
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200) {
+                renderSalesReps(res.data);
+            }
+        }
+    });
+}
+
+function renderSalesReps(reps) {
+    const list = $('#sales-rep-list');
+    list.empty();
+    
+    if (!reps || reps.length === 0) {
+        list.html('<li class="list-group-item bg-transparent text-center text-muted small py-3 border-0">' + SES.i18n.t('engineer.salesUser.empty', '担当営業が設定されていません') + '</li>');
+        return;
+    }
+    
+    reps.forEach(rep => {
+        const isActive = !rep.releasedAt;
+        const primaryBadge = rep.primaryFlag === 1 && isActive 
+            ? '<span class="badge bg-primary ms-2">主担当</span>' : '';
+        const historyBadge = !isActive 
+            ? '<span class="badge bg-secondary ms-2">過去担当</span>' : '';
+            
+        const dateStr = rep.assignedAt + ' 〜 ' + (rep.releasedAt ? rep.releasedAt : '');
+        
+        // Actions
+        let actionHtml = '';
+        if (isActive) {
+            actionHtml = `
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-link text-muted p-0" type="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-three-dots-vertical"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark shadow">
+                        ${rep.primaryFlag !== 1 ? `<li><a class="dropdown-item small" href="javascript:void(0)" onclick="setPrimarySalesRep(${rep.id})"><i class="bi bi-star me-2 text-warning"></i>主担当にする</a></li>` : ''}
+                        <li><a class="dropdown-item small text-danger" href="javascript:void(0)" onclick="releaseSalesRep(${rep.id})"><i class="bi bi-person-x me-2"></i>担当解除</a></li>
+                    </ul>
+                </div>
+            `;
+        }
+
+        const html = `
+            <li class="list-group-item bg-transparent border-bottom border-dark px-3 py-2 ${!isActive ? 'opacity-75' : ''}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-bold text-light">${SES.escapeHtml(rep.salesUserName || '-')} ${primaryBadge}${historyBadge}</div>
+                        <div class="small text-muted"><i class="bi bi-calendar-event me-1"></i>${dateStr}</div>
+                        ${rep.remarks ? `<div class="small text-muted mt-1">${SES.escapeHtml(rep.remarks)}</div>` : ''}
+                    </div>
+                    ${actionHtml}
+                </div>
+            </li>
+        `;
+        list.append(html);
+    });
+}
+
+function openSalesRepModal() {
+    $.ajax({
+        url: '/api/engineers/sales-user-options',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const select = $('#sr-salesUserId');
+                select.empty();
+                select.append('<option value="">担当営業を選択...</option>');
+                res.data.forEach(u => {
+                    select.append($('<option>').val(u.id).text(u.fullName));
+                });
+                $('#sales-rep-form')[0].reset();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('salesRepModal')).show();
+            }
+        }
+    });
+}
+
+function saveSalesRep() {
+    const salesUserId = $('#sr-salesUserId').val();
+    if (!salesUserId) {
+        Toast.error(SES.i18n.t('error.requiredFields'));
+        return;
+    }
+    
+    const data = {
+        salesUserId: parseInt(salesUserId),
+        primaryFlag: $('#sr-primaryFlag').is(':checked') ? 1 : 0,
+        remarks: $('#sr-remarks').val() || null
+    };
+    
+    $.ajax({
+        url: '/api/engineers/' + currentEngineerId + '/sales-reps',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(SES.i18n.t('success.save'));
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('salesRepModal')).hide();
+                loadSalesReps(currentEngineerId);
+            } else {
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
+            }
+        }
+    });
+}
+
+function setPrimarySalesRep(assignmentId) {
+    $.ajax({
+        url: '/api/engineers/' + currentEngineerId + '/sales-reps/' + assignmentId + '/primary',
+        method: 'PUT',
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(SES.i18n.t('success.update'));
+                loadSalesReps(currentEngineerId);
+            } else {
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
+            }
+        }
+    });
+}
+
+function releaseSalesRep(assignmentId) {
+    Swal.fire({
+        title: SES.i18n.t('common.confirm'),
+        text: 'この担当を解除しますか？',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        confirmButtonText: '解除する',
+        cancelButtonText: SES.i18n.t('common.cancel')
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/engineers/' + currentEngineerId + '/sales-reps/' + assignmentId,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success(SES.i18n.t('success.delete'));
+                        loadSalesReps(currentEngineerId);
                     } else {
                         Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
                     }

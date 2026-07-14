@@ -1,4 +1,5 @@
-﻿let utilizationChartInstance = null;
+let utilizationChartInstance = null;
+let allBenchList = [];
 
 $(document).ready(function() {
     loadUtilizationTrend();
@@ -7,6 +8,16 @@ $(document).ready(function() {
     // テーマ変更時にチャートを再配色する（発火元: SES.theme.applyTheme）
     document.addEventListener('ses:theme-changed', function() {
         SES.theme.applyChartTheme(utilizationChartInstance);
+    });
+
+    $('#bench-sales-filter').on('change', function() {
+        const val = $(this).val();
+        if (!val) {
+            renderBenchTable(allBenchList);
+        } else {
+            const filtered = allBenchList.filter(item => item.primarySalesUserId == val);
+            renderBenchTable(filtered);
+        }
     });
 });
 
@@ -35,7 +46,9 @@ function loadBenchList() {
         method: 'GET',
         success: function(res) {
             if (res.code === 200 && res.data) {
-                renderBenchTable(res.data);
+                allBenchList = res.data;
+                populateSalesFilter(allBenchList);
+                renderBenchTable(allBenchList);
             } else {
                 Toast.error(res.message || SES.i18n.t('analytics.msg.benchFetchFail'));
             }
@@ -136,6 +149,25 @@ function renderUtilizationChart(points) {
     });
 }
 
+function populateSalesFilter(list) {
+    const filter = $('#bench-sales-filter');
+    filter.find('option:not(:first)').remove();
+    
+    const uniqueSales = new Set();
+    list.forEach(item => {
+        if (item.primarySalesUserId && item.primarySalesUserName) {
+            uniqueSales.add(JSON.stringify({id: item.primarySalesUserId, name: item.primarySalesUserName}));
+        }
+    });
+    
+    const sorted = Array.from(uniqueSales).map(json => JSON.parse(json))
+        .sort((a,b) => a.name.localeCompare(b.name));
+        
+    sorted.forEach(s => {
+        filter.append(`<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`);
+    });
+}
+
 // ユーザー入力由来の値(要員名・スキル名など)をHTMLとして挿入する前に必ずエスケープする
 // (XSS対策。氏名は要員登録フォームから任意の文字列が入りうるため必須)
 function escapeHtml(value) {
@@ -153,7 +185,7 @@ function renderBenchTable(list) {
     tbody.empty();
 
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">`${SES.i18n.t('analytics.bench.empty')}</td></tr>');
+        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('analytics.bench.empty')}</td></tr>`);
         return;
     }
 
@@ -168,6 +200,7 @@ function renderBenchTable(list) {
             ? escapeHtml(item.skillNames.join(', '))
             : '-';
         const nameStr = escapeHtml(item.fullName || '-');
+        const salesStr = escapeHtml(item.primarySalesUserName || '—');
         const engineerId = encodeURIComponent(item.engineerId);
 
         const tr = `
@@ -186,6 +219,7 @@ function renderBenchTable(list) {
                 <td class="py-3">${priceStr}</td>
                 <td class="py-3">${availableStr}</td>
                 <td class="py-3 text-muted small">${skillStr}</td>
+                <td class="py-3 text-muted small">${salesStr}</td>
                 <td class="px-4 py-3 text-end">
                     <div class="btn-group btn-group-sm" role="group">
                         <a href="/engineer/detail?id=${engineerId}" class="btn btn-outline-secondary border-secondary"><i class="bi bi-eye me-1"></i>${SES.i18n.t('common.btn.detail')}</a>

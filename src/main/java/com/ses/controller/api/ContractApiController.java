@@ -41,9 +41,10 @@ public class ContractApiController {
             @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String contractNo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
+            @RequestParam(required = false) Long salesUserId) {
         Page<ContractListDto> page = new Page<>(current, size);
-        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo));
+        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId));
     }
 
     /**

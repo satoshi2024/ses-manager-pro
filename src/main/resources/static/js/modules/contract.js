@@ -9,6 +9,7 @@ function loadContracts() {
     const params = {
         status: $('#search-form [name="status"]').val(),
         customerId: $('#search-customerId').val(),
+        salesUserId: $('#search-salesUserId').val(),
         contractNo: $('#search-form [name="contractNo"]').val(),
         endDateFrom: $('#search-form [name="endDateFrom"]').val(),
         endDateTo: $('#search-form [name="endDateTo"]').val()
@@ -64,6 +65,35 @@ function loadSelectOptions() {
             });
         }
     });
+    // Load Sales Reps
+    $.get('/api/engineers/sales-user-options', function(res) {
+        if(res.code === 200 && res.data) {
+            const select = $('#cont-salesUserId');
+            const searchSelect = $('#search-salesUserId');
+            select.empty().append('<option value="">営業を選択...</option>');
+            searchSelect.empty().append('<option value="">営業で絞り込み</option>');
+            res.data.forEach(u => {
+                select.append(`<option value="${u.salesUserId}">${SES.escapeHtml(u.salesUserName)}</option>`);
+                searchSelect.append(`<option value="${u.salesUserId}">${SES.escapeHtml(u.salesUserName)}</option>`);
+            });
+        }
+    });
+
+    // Auto preset primary sales rep when engineer is selected
+    $('#cont-engineerId').on('change', function() {
+        const engId = $(this).val();
+        $('#cont-salesUserId').val('');
+        if (engId) {
+            $.get(`/api/engineers/${engId}/sales-reps`, function(res) {
+                if(res.code === 200 && res.data) {
+                    const primary = res.data.find(r => r.primaryFlag === 1);
+                    if (primary) {
+                        $('#cont-salesUserId').val(primary.salesUserId);
+                    }
+                }
+            });
+        }
+    });
 }
 
 function renderContracts(list) {
@@ -91,6 +121,9 @@ function renderContracts(list) {
                 <td class="py-3">
                     <div class="text-white">${SES.escapeHtml(customerName)}</div>
                     <div class="small text-muted text-truncate" style="max-width:200px;">${SES.escapeHtml(projectName)}</div>
+                </td>
+                <td class="py-3 text-white small">
+                    ${SES.escapeHtml(c.salesUserName || '-')}
                 </td>
                 <td class="py-3 text-white small">
                     <div><i class="bi bi-play-circle text-success me-1"></i>${c.startDate || '-'}</div>
@@ -138,6 +171,9 @@ function saveContract() {
         endDate: $('#cont-endDate').val() || null,
         sellingPrice: $('#cont-sellingPrice').val() ? parseInt($('#cont-sellingPrice').val()) : null,
         costPrice: $('#cont-costPrice').val() ? parseInt($('#cont-costPrice').val()) : null,
+        salesUserId: $('#cont-salesUserId').val() ? parseInt($('#cont-salesUserId').val()) : null,
+        commissionBaseType: $('#cont-commissionBaseType').val() || null,
+        commissionRate: $('#cont-commissionRate').val() ? parseFloat($('#cont-commissionRate').val()) : null,
         status: SES.i18n.t('contract.status.preparing') // Default status
     };
 
@@ -170,6 +206,7 @@ function exportContracts() {
     const params = {
         status: $('#search-form [name="status"]').val(),
         customerId: $('#search-customerId').val(),
+        salesUserId: $('#search-salesUserId').val(),
         contractNo: $('#search-form [name="contractNo"]').val(),
         endDateFrom: $('#search-form [name="endDateFrom"]').val(),
         endDateTo: $('#search-form [name="endDateTo"]').val()

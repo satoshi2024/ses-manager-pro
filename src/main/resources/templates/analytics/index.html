@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
     <title th:text="#{analytics.title}">稼動分析</title>
@@ -37,6 +37,11 @@
             <div class="card bg-card border-dark shadow-sm">
                 <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0 text-white fw-bold"><i class="bi bi-person-x me-2 text-accent-red"></i><th:block th:text="#{analytics.bench.title}">Bench一覧</th:block></h6>
+                    <div>
+                        <select class="form-select form-select-sm bg-dark text-white border-secondary" id="bench-sales-filter" style="min-width: 150px;">
+                            <option value="">-- 主担当営業 --</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -48,6 +53,7 @@
                                     <th class="py-3 text-muted small text-uppercase" th:text="#{analytics.table.price}">希望単価</th>
                                     <th class="py-3 text-muted small text-uppercase" th:text="#{analytics.table.availableDate}">稼動可能日</th>
                                     <th class="py-3 text-muted small text-uppercase" th:text="#{analytics.table.skill}">スキル</th>
+                                    <th class="py-3 text-muted small text-uppercase" th:text="#{engineerSales.salesUser}">主担当営業</th>
                                     <th class="px-4 py-3 text-end text-muted small text-uppercase" th:text="#{analytics.table.actions}">アクション</th>
                                 </tr>
                             </thead>
