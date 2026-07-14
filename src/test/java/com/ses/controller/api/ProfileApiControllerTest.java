@@ -119,7 +119,7 @@ class ProfileApiControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(500))
-                .andExpect(jsonPath("$.message").value("Current password is incorrect"));
+                .andExpect(jsonPath("$.message").value("現在のパスワードが正しくありません"));
     }
 
     @Test
@@ -135,7 +135,7 @@ class ProfileApiControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(500))
-                .andExpect(jsonPath("$.message").value("Password must be at least 8 characters and contain letters and numbers"));
+                .andExpect(jsonPath("$.message").value("パスワードは8文字以上で英字と数字を含めてください"));
     }
 
     @Test
@@ -151,7 +151,7 @@ class ProfileApiControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(500))
-                .andExpect(jsonPath("$.message").value("New password cannot be the same as the current password"));
+                .andExpect(jsonPath("$.message").value("新しいパスワードは現在のパスワードと同じにできません"));
     }
 
     @Test
