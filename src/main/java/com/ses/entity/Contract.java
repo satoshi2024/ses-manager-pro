@@ -1,6 +1,7 @@
 package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
@@ -79,13 +80,26 @@ public class Contract extends BaseEntity {
     /** 備考 */
     private String remarks;
 
-    /** 成約担当営業ID（成約時の主担当を既定値とし変更可） */
+    /**
+     * 成約担当営業ID（成約時の主担当を既定値とし変更可）
+     * updateStrategy=ALWAYS: グローバルの not_null 戦略を上書きし、
+     * NULL(未設定に戻す操作)も確実に更新反映させる。契約更新は全項目を送る単一経路のため安全。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long salesUserId;
 
-    /** インセンティブ基準の個別上書き（粗利/売上、NULL=既定規則適用） */
+    /**
+     * インセンティブ基準の個別上書き（粗利/売上、NULL=既定規則適用）
+     * updateStrategy=ALWAYS: 「既定に戻す」= NULL 更新を反映させるため。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String commissionBaseType;
 
-    /** インセンティブ率の個別上書き（%、NULL=既定規則適用） */
+    /**
+     * インセンティブ率の個別上書き（%、NULL=既定規則適用）
+     * updateStrategy=ALWAYS: 「既定に戻す」= NULL 更新を反映させるため。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal commissionRate;
 
     /** 自動更新ドラフトの生成元契約ID（このIDから自動生成された更新ドラフトの場合のみ設定） */

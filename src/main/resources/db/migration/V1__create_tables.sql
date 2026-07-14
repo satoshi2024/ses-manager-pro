@@ -45,6 +45,8 @@ CREATE TABLE sys_user (
   role       ENUM('管理者','営業','HR','マネージャー') NOT NULL COMMENT '権限ロール',
   email      VARCHAR(100)                             COMMENT 'メールアドレス',
   status     TINYINT      DEFAULT 1                   COMMENT '1:有効 0:無効',
+  failed_count INT        DEFAULT 0                   COMMENT 'ログイン失敗回数',
+  locked_until DATETIME   NULL                        COMMENT 'アカウントロック解除日時',
   created_at DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
   updated_at DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag TINYINT    DEFAULT 0                   COMMENT '論理削除フラグ'

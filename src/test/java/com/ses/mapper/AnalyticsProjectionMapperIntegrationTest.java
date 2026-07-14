@@ -116,4 +116,39 @@ class AnalyticsProjectionMapperIntegrationTest {
                 new Page<>(1, 10), null, null, null, null, null, null, null, 1L);
         assertTrue(filtered.getRecords().stream().allMatch(r -> Long.valueOf(1L).equals(r.getSalesUserId())));
     }
+
+    /**
+     * インセンティブ個別設定を NULL に更新すると「既定」に戻せることを検証する。
+     * グローバルの update-strategy=not_null では NULL 更新が無視されるため、
+     * Contract の該当3フィールドは updateStrategy=ALWAYS で上書きしている。
+     * 本テストが無いと「既定に戻せない」不具合を検出できない。
+     */
+    @Test
+    void 契約更新_インセンティブ個別設定をNULLで既定に戻せる() {
+        Contract contract = new Contract();
+        contract.setEngineerId(1L);
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setSalesUserId(1L);
+        contract.setCommissionBaseType("売上");
+        contract.setCommissionRate(new java.math.BigDecimal("8.00"));
+        contract.setStatus("稼動中");
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setSellingPrice(java.math.BigDecimal.valueOf(80));
+        contract.setCostPrice(java.math.BigDecimal.valueOf(60));
+        contractMapper.insert(contract);
+
+        // 個別設定を「既定に戻す」= NULL 更新
+        Contract update = new Contract();
+        update.setId(contract.getId());
+        update.setSalesUserId(null);
+        update.setCommissionBaseType(null);
+        update.setCommissionRate(null);
+        contractMapper.updateById(update);
+
+        Contract reloaded = contractMapper.selectById(contract.getId());
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getCommissionBaseType(), "基準がNULLに戻ること");
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getCommissionRate(), "率がNULLに戻ること");
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getSalesUserId(), "担当営業がNULLに戻ること");
+    }
 }
