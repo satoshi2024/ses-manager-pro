@@ -1,19 +1,19 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
-    <title>顧客詳細 - SES Manager Pro</title>
+    <title th:text="#{customer.detail} + ' - ' + #{app.name}">顧客詳細 - SES Manager Pro</title>
 </head>
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light">
             <a href="/customer/list" class="text-decoration-none text-muted me-2 hover-text-info"><i class="bi bi-arrow-left"></i></a>
-            <i class="bi bi-building me-2 text-info"></i><span id="header-company-name">顧客詳細</span>
+            <i class="bi bi-building me-2 text-info"></i><span id="header-company-name" th:text="#{customer.detail}">顧客詳細</span>
         </h2>
         <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#activityModal">
-            <i class="bi bi-plus-lg me-1"></i>活動記録を追加
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{customer.activity.add}">活動記録を追加</th:block>
         </button>
     </div>
 
@@ -22,17 +22,17 @@
         <div class="col-md-5">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header border-dark bg-dark">
-                    <h5 class="mb-0 text-light"><i class="bi bi-info-circle me-2"></i>基本情報</h5>
+                    <h5 class="mb-0 text-light"><i class="bi bi-info-circle me-2"></i><th:block th:text="#{common.basicInfo}">基本情報</th:block></h5>
                 </div>
                 <div class="card-body text-light">
                     <table class="table table-borderless table-dark table-sm mb-0">
                         <tbody>
-                            <tr><th style="width: 120px;" class="text-muted">会社名</th><td id="info-companyName">-</td></tr>
-                            <tr><th class="text-muted">住所</th><td id="info-address">-</td></tr>
-                            <tr><th class="text-muted">商流</th><td id="info-commercialFlow">-</td></tr>
-                            <tr><th class="text-muted">信頼度</th><td id="info-trustLevel">-</td></tr>
-                            <tr><th class="text-muted">担当者</th><td id="info-contactPerson">-</td></tr>
-                            <tr><th class="text-muted">電話番号</th><td id="info-contactPhone">-</td></tr>
+                            <tr><th style="width: 120px;" class="text-muted" th:text="#{customer.companyName}">会社名</th><td id="info-companyName">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{customer.address}">住所</th><td id="info-address">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{customer.commercialFlow}">商流</th><td id="info-commercialFlow">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{customer.trustLevel}">信頼度</th><td id="info-trustLevel">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{customer.contactPerson}">担当者</th><td id="info-contactPerson">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{customer.contactPhone}">電話番号</th><td id="info-contactPhone">-</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -43,31 +43,31 @@
         <div class="col-md-7">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header border-dark bg-dark">
-                    <h5 class="mb-0 text-light"><i class="bi bi-bar-chart me-2"></i>実績サマリ</h5>
+                    <h5 class="mb-0 text-light"><i class="bi bi-bar-chart me-2"></i><th:block th:text="#{customer.performanceSummary}">実績サマリ</th:block></h5>
                 </div>
                 <div class="card-body">
                     <div class="row text-center g-3">
                         <div class="col-sm-3">
                             <div class="p-3 bg-dark rounded border border-secondary h-100">
-                                <div class="text-muted small mb-1">案件数</div>
+                                <div class="text-muted small mb-1" th:text="#{customer.kpi.projectCount}">案件数</div>
                                 <div class="fs-4 text-light fw-bold" id="kpi-projectCount">-</div>
                             </div>
                         </div>
                         <div class="col-sm-3">
                             <div class="p-3 bg-dark rounded border border-secondary h-100">
-                                <div class="text-muted small mb-1">提案数</div>
+                                <div class="text-muted small mb-1" th:text="#{customer.kpi.proposalCount}">提案数</div>
                                 <div class="fs-4 text-light fw-bold" id="kpi-proposalCount">-</div>
                             </div>
                         </div>
                         <div class="col-sm-3">
                             <div class="p-3 bg-dark rounded border border-secondary h-100">
-                                <div class="text-muted small mb-1">成約率</div>
+                                <div class="text-muted small mb-1" th:text="#{customer.kpi.winRate}">成約率</div>
                                 <div class="fs-4 text-info fw-bold" id="kpi-winRate">-</div>
                             </div>
                         </div>
                         <div class="col-sm-3">
                             <div class="p-3 bg-dark rounded border border-secondary h-100">
-                                <div class="text-muted small mb-1">稼動中契約</div>
+                                <div class="text-muted small mb-1" th:text="#{customer.kpi.activeContractCount}">稼動中契約</div>
                                 <div class="fs-4 text-success fw-bold" id="kpi-activeContractCount">-</div>
                             </div>
                         </div>
@@ -80,7 +80,7 @@
     <!-- 活動タイムライン -->
     <div class="card bg-card border-dark shadow-sm">
         <div class="card-header border-dark bg-dark d-flex justify-content-between align-items-center">
-            <h5 class="mb-0 text-light"><i class="bi bi-clock-history me-2"></i>活動タイムライン</h5>
+            <h5 class="mb-0 text-light"><i class="bi bi-clock-history me-2"></i><th:block th:text="#{customer.activity.timeline}">活動タイムライン</th:block></h5>
         </div>
         <div class="card-body" id="timeline-container">
             <!-- Timeline items injected by JS -->
@@ -95,7 +95,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-pencil-square me-2 text-info"></i>活動記録</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-pencil-square me-2 text-info"></i><th:block th:text="#{customer.activity.record}">活動記録</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -103,30 +103,30 @@
                         <input type="hidden" id="act-id">
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">活動日 <span class="text-danger">*</span></label>
+                                <label class="form-label text-muted small"><th:block th:text="#{customer.activity.date}">活動日</th:block> <span class="text-danger">*</span></label>
                                 <input type="date" id="act-date" class="form-control form-control-dark bg-secondary text-white border-dark" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">活動種別 <span class="text-danger">*</span></label>
+                                <label class="form-label text-muted small"><th:block th:text="#{customer.activity.type}">活動種別</th:block> <span class="text-danger">*</span></label>
                                 <select id="act-type" class="form-select form-select-dark bg-secondary text-white border-dark" required>
-                                    <option value="商談">商談</option>
-                                    <option value="訪問">訪問</option>
-                                    <option value="電話">電話</option>
-                                    <option value="メール">メール</option>
-                                    <option value="その他">その他</option>
+                                    <option value="商談" th:text="#{customer.activity.type.meeting}">商談</option>
+                                    <option value="訪問" th:text="#{customer.activity.type.visit}">訪問</option>
+                                    <option value="電話" th:text="#{customer.activity.type.phone}">電話</option>
+                                    <option value="メール" th:text="#{customer.activity.type.email}">メール</option>
+                                    <option value="その他" th:text="#{customer.activity.type.other}">その他</option>
                                 </select>
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">タイトル <span class="text-danger">*</span></label>
+                            <label class="form-label text-muted small"><th:block th:text="#{customer.activity.title}">タイトル</th:block> <span class="text-danger">*</span></label>
                             <input type="text" id="act-title" class="form-control form-control-dark bg-secondary text-white border-dark" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">内容</label>
+                            <label class="form-label text-muted small" th:text="#{customer.activity.content}">内容</label>
                             <textarea id="act-content" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3"></textarea>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">次回アクション予定日</label>
+                            <label class="form-label text-muted small" th:text="#{customer.activity.nextDate}">次回アクション予定日</label>
                             <input type="date" id="act-next-date" class="form-control form-control-dark bg-secondary text-white border-dark">
                         </div>
                     </form>
@@ -134,7 +134,7 @@
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
                     <button type="button" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveActivity()">
-                        <i class="bi bi-check-lg me-1"></i>保存
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.save}">保存</th:block>
                     </button>
                 </div>
             </div>

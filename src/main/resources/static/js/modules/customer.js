@@ -1,4 +1,4 @@
-$(document).ready(function() {
+﻿$(document).ready(function() {
     loadCustomers();
 });
 
@@ -18,7 +18,7 @@ function loadCustomers(page = 1) {
                     total++;
                 });
                 if (total > 0) {
-                    $('#total-followup-badge').text(`${total}件の要フォロー`).removeClass('d-none');
+                    $('#total-followup-badge').text(`${total}'' + SES.i18n.t('customer.followUp') + ''`).removeClass('d-none');
                 } else {
                     $('#total-followup-badge').addClass('d-none');
                 }
@@ -52,12 +52,12 @@ function fetchCustomerList(page) {
                     renderPagination(res.data, 'loadCustomers');
                 }
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('error.getDataFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
@@ -65,7 +65,7 @@ function fetchCustomerList(page) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('.card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">全 0 件</div>');
+        paginationContainer.html('<div class="text-muted small ps-2">'' + SES.i18n.t('common.page.totalZero') + ''</div>');
         return;
     }
     
@@ -74,7 +74,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            全 ${pageData.total} 件中 ${start}-${end} 件を表示
+            '' + SES.i18n.t('common.page.info', [pageData.total, start, end]) + ''
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -113,16 +113,16 @@ function renderCustomers(records) {
     tbody.empty();
     
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
         return;
     }
     
     records.forEach(cust => {
         // Commercial Flow Badge
-        let flowBadge = `<span class="status-badge status-secondary">${cust.commercialFlow || '-'}</span>`;
-        if (cust.commercialFlow === 'エンド直') flowBadge = '<span class="status-badge status-primary">エンド直</span>';
-        else if (cust.commercialFlow === '元請け') flowBadge = '<span class="status-badge status-success">元請け</span>';
-        else if (cust.commercialFlow === '二次請け') flowBadge = '<span class="status-badge status-warning">二次請け</span>';
+        let flowBadge = `<span class="status-badge status-secondary">${cust.commercialFlow ? SES.i18n.e('customerCommercialFlow', cust.commercialFlow) : '-'}</span>`;
+        if (cust.commercialFlow === 'エンド直') flowBadge = '<span class="status-badge status-primary">' + SES.i18n.e('customerCommercialFlow', cust.commercialFlow) + '</span>';
+        else if (cust.commercialFlow === '元請け') flowBadge = '<span class="status-badge status-success">' + SES.i18n.e('customerCommercialFlow', cust.commercialFlow) + '</span>';
+        else if (cust.commercialFlow === '二次請け') flowBadge = '<span class="status-badge status-warning">' + SES.i18n.e('customerCommercialFlow', cust.commercialFlow) + '</span>';
 
         // Trust Level
         let trustIcon = '';
@@ -134,7 +134,7 @@ function renderCustomers(records) {
         let followUpBadge = '';
         const count = followUpCounts[cust.id];
         if (count && count > 0) {
-            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="要フォロー">${count}件の要フォロー</span>`;
+            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="' + SES.i18n.t('customer.followUpNeeded') + '">${count}'' + SES.i18n.t('customer.followUp') + ''</span>`;
         }
 
         const tr = `
@@ -175,7 +175,7 @@ function editCustomer(id) {
                 
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).show();
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('error.getDataFailed'));
             }
         }
     });
@@ -184,7 +184,7 @@ function editCustomer(id) {
 function saveCustomer() {
     const companyName = $('#cust-companyName').val();
     if (!companyName) {
-        Toast.error('会社名は必須です');
+        Toast.error(SES.i18n.t('validation.required', [SES.i18n.t('customer.companyName')]));
         return;
     }
     
@@ -208,32 +208,32 @@ function saveCustomer() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(id ? '顧客を更新しました' : '顧客を登録しました');
+                Toast.success(id ? SES.i18n.t('success.update') : SES.i18n.t('success.create'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).hide();
                 $('#customer-form')[0].reset();
                 $('#cust-id').val('');
                 loadCustomers(1);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
 
 function deleteCustomer(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この顧客データを削除しますか？この操作は元に戻せません。',
+        title: SES.i18n.t('common.deleteConfirmTitle'),
+        text: SES.i18n.t('confirm.deleteCustomer'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.delete'),
+        cancelButtonText: SES.i18n.t('common.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -241,15 +241,15 @@ function deleteCustomer(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('success.delete'));
                         loadCustomers();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('通信エラーが発生しました');
+                    Toast.error(SES.i18n.t('error.networkError'));
                 }
             });
         }

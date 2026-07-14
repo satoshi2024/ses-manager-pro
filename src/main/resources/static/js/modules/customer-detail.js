@@ -1,4 +1,4 @@
-let customerId = null;
+﻿let customerId = null;
 let currentActivities = [];
 
 $(document).ready(function() {
@@ -76,7 +76,7 @@ function renderActivities(records) {
     container.empty();
 
     if (!records || records.length === 0) {
-        container.append('<div class="text-center text-muted py-4">活動記録がありません</div>');
+        container.append('<div class="text-center text-muted py-4">' + SES.i18n.t('customer.activity.empty') + '</div>');
         return;
     }
 
@@ -88,30 +88,30 @@ function renderActivities(records) {
     records.forEach(act => {
         let icon = 'bi-list';
         if (act.activityType === '商談') icon = 'bi-people';
-        else if (act.activityType === '訪問') icon = 'bi-geo-alt';
-        else if (act.activityType === '電話') icon = 'bi-telephone';
-        else if (act.activityType === 'メール') icon = 'bi-envelope';
+        else if (act.activityType === '訪問' || act.activityType === 'visit') icon = 'bi-geo-alt';
+        else if (act.activityType === '電話' || act.activityType === 'phone') icon = 'bi-telephone';
+        else if (act.activityType === 'メール' || act.activityType === 'email') icon = 'bi-envelope';
 
         let isOverdue = act.nextActionDate && act.nextActionDate <= todayStr && act.completedFlag === 0;
         let borderClass = isOverdue ? 'border-danger' : 'border-secondary';
         let bgClass = isOverdue ? 'bg-danger bg-opacity-10' : 'bg-dark';
         
-        let followUpBadge = isOverdue ? '<span class="badge bg-danger ms-2"><i class="bi bi-exclamation-circle me-1"></i>要フォロー</span>' : '';
+        let followUpBadge = isOverdue ? '<span class="badge bg-danger ms-2"><i class="bi bi-exclamation-circle me-1"></i>' + SES.i18n.t('customer.followUpNeeded') + '</span>' : '';
         if (act.completedFlag === 1) {
-            followUpBadge = '<span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>完了済</span>';
+            followUpBadge = '<span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>' + SES.i18n.t('customer.activity.completed') + '</span>';
         }
 
         let nextActionHtml = '';
         if (act.nextActionDate) {
             let color = isOverdue ? 'text-danger fw-bold' : 'text-info';
-            nextActionHtml = `<div class="mt-3 small ${color}"><i class="bi bi-calendar-event me-1"></i>次回アクション予定: ${act.nextActionDate}</div>`;
+            nextActionHtml = `<div class="mt-3 small ${color}"><i class="bi bi-calendar-event me-1"></i>' + SES.i18n.t('customer.activity.nextDate') + ': ${act.nextActionDate}</div>`;
         }
 
         let completeBtn = '';
         if (isOverdue) {
-            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>完了にする</button>`;
+            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>' + SES.i18n.t('customer.activity.markCompleted') + '</button>`;
         } else if (act.completedFlag === 0 && act.nextActionDate) {
-            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>完了にする</button>`;
+            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>' + SES.i18n.t('customer.activity.markCompleted') + '</button>`;
         }
 
         html += `
@@ -126,7 +126,7 @@ function renderActivities(records) {
                                 <h6 class="mb-1 text-light">${SES.escapeHtml(act.title)} ${followUpBadge}</h6>
                                 <div class="text-muted small">
                                     <i class="bi bi-calendar3 me-1"></i>${act.activityDate}
-                                    <span class="ms-2 badge bg-secondary">${SES.escapeHtml(act.activityType)}</span>
+                                    <span class="ms-2 badge bg-secondary">${SES.i18n.e('customerActivityType', act.activityType)}</span>
                                 </div>
                             </div>
                             <div class="btn-group btn-group-sm">
@@ -155,7 +155,7 @@ function renderActivityPagination(pageData) {
     }
     
     let html = `
-        <div class="text-muted small ps-2">全 ${pageData.total} 件</div>
+        <div class="text-muted small ps-2">'' + SES.i18n.t('common.page.totalCount', [pageData.total]) + ''</div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
     `;
@@ -200,7 +200,7 @@ function editActivity(id) {
 
 function saveActivity() {
     if (!$('#act-date').val() || !$('#act-type').val() || !$('#act-title').val()) {
-        Toast.error('必須項目を入力してください');
+        Toast.error(SES.i18n.t('error.requiredFields'));
         return;
     }
     
@@ -227,30 +227,30 @@ function saveActivity() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(id ? '活動を更新しました' : '活動を登録しました');
+                Toast.success(id ? SES.i18n.t('success.updateActivity') : SES.i18n.t('success.createActivity'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).hide();
                 loadActivities(1);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
 
 function deleteActivity(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この活動記録を削除しますか？',
+        title: SES.i18n.t('common.deleteConfirmTitle'),
+        text: SES.i18n.t('confirm.deleteActivity'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.delete'),
+        cancelButtonText: SES.i18n.t('common.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -258,10 +258,10 @@ function deleteActivity(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('success.delete'));
                         loadActivities(1);
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
                     }
                 }
             });
@@ -275,10 +275,10 @@ function completeActivity(id) {
         method: 'PUT',
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('完了にしました');
+                Toast.success(SES.i18n.t('success.completed'));
                 loadActivities(1);
             } else {
-                Toast.error(res.message || '更新に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.updateFailed'));
             }
         }
     });

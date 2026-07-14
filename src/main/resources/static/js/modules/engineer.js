@@ -1,4 +1,4 @@
-// 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
+﻿// 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
 window.stationIndex = {};
 
 $(document).ready(function() {
@@ -27,7 +27,7 @@ function loadSearchSkills() {
             if (res.code === 200 && res.data) {
                 const select = $('#searchSkill');
                 select.empty();
-                select.append('<option value="">すべて</option>');
+                select.append('<option value="">' + SES.i18n.t('common.all') + '</option>');
                 // group by category
                 const groups = {};
                 res.data.forEach(skill => {
@@ -103,14 +103,14 @@ function populateRailwayLines(stationName, selectedPref) {
             select.append(`<option value="${SES.escapeHtml(selectedPref)}" selected>${SES.escapeHtml(splitPref(selectedPref).line || selectedPref)}</option>`);
             select.prop('disabled', false);
         } else {
-            select.append('<option value="">路線情報がありません</option>');
+            select.append('<option value="">' + SES.i18n.t('engineer.message.noRailwayInfo') + '</option>');
             select.prop('disabled', true);
         }
         applyRailwaySelection();
         return;
     }
 
-    select.append('<option value="">路線を選択...</option>');
+    select.append('<option value="">' + SES.i18n.t('engineer.placeholder.selectRailway') + '</option>');
     entries.forEach(pref => {
         const line = splitPref(pref).line;
         select.append(`<option value="${SES.escapeHtml(pref)}">${SES.escapeHtml(line)}</option>`);
@@ -179,12 +179,12 @@ function loadEngineers(page = 1) {
                     renderPagination(res.data, 'loadEngineers');
                 }
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('error.getDataFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
@@ -192,7 +192,7 @@ function loadEngineers(page = 1) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('.card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">全 0 件</div>');
+        paginationContainer.html('<div class="text-muted small ps-2">' + SES.i18n.t('common.page.totalZero') + '</div>');
         return;
     }
     
@@ -201,7 +201,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            全 ${pageData.total} 件中 ${start}-${end} 件を表示
+            ' + SES.i18n.t('common.page.info', [pageData.total, start, end]) + '
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -243,7 +243,7 @@ function renderEngineers(records) {
     tbody.empty();
     
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
         return;
     }
     
@@ -259,8 +259,8 @@ function renderEngineers(records) {
         else if (eng.status === '退場予定') statusBadge = '<span class="status-badge status-danger">退場予定</span>';
         else statusBadge = '<span class="status-badge status-secondary">Bench</span>';
 
-        const priceStr = eng.expectedUnitPrice ? eng.expectedUnitPrice.toLocaleString() + '円' : '-';
-        const expStr = eng.experienceYears ? eng.experienceYears + '年' : '-';
+        const priceStr = eng.expectedUnitPrice ? eng.expectedUnitPrice.toLocaleString() + SES.i18n.t('engineer.expectedPrice.currency') : '-';
+        const expStr = eng.experienceYears ? eng.experienceYears + SES.i18n.t('engineer.experience.unit') : '-';
 
         const tr = `
             <tr>
@@ -320,7 +320,7 @@ function editEngineer(id) {
                 // モーダル表示（既存インスタンスを再利用し、二重生成・バックドロップ残りを防ぐ）
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).show();
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('error.getDataFailed'));
             }
         }
     });
@@ -371,7 +371,7 @@ function extractInitials(fullName, kanaName) {
 function saveEngineer() {
     const fullName = $('#eng-fullName').val();
     if (!fullName) {
-        Toast.error('氏名は必須です');
+        Toast.error(SES.i18n.t('validation.required', [SES.i18n.t('engineer.name')]));
         return;
     }
     
@@ -405,19 +405,19 @@ function saveEngineer() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(id ? '要員を更新しました' : '要員を登録しました');
+                Toast.success(id ? SES.i18n.t('success.update') : SES.i18n.t('success.create'));
                 // getInstance は未生成時に null を返し .hide() で例外→モーダルが閉じない不具合になるため getOrCreateInstance を使う
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).hide();
                 $('#engineer-form')[0].reset();
                 $('#eng-id').val('');
                 loadEngineers(1);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
@@ -461,12 +461,12 @@ function importEngineersCsv(input) {
             if (res.code === 200 && res.data) {
                 renderCsvResult(res.data);
             } else {
-                Toast.error(res.message || 'インポートに失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.importFailed'));
             }
         },
         error: function(xhr) {
             const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'インポートに失敗しました';
-            Toast.error(msg);
+            Toast.error(msg || SES.i18n.t('error.importFailed'));
         },
         complete: function() { input.value = ''; }
     });
@@ -476,12 +476,12 @@ function renderCsvResult(result) {
     $('#csvSuccessCount').text(result.successCount || 0);
     const errors = result.errors || [];
     if (errors.length === 0) {
-        $('#csvErrorArea').html('<div class="text-muted small">エラーはありませんでした。</div>');
+        $('#csvErrorArea').html('<div class="text-muted small">' + SES.i18n.t('engineer.csv.noError') + '</div>');
     } else {
-        let html = '<div class="text-danger small mb-1">失敗した行:</div>';
+        let html = '<div class="text-danger small mb-1">' + SES.i18n.t('engineer.csv.errorLines') + '</div>';
         html += '<ul class="list-group list-group-flush">';
         errors.forEach(function(e) {
-            html += `<li class="list-group-item bg-transparent text-light small border-dark py-1">${e.line}行目: ${e.message}</li>`;
+            html += `<li class="list-group-item bg-transparent text-light small border-dark py-1">${e.line} ' + SES.i18n.t('engineer.csv.line') + ': ${e.message}</li>`;
         });
         html += '</ul>';
         $('#csvErrorArea').html(html);
@@ -492,14 +492,14 @@ function renderCsvResult(result) {
 
 function deleteEngineer(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この要員データを削除しますか？この操作は元に戻せません。',
+        title: SES.i18n.t('common.deleteConfirmTitle'),
+        text: SES.i18n.t('confirm.deleteEngineer'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.delete'),
+        cancelButtonText: SES.i18n.t('common.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -507,15 +507,15 @@ function deleteEngineer(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('success.delete'));
                         loadEngineers();
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
                     }
                 },
                 error: function(err) {
                     console.error(err);
-                    Toast.error('通信エラーが発生しました');
+                    Toast.error(SES.i18n.t('error.networkError'));
                 }
             });
         }
