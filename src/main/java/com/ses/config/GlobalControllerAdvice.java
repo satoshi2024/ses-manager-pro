@@ -31,6 +31,36 @@ public class GlobalControllerAdvice {
     }
 
     /**
+     * 言語切替リンクのベースURL(現在URI+クエリ、既存の lang パラメータは除去し
+     * 末尾を "lang=" にした文字列)。テンプレート側で言語コードを連結して使う。
+     * 例: th:href="${langSwitchBase} + 'en'"
+     */
+    @ModelAttribute("langSwitchBase")
+    public String langSwitchBase(HttpServletRequest request) {
+        StringBuilder sb = new StringBuilder(request.getRequestURI());
+        String queryString = request.getQueryString();
+        sb.append('?');
+        boolean hasParam = false;
+        if (queryString != null && !queryString.isEmpty()) {
+            for (String pair : queryString.split("&")) {
+                if (pair.isEmpty() || pair.startsWith("lang=") || pair.equals("lang")) {
+                    continue;
+                }
+                if (hasParam) {
+                    sb.append('&');
+                }
+                sb.append(pair);
+                hasParam = true;
+            }
+        }
+        if (hasParam) {
+            sb.append('&');
+        }
+        sb.append("lang=");
+        return sb.toString();
+    }
+
+    /**
      * ログイン中ユーザーのロールがアクセス可能なメニューキー一覧
      * サイドバーのメニュー表示可否の判定に使用する
      */

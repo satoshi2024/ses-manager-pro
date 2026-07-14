@@ -26,7 +26,7 @@
                 </li>
                 
                 <li class="nav-item mt-3 mb-1 px-3">
-                    <span class="text-muted small fw-bold text-uppercase">業務管理</span>
+                    <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.business}">業務管理</span>
                 </li>
                 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
@@ -49,7 +49,7 @@
                 </li>
 
                 <li class="nav-item mt-3 mb-1 px-3">
-                    <span class="text-muted small fw-bold text-uppercase">営業・契約</span>
+                    <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.sales}">営業・契約</span>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('proposal')}">
@@ -66,20 +66,20 @@
                 </li>
 
                 <li class="nav-item mt-3 mb-1 px-3">
-                    <span class="text-muted small fw-bold text-uppercase">高度な機能</span>
+                    <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.advanced}">高度な機能</span>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('analytics')}">
                     <a th:href="@{/analytics}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/analytics') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-graph-up me-2"></i>
-                        <span>稼動分析</span>
+                        <span th:text="#{menu.analytics}">稼動分析</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('todo')}">
                     <a th:href="@{/todo}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/todo') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bell me-2"></i>
-                        <span>ToDo・通知</span>
+                        <span th:text="#{menu.todo}">ToDo・通知</span>
                     </a>
                 </li>
 
@@ -100,7 +100,7 @@
                 </li>
 
                 <li class="nav-item mt-3 mb-1 px-3" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
-                    <span class="text-muted small fw-bold text-uppercase">システム管理</span>
+                    <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.system}">システム管理</span>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
                     <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/user') ? 'active bg-tertiary text-white' : 'text-secondary'}">
@@ -111,13 +111,13 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('system-config')}">
                     <a th:href="@{/system-config}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/system-config') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-sliders me-2"></i>
-                        <span>システム設定</span>
+                        <span th:text="#{menu.system.config}">システム設定</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('audit-log')}">
                     <a th:href="@{/audit-log}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/audit-log') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-shield-check me-2"></i>
-                        <span>監査ログ</span>
+                        <span th:text="#{menu.auditLog}">監査ログ</span>
                     </a>
                 </li>
             </ul>

@@ -27,8 +27,29 @@
                 2026年07月10日 (金) 19:00
             </div>
 
+            <!-- Language Switch -->
+            <div class="dropdown">
+                <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="languageDropdown" data-bs-toggle="dropdown" aria-expanded="false" th:title="#{common.language.switch}">
+                    <i class="bi bi-globe2 fs-5"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="languageDropdown">
+                    <li>
+                        <a class="dropdown-item py-2" th:href="${langSwitchBase} + 'ja'" th:classappend="${#locale.toLanguageTag() == 'ja' ? 'active' : ''}">日本語</a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item py-2" th:href="${langSwitchBase} + 'en'" th:classappend="${#locale.toLanguageTag() == 'en' ? 'active' : ''}">English</a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item py-2" th:href="${langSwitchBase} + 'zh-CN'" th:classappend="${#locale.toLanguageTag() == 'zh-CN' ? 'active' : ''}">简体中文</a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item py-2" th:href="${langSwitchBase} + 'ko'" th:classappend="${#locale.toLanguageTag() == 'ko' ? 'active' : ''}">한국어</a>
+                    </li>
+                </ul>
+            </div>
+
             <!-- Theme Toggle -->
-            <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="theme-toggle-btn" data-bs-toggle="tooltip" data-bs-placement="bottom" title="テーマ切り替え">
+            <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="theme-toggle-btn" data-bs-toggle="tooltip" data-bs-placement="bottom" th:title="#{tooltip.themeToggle}">
                 <i class="bi bi-sun fs-5 d-none" id="theme-icon-light"></i>
                 <i class="bi bi-moon-stars fs-5" id="theme-icon-dark"></i>
             </button>
@@ -43,28 +64,28 @@
                     </span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="notificationDropdown" style="width: 300px; max-width: calc(100vw - 2rem);">
-                    <li><h6 class="dropdown-header text-white border-bottom border-dark pb-2">通知</h6></li>
+                    <li><h6 class="dropdown-header text-white border-bottom border-dark pb-2" th:text="#{notification.title}">通知</h6></li>
                     <li id="notification-list">
                         <!-- JSにより動的生成。ロード中/空/エラー時のメッセージもここに描画 -->
-                        <span class="dropdown-item-text text-muted small py-2">読み込み中...</span>
+                        <span class="dropdown-item-text text-muted small py-2" th:text="#{common.loading}">読み込み中...</span>
                     </li>
                     <li><hr class="dropdown-divider border-dark"></li>
-                    <li><a class="dropdown-item text-center small text-muted hover-text-white" href="#">すべての通知を見る</a></li>
+                    <li><a class="dropdown-item text-center small text-muted hover-text-white" href="#" th:text="#{notification.viewAll}">すべての通知を見る</a></li>
                 </ul>
             </div>
 
             <!-- Quick Add Dropdown -->
             <div class="dropdown">
                 <button class="btn btn-primary btn-sm rounded-pill shadow-sm bg-gradient-blue border-0 px-3 py-1 dropdown-toggle" type="button" id="quickAddDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="bi bi-plus-lg me-1"></i><span class="quick-add-label">新規作成</span>
+                    <i class="bi bi-plus-lg me-1"></i><span class="quick-add-label" th:text="#{common.create}">新規作成</span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="quickAddDropdown">
-                    <li><a class="dropdown-item py-2" href="/engineer/list"><i class="bi bi-person-plus me-2 text-accent-blue"></i>要員を登録</a></li>
-                    <li><a class="dropdown-item py-2" href="/project/list"><i class="bi bi-briefcase me-2 text-success"></i>案件を登録</a></li>
-                    <li><a class="dropdown-item py-2" href="/customer/list"><i class="bi bi-building-add me-2 text-info"></i>顧客を登録</a></li>
+                    <li><a class="dropdown-item py-2" href="/engineer/list"><i class="bi bi-person-plus me-2 text-accent-blue"></i><span th:text="#{quickAdd.engineer}">要員を登録</span></a></li>
+                    <li><a class="dropdown-item py-2" href="/project/list"><i class="bi bi-briefcase me-2 text-success"></i><span th:text="#{quickAdd.project}">案件を登録</span></a></li>
+                    <li><a class="dropdown-item py-2" href="/customer/list"><i class="bi bi-building-add me-2 text-info"></i><span th:text="#{quickAdd.customer}">顧客を登録</span></a></li>
                     <li><hr class="dropdown-divider border-dark"></li>
-                    <li><a class="dropdown-item py-2" href="/proposal/kanban"><i class="bi bi-kanban me-2 text-accent-purple"></i>提案を作成</a></li>
-                    <li><a class="dropdown-item py-2" href="/contract/list"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i>契約を作成</a></li>
+                    <li><a class="dropdown-item py-2" href="/proposal/kanban"><i class="bi bi-kanban me-2 text-accent-purple"></i><span th:text="#{quickAdd.proposal}">提案を作成</span></a></li>
+                    <li><a class="dropdown-item py-2" href="/contract/list"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i><span th:text="#{quickAdd.contract}">契約を作成</span></a></li>
                 </ul>
             </div>
 
@@ -74,7 +95,7 @@
                     <i class="bi bi-person-circle fs-5"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="profileDropdown">
-                    <li><a class="dropdown-item py-2" href="#" id="open-password-modal"><i class="bi bi-key me-2 text-warning"></i>パスワード変更</a></li>
+                    <li><a class="dropdown-item py-2" href="#" id="open-password-modal"><i class="bi bi-key me-2 text-warning"></i><span th:text="#{common.password.change}">パスワード変更</span></a></li>
                 </ul>
             </div>
 

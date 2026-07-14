@@ -67,8 +67,10 @@ spring:
 
   # ===== メッセージリソース =====
   messages:
-    basename: messages_ja
+    basename: messages
     encoding: UTF-8
+    fallback-to-system-locale: false   # 必須: サーバーOSロケールへ落ちるのを防ぐ
+    use-code-as-default-message: true  # キー欠落でも画面が死なない(欠落はテストで検出)
 
   # ===== Jackson (JSON) =====
   jackson:
