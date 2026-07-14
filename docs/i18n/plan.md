@@ -38,6 +38,7 @@ public LocaleResolver localeResolver() {          // Bean名は必ず localeReso
     CookieLocaleResolver resolver = new CookieLocaleResolver("SES_LOCALE");
     resolver.setDefaultLocale(Locale.JAPANESE);
     resolver.setCookieMaxAge(Duration.ofDays(365));
+    resolver.setCookiePath("/");                  // ★全パスで有効に(既定はコンテキストパス依存)
     return resolver;
 }
 @Bean
@@ -57,13 +58,16 @@ public void addInterceptors(InterceptorRegistry registry) {
 - 除外パスは「lang パラメータによる書き換え」の除外であり、Locale 解決自体は全リクエストで Cookie から行われる → API のエラーメッセージも正しくローカライズされる
 - `base.html` / `login.html` の `<html lang="ja">` → `th:lang="${#locale.toLanguageTag()}"`
 - Google Fonts に Noto Sans SC / Noto Sans KR を追加(中韓のフォントフォールバック対策)
+- **★リスク(ロケールタグとファイル名の対応)**: `?lang=zh-CN`(ハイフン・国コード大文字)は Spring Framework 6.1 で `Locale(zh, CN)` に解決され、MessageSource は `messages_zh_CN.properties`(**アンダースコア・CN大文字**)を探す。ファイル名の綴りが1文字でもズレると無言でデフォルト(日本語)にフォールバックするため、4ファイル名を厳密に `messages_en` / `messages_zh_CN` / `messages_ko` とし、この往復を `I18nLocaleSwitchTest` の zh-CN ケースで必ず検証する
+- **★リスク(テストスライス互換)**: `WebConfig` に追加する `localeResolver` / interceptor は外部依存を持たないため `@WebMvcTest` でも安全だが、既存の H2 系スライステスト(`MobileResponsiveLayoutTest` 等)が Accept-Language 依存で動いていないことを確認する
 
 ### 決定2: 言語切替UI
 
 - `header.html` の `div.header-tools` 内、テーマ切替ボタンと通知ベルの間に bi-globe2 アイコンのドロップダウン(日本語 / English / 简体中文 / 한국어、現在言語を `active` 強調)
 - `login.html` はカード下部に同構造のリンク行
-- 切替は `<a th:href="${langSwitchBase} + 'en'">` による GET 全画面リロード(JS不要・CSRF問題なし)
-- `langSwitchBase`(現在URI+クエリ、既存 lang を除去し `lang=` で終わる文字列)は `GlobalControllerAdvice` の `@ModelAttribute` で全画面へ供給
+- 切替は `<a th:href="${langSwitchBase} + 'en'">` による GET 全画面リロード(JS不要)
+- **★CSRFに関する訂正**: 現行 `SecurityConfig` は `CookieCsrfTokenRepository`(XSRF-TOKEN Cookie → X-XSRF-TOKEN ヘッダー)で **全リクエストにCSRFが有効**(かつては `/api/**` を除外していたが現在は除外なし)。言語切替と `/js/i18n.js` は**GETのため CSRF 検証対象外**で問題なし。ただし言語切替を将来 POST 化してはならない(XSRFヘッダーが必要になり、未認証のログイン画面で破綻する)
+- `langSwitchBase`(現在URI+クエリ、既存 lang を除去し `lang=` で終わる文字列)は `GlobalControllerAdvice`(スコープは `com.ses.controller.page` のみ=ページ限定で API を汚さない)の `@ModelAttribute` で全画面へ供給
 
 ### 決定3: プロパティファイル構成
 
@@ -95,7 +99,16 @@ spring:
 - 新規 `controller/page/I18nJsController.java`: `GET /js/i18n.js?lang=xx&v=版本` が
   `window.SES_LANG / SES_MESSAGES / SES_ENUMS` を `application/javascript` で配信。
   permitAll 済みの `/js/**` 配下なので SecurityConfig 修正ゼロ、未ログインでも取得可。Cache-Control 24h(lang/v パラメータで言語別・リリース別キャッシュ)
-- 新規 `common/i18n/I18nMessagesLoader.java`: `PropertiesLoaderUtils` でデフォルト包→ロケール包の順にマージ、locale別に `ConcurrentHashMap` キャッシュ、Jackson で JSON 化
+- 新規 `common/i18n/I18nMessagesLoader.java`: デフォルト包→ロケール包の順にマージ、locale別に `ConcurrentHashMap` キャッシュ、Jackson で JSON 化
+  - **★重大リスク(文字化けバグ)**: 決定3で `.properties` を **UTF-8 素文**で保存するが、`java.util.Properties.load(InputStream)` および `PropertiesLoaderUtils.loadProperties(Resource)` は仕様上 **ISO-8859-1** で読む。そのまま使うと日本語・中国語・韓国語が全て文字化けし、JS辞書に壊れた文字列が載る。**必ず UTF-8 を明示して読む**こと:
+    ```java
+    Properties p = new Properties();
+    // どちらか: EncodedResource で UTF-8 を明示
+    PropertiesLoaderUtils.fillProperties(p, new EncodedResource(resource, StandardCharsets.UTF_8));
+    // または Reader を UTF-8 で開いて Properties.load(Reader)
+    // try (Reader r = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) { p.load(r); }
+    ```
+    (Spring がDI する `ResourceBundleMessageSource` 側は JDK 17 が `.properties` を UTF-8 で読むため無影響。UTF-8明示が必要なのはこの独自ローダーのみ)
 - `base.html` / `login.html` で **common.js より前に** 同期ロード
 - `common.js` に追加する `SES.i18n`:
   - `t(key, ...args)`: `SES_MESSAGES` 参照 + `{0}` 置換。欠落時はキー名を返す
@@ -124,6 +137,17 @@ spring:
 - `MessageConstants` の定数値を文言→キー名へ変更。新規 `common/util/MessageUtils.java`(MessageSource 静的保持)で `ApiResult.success(MessageUtils.get(MessageConstants.SAVE_SUCCESS))`
 - **`StatusConstants` は一切変更しない**(あれはDB値であり文言ではない)
 - Validation: WebConfig で `getValidator()` をオーバーライドし `setValidationMessageSource(messageSource)`。DTO は `@NotBlank(message = "{validation.xxx}")`。ValidationMessages.properties は作らない(messages に一本化)
+  - **★リスク(未初期化バリデータ)**: `new LocalValidatorFactoryBean()` を `getValidator()` から返す際、初期化 (`afterPropertiesSet()`) が呼ばれないと `validate()` 実行時に `IllegalStateException` で全バリデーションが落ちる。確実性のため明示的に呼ぶ:
+    ```java
+    @Override
+    public Validator getValidator() {
+        LocalValidatorFactoryBean bean = new LocalValidatorFactoryBean();
+        bean.setValidationMessageSource(messageSource);
+        bean.afterPropertiesSet();   // ★必須: これが無いと未初期化で例外
+        return bean;
+    }
+    ```
+    (`messageSource` は WebConfig にコンストラクタ注入。既存の `configureMessageConverters` 等と同一クラスに同居させる)
 
 ## 新規 / 変更ファイル一覧
 
@@ -154,9 +178,19 @@ spring:
 
 ## リスクと遺留事項
 
+**レビューで検出・是正済みの技術リスク(実装時の必須チェック)**
+
+1. **【重大】UTF-8 プロパティの文字化け** — 独自ローダー `I18nMessagesLoader` が `.properties` を ISO-8859-1 で読むと多言語が全滅。`EncodedResource(resource, UTF-8)` か UTF-8 `Reader` で読む(決定4参照)
+2. **【中】未初期化バリデータ** — `getValidator()` で `afterPropertiesSet()` を呼ばないと全バリデーションが例外(決定6参照)
+3. **【中】ロケールタグとファイル名の綴りズレ** — `zh-CN` → `messages_zh_CN.properties` の往復を zh-CN ケースのテストで担保(決定1参照)
+4. **【中】CSRFは全リクエスト有効(Cookie方式)** — 言語切替は GET なので問題ないが POST 化禁止(決定2参照)
+
+**設計上の意図的トレードオフ / 残リスク**
+
 - `fallback-to-system-locale: false` 漏れ → 英語圏サーバーで Cookie なしユーザーが英語になる(テスト3で担保)
 - MessageFormat の単引用符エスケープ(英語訳)
 - `use-code-as-default-message: true` はキー欠落を静かにキー名表示にする意図的トレードオフ(画面を500にしない)。欠落は一貫性テストで検出
+- 辞書キャッシュ(`I18nMessagesLoader`)は無効化しない。再デプロイ時は `/js/i18n.js?v=版本` の `v` を必ず更新して 24h キャッシュを破棄する
 - 遺留: メールテンプレート(日本語のまま) / invoice print + PDF(日本語固定、中韓はフォント埋込方式の検討が必要) / CSVデータ列の列挙値(生の日本語値)
 
 ## タスク分解と並行実行ガイド
