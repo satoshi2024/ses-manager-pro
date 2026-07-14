@@ -2,11 +2,13 @@ package com.ses.common.i18n;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.io.support.PropertiesLoaderUtils;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,17 +35,17 @@ public class I18nMessagesLoader {
             Properties merged = new Properties();
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             
-            // Default
+            // Default（.propertiesはUTF-8で明示的に読む。既定のISO-8859-1では日本語・中国語・韓国語が文字化けする）
             Resource defaultRes = resolver.getResource("classpath:messages.properties");
             if (defaultRes.exists()) {
-                PropertiesLoaderUtils.fillProperties(merged, defaultRes);
+                PropertiesLoaderUtils.fillProperties(merged, new EncodedResource(defaultRes, StandardCharsets.UTF_8));
             }
-            
+
             // Locale specific
             if (!lang.equals("ja") && !lang.isEmpty()) {
                 Resource locRes = resolver.getResource("classpath:messages_" + lang + ".properties");
                 if (locRes.exists()) {
-                    PropertiesLoaderUtils.fillProperties(merged, locRes);
+                    PropertiesLoaderUtils.fillProperties(merged, new EncodedResource(locRes, StandardCharsets.UTF_8));
                 }
             }
 
