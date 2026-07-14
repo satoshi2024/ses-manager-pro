@@ -1,4 +1,4 @@
-$(document).ready(function() {
+﻿$(document).ready(function() {
     // Get engineer ID from URL
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id');
@@ -6,7 +6,7 @@ $(document).ready(function() {
     if (id) {
         loadEngineerDetail(id);
     } else {
-        Toast.error('要員IDが指定されていません');
+        Toast.error(SES.i18n.t('error.noEngineerId'));
     }
 });
 
@@ -18,12 +18,12 @@ function loadEngineerDetail(id) {
             if (res.code === 200 && res.data) {
                 renderEngineerDetail(res.data);
             } else {
-                Toast.error('データの取得に失敗しました');
+                Toast.error(SES.i18n.t('error.getDataFailed'));
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('error.networkError'));
         }
     });
 }
@@ -57,13 +57,13 @@ function renderEngineerDetail(eng) {
     if (eng.status === 'Bench') { statusColor = 'text-warning'; statusIcon = 'bi-pause-circle-fill'; }
     if (eng.status === '退場予定') { statusColor = 'text-danger'; statusIcon = 'bi-exclamation-circle-fill'; }
     
-    $('#det-status').html(`<span class="${statusColor}"><i class="bi ${statusIcon} me-1"></i>${SES.escapeHtml(eng.status || '未設定')}</span>`);
+    $('#det-status').html(`<span class="${statusColor}"><i class="bi ${statusIcon} me-1"></i>${SES.escapeHtml(eng.status ? SES.i18n.e('engineerStatus', eng.status) : SES.i18n.t('common.notSet'))}</span>`);
     
     // Experience
-    $('#det-experience').text(eng.experienceYears ? eng.experienceYears + '年' : '-');
+    $('#det-experience').text(eng.experienceYears ? eng.experienceYears + SES.i18n.t('engineer.experience.unit') : '-');
     
     // Price
-    const priceStr = eng.expectedUnitPrice ? '¥' + eng.expectedUnitPrice.toLocaleString() + ' / 月' : '-';
+    const priceStr = eng.expectedUnitPrice ? '¥' + eng.expectedUnitPrice.toLocaleString() + ' / ' + SES.i18n.t('engineer.expectedPrice.month') : '-';
     $('#det-price').text(priceStr);
     
     // Station / Prefecture / Railway
@@ -83,12 +83,12 @@ function renderEngineerDetail(eng) {
         $('#det-resume').html(`
             <div class="position-relative mb-4">
                 <div class="position-absolute bg-accent-blue rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
-                <div class="text-muted small mb-1">サマリ</div>
+                <div class="text-muted small mb-1">' + SES.i18n.t('engineer.resumeSummary') + '</div>
                 <p class="text-light small mb-2" style="white-space: pre-wrap;">${SES.escapeHtml(eng.resumeSummary)}</p>
             </div>
         `);
     } else {
-        $('#det-resume').html('<div class="text-muted small">経歴情報が登録されていません。</div>');
+        $('#det-resume').html('<div class="text-muted small">' + SES.i18n.t('engineer.career.empty') + '</div>');
     }
 }
 
@@ -98,7 +98,7 @@ function renderEngineerDetail(eng) {
 function renderAvatar(eng) {
     const $avatar = $('#det-avatar');
     if (eng.photoUrl) {
-        $avatar.html(`<img src="/api/files/${SES.escapeHtml(eng.photoUrl)}" alt="顔写真" style="width:100%;height:100%;object-fit:cover;">`);
+        $avatar.html(`<img src="/api/files/${SES.escapeHtml(eng.photoUrl)}" alt="' + SES.i18n.t('engineer.photo') + '" style="width:100%;height:100%;object-fit:cover;">`);
     } else {
         // 写真が無い場合はイニシャル or 氏名先頭文字
         const label = (eng.initialName && eng.initialName.trim())
@@ -110,7 +110,7 @@ function renderAvatar(eng) {
 
 function uploadPhoto(input) {
     if (!input.files || input.files.length === 0) return;
-    if (!detailEngineer) { Toast.error('要員情報が読み込まれていません'); return; }
+    if (!detailEngineer) { Toast.error(SES.i18n.t('error.engineerNotLoaded')); return; }
 
     const formData = new FormData();
     formData.append('file', input.files[0]);
@@ -135,20 +135,20 @@ function uploadPhoto(input) {
                         if (r2.code === 200) {
                             detailEngineer = updated;
                             renderAvatar(updated);
-                            Toast.success('写真を更新しました');
+                            Toast.success(SES.i18n.t('success.updatePhoto'));
                         } else {
-                            Toast.error(r2.message || '写真の保存に失敗しました');
+                            Toast.error(r2.message || SES.i18n.t('error.savePhotoFailed'));
                         }
                     },
-                    error: function() { Toast.error('写真の保存に失敗しました'); }
+                    error: function() { Toast.error(SES.i18n.t('error.savePhotoFailed')); }
                 });
             } else {
-                Toast.error(res.message || 'アップロードに失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.uploadFailed'));
             }
         },
         error: function(xhr) {
             const msg = (xhr.responseJSON && xhr.responseJSON.message) || 'アップロードに失敗しました';
-            Toast.error(msg);
+            Toast.error(msg || SES.i18n.t('error.uploadFailed'));
         },
         complete: function() { input.value = ''; }
     });
@@ -171,7 +171,7 @@ function loadSkills(engineerId) {
 
 function renderSkills(skills) {
     if (!skills || skills.length === 0) {
-        $('#det-skills').html('<span class="badge bg-secondary border border-dark text-light">登録なし</span>');
+        $('#det-skills').html('<span class="badge bg-secondary border border-dark text-light">' + SES.i18n.t('common.notRegistered') + '</span>');
         return;
     }
     
@@ -181,7 +181,7 @@ function renderSkills(skills) {
         if (skill.proficiency === '上級') badgeClass = 'bg-accent-blue';
         if (skill.proficiency === '中級') badgeClass = 'bg-primary';
         
-        let expText = skill.experienceYears ? ` (${skill.experienceYears}年)` : '';
+        let expText = skill.experienceYears ? ` (${skill.experienceYears}${SES.i18n.t('engineer.experience.unit')})` : '';
         html += `<span class="badge ${badgeClass} border border-dark text-light">${SES.escapeHtml(skill.skillName)}${expText}</span> `;
     });
     $('#det-skills').html(html);
@@ -204,7 +204,7 @@ function fetchSkillOptions(callback) {
                     groups[s.category].push(s);
                 });
                 
-                skillOptionsHtml = '<option value="">スキルを選択...</option>';
+                skillOptionsHtml = '<option value="">' + SES.i18n.t('engineer.placeholder.selectSkill') + '</option>';
                 for (const cat in groups) {
                     skillOptionsHtml += `<optgroup label="${SES.escapeHtml(cat)}">`;
                     groups[cat].forEach(s => {
@@ -220,7 +220,7 @@ function fetchSkillOptions(callback) {
 
 function openSkillModal() {
     if (typeof currentEngineerId === 'undefined') {
-        Toast.error('要員データがありません');
+        Toast.error(SES.i18n.t('error.engineerNotLoaded'));
         return;
     }
     
@@ -258,15 +258,15 @@ function addSkillRow(skill = null) {
     // Proficiency Select
     const profSelect = $(`
         <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark skill-prof-select">
-            <option value="初級">初級</option>
-            <option value="中級">中級</option>
-            <option value="上級">上級</option>
+            <option value="初級">' + SES.i18n.t('engineer.skill.proficiency.beginner') + '</option>
+            <option value="中級">' + SES.i18n.t('engineer.skill.proficiency.intermediate') + '</option>
+            <option value="上級">' + SES.i18n.t('engineer.skill.proficiency.advanced') + '</option>
         </select>
     `);
     if (skill && skill.proficiency) profSelect.val(skill.proficiency);
     
     // Experience Years Input
-    const expInput = $(`<input type="number" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark skill-exp-input" min="0" placeholder="年">`);
+    const expInput = $(`<input type="number" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark skill-exp-input" min="0" placeholder="' + SES.i18n.t('engineer.experience.unit') + '">`);
     if (skill && skill.experienceYears) expInput.val(skill.experienceYears);
     
     // Delete Button
@@ -304,11 +304,11 @@ function saveSkills() {
         data: JSON.stringify(skills),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('スキルを保存しました');
+                Toast.success(SES.i18n.t('success.saveSkills'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('skillEditModal')).hide();
                 loadSkills(currentEngineerId);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
             }
         }
     });
@@ -334,13 +334,13 @@ function renderCareers(careers) {
     tbody.empty();
     
     if (!careers || careers.length === 0) {
-        tbody.html('<tr><td colspan="4" class="text-center text-muted">経歴情報がありません</td></tr>');
+        tbody.html('<tr><td colspan="4" class="text-center text-muted">' + SES.i18n.t('engineer.career.empty') + '</td></tr>');
         return;
     }
     
     careers.forEach(car => {
         const fromStr = car.periodFrom ? car.periodFrom.substring(0, 7) : '?';
-        const toStr = car.periodTo ? car.periodTo.substring(0, 7) : '現在';
+        const toStr = car.periodTo ? car.periodTo.substring(0, 7) : SES.i18n.t('engineer.career.present');
         
         const tr = `
             <tr>
@@ -351,7 +351,7 @@ function renderCareers(careers) {
                 </td>
                 <td>
                     <div>${SES.escapeHtml(car.role || '-')}</div>
-                    ${car.teamSize ? '<div class="small text-muted">' + car.teamSize + '名</div>' : ''}
+                    ${car.teamSize ? '<div class="small text-muted">' + car.teamSize + ''' + SES.i18n.t('common.personUnit') + ''</div>' : ''}
                 </td>
                 <td class="text-end">
                     <div class="btn-group btn-group-sm">
@@ -413,7 +413,7 @@ function saveCareer() {
     }
     
     if (!data.periodFrom || !data.projectName) {
-        Toast.error('必須項目を入力してください');
+        Toast.error(SES.i18n.t('error.requiredFields'));
         return;
     }
     
@@ -424,11 +424,11 @@ function saveCareer() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success('経歴を保存しました');
+                Toast.success(SES.i18n.t('success.saveCareer'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('careerModal')).hide();
                 loadCareers(currentEngineerId);
             } else {
-                Toast.error(res.message || '保存に失敗しました');
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
             }
         }
     });
@@ -436,13 +436,13 @@ function saveCareer() {
 
 function deleteCareer(id) {
     Swal.fire({
-        title: '削除確認',
-        text: 'この経歴を削除しますか？',
+        title: SES.i18n.t('common.deleteConfirmTitle'),
+        text: SES.i18n.t('confirm.deleteCareer'),
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#dc3545',
-        confirmButtonText: '削除する',
-        cancelButtonText: 'キャンセル'
+        confirmButtonText: SES.i18n.t('common.delete'),
+        cancelButtonText: SES.i18n.t('common.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
@@ -450,10 +450,10 @@ function deleteCareer(id) {
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
-                        Toast.success('削除しました');
+                        Toast.success(SES.i18n.t('success.delete'));
                         loadCareers(currentEngineerId);
                     } else {
-                        Toast.error(res.message || '削除に失敗しました');
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
                     }
                 }
             });

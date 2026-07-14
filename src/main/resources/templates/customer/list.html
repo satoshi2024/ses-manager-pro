@@ -1,19 +1,19 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
-    <title>顧客管理 - SES Manager Pro</title>
+    <title th:text="#{customer.title} + ' - ' + #{app.name}"><th:block th:text="#{customer.title}">顧客管理</th:block> - SES Manager Pro</title>
 </head>
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light">
-            <i class="bi bi-building me-2 text-info"></i>顧客管理
-            <span id="total-followup-badge" class="badge bg-danger rounded-pill fs-6 ms-3 d-none">0件の要フォロー</span>
+            <i class="bi bi-building me-2 text-info"></i><th:block th:text="#{customer.title}">顧客管理</th:block>
+            <span id="total-followup-badge" class="badge bg-danger rounded-pill fs-6 ms-3 d-none">0<th:block th:text="#{customer.followUp}">件の要フォロー</th:block></span>
         </h2>
         <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#customerModal">
-            <i class="bi bi-plus-lg me-1"></i>新規登録
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{customer.new}">新規登録</th:block>
         </button>
     </div>
 
@@ -22,36 +22,36 @@
         <div class="card-body">
             <form id="searchForm" onsubmit="event.preventDefault(); loadCustomers(1);" class="row g-3 align-items-end">
                 <div class="col-md-4">
-                    <label for="searchCompanyName" class="form-label text-muted small">会社名</label>
+                    <label for="searchCompanyName" class="form-label text-muted small" th:text="#{customer.companyName}">会社名</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-info" id="searchCompanyName" name="companyName" placeholder="株式会社〇〇" list="customer-list">
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-info" id="searchCompanyName" name="companyName" th:placeholder="#{customer.placeholder.companyName}" list="customer-list">
                         <datalist id="customer-list"></datalist>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <label for="searchFlow" class="form-label text-muted small">商流</label>
+                    <label for="searchFlow" class="form-label text-muted small" th:text="#{customer.commercialFlow}">商流</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchFlow" name="flow">
-                        <option value="">すべて</option>
-                        <option value="エンド直">エンド直</option>
-                        <option value="元請け">元請け</option>
-                        <option value="二次請け">二次請け</option>
-                        <option value="それ以降">それ以降</option>
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="エンド直" th:text="#{customer.commercialFlow.prime}">エンド直</option>
+                        <option value="元請け" th:text="#{customer.commercialFlow.primary}">元請け</option>
+                        <option value="二次請け" th:text="#{customer.commercialFlow.secondary}">二次請け</option>
+                        <option value="それ以降" th:text="#{customer.commercialFlow.other}">それ以降</option>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label for="searchRank" class="form-label text-muted small">信頼度</label>
+                    <label for="searchRank" class="form-label text-muted small" th:text="#{customer.trustLevel}">信頼度</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchRank" name="rank">
-                        <option value="">すべて</option>
-                        <option value="S">Sランク (優良)</option>
-                        <option value="A">Aランク (良好)</option>
-                        <option value="B">Bランク (普通)</option>
-                        <option value="C">Cランク (注意)</option>
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="S" th:text="#{customer.trustLevel.s}">Sランク (優良)</option>
+                        <option value="A" th:text="#{customer.trustLevel.a}">Aランク (良好)</option>
+                        <option value="B" th:text="#{customer.trustLevel.b}">Bランク (普通)</option>
+                        <option value="C" th:text="#{customer.trustLevel.c}">Cランク (注意)</option>
                     </select>
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-info w-100">
-                        <i class="bi bi-filter me-1"></i>絞り込み
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
                     </button>
                 </div>
             </form>
@@ -65,12 +65,12 @@
                 <table class="table table-dark table-hover table-striped mb-0 align-middle">
                     <thead class="table-dark-header border-bottom border-dark">
                         <tr>
-                            <th scope="col" class="ps-4">会社名</th>
-                            <th scope="col">商流</th>
-                            <th scope="col">信頼度ランク</th>
-                            <th scope="col">担当者</th>
-                            <th scope="col">電話番号</th>
-                            <th scope="col" class="text-end pe-4">アクション</th>
+                            <th scope="col" class="ps-4" th:text="#{customer.companyName}">会社名</th>
+                            <th scope="col" th:text="#{customer.commercialFlow}">商流</th>
+                            <th scope="col" th:text="#{customer.trustLevel}">信頼度ランク</th>
+                            <th scope="col" th:text="#{customer.contactPerson}">担当者</th>
+                            <th scope="col" th:text="#{customer.contactPhone}">電話番号</th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
                         </tr>
                     </thead>
                     <tbody id="customer-table-body">
@@ -110,50 +110,50 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building-add me-2 text-info"></i>顧客登録</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building-add me-2 text-info"></i><th:block th:text="#{customer.new}">顧客登録</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
                     <form id="customer-form">
                         <input type="hidden" id="cust-id">
                         <div class="mb-3">
-                            <label class="form-label text-muted small">会社名 <span class="text-danger">*</span></label>
-                            <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 株式会社〇〇" required>
+                            <label class="form-label text-muted small"><th:block th:text="#{customer.companyName}">会社名</th:block> <span class="text-danger">*</span></label>
+                            <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.companyName}" required>
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">商流</label>
+                                <label class="form-label text-muted small" th:text="#{customer.commercialFlow}">商流</label>
                                 <select id="cust-commercialFlow" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                    <option value="エンド直">エンド直</option>
-                                    <option value="元請け">元請け</option>
-                                    <option value="二次請け">二次請け</option>
-                                    <option value="それ以降">それ以降</option>
+                                    <option value="エンド直" th:text="#{customer.commercialFlow.prime}">エンド直</option>
+                                    <option value="元請け" th:text="#{customer.commercialFlow.primary}">元請け</option>
+                                    <option value="二次請け" th:text="#{customer.commercialFlow.secondary}">二次請け</option>
+                                    <option value="それ以降" th:text="#{customer.commercialFlow.other}">それ以降</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">信頼度</label>
+                                <label class="form-label text-muted small" th:text="#{customer.trustLevel}">信頼度</label>
                                 <select id="cust-trustLevel" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                    <option value="S">Sランク (優良)</option>
-                                    <option value="A">Aランク (良好)</option>
-                                    <option value="B">Bランク (普通)</option>
-                                    <option value="C">Cランク (注意)</option>
+                                    <option value="S" th:text="#{customer.trustLevel.s}">Sランク (優良)</option>
+                                    <option value="A" th:text="#{customer.trustLevel.a}">Aランク (良好)</option>
+                                    <option value="B" th:text="#{customer.trustLevel.b}">Bランク (普通)</option>
+                                    <option value="C" th:text="#{customer.trustLevel.c}">Cランク (注意)</option>
                                 </select>
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">担当者名</label>
-                            <input type="text" id="cust-contactPerson" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 田中 康夫">
+                            <label class="form-label text-muted small" th:text="#{customer.contactPerson}">担当者名</label>
+                            <input type="text" id="cust-contactPerson" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.contactPerson}">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">電話番号</label>
-                            <input type="text" id="cust-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 03-1234-5678">
+                            <label class="form-label text-muted small" th:text="#{customer.contactPhone}">電話番号</label>
+                            <input type="text" id="cust-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.contactPhone}">
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
-                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveCustomer()">
-                        <i class="bi bi-check-lg me-1"></i>登録
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.create}">登録</th:block>
                     </button>
                 </div>
             </div>

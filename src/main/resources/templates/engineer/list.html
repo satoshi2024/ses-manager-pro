@@ -1,27 +1,27 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
-    <title>要員管理 - SES Manager Pro</title>
+    <title th:text="#{engineer.title} + ' - ' + #{app.name}">要員管理 - SES Manager Pro</title>
 </head>
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i>要員管理</h2>
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i><th:block th:text="#{engineer.title}">要員管理</th:block></h2>
         <div>
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineers()">
-                <i class="bi bi-file-earmark-excel me-1"></i>Excel出力
+                <i class="bi bi-file-earmark-excel me-1"></i><th:block th:text="#{common.export.excel}">Excel出力</th:block>
             </button>
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineersCsv()">
-                <i class="bi bi-filetype-csv me-1"></i>CSV出力
+                <i class="bi bi-filetype-csv me-1"></i><th:block th:text="#{common.export.csv}">CSV出力</th:block>
             </button>
             <input type="file" id="csvImportInput" accept=".csv" class="d-none" onchange="importEngineersCsv(this)">
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="document.getElementById('csvImportInput').click()">
-                <i class="bi bi-upload me-1"></i>CSVインポート
+                <i class="bi bi-upload me-1"></i><th:block th:text="#{common.import.csv}">CSVインポート</th:block>
             </button>
             <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
-                <i class="bi bi-plus-lg me-1"></i>新規登録
+                <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{engineer.new}">新規登録</th:block>
             </button>
         </div>
     </div>
@@ -31,41 +31,41 @@
         <div class="card-body">
             <form id="searchForm" onsubmit="event.preventDefault(); loadEngineers(1);" class="row g-3 align-items-end">
                 <div class="col-md-3">
-                    <label for="searchName" class="form-label text-muted small">名前</label>
+                    <label for="searchName" class="form-label text-muted small" th:text="#{engineer.name}">名前</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" placeholder="山田 太郎" list="engineer-list">
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" th:placeholder="#{engineer.placeholder.name}" list="engineer-list">
                         <datalist id="engineer-list"></datalist>
                     </div>
                 </div>
                 <div class="col-md-2">
-                    <label for="searchStatus" class="form-label text-muted small">ステータス</label>
+                    <label for="searchStatus" class="form-label text-muted small" th:text="#{engineer.status}">ステータス</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchStatus" name="status">
-                        <option value="" th:text="#{common.action.all}">すべて</option>
+                        <option value="" th:text="#{common.all}">すべて</option>
                         <option value="稼動中" th:text="#{enum.engineerStatus.active}"></option>
                         <option value="待機" th:text="#{enum.engineerStatus.bench}"></option>
-                        <option value="提案中" th:text="#{projectStatus.proposing}"></option>
+                        <option value="提案中" th:text="#{enum.engineerStatus.proposed}"></option>
                         <option value="退場予定" th:text="#{enum.engineerStatus.retiring}"></option>
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label for="searchEmpType" class="form-label text-muted small">雇用形態</label>
+                    <label for="searchEmpType" class="form-label text-muted small" th:text="#{engineer.employmentType}">雇用形態</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchEmpType" name="empType">
-                        <option value="">すべて</option>
-                        <option value="正社員">正社員</option>
-                        <option value="契約社員">契約社員</option>
-                        <option value="BP">フリーランス/BP</option>
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="正社員" th:text="#{engineer.employmentType.fulltime}">正社員</option>
+                        <option value="契約社員" th:text="#{engineer.employmentType.contract}">契約社員</option>
+                        <option value="BP" th:text="#{engineer.employmentType.bp}">フリーランス/BP</option>
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label for="searchSkill" class="form-label text-muted small">スキル</label>
+                    <label for="searchSkill" class="form-label text-muted small" th:text="#{engineer.skills}">スキル</label>
                     <select class="form-select bg-dark border-secondary text-light" id="searchSkill" name="skillId">
-                        <option value="">すべて</option>
+                        <option value="" th:text="#{common.all}">すべて</option>
                     </select>
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100">
-                        <i class="bi bi-filter me-1"></i>絞り込み
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
                     </button>
                 </div>
             </form>
@@ -79,12 +79,12 @@
                 <table class="table table-dark table-hover table-striped mb-0 align-middle">
                     <thead class="table-dark-header border-bottom border-dark">
                         <tr>
-                            <th scope="col" class="ps-4">氏名</th>
-                            <th scope="col">稼動状態</th>
-                            <th scope="col">雇用形態</th>
-                            <th scope="col">経験年数</th>
-                            <th scope="col">単価</th>
-                            <th scope="col" class="text-end pe-4">アクション</th>
+                            <th scope="col" class="ps-4" th:text="#{engineer.name}">氏名</th>
+                            <th scope="col" th:text="#{engineer.status}">稼動状態</th>
+                            <th scope="col" th:text="#{engineer.employmentType}">雇用形態</th>
+                            <th scope="col" th:text="#{engineer.experience}">経験年数</th>
+                            <th scope="col" th:text="#{engineer.expectedPrice}">単価</th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
                         </tr>
                     </thead>
                     <tbody id="engineer-table-body">
@@ -124,15 +124,15 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark">
                 <div class="modal-header border-dark">
-                    <h5 class="modal-title text-light"><i class="bi bi-upload me-2"></i>CSVインポート結果</h5>
+                    <h5 class="modal-title text-light"><i class="bi bi-upload me-2"></i><th:block th:text="#{engineer.csv.importResult}"><th:block th:text="#{common.import.csv}">CSVインポート</th:block>結果</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-light mb-2"><span id="csvSuccessCount" class="fw-bold text-accent-green">0</span> 件を取り込みました。</p>
+                    <p class="text-light mb-2"><span id="csvSuccessCount" class="fw-bold text-accent-green">0</span> <th:block th:text="#{engineer.csv.importSuccessUnit}">件を取り込みました。</th:block></p>
                     <div id="csvErrorArea"></div>
                 </div>
                 <div class="modal-footer border-dark">
-                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="loadEngineers(1)">閉じる</button>
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="loadEngineers(1)" th:text="#{common.close}">閉じる</button>
                 </div>
             </div>
         </div>
@@ -143,52 +143,52 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-accent-blue"></i>要員登録</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-accent-blue"></i><th:block th:text="#{engineer.new}">要員登録</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
                     <form id="engineer-form">
                         <input type="hidden" id="eng-id">
                         <div class="mb-3">
-                            <label class="form-label text-muted small">氏名 <span class="text-danger">*</span></label>
+                            <label class="form-label text-muted small"><th:block th:text="#{engineer.name}">氏名</th:block> <span class="text-danger">*</span></label>
                             <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 山田 太郎" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">フリガナ</label>
-                            <input type="text" id="eng-fullNameKana" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: ヤマダ タロウ">
+                            <label class="form-label text-muted small" th:text="#{engineer.nameKana}">フリガナ</label>
+                            <input type="text" id="eng-fullNameKana" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.nameKana}">
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">稼動状態</label>
+                                <label class="form-label text-muted small" th:text="#{engineer.status}">稼動状態</label>
                                 <select id="eng-status" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                    <option value="Bench">待機中 (Bench)</option>
-                                    <option value="稼動中">稼動中</option>
-                                    <option value="提案中">提案中</option>
-                                    <option value="退場予定">退場予定</option>
+                                    <option value="Bench" th:text="#{enum.engineerStatus.bench}">待機中 (Bench)</option>
+                                    <option value="稼動中" th:text="#{enum.engineerStatus.active}">稼動中</option>
+                                    <option value="提案中" th:text="#{enum.engineerStatus.proposed}">提案中</option>
+                                    <option value="退場予定" th:text="#{enum.engineerStatus.retiring}">退場予定</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">雇用形態</label>
+                                <label class="form-label text-muted small" th:text="#{engineer.employmentType}">雇用形態</label>
                                 <select id="eng-employmentType" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                    <option value="正社員">正社員</option>
-                                    <option value="契約社員">契約社員</option>
-                                    <option value="BP">フリーランス/BP</option>
+                                    <option value="正社員" th:text="#{engineer.employmentType.fulltime}">正社員</option>
+                                    <option value="契約社員" th:text="#{engineer.employmentType.contract}">契約社員</option>
+                                    <option value="BP" th:text="#{engineer.employmentType.bp}">フリーランス/BP</option>
                                 </select>
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">経験年数 (年)</label>
-                            <input type="number" id="eng-experienceYears" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 5" min="0">
+                            <label class="form-label text-muted small" th:text="#{engineer.experience}">経験年数 (年)</label>
+                            <input type="number" id="eng-experienceYears" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.experience}" min="0">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">希望単価 (円)</label>
-                            <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0">
+                            <label class="form-label text-muted small" th:text="#{engineer.expectedPrice}">希望単価 (円)</label>
+                            <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.price}" min="0">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">最寄り駅</label>
+                            <label class="form-label text-muted small" th:text="#{engineer.nearestStation}">最寄り駅</label>
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-dark border-dark text-muted"><i class="bi bi-train-front"></i></span>
-                                <input type="text" id="eng-nearestStation" class="form-control form-control-dark bg-secondary text-white border-dark" list="station-list" placeholder="駅名を入力してください（例: 東京）" autocomplete="off">
+                                <input type="text" id="eng-nearestStation" class="form-control form-control-dark bg-secondary text-white border-dark" list="station-list" th:placeholder="#{engineer.placeholder.station}" autocomplete="off">
                                 <datalist id="station-list">
                                     <!-- Populated via API -->
                                 </datalist>
@@ -197,11 +197,11 @@
                             <div class="input-group input-group-sm mt-2">
                                 <span class="input-group-text bg-dark border-dark text-muted"><i class="bi bi-signpost-split"></i></span>
                                 <select id="eng-railwayLine" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" disabled>
-                                    <option value="">駅名を入力すると路線を選択できます</option>
+                                    <option value="" th:text="#{engineer.placeholder.railwaySelect}">駅名を入力すると路線を選択できます</option>
                                 </select>
                             </div>
                             <div class="form-text text-muted small mt-1">
-                                <i class="bi bi-geo-alt me-1"></i>都道府県:
+                                <i class="bi bi-geo-alt me-1"></i><th:block th:text="#{engineer.prefecture}">都道府県</th:block>:
                                 <span id="eng-prefecture-text" class="text-light">-</span>
                             </div>
                             <!-- 保存対象の実値（路線選択から自動設定） -->
@@ -209,15 +209,15 @@
                             <input type="hidden" id="eng-railwayCompany">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">経歴サマリ</label>
-                            <textarea id="eng-resumeSummary" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3" placeholder="経歴の要約を入力してください"></textarea>
+                            <label class="form-label text-muted small" th:text="#{engineer.resumeSummary}">経歴サマリ</label>
+                            <textarea id="eng-resumeSummary" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3" th:placeholder="#{engineer.placeholder.resumeSummary}"></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
-                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveEngineer()">
-                        <i class="bi bi-check-lg me-1"></i>登録
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.create}">登録</th:block>
                     </button>
                 </div>
             </div>
@@ -237,7 +237,7 @@
             document.getElementById('eng-railwayCompany').value = '';
             document.getElementById('eng-prefecture-text').textContent = '-';
             const lineSel = document.getElementById('eng-railwayLine');
-            lineSel.innerHTML = '<option value="">駅名を入力すると路線を選択できます</option>';
+            lineSel.innerHTML = '<option value="">' + SES.i18n.t('engineer.placeholder.railwaySelect') + '</option>';
             lineSel.disabled = true;
         });
     </script>

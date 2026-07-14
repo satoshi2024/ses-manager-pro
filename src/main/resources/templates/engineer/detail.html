@@ -1,7 +1,7 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
-    <title>要員詳細</title>
+    <title th:text="#{engineer.detail}">要員詳細</title>
 </head>
 <body>
 
@@ -14,17 +14,17 @@
                 <span id="eng-name">田中 太郎</span> 
                 <span class="fs-6 text-muted ms-2" id="eng-initial">(T.T)</span>
             </h4>
-            <p class="text-muted small mb-0">エンジニア詳細情報およびAIマッチング</p>
+            <p class="text-muted small mb-0"><th:block th:text="#{engineer.detail.subtitle}">エンジニア詳細情報およびAIマッチング</th:block></p>
         </div>
         <div class="d-flex gap-2">
             <a href="/engineer/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
-                <i class="bi bi-arrow-left me-1"></i>戻る
+                <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}">戻る</th:block>
             </a>
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" onclick="generateSkillSheet(currentEngineerId)">
-                <i class="bi bi-file-earmark-pdf me-1"></i>スキルシート自動生成
+                <i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{ai.skillsheet.generate}">スキルシート自動生成</th:block>
             </button>
             <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(currentEngineerId, currentEngineerName)">
-                <i class="bi bi-robot me-1"></i>AIマッチング実行
+                <i class="bi bi-robot me-1"></i><th:block th:text="#{ai.matching.run}">AIマッチング実行</th:block>
             </button>
         </div>
     </div>
@@ -39,39 +39,39 @@
                     </div>
                     <div class="mb-3">
                         <input type="file" id="det-photo-input" accept="image/png,image/jpeg" class="d-none" onchange="uploadPhoto(this)">
-                        <button class="btn btn-sm btn-outline-secondary border-0 px-2 py-0" onclick="document.getElementById('det-photo-input').click()" title="写真を登録・差し替え">
-                            <i class="bi bi-camera me-1"></i>写真
+                        <button class="btn btn-sm btn-outline-secondary border-0 px-2 py-0" onclick="document.getElementById('det-photo-input').click()" th:title="#{engineer.photo.upload}">
+                            <i class="bi bi-camera me-1"></i><th:block th:text="#{engineer.photo}">写真</th:block>
                         </button>
                     </div>
-                    <h5 class="text-white fw-bold mb-1" id="det-name">名前</h5>
+                    <h5 class="text-white fw-bold mb-1" id="det-name" th:text="#{engineer.name}">名前</h5>
                     <div class="d-flex justify-content-center align-items-center mb-3 gap-3">
-                        <div id="det-status"><i class="bi bi-check-circle-fill me-1"></i>ステータス</div>
-                        <button class="btn btn-sm btn-outline-info border-0 px-2 py-0" onclick="openSkillModal()" title="スキル編集"><i class="bi bi-pencil"></i></button>
+                        <div id="det-status"><i class="bi bi-check-circle-fill me-1"></i><th:block th:text="#{engineer.status}">ステータス</th:block></div>
+                        <button class="btn btn-sm btn-outline-info border-0 px-2 py-0" onclick="openSkillModal()" th:title="#{engineer.skill.edit}"><i class="bi bi-pencil"></i></button>
                     </div>
                     
                     <div class="d-flex flex-wrap justify-content-center gap-2 mb-4" id="det-skills">
-                        <span class="badge bg-secondary border border-dark text-light">スキルなし</span>
+                        <span class="badge bg-secondary border border-dark text-light" th:text="#{engineer.skill.none}">スキルなし</span>
                     </div>
 
                     <ul class="list-group list-group-flush text-start border-top border-dark pt-3">
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
-                            <span>経験年数</span>
+                            <span th:text="#{engineer.experience}">経験年数</span>
                             <span class="text-white fw-bold" id="det-experience">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
-                            <span>希望単価</span>
+                            <span th:text="#{engineer.expectedPrice}">希望単価</span>
                             <span class="text-white fw-bold" id="det-price">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
-                            <span>最寄り駅</span>
+                            <span th:text="#{engineer.nearestStation}">最寄り駅</span>
                             <span class="text-white fw-bold" id="det-station">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
-                            <span>都道府県</span>
+                            <span th:text="#{engineer.prefecture}">都道府県</span>
                             <span class="text-white fw-bold" id="det-prefecture">-</span>
                         </li>
                         <li class="list-group-item bg-transparent border-0 px-0 py-2 d-flex justify-content-between text-muted small">
-                            <span>鉄道会社・路線</span>
+                            <span th:text="#{engineer.railwayCompany}">鉄道会社・路線</span>
                             <span class="text-white fw-bold text-end ms-2" id="det-railway">-</span>
                         </li>
                     </ul>
@@ -85,10 +85,10 @@
                 <div class="card-header bg-transparent border-dark px-4 py-3">
                     <ul class="nav nav-tabs card-header-tabs border-dark" id="engineerTabs" role="tablist">
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link active text-light border-dark bg-dark" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary-tab-pane" type="button" role="tab" aria-controls="summary-tab-pane" aria-selected="true"><i class="bi bi-journal-text me-2"></i>経歴サマリ</button>
+                            <button class="nav-link active text-light border-dark bg-dark" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary-tab-pane" type="button" role="tab" aria-controls="summary-tab-pane" aria-selected="true"><i class="bi bi-journal-text me-2"></i><th:block th:text="#{engineer.resumeSummary}">経歴サマリ</th:block></button>
                         </li>
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link text-muted border-transparent hover-text-white" id="career-tab" data-bs-toggle="tab" data-bs-target="#career-tab-pane" type="button" role="tab" aria-controls="career-tab-pane" aria-selected="false"><i class="bi bi-building me-2"></i>経歴詳細</button>
+                            <button class="nav-link text-muted border-transparent hover-text-white" id="career-tab" data-bs-toggle="tab" data-bs-target="#career-tab-pane" type="button" role="tab" aria-controls="career-tab-pane" aria-selected="false"><i class="bi bi-building me-2"></i><th:block th:text="#{engineer.career}">経歴詳細</th:block></button>
                         </li>
                     </ul>
                 </div>
@@ -96,22 +96,22 @@
                     <div class="tab-content" id="engineerTabsContent">
                         <div class="tab-pane fade show active" id="summary-tab-pane" role="tabpanel" aria-labelledby="summary-tab" tabindex="0">
                             <div class="timeline position-relative border-start border-dark ms-3 ps-4 pb-2" id="det-resume">
-                                <div class="text-muted small">経歴情報がありません。</div>
+                                <div class="text-muted small" th:text="#{engineer.career.empty}">経歴情報がありません。</div>
                             </div>
                         </div>
                         <div class="tab-pane fade" id="career-tab-pane" role="tabpanel" aria-labelledby="career-tab" tabindex="0">
                             <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="mb-0 text-white fw-bold">経歴一覧</h6>
-                                <button class="btn btn-sm btn-outline-primary" onclick="openCareerModal()"><i class="bi bi-plus-lg me-1"></i>経歴追加</button>
+                                <h6 class="mb-0 text-white fw-bold" th:text="#{engineer.career.list}">経歴一覧</h6>
+                                <button class="btn btn-sm btn-outline-primary" onclick="openCareerModal()"><i class="bi bi-plus-lg me-1"></i><th:block th:text="#{engineer.career.add}">経歴追加</th:block></button>
                             </div>
                             <div class="table-responsive">
                                 <table class="table table-dark table-hover align-middle">
                                     <thead>
                                         <tr>
-                                            <th>期間</th>
-                                            <th>案件名</th>
-                                            <th>役割</th>
-                                            <th class="text-end">操作</th>
+                                            <th th:text="#{engineer.career.period}">期間</th>
+                                            <th th:text="#{engineer.career.projectName}">案件名</th>
+                                            <th th:text="#{engineer.career.role}">役割</th>
+                                            <th class="text-end" th:text="#{common.actions}">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="career-table-body">
@@ -137,8 +137,8 @@
                             <i class="bi bi-robot fs-5"></i>
                         </div>
                         <div>
-                            <h5 class="modal-title text-white fw-bold mb-0 fs-6">AIアシスタント</h5>
-                            <div class="small text-muted" style="font-size: 0.75rem;"><span id="chat-eng-name">田中 太郎</span> さんのサポート</div>
+                            <h5 class="modal-title text-white fw-bold mb-0 fs-6" th:text="#{ai.assistant}">AIアシスタント</h5>
+                            <div class="small text-muted" style="font-size: 0.75rem;"><span id="chat-eng-name">田中 太郎</span> <th:block th:text="#{ai.assistant.support}">さんのサポート</th:block></div>
                         </div>
                     </div>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -152,13 +152,13 @@
                             <i class="bi bi-robot"></i>
                         </div>
                         <div class="bg-dark border border-secondary rounded p-3 text-light position-relative" style="max-width: 85%;">
-                            <p class="mb-2">こんにちは！AIアシスタントです。<br>エンジニアの最適な案件マッチングや、提案メールの作成をサポートします。何をしますか？</p>
+                            <p class="mb-2"><th:block th:utext="#{ai.assistant.greeting}">こんにちは！AIアシスタントです。<br>エンジニアの最適な案件マッチングや、提案メールの作成をサポートします。何をしますか？</th:block></p>
                             <div class="d-flex gap-2 flex-wrap">
                                 <button class="btn btn-sm btn-outline-primary border-0 bg-primary bg-opacity-10 text-accent-blue rounded-pill px-3" onclick="requestAiMatch()">
-                                    <i class="bi bi-search me-1"></i>案件をマッチング
+                                    <i class="bi bi-search me-1"></i><th:block th:text="#{ai.matching.run}">案件をマッチング</th:block>
                                 </button>
                                 <button class="btn btn-sm btn-outline-info border-0 bg-info bg-opacity-10 text-info rounded-pill px-3" onclick="requestSkillSummary()">
-                                    <i class="bi bi-card-text me-1"></i>スキルを要約
+                                    <i class="bi bi-card-text me-1"></i><th:block th:text="#{ai.assistant.summarizeSkill}">スキルを要約</th:block>
                                 </button>
                             </div>
                         </div>
@@ -169,21 +169,21 @@
                 <div class="modal-footer border-dark bg-dark flex-column align-items-stretch p-3 gap-2">
                     <!-- Email Template Selector -->
                     <div class="d-flex align-items-center gap-2 mb-1">
-                        <span class="badge bg-secondary text-light border border-dark"><i class="bi bi-envelope-paper me-1"></i>提案文作成モード</span>
+                        <span class="badge bg-secondary text-light border border-dark"><i class="bi bi-envelope-paper me-1"></i><th:block th:text="#{ai.assistant.proposalMode}">提案文作成モード</th:block></span>
                         <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" id="chat-template-select" style="width: 250px;">
-                            <option value="">(テンプレートを選択...)</option>
+                            <option value="" th:text="#{ai.assistant.selectTemplate}">(テンプレートを選択...)</option>
                             <!-- JS will load templates -->
-                            <option value="1">標準提案メール</option>
-                            <option value="2">スキル強調テンプレート</option>
+                            <option value="1" th:text="#{ai.assistant.template.standard}">標準提案メール</option>
+                            <option value="2" th:text="#{ai.assistant.template.skill}">スキル強調テンプレート</option>
                         </select>
                         <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark ms-auto" onclick="generateEmailDraft()">
-                            <i class="bi bi-magic me-1"></i>選択した雛形で作成
+                            <i class="bi bi-magic me-1"></i><th:block th:text="#{ai.assistant.createWithTemplate}">選択した雛形で作成</th:block>
                         </button>
                     </div>
                     
                     <!-- Text Input -->
                     <div class="input-group">
-                        <textarea class="form-control form-control-dark bg-secondary text-white border-dark" id="chat-input" rows="1" placeholder="AIへの指示を入力してください... (Enterで送信)" style="resize: none;"></textarea>
+                        <textarea class="form-control form-control-dark bg-secondary text-white border-dark" id="chat-input" rows="1" th:placeholder="#{ai.assistant.placeholder.input}" style="resize: none;"></textarea>
                         <button class="btn btn-primary bg-gradient-purple border-0 px-4" type="button" id="chat-send-btn" onclick="sendChatMessage()">
                             <i class="bi bi-send-fill"></i>
                         </button>
@@ -198,7 +198,7 @@
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-tools me-2 text-info"></i>スキル編集</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-tools me-2 text-info"></i><th:block th:text="#{engineer.skill.edit}">スキル編集</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -206,10 +206,10 @@
                         <table class="table table-dark table-bordered align-middle">
                             <thead class="table-dark-header">
                                 <tr>
-                                    <th style="width: 40%">スキル</th>
-                                    <th style="width: 25%">習熟度</th>
-                                    <th style="width: 20%">経験年数</th>
-                                    <th style="width: 15%" class="text-center">操作</th>
+                                    <th style="width: 40%" th:text="#{engineer.skills}">スキル</th>
+                                    <th style="width: 25%" th:text="#{engineer.skill.proficiency}">習熟度</th>
+                                    <th style="width: 20%" th:text="#{engineer.experience}">経験年数</th>
+                                    <th style="width: 15%" class="text-center" th:text="#{common.actions}">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="skill-edit-tbody">
@@ -218,12 +218,12 @@
                         </table>
                     </div>
                     <button class="btn btn-sm btn-outline-secondary w-100 mt-2" onclick="addSkillRow()">
-                        <i class="bi bi-plus-lg me-1"></i>スキルを追加
+                        <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{engineer.skill.add}">スキルを追加</th:block>
                     </button>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveSkills()">保存</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveSkills()" th:text="#{common.save}">保存</button>
                 </div>
             </div>
         </div>
@@ -234,7 +234,7 @@
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building me-2 text-primary"></i>経歴情報</h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building me-2 text-primary"></i><th:block th:text="#{engineer.career.info}">経歴情報</th:block></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -242,45 +242,45 @@
                         <input type="hidden" id="car-id">
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">期間(開始) <span class="text-danger">*</span></label>
+                                <label class="form-label text-muted small"><th:block th:text="#{engineer.career.periodFrom}">期間(開始)</th:block> <span class="text-danger">*</span></label>
                                 <input type="date" id="car-periodFrom" class="form-control form-control-dark bg-secondary text-white border-dark" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">期間(終了)</label>
+                                <label class="form-label text-muted small" th:text="#{engineer.career.periodTo}">期間(終了)</label>
                                 <input type="date" id="car-periodTo" class="form-control form-control-dark bg-secondary text-white border-dark">
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">案件名 <span class="text-danger">*</span></label>
+                            <label class="form-label text-muted small"><th:block th:text="#{engineer.career.projectName}">案件名</th:block> <span class="text-danger">*</span></label>
                             <input type="text" id="car-projectName" class="form-control form-control-dark bg-secondary text-white border-dark" required>
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">顧客業種</label>
+                                <label class="form-label text-muted small" th:text="#{engineer.career.industry}">顧客業種</label>
                                 <input type="text" id="car-clientIndustry" class="form-control form-control-dark bg-secondary text-white border-dark">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">役割</label>
+                                <label class="form-label text-muted small" th:text="#{engineer.career.role}">役割</label>
                                 <input type="text" id="car-role" class="form-control form-control-dark bg-secondary text-white border-dark">
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">チーム規模 (人)</label>
+                            <label class="form-label text-muted small" th:text="#{engineer.career.teamSize}">チーム規模 (人)</label>
                             <input type="number" id="car-teamSize" class="form-control form-control-dark bg-secondary text-white border-dark" min="1">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">技術スタック</label>
-                            <input type="text" id="car-techStack" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="Java, Spring, MySQL...">
+                            <label class="form-label text-muted small" th:text="#{engineer.career.techStack}">技術スタック</label>
+                            <input type="text" id="car-techStack" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.career.placeholder.techStack}">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">業務内容・実績</label>
+                            <label class="form-label text-muted small" th:text="#{engineer.career.description}">業務内容・実績</label>
                             <textarea id="car-description" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3"></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveCareer()">保存</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveCareer()" th:text="#{common.save}">保存</button>
                 </div>
             </div>
         </div>
