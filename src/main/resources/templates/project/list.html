@@ -141,7 +141,7 @@
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small">ステータス</label>
+                                <label class="form-label text-muted small" th:text="#{project.status}">ステータス</label>
                                 <select id="proj-status" class="form-select form-select-dark bg-secondary text-white border-dark">
                                     <option value="募集中" th:text="#{project.status.open}">募集中</option>
                                     <option value="選考中" th:text="#{project.status.interviewing}">面談調整中 (選考中)</option>

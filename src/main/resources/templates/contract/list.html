@@ -36,7 +36,7 @@
                         <option value="準備中" th:text="#{contract.status.preparing}">準備中</option>
                         <option value="稼動中" th:text="#{contract.status.active}">稼動中</option>
                         <option value="終了" th:text="#{contract.status.ended}">終了</option>
-                        <option value="解約">解約</option>
+                        <option value="解約" th:text="#{contract.status.cancelled}">解約</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -112,7 +112,7 @@
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-muted small">顧客</label>
+                            <label class="form-label text-muted small" th:text="#{contract.customer}">顧客</label>
                             <select id="cont-customerId" class="form-select form-select-dark bg-secondary text-white border-dark">
                                 <option value="1" th:text="#{contract.customer.select}">顧客を選択...</option>
                             </select>
@@ -130,17 +130,17 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small" th:text="#{contract.sellingPrice}">売上単価 (円)</label>
-                                <input type="number" id="cont-sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 800000" min="0" required>
+                                <input type="number" id="cont-sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{contract.placeholder.sellingPrice}" placeholder="例: 800000" min="0" required>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label text-muted small"><th:block th:text="#{contract.costPrice}">原価 (円)</th:block> <span class="text-danger">*</span></label>
-                                <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 600000" min="0" required>
+                                <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{contract.placeholder.costPrice}" placeholder="例: 600000" min="0" required>
                             </div>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
-                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveContract()">
                         <i class="bi bi-check-lg me-1"></i>登録
                     </button>

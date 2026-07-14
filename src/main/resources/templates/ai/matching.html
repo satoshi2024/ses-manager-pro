@@ -103,8 +103,8 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label for="geminiApiKey" class="form-label"><i class="bi bi-key-fill text-warning me-1"></i>Gemini API Key <span class="text-danger">*</span></label>
-                        <input type="password" class="form-control form-control-dark bg-secondary text-white border-dark" id="geminiApiKey" placeholder="AI Studioで取得したAPIキーを入力">
-                        <div class="form-text text-muted small">※APIキーはブラウザにのみ保存され、サーバーには保存されません。</div>
+                        <input type="password" class="form-control form-control-dark bg-secondary text-white border-dark" id="geminiApiKey" th:placeholder="#{ai.placeholder.apiKey}" placeholder="AI Studioで取得したAPIキーを入力">
+                        <div class="form-text text-muted small" th:text="#{ai.hint.apiKeyStorage}">※APIキーはブラウザにのみ保存され、サーバーには保存されません。</div>
                     </div>
                     <div class="col-md-3">
                         <label for="contextEngineer" class="form-label"><i class="bi bi-person-badge text-info me-1"></i><th:block th:text="#{ai.label.contextEngineer}">対象要員 (コンテキスト)</th:block></label>

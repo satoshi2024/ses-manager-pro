@@ -151,7 +151,7 @@
                         <input type="hidden" id="eng-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{engineer.name}">氏名</th:block> <span class="text-danger">*</span></label>
-                            <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="例: 山田 太郎" required>
+                            <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.name}" placeholder="例: 山田 太郎" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{engineer.nameKana}">フリガナ</label>
