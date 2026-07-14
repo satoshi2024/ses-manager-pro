@@ -113,7 +113,7 @@ public class ProposalServiceImplTest {
             proposalService.changeStatus(p.getId(), "結果待ち");
         });
 
-        assertTrue(exception.getMessage().contains("変更できません"));
+        assertTrue(exception.getMessage().contains("error.proposal.statusTransitionInvalid"));
     }
 
     @Test

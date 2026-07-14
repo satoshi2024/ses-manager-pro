@@ -96,7 +96,7 @@ class InvoiceApiControllerTest {
     @Test
     @WithMockUser
     void voidInvoice_Error() throws Exception {
-        org.mockito.Mockito.doThrow(new com.ses.common.exception.BusinessException("入金済の請求書は取消できません。先に入金を取り消してください"))
+        org.mockito.Mockito.doThrow(new com.ses.common.exception.BusinessException("error.invoice.cancelPaidInvoice。先に入金を取り消してください"))
                 .when(invoiceService).voidInvoice(1L);
 
         // GlobalExceptionHandler がある場合は isBadRequest になる可能性もあるが、

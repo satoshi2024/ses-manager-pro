@@ -37,22 +37,22 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Override
     public StoredFile store(MultipartFile file, FileKind kind) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("ファイルが空です");
+            throw BusinessException.of("error.file.empty");
         }
         // サイズ検証
         if (file.getSize() > kind.getMaxBytes()) {
-            throw new BusinessException("ファイルサイズが上限（" + (kind.getMaxBytes() / 1024 / 1024) + "MB）を超えています");
+            throw BusinessException.of("error.file.sizeOver", (kind.getMaxBytes() / 1024 / 1024));
         }
         // 拡張子検証
         String originalName = StringUtils.cleanPath(
                 file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
         String ext = StringUtils.getFilenameExtension(originalName);
         if (!kind.isExtensionAllowed(ext)) {
-            throw new BusinessException("許可されていない拡張子です（許可: " + kind.allowedExtensionsLabel() + "）");
+            throw BusinessException.of("error.file.extensionInvalid", kind.allowedExtensionsLabel());
         }
         // Content-Type検証
         if (!kind.isContentTypeAllowed(file.getContentType())) {
-            throw new BusinessException("許可されていないファイル形式です");
+            throw BusinessException.of("error.file.formatInvalid");
         }
 
         String storedName = UUID.randomUUID().toString().replace("-", "") + "." + ext.toLowerCase();
@@ -62,13 +62,13 @@ public class FileStorageServiceImpl implements FileStorageService {
             Path target = base.resolve(storedName).normalize();
             // 念のため保存先がベースディレクトリ配下であることを確認
             if (!target.startsWith(base)) {
-                throw new BusinessException("不正な保存先です");
+                throw BusinessException.of("error.file.invalidDestination");
             }
             file.transferTo(target);
             return new StoredFile(storedName, originalName, file.getSize());
         } catch (IOException e) {
             log.error("ファイル保存に失敗しました: {}", storedName, e);
-            throw new BusinessException("ファイルの保存に失敗しました");
+            throw BusinessException.of("error.file.saveFailed");
         }
     }
 
@@ -77,20 +77,40 @@ public class FileStorageServiceImpl implements FileStorageService {
         // ファイル名に区切り文字や親参照が含まれる場合は拒否
         if (storedName == null || storedName.isBlank()
                 || storedName.contains("/") || storedName.contains("\\") || storedName.contains("..")) {
-            throw new BusinessException("不正なファイル名です");
+            throw BusinessException.of("error.file.invalidName");
         }
         Path base = baseDir();
         Path target = base.resolve(storedName).normalize();
         if (!target.startsWith(base)) {
-            throw new BusinessException("不正なファイルパスです");
+            throw BusinessException.of("error.file.invalidPath");
         }
         if (!Files.exists(target) || !Files.isReadable(target)) {
-            throw new BusinessException("ファイルが見つかりません");
+            throw BusinessException.of("error.file.notFound");
         }
         try {
             return new UrlResource(target.toUri());
         } catch (MalformedURLException e) {
-            throw new BusinessException("ファイルの読み込みに失敗しました");
+            throw BusinessException.of("error.file.readFailed");
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

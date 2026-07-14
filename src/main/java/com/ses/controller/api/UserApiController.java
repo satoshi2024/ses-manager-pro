@@ -74,12 +74,12 @@ public class UserApiController {
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser) {
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
-            throw new BusinessException("ログインIDとパスワードは必須です");
+            throw BusinessException.of("error.user.credentialsRequired");
         }
         long duplicated = sysUserService.count(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, sysUser.getUsername()));
         if (duplicated > 0) {
-            throw new BusinessException("このログインIDは既に使用されています");
+            throw BusinessException.of("error.user.loginIdDuplicate");
         }
         validatePasswordPolicy(sysUser.getPassword());
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
@@ -101,14 +101,14 @@ public class UserApiController {
                     .eq(SysUser::getUsername, sysUser.getUsername())
                     .ne(sysUser.getId() != null, SysUser::getId, sysUser.getId()));
             if (duplicated > 0) {
-                throw new BusinessException("このログインIDは既に使用されています");
+                throw BusinessException.of("error.user.loginIdDuplicate");
             }
         }
         // 自分自身のロール変更を禁止（自己降格による管理者権限の喪失・ロックアウトを防ぐ）
         SysUser current = currentUser(authentication);
         if (current != null && sysUser.getId() != null && current.getId().equals(sysUser.getId())
                 && StringUtils.hasText(sysUser.getRole()) && !sysUser.getRole().equals(current.getRole())) {
-            throw new BusinessException("自分自身のロールは変更できません");
+            throw BusinessException.of("error.user.roleSelfChange");
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
             validatePasswordPolicy(sysUser.getPassword());
@@ -158,3 +158,9 @@ public class UserApiController {
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, authentication.getName()));
     }
 }
+
+
+
+
+
+

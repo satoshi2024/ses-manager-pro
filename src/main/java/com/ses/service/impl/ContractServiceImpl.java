@@ -39,12 +39,12 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         Contract target = this.getById(id);
         if (target == null) return false;
         if ("稼動中".equals(target.getStatus())) {
-            throw new BusinessException("稼動中の契約は削除できません。先に終了/解約へ変更してください");
+            throw BusinessException.of("error.contract.activeDelete");
         }
         Long contractId = Long.valueOf(id.toString());
         long workRecords = workRecordMapper.selectCount(new LambdaQueryWrapper<WorkRecord>().eq(WorkRecord::getContractId, contractId));
         if (workRecords > 0) {
-            throw new BusinessException("実績が登録されているため削除できません");
+            throw BusinessException.of("error.contract.hasWorkRecord");
         }
         return super.removeById(id);
     }
@@ -63,11 +63,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     private void validate(Contract c) {
         if (c.getEndDate() != null && c.getStartDate() != null && c.getEndDate().isBefore(c.getStartDate())) {
-            throw new BusinessException("契約終了日は開始日以降の日付を指定してください");
+            throw BusinessException.of("error.contract.endDateInvalid");
         }
         if (c.getSettlementHoursMax() != null && c.getSettlementHoursMin() != null 
                 && c.getSettlementHoursMax().compareTo(c.getSettlementHoursMin()) < 0) {
-            throw new BusinessException("精算上限は下限以上の値を指定してください");
+            throw BusinessException.of("error.contract.unitPriceInvalid");
         }
     }
 
@@ -92,7 +92,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 }
             }
             if (!success) {
-                throw new BusinessException("契約番号の採番に失敗しました。再試行してください。");
+                throw BusinessException.of("error.contract.numberGenerateFailed");
             }
         } else {
             this.baseMapper.insert(contract);
@@ -110,7 +110,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
         Contract old = this.baseMapper.selectById(contract.getId());
         if (old == null) {
-            throw new BusinessException("更新対象の契約が見つかりません");
+            throw BusinessException.of("error.contract.notFound");
         }
         this.baseMapper.updateById(contract);
 
@@ -146,7 +146,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
         Project project = projectMapper.selectById(proposal.getProjectId());
         if (project == null) {
-            throw new BusinessException("提案の案件が見つかりません");
+            throw BusinessException.of("error.contract.proposalProjectNotFound");
         }
 
         Contract contract = new Contract();
@@ -168,3 +168,17 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         return contract;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -87,14 +87,14 @@ class WorkRecordServiceImplTest {
     }
 
     /**
-     * 確定済みの月は編集できないこと
+     * error.workRecord.confirmedEditの月は編集できないこと
      */
     @Test
-    void testSaveHours_確定済みはBusinessExceptionをスロー() {
+    void testSaveHours_confirmedRecordThrowsException() {
         Long contractId = 1L;
         String workMonth = "2026-07";
 
-        // すでに確定済みの実績が存在
+        // すでにerror.workRecord.confirmedEditの実績が存在
         WorkRecord existingRecord = new WorkRecord();
         existingRecord.setId(10L);
         existingRecord.setStatus("確定");
@@ -102,7 +102,7 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, workMonth, new BigDecimal("160"), "再入力"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("確定済み");
+                .hasMessageContaining("error.workRecord.confirmedEdit");
     }
 
     /**
@@ -150,7 +150,7 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> spyService.reopenMonth(workMonth))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("支払済のBP支払が1件あるため解除できません");
+                .hasMessageContaining("error.workRecord.paidBpDelete");
                 
         verify(spyService, never()).updateBatchById(any());
     }
@@ -186,7 +186,7 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> spyService.reopenMonth(workMonth))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("請求書(INV-202607-0001)に計上済みの実績が含まれるため解除できません");
+                .hasMessageContaining("error.workRecord.invoicedDelete2");
     }
 
     @Test
@@ -220,7 +220,7 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, workMonth, new BigDecimal("160"), "再入力"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("請求書(INV-202607-0001)に計上済みの実績は編集できません");
+                .hasMessageContaining("error.workRecord.invoicedEdit2");
     }
 
     @Test
@@ -242,6 +242,6 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> spyService.saveHours(contractId, workMonth, new BigDecimal("150"), "テスト"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("他のユーザーが同じ実績を登録しました。再読み込みしてください");
+                .hasMessageContaining("error.workRecord.userNotFound2");
     }
 }

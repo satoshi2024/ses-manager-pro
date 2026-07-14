@@ -78,11 +78,11 @@ public class ProposalApiController {
     public ApiResult<Boolean> sendMail(@PathVariable Long id, @RequestBody Map<String, String> req) {
         Proposal proposal = proposalService.getById(id);
         if (proposal == null) {
-            throw new BusinessException("提案が見つかりません");
+            throw BusinessException.of("error.proposal.notFound");
         }
         String templateIdStr = req.get("templateId");
         if (!StringUtils.hasText(templateIdStr)) {
-            throw new BusinessException("テンプレートを選択してください");
+            throw BusinessException.of("error.proposal.templateNotSelected");
         }
         Long templateId = Long.valueOf(templateIdStr);
 
@@ -102,10 +102,16 @@ public class ProposalApiController {
             to = customer != null ? customer.getContactEmail() : null;
         }
         if (!StringUtils.hasText(to)) {
-            throw new BusinessException("宛先メールアドレスが指定されていません");
+            throw BusinessException.of("error.proposal.emailNotSpecified");
         }
 
         mailService.sendWithTemplate(templateId, params, to);
         return ApiResult.success(true);
     }
 }
+
+
+
+
+
+

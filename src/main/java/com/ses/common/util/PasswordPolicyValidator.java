@@ -8,7 +8,9 @@ public final class PasswordPolicyValidator {
     public static void validate(String password) {
         if (password == null || password.length() < 8
                 || !password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
-            throw new BusinessException("パスワードは8文字以上で英字と数字を含めてください");
+            throw BusinessException.of("error.passwordPolicy");
         }
     }
 }
+
+

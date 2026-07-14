@@ -188,7 +188,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
-        assertTrue(ex.getMessage().contains("入金済の請求書は取消できません"));
+        assertTrue(ex.getMessage().contains("error.invoice.cancelPaidInvoice"));
     }
 
     @Test
@@ -197,7 +197,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(invoiceId)).thenReturn(null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
-        assertTrue(ex.getMessage().contains("請求書が見つかりません"));
+        assertTrue(ex.getMessage().contains("error.invoice.notFound"));
     }
 
     @Test
@@ -210,7 +210,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
-        assertTrue(ex.getMessage().contains("変更できません"));
+        assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
     }
 
     @Test
@@ -223,7 +223,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
-        assertTrue(ex.getMessage().contains("入金日を指定してください"));
+        assertTrue(ex.getMessage().contains("error.invoice.paymentDateRequired"));
     }
 
     @Test
@@ -247,7 +247,7 @@ public class InvoiceServiceImplTest {
         when(bpPaymentMapper.selectById(anyLong())).thenReturn(null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "支払済", null));
-        assertTrue(ex.getMessage().contains("BP支払が見つかりません"));
+        assertTrue(ex.getMessage().contains("error.invoice.bpPaymentNotFound"));
     }
 
     @Test
@@ -270,7 +270,7 @@ public class InvoiceServiceImplTest {
         when(bpPaymentMapper.selectById(1L)).thenReturn(bp);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "済", null));
-        assertTrue(ex.getMessage().contains("不正なステータスです"));
+        assertTrue(ex.getMessage().contains("error.invoice.statusInvalid"));
     }
 
     // ===== WS-F: 支払期限・適格請求書対応 =====

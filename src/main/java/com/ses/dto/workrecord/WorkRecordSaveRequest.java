@@ -24,3 +24,4 @@ public class WorkRecordSaveRequest {
     @Size(max = 500, message = "備考は500文字以内で入力してください")
     private String remarks;
 }
+

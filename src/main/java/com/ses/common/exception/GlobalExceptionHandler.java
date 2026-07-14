@@ -2,11 +2,14 @@ package com.ses.common.exception;
 
 import com.ses.common.result.ApiResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.stream.Collectors;
 
@@ -22,6 +25,9 @@ import java.util.stream.Collectors;
 @RestControllerAdvice(basePackages = "com.ses.controller.api")
 public class GlobalExceptionHandler {
 
+    @Autowired
+    private MessageSource messageSource;
+
     /**
      * 業務例外のハンドリング
      *
@@ -30,8 +36,12 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     public ApiResult<Void> handleBusinessException(BusinessException e) {
-        log.warn("業務例外が発生しました: code={}, message={}", e.getCode(), e.getMessage());
-        return ApiResult.error(e.getCode(), e.getMessage());
+        String message = e.getMessage();
+        if (e.getMessageKey() != null) {
+            message = messageSource.getMessage(e.getMessageKey(), e.getArgs(), e.getMessageKey(), LocaleContextHolder.getLocale());
+        }
+        log.warn("業務例外が発生しました: code={}, message={}", e.getCode(), message);
+        return ApiResult.error(e.getCode(), message);
     }
 
     /**

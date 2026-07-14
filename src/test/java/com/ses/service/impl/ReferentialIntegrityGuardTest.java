@@ -107,7 +107,7 @@ class ReferentialIntegrityGuardTest {
         createContract(e.getId(), p.getId(), c.getId(), "稼動中");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> engineerService.removeById(e.getId()));
-        assertEquals("稼動中の契約があるため削除できません", ex.getMessage());
+        assertEquals("error.engineer.delete.activeContract", ex.getMessage());
         assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_engineer WHERE id = ? AND deleted_flag = 0", Integer.class, e.getId()));
     }
 
@@ -130,7 +130,7 @@ class ReferentialIntegrityGuardTest {
         createProposal(e.getId(), p.getId(), "書類選考中");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> engineerService.removeById(e.getId()));
-        assertEquals("進行中の提案があるため削除できません", ex.getMessage());
+        assertEquals("error.engineer.delete.activeProposal", ex.getMessage());
     }
 
     @Test
@@ -150,7 +150,7 @@ class ReferentialIntegrityGuardTest {
         createProject(c.getId());
 
         BusinessException ex = assertThrows(BusinessException.class, () -> customerService.removeById(c.getId()));
-        assertTrue(ex.getMessage().contains("案件が"));
+        assertTrue(ex.getMessage().contains("error.customer.delete.hasProjects"));
     }
 
     @Test
@@ -176,7 +176,7 @@ class ReferentialIntegrityGuardTest {
         createContract(e.getId(), p.getId(), c.getId(), "終了");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> projectService.removeById(p.getId()));
-        assertEquals("契約が紐づいているため削除できません", ex.getMessage());
+        assertEquals("error.project.delete.hasContract", ex.getMessage());
     }
 
     // --- Contract Tests ---
@@ -189,7 +189,7 @@ class ReferentialIntegrityGuardTest {
         createWorkRecord(contract.getId());
 
         BusinessException ex = assertThrows(BusinessException.class, () -> contractService.removeById(contract.getId()));
-        assertEquals("実績が登録されているため削除できません", ex.getMessage());
+        assertEquals("error.contract.hasWorkRecord", ex.getMessage());
     }
 
     @Test
@@ -200,7 +200,7 @@ class ReferentialIntegrityGuardTest {
         Contract contract = createContract(e.getId(), p.getId(), c.getId(), "稼動中");
 
         BusinessException ex = assertThrows(BusinessException.class, () -> contractService.removeById(contract.getId()));
-        assertEquals("稼動中の契約は削除できません。先に終了/解約へ変更してください", ex.getMessage());
+        assertEquals("error.contract.activeDelete", ex.getMessage());
     }
 
     @Test

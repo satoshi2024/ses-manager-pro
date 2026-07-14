@@ -9,68 +9,108 @@ public interface MessageConstants {
     // ========== CRUD操作メッセージ ==========
 
     /** 保存成功 */
-    String SAVE_SUCCESS = "保存しました";
+    String SAVE_SUCCESS = "common.msg.saveSuccess";
 
     /** 更新成功 */
-    String UPDATE_SUCCESS = "更新しました";
+    String UPDATE_SUCCESS = "common.msg.updateSuccess";
 
     /** 削除成功 */
-    String DELETE_SUCCESS = "削除しました";
+    String DELETE_SUCCESS = "common.msg.deleteSuccess";
 
     /** データ未検出 */
-    String NOT_FOUND = "データが見つかりません";
+    String NOT_FOUND = "error.notFound";
 
     /** 登録成功 */
-    String REGISTER_SUCCESS = "登録しました";
+    String REGISTER_SUCCESS = "common.msg.registerSuccess";
 
     // ========== 認証・認可メッセージ ==========
 
     /** 認証失敗 */
-    String AUTH_FAILED = "認証に失敗しました";
+    String AUTH_FAILED = "error.authFailed";
 
     /** アクセス拒否 */
-    String ACCESS_DENIED = "アクセス権限がありません";
+    String ACCESS_DENIED = "error.accessDenied";
 
     /** ログイン成功 */
-    String LOGIN_SUCCESS = "ログインしました";
+    String LOGIN_SUCCESS = "common.msg.loginSuccess";
 
     /** ログアウト成功 */
-    String LOGOUT_SUCCESS = "ログアウトしました";
+    String LOGOUT_SUCCESS = "common.msg.logoutSuccess";
 
     /** パスワード不一致 */
-    String PASSWORD_MISMATCH = "パスワードが一致しません";
+    String PASSWORD_MISMATCH = "error.passwordMismatch";
 
     /** アカウント無効 */
-    String ACCOUNT_DISABLED = "アカウントが無効です";
+    String ACCOUNT_DISABLED = "error.accountDisabled";
 
     // ========== システムメッセージ ==========
 
     /** システムエラー */
-    String SYSTEM_ERROR = "システムエラーが発生しました";
+    String SYSTEM_ERROR = "error.systemError";
 
     /** バリデーションエラー */
-    String VALIDATION_ERROR = "入力内容に誤りがあります";
+    String VALIDATION_ERROR = "error.validationError";
 
     /** 重複エラー */
-    String DUPLICATE_ERROR = "既に登録されています";
+    String DUPLICATE_ERROR = "error.duplicateError";
 
     /** 処理中 */
-    String PROCESSING = "処理中です。しばらくお待ちください";
+    String PROCESSING = "common.msg.processing";
 
     // ========== 業務メッセージ ==========
 
     /** エンジニア登録成功 */
-    String ENGINEER_REGISTERED = "エンジニアを登録しました";
+    String ENGINEER_REGISTERED = "common.msg.engineerRegistered";
 
     /** 案件登録成功 */
-    String PROJECT_REGISTERED = "案件を登録しました";
+    String PROJECT_REGISTERED = "common.msg.projectRegistered";
 
     /** 提案登録成功 */
-    String PROPOSAL_REGISTERED = "提案を登録しました";
+    String PROPOSAL_REGISTERED = "common.msg.proposalRegistered";
 
     /** 契約登録成功 */
-    String CONTRACT_REGISTERED = "契約を登録しました";
+    String CONTRACT_REGISTERED = "common.msg.contractRegistered";
 
     /** ステータス更新成功 */
-    String STATUS_UPDATED = "ステータスを更新しました";
+    String STATUS_UPDATED = "common.msg.statusUpdated";
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

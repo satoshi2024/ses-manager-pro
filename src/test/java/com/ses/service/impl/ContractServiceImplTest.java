@@ -61,7 +61,7 @@ class ContractServiceImplTest {
         BusinessException exception = assertThrows(BusinessException.class, () -> {
             contractService.saveWithBusinessRules(contract);
         });
-        assertEquals("契約終了日は開始日以降の日付を指定してください", exception.getMessage());
+        assertEquals("error.contract.endDateInvalid", exception.getMessage());
     }
 
     @Test
@@ -73,7 +73,7 @@ class ContractServiceImplTest {
         BusinessException exception = assertThrows(BusinessException.class, () -> {
             contractService.saveWithBusinessRules(contract);
         });
-        assertEquals("精算上限は下限以上の値を指定してください", exception.getMessage());
+        assertEquals("error.contract.unitPriceInvalid", exception.getMessage());
     }
 
     @Test
@@ -250,7 +250,7 @@ class ContractServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.createDraftFromProposal(p));
-        assertTrue(ex.getMessage().contains("案件が見つかりません"));
+        assertTrue(ex.getMessage().contains("error.contract.proposalProjectNotFound"));
     }
 
     @Test

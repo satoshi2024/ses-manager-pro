@@ -63,14 +63,18 @@ public class EngineerCareerApiController {
     private EngineerCareer findOwnedOrThrow(Long engineerId, Long id) {
         EngineerCareer career = engineerCareerService.getById(id);
         if (career == null || !career.getEngineerId().equals(engineerId)) {
-            throw new BusinessException(404, "指定された経歴情報が見つかりません");
+            throw BusinessException.of(404, "error.engineerCareer.notFound");
         }
         return career;
     }
 
     private void validatePeriod(EngineerCareer career) {
         if (career.getPeriodTo() != null && career.getPeriodFrom() != null && career.getPeriodTo().isBefore(career.getPeriodFrom())) {
-            throw new BusinessException("終了時期は開始時期以降を指定してください");
+            throw BusinessException.of("error.engineerCareer.endDateInvalid");
         }
     }
 }
+
+
+
+
