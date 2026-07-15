@@ -68,5 +68,39 @@ public class SalesPerformanceServiceImplTest {
         assertEquals(1, result.size());
         assertEquals(1L, result.get(0).getSalesUserId());
         assertEquals("Sales1", result.get(0).getSalesUserName());
+        assertEquals(null, result.get(0).getClosedRate());
+    }
+
+    @Test
+    void 成約率は百分率で返す() {
+        SysUser u1 = new SysUser();
+        u1.setId(1L);
+        u1.setRealName("Sales1");
+        SysUser u2 = new SysUser();
+        u2.setId(2L);
+        u2.setRealName("Sales2");
+
+        Proposal wonByU1 = new Proposal();
+        wonByU1.setProposedBy(1L);
+        wonByU1.setStatus(StatusConstants.PROPOSAL_CONTRACTED);
+        Proposal lostByU1 = new Proposal();
+        lostByU1.setProposedBy(1L);
+        lostByU1.setStatus(StatusConstants.PROPOSAL_REJECTED);
+        Proposal wonByU2 = new Proposal();
+        wonByU2.setProposedBy(2L);
+        wonByU2.setStatus(StatusConstants.PROPOSAL_CONTRACTED);
+
+        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+                .thenReturn(Arrays.asList(u1, u2));
+        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+        when(engineerSalesMapper.countActivePrimaryGroupBySalesUser()).thenReturn(Collections.emptyList());
+        when(proposalMapper.selectList(ArgumentMatchers.any()))
+                .thenReturn(Arrays.asList(wonByU1, lostByU1, wonByU2));
+        when(workRecordMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+
+        List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
+
+        assertEquals(0, result.get(0).getClosedRate().compareTo(new BigDecimal("50")));
+        assertEquals(0, result.get(1).getClosedRate().compareTo(new BigDecimal("100")));
     }
 }

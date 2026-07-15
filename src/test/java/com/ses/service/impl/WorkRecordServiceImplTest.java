@@ -10,7 +10,6 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordMapper;
-import com.ses.service.billing.SettlementCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,8 +68,8 @@ class WorkRecordServiceImplTest {
         // 契約データを準備
         Contract contract = new Contract();
         contract.setId(contractId);
-        contract.setSellingPrice(new BigDecimal("80")); // 80万円
-        contract.setCostPrice(new BigDecimal("60"));    // 60万円
+        contract.setSellingPrice(new BigDecimal("800000"));
+        contract.setCostPrice(new BigDecimal("600000"));
         contract.setSettlementHoursMin(new BigDecimal("140"));
         contract.setSettlementHoursMax(new BigDecimal("180"));
         when(contractMapper.selectById(contractId)).thenReturn(contract);
@@ -80,9 +79,8 @@ class WorkRecordServiceImplTest {
         WorkRecord record = workRecordService.saveHours(contractId, workMonth, new BigDecimal("150"), "テスト");
 
         assertThat(record).isNotNull();
-        assertThat(record.getBillingAmount()).isEqualByComparingTo(
-                SettlementCalculator.calc(new BigDecimal("80"), new BigDecimal("140"), new BigDecimal("180"), new BigDecimal("150"))
-        );
+        assertThat(record.getBillingAmount()).isEqualByComparingTo("800000");
+        assertThat(record.getPaymentAmount()).isEqualByComparingTo("600000");
         assertThat(record.getStatus()).isEqualTo("入力中");
     }
 
@@ -232,7 +230,7 @@ class WorkRecordServiceImplTest {
 
         Contract contract = new Contract();
         contract.setId(contractId);
-        contract.setSellingPrice(new BigDecimal("80"));
+        contract.setSellingPrice(new BigDecimal("800000"));
         contract.setSettlementHoursMin(new BigDecimal("140"));
         contract.setSettlementHoursMax(new BigDecimal("180"));
         when(contractMapper.selectById(contractId)).thenReturn(contract);

@@ -4,7 +4,7 @@
 
 - [x] 1. タイムラインデータAPI実装
   - **Objective**: `getAvailabilityTimeline()`と新規GETエンドポイントを実装。
-  - **実装ガイダンス**: design.md 2章。「まもなく空き」判定は`notification-center`の`CONTRACT_END`条件と同一にする(踩坑点参照)。
+  - **実装ガイダンス**: design.md 2章。「まもなく空き」判定は`notification-center`の`CONTRACT_END`条件と同一にする(注意点参照)。
   - **テスト要件**: `AnalyticsServiceImplTest`で帯生成・期間未定・後続契約除外の3系統、および`CONTRACT_END`判定との一致テスト。
   - **Demo**: `mvn test`グリーン。curlでレスポンスJSONを確認。
 

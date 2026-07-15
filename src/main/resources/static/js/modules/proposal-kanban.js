@@ -1,3 +1,12 @@
+const PROPOSAL_STATUS_TRANSITIONS = {
+    '書類選考中': ['一次面接', '見送り'],
+    '一次面接': ['二次面接', '結果待ち', '見送り'],
+    '二次面接': ['結果待ち', '見送り'],
+    '結果待ち': ['成約', '見送り'],
+    '成約': [],
+    '見送り': []
+};
+
 $(document).ready(function() {
     // --- Initialize Sortable for Kanban Columns ---
     const columns = document.querySelectorAll('.kanban-column-body');
@@ -20,9 +29,17 @@ $(document).ready(function() {
                 const newCol = evt.to;    // target list
                 
                 const proposalId = itemEl.dataset.id;
+                const oldStatus = evt.from.parentElement.dataset.status;
                 const newStatus = newCol.parentElement.dataset.status;
-                
-                updateProposalStatus(proposalId, newStatus, itemEl, evt.from);
+
+                if (!isProposalStatusTransitionAllowed(oldStatus, newStatus)) {
+                    moveProposalCardBack(itemEl, evt.from, evt.oldIndex);
+                    Toast.error(`ステータスは「${oldStatus}」から「${newStatus}」へ変更できません`);
+                    updateBadgeCounts();
+                    return;
+                }
+
+                updateProposalStatus(proposalId, newStatus, itemEl, evt.from, evt.oldIndex);
             }
         });
         sortables.push(sortable);
@@ -81,6 +98,16 @@ $(document).ready(function() {
         }
     }, { passive: false });
 });
+
+function isProposalStatusTransitionAllowed(oldStatus, newStatus) {
+    return (PROPOSAL_STATUS_TRANSITIONS[oldStatus] || []).includes(newStatus);
+}
+
+function moveProposalCardBack(itemEl, fromCol, oldIndex) {
+    const children = Array.from(fromCol.children).filter(child => child !== itemEl);
+    const beforeNode = children[oldIndex] || null;
+    fromCol.insertBefore(itemEl, beforeNode);
+}
 
 function loadKanbanData() {
     // Show loading state
@@ -174,7 +201,7 @@ function createKanbanCard(item) {
             </div>
             
             <div class="kanban-card-meta">
-                <span class="kanban-card-price">¥${item.proposedUnitPrice ? item.proposedUnitPrice.toLocaleString() : '---'}万</span>
+                <span class="kanban-card-price">¥${item.proposedUnitPrice != null ? item.proposedUnitPrice.toLocaleString() : '---'}</span>
 
                 ${item.aiMatchScore ? `
                 <div class="ai-score-badge small" title="' + SES.i18n.t('js.kanban.ai_score') + '">
@@ -190,15 +217,15 @@ function createKanbanCard(item) {
     `;
 }
 
-function updateProposalStatus(proposalId, newStatus, itemEl, fromCol) {
+function updateProposalStatus(proposalId, newStatus, itemEl, fromCol, oldIndex) {
     if (newStatus === '成約') {
-        executeStatusChange(proposalId, newStatus, itemEl, fromCol, true);
+        executeStatusChange(proposalId, newStatus, itemEl, fromCol, oldIndex, true);
     } else {
-        executeStatusChange(proposalId, newStatus, itemEl, fromCol, false);
+        executeStatusChange(proposalId, newStatus, itemEl, fromCol, oldIndex, false);
     }
 }
 
-function executeStatusChange(proposalId, newStatus, itemEl, fromCol, isWon) {
+function executeStatusChange(proposalId, newStatus, itemEl, fromCol, oldIndex, isWon) {
     $.ajax({
         url: `/api/proposals/${proposalId}/status`,
         method: 'PUT',
@@ -228,14 +255,14 @@ function executeStatusChange(proposalId, newStatus, itemEl, fromCol, isWon) {
                 }
             } else {
                 Toast.error(res.message);
-                $(fromCol).append(itemEl);
+                moveProposalCardBack(itemEl, fromCol, oldIndex);
                 updateBadgeCounts();
             }
         },
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('js.common.error_network'));
-            $(fromCol).append(itemEl);
+            moveProposalCardBack(itemEl, fromCol, oldIndex);
             updateBadgeCounts();
         }
     });
@@ -273,8 +300,7 @@ function saveProposal() {
     const data = {
         engineerId: parseInt(engineerId),
         projectId: parseInt(projectId),
-        proposedUnitPrice: $('#prop-proposedUnitPrice').val() ? parseInt($('#prop-proposedUnitPrice').val()) : null,
-        status: $('#prop-status').val() || '書類選考中'
+        proposedUnitPrice: $('#prop-proposedUnitPrice').val() ? parseInt($('#prop-proposedUnitPrice').val()) : null
     };
 
     $.ajax({

@@ -27,12 +27,17 @@ public class BpPaymentApiController {
         return ApiResult.success(bpPaymentService.addLayer(bpPayment));
     }
 
-    @PutMapping("/bp-payments/{id}")
+    /**
+     * BP支払階層の編集用API。
+     * invoiceメニューの権限境界に含めるため /api/invoices 配下に置く。
+     * 支払ステータス更新は InvoiceApiController の /api/invoices/bp-payments/{id} を使う。
+     */
+    @PutMapping("/invoices/bp-payments/{id}/layer")
     public ApiResult<BpPayment> updateLayer(@PathVariable Long id, @RequestBody BpPayment bpPayment) {
         return ApiResult.success(bpPaymentService.updateLayer(id, bpPayment));
     }
 
-    @DeleteMapping("/bp-payments/{id}")
+    @DeleteMapping("/invoices/bp-payments/{id}/layer")
     public ApiResult<?> deleteLayer(@PathVariable Long id) {
         bpPaymentService.deleteLayer(id);
         return ApiResult.success(null);

@@ -33,7 +33,7 @@
 2. WHEN ユーザーが「エンジニアとして登録」を実行した場合、THE システム SHALL 候補者の氏名・スキル概要を初期値とした`t_engineer`新規作成画面へ遷移する(自動保存はせず、必ず確認・補完の手動操作を挟む)。
 3. THE システム SHALL 変換後も`t_candidate`レコードを削除せず、変換済みフラグ(`convertedEngineerId`)で紐付けを残す(採用実績のトレーサビリティのため)。
 
-## 踩坑点（実装時の注意）
+## 注意点（実装時の注意）
 - `SalesActivity`と見た目が似ているため、実装者が「既存の`SalesActivityApiController`を`customerId`ではなく`candidateId`に置き換えて使い回そう」としがちだが、要件2.3（不採用理由必須）・要件3（エンジニア変換連携）など候補者固有の分岐が今後増える前提のため、**コード共有はせず最初から独立実装にする**こと。
 - 候補者の個人情報（連絡先・希望単価）は`t_engineer`より機微度が高い（不採用者の情報も残るため）。既存の`AuditLog`の対象に`t_candidate`のCRUDも含めるかどうかを実装前に確認する（個人情報保護方針次第）。
 - ステージ変更履歴(`t_candidate_activity`)を「現在ステージ」の単一ソースとして扱うか、`t_candidate.currentStage`という非正規化カラムを別途持つかで実装コストが変わる。一覧表示のパフォーマンスを優先するなら`t_candidate.currentStage`を非正規化カラムとして持ち、`t_candidate_activity`挿入時に同期更新する設計を推奨(design.mdで確定)。

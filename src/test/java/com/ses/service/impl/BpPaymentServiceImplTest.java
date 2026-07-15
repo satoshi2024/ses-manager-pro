@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
 import com.ses.mapper.BpPaymentMapper;
@@ -55,10 +56,10 @@ class BpPaymentServiceImplTest {
 
         when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
-        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+        Exception exception = assertThrows(BusinessException.class, () -> {
             bpPaymentService.addLayer(payment);
         });
-        assertEquals("指定された階層は既に存在します。", exception.getMessage());
+        assertEquals("error.bpPayment.duplicateLayer", exception.getMessage());
     }
 
     @Test
@@ -76,10 +77,10 @@ class BpPaymentServiceImplTest {
 
         when(bpPaymentMapper.selectById(100L)).thenReturn(parent);
 
-        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+        Exception exception = assertThrows(BusinessException.class, () -> {
             bpPaymentService.addLayer(payment);
         });
-        assertEquals("親階層が正しくありません。", exception.getMessage());
+        assertEquals("error.bpPayment.parentInvalid", exception.getMessage());
     }
 
     @Test
@@ -139,5 +140,53 @@ class BpPaymentServiceImplTest {
         assertEquals(1, tree.size());
         assertEquals(new BigDecimal("500000"), tree.get(0).getMargin());
         assertTrue(tree.get(0).getChildren().isEmpty());
+    }
+
+    @Test
+    void updateLayer_支払済の金額変更は拒否する() {
+        BpPayment existing = new BpPayment();
+        existing.setId(1L);
+        existing.setStatus("支払済");
+        existing.setAmount(new BigDecimal("500000"));
+        when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
+
+        BpPayment request = new BpPayment();
+        request.setAmount(new BigDecimal("400000"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> bpPaymentService.updateLayer(1L, request));
+
+        assertEquals("error.bpPayment.paidAmountEdit", ex.getMessage());
+        verify(bpPaymentMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void updateLayer_状態変更は専用API以外では拒否する() {
+        BpPayment existing = new BpPayment();
+        existing.setId(1L);
+        existing.setStatus("未払");
+        when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
+
+        BpPayment request = new BpPayment();
+        request.setStatus("支払済");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> bpPaymentService.updateLayer(1L, request));
+
+        assertEquals("error.bpPayment.statusDedicatedApi", ex.getMessage());
+    }
+
+    @Test
+    void deleteLayer_支払済は拒否する() {
+        BpPayment existing = new BpPayment();
+        existing.setId(1L);
+        existing.setStatus("支払済");
+        when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> bpPaymentService.deleteLayer(1L));
+
+        assertEquals("error.bpPayment.paidDelete", ex.getMessage());
+        verify(bpPaymentMapper, never()).deleteById(1L);
     }
 }

@@ -173,12 +173,33 @@ public class ProposalServiceImplTest {
         Proposal p = new Proposal();
         p.setProjectId(1L);
         p.setEngineerId(7L);
-        p.setStatus("書類選考中");
+        p.setProposedBy(99L);
+        p.setProposedAt(LocalDateTime.now().minusDays(1));
 
         proposalService.save(p);
 
+        Proposal saved = proposalMapper.selectById(p.getId());
+        assertEquals("書類選考中", saved.getStatus());
+        assertEquals(1L, saved.getProposedBy());
+        assertNotNull(saved.getProposedAt());
+        assertTrue(saved.getProposedAt().isAfter(LocalDateTime.now().minusMinutes(1)));
+
         // 提案作成時にBench要員を「提案中」へ連動させる呼び出しが行われること
         verify(engineerStatusService, times(1)).onProposalCreated(7L);
+    }
+
+    @Test
+    public void testSave_RejectsNonInitialStatus() {
+        Proposal p = new Proposal();
+        p.setProjectId(1L);
+        p.setEngineerId(8L);
+        p.setStatus("成約");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> proposalService.save(p));
+
+        assertEquals("error.proposal.statusTransitionInvalid", ex.getMessage());
+        assertNull(p.getId());
+        verify(engineerStatusService, never()).onProposalCreated(8L);
     }
 
     @Test

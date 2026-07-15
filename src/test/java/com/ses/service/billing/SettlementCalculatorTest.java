@@ -10,24 +10,24 @@ class SettlementCalculatorTest {
 
     @Test
     void testFixed() {
-        BigDecimal unitPrice = new BigDecimal("50"); // 50万
+        BigDecimal unitPrice = new BigDecimal("500000");
         BigDecimal amount = SettlementCalculator.calc(unitPrice, null, null, new BigDecimal("160"));
         assertThat(amount).isEqualByComparingTo("500000");
     }
 
     @Test
     void testWithinRange() {
-        BigDecimal unitPrice = new BigDecimal("60"); // 60万
+        BigDecimal unitPrice = new BigDecimal("800000");
         BigDecimal hoursMin = new BigDecimal("140");
         BigDecimal hoursMax = new BigDecimal("180");
         BigDecimal actualHours = new BigDecimal("150");
         BigDecimal amount = SettlementCalculator.calc(unitPrice, hoursMin, hoursMax, actualHours);
-        assertThat(amount).isEqualByComparingTo("600000");
+        assertThat(amount).isEqualByComparingTo("800000");
     }
 
     @Test
     void testExactBounds() {
-        BigDecimal unitPrice = new BigDecimal("60"); // 60万
+        BigDecimal unitPrice = new BigDecimal("600000");
         BigDecimal hoursMin = new BigDecimal("140");
         BigDecimal hoursMax = new BigDecimal("180");
         
@@ -42,7 +42,7 @@ class SettlementCalculatorTest {
 
     @Test
     void testOver() {
-        BigDecimal unitPrice = new BigDecimal("60"); // 60万
+        BigDecimal unitPrice = new BigDecimal("600000");
         BigDecimal hoursMin = new BigDecimal("140");
         BigDecimal hoursMax = new BigDecimal("180");
         BigDecimal actualHours = new BigDecimal("185"); // +5h
@@ -55,7 +55,7 @@ class SettlementCalculatorTest {
 
     @Test
     void testUnder() {
-        BigDecimal unitPrice = new BigDecimal("60"); // 60万
+        BigDecimal unitPrice = new BigDecimal("600000");
         BigDecimal hoursMin = new BigDecimal("140");
         BigDecimal hoursMax = new BigDecimal("180");
         BigDecimal actualHours = new BigDecimal("130"); // -10h
@@ -69,14 +69,14 @@ class SettlementCalculatorTest {
     @Test
     void 上限が0の場合はゼロ除算せず固定扱いになる() {
         BigDecimal amount = SettlementCalculator.calc(
-                new BigDecimal("50"), new BigDecimal("0"), new BigDecimal("0"), new BigDecimal("200"));
+                new BigDecimal("500000"), new BigDecimal("0"), new BigDecimal("0"), new BigDecimal("200"));
         assertThat(amount).isEqualByComparingTo("500000");
     }
 
     @Test
     void 下限が0で実績が下回る場合も固定扱いになる() {
         BigDecimal amount = SettlementCalculator.calc(
-                new BigDecimal("50"), new BigDecimal("0"), new BigDecimal("180"), new BigDecimal("100"));
+                new BigDecimal("500000"), new BigDecimal("0"), new BigDecimal("180"), new BigDecimal("100"));
         assertThat(amount).isEqualByComparingTo("500000");
     }
 }

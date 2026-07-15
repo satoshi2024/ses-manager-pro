@@ -168,7 +168,8 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
             Integer w = proposalWon.getOrDefault(uid, 0);
             Integer t = proposalTotal.getOrDefault(uid, 0);
             if (t > 0) {
-                dto.setClosedRate(new BigDecimal(w).divide(new BigDecimal(t), 4, RoundingMode.HALF_UP));
+                dto.setClosedRate(new BigDecimal(w).multiply(BigDecimal.valueOf(100))
+                        .divide(new BigDecimal(t), 2, RoundingMode.HALF_UP));
             } else {
                 dto.setClosedRate(null);
             }

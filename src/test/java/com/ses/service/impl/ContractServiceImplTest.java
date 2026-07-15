@@ -5,8 +5,10 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
 import com.ses.entity.Project;
 import com.ses.entity.Proposal;
+import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerStatusService;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +38,9 @@ class ContractServiceImplTest {
 
     @Mock
     private ProjectMapper projectMapper;
+
+    @Mock
+    private SysUserMapper sysUserMapper;
 
     @InjectMocks
     private ContractServiceImpl contractService;
@@ -98,6 +103,19 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void saveWithBusinessRules_defaultsBlankContractTypeToQuasiMandate() {
+        Contract contract = new Contract();
+        contract.setContractNo("MANUAL-001");
+        contract.setContractType(" ");
+        when(contractMapper.insert(contract)).thenReturn(1);
+
+        contractService.saveWithBusinessRules(contract);
+
+        assertEquals("準委任", contract.getContractType());
+        verify(contractMapper, times(1)).insert(contract);
+    }
+
+    @Test
     void saveWithBusinessRules_retryOnDuplicateKeyException() {
         Contract contract = new Contract();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
@@ -113,6 +131,38 @@ class ContractServiceImplTest {
 
         assertEquals("C-202607-0003", contract.getContractNo());
         verify(contractMapper, times(2)).insert(contract);
+    }
+
+    @Test
+    void saveWithBusinessRules_rejectsProjectCustomerMismatch() {
+        Contract contract = new Contract();
+        contract.setProjectId(10L);
+        contract.setCustomerId(20L);
+        Project project = new Project();
+        project.setCustomerId(21L);
+        when(projectMapper.selectById(10L)).thenReturn(project);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.saveWithBusinessRules(contract));
+
+        assertEquals("error.contract.projectCustomerMismatch", ex.getMessage());
+        verify(contractMapper, never()).insert(any(Contract.class));
+    }
+
+    @Test
+    void saveWithBusinessRules_rejectsInactiveSalesUser() {
+        Contract contract = new Contract();
+        contract.setSalesUserId(30L);
+        SysUser salesUser = new SysUser();
+        salesUser.setRole("営業");
+        salesUser.setStatus(0);
+        when(sysUserMapper.selectById(30L)).thenReturn(salesUser);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.saveWithBusinessRules(contract));
+
+        assertEquals("error.contract.salesUserInvalid", ex.getMessage());
+        verify(contractMapper, never()).insert(any(Contract.class));
     }
 
     @Test
@@ -150,6 +200,7 @@ class ContractServiceImplTest {
         Contract oldContract = new Contract();
         oldContract.setId(1L);
         oldContract.setStatus("稼動中");
+        oldContract.setEngineerId(200L);
 
         Contract newContract = new Contract();
         newContract.setId(1L);
@@ -162,6 +213,49 @@ class ContractServiceImplTest {
         contractService.updateWithBusinessRules(newContract);
 
         verify(engineerStatusService, times(1)).releaseIfIdle(200L);
+    }
+
+    @Test
+    void updateWithBusinessRules_activeContractEngineerChangeRecalculatesBothEngineers() {
+        Contract oldContract = new Contract();
+        oldContract.setId(1L);
+        oldContract.setStatus("稼動中");
+        oldContract.setEngineerId(100L);
+
+        Contract newContract = new Contract();
+        newContract.setId(1L);
+        newContract.setStatus("稼動中");
+        newContract.setEngineerId(200L);
+
+        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.updateById(newContract)).thenReturn(1);
+
+        contractService.updateWithBusinessRules(newContract);
+
+        verify(engineerStatusService).releaseIfIdle(100L);
+        verify(engineerStatusService).onContractActive(200L);
+    }
+
+    @Test
+    void updateWithBusinessRules_engineerChangeAndEndReleasesOldEngineerOnly() {
+        Contract oldContract = new Contract();
+        oldContract.setId(1L);
+        oldContract.setStatus("稼動中");
+        oldContract.setEngineerId(100L);
+
+        Contract newContract = new Contract();
+        newContract.setId(1L);
+        newContract.setStatus("終了");
+        newContract.setEngineerId(200L);
+
+        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.updateById(newContract)).thenReturn(1);
+
+        contractService.updateWithBusinessRules(newContract);
+
+        verify(engineerStatusService).releaseIfIdle(100L);
+        verify(engineerStatusService, never()).releaseIfIdle(200L);
+        verify(engineerStatusService, never()).onContractActive(any());
     }
 
     @Test
@@ -216,6 +310,7 @@ class ContractServiceImplTest {
         prj.setId(9L);
         prj.setCustomerId(4L);
         when(projectMapper.selectById(9L)).thenReturn(prj);
+        when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class))).thenReturn(1);
 
@@ -285,6 +380,10 @@ class ContractServiceImplTest {
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class))).thenReturn(1);
         when(engineerSalesService.findPrimarySalesUserId(3L)).thenReturn(99L);
+        SysUser salesUser = new SysUser();
+        salesUser.setRole("営業");
+        salesUser.setStatus(1);
+        when(sysUserMapper.selectById(99L)).thenReturn(salesUser);
 
         Contract draft = contractService.createDraftFromProposal(p);
 

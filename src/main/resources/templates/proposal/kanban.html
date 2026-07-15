@@ -158,15 +158,8 @@
                                 <input type="number" id="prop-proposedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{proposal.unitPrice.placeholder}" placeholder="例: 800000" min="0">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small" th:text="#{common.status}">ステータス</label>
-                                <select id="prop-status" class="form-select form-select-dark bg-secondary text-white border-dark">
-                                    <option value="書類選考中" th:text="#{enum.proposalStatus.doc_screening}">書類選考中</option>
-                                    <option value="一次面接" th:text="#{enum.proposalStatus.first_interview}">一次面接</option>
-                                    <option value="二次面接" th:text="#{enum.proposalStatus.second_interview}">二次面接</option>
-                                    <option value="結果待ち" th:text="#{enum.proposalStatus.waiting}">結果待ち</option>
-                                    <option value="成約" th:text="#{enum.proposalStatus.won}">成約</option>
-                                    <option value="見送り" th:text="#{enum.proposalStatus.lost}">見送り</option>
-                                </select>
+                                <label class="form-label text-muted small" th:text="#{proposal.status}">選考ステータス</label>
+                                <input type="text" class="form-control form-control-dark bg-secondary text-white border-dark" th:value="#{proposal.status.documentScreening}" value="書類選考中" readonly>
                             </div>
                         </div>
                     </form>

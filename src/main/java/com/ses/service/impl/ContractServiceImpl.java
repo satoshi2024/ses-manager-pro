@@ -2,12 +2,15 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
 import com.ses.entity.Project;
 import com.ses.entity.Proposal;
+import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerStatusService;
@@ -15,11 +18,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 import com.ses.entity.WorkRecord;
 
 /**
@@ -32,6 +37,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
+    private final SysUserMapper sysUserMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
 
     @Override
@@ -70,12 +76,35 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 && c.getSettlementHoursMax().compareTo(c.getSettlementHoursMin()) < 0) {
             throw BusinessException.of("error.contract.unitPriceInvalid");
         }
+
+        if (c.getProjectId() != null) {
+            Project project = projectMapper.selectById(c.getProjectId());
+            if (project == null) {
+                throw BusinessException.of("error.contract.projectNotFound");
+            }
+            if (!Objects.equals(project.getCustomerId(), c.getCustomerId())) {
+                throw BusinessException.of("error.contract.projectCustomerMismatch");
+            }
+        }
+
+        if (c.getSalesUserId() != null) {
+            SysUser salesUser = sysUserMapper.selectById(c.getSalesUserId());
+            if (salesUser == null
+                    || !StatusConstants.ROLE_SALES.equals(salesUser.getRole())
+                    || !Integer.valueOf(1).equals(salesUser.getStatus())
+                    || Integer.valueOf(1).equals(salesUser.getDeletedFlag())) {
+                throw BusinessException.of("error.contract.salesUserInvalid");
+            }
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveWithBusinessRules(Contract contract) {
         validate(contract);
+        if (!StringUtils.hasText(contract.getContractType())) {
+            contract.setContractType("準委任");
+        }
         
         if (contract.getContractNo() == null || contract.getContractNo().isEmpty()) {
             LocalDate baseDate = contract.getStartDate() != null ? contract.getStartDate() : LocalDate.now();
@@ -115,15 +144,19 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
         this.baseMapper.updateById(contract);
 
-        String newStatus = contract.getStatus();
-        if (newStatus == null || newStatus.equals(old.getStatus())) {
-            return;
+        Long oldEngineerId = old.getEngineerId();
+        Long newEngineerId = contract.getEngineerId() != null ? contract.getEngineerId() : oldEngineerId;
+        String newStatus = contract.getStatus() != null ? contract.getStatus() : old.getStatus();
+        boolean engineerChanged = !Objects.equals(oldEngineerId, newEngineerId);
+
+        // 契約更新後に再計算し、releaseIfIdle が更新済みの関連を参照できるようにする。
+        if (engineerChanged && oldEngineerId != null) {
+            engineerStatusService.releaseIfIdle(oldEngineerId);
         }
-        if ("稼動中".equals(newStatus)) {
-            // 準備中→稼動中 などの更新経由でも要員ステータスを連動させる
-            engineerStatusService.onContractActive(contract.getEngineerId());
-        } else if ("終了".equals(newStatus) || "解約".equals(newStatus)) {
-            engineerStatusService.releaseIfIdle(contract.getEngineerId());
+        if ("稼動中".equals(newStatus) && newEngineerId != null) {
+            engineerStatusService.onContractActive(newEngineerId);
+        } else if (!engineerChanged && "稼動中".equals(old.getStatus()) && newEngineerId != null) {
+            engineerStatusService.releaseIfIdle(newEngineerId);
         }
     }
 
