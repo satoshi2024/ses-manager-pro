@@ -68,7 +68,7 @@ CREATE TABLE t_candidate_activity (
 - `CandidateServiceImplTest`: ステージ変更時の`currentStage`同期、不採用理由必須バリデーション、エンジニア変換DTO生成。
 - `CandidateApiControllerTest`: 権限(HR/営業/管理者は許可、他ロールは403)。
 
-## 5. リスク・確定口径(踩坑点)
+## 5. リスク・確定口径(注意点)
 
 - **`currentStage`非正規化のズレ**: `t_candidate_activity`への直接INSERTが将来バッチ等で行われた場合、`t_candidate.currentStage`との不整合が起きうる。**ステージ変更は必ず`CandidateService`経由のみ**とし、Mapperの直接呼び出しを禁止するコメントをエンティティに残す。
 - **個人情報保護**: `t_candidate`は不採用者の個人情報も保持し続けるため、保存期間ポリシー(何年で削除するか)は本specでは未確定。運用開始前に法務/HRへの確認が必要（design未確定事項としてtasks.mdのDemoステップに含めない）。

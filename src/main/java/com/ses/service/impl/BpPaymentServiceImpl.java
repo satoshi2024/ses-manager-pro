@@ -1,12 +1,15 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.BpPaymentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +17,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -83,20 +87,27 @@ public class BpPaymentServiceImpl implements BpPaymentService {
                 .eq(BpPayment::getWorkRecordId, bpPayment.getWorkRecordId())
                 .eq(BpPayment::getLayerOrder, bpPayment.getLayerOrder()));
         if (count > 0) {
-            throw new IllegalArgumentException("指定された階層は既に存在します。");
+            throw BusinessException.of("error.bpPayment.duplicateLayer");
         }
 
         if (bpPayment.getParentPaymentId() != null) {
             BpPayment parent = bpPaymentMapper.selectById(bpPayment.getParentPaymentId());
             if (parent == null || !parent.getWorkRecordId().equals(bpPayment.getWorkRecordId())) {
-                throw new IllegalArgumentException("親階層が正しくありません。");
+                throw BusinessException.of("error.bpPayment.parentInvalid");
             }
             if (parent.getLayerOrder() >= bpPayment.getLayerOrder()) {
-                throw new IllegalArgumentException("親階層は自身より上位（小さい番号）である必要があります。");
+                throw BusinessException.of("error.bpPayment.parentOrderInvalid");
             }
         }
 
-        bpPaymentMapper.insert(bpPayment);
+        if (bpPayment.getStatus() == null) {
+            bpPayment.setStatus("未払");
+        }
+        try {
+            bpPaymentMapper.insert(bpPayment);
+        } catch (DuplicateKeyException ex) {
+            throw BusinessException.of("error.bpPayment.duplicateLayer");
+        }
         return bpPayment;
     }
 
@@ -105,23 +116,45 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     public BpPayment updateLayer(Long id, BpPayment bpPayment) {
         BpPayment existing = bpPaymentMapper.selectById(id);
         if (existing == null) {
-            throw new IllegalArgumentException("対象データが見つかりません。");
+            throw BusinessException.of("error.bpPayment.notFound");
         }
-        existing.setAmount(bpPayment.getAmount());
-        existing.setStatus(bpPayment.getStatus());
-        existing.setPaidDate(bpPayment.getPaidDate());
+        if ((bpPayment.getStatus() != null && !Objects.equals(existing.getStatus(), bpPayment.getStatus()))
+                || (bpPayment.getPaidDate() != null && !Objects.equals(existing.getPaidDate(), bpPayment.getPaidDate()))) {
+            throw BusinessException.of("error.bpPayment.statusDedicatedApi");
+        }
+        if ("支払済".equals(existing.getStatus())
+                && bpPayment.getAmount() != null
+                && existing.getAmount() != null
+                && existing.getAmount().compareTo(bpPayment.getAmount()) != 0) {
+            throw BusinessException.of("error.bpPayment.paidAmountEdit");
+        }
+
+        if (bpPayment.getAmount() != null) {
+            existing.setAmount(bpPayment.getAmount());
+        }
         existing.setRemarks(bpPayment.getRemarks());
-        bpPaymentMapper.updateById(existing);
+        UpdateWrapper<BpPayment> update = new UpdateWrapper<BpPayment>()
+                .eq("id", id)
+                .set(bpPayment.getAmount() != null, "amount", bpPayment.getAmount())
+                .set("remarks", bpPayment.getRemarks());
+        bpPaymentMapper.update(null, update);
         return existing;
     }
 
     @Override
     @Transactional
     public void deleteLayer(Long id) {
+        BpPayment existing = bpPaymentMapper.selectById(id);
+        if (existing == null) {
+            throw BusinessException.of("error.bpPayment.notFound");
+        }
+        if ("支払済".equals(existing.getStatus())) {
+            throw BusinessException.of("error.bpPayment.paidDelete");
+        }
         Long childCount = bpPaymentMapper.selectCount(new LambdaQueryWrapper<BpPayment>()
                 .eq(BpPayment::getParentPaymentId, id));
         if (childCount > 0) {
-            throw new IllegalArgumentException("子階層が存在するため削除できません。先に子階層を削除してください。");
+            throw BusinessException.of("error.bpPayment.hasChildren");
         }
         bpPaymentMapper.deleteById(id);
     }

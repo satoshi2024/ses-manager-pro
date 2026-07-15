@@ -106,6 +106,11 @@ public class InvoiceApiController {
         return ApiResult.success(list);
     }
 
+    /**
+     * 請求一覧画面からのBP支払ステータス更新。
+     * 階層データ自体の編集は BpPaymentApiController の
+     * /api/invoices/bp-payments/{id}/layer が担当する。
+     */
     @PutMapping("/bp-payments/{id}")
     public ApiResult<?> updateBpPaymentStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
         invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());

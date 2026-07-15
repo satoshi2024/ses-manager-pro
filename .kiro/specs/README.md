@@ -6,9 +6,9 @@
 
 ## 0. 前提の訂正（既に実装済み・spec化済みの機能）
 
-以前の分析で「未実装」と誤って挙げていたが、調査の結果**実装済み**と判明したもの。新規spec作成は不要。今後この領域を触るAIへは、下記の踩坑点を申し送りとして渡すこと。
+以前の分析で「未実装」と誤って挙げていたが、調査の結果**実装済み**と判明したもの。新規spec作成は不要。今後この領域を触るAIへは、下記の注意点を申し送りとして渡すこと。
 
-| 機能 | 実装箇所 | 踩坑点 |
+| 機能 | 実装箇所 | 注意点 |
 |---|---|---|
 | 精算幅（清算幅）計価 | `entity/Contract.java`の`settlementHoursMin`/`settlementHoursMax` + `service/billing/SettlementCalculator.java` | 下限割れ/上限超過の按分計算は「万円単位の単価×時間」で端数切捨て。単価を`sellingPrice`(売上)と`costPrice`(原価)の両方に同一ロジックを適用しているため、**按分計算式を変更する場合は売上・原価の両方に影響する**ことを忘れないこと。`hoursMin`/`hoursMax`がnullまたは0以下の場合は固定額（按分なし）という分岐も見落としやすい。 |
 | 契約更新アラート（契約終了30日前通知） | `.kiro/specs/notification-center`の`CONTRACT_END`通知（`NotificationGenerateService`、日次バッチ`NotificationScheduler`） | 判定条件は`status='稼動中'`かつ`end_date`が[今日, +30日]。**後続契約(`renewedFromContractId`)の有無チェックが入っているか**は要確認 — `engineer-availability-visualization`(本ディレクトリの新規spec)の「まもなく空き」判定と基準をズレさせないこと。 |
@@ -23,6 +23,7 @@
 | `engineer-availability-visualization` | 未着手 | 逐次1〜3 | 新規`AnalyticsApiController`エンドポイント追加のみ | `.kiro/specs/engineer-availability-visualization/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `recruiting-pipeline` | 未着手 | F→A/B→M1 | 完全新規テーブル(`t_candidate`等) | `.kiro/specs/recruiting-pipeline/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `webhook-notifications` | 未着手 | 逐次1〜3 | `WebhookNotifier`新規+既存への1行フック | `.kiro/specs/webhook-notifications/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `business-logic-integrity-hardening` | 対応中 | A/B/C/D→E | Flyway・金額口径・契約/提案/候補者状態・BP支払権限 | `.kiro/specs/business-logic-integrity-hardening/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `payroll-management` | **要ヒアリング・design/tasks未作成** | — | — | 実装指示不可。先に`requirements.md`のヒアリング事項をユーザーに確認すること。 |
 
 ## 2. 既存の未完了spec（再開のみ、ドキュメント追加不要）

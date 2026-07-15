@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -95,17 +96,38 @@ public class ExportApiController {
     }
 
     /**
-     * 契約一覧Excel出力。contract/list.html の検索フォーム(status/customerName/keyword)と同じ条件を受け付ける。
+     * 契約一覧Excel出力。ContractApiController.page と同じ検索条件を受け付ける。
+     * 旧パラメータ(customerName/keyword)も互換のため継続して受け付ける。
      */
     @GetMapping("/api/contracts/export")
     public ResponseEntity<byte[]> exportContracts(
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long salesUserId,
+            @RequestParam(required = false) String contractNo,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
             @RequestParam(required = false) String customerName,
             @RequestParam(required = false) String keyword) {
 
         QueryWrapper<Contract> queryWrapper = new QueryWrapper<>();
         if (StringUtils.hasText(status)) {
             queryWrapper.eq("status", status);
+        }
+        if (customerId != null) {
+            queryWrapper.eq("customer_id", customerId);
+        }
+        if (salesUserId != null) {
+            queryWrapper.eq("sales_user_id", salesUserId);
+        }
+        if (StringUtils.hasText(contractNo)) {
+            queryWrapper.like("contract_no", contractNo);
+        }
+        if (endDateFrom != null) {
+            queryWrapper.ge("end_date", endDateFrom);
+        }
+        if (endDateTo != null) {
+            queryWrapper.le("end_date", endDateTo);
         }
         if (StringUtils.hasText(customerName)) {
             List<Customer> matchedCustomers = customerMapper.selectList(

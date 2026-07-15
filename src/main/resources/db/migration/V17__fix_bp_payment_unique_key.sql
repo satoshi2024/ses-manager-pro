@@ -21,5 +21,6 @@
 -- 空DBからの新規構築・CI(FlywayMigrationSmokeTest)・H2テストでは問題ないが、
 -- レガシーDBをアップグレードする場合は別途 ADD COLUMN を伴う移行が必要になる。
 
-CREATE INDEX idx_bp_payment_work_record ON t_bp_payment (work_record_id);
-ALTER TABLE t_bp_payment DROP INDEX uk_work_record_layer;
+-- V10 ですでに同じ索引移行を実行済み。デプロイ済み環境の
+-- flyway_schema_history と連番を維持するため、V17 は副作用のない移行として残す。
+SELECT 1;

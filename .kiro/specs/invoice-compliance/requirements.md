@@ -11,7 +11,7 @@
 
 ## R1. 支払期限カラムの追加
 
-受入基準:
+受け入れ基準:
 1. `V13__invoice_due_date.sql` で `t_invoice` に `due_date DATE NULL COMMENT '支払期限'` を追加する。
 2. マイグレーションは `src/test/resources/application-test.yml` の
    `spring.sql.init.schema-locations` にも追記され、H2(MySQLモード)でエラーなく適用される。
@@ -20,7 +20,7 @@
 
 ## R2. 支払期限の自動設定
 
-受入基準:
+受け入れ基準:
 1. 請求書生成(`InvoiceServiceImpl.generate`)時に、システム設定キー
    `billing.payment-due-rule` に従って `due_date` が自動設定される。
 2. ルール値は「請求月の翌月末」をデフォルトとする(`next-month-end`)。
@@ -31,7 +31,7 @@
 
 ## R3. 期限超過の検知と通知
 
-受入基準:
+受け入れ基準:
 1. 日次の通知バッチ(既存 `NotificationScheduler` → `NotificationGenerateService`)に
    「期限超過請求書」の生成処理が追加される: `status != '入金済'` かつ `deleted_flag=0` かつ
    `due_date < 今日` の請求書ごとに通知を1件発行する。
@@ -43,7 +43,7 @@
 
 ## R4. 一覧画面での期限表示
 
-受入基準:
+受け入れ基準:
 1. 請求書一覧(invoice.js)に「支払期限」列が追加される。
 2. 期限超過(未入金かつ due_date < 今日)の行は期限が赤字表示になる。
 3. due_date が NULL の既存請求書は `-` 表示。
@@ -54,7 +54,7 @@
 適格請求書の要件(①発行者の氏名/名称と**登録番号** ②取引年月日 ③取引内容
 ④**税率ごとに区分した合計額と適用税率** ⑤**税率ごとの消費税額** ⑥受領者の氏名/名称)を満たさない。
 
-受入基準:
+受け入れ基準:
 1. システム設定に自社情報キーを追加(V13 でシード):
    `company.name`(自社名)、`company.invoice-registration-number`(登録番号 T+13桁)、
    `company.address`(住所)。
@@ -67,6 +67,6 @@
 
 ## R6. 期限のフィルタ(任意・工数が許せば)
 
-受入基準:
+受け入れ基準:
 1. `GET /api/invoices` に `overdue=true` パラメータを追加し、期限超過のみに絞れる。
 2. 一覧画面に「期限超過のみ」チェックボックス。

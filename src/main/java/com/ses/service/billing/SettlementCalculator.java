@@ -11,19 +11,19 @@ public final class SettlementCalculator {
 
     /**
      * 精算計算を行う
-     * @param unitPriceMan 単価(万円, 売上 or 原価)
+     * @param unitPriceYen 単価(円, 売上 or 原価)
      * @param hoursMin 精算下限(h, null=固定)
      * @param hoursMax 精算上限(h, null=固定)
      * @param actualHours 実績時間
      * @return 精算後金額(円, 1円未満切り捨て)
      */
-    public static BigDecimal calc(BigDecimal unitPriceMan, BigDecimal hoursMin,
+    public static BigDecimal calc(BigDecimal unitPriceYen, BigDecimal hoursMin,
                                   BigDecimal hoursMax, BigDecimal actualHours) {
-        if (unitPriceMan == null) {
+        if (unitPriceYen == null) {
             return BigDecimal.ZERO;
         }
         
-        BigDecimal base = unitPriceMan.multiply(BigDecimal.valueOf(10000));
+        BigDecimal base = unitPriceYen;
         
         if (hoursMin == null || hoursMax == null || actualHours == null) {
             return base; // 固定

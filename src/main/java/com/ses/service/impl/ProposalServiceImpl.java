@@ -55,6 +55,14 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Proposal proposal) {
+        if (proposal.getStatus() == null || proposal.getStatus().isBlank()) {
+            proposal.setStatus("書類選考中");
+        } else if (!"書類選考中".equals(proposal.getStatus())) {
+            throw BusinessException.of("error.proposal.statusTransitionInvalid", "新規", proposal.getStatus());
+        }
+        proposal.setProposedAt(LocalDateTime.now());
+        proposal.setProposedBy(SecurityUtils.currentUserId());
+
         boolean result = super.save(proposal);
         if (result && proposal.getEngineerId() != null) {
             engineerStatusService.onProposalCreated(proposal.getEngineerId());

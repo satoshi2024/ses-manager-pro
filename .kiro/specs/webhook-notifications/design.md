@@ -12,7 +12,7 @@ INSERT INTO m_system_config (config_key, config_value, description) VALUES
 ## 2. バックエンド
 
 ### 2.1 新規
-- `service/notification/WebhookNotifier.java`: `@Async`メソッド`notify(Notification notification)`。`RestTemplate`(Spring Boot標準)でSlack互換JSON(`{"text": "..."}`)をPOST。タイムアウト設定(例: 3秒)、例外はcatchしてログ出力のみ(踩坑点参照)。
+- `service/notification/WebhookNotifier.java`: `@Async`メソッド`notify(Notification notification)`。`RestTemplate`(Spring Boot標準)でSlack互換JSON(`{"text": "..."}`)をPOST。タイムアウト設定(例: 3秒)、例外はcatchしてログ出力のみ(注意点参照)。
 - `config/AsyncConfig.java`(未存在の場合новый): `@EnableAsync`+専用`ThreadPoolTaskExecutor`(通知バッチ本処理と分離)。
 
 ### 2.2 既存コードへのフック(最小限の変更)
@@ -30,7 +30,7 @@ INSERT INTO m_system_config (config_key, config_value, description) VALUES
 - `WebhookNotifierTest`: URL未設定時のスキップ、送信失敗時に例外が上位へ伝播しないこと、非同期実行であること(`@Async`のモック検証)。
 - 既存`NotificationServiceImplTest`への影響がないこと(回帰確認、フック追加のみで既存アサーションが変わらないこと)。
 
-## 5. リスク・確定口径(踩坑点)
+## 5. リスク・確定口径(注意点)
 
 - **Webhook URLの機微情報扱い**: requirements.md記載の通り、画面表示・ログ出力ともにマスキングする。
 - **非同期化必須**: 同期実装するとバッチ全体がブロックされる。`@Async`未設定の見落としがないかコードレビューで必ず確認する。

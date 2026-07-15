@@ -35,7 +35,7 @@
 1. THE 各階層 SHALL 個別に `status`（未払/支払済）と `paidDate` を持つ（既存フィールドを流用、階層追加による変更なし）。
 2. THE システム SHALL 上位階層（`layer_order`が大きい側、＝元請に近い側）が「支払済」であっても、下位階層が「未払」のままであることを許容する（実務上、階層間で支払タイミングがずれるため、ステータスの自動連動は行わない）。
 
-## 踩坑点（実装時の注意）
+## 注意点（実装時の注意）
 - `work_record_id UNIQUE` 制約をDBレベルで撤廃する際、既存の一意インデックスを`DROP INDEX`してから複合インデックス（`work_record_id, layer_order`のUNIQUE）に置き換える必要がある。MySQL 8では`ALTER TABLE ... DROP INDEX`と`ADD UNIQUE`を同一ステートメントにまとめないと、一瞬でも制約が外れた隙に矛盾データが入り得る点に注意。
 - `parent_payment_id`の自己参照FKは、同一`work_record_id`内でのみ閉じていることをアプリ層でも検証すること（DBのFK制約だけでは異なるwork_record間の誤参照を防げない）。
 - CLAUDE.mdの規約により、新規カラムは**V1のCREATE TABLEに直接追記**し、追加のALTER migrationを重複させないこと。既存の`db/migration-prod`のBCryptマイグレーション同様、V1は「統合済みベーススキーマ」なので、H2テスト用の`sql/`配下の対応スキーマファイルとENGINEER-SCHEMA等も同時更新が必要（`engineer-schema-h2.sql`など）。

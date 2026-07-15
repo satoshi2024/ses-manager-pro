@@ -8,11 +8,11 @@ $(document).ready(function() {
 
 function loadAllSkillTags() {
     $.ajax({
-        url: '/api/skill-tags?size=1000',
+        url: '/api/skill-tags',
         method: 'GET',
         success: function(res) {
             if (res.code === 200 && res.data) {
-                allSkillTags = res.data.records || res.data;
+                allSkillTags = res.data;
             }
         }
     });

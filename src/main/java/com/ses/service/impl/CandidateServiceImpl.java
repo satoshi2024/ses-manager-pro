@@ -31,12 +31,34 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate> implements CandidateService {
 
+    private static final Set<String> ALLOWED_STAGES = Set.of(
+            StatusConstants.CANDIDATE_STAGE_APPLIED,
+            StatusConstants.CANDIDATE_STAGE_DOCUMENT_SCREENING,
+            StatusConstants.CANDIDATE_STAGE_FIRST_INTERVIEW,
+            StatusConstants.CANDIDATE_STAGE_FINAL_INTERVIEW,
+            StatusConstants.CANDIDATE_STAGE_OFFER,
+            StatusConstants.CANDIDATE_STAGE_OFFER_DECLINED,
+            StatusConstants.CANDIDATE_STAGE_HIRED,
+            StatusConstants.CANDIDATE_STAGE_REJECTED
+    );
+
     private static final Set<String> REASON_REQUIRED_STAGES = Set.of(
             StatusConstants.CANDIDATE_STAGE_REJECTED,
             StatusConstants.CANDIDATE_STAGE_OFFER_DECLINED
     );
 
     private final CandidateActivityMapper candidateActivityMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Candidate candidate) {
+        if (!StringUtils.hasText(candidate.getCurrentStage())) {
+            candidate.setCurrentStage(StatusConstants.CANDIDATE_STAGE_APPLIED);
+        } else {
+            validateStage(candidate.getCurrentStage());
+        }
+        return super.save(candidate);
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -48,6 +70,7 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         if (!StringUtils.hasText(newStage)) {
             throw BusinessException.of("error.candidate.stageRequired");
         }
+        validateStage(newStage);
         if (REASON_REQUIRED_STAGES.contains(newStage) && !StringUtils.hasText(reason)) {
             throw BusinessException.of("error.candidate.reasonRequired");
         }
@@ -67,6 +90,12 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         update.setId(candidateId);
         update.setCurrentStage(newStage);
         this.updateById(update);
+    }
+
+    private void validateStage(String stage) {
+        if (!ALLOWED_STAGES.contains(stage)) {
+            throw BusinessException.of("error.candidate.stageInvalid", stage);
+        }
     }
 
     @Override

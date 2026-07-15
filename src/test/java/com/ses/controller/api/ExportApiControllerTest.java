@@ -18,7 +18,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -87,6 +89,32 @@ class ExportApiControllerTest {
                         result.getResponse().getContentType() != null
                                 && result.getResponse().getContentType().startsWith(XLSX_MEDIA_TYPE)))
                 .andExpect(header().exists("Content-Disposition"));
+    }
+
+    @Test
+    @WithMockUser
+    void exportContracts_appliesListSearchParameters() throws Exception {
+        when(contractMapper.selectList(any())).thenReturn(List.of());
+        when(excelExportService.exportContracts(any())).thenReturn(new byte[]{1, 2, 3});
+
+        mockMvc.perform(get("/api/contracts/export")
+                        .param("status", "稼動中")
+                        .param("customerId", "10")
+                        .param("salesUserId", "20")
+                        .param("contractNo", "C-001")
+                        .param("endDateFrom", "2026-07-01")
+                        .param("endDateTo", "2026-07-31"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(contractMapper).selectList(captor.capture());
+        String sqlSegment = captor.getValue().getSqlSegment();
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("status"));
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("customer_id"));
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("sales_user_id"));
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("contract_no"));
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("end_date >="));
+        org.junit.jupiter.api.Assertions.assertTrue(sqlSegment.contains("end_date <="));
     }
 
     @Test

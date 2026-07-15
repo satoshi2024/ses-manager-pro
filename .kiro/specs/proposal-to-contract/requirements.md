@@ -14,7 +14,7 @@
 
 ## R1. 契約と提案の関連付け
 
-受入基準:
+受け入れ基準:
 1. `V14__contract_proposal_link.sql` で `t_contract` に
    `proposal_id BIGINT NULL COMMENT '生成元提案ID'` とインデックスを追加する。
 2. マイグレーションは `application-test.yml` の `schema-locations` にも追記される。
@@ -22,7 +22,7 @@
 
 ## R2. 成約時の契約ドラフト自動生成
 
-受入基準:
+受け入れ基準:
 1. `ProposalServiceImpl.changeStatus` で `成約` へ遷移した際、**同一トランザクション内で**
    契約ドラフトが自動生成される。トランザクション失敗時は成約への遷移ごとロールバックされる。
 2. 生成される契約の内容:
@@ -40,7 +40,7 @@
 
 ## R3. 成約時の通知
 
-受入基準:
+受け入れ基準:
 1. ドラフト生成後、`NotificationService.publish` で通知を発行する:
    type=`CONTRACT_DRAFT`、メッセージ「提案の成約により契約ドラフト({契約番号})を作成しました。
    内容を確認して契約を確定してください」、リンク `/contract/list`、
@@ -50,7 +50,7 @@
 
 ## R4. カンバン側の二重フロー撤去
 
-受入基準:
+受け入れ基準:
 1. proposal-kanban.js の「成約時にクライアントから契約を作成する」既存フロー
    (契約モーダル起動 or `/api/contracts` POST — 現物を確認)は撤去する。
 2. 成約ドロップ成功後は Toast「成約しました。契約ドラフトを作成しました」を表示し、
@@ -61,7 +61,7 @@
 
 ## R5. 回帰
 
-受入基準:
+受け入れ基準:
 1. 成約以外の遷移(`見送り` 等)の挙動・履歴記録(`t_proposal_history`)は不変。
 2. 既存 `ProposalServiceImplTest` / `ProposalApiControllerTest` がグリーンのまま
    (成約ケースは契約生成の検証を追加した形に更新してよい)。

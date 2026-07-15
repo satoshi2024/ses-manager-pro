@@ -66,6 +66,30 @@ class CandidateServiceImplTest {
     }
 
     @Test
+    void save_ステージ未指定なら応募受付を設定する() {
+        Candidate candidate = new Candidate();
+        candidate.setName("新規候補者");
+
+        candidateService.save(candidate);
+
+        Candidate saved = candidateMapper.selectById(candidate.getId());
+        assertEquals("応募受付", saved.getCurrentStage());
+    }
+
+    @Test
+    void save_未知ステージなら保存しない() {
+        Candidate candidate = new Candidate();
+        candidate.setName("不正候補者");
+        candidate.setCurrentStage("任意文字列");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> candidateService.save(candidate));
+
+        assertEquals("error.candidate.stageInvalid", ex.getMessage());
+        assertNull(candidate.getId());
+    }
+
+    @Test
     void changeStage_currentStageが同期更新され履歴が記録される() {
         Candidate candidate = seedCandidate("応募受付");
 
@@ -109,6 +133,21 @@ class CandidateServiceImplTest {
     void changeStage_候補者が存在しない場合は例外() {
         assertThrows(BusinessException.class,
                 () -> candidateService.changeStage(9999L, "書類選考", null, null));
+    }
+
+    @Test
+    void changeStage_未知ステージなら状態も履歴も変更しない() {
+        Candidate candidate = seedCandidate("応募受付");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> candidateService.changeStage(candidate.getId(), "任意文字列", null, null));
+
+        assertEquals("error.candidate.stageInvalid", ex.getMessage());
+        assertEquals("応募受付", candidateMapper.selectById(candidate.getId()).getCurrentStage());
+        long activityCount = candidateActivityMapper.selectCount(
+                new LambdaQueryWrapper<CandidateActivity>()
+                        .eq(CandidateActivity::getCandidateId, candidate.getId()));
+        assertEquals(0, activityCount);
     }
 
     @Test
