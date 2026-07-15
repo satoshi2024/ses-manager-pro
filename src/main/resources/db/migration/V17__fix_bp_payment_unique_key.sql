@@ -1,0 +1,25 @@
+-- 多段階BP対応の後処理マイグレーション。
+--
+-- 【バージョン変更の経緯】当初 V6 として追加されていたが、既存の
+-- V6__create_sales_activity.sql とバージョン番号が衝突し、Flyway が
+-- 「Found more than one migration with version 6」で起動失敗していたため、
+-- 既存最新の V16 の後続として V17 に採番し直した。
+--
+-- 【処理内容】t_bp_payment の UNIQUE制約 (work_record_id, layer_order) は、
+-- 論理削除(deleted_flag=1)されたレコードと新規追加される同一番号の階層との
+-- 間で重複エラーを引き起こすため削除し、代わりに外部キー制約用・検索用の
+-- 通常インデックスを付与する。階層重複の防止はアプリ層
+-- (BpPaymentServiceImpl.addLayer の selectCount チェック)で担保する。
+--
+-- 【FK依存の順序】work_record_id への外部キーはインデックスを必要とするため、
+-- 先に idx_bp_payment_work_record を作成してから複合UNIQUEを削除する。
+--
+-- 【baseline 運用に関する注意】t_bp_payment の階層カラム
+-- (layer_order/payee_company_name/parent_payment_id) は V5 の CREATE TABLE に
+-- 折り込まれている。baseline-version=9 で導入された「手動SQL適用済みの既存DB」は
+-- V5 を再実行しないため、そうしたレガシーDBに対しては本カラム追加が届かない。
+-- 空DBからの新規構築・CI(FlywayMigrationSmokeTest)・H2テストでは問題ないが、
+-- レガシーDBをアップグレードする場合は別途 ADD COLUMN を伴う移行が必要になる。
+
+CREATE INDEX idx_bp_payment_work_record ON t_bp_payment (work_record_id);
+ALTER TABLE t_bp_payment DROP INDEX uk_work_record_layer;
