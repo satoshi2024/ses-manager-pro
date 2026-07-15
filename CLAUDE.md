@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-SES Manager Pro (`sql/`,`README.md`) is a management system for a Japanese SES (システムエンジニアリングサービス) company: engineer/skill management, customer & project management, a Kanban-style proposal pipeline, contract/assignment tracking, a KPI dashboard (utilization rate, bench count, projected revenue, gross profit), and an admin-only user/permission module (account CRUD + role-based menu access). Backend: Spring Boot 3.3 + MyBatis-Plus + MySQL. Frontend: Thymeleaf server-rendered pages with jQuery/vanilla JS + Bootstrap 5 (no build step, no bundler — static JS/CSS served directly).
+SES Manager Pro (`sql/`,`README.md`) is a management system for a Japanese SES (システムエンジニアリングサービス) company: engineer/skill management, customer & project management, a Kanban-style proposal pipeline, contract/assignment tracking, a KPI dashboard (utilization rate, bench count, projected revenue, gross profit), engineer↔sales-rep assignment with a per-sales-rep performance/commission rollup, and an admin-only user/permission module (account CRUD + role-based menu access). Backend: Spring Boot 3.3 + MyBatis-Plus + MySQL. Frontend: Thymeleaf server-rendered pages with jQuery/vanilla JS + Bootstrap 5 (no build step, no bundler — static JS/CSS served directly).
 
 The UI, comments, log messages, and commit conventions in this repo are in Japanese. Match that when editing templates, JS, and Java comments/log strings.
 
@@ -17,6 +17,7 @@ No Maven wrapper is checked in; use the bundled Maven distribution under `apache
 .\apache-maven-3.9.6\bin\mvn spring-boot:run
 
 # run all tests (uses H2 in-memory DB via src/test/resources/application-test.yml, no MySQL needed)
+# the Testcontainers migration smoke test auto-skips unless Docker is available (see "Tests and the DB")
 .\apache-maven-3.9.6\bin\mvn test
 
 # run a single test class
@@ -33,15 +34,23 @@ App listens on `http://localhost:8080`. Login page is at `/login`; default seede
 
 ### Local database
 
-`application.yml` points at `jdbc:mysql://localhost:3306/ses_manager_db` (env vars `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` override; defaults are for local dev only). Schema/data are managed by **Flyway** (`src/main/resources/db/migration/V1__...` through `V9__...`) and applied automatically on startup — no manual SQL execution needed. Before running the app locally:
+`application.yml` points at `jdbc:mysql://localhost:3306/ses_manager_db` (env vars `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` override; defaults are for local dev only). Schema/data are managed by **Flyway** (`src/main/resources/db/migration/V1__...` through `V14__...`) and applied automatically on startup — no manual SQL execution needed. Before running the app locally:
 1. Start MySQL and create an empty `ses_manager_db` database.
 2. Run the app (`mvn spring-boot:run`) — Flyway applies all migrations on startup.
 
 If you already have a database that was set up by manually running the old `sql/001`–`sql/008` scripts (pre-Flyway), Flyway's `baseline-on-migrate: true` (configured with `baseline-version: 9`) treats it as already at V9 and only applies anything newer — it will NOT re-run V1–V9 against a non-empty schema.
 
+**`V1__create_tables.sql` is a *consolidated baseline schema***, not the original first migration — later structural additions (e.g. `t_engineer.prefecture`/`railway_company`, `sys_user.failed_count`/`locked_until`) have been folded back into V1's `CREATE TABLE`s. Because of this, the incremental migrations that originally added those columns (`V3`, `V8`) are kept as **no-ops** (`SELECT 1;` only — an empty script is rejected by `spring.sql.init`). **When you add a column, add it to V1's `CREATE TABLE` and make sure no later migration re-`ADD COLUMN`s it** — a duplicate `ADD COLUMN` breaks *both* the empty-DB Flyway startup *and* test context init (see below), and MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. New columns/tables introduced *after* the baseline (e.g. V12/V14) are added by their own migration as usual.
+
 `prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/V10__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
 
-Tests do **not** need MySQL — Spring Boot tests pick up `src/test/resources/application-test.yml`, which points at an H2 in-memory DB in MySQL compatibility mode, disables Flyway (`spring.flyway.enabled: false`), and lets individual test classes load their own minimal schema via `@Sql`.
+### Tests and the DB
+
+Tests do **not** need MySQL — Spring Boot tests pick up `src/test/resources/application-test.yml`, which uses an H2 in-memory DB in MySQL compatibility mode and disables Flyway (`spring.flyway.enabled: false`). The H2 schema for tests comes from **two** mechanisms, so keep both in sync when you change the schema:
+1. `spring.sql.init.schema-locations` in `application-test.yml` **replays a curated subset of `db/migration` scripts** (plus H2-specific variants under `sql/` for MySQL-only migrations) to build the base schema for `@SpringBootTest`s that boot the real datasource. `V3` is deliberately **excluded** from this list because it duplicated V1's columns — the same class of conflict described above. A non-idempotent migration will fail *here* at context-init even if it's fine under baselined prod.
+2. Test classes that need a fuller/isolated schema load `@Sql("/sql/engineer-schema-h2.sql")`, a hand-maintained consolidated H2 schema. **If you add a column/table, update `engineer-schema-h2.sql` too** or MyBatis-Plus's generated `SELECT` (which lists every entity column) will fail with "Unknown column".
+
+Because tests run on H2 with Flyway disabled, **migration SQL is never executed against real MySQL by the normal suite**. `src/test/java/com/ses/migration/FlywayMigrationSmokeTest` (Testcontainers) fills that gap: it spins up a real MySQL 8 container, runs the full `db/migration` set from an empty DB, and asserts the resulting schema. **It requires Docker** — it auto-skips when Docker is unavailable (`@Testcontainers(disabledWithoutDocker = true)`), so `mvn test` stays green locally, but **CI needs Docker for this test to actually run** (it is the only automated check that catches MySQL-dialect errors, missing columns, and migration-vs-migration conflicts).
 
 ## Architecture
 
@@ -75,6 +84,15 @@ The user/permission module lets an admin manage accounts and control which menus
 - Both `GlobalControllerAdvice` and `MenuPermissionFilter` obtain their service/mapper beans via `ObjectProvider` and fall back gracefully (empty menus / allow-through) when unavailable, so test slices like `@WebMvcTest` and the H2-backed `MobileResponsiveLayoutTest` (whose schema has no `m_menu`/`t_role_menu`) don't break.
 
 Spec for this module: `.kiro/specs/user-account-management/` (requirements / design / tasks).
+
+### Engineer ↔ sales-rep & commission module
+
+Links engineers to sales users (`sys_user.role = '営業'`), attributes contracts to a sales rep, and computes a per-sales-rep performance/commission rollup. Spec: `.kiro/specs/engineer-sales-commission/`.
+
+- **担当営業 association** — `t_engineer_sales` (`entity/EngineerSales`, `mapper/EngineerSalesMapper`, `service/EngineerSalesService`) maps engineer×sales-user with a `primary_flag` and **history via `released_at` (NULL = current), not soft-delete** (soft-deleted rows are hidden by the global `@TableLogic`, so history would be unqueryable). Business rules live in `EngineerSalesServiceImpl` (`@Transactional`): assignee must be an active `営業`; no duplicate active assignment; first assignment is forced primary; setting a new primary demotes the old one in the same tx; releasing a primary while other reps remain is blocked. API is under `/api/engineers/{id}/sales-reps` (reuses the `engineer` menu's `api_prefix`, so no new permission wiring). UI: a card on `templates/engineer/detail.html` + a column/filter on the engineer list; the bench list (`analytics`) also shows the primary rep.
+- **Contract attribution** — `t_contract` gains `sales_user_id` (+ optional `commission_base_type`/`commission_rate` overrides). On proposal→contract conversion (`ContractServiceImpl.createDraftFromProposal`) it defaults to the engineer's current primary rep; the contract form lets you change it. `ContractMapper.selectPageWithNames` joins `sys_user` for the rep name (**note: `sys_user`'s name column is `real_name`, not `full_name`**) and filters by `salesUserId`.
+- **Performance & commission** — `SalesPerformanceService`/`Impl` computes per-rep monthly figures on the fly (no ledger table): assigned-engineer count, closed-deal count (契約, excluding renewals), win rate (提案 basis via `proposed_by`), active-contract sales/gross-profit (mirrors `DashboardServiceImpl`'s work-record-preferred / contract-price-fallback), and commission = `max(0, floor(base × rate ÷ 100))` per contract. The **default commission rule is stored in `m_system_config`** (`commission.base-type` = 粗利/売上, `commission.rate` = %) and edited from the existing admin `/system-config` screen — no new table. Page: `/sales-performance` (`sales-performance` menu, seeded in V14 for 管理者/営業/マネージャー).
+- **Clearable override fields** — the global `mybatis-plus … update-strategy: not_null` means a `null` field is skipped on update, so a nullable column normally can't be cleared back to "unset". `Contract.salesUserId`/`commissionBaseType`/`commissionRate` override this with `@TableField(updateStrategy = FieldStrategy.ALWAYS)` so "revert to default" (send `null`) actually persists. Use this pattern when a nullable field must be user-clearable; it's safe only when every update path sends the full entity.
 
 ### Frontend structure
 
