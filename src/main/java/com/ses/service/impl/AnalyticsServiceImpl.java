@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.dto.engineersales.EngineerPrimarySalesDto;
 import com.ses.service.AnalyticsService;
+import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +41,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     private final ContractMapper contractMapper;
     private final EngineerSkillMapper engineerSkillMapper;
     private final EngineerSalesMapper engineerSalesMapper;
+    private final SystemConfigService systemConfigService;
 
     @Override
     public List<UtilizationPointDto> utilizationTrend(int months) {
@@ -171,5 +173,130 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             months.add(current.minusMonths(i));
         }
         return months;
+    }
+
+    @Override
+    public com.ses.dto.analytics.AvailabilityTimelineDto getAvailabilityTimeline(String fromMonth, String toMonth, Long skillId, Long salesUserId) {
+        LambdaQueryWrapper<Engineer> eqw = new LambdaQueryWrapper<>();
+        eqw.eq(Engineer::getDeletedFlag, 0);
+
+        List<Engineer> allEngineers = engineerMapper.selectList(eqw);
+
+        if (skillId != null && !allEngineers.isEmpty()) {
+            List<com.ses.entity.EngineerSkill> skills = engineerSkillMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.EngineerSkill>().eq("skill_id", skillId));
+            Set<Long> engIds = skills.stream().map(com.ses.entity.EngineerSkill::getEngineerId).collect(Collectors.toSet());
+            allEngineers = allEngineers.stream().filter(e -> engIds.contains(e.getId())).collect(Collectors.toList());
+        }
+
+        if (salesUserId != null && !allEngineers.isEmpty()) {
+            List<Long> currentEngIds = allEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
+            List<EngineerPrimarySalesDto> primarySales = engineerSalesMapper.selectActivePrimaryByEngineerIds(currentEngIds);
+            Set<Long> engIds = primarySales.stream().filter(s -> salesUserId.equals(s.getSalesUserId())).map(EngineerPrimarySalesDto::getEngineerId).collect(Collectors.toSet());
+            allEngineers = allEngineers.stream().filter(e -> engIds.contains(e.getId())).collect(Collectors.toList());
+        }
+
+        if (allEngineers.isEmpty()) {
+            com.ses.dto.analytics.AvailabilityTimelineDto dto = new com.ses.dto.analytics.AvailabilityTimelineDto();
+            dto.setEngineers(Collections.emptyList());
+            return dto;
+        }
+
+        LocalDate fromDate = YearMonth.parse(fromMonth).atDay(1);
+        LocalDate toDate = YearMonth.parse(toMonth).atEndOfMonth();
+
+        List<Long> engineerIds = allEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
+        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .in(Contract::getEngineerId, engineerIds)
+                .and(wrapper -> wrapper
+                        .eq(Contract::getStatus, "稼動中")
+                        .or(w -> w.eq(Contract::getStatus, "終了")
+                                  .and(w2 -> w2.isNull(Contract::getEndDate).or().ge(Contract::getEndDate, fromDate))
+                                  .le(Contract::getStartDate, toDate))
+                )
+                .orderByAsc(Contract::getStartDate));
+
+        Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
+                .collect(Collectors.groupingBy(Contract::getEngineerId));
+
+        Set<Long> renewedFromContractIds = contracts.stream()
+                .filter(c -> c.getRenewedFromContractId() != null)
+                .map(Contract::getRenewedFromContractId)
+                .collect(Collectors.toSet());
+
+        int noticeDays = systemConfigService.getInt("notice.contract-end-days", 30);
+        LocalDate today = LocalDate.now();
+        LocalDate noticeThreshold = today.plusDays(noticeDays);
+
+        List<com.ses.dto.analytics.EngineerTimelineDto> timelines = new ArrayList<>();
+        for (Engineer eng : allEngineers) {
+            com.ses.dto.analytics.EngineerTimelineDto edto = new com.ses.dto.analytics.EngineerTimelineDto();
+            edto.setId(eng.getId());
+            edto.setName(eng.getFullName());
+
+            List<Contract> engContracts = contractsByEngineer.getOrDefault(eng.getId(), Collections.emptyList());
+            List<com.ses.dto.analytics.TimelineBarDto> bars = new ArrayList<>();
+
+            boolean endingSoon = false;
+
+            for (Contract c : engContracts) {
+                com.ses.dto.analytics.TimelineBarDto bar = new com.ses.dto.analytics.TimelineBarDto();
+                bar.setStart(c.getStartDate());
+                bar.setEnd(c.getEndDate());
+                bar.setContractId(c.getId());
+                bar.setType("contracted");
+                bars.add(bar);
+
+                if ("稼動中".equals(c.getStatus())) {
+                    if (c.getEndDate() != null && !c.getEndDate().isBefore(today) && !c.getEndDate().isAfter(noticeThreshold)) {
+                        if (!renewedFromContractIds.contains(c.getId())) {
+                            endingSoon = true;
+                        }
+                    }
+                }
+            }
+
+            if ("Bench".equals(eng.getStatus()) || bars.isEmpty()) {
+                // Determine available period
+                LocalDate availableFrom = eng.getAvailableDate() != null ? eng.getAvailableDate() : today;
+                com.ses.dto.analytics.TimelineBarDto bar = new com.ses.dto.analytics.TimelineBarDto();
+                bar.setStart(availableFrom);
+                bar.setType("available");
+                bars.add(bar);
+            } else {
+                // If last contract has end date, mark available after that
+                Contract lastContract = engContracts.get(engContracts.size() - 1);
+                if (lastContract.getEndDate() != null && lastContract.getEndDate().isBefore(LocalDate.parse(toMonth + "-01").plusMonths(1).minusDays(1))) {
+                    com.ses.dto.analytics.TimelineBarDto bar = new com.ses.dto.analytics.TimelineBarDto();
+                    bar.setStart(lastContract.getEndDate().plusDays(1));
+                    bar.setType("available");
+                    bars.add(bar);
+                }
+            }
+
+            edto.setBars(bars);
+            edto.setEndingSoon(endingSoon);
+            timelines.add(edto);
+        }
+
+        final java.util.Map<Long, Engineer> engMap = allEngineers.stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+        // Sort: endingSoon first, then Bench (status='Bench'), then others
+        timelines.sort((t1, t2) -> {
+            if (t1.isEndingSoon() != t2.isEndingSoon()) {
+                return t1.isEndingSoon() ? -1 : 1;
+            }
+            Engineer e1 = engMap.get(t1.getId());
+            Engineer e2 = engMap.get(t2.getId());
+            boolean b1 = e1 != null && "Bench".equals(e1.getStatus());
+            boolean b2 = e2 != null && "Bench".equals(e2.getStatus());
+            if (b1 != b2) {
+                return b1 ? -1 : 1;
+            }
+            return t1.getName().compareTo(t2.getName());
+        });
+
+        com.ses.dto.analytics.AvailabilityTimelineDto result = new com.ses.dto.analytics.AvailabilityTimelineDto();
+        result.setEngineers(timelines);
+        return result;
     }
 }

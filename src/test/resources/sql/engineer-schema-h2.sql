@@ -253,14 +253,20 @@ CREATE TABLE t_invoice_item (
 
 DROP TABLE IF EXISTS t_bp_payment CASCADE;
 CREATE TABLE t_bp_payment (
-  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  work_record_id BIGINT NOT NULL UNIQUE,
-  amount         DECIMAL(12,0) NOT NULL,
-  status         VARCHAR(20) DEFAULT '未払',
-  paid_date      DATE,
-  remarks        VARCHAR(500),
-  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  work_record_id     BIGINT NOT NULL,
+  layer_order        INT NOT NULL DEFAULT 1,
+  payee_company_name VARCHAR(200),
+  parent_payment_id  BIGINT,
+  amount             DECIMAL(12,0) NOT NULL,
+  status             VARCHAR(20) DEFAULT '未払',
+  paid_date          DATE,
+  remarks            VARCHAR(500),
+  deleted_flag       TINYINT NOT NULL DEFAULT 0,
+  created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_work_record_layer (work_record_id, layer_order),
+  CONSTRAINT fk_bp_payment_parent FOREIGN KEY (parent_payment_id) REFERENCES t_bp_payment(id)
 );
 
 DROP TABLE IF EXISTS t_sales_activity CASCADE;
@@ -277,6 +283,37 @@ CREATE TABLE t_sales_activity (
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag     TINYINT DEFAULT 0
+);
+
+DROP TABLE IF EXISTS t_candidate_activity CASCADE;
+DROP TABLE IF EXISTS t_candidate CASCADE;
+CREATE TABLE t_candidate (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name                  VARCHAR(100) NOT NULL,
+  contact_email         VARCHAR(200),
+  contact_phone         VARCHAR(20),
+  skill_summary         VARCHAR(1000),
+  desired_rate          DECIMAL(10,0),
+  source                VARCHAR(50),
+  current_stage         VARCHAR(20) NOT NULL DEFAULT '応募受付',
+  next_action_date      DATE,
+  converted_engineer_id BIGINT,
+  remarks               VARCHAR(1000),
+  deleted_flag          TINYINT NOT NULL DEFAULT 0,
+  created_by            BIGINT,
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE t_candidate_activity (
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  candidate_id BIGINT NOT NULL,
+  stage        VARCHAR(20) NOT NULL,
+  reason       VARCHAR(500),
+  changed_by   BIGINT,
+  changed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  remarks      VARCHAR(500),
+  CONSTRAINT fk_candidate_activity_candidate FOREIGN KEY (candidate_id) REFERENCES t_candidate(id)
 );
 
 -- Menu エンティティは path_prefix/api_prefix/created_at/updated_at にマッピングされる

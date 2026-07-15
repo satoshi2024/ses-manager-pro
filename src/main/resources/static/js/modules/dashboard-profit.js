@@ -25,7 +25,7 @@ function renderProfitTable(data) {
     tbody.empty();
 
     if (!data || data.length === 0) {
-        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4"></td></tr>`);
+        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('dashboard.profit.no_data')}</td></tr>`);
         return;
     }
 

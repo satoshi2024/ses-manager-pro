@@ -1,5 +1,8 @@
 ﻿// システム設定画面
 
+// マスキング表示対象キー（漏洩すると第三者に悪用されうる機微情報。サーバー側と同じキー一覧）
+const MASKED_CONFIG_KEYS = ['notification.webhook-url'];
+
 $(document).ready(function() {
     loadConfigs();
 });
@@ -27,10 +30,12 @@ function renderConfigs(configs) {
         const key = escapeHtml(c.configKey);
         const val = c.configValue != null ? escapeHtml(c.configValue) : '';
         const desc = c.description != null ? escapeHtml(c.description) : '';
+        const isMasked = MASKED_CONFIG_KEYS.indexOf(c.configKey) !== -1;
+        const inputType = isMasked ? 'password' : 'text';
         html += `
             <tr data-key="${key}">
                 <td class="text-light small"><code class="text-info">${key}</code></td>
-                <td><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light cfg-value" value="${val}"></td>
+                <td><input type="${inputType}" autocomplete="new-password" class="form-control form-control-sm bg-dark border-secondary text-light cfg-value" value="${val}"></td>
                 <td class="text-muted small">${desc}</td>
             </tr>`;
     });

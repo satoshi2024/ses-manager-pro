@@ -6,7 +6,7 @@
 
 ---
 
-- [ ] 1. テスト基盤のセットアップと動作確認
+- [x] 1. テスト基盤のセットアップと動作確認
   - **Objective**: JUnit5 + Mockitoベースのテストが実行可能な状態を確立する。
   - **実装ガイダンス**:
     - `src/test/java/com/ses/` 配下にテストソースルートを作成する。
@@ -19,7 +19,7 @@
 
 ## 利益分析ページ（Requirement 1）
 
-- [ ] 2. `ContractProfitDto` の作成と `getProfitAnalysis()` のテスト駆動実装
+- [x] 2. `ContractProfitDto` の作成と `getProfitAnalysis()` のテスト駆動実装
   - **Objective**: 契約ごとの粗利計算ロジックをテストで固めてから実装する（design.md 1.3, 1.4節）。
   - **実装ガイダンス**:
     - `dto/dashboard/ContractProfitDto.java` を新規作成（design.md記載のフィールド: contractNo, engineerName, projectName, sellingPrice, costPrice, grossProfitAmount, grossProfitRate）。
@@ -29,7 +29,7 @@
   - **テスト要件**: 上記4パターンを含むユニットテスト。`mvn test` でグリーンになることを確認。
   - **Demo**: `mvn test` で `DashboardServiceImplTest` が全てパスする。まだAPI/画面には繋がっていないが、粗利計算ロジックの正しさが保証された状態。
 
-- [ ] 3. 利益分析API `/api/dashboard/profit-analysis` の追加と結線
+- [x] 3. 利益分析API `/api/dashboard/profit-analysis` の追加と結線
   - **Objective**: Task 2で実装したServiceメソッドをHTTP経由で呼び出せるようにする。
   - **実装ガイダンス**:
     - `DashboardApiController` に `GET /profit-analysis` を追加（design.md 1.2節）。
@@ -37,7 +37,7 @@
   - **テスト要件**: コントローラーテスト1件以上。
   - **Demo**: アプリを起動し、`curl http://localhost:8080/api/dashboard/profit-analysis`（またはPostman/ブラウザ）でJSON形式の契約粗利一覧が返ることを確認できる。
 
-- [ ] 4. 利益分析ページ（`/dashboard/profit`）の画面実装と結線
+- [x] 4. 利益分析ページ（`/dashboard/profit`）の画面実装と結線
   - **Objective**: Task 3のAPIを実際の画面から呼び出し、ユーザーが操作できる状態にする（500エラーの解消）。
   - **実装ガイダンス**:
     - `LoginPageController` に `GET /dashboard/profit` マッピングを追加し `"dashboard/profit"` を返す（design.md 1.1節）。
@@ -50,7 +50,7 @@
 
 ## 年度別売上・粗利集計（Requirement 2, 3）
 
-- [ ] 5. 会計年度計算ロジックのテスト駆動実装
+- [x] 5. 会計年度計算ロジックのテスト駆動実装
   - **Objective**: `year`パラメータに応じた月次集計ロジックをテストで固めてから既存メソッドに組み込む（design.md 2.1, 2.2節）。
   - **実装ガイダンス**:
     - `DashboardServiceImplTest` に以下のテストケースを追加: `year`指定時に4月～翌年3月の12ヶ月分のラベル・データが返ること（AC 2.6）、`year`未指定時に既存の直近6ヶ月トレーリング挙動が維持されること（AC 2.2、既存の回帰確認）、指定年度内で対象契約が存在しない月は0を返すこと（AC 2.7）、契約が存在する月は計算結果（0を含む）をそのまま返すこと（AC 2.8）、月ごとの契約有効判定が開始日・終了日の境界条件を正しく扱うこと（AC 2.5）。
@@ -59,7 +59,7 @@
   - **テスト要件**: 上記5パターンを含むユニットテスト。既存の6ヶ月トレーリング挙動のテストは既存動作の回帰確認として重要。
   - **Demo**: `mvn test` で年度別集計ロジックのテストが全てパスする。既存の `/api/dashboard/summary`（年度指定なし）の挙動が変わっていないこともテストで保証される。
 
-- [ ] 6. `/api/dashboard/summary` への `year` パラメータ結線
+- [x] 6. `/api/dashboard/summary` への `year` パラメータ結線
   - **Objective**: Task 5のロジックをHTTP経由で年度指定できるようにする。
   - **実装ガイダンス**:
     - `DashboardApiController.getSummary()` に `@RequestParam(required = false) Integer year` を追加し、`dashboardService.getSummary(year)` を呼ぶ（design.md 2.1節）。
@@ -67,7 +67,7 @@
   - **テスト要件**: コントローラーテスト2件（year指定あり/なし）。
   - **Demo**: `curl http://localhost:8080/api/dashboard/summary?year=2025` と `year=2026` で異なる月次データ（`charts.revenue.labels`が4月～翌3月）が返ることを確認できる。`year`を省略した場合は従来通り直近6ヶ月が返る。
 
-- [ ] 7. ダッシュボード画面の年度セレクトボックス連携
+- [x] 7. ダッシュボード画面の年度セレクトボックス連携
   - **Objective**: 画面上のセレクトボックス操作でグラフがリロードなしに切り替わるようにする（AC 3.1〜3.4）。
   - **実装ガイダンス**:
     - `templates/dashboard/index.html` の年度 `<select>` に `id="fiscal-year-selector"` を付与。
@@ -84,7 +84,7 @@
 
 ## レポート出力（印刷）機能（Requirement 4）
 
-- [ ] 8. 印刷用CSSとボタンの結線
+- [x] 8. 印刷用CSSとボタンの結線
   - **Objective**: 「レポート出力」ボタンを押すとブラウザの印刷プレビューが開き、資料として読める形で出力される（AC 4.1〜4.3）。
   - **実装ガイダンス**:
     - `templates/dashboard/index.html` のレポート出力ボタンに `id="btn-print-report"` と `no-print` クラスを付与。
@@ -98,7 +98,7 @@
 
 ## 通知機能（Requirement 5, 6）
 
-- [ ] 9. `NotificationDto` の作成と通知抽出ロジックのテスト駆動実装
+- [x] 9. `NotificationDto` の作成と通知抽出ロジックのテスト駆動実装
   - **Objective**: 退場予定エンジニア通知・AIマッチング完了通知の抽出・ソート・件数制限ロジックをテストで固めてから実装する（design.md 5.2, 5.3節）。
   - **実装ガイダンス**:
     - `dto/notification/NotificationDto.java` を新規作成（type, icon, message, date, sortDate）。
@@ -109,7 +109,7 @@
   - **テスト要件**: 上記6パターンを含むユニットテスト。
   - **Demo**: `mvn test` で `NotificationServiceImplTest` が全てパスする。通知の抽出・ソート・件数制限ロジックの正しさが保証された状態。
 
-- [ ] 10. 通知API `/api/notifications` の追加
+- [x] 10. 通知API `/api/notifications` の追加
   - **Objective**: Task 9のServiceをHTTP経由で呼び出せるようにする。
   - **実装ガイダンス**:
     - `controller/api/NotificationApiController.java` を新規作成（design.md 5.1節、`GET /api/notifications`）。
@@ -117,7 +117,7 @@
   - **テスト要件**: コントローラーテスト1件以上。
   - **Demo**: アプリ起動後、`curl http://localhost:8080/api/notifications` でJSON形式の通知一覧が返ることを確認できる（既存データに応じて空配列または実データ）。
 
-- [ ] 11. ヘッダー通知ドロップダウンの動的表示への置き換え
+- [x] 11. ヘッダー通知ドロップダウンの動的表示への置き換え
   - **Objective**: ハードコードされた通知2件を撤廃し、実データに基づく動的表示に置き換える（AC 6.1〜6.5）。
   - **実装ガイダンス**:
     - `templates/layout/header.html` のハードコードされた `<li>` 2件を、design.md 5.4節の `<li id="notification-list">`（初期状態は「読み込み中...」）に置き換える。
@@ -130,7 +130,7 @@
 
 ## 最終確認
 
-- [ ] 12. 全機能の統合確認と既存機能の回帰確認
+- [x] 12. 全機能の統合確認と既存機能の回帰確認
   - **Objective**: 4つの課題が全て解消され、既存機能に影響がないことを確認する。
   - **実装ガイダンス**:
     - `mvn test` を実行し、Task 1〜11で作成した全テストがグリーンであることを確認する。

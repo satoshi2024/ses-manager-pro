@@ -14,4 +14,6 @@ public class BpPaymentListDto {
     private BigDecimal amount;
     private String status;
     private LocalDate paidDate;
+    private Integer layerOrder;
+    private String payeeCompanyName;
 }

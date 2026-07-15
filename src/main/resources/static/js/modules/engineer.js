@@ -1,6 +1,10 @@
 // 駅名 -> 紐づく pref（「都道府県 路線」形式）の一覧。同名駅が複数路線に存在するため配列で保持する。
 window.stationIndex = {};
 
+// 候補者管理からの「エンジニアとして登録」導線で渡される変換元候補者ID
+// (保存完了後にPUT /api/candidates/{id}/converted-engineerで紐付けるために保持する)
+let prefillCandidateId = null;
+
 $(document).ready(function() {
     // Load engineers on page load
     loadEngineers();
@@ -20,7 +24,22 @@ $(document).ready(function() {
     });
     // 路線（鉄道会社）を選択したら、都道府県と鉄道会社を自動設定する
     $('#eng-railwayLine').on('change', applyRailwaySelection);
+
+    // 候補者「入社」→エンジニア変換連携: クエリパラメータで初期値が渡された場合、
+    // 新規登録モーダルを開いて氏名・経歴サマリを補完する(自動保存はしない。要件3.2)。
+    applyCandidateConversionPrefill();
 });
+
+function applyCandidateConversionPrefill() {
+    const params = new URLSearchParams(window.location.search);
+    const candidateId = params.get('prefillCandidateId');
+    if (!candidateId) return;
+
+    prefillCandidateId = candidateId;
+    $('#eng-fullName').val(params.get('prefillName') || '');
+    $('#eng-resumeSummary').val(params.get('prefillSkillSummary') || '');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).show();
+}
 
 function loadSearchSkills() {
     $.ajax({
@@ -430,6 +449,13 @@ function saveEngineer() {
                 Toast.success(id ? SES.i18n.t('success.update') : SES.i18n.t('success.create'));
                 // getInstance は未生成時に null を返し .hide() で例外→モーダルが閉じない不具合になるため getOrCreateInstance を使う
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).hide();
+
+                // 候補者からの変換導線: 新規登録が完了したら、候補者側にconvertedEngineerIdを紐付ける
+                if (!id && prefillCandidateId) {
+                    linkConvertedEngineer(prefillCandidateId);
+                    prefillCandidateId = null;
+                }
+
                 $('#engineer-form')[0].reset();
                 $('#eng-id').val('');
                 loadEngineers(1);
@@ -440,6 +466,27 @@ function saveEngineer() {
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('error.networkError'));
+        }
+    });
+}
+
+// 新規登録された要員のIDをレスポンスから直接得られないため(POST /api/engineersはBoolean応答)、
+// 直近登録分を氏名で再取得して候補者へ紐付ける。
+function linkConvertedEngineer(candidateId) {
+    $.ajax({
+        url: '/api/engineers',
+        method: 'GET',
+        data: { current: 1, size: 1, fullName: $('#eng-fullName').val() },
+        success: function(res) {
+            const records = res.data && (res.data.records || res.data);
+            const engineer = records && records[0];
+            if (!engineer) return;
+            $.ajax({
+                url: '/api/candidates/' + candidateId + '/converted-engineer',
+                method: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({ engineerId: engineer.id })
+            });
         }
     });
 }

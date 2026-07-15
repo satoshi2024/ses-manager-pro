@@ -6,6 +6,7 @@ import com.ses.entity.Notification;
 import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
+import com.ses.service.notification.WebhookNotifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -31,6 +32,9 @@ class NotificationServiceImplTest {
 
     @Mock
     private NotificationReadMapper notificationReadMapper;
+
+    @Mock
+    private WebhookNotifier webhookNotifier;
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
@@ -79,12 +83,14 @@ class NotificationServiceImplTest {
     void testPublish_Success() {
         notificationService.publish("TYPE", "Title", "Msg", "Url", "Key");
         verify(notificationMapper, times(1)).insert(any(Notification.class));
+        verify(webhookNotifier, times(1)).notify(any(Notification.class));
     }
 
     @Test
     void testPublish_Duplicate() {
         doThrow(new DuplicateKeyException("Duplicate")).when(notificationMapper).insert(any(Notification.class));
         assertDoesNotThrow(() -> notificationService.publish("TYPE", "Title", "Msg", "Url", "Key"));
+        verify(webhookNotifier, never()).notify(any(Notification.class));
     }
 
     @Test

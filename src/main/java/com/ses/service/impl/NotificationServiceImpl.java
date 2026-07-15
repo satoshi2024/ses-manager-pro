@@ -8,6 +8,7 @@ import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.notification.WebhookNotifier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationMapper notificationMapper;
     private final NotificationReadMapper notificationReadMapper;
+    private final WebhookNotifier webhookNotifier;
 
     @Override
     public List<NotificationDto> getRecentNotifications(Long userId) {
@@ -72,6 +74,7 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setDedupeKey(dedupeKey);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);
+            webhookNotifier.notify(notification);
         } catch (DuplicateKeyException e) {
             // idempotent
         }

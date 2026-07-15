@@ -22,7 +22,9 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             p.project_name AS projectName,
             b.amount AS amount,
             b.status AS status,
-            b.paid_date AS paidDate
+            b.paid_date AS paidDate,
+            b.layer_order AS layerOrder,
+            b.payee_company_name AS payeeCompanyName
         FROM t_bp_payment b
         INNER JOIN t_work_record w ON b.work_record_id = w.id
         INNER JOIN t_contract c ON w.contract_id = c.id
@@ -35,9 +37,13 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             <if test='status != null and status != ""'>
                 AND b.status = #{status}
             </if>
+            AND b.deleted_flag = 0
         </where>
-        ORDER BY b.id DESC
+        ORDER BY w.id DESC, b.layer_order ASC
         </script>
     """)
     List<BpPaymentListDto> selectListWithDetails(@Param("month") String month, @Param("status") String status);
+
+    @Select("SELECT * FROM t_bp_payment WHERE work_record_id = #{workRecordId} AND deleted_flag = 0 ORDER BY layer_order ASC")
+    List<BpPayment> selectByWorkRecordIdOrderByLayer(@Param("workRecordId") Long workRecordId);
 }

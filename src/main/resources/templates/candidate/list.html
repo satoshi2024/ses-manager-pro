@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{candidate.title} + ' - ' + #{app.name}">候補者管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-plus me-2 text-primary"></i><th:block th:text="#{candidate.title}">候補者管理</th:block></h2>
+        <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#candidateModal">
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{candidate.new}">候補者登録</th:block>
+        </button>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadCandidates(1);" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="searchName" class="form-label text-muted small" th:text="#{candidate.name}">氏名</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchName" th:placeholder="#{candidate.search.placeholder}">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchStage" class="form-label text-muted small" th:text="#{candidate.currentStage}">現在のステージ</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchStage">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="応募受付" th:text="#{candidate.stage.applied}">応募受付</option>
+                        <option value="書類選考" th:text="#{candidate.stage.documentScreening}">書類選考</option>
+                        <option value="一次面談" th:text="#{candidate.stage.firstInterview}">一次面談</option>
+                        <option value="最終面談" th:text="#{candidate.stage.finalInterview}">最終面談</option>
+                        <option value="内定" th:text="#{candidate.stage.offer}">内定</option>
+                        <option value="内定辞退" th:text="#{candidate.stage.offerDeclined}">内定辞退</option>
+                        <option value="入社" th:text="#{candidate.stage.hired}">入社</option>
+                        <option value="不採用" th:text="#{candidate.stage.rejected}">不採用</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="searchSkill" class="form-label text-muted small" th:text="#{candidate.skillSummary}">スキル概要</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchSkill" th:placeholder="#{candidate.placeholder.skillSummary}">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 一覧データテーブル -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4" th:text="#{candidate.name}">氏名</th>
+                            <th scope="col" th:text="#{candidate.currentStage}">ステージ</th>
+                            <th scope="col" th:text="#{candidate.skillSummary}">スキル概要</th>
+                            <th scope="col" th:text="#{candidate.desiredRate}">希望単価</th>
+                            <th scope="col" th:text="#{candidate.source}">情報源</th>
+                            <th scope="col" th:text="#{candidate.nextActionDate}">次アクション予定日</th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody id="candidate-table-body">
+                        <!-- JS will populate results here -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center" id="candidate-pagination">
+            </div>
+        </div>
+    </div>
+
+    <!-- Candidate Registration Modal -->
+    <div class="modal fade" id="candidateModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-primary"></i><th:block th:text="#{candidate.new}">候補者登録</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="candidate-form">
+                        <input type="hidden" id="cand-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small"><th:block th:text="#{candidate.name}">氏名</th:block> <span class="text-danger">*</span></label>
+                            <input type="text" id="cand-name" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{candidate.placeholder.name}" required>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{candidate.contactEmail}">連絡先メール</label>
+                                <input type="email" id="cand-contactEmail" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{candidate.contactPhone}">連絡先電話番号</label>
+                                <input type="text" id="cand-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{candidate.skillSummary}">スキル概要</label>
+                            <textarea id="cand-skillSummary" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3" th:placeholder="#{candidate.placeholder.skillSummary}"></textarea>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{candidate.desiredRate}">希望単価</label>
+                                <input type="number" id="cand-desiredRate" class="form-control form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{candidate.source}">情報源</label>
+                                <input type="text" id="cand-source" class="form-control form-control-dark bg-secondary text-white border-dark" placeholder="紹介/エージェント/自社応募等">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{candidate.nextActionDate}">次アクション予定日</label>
+                            <input type="date" id="cand-nextActionDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{common.remarks}">備考</label>
+                            <textarea id="cand-remarks" class="form-control form-control-dark bg-secondary text-white border-dark" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveCandidate()">
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.create}">登録</th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/candidate.js}"></script>
+    <script>
+        document.getElementById('candidateModal').addEventListener('hidden.bs.modal', function () {
+            document.getElementById('candidate-form').reset();
+            document.getElementById('cand-id').value = '';
+        });
+    </script>
+</th:block>
+</body>
+</html>

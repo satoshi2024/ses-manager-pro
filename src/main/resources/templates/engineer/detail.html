@@ -20,9 +20,15 @@
             <a href="/engineer/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
                 <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}">戻る</th:block>
             </a>
-            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" onclick="generateSkillSheet(currentEngineerId)">
-                <i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{ai.skillsheet.generate}">スキルシート自動生成</th:block>
-            </button>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary text-muted hover-text-white border-dark dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{ai.skillsheet.generate}">スキルシート自動生成</th:block>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-dark">
+                    <li><a class="dropdown-item" href="#" onclick="downloadSkillSheet(currentEngineerId, 'pdf'); return false;"><i class="bi bi-filetype-pdf me-2 text-danger"></i>PDF形式</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="downloadSkillSheet(currentEngineerId, 'excel'); return false;"><i class="bi bi-filetype-xlsx me-2 text-success"></i>Excel形式</a></li>
+                </ul>
+            </div>
             <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(currentEngineerId, currentEngineerName)">
                 <i class="bi bi-robot me-1"></i><th:block th:text="#{ai.matching.run}">AIマッチング実行</th:block>
             </button>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout/base :: head('稼働率カレンダー', ~{::link}, ~{::style})}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        .timeline-container {
+            position: relative;
+            height: 600px;
+            width: 100%;
+            overflow-y: auto;
+        }
+        .filter-section {
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body th:replace="~{layout/base :: body(~{::div}, ~{::script})}">
+
+    <div class="container-fluid py-4">
+        <h1 class="h3 mb-4 text-gray-800">稼働率カレンダー / ガントチャート</h1>
+        
+        <div class="filter-section">
+            <form id="filterForm" class="row gx-3 gy-2 align-items-center">
+                <div class="col-sm-3">
+                    <label class="visually-hidden" for="fromMonth">開始月</label>
+                    <input type="month" class="form-control" id="fromMonth" name="from" required>
+                </div>
+                <div class="col-sm-3">
+                    <label class="visually-hidden" for="toMonth">終了月</label>
+                    <input type="month" class="form-control" id="toMonth" name="to" required>
+                </div>
+                <div class="col-sm-2">
+                    <select class="form-select" id="skillId" name="skillId">
+                        <option value="">全てのスキル</option>
+                        <!-- Options will be populated by JS or rendered by Thymeleaf if we had skill list -->
+                    </select>
+                </div>
+                <div class="col-sm-2">
+                    <select class="form-select" id="salesUserId" name="salesUserId">
+                        <option value="">全ての営業担当</option>
+                        <!-- Options will be populated by JS -->
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary">絞り込み</button>
+                    <button type="button" class="btn btn-secondary ms-2" id="filterEndingSoonBtn">30日以内空き</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">エンジニア稼働タイムライン</h6>
+            </div>
+            <div class="card-body">
+                <div class="timeline-container">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart.js 3+ is needed for the date adapter and timeline features -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="/js/modules/availability-calendar.js"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{candidate.detail} + ' - ' + #{app.name}">候補者詳細 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light">
+            <a href="/candidate/list" class="text-decoration-none text-muted me-2 hover-text-info"><i class="bi bi-arrow-left"></i></a>
+            <i class="bi bi-person-plus me-2 text-primary"></i><span id="header-candidate-name" th:text="#{candidate.detail}">候補者詳細</span>
+        </h2>
+        <div>
+            <button id="btn-convert-engineer" class="btn btn-success shadow-sm d-none" onclick="convertToEngineer()">
+                <i class="bi bi-person-check me-1"></i><th:block th:text="#{candidate.convertToEngineer}">エンジニアとして登録</th:block>
+            </button>
+            <button class="btn btn-primary shadow-sm ms-2" data-bs-toggle="modal" data-bs-target="#stageModal">
+                <i class="bi bi-arrow-repeat me-1"></i><th:block th:text="#{candidate.activity.changeStage}">ステージ変更</th:block>
+            </button>
+        </div>
+    </div>
+
+    <div class="row mb-4 g-4">
+        <!-- 基本情報カード -->
+        <div class="col-md-5">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark bg-dark">
+                    <h5 class="mb-0 text-light"><i class="bi bi-info-circle me-2"></i><th:block th:text="#{common.basicInfo}">基本情報</th:block></h5>
+                </div>
+                <div class="card-body text-light">
+                    <table class="table table-borderless table-dark table-sm mb-0">
+                        <tbody>
+                            <tr><th style="width: 140px;" class="text-muted" th:text="#{candidate.name}">氏名</th><td id="info-name">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.currentStage}">ステージ</th><td id="info-currentStage">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.contactEmail}">連絡先メール</th><td id="info-contactEmail">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.contactPhone}">連絡先電話番号</th><td id="info-contactPhone">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.desiredRate}">希望単価</th><td id="info-desiredRate">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.source}">情報源</th><td id="info-source">-</td></tr>
+                            <tr><th class="text-muted" th:text="#{candidate.nextActionDate}">次アクション予定日</th><td id="info-nextActionDate">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- スキル概要・備考 -->
+        <div class="col-md-7">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark bg-dark">
+                    <h5 class="mb-0 text-light"><i class="bi bi-card-text me-2"></i><th:block th:text="#{candidate.skillSummary}">スキル概要</th:block></h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-light text-wrap" style="white-space: pre-wrap;" id="info-skillSummary">-</p>
+                    <hr class="border-dark">
+                    <h6 class="text-muted small" th:text="#{common.remarks}">備考</h6>
+                    <p class="text-light text-wrap" style="white-space: pre-wrap;" id="info-remarks">-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ステージ変更履歴タイムライン -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-header border-dark bg-dark d-flex justify-content-between align-items-center">
+            <h5 class="mb-0 text-light"><i class="bi bi-clock-history me-2"></i><th:block th:text="#{candidate.activity.timeline}">ステージ変更履歴</th:block></h5>
+        </div>
+        <div class="card-body" id="timeline-container">
+            <!-- Timeline items injected by JS -->
+        </div>
+    </div>
+
+    <!-- Stage Change Modal -->
+    <div class="modal fade" id="stageModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-arrow-repeat me-2 text-primary"></i><th:block th:text="#{candidate.activity.changeStage}">ステージ変更</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="stage-form">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small"><th:block th:text="#{candidate.currentStage}">ステージ</th:block> <span class="text-danger">*</span></label>
+                            <select id="stage-newStage" class="form-select form-select-dark bg-secondary text-white border-dark" required onchange="toggleReasonRequired()">
+                                <option value="応募受付" th:text="#{candidate.stage.applied}">応募受付</option>
+                                <option value="書類選考" th:text="#{candidate.stage.documentScreening}">書類選考</option>
+                                <option value="一次面談" th:text="#{candidate.stage.firstInterview}">一次面談</option>
+                                <option value="最終面談" th:text="#{candidate.stage.finalInterview}">最終面談</option>
+                                <option value="内定" th:text="#{candidate.stage.offer}">内定</option>
+                                <option value="内定辞退" th:text="#{candidate.stage.offerDeclined}">内定辞退</option>
+                                <option value="入社" th:text="#{candidate.stage.hired}">入社</option>
+                                <option value="不採用" th:text="#{candidate.stage.rejected}">不採用</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">
+                                <th:block th:text="#{candidate.activity.reason}">理由</th:block>
+                                <span id="stage-reason-required" class="text-danger d-none">*</span>
+                            </label>
+                            <textarea id="stage-reason" class="form-control form-control-dark bg-secondary text-white border-dark" rows="2"></textarea>
+                            <div class="form-text text-muted small" th:text="#{candidate.reasonRequired.hint}">不採用・内定辞退の場合は理由の入力が必須です</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{candidate.activity.remarks}">備考</label>
+                            <textarea id="stage-remarks" class="form-control form-control-dark bg-secondary text-white border-dark" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveStageChange()">
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.save}">保存</th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/candidate.js}"></script>
+</th:block>
+</body>
+</html>

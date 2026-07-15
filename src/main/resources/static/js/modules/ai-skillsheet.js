@@ -1,4 +1,6 @@
-﻿function generateSkillSheet(engineerId) {
+function downloadSkillSheet(engineerId, type) {
+    const url = `/api/engineers/${engineerId}/skill-sheet.${type}`;
+    
     Swal.fire({
         title: SES.i18n.t('ai.skillsheet.generateTitle'),
         text: SES.i18n.t('ai.skillsheet.generateConfirm'),
@@ -6,7 +8,7 @@
         showCancelButton: true,
         confirmButtonColor: '#6f42c1',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: '<i class="bi bi-magic me-1"></i> ' + SES.i18n.t('ai.skillsheet.generateButton'),
+        confirmButtonText: '<i class="bi bi-download me-1"></i> ' + SES.i18n.t('common.download') || 'ダウンロード',
         cancelButtonText: SES.i18n.t('common.cancel')
     }).then((result) => {
         if (result.isConfirmed) {
@@ -17,40 +19,18 @@
                 showConfirmButton: false
             });
 
-            // Simulate API call
-            $.ajax({
-                url: '/api/ai/skill-sheet/generate',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({ engineerId: engineerId }),
-                success: function(res) {
-                    setTimeout(() => {
-                        Swal.fire({
-                            title: SES.i18n.t('ai.skillsheet.successTitle'),
-                            text: SES.i18n.t('ai.skillsheet.successMessage'),
-                            icon: 'success',
-                            confirmButtonColor: '#20c997',
-                            confirmButtonText: SES.i18n.t('common.download')
-                        }).then(() => {
-                            // In real app, trigger PDF download or open in new tab
-                            Toast.success(SES.i18n.t('ai.skillsheet.downloadStarted'));
-                        });
-                    }, 2000);
-                },
-                error: function(err) {
-                    setTimeout(() => {
-                        Swal.fire({
-                            title: SES.i18n.t('ai.skillsheet.successTitle') + ' (Mock)',
-                            text: SES.i18n.t('ai.skillsheet.successMessage'),
-                            icon: 'success',
-                            confirmButtonColor: '#20c997',
-                            confirmButtonText: SES.i18n.t('common.download')
-                        }).then(() => {
-                            Toast.success(SES.i18n.t('ai.skillsheet.downloadStarted'));
-                        });
-                    }, 2000);
-                }
-            });
+            // Trigger file download by creating a temporary anchor tag
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            setTimeout(() => {
+                Swal.close();
+                Toast.success(SES.i18n.t('ai.skillsheet.downloadStarted'));
+            }, 1000);
         }
     });
 }

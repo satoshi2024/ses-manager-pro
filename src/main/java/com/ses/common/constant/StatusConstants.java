@@ -89,4 +89,30 @@ public interface StatusConstants {
 
     /** インセンティブ計算基準: 売上 */
     String COMMISSION_BASE_SALES = "売上";
+
+    // ========== 候補者採用ステージ ==========
+
+    /** 候補者ステージ: 応募受付 */
+    String CANDIDATE_STAGE_APPLIED = "応募受付";
+
+    /** 候補者ステージ: 書類選考 */
+    String CANDIDATE_STAGE_DOCUMENT_SCREENING = "書類選考";
+
+    /** 候補者ステージ: 一次面談 */
+    String CANDIDATE_STAGE_FIRST_INTERVIEW = "一次面談";
+
+    /** 候補者ステージ: 最終面談 */
+    String CANDIDATE_STAGE_FINAL_INTERVIEW = "最終面談";
+
+    /** 候補者ステージ: 内定 */
+    String CANDIDATE_STAGE_OFFER = "内定";
+
+    /** 候補者ステージ: 内定辞退 */
+    String CANDIDATE_STAGE_OFFER_DECLINED = "内定辞退";
+
+    /** 候補者ステージ: 入社 */
+    String CANDIDATE_STAGE_HIRED = "入社";
+
+    /** 候補者ステージ: 不採用 */
+    String CANDIDATE_STAGE_REJECTED = "不採用";
 }

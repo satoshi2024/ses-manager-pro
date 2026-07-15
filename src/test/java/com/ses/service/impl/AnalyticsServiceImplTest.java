@@ -81,8 +81,11 @@ class AnalyticsServiceImplTest {
         return dto;
     }
 
+    @Mock
+    private com.ses.service.SystemConfigService systemConfigService;
+
     private void initService() {
-        analyticsService = new AnalyticsServiceImpl(engineerMapper, contractMapper, engineerSkillMapper, engineerSalesMapper);
+        analyticsService = new AnalyticsServiceImpl(engineerMapper, contractMapper, engineerSkillMapper, engineerSalesMapper, systemConfigService);
     }
 
     // --- utilizationTrend boundary tests ---
@@ -261,5 +264,71 @@ class AnalyticsServiceImplTest {
         assertEquals(1, result.size());
         assertEquals(100L, result.get(0).getPrimarySalesUserId());
         assertEquals("山田営業", result.get(0).getPrimarySalesUserName());
+    }
+
+    // --- getAvailabilityTimeline tests ---
+    @Test
+    void getAvailabilityTimeline_generatesCorrectTimelineBars() {
+        initService();
+        Engineer e1 = createEngineer(1L, "Eng1", "稼動中", LocalDate.now().minusDays(10).atStartOfDay());
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e1));
+
+        Contract c1 = createContract(1L, "稼動中", LocalDate.now().minusDays(10), LocalDate.now().plusDays(10));
+        c1.setId(100L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(systemConfigService.getInt(any(), any(Integer.class))).thenReturn(30);
+
+        com.ses.dto.analytics.AvailabilityTimelineDto result = analyticsService.getAvailabilityTimeline("2026-07", "2026-12", null, null);
+        
+        assertEquals(1, result.getEngineers().size());
+        com.ses.dto.analytics.EngineerTimelineDto edto = result.getEngineers().get(0);
+        assertEquals(1L, edto.getId());
+        assertTrue(edto.isEndingSoon(), "End date within 30 days and no next contract should be endingSoon");
+
+        assertEquals(2, edto.getBars().size(), "Should have contracted bar and available bar");
+        assertEquals("contracted", edto.getBars().get(0).getType());
+        assertEquals("available", edto.getBars().get(1).getType());
+        assertEquals(c1.getEndDate().plusDays(1), edto.getBars().get(1).getStart());
+    }
+
+    @Test
+    void getAvailabilityTimeline_noEndDate_isNotEndingSoon() {
+        initService();
+        Engineer e1 = createEngineer(1L, "Eng1", "稼動中", LocalDate.now().minusDays(10).atStartOfDay());
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e1));
+
+        Contract c1 = createContract(1L, "稼動中", LocalDate.now().minusDays(10), null);
+        c1.setId(100L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(systemConfigService.getInt(any(), any(Integer.class))).thenReturn(30);
+
+        com.ses.dto.analytics.AvailabilityTimelineDto result = analyticsService.getAvailabilityTimeline("2026-07", "2026-12", null, null);
+        
+        com.ses.dto.analytics.EngineerTimelineDto edto = result.getEngineers().get(0);
+        org.junit.jupiter.api.Assertions.assertFalse(edto.isEndingSoon(), "No end date should not trigger endingSoon");
+        assertEquals(1, edto.getBars().size(), "Only contracted bar since no end date");
+        assertEquals("contracted", edto.getBars().get(0).getType());
+    }
+
+    @Test
+    void getAvailabilityTimeline_hasRenewedContract_isNotEndingSoon() {
+        initService();
+        Engineer e1 = createEngineer(1L, "Eng1", "稼動中", LocalDate.now().minusDays(10).atStartOfDay());
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e1));
+
+        Contract c1 = createContract(1L, "稼動中", LocalDate.now().minusDays(10), LocalDate.now().plusDays(10));
+        c1.setId(100L);
+        
+        Contract c2 = createContract(1L, "準備中", LocalDate.now().plusDays(11), LocalDate.now().plusDays(40));
+        c2.setId(101L);
+        c2.setRenewedFromContractId(100L);
+
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(systemConfigService.getInt(any(), any(Integer.class))).thenReturn(30);
+
+        com.ses.dto.analytics.AvailabilityTimelineDto result = analyticsService.getAvailabilityTimeline("2026-07", "2026-12", null, null);
+        
+        com.ses.dto.analytics.EngineerTimelineDto edto = result.getEngineers().get(0);
+        org.junit.jupiter.api.Assertions.assertFalse(edto.isEndingSoon(), "Has next contract, so not endingSoon");
     }
 }

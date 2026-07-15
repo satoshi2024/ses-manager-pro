@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layout/base :: layout(#{invoice.title}, ~{::content}, ~{::script})}">
 <head>
@@ -117,6 +117,44 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary" id="btnSubmitGenerate" th:text="#{common.btn.generate}">生成</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 階層追加モーダル -->
+    <div class="modal fade" id="bpPaymentLayerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">階層追加</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="bpPaymentLayerForm">
+                        <input type="hidden" name="workRecordId">
+                        <input type="hidden" name="parentPaymentId">
+                        <div class="mb-3">
+                            <label class="form-label">階層番号</label>
+                            <input type="number" class="form-control" name="layerOrder" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">支払先協力会社名</label>
+                            <input type="text" class="form-control" name="payeeCompanyName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">金額(円)</label>
+                            <input type="number" class="form-control" name="amount" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">備考</label>
+                            <textarea class="form-control" name="remarks"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btnSubmitBpPaymentLayer">保存</button>
                 </div>
             </div>
         </div>

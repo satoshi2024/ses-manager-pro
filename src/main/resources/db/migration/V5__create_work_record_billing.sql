@@ -47,14 +47,20 @@ CREATE TABLE t_invoice_item (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='請求書明細';
 
 CREATE TABLE t_bp_payment (
-  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
-  work_record_id BIGINT NOT NULL UNIQUE COMMENT '対象実績',
-  amount         DECIMAL(12,0) NOT NULL COMMENT '支払金額(円)',
-  status         ENUM('未払','支払済') DEFAULT '未払',
-  paid_date      DATE COMMENT '支払日',
-  remarks        VARCHAR(500),
-  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  work_record_id     BIGINT NOT NULL COMMENT '対象実績',
+  layer_order        INT NOT NULL DEFAULT 1 COMMENT '階層番号(1=技術者に最も近い一次請)',
+  payee_company_name VARCHAR(200) COMMENT '支払先協力会社名',
+  parent_payment_id  BIGINT COMMENT '上位階層への自己参照(同一work_record_id内)',
+  amount             DECIMAL(12,0) NOT NULL COMMENT '支払金額(円)',
+  status             VARCHAR(20) NOT NULL DEFAULT '未払',
+  paid_date          DATE COMMENT '支払日',
+  remarks            VARCHAR(500),
+  deleted_flag       TINYINT NOT NULL DEFAULT 0,
+  created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_work_record_layer (work_record_id, layer_order),
+  CONSTRAINT fk_bp_payment_parent FOREIGN KEY (parent_payment_id) REFERENCES t_bp_payment(id),
   FOREIGN KEY (work_record_id) REFERENCES t_work_record(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP支払';
 

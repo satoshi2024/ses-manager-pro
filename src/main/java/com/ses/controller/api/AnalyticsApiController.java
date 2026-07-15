@@ -33,4 +33,13 @@ public class AnalyticsApiController {
     public ApiResult<List<BenchEngineerDto>> bench() {
         return ApiResult.success(analyticsService.benchList());
     }
+
+    @GetMapping("/availability-timeline")
+    public ApiResult<com.ses.dto.analytics.AvailabilityTimelineDto> availabilityTimeline(
+            @RequestParam(required = true) String from,
+            @RequestParam(required = true) String to,
+            @RequestParam(required = false) Long skillId,
+            @RequestParam(required = false) Long salesUserId) {
+        return ApiResult.success(analyticsService.getAvailabilityTimeline(from, to, skillId, salesUserId));
+    }
 }

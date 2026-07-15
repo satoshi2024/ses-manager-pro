@@ -1,4 +1,4 @@
-﻿document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
     loadInvoices();
     
     document.getElementById('btnGenerateInvoice').addEventListener('click', () => {
@@ -144,9 +144,15 @@ function loadBpPayments() {
             tbody.innerHTML = '';
             data.data.forEach(bp => {
                 const tr = document.createElement('tr');
+                let indentStyle = '';
+                let prefix = '';
+                if (bp.layerOrder && bp.layerOrder > 1) {
+                    indentStyle = `padding-left: ${(bp.layerOrder - 1) * 20}px; border-left: 3px solid #ccc;`;
+                    prefix = '└ ';
+                }
                 tr.innerHTML = `
-                    <td>${bp.workMonth}</td>
-                    <td>${SES.escapeHtml(bp.engineerName)}</td>
+                    <td style="${indentStyle}">${prefix}${bp.workMonth}</td>
+                    <td>${SES.escapeHtml(bp.engineerName)}<br><small class="text-muted">${bp.payeeCompanyName ? SES.escapeHtml(bp.payeeCompanyName) : ''}</small></td>
                     <td>${SES.escapeHtml(bp.projectName)}</td>
                     <td class="text-right">￥${bp.amount.toLocaleString()}</td>
                     <td>${SES.i18n.t('invoice.status.' + bp.status, bp.status)}</td>
@@ -154,6 +160,7 @@ function loadBpPayments() {
                     <td>
                         ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('invoice.btn.markPaid')}</button>` : ''}
                         ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">${SES.i18n.t('invoice.btn.revertToUnpaid')}</button>` : ''}
+                        <button class="btn btn-sm btn-info" onclick="openBpPaymentLayerModal(${bp.workRecordId}, ${bp.id}, ${bp.layerOrder ? bp.layerOrder + 1 : 2})">階層追加</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -161,6 +168,48 @@ function loadBpPayments() {
         }
     });
 }
+
+function openBpPaymentLayerModal(workRecordId, parentPaymentId, nextLayerOrder) {
+    document.querySelector('#bpPaymentLayerForm [name="workRecordId"]').value = workRecordId;
+    document.querySelector('#bpPaymentLayerForm [name="parentPaymentId"]').value = parentPaymentId;
+    document.querySelector('#bpPaymentLayerForm [name="layerOrder"]').value = nextLayerOrder;
+    document.querySelector('#bpPaymentLayerForm [name="payeeCompanyName"]').value = '';
+    document.querySelector('#bpPaymentLayerForm [name="amount"]').value = '';
+    document.querySelector('#bpPaymentLayerForm [name="remarks"]').value = '';
+    new bootstrap.Modal(document.getElementById('bpPaymentLayerModal')).show();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // ... existing init ...
+    const btnSubmitLayer = document.getElementById('btnSubmitBpPaymentLayer');
+    if (btnSubmitLayer) {
+        btnSubmitLayer.addEventListener('click', () => {
+            const form = document.getElementById('bpPaymentLayerForm');
+            const workRecordId = form.querySelector('[name="workRecordId"]').value;
+            const data = {
+                parentPaymentId: form.querySelector('[name="parentPaymentId"]').value,
+                layerOrder: parseInt(form.querySelector('[name="layerOrder"]').value, 10),
+                payeeCompanyName: form.querySelector('[name="payeeCompanyName"]').value,
+                amount: parseFloat(form.querySelector('[name="amount"]').value),
+                remarks: form.querySelector('[name="remarks"]').value,
+                status: '未払'
+            };
+
+            fetch(`/api/work-records/${workRecordId}/bp-payments`, {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+                body: JSON.stringify(data)
+            }).then(res => res.json()).then(resData => {
+                if (resData.code === 200) {
+                    bootstrap.Modal.getInstance(document.getElementById('bpPaymentLayerModal')).hide();
+                    loadBpPayments();
+                } else {
+                    alert(resData.message || 'Error occurred');
+                }
+            });
+        });
+    }
+});
 
 function updateBpPaymentStatus(id, status) {
     let paidDate = null;
