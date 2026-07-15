@@ -63,6 +63,21 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='commission.base-type'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='commission.rate'");
 
+            // Webhook設定(V15)
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='notification.webhook-url'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='notification.webhook-types'");
+
+            // 候補者管理テーブル(V16)
+            assertTableExists(st, "t_candidate");
+            assertTableExists(st, "t_candidate_activity");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='candidate'");
+
+            // 一意性制約カラム(V18) - 生成列の検証
+            assertColumnExists(st, "t_bp_payment", "active_work_record_id");
+            assertColumnExists(st, "t_bp_payment", "active_layer_order");
+            assertColumnExists(st, "t_contract", "active_proposal_id");
+            assertColumnExists(st, "t_contract", "active_renewed_from_contract_id");
+
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
                     "SELECT c.id, su.real_name AS salesUserName FROM t_contract c " +
