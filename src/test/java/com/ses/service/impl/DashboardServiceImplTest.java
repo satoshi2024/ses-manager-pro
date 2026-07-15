@@ -189,8 +189,12 @@ class DashboardServiceImplTest {
     void testGetSummary_退場予定の抽出は終了日の下限も条件に含む() {
         // 退場予定リストは「本日〜30日以内に終了する」契約が対象であり、
         // 既に終了済み（end_date < 本日）の契約を含めてはならない。
-        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        
+        Engineer e2 = new Engineer();
+        e2.setId(2L);
+        e2.setFullName("Target Engineer");
+        e2.setStatus("稼動中");
+        when(engineerMapper.selectList(any())).thenReturn(List.of(e2));
+
         Contract c1 = new Contract();
         c1.setId(1L);
         c1.setEngineerId(1L);
@@ -205,15 +209,62 @@ class DashboardServiceImplTest {
         
         when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
 
-        Engineer e2 = new Engineer();
-        e2.setId(2L);
-        e2.setFullName("Target Engineer");
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e2));
 
         var result = dashboardService.getSummary(null);
 
         assertEquals(1, result.getRetiring().size(), "退場予定リストに既に終了した契約が含まれていないこと");
         assertEquals(2L, result.getRetiring().get(0).getId());
+    }
+
+    @Test
+    void testGetSummary_退場予定チャートは退場予定リストと同じ契約終了日ベースで集計する() {
+        Engineer engineer = createEngineer(1L, "Retiring Engineer");
+        engineer.setStatus("稼動中");
+        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer));
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setEngineerId(1L);
+        contract.setStatus("稼動中");
+        contract.setEndDate(LocalDate.now().plusDays(10));
+        when(contractMapper.selectList(any())).thenReturn(List.of(contract));
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(engineer));
+        when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(Collections.emptyList());
+        when(proposalMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        var result = dashboardService.getSummary(null);
+
+        assertEquals(List.of(0, 0, 1, 0), result.getCharts().getStatus().getData());
+        assertEquals(1, result.getRetiring().size());
+        assertEquals(1L, result.getRetiring().get(0).getId());
+    }
+
+    @Test
+    void testGetSummary_退場予定は要員単位で重複せず他ステータスにも重複計上しない() {
+        Engineer engineer = createEngineer(1L, "Retiring Engineer");
+        engineer.setStatus("Bench");
+        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer));
+
+        Contract later = createContract(1L, "C001", 100, 50, LocalDate.now());
+        later.setStatus("稼動中");
+        later.setEndDate(LocalDate.now().plusDays(20));
+        Contract earlier = createContract(2L, "C002", 100, 50, LocalDate.now());
+        earlier.setEngineerId(1L);
+        earlier.setStatus("稼動中");
+        earlier.setEndDate(LocalDate.now().plusDays(10));
+        when(contractMapper.selectList(any())).thenReturn(List.of(later, earlier));
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(engineer));
+        when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(Collections.emptyList());
+        when(proposalMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        var result = dashboardService.getSummary(null);
+
+        assertEquals(List.of(0, 0, 1, 0), result.getCharts().getStatus().getData());
+        assertEquals(1, result.getRetiring().size());
+        assertEquals(LocalDate.now().plusDays(10).toString().replace('-', '/'), result.getRetiring().get(0).getDate());
     }
 
     @Test

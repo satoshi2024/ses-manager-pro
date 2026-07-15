@@ -22,7 +22,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.Map;
 import java.util.Collections;
@@ -101,18 +105,47 @@ public class DashboardServiceImpl implements DashboardService {
             profitTrend = String.format("%+.1f%%", rate);
         }
 
+        List<Contract> activeContracts = allContracts.stream().filter(c -> "稼動中".equals(c.getStatus())).collect(Collectors.toList());
+
+        // 退場予定は Engineer.status ではなく、下部の退場予定リストと同じ契約終了日ベースで集計する。
+        LocalDate now = LocalDate.now();
+        LocalDate next30Days = now.plusDays(30);
+        List<Contract> retiringContracts = new ArrayList<>(activeContracts.stream()
+                .filter(c -> c.getEngineerId() != null && c.getEndDate() != null
+                        && !c.getEndDate().isBefore(now) && !c.getEndDate().isAfter(next30Days))
+                .collect(Collectors.toMap(
+                        Contract::getEngineerId,
+                        Function.identity(),
+                        (first, second) -> first.getEndDate().isBefore(second.getEndDate()) ? first : second,
+                        LinkedHashMap::new))
+                .values());
+        retiringContracts.sort(Comparator.comparing(Contract::getEndDate));
+        Set<Long> retiringEngineerIds = retiringContracts.stream()
+                .map(Contract::getEngineerId)
+                .collect(Collectors.toSet());
+
         // 2. Base counts and KPI
         List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
         long totalEngineers = allEngineers.size();
-        
-        long activeCount = allEngineers.stream().filter(e -> "稼動中".equals(e.getStatus())).count();
-        long benchCount = allEngineers.stream().filter(e -> "Bench".equals(e.getStatus())).count();
-        long retiringCount = allEngineers.stream().filter(e -> "退場予定".equals(e.getStatus())).count();
-        long proposingCount = allEngineers.stream().filter(e -> "提案中".equals(e.getStatus())).count();
+        Set<Long> existingEngineerIds = allEngineers.stream()
+                .map(Engineer::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        retiringEngineerIds.retainAll(existingEngineerIds);
 
-        double utilization = totalEngineers > 0 ? (double) activeCount / totalEngineers * 100 : 0.0;
+        long activeCount = allEngineers.stream()
+                .filter(e -> "稼動中".equals(e.getStatus()) && !retiringEngineerIds.contains(e.getId()))
+                .count();
+        long benchCount = allEngineers.stream()
+                .filter(e -> "Bench".equals(e.getStatus()) && !retiringEngineerIds.contains(e.getId()))
+                .count();
+        long retiringCount = retiringEngineerIds.size();
+        long proposingCount = allEngineers.stream()
+                .filter(e -> "提案中".equals(e.getStatus()) && !retiringEngineerIds.contains(e.getId()))
+                .count();
 
-        List<Contract> activeContracts = allContracts.stream().filter(c -> "稼動中".equals(c.getStatus())).collect(Collectors.toList());
+        double utilization = totalEngineers > 0 ? (double) (activeCount + retiringCount) / totalEngineers * 100 : 0.0;
+
         long totalRevenue = activeContracts.stream().mapToLong(c -> c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0).sum();
         long totalCost = activeContracts.stream().mapToLong(c -> c.getCostPrice() != null ? c.getCostPrice().longValue() : 0).sum();
         long grossProfit = totalRevenue - totalCost;
@@ -139,21 +172,24 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
 
         // 3. Retiring Engineers List
-        LocalDate now = LocalDate.now();
-        LocalDate next30Days = now.plusDays(30);
-        
-        List<Contract> retiringContracts = activeContracts.stream()
-                .filter(c -> c.getEndDate() != null && !c.getEndDate().isBefore(now) && !c.getEndDate().isAfter(next30Days))
-                .collect(Collectors.toList());
-
         List<DashboardSummaryDto.RetiringEngineerDto> retiringList = new ArrayList<>();
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
-        if (!retiringContracts.isEmpty()) {
-            List<Long> engineerIds = retiringContracts.stream().map(Contract::getEngineerId).distinct().collect(Collectors.toList());
-            List<Long> projectIds = retiringContracts.stream().map(Contract::getProjectId).distinct().collect(Collectors.toList());
+        if (!retiringEngineerIds.isEmpty()) {
+            List<Long> engineerIds = retiringContracts.stream()
+                    .map(Contract::getEngineerId)
+                    .filter(retiringEngineerIds::contains)
+                    .distinct()
+                    .collect(Collectors.toList());
+            List<Long> projectIds = retiringContracts.stream()
+                    .filter(c -> retiringEngineerIds.contains(c.getEngineerId()))
+                    .map(Contract::getProjectId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
 
-            Map<Long, Engineer> engineerMap = engineerMapper.selectBatchIds(engineerIds).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+            Map<Long, Engineer> engineerMap = engineerIds.isEmpty() ? Collections.emptyMap() :
+                    engineerMapper.selectBatchIds(engineerIds).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
             Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() : projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
 
             List<EngineerSkillDetailDto> topSkills = engineerSkillMapper.selectTopSkillCandidates(engineerIds);
