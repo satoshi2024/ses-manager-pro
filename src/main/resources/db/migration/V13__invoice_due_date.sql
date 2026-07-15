@@ -16,4 +16,5 @@ INSERT INTO m_system_config (config_key, config_value, description) VALUES
   ('billing.payment-due-rule',            'next-month-end', '支払期限ルール(next-month-end/next-next-month-end)'),
   ('company.invoice-registration-number', '',               '適格請求書発行事業者 登録番号(T+13桁)'),
   ('company.address',                     '',               '会社住所（請求書用）')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
+AS new(config_key, config_value, description)
+ON DUPLICATE KEY UPDATE description = new.description;

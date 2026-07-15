@@ -7,4 +7,5 @@
 INSERT INTO m_system_config (config_key, config_value, description) VALUES
   ('notification.webhook-url', '', 'Slack互換Incoming Webhook URL(空=無効)'),
   ('notification.webhook-types', 'CONTRACT_END,PROJECT_URGENT', '転送対象の通知種別(カンマ区切り)')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
+AS new(config_key, config_value, description)
+ON DUPLICATE KEY UPDATE description = new.description;
