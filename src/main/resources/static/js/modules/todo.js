@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ToDo・通知一覧画面用JavaScript
  */
 
@@ -84,14 +84,14 @@ function renderPagination(pageData) {
     const controls = document.getElementById('pagination-controls');
 
     if (pageData.total === 0) {
-        info.textContent = '全 0 件';
+        info.textContent = SES.i18n.t('common.page.totalZero');
         controls.innerHTML = '';
         return;
     }
 
     const start = (pageData.current - 1) * pageData.size + 1;
     const end = Math.min(pageData.current * pageData.size, pageData.total);
-    info.textContent = `全 ${pageData.total} 件中 ${start}-${end} 件を表示`;
+    info.textContent = SES.i18n.t('common.page.info', [pageData.total, start, end]);
 
     let html = '';
     

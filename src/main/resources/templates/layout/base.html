@@ -109,7 +109,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <!-- Custom JS -->
-    <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()})}"></script>
+    <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()},v=${T(java.lang.System).currentTimeMillis()})}"></script>
     <script th:src="@{/js/common.js}"></script>
     <script th:src="@{/js/profile.js}"></script>
     

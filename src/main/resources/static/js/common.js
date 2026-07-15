@@ -12,10 +12,25 @@ const SES = {
     i18n: {
         t: function(key, ...args) {
             let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : key;
-            if (args.length > 0) {
-                for (let i = 0; i < args.length; i++) {
-                    msg = msg.replace(new RegExp('\\{' + i + '\\}', 'g'), args[i]);
-                }
+            if (args.length === 0) return msg;
+
+            // 引数がオブジェクト1つの場合: 名前付きプレースホルダー {key} を置換
+            if (args.length === 1 && args[0] !== null && typeof args[0] === 'object' && !Array.isArray(args[0])) {
+                var params = args[0];
+                Object.keys(params).forEach(function(k) {
+                    msg = msg.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k]);
+                });
+                return msg;
+            }
+
+            // 引数が配列1つの場合: 位置プレースホルダー {0},{1},... を置換
+            if (args.length === 1 && Array.isArray(args[0])) {
+                args = args[0];
+            }
+
+            // 位置プレースホルダー {0},{1},{2}... を置換
+            for (var i = 0; i < args.length; i++) {
+                msg = msg.replace(new RegExp('\\{' + i + '\\}', 'g'), args[i]);
             }
             return msg;
         },
@@ -168,13 +183,12 @@ const SES = {
             if (!el) return;
             
             const now = new Date();
-            const days = ['日', '月', '火', '水', '木', '金', '土'];
+            const locale = document.documentElement.lang || 'ja-JP';
             
-            const dateStr = `${now.getFullYear()}年${String(now.getMonth()+1).padStart(2,'0')}月${String(now.getDate()).padStart(2,'0')}日`;
-            const dayStr = `(${days[now.getDay()]})`;
-            const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            const dateStr = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit', weekday: 'short' }).format(now);
+            const timeStr = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
             
-            el.innerHTML = `${dateStr} ${dayStr} <span class="fw-bold ms-1 text-white">${timeStr}</span>`;
+            el.innerHTML = `${dateStr} <span class="fw-bold ms-1 text-white">${timeStr}</span>`;
         },
         
         // シンプルな確認ダイアログラッパー
@@ -307,7 +321,7 @@ const SES = {
         render: function(list) {
             const container = $('#notification-list');
             if (!list || list.length === 0) {
-                container.html('<span class="dropdown-item-text text-muted small py-2">新しい通知はありません</span>');
+                container.html(`<span class="dropdown-item-text text-muted small py-2">${SES.i18n.t('notification.empty')}</span>`);
                 return;
             }
             const iconColorMap = {
@@ -321,7 +335,7 @@ const SES = {
                 'CONTRACT_DRAFT': 'text-accent-blue'
             };
             
-            let html = '<div class="d-flex justify-content-end px-3 py-1 border-bottom border-dark"><a href="#" id="mark-all-read" class="small text-muted hover-text-white text-decoration-none">すべて既読にする</a></div>';
+            let html = `<div class="d-flex justify-content-end px-3 py-1 border-bottom border-dark"><a href="#" id="mark-all-read" class="small text-muted hover-text-white text-decoration-none">${SES.i18n.t('notification.markAllRead')}</a></div>`;
             
             html += list.map(function(n) {
                 const colorClass = iconColorMap[n.type] || 'text-accent-blue';
@@ -332,8 +346,6 @@ const SES = {
                             <div class="small text-muted ms-4">${SES.escapeHtml(n.date)}</div>
                         </a>`;
             }).join('');
-            
-            html += '<div class="dropdown-divider my-0 border-dark"></div><a href="/todo" class="dropdown-item text-center small py-2 text-primary">すべての通知を見る</a>';
             
             container.html(html);
 

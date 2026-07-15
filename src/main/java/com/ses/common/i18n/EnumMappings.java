@@ -109,5 +109,20 @@ public class EnumMappings {
         emailTemplateType.put("フォローアップ", "followup");
         emailTemplateType.put("その他", "other");
         GROUPS.put("emailTemplateType", emailTemplateType);
+
+        Map<String, String> customerCommercialFlow = new HashMap<>();
+        customerCommercialFlow.put("エンド直", "prime");
+        customerCommercialFlow.put("元請け", "primary");
+        customerCommercialFlow.put("二次請け", "secondary");
+        customerCommercialFlow.put("それ以降", "other");
+        GROUPS.put("customerCommercialFlow", customerCommercialFlow);
+
+        Map<String, String> customerActivityType = new HashMap<>();
+        customerActivityType.put("商談", "meeting");
+        customerActivityType.put("訪問", "visit");
+        customerActivityType.put("電話", "phone");
+        customerActivityType.put("メール", "email");
+        customerActivityType.put("その他", "other");
+        GROUPS.put("customerActivityType", customerActivityType);
     }
 }

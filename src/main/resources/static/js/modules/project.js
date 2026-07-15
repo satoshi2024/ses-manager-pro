@@ -50,7 +50,7 @@ function loadProjects(page = 1) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('.card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">全 0 件</div>');
+        paginationContainer.html(`<div class="text-muted small ps-2">${SES.i18n.t('common.page.totalZero')}</div>`);
         return;
     }
     
@@ -59,7 +59,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            `${SES.i18n.t('common.page.info', [pageData.total, start, end])}`
+            ${SES.i18n.t('common.page.info', [pageData.total, start, end])}
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -128,10 +128,11 @@ function renderProjects(records) {
         else remoteIcon = '<i class="bi bi-x-circle text-danger" title="不可"></i> 不可';
 
         // Status Badge
-        let statusBadge = `<span class="status-badge status-secondary">${proj.status || '-'}</span>`;
-        if (proj.status === SES.i18n.t('js.project.status.recruiting')) statusBadge = '<span class="status-badge status-success">募集中</span>';
-        else if (proj.status === SES.i18n.t('js.project.status.interviewing') || proj.status === SES.i18n.t('js.project.status.interviewing')) statusBadge = '<span class="status-badge status-warning">選考中</span>';
-        else if (proj.status === SES.i18n.t('js.project.status.filled') || proj.status === SES.i18n.t('js.project.status.filled')) statusBadge = '<span class="status-badge status-primary">参画決定</span>';
+        const localizedStatus = SES.i18n.e('projectStatus', proj.status);
+        let statusBadge = `<span class="status-badge status-secondary">${localizedStatus || '-'}</span>`;
+        if (proj.status === '募集中') statusBadge = `<span class="status-badge status-success">${localizedStatus}</span>`;
+        else if (proj.status === '選考中') statusBadge = `<span class="status-badge status-warning">${localizedStatus}</span>`;
+        else if (proj.status === '充足') statusBadge = `<span class="status-badge status-primary">${localizedStatus}</span>`;
 
         const min = proj.unitPriceMin ? (proj.unitPriceMin / 10000) + '万' : '-';
         const max = proj.unitPriceMax ? (proj.unitPriceMax / 10000) + '万' : '-';
@@ -151,9 +152,9 @@ function renderProjects(records) {
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-success text-success border-success" title="' + SES.i18n.t('js.project.search_candidate') + '" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
-                        <button type="button" class="btn btn-outline-info text-info border-info" title="' + SES.i18n.t('common.edit') + '" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger" title="' + SES.i18n.t('common.delete') + '" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
+                        <button type="button" class="btn btn-outline-success text-success border-success" title="${SES.i18n.t('js.project.search_candidate')}" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
+                        <button type="button" class="btn btn-outline-info text-info border-info" title="${SES.i18n.t('common.edit')}" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
+                        <button type="button" class="btn btn-outline-danger text-danger border-danger" title="${SES.i18n.t('common.delete')}" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -430,15 +431,15 @@ function findMatchingEngineers(projectId) {
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
                                         <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${SES.escapeHtml(match.engineerName)}</a></h6>
-                                        <div class="small text-muted">' + SES.i18n.t('js.project.match.expected_price') + ': ${priceText}</div>
+                                        <div class="small text-muted">${SES.i18n.t('js.project.match.expected_price')}: ${priceText}</div>
                                     </div>
                                     <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                                 </div>
-                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">' + SES.i18n.t('js.project.match.ai_eval') + '</span>${SES.escapeHtml(match.reason)}</p>
-                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || '' + SES.i18n.t('js.project.match.no_remarks') + '')}</p>
+                                <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">${SES.i18n.t('js.project.match.ai_eval')}</span>${SES.escapeHtml(match.reason)}</p>
+                                <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || SES.i18n.t('js.project.match.no_remarks'))}</p>
                                 <div class="text-end">
                                     <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
-                                        <i class="bi bi-send-fill me-1"></i>' + SES.i18n.t('js.project.match.propose_btn') + '
+                                        <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('js.project.match.propose_btn')}
                                     </button>
                                 </div>
                             </div>

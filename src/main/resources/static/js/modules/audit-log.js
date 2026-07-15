@@ -38,7 +38,7 @@ function renderAuditLogs(records) {
     tbody.empty();
 
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
+        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
         return;
     }
 
@@ -60,7 +60,7 @@ function renderAuditLogs(records) {
 function renderPagination(pageData) {
     const container = $('.card-footer');
     if (pageData.total === 0) {
-        container.html('<div class="text-muted small ps-2">${SES.i18n.t('auditLog.pagination.zero')}</div>');
+        container.html('<div class="text-muted small ps-2">' + SES.i18n.t('auditLog.pagination.zero') + '</div>');
         return;
     }
 

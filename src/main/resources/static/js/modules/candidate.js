@@ -139,7 +139,7 @@ function renderCandidatePagination(pageData) {
         return;
     }
 
-    let html = `<div class="text-muted small ps-2">` + SES.i18n.t('common.page.totalCount', pageData.total) + `</div>
+    let html = `<div class="text-muted small ps-2">` + SES.i18n.t('common.page.totalCount', [pageData.total]) + `</div>
         <nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
 
     if (pageData.current > 1) {

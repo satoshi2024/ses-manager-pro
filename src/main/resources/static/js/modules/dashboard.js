@@ -1,4 +1,4 @@
-﻿let revenueChartInstance = null;
+let revenueChartInstance = null;
 let statusChartInstance = null;
 
 $(document).ready(function() {
@@ -38,7 +38,7 @@ function populateFiscalYearSelector(currentYear) {
     selector.empty();
     for (let i = 0; i < 5; i++) {
         const y = currentYear - i;
-        selector.append(`<option value="${y}">${y}年度</option>`);
+        selector.append(`<option value="${y}">${SES.i18n.t('dashboard.fiscalYear', [y])}</option>`);
     }
 }
 
@@ -71,7 +71,7 @@ function renderKPIs(kpi) {
     
     $('#kpi-bench-count').text(kpi.benchCount);
     
-    $('#kpi-revenue').text('¥' + kpi.revenue.toLocaleString() + '万');
+    $('#kpi-revenue').text('¥' + kpi.revenue.toLocaleString());
     updateTrendBadge($('#kpi-revenue-trend'), kpi.revenueTrend);
     
     $('#kpi-profit-margin').text(kpi.profitMargin + '%');
@@ -183,7 +183,7 @@ function renderCharts(chartsData) {
     statusChartInstance = new Chart(statusCtx, {
         type: 'doughnut',
         data: {
-            labels: chartsData.status.labels,
+            labels: chartsData.status.labels.map(l => SES.i18n.e('engineerStatus', l)),
             datasets: [{
                 data: chartsData.status.data,
                 backgroundColor: [

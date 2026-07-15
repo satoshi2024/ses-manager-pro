@@ -12,6 +12,24 @@
     cursor: grabbing;
 }
 
+/* Custom Horizontal Scrollbar for Board */
+.kanban-board-container::-webkit-scrollbar {
+    height: 14px; /* Thick enough to easily click and drag */
+}
+.kanban-board-container::-webkit-scrollbar-track {
+    background-color: var(--bg-tertiary);
+    border-radius: 8px;
+    margin: 0 10px;
+}
+.kanban-board-container::-webkit-scrollbar-thumb {
+    background-color: var(--accent-purple);
+    border-radius: 8px;
+    border: 3px solid var(--bg-tertiary); /* Creates padding effect */
+}
+.kanban-board-container::-webkit-scrollbar-thumb:hover {
+    background-color: #7b4ccf;
+}
+
 .kanban-board {
     display: inline-flex;
     height: 100%;

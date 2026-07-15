@@ -354,7 +354,7 @@ function renderCareers(careers) {
                 </td>
                 <td>
                     <div>${SES.escapeHtml(car.role || '-')}</div>
-                    ${car.teamSize ? '<div class="small text-muted">' + car.teamSize + ''' + SES.i18n.t('common.personUnit') + ''</div>' : ''}
+                    ${car.teamSize ? `<div class="small text-muted">${car.teamSize}${SES.i18n.t('common.personUnit')}</div>` : ''}
                 </td>
                 <td class="text-end">
                     <div class="btn-group btn-group-sm">
@@ -544,7 +544,7 @@ function openSalesRepModal() {
                 select.empty();
                 select.append('<option value="">担当営業を選択...</option>');
                 res.data.forEach(u => {
-                    select.append($('<option>').val(u.id).text(u.fullName));
+                    select.append($('<option>').val(u.id).text(u.realName));
                 });
                 $('#sales-rep-form')[0].reset();
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('salesRepModal')).show();

@@ -61,7 +61,7 @@ public class NotificationGenerateService {
             String customerName = getCustomerName(inv.getCustomerId());
             long days = ChronoUnit.DAYS.between(inv.getDueDate(), today);
             String dedupeKey = "INVOICE_OVERDUE:" + inv.getId() + ":" + today;
-            String message = "請求書 " + inv.getInvoiceNo() + "（" + customerName + "）が支払期限を" + days + "日超過しています";
+            String message = "[\"notification.msg.INVOICE_OVERDUE\", \"" + inv.getInvoiceNo() + "\", \"" + customerName + "\", \"" + days + "\"]";
             notificationService.publish("INVOICE_OVERDUE", "支払期限超過", message, "/invoice/list", dedupeKey);
         }
     }
@@ -77,7 +77,7 @@ public class NotificationGenerateService {
         for (Contract c : contracts) {
             String name = getEngineerName(c.getEngineerId());
             String dedupeKey = "CONTRACT_END:" + c.getId() + ":" + c.getEndDate().toString();
-            String message = name + "氏の稼動終了が" + days + "日以内に迫っています（終了日：" + c.getEndDate() + "）";
+            String message = "[\"notification.msg.CONTRACT_END\", \"" + name + "\", \"" + days + "\", \"" + c.getEndDate() + "\"]";
             notificationService.publish("CONTRACT_END", "稼動終了間近", message, "/contract/detail/" + c.getId(), dedupeKey);
         }
     }
@@ -91,7 +91,7 @@ public class NotificationGenerateService {
         List<Proposal> proposals = proposalMapper.selectList(qw);
         for (Proposal p : proposals) {
             String dedupeKey = "PROPOSAL_STALE:" + p.getId() + ":" + todayString();
-            String message = "提案ID " + p.getId() + " のステータスが" + days + "日以上更新されていません（現在：" + p.getStatus() + "）";
+            String message = "[\"notification.msg.PROPOSAL_STALE\", \"" + p.getId() + "\", \"" + days + "\", \"" + p.getStatus() + "\"]";
             notificationService.publish("PROPOSAL_STALE", "提案ステータス停滞", message, "/proposal", dedupeKey);
         }
     }
@@ -110,7 +110,7 @@ public class NotificationGenerateService {
             if (dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
                 String name = getEngineerName(e.getId());
                 String dedupeKey = "BENCH_LONG:" + e.getId() + ":" + LocalDate.now().getYear() + "-" + LocalDate.now().getMonthValue();
-                String message = name + "氏の待機期間が" + days + "日を超えています";
+                String message = "[\"notification.msg.BENCH_LONG\", \"" + name + "\", \"" + days + "\"]";
                 notificationService.publish("BENCH_LONG", "待機期間警告", message, "/engineer/detail/" + e.getId(), dedupeKey);
             }
         }
@@ -122,7 +122,7 @@ public class NotificationGenerateService {
         List<Project> projects = projectMapper.selectList(qw);
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
-            String message = "急募案件「" + p.getProjectName() + "」が募集中です";
+            String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
             notificationService.publish("PROJECT_URGENT", "急募案件", message, "/project/detail/" + p.getId(), dedupeKey);
         }
     }

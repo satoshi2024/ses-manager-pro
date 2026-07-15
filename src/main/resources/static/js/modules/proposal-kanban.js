@@ -10,6 +10,9 @@ $(document).ready(function() {
             ghostClass: 'sortable-ghost',
             dragClass: 'sortable-drag',
             easing: "cubic-bezier(1, 0, 0, 1)",
+            scroll: true,
+            scrollSensitivity: 100, // How close to the edge to trigger scrolling
+            scrollSpeed: 20, // px per frame
             
             // Triggered when an item is dropped into this list from another list
             onAdd: function (evt) {
@@ -59,6 +62,24 @@ $(document).ready(function() {
         const walk = (x - startX) * 2; // scroll-fast
         slider.scrollLeft = scrollLeft - walk;
     });
+
+    // Horizontal scrolling with mouse wheel
+    slider.addEventListener('wheel', (e) => {
+        // If the user is scrolling vertically (deltaY) and NOT hovering over a scrollable column body,
+        // or if they hold shift, scroll the board horizontally.
+        if (e.deltaY !== 0) {
+            // Check if hovered element is a column body that has vertical scroll
+            const columnBody = e.target.closest('.kanban-column-body');
+            const hasVerticalScroll = columnBody && columnBody.scrollHeight > columnBody.clientHeight;
+            
+            // If we are over a column that can scroll vertically, let it scroll vertically.
+            // Otherwise, translate vertical wheel to horizontal scroll.
+            if (!hasVerticalScroll || e.shiftKey) {
+                e.preventDefault();
+                slider.scrollLeft += e.deltaY;
+            }
+        }
+    }, { passive: false });
 });
 
 function loadKanbanData() {
@@ -77,7 +98,7 @@ function loadKanbanData() {
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
             $('.kanban-column-body').empty();
         }
     });
@@ -87,14 +108,14 @@ function loadSelectOptions() {
     $.get('/api/engineers', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-engineerId');
-            select.empty().append('<option value="">要員を選択...</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
             (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
         }
     });
     $.get('/api/projects', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-projectId');
-            select.empty().append('<option value="">案件を選択...</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
             (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
         }
     });
@@ -213,7 +234,7 @@ function executeStatusChange(proposalId, newStatus, itemEl, fromCol, isWon) {
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
             $(fromCol).append(itemEl);
             updateBadgeCounts();
         }
@@ -273,7 +294,7 @@ function saveProposal() {
         },
         error: function(err) {
             console.error(err);
-            Toast.error('通信エラーが発生しました');
+            Toast.error(SES.i18n.t('js.common.error_network'));
         }
     });
 }
@@ -288,10 +309,10 @@ function openMailModal(proposalId) {
     $select.html('<option value="">' + SES.i18n.t('js.common.loading') + '</option>');
     $.get('/api/email-templates', function(res) {
         const list = res.data && (res.data.records || res.data) || [];
-        $select.empty().append('<option value="">テンプレートを選択</option>');
+        $select.empty().append(`<option value="">${SES.i18n.t('kanban.proposal.mail.template.select')}</option>`);
         list.forEach(t => $select.append(`<option value="${t.id}">${SES.escapeHtml(t.templateName)}</option>`));
     }).fail(function() {
-        $select.html('<option value="">テンプレート取得に失敗</option>');
+        $select.html(`<option value="">${SES.i18n.t('js.kanban.mail.fetch_error')}</option>`);
     });
     bootstrap.Modal.getOrCreateInstance(document.getElementById('mailModal')).show();
 }

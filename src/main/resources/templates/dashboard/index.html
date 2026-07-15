@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
 <head>
     <title th:text="#{menu.dashboard}">ダッシュボード</title>
@@ -100,7 +100,7 @@
                     <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.avg_profit_margin}">全社平均粗利率</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-profit-margin">--%</h2>
-                        <span class="badge bg-secondary text-muted rounded-pill px-2 py-1 small border border-dark">
+                        <span class="badge bg-secondary text-white rounded-pill px-2 py-1 small">
                             <i class="bi bi-dash"></i> <span id="kpi-profit-trend">--</span>
                         </span>
                     </div>
