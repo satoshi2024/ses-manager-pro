@@ -24,13 +24,13 @@ function loadContracts() {
                 renderContracts(res.data.records || res.data);
             } else {
                 Toast.error(SES.i18n.t('js.common.error_fetch'));
-                $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4">データの取得に失敗しました</td></tr>');
+                $('#contract-table-body').html(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_fetch')}</td></tr>`);
             }
         },
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('js.common.error_network'));
-            $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4">通信エラーが発生しました</td></tr>');
+            $('#contract-table-body').html(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_network')}</td></tr>`);
         }
     });
 }
@@ -40,7 +40,7 @@ function loadSelectOptions() {
     $.get('/api/engineers', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-engineerId');
-            select.empty().append('<option value="">要員を選択...</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
             (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
         }
     });
@@ -48,7 +48,7 @@ function loadSelectOptions() {
     $.get('/api/projects', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-projectId');
-            select.empty().append('<option value="">案件を選択...</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
             (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
         }
     });
@@ -57,8 +57,8 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#cont-customerId');
             const searchSelect = $('#search-customerId');
-            select.empty().append('<option value="">顧客を選択...</option>');
-            searchSelect.empty().append('<option value="">顧客で絞り込み</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('contract.customer.select')}</option>`);
+            searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.customer.filter')}</option>`);
             (res.data.records || res.data).forEach(c => {
                 select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
                 searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
@@ -70,11 +70,11 @@ function loadSelectOptions() {
         if(res.code === 200 && res.data) {
             const select = $('#cont-salesUserId');
             const searchSelect = $('#search-salesUserId');
-            select.empty().append('<option value="">営業を選択...</option>');
-            searchSelect.empty().append('<option value="">営業で絞り込み</option>');
+            select.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.select')}</option>`);
+            searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.filter')}</option>`);
             res.data.forEach(u => {
-                select.append(`<option value="${u.salesUserId}">${SES.escapeHtml(u.salesUserName)}</option>`);
-                searchSelect.append(`<option value="${u.salesUserId}">${SES.escapeHtml(u.salesUserName)}</option>`);
+                select.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
+                searchSelect.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
             });
         }
     });
@@ -101,7 +101,7 @@ function renderContracts(list) {
     tbody.empty();
     
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('common.noData')}</td></tr>`);
         return;
     }
     

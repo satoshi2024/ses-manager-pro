@@ -19,7 +19,7 @@ public interface ProposalMapper extends BaseMapper<Proposal> {
             "FROM t_proposal p " +
             "LEFT JOIN t_engineer e ON p.engineer_id = e.id " +
             "LEFT JOIN t_project pj ON p.project_id = pj.id " +
-            "LEFT JOIN t_customer c ON pj.customer_id = c.id " +
+            "LEFT JOIN m_customer c ON pj.customer_id = c.id " +
             "WHERE p.deleted_flag = 0 AND (e.deleted_flag = 0 OR e.deleted_flag IS NULL) AND (pj.deleted_flag = 0 OR pj.deleted_flag IS NULL)")
     List<ProposalKanbanDto> selectKanbanList();
 

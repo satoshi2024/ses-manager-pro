@@ -1,4 +1,4 @@
-﻿$(document).ready(function() {
+$(document).ready(function() {
     loadCustomers();
 });
 
@@ -18,7 +18,7 @@ function loadCustomers(page = 1) {
                     total++;
                 });
                 if (total > 0) {
-                    $('#total-followup-badge').text(`${total}'' + SES.i18n.t('customer.followUp') + ''`).removeClass('d-none');
+                    $('#total-followup-badge').text(`${total}${SES.i18n.t('customer.followUp')}`).removeClass('d-none');
                 } else {
                     $('#total-followup-badge').addClass('d-none');
                 }
@@ -65,7 +65,7 @@ function fetchCustomerList(page) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('.card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">'' + SES.i18n.t('common.page.totalZero') + ''</div>');
+        paginationContainer.html(`<div class="text-muted small ps-2">${SES.i18n.t('common.page.totalZero')}</div>`);
         return;
     }
     
@@ -74,7 +74,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            '' + SES.i18n.t('common.page.info', [pageData.total, start, end]) + ''
+            ${SES.i18n.t('common.page.info', [pageData.total, start, end])}
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">
@@ -134,7 +134,7 @@ function renderCustomers(records) {
         let followUpBadge = '';
         const count = followUpCounts[cust.id];
         if (count && count > 0) {
-            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="' + SES.i18n.t('customer.followUpNeeded') + '">${count}'' + SES.i18n.t('customer.followUp') + ''</span>`;
+            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="${SES.i18n.t('customer.followUpNeeded')}">${count}${SES.i18n.t('customer.followUp')}</span>`;
         }
 
         const tr = `

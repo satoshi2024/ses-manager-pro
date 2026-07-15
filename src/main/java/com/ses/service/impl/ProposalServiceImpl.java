@@ -103,7 +103,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
             notificationService.publish(
                     "CONTRACT_DRAFT",
                     "契約ドラフト作成",
-                    "提案の成約により契約ドラフト(" + draft.getContractNo() + ")を作成しました。内容を確認して契約を確定してください",
+                    "[\"notification.msg.CONTRACT_DRAFT\", \"" + draft.getContractNo() + "\"]",
                     "/contract/list",
                     "contract-draft:" + proposal.getId());
         }

@@ -78,7 +78,7 @@ function loadSalesUsers() {
                 select.empty();
                 select.append('<option value="">' + SES.i18n.t('common.all') + '</option>');
                 res.data.forEach(user => {
-                    select.append($('<option>').val(user.id).text(user.fullName));
+                    select.append($('<option>').val(user.id).text(user.realName));
                 });
             }
         }
@@ -241,7 +241,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            ' + SES.i18n.t('common.page.info', [pageData.total, start, end]) + '
+            ${SES.i18n.t('common.page.info', [pageData.total, start, end])}
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">

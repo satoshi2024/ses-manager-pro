@@ -1,4 +1,4 @@
-﻿let allMenus = [];
+let allMenus = [];
 
 $(document).ready(function() {
     loadUsers();
@@ -38,7 +38,7 @@ function loadUsers(page = 1) {
 function renderPagination(pageData, loadFuncName) {
     const paginationContainer = $('#accounts-pane .card-footer');
     if (pageData.total === 0) {
-        paginationContainer.html('<div class="text-muted small ps-2">${SES.i18n.t('user.pagination.zero')}</div>');
+        paginationContainer.html(`<div class="text-muted small ps-2">${SES.i18n.t('user.pagination.zero')}</div>`);
         return;
     }
 
@@ -82,20 +82,20 @@ function renderUsers(records) {
     tbody.empty();
 
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
+        tbody.append(`<tr><td colspan="6" class="text-center text-muted py-4">${SES.i18n.t('common.msg.noData')}</td></tr>`);
         return;
     }
 
     records.forEach(user => {
         const statusBadge = user.status === 1
-            ? '<span class="status-badge status-success">${SES.i18n.t('user.status.active')}</span>'
-            : '<span class="status-badge status-secondary">${SES.i18n.t('user.status.inactive')}</span>';
+            ? `<span class="status-badge status-success">${SES.i18n.t('user.status.active')}</span>`
+            : `<span class="status-badge status-secondary">${SES.i18n.t('user.status.inactive')}</span>`;
 
         const tr = `
             <tr>
                 <td class="ps-4 py-3 fw-bold text-light">${SES.escapeHtml(user.username)}</td>
                 <td>${SES.escapeHtml(user.realName || '-')}</td>
-                <td><span class="status-badge status-primary">${SES.i18n.t('user.role.' + user.role, user.role)}</span></td>
+                <td><span class="status-badge status-primary">${SES.i18n.e('userRole', user.role)}</span></td>
                 <td>${SES.escapeHtml(user.email || '-')}</td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">

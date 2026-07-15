@@ -22,7 +22,7 @@ function loadConfigs() {
 function renderConfigs(configs) {
     const $body = $('#configTableBody');
     if (!configs.length) {
-        $body.html('<tr><td colspan="3" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
+        $body.html('<tr><td colspan="3" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
         return;
     }
     let html = '';

@@ -51,7 +51,7 @@ function loadTemplatesToSelect() {
         success: function(res) {
             if (res.code === 200 && res.data) {
                 const select = $('#chat-template-select');
-                select.empty().append('<option value="">${SES.i18n.t('ai.select.template')}</option>');
+                select.empty().append('<option value="">' + SES.i18n.t('ai.select.template') + '</option>');
                 res.data.forEach(t => {
                     select.append(`<option value="${t.id}">${SES.escapeHtml(t.templateName)}</option>`);
                 });

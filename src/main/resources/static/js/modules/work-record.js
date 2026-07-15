@@ -9,7 +9,7 @@ function loadWorkRecords() {
     const month = $('#workMonth').val();
     if (!month) return;
 
-    $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>`${SES.i18n.t('common.msg.loading')}`</td></tr>');
+    $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('common.msg.loading') + '</td></tr>');
     
     $.ajax({
         url: '/api/work-records/grid',
@@ -20,13 +20,13 @@ function loadWorkRecords() {
                 renderWorkRecords(res.data);
             } else {
                 Toast.error(res.message || SES.i18n.t('common.msg.fetchFail'));
-                $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.fetchFail')}</td></tr>');
+                $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.fetchFail') + '</td></tr>');
             }
         },
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('common.msg.networkError'));
-            $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.networkError')}</td></tr>');
+            $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.networkError') + '</td></tr>');
         }
     });
 }
@@ -36,7 +36,7 @@ function renderWorkRecords(list) {
     tbody.empty();
     
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="8" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
+        tbody.append('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
         return;
     }
     

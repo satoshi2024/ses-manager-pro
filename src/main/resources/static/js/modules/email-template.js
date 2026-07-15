@@ -7,7 +7,7 @@ $(document).ready(function() {
 });
 
 function loadTemplates() {
-    $('#template-table-body').html('<tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>`${SES.i18n.t('common.msg.loading')}`</td></tr>');
+    $('#template-table-body').html('<tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('common.msg.loading') + '</td></tr>');
     
     $.ajax({
         url: '/api/email-templates',
@@ -33,7 +33,7 @@ function renderTemplates(list) {
     tbody.empty();
 
     if (!list || list.length === 0) {
-        tbody.append('<tr><td colspan="4" class="text-center text-muted py-4">`${SES.i18n.t('common.msg.noData')}</td></tr>');
+        tbody.append('<tr><td colspan="4" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
         return;
     }
 
@@ -46,7 +46,7 @@ function renderTemplates(list) {
         const tr = `
             <tr>
                 <td class="px-4 py-3 text-white fw-bold">${SES.escapeHtml(t.templateName)}</td>
-                <td class="py-3"><span class="status-badge ${typeBadge}">${SES.i18n.t('emailTemplate.type.' + t.templateType, t.templateType)}</span></td>
+                <td class="py-3"><span class="status-badge ${typeBadge}">${SES.i18n.e('emailTemplateType', t.templateType)}</span></td>
                 <td class="py-3 text-muted text-truncate" style="max-width:300px;">${SES.escapeHtml(t.subjectTemplate)}</td>
                 <td class="px-4 py-3 text-end">
                     <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick="editTemplate(${t.id})">
