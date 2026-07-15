@@ -61,7 +61,7 @@ public class NotificationGenerateService {
             String customerName = getCustomerName(inv.getCustomerId());
             long days = ChronoUnit.DAYS.between(inv.getDueDate(), today);
             String dedupeKey = "INVOICE_OVERDUE:" + inv.getId() + ":" + today;
-            String message = "[\"notification.msg.INVOICE_OVERDUE\", \"" + inv.getInvoiceNo() + "\", \"" + customerName + "\", \"" + days + "\"]";
+            String message = "[\"notification.msg.INVOICE_OVERDUE\", \"" + inv.getInvoiceNo() + "\", \"" + customerName + "\", \"" + days + "日\"]";
             notificationService.publish("INVOICE_OVERDUE", "支払期限超過", message, "/invoice/list", dedupeKey);
         }
     }

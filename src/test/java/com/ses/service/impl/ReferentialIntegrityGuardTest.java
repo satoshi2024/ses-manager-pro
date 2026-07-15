@@ -67,9 +67,15 @@ class ReferentialIntegrityGuardTest {
         Proposal p = new Proposal();
         p.setEngineerId(engineerId);
         p.setProjectId(projectId);
-        p.setStatus(status);
         p.setProposedAt(java.time.LocalDateTime.now());
         proposalService.save(p);
+
+        if (status != null && !"書類選考中".equals(status)) {
+            proposalService.changeStatus(p.getId(), status);
+            p.setStatus(status);
+        } else if (status != null) {
+            p.setStatus(status);
+        }
         return p;
     }
 
