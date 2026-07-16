@@ -35,11 +35,11 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
-        WHERE c.start_date <= CONCAT(#{workMonth}, '-31')
+        WHERE c.start_date <= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date >= CONCAT(#{workMonth}, '-01'))
           AND c.status IN ('稼動中', '終了')
           AND c.deleted_flag = 0
         ORDER BY c.id DESC
     """)
-    List<WorkRecordGridDto> selectMonthlyGrid(@Param("workMonth") String workMonth);
+    List<WorkRecordGridDto> selectMonthlyGrid(@Param("workMonth") String workMonth, @Param("monthEnd") String monthEnd);
 }

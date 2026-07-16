@@ -3,13 +3,32 @@ $(document).ready(function() {
     loadSelectOptions();
 });
 
+// サーバの ALLOWED_STATUS_TRANSITIONS を反映(値はDB格納の日本語ステータスそのまま送る)。
+const STATUS_TRANSITIONS = {
+    '準備中': ['稼動中', '解約'],
+    '稼動中': ['終了', '解約']
+};
+
+function statusLabel(status) {
+    switch (status) {
+        case '準備中': return SES.i18n.t('contract.status.preparing');
+        case '稼動中': return SES.i18n.t('contract.status.active');
+        case '終了': return SES.i18n.t('contract.status.ended');
+        case '解約': return SES.i18n.t('contract.status.cancelled');
+        default: return status;
+    }
+}
+
 function loadContracts() {
-    $('#contract-table-body').html('<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</td></tr>');
-    
+    $('#contract-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</td></tr>');
+
+    const salesVal = $('#search-salesUserId').val();
     const params = {
         status: $('#search-form [name="status"]').val(),
         customerId: $('#search-customerId').val(),
-        salesUserId: $('#search-salesUserId').val(),
+        // 'none' = 担当営業未設定(sales_user_id IS NULL)での絞り込み
+        salesUserId: salesVal === 'none' ? null : salesVal,
+        salesUnassigned: salesVal === 'none' ? true : null,
         contractNo: $('#search-form [name="contractNo"]').val(),
         endDateFrom: $('#search-form [name="endDateFrom"]').val(),
         endDateTo: $('#search-form [name="endDateTo"]').val()
@@ -24,13 +43,13 @@ function loadContracts() {
                 renderContracts(res.data.records || res.data);
             } else {
                 Toast.error(SES.i18n.t('js.common.error_fetch'));
-                $('#contract-table-body').html(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_fetch')}</td></tr>`);
+                $('#contract-table-body').html(`<tr><td colspan="8" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_fetch')}</td></tr>`);
             }
         },
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('js.common.error_network'));
-            $('#contract-table-body').html(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_network')}</td></tr>`);
+            $('#contract-table-body').html(`<tr><td colspan="8" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_network')}</td></tr>`);
         }
     });
 }
@@ -72,14 +91,22 @@ function loadSelectOptions() {
             const searchSelect = $('#search-salesUserId');
             select.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.select')}</option>`);
             searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.filter')}</option>`);
+            // 担当営業未設定での絞り込みオプション(営業成績「未帰属」行からのリンク先)
+            searchSelect.append(`<option value="none">${SES.i18n.t('contract.salesRep.unassigned')}</option>`);
             res.data.forEach(u => {
                 select.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
                 searchSelect.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
             });
+            // URL に ?salesUserId=none が付いていれば未設定フィルタを初期選択して再検索する
+            const urlSales = new URLSearchParams(window.location.search).get('salesUserId');
+            if (urlSales === 'none') {
+                searchSelect.val('none');
+                loadContracts();
+            }
         }
     });
 
-    // Auto preset primary sales rep when engineer is selected
+    // Auto preset primary sales rep when engineer is selected (新規登録時のみ有効。編集時のプリセットを壊さないよう、ユーザー操作の change でのみ発火)
     $('#cont-engineerId').on('change', function() {
         const engId = $(this).val();
         $('#cont-salesUserId').val('');
@@ -99,17 +126,23 @@ function loadSelectOptions() {
 function renderContracts(list) {
     const tbody = $('#contract-table-body');
     tbody.empty();
-    
+
     if (!list || list.length === 0) {
-        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('common.noData')}</td></tr>`);
+        tbody.append(`<tr><td colspan="8" class="text-center text-muted py-4">${SES.i18n.t('common.noData')}</td></tr>`);
         return;
     }
-    
+
     list.forEach(c => {
         const engineerName = c.engineerName != null ? c.engineerName : SES.i18n.t('js.contract.engineer_deleted');
         const customerName = c.customerName != null ? c.customerName : '-';
         const projectName = c.projectName != null ? c.projectName : '-';
         const contractNo = c.contractNo != null ? c.contractNo : ('C-' + c.id);
+
+        // 遷移可能なステータスがあれば状態変更ボタンを表示
+        const transitions = STATUS_TRANSITIONS[c.status] || [];
+        const statusBtn = transitions.length > 0
+            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('contract.action.changeStatus')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
+            : '';
 
         const tr = `
             <tr>
@@ -130,13 +163,15 @@ function renderContracts(list) {
                     <div><i class="bi bi-stop-circle text-danger me-1"></i>${c.endDate || '-'}</div>
                 </td>
                 <td class="py-3">
-                    <div class="text-accent-green fw-bold">¥${c.sellingPrice ? c.sellingPrice.toLocaleString() : '---'}円</div>
-                    <div class="small text-muted">¥${c.costPrice ? c.costPrice.toLocaleString() : '---'}円</div>
+                    <div class="text-accent-green fw-bold">¥${c.sellingPrice != null ? c.sellingPrice.toLocaleString() : '---'}</div>
+                    <div class="small text-muted">¥${c.costPrice != null ? c.costPrice.toLocaleString() : '---'}</div>
                 </td>
                 <td class="py-3">
                     ${getStatusBadge(c.status)}
                 </td>
-                <td class="px-4 py-3 text-end">
+                <td class="px-4 py-3 text-end text-nowrap">
+                    <button type="button" class="btn btn-outline-secondary btn-sm me-1" title="${SES.i18n.t('contract.action.edit')}" onclick="openEditContract(${c.id})"><i class="bi bi-pencil"></i></button>
+                    ${statusBtn}
                     <button type="button" class="btn btn-outline-danger btn-sm text-danger border-danger" onclick="deleteContract(${c.id})"><i class="bi bi-trash"></i></button>
                 </td>
             </tr>
@@ -147,46 +182,103 @@ function renderContracts(list) {
 
 function getStatusBadge(status) {
     let bg = 'status-secondary';
-    if(status === SES.i18n.t('contract.status.active')) bg = 'status-success';
-    if(status === SES.i18n.t('contract.status.preparing')) bg = 'status-primary';
-    if(status === SES.i18n.t('contract.status.ended')) bg = 'status-secondary';
-    if(status === SES.i18n.t('contract.status.cancelled')) bg = 'status-danger';
-    return `<span class="status-badge ${bg}">${status || SES.i18n.t('contract.status.preparing')}</span>`;
+    if(status === '稼動中') bg = 'status-success';
+    if(status === '準備中') bg = 'status-primary';
+    if(status === '終了') bg = 'status-secondary';
+    if(status === '解約') bg = 'status-danger';
+    return `<span class="status-badge ${bg}">${statusLabel(status || '準備中')}</span>`;
+}
+
+// 新規登録モーダルを開く(フォームをリセットし hidden id をクリア)
+function openNewContract() {
+    $('#contract-form')[0].reset();
+    $('#cont-id').val('');
+    $('#contractModalTitle').text(SES.i18n.t('contract.new'));
+    $('#contractSaveBtnLabel').text(SES.i18n.t('common.register'));
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).show();
+}
+
+// 編集モーダルを開く。GET /api/contracts/{id} で全項目を取得しプリセット。
+function openEditContract(id) {
+    $.get('/api/contracts/' + id, function(res) {
+        if (res.code !== 200 || !res.data) {
+            Toast.error(res.message || SES.i18n.t('js.common.error_fetch'));
+            return;
+        }
+        const c = res.data;
+        $('#contract-form')[0].reset();
+        $('#cont-id').val(c.id);
+        $('#cont-engineerId').val(c.engineerId != null ? String(c.engineerId) : '');
+        $('#cont-projectId').val(c.projectId != null ? String(c.projectId) : '');
+        $('#cont-customerId').val(c.customerId != null ? String(c.customerId) : '');
+        $('#cont-salesUserId').val(c.salesUserId != null ? String(c.salesUserId) : '');
+        $('#cont-contractType').val(c.contractType || '準委任');
+        $('#cont-startDate').val(c.startDate || '');
+        $('#cont-endDate').val(c.endDate || '');
+        $('#cont-sellingPrice').val(c.sellingPrice != null ? c.sellingPrice : '');
+        $('#cont-costPrice').val(c.costPrice != null ? c.costPrice : '');
+        $('#cont-settlementHoursMin').val(c.settlementHoursMin != null ? c.settlementHoursMin : '');
+        $('#cont-settlementHoursMax').val(c.settlementHoursMax != null ? c.settlementHoursMax : '');
+        $('#cont-fractionRule').val(c.fractionRule || '');
+        $('#cont-autoRenew').val(c.autoRenew != null ? String(c.autoRenew) : '0');
+        $('#cont-commissionBaseType').val(c.commissionBaseType || '');
+        $('#cont-commissionRate').val(c.commissionRate != null ? c.commissionRate : '');
+        $('#contractModalTitle').text(SES.i18n.t('contract.edit'));
+        $('#contractSaveBtnLabel').text(SES.i18n.t('common.save'));
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).show();
+    });
+}
+
+// 契約フォームの全項目を組み立てる。PUT/POST 共通で全フィールドを常に送信する
+// (FieldStrategy.ALWAYS 前提: 未選択 select は明示的に null を積み、「既定に戻す」を機能させる)。
+function buildContractPayload() {
+    const val = (sel) => { const v = $(sel).val(); return v !== '' && v != null ? v : null; };
+    return {
+        engineerId: val('#cont-engineerId') ? parseInt(val('#cont-engineerId')) : null,
+        projectId: val('#cont-projectId') ? parseInt(val('#cont-projectId')) : null,
+        customerId: val('#cont-customerId') ? parseInt(val('#cont-customerId')) : null,
+        salesUserId: val('#cont-salesUserId') ? parseInt(val('#cont-salesUserId')) : null,
+        contractType: val('#cont-contractType'),
+        startDate: val('#cont-startDate'),
+        endDate: val('#cont-endDate'),
+        sellingPrice: val('#cont-sellingPrice') ? parseInt(val('#cont-sellingPrice')) : null,
+        costPrice: val('#cont-costPrice') ? parseInt(val('#cont-costPrice')) : null,
+        settlementHoursMin: val('#cont-settlementHoursMin') ? parseFloat(val('#cont-settlementHoursMin')) : null,
+        settlementHoursMax: val('#cont-settlementHoursMax') ? parseFloat(val('#cont-settlementHoursMax')) : null,
+        fractionRule: val('#cont-fractionRule'),
+        autoRenew: val('#cont-autoRenew') != null ? parseInt(val('#cont-autoRenew')) : 0,
+        commissionBaseType: val('#cont-commissionBaseType'),
+        commissionRate: val('#cont-commissionRate') ? parseFloat(val('#cont-commissionRate')) : null
+    };
 }
 
 function saveContract() {
+    const id = $('#cont-id').val();
     const engineerId = $('#cont-engineerId').val();
     const projectId = $('#cont-projectId').val();
-    
+
     if (!engineerId || !projectId) {
         Toast.error(SES.i18n.t('js.contract.error.engineer_project'));
         return;
     }
-    
-    const data = {
-        engineerId: parseInt(engineerId),
-        projectId: parseInt(projectId),
-        customerId: $('#cont-customerId').val() ? parseInt($('#cont-customerId').val()) : null,
-        startDate: $('#cont-startDate').val() || null,
-        endDate: $('#cont-endDate').val() || null,
-        sellingPrice: $('#cont-sellingPrice').val() ? parseInt($('#cont-sellingPrice').val()) : null,
-        costPrice: $('#cont-costPrice').val() ? parseInt($('#cont-costPrice').val()) : null,
-        salesUserId: $('#cont-salesUserId').val() ? parseInt($('#cont-salesUserId').val()) : null,
-        commissionBaseType: $('#cont-commissionBaseType').val() || null,
-        commissionRate: $('#cont-commissionRate').val() ? parseFloat($('#cont-commissionRate').val()) : null,
-        status: SES.i18n.t('contract.status.preparing') // Default status
-    };
+
+    const data = buildContractPayload();
+    if (!id) {
+        // 新規時のみ既定ステータス。更新時は status を送らない(サーバが無視するが混同を避ける)。
+        data.status = '準備中';
+    }
 
     $.ajax({
-        url: '/api/contracts',
-        method: 'POST',
+        url: id ? ('/api/contracts/' + id) : '/api/contracts',
+        method: id ? 'PUT' : 'POST',
         contentType: 'application/json',
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(SES.i18n.t('js.contract.success.register'));
+                Toast.success(id ? SES.i18n.t('js.contract.success.update') : SES.i18n.t('js.contract.success.register'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).hide();
                 $('#contract-form')[0].reset();
+                $('#cont-id').val('');
                 loadContracts();
             } else {
                 Toast.error(res.message || SES.i18n.t('js.contract.error.register'));
@@ -194,7 +286,82 @@ function saveContract() {
         },
         error: function(err) {
             console.error(err);
-            Toast.error(SES.i18n.t('js.common.error_network'));
+            const msg = err.responseJSON && err.responseJSON.message ? err.responseJSON.message : SES.i18n.t('js.common.error_network');
+            Toast.error(msg);
+        }
+    });
+}
+
+// 状態遷移。解約のみ解約日入力ダイアログを挟む。
+function changeContractStatus(id, currentStatus) {
+    const transitions = STATUS_TRANSITIONS[currentStatus] || [];
+    if (transitions.length === 0) {
+        return;
+    }
+    const inputOptions = {};
+    transitions.forEach(s => { inputOptions[s] = statusLabel(s); });
+
+    Swal.fire({
+        title: SES.i18n.t('contract.action.changeStatus'),
+        input: 'select',
+        inputOptions: inputOptions,
+        inputPlaceholder: '...',
+        showCancelButton: true,
+        confirmButtonColor: '#0d6efd',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: SES.i18n.t('common.confirm'),
+        cancelButtonText: SES.i18n.t('js.project.delete.cancel')
+    }).then((result) => {
+        if (!result.isConfirmed || !result.value) return;
+        const newStatus = result.value;
+        if (newStatus === '解約') {
+            promptCancelDate(id);
+        } else {
+            postStatusChange(id, newStatus, null);
+        }
+    });
+}
+
+function promptCancelDate(id) {
+    const today = new Date().toISOString().slice(0, 10);
+    Swal.fire({
+        title: SES.i18n.t('contract.cancel.title'),
+        text: SES.i18n.t('contract.cancel.datePrompt'),
+        input: 'date',
+        inputValue: today,
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: SES.i18n.t('contract.action.cancel'),
+        cancelButtonText: SES.i18n.t('js.project.delete.cancel'),
+        inputValidator: (value) => {
+            if (!value) return SES.i18n.t('error.contract.cancelDateRequired') || '';
+        }
+    }).then((result) => {
+        if (!result.isConfirmed || !result.value) return;
+        postStatusChange(id, '解約', result.value);
+    });
+}
+
+function postStatusChange(id, newStatus, cancelDate) {
+    $.ajax({
+        url: '/api/contracts/' + id + '/status',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify({ status: newStatus, cancelDate: cancelDate }),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(SES.i18n.t('js.contract.success.update'));
+                loadContracts();
+            } else {
+                Toast.error(res.message || SES.i18n.t('js.contract.error.register'));
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            // 不正遷移(409)などのAPIメッセージをそのままトースト表示する
+            const msg = err.responseJSON && err.responseJSON.message ? err.responseJSON.message : SES.i18n.t('js.common.error_network');
+            Toast.error(msg);
         }
     });
 }

@@ -32,11 +32,15 @@ function renderConfigs(configs) {
         const desc = c.description != null ? escapeHtml(c.description) : '';
         const isMasked = MASKED_CONFIG_KEYS.indexOf(c.configKey) !== -1;
         const inputType = isMasked ? 'password' : 'text';
+        // 単位の紛らわしいキーには画面側の注記を添える(DBのdescriptionは変更しない)。
+        // 注記は .cfg-desc とは別要素に置き、保存時に説明へ混入しないようにする。
+        const unitNote = unitNoteFor(c.configKey);
+        const noteHtml = unitNote ? `<div class="text-warning-emphasis small mt-1"><i class="bi bi-info-circle me-1"></i>${escapeHtml(unitNote)}</div>` : '';
         html += `
             <tr data-key="${key}">
                 <td class="text-light small"><code class="text-info">${key}</code></td>
                 <td><input type="${inputType}" autocomplete="new-password" class="form-control form-control-sm bg-dark border-secondary text-light cfg-value" value="${val}"></td>
-                <td class="text-muted small">${desc}</td>
+                <td class="text-muted small"><span class="cfg-desc">${desc}</span>${noteHtml}</td>
             </tr>`;
     });
     $body.html(html);
@@ -48,7 +52,8 @@ function saveConfigs() {
         configs.push({
             configKey: $(this).data('key'),
             configValue: $(this).find('.cfg-value').val(),
-            description: $(this).find('td:last').text()
+            // 画面側注記(.cfg-desc の外)を除いた元の説明のみを送る
+            description: $(this).find('.cfg-desc').text()
         });
     });
 
@@ -69,6 +74,13 @@ function saveConfigs() {
             Toast.error(msg);
         }
     });
+}
+
+// 単位が紛らわしい設定キーの注記(小数/百分率)。i18n から取得。
+function unitNoteFor(key) {
+    if (key === 'billing.tax-rate') return SES.i18n.t('systemConfig.note.taxRate');
+    if (key === 'commission.rate') return SES.i18n.t('systemConfig.note.commissionRate');
+    return '';
 }
 
 function escapeHtml(s) {

@@ -45,6 +45,9 @@ class WorkRecordServiceImplTest {
     @Mock
     private InvoiceItemMapper invoiceItemMapper;
 
+    @Mock
+    private com.ses.service.NotificationService notificationService;
+
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
 
@@ -124,7 +127,7 @@ class WorkRecordServiceImplTest {
         WorkRecordGridDto dto = new WorkRecordGridDto();
         dto.setWorkRecordId(1L);
         dto.setEmploymentType("BP");
-        when(workRecordMapper.selectMonthlyGrid(workMonth)).thenReturn(Collections.singletonList(dto));
+        when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
 
         // BP支払未存在
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
@@ -203,6 +206,98 @@ class WorkRecordServiceImplTest {
 
         assertThat(r1.getStatus()).isEqualTo("入力中");
         verify(spyService, times(1)).updateBatchById(any());
+    }
+
+    // ===== R4: 手動BP階層の保護 / confirm 金額同期 =====
+
+    @Test
+    void testReopenMonth_手動BP階層ありで拒否() {
+        String workMonth = "2026-07";
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
+        // 支払済はなし
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
+        // 未払の2階層目(手動登録)が存在
+        BpPayment tier2 = new BpPayment();
+        tier2.setId(5L); tier2.setLayerOrder(2); tier2.setStatus("未払");
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.singletonList(tier2));
+
+        assertThatThrownBy(() -> spyService.reopenMonth(workMonth))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.manualBpDelete");
+
+        verify(spyService, never()).updateBatchById(any());
+        verify(bpPaymentMapper, never()).delete(any());
+    }
+
+    @Test
+    void testConfirmMonth_既存未払BP1階層目の金額を追従更新する() {
+        String workMonth = "2026-07";
+
+        WorkRecord record = new WorkRecord();
+        record.setId(1L);
+        record.setStatus("入力中");
+        record.setPaymentAmount(new BigDecimal("650000"));
+
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+
+        WorkRecordGridDto dto = new WorkRecordGridDto();
+        dto.setWorkRecordId(1L);
+        dto.setEmploymentType("BP");
+        when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+
+        // 既存BP支払あり(手動登録などで入力中に生成済み)
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
+        BpPayment root = new BpPayment();
+        root.setId(9L);
+        root.setStatus("未払");
+        root.setParentPaymentId(null);
+        root.setAmount(new BigDecimal("600000")); // 旧金額(payment_amount と不一致)
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.singletonList(root));
+        when(bpPaymentMapper.update(any(), any())).thenReturn(1);
+
+        workRecordService.confirmMonth(workMonth);
+
+        // 新規insertはせず、未払1階層目の金額を追従更新する
+        verify(bpPaymentMapper, never()).insert(any(BpPayment.class));
+        verify(bpPaymentMapper, times(1)).update(isNull(), any());
+    }
+
+    @Test
+    void testConfirmMonth_支払済BP1階層目の不一致は更新せず通知する() {
+        String workMonth = "2026-07";
+
+        WorkRecord record = new WorkRecord();
+        record.setId(1L);
+        record.setStatus("入力中");
+        record.setPaymentAmount(new BigDecimal("650000"));
+
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+
+        WorkRecordGridDto dto = new WorkRecordGridDto();
+        dto.setWorkRecordId(1L);
+        dto.setEmploymentType("BP");
+        when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
+        BpPayment root = new BpPayment();
+        root.setId(9L);
+        root.setStatus("支払済");
+        root.setParentPaymentId(null);
+        root.setAmount(new BigDecimal("600000"));
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.singletonList(root));
+
+        workRecordService.confirmMonth(workMonth);
+
+        // 支払済は更新せず通知に留める
+        verify(bpPaymentMapper, never()).update(any(), any());
+        verify(notificationService, times(1)).publish(any(), any(), any(), any(), any());
     }
 
     @Test

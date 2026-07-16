@@ -247,6 +247,7 @@ CREATE TABLE t_invoice (
   subtotal      DECIMAL(12,0) NOT NULL,
   tax           DECIMAL(12,0) NOT NULL,
   total         DECIMAL(12,0) NOT NULL,
+  tax_rate      DECIMAL(4,3),
   status        VARCHAR(20) DEFAULT '未送付',
   issued_date   DATE,
   paid_date     DATE,

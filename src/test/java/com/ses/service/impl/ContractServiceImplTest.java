@@ -291,6 +291,66 @@ class ContractServiceImplTest {
                 () -> contractService.updateWithBusinessRules(newContract));
     }
 
+    // ===== R2: 解約日つき状態遷移 =====
+
+    private Contract activeContract(Long id, LocalDate startDate, LocalDate endDate) {
+        Contract c = new Contract();
+        c.setId(id);
+        c.setStatus("稼動中");
+        c.setStartDate(startDate);
+        c.setEndDate(endDate);
+        c.setEngineerId(500L);
+        return c;
+    }
+
+    @Test
+    void changeStatus_cancelRequiresCancelDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
+        when(contractMapper.selectById(1L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.changeStatus(1L, "解約", null));
+        assertEquals("error.contract.cancelDateRequired", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void changeStatus_cancelDateBeforeStartRejected() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
+        when(contractMapper.selectById(1L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.changeStatus(1L, "解約", LocalDate.of(2026, 3, 31)));
+        assertEquals("error.contract.cancelDateInvalid", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void changeStatus_cancelOverwritesEndDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+
+        contractService.changeStatus(1L, "解約", LocalDate.of(2026, 7, 15));
+
+        assertEquals(LocalDate.of(2026, 7, 15), c.getEndDate());
+        assertEquals("解約", c.getStatus());
+        verify(engineerStatusService, times(1)).releaseIfIdle(500L);
+    }
+
+    @Test
+    void changeStatus_endDoesNotChangeEndDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+
+        // 終了遷移では cancelDate を渡しても end_date は不変(自然満了)
+        contractService.changeStatus(1L, "終了", LocalDate.of(2026, 7, 15));
+
+        assertEquals(LocalDate.of(2026, 12, 31), c.getEndDate());
+        assertEquals("終了", c.getStatus());
+    }
+
     // ===== WS-G: 成約→契約ドラフト自動生成 =====
 
     private Proposal proposal(Long id, Long engineerId, Long projectId, BigDecimal unitPrice) {

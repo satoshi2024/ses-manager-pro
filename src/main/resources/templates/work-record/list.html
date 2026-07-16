@@ -36,6 +36,11 @@
         </div>
     </div>
 
+    <!-- 端数処理ルールの注記(R6): fraction_rule は自由記述メモであり計算には適用されない -->
+    <div class="alert alert-secondary bg-dark border-dark text-muted small py-2 mb-3" role="alert">
+        <i class="bi bi-info-circle me-1"></i><th:block th:text="#{contract.fractionRule.note}">精算計算は常に1円未満切り捨てです。この欄はメモであり計算には適用されません。</th:block>
+    </div>
+
     <!-- Table -->
     <div class="card bg-card border-dark shadow-sm">
         <div class="card-body p-0">

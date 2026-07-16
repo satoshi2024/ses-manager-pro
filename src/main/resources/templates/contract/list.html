@@ -19,7 +19,7 @@
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportContracts()">
                 <i class="bi bi-file-earmark-excel me-1"></i><th:block th:text="#{contract.excel.btn}">Excel出力</th:block>
             </button>
-            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#contractModal">
+            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" onclick="openNewContract()">
                 <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{contract.new}">新規契約</th:block>
             </button>
         </div>
@@ -101,11 +101,12 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i><th:block th:text="#{contract.new}">契約登録</th:block></h5>
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i><span id="contractModalTitle" th:text="#{contract.new}">契約登録</span></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
                     <form id="contract-form">
+                        <input type="hidden" id="cont-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{contract.engineer}">稼働要員</th:block> <span class="text-danger">*</span></label>
                             <select id="cont-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
@@ -130,6 +131,14 @@
                                 <option value="" th:text="#{contract.salesRep.select}">営業を選択...</option>
                             </select>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{contract.contractType}">契約形態</label>
+                            <select id="cont-contractType" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="準委任" th:text="#{contract.contractType.quasiMandate}">準委任</option>
+                                <option value="請負" th:text="#{contract.contractType.contract}">請負</option>
+                                <option value="派遣" th:text="#{contract.contractType.dispatch}">派遣</option>
+                            </select>
+                        </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small" th:text="#{contract.startDate}">開始日</label>
@@ -149,6 +158,28 @@
                                 <label class="form-label text-muted small"><th:block th:text="#{contract.costPrice}">原価 (円)</th:block> <span class="text-danger">*</span></label>
                                 <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{contract.placeholder.costPrice}" placeholder="例: 600000" min="0" required>
                             </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{contract.settlementMin}">精算下限(h)</label>
+                                <input type="number" id="cont-settlementHoursMin" class="form-control form-control-dark bg-secondary text-white border-dark" step="0.1" min="0" placeholder="140">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{contract.settlementMax}">精算上限(h)</label>
+                                <input type="number" id="cont-settlementHoursMax" class="form-control form-control-dark bg-secondary text-white border-dark" step="0.1" min="0" placeholder="180">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{contract.fractionRule}">端数処理ルール</label>
+                            <input type="text" id="cont-fractionRule" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            <div class="form-text text-muted small mt-1"><i class="bi bi-info-circle me-1"></i><th:block th:text="#{contract.fractionRule.note}">精算計算は常に1円未満切り捨てです。この欄はメモであり計算には適用されません。</th:block></div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{contract.autoRenew}">自動更新</label>
+                            <select id="cont-autoRenew" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="0" th:text="#{contract.autoRenew.no}">しない</option>
+                                <option value="1" th:text="#{contract.autoRenew.yes}">する</option>
+                            </select>
                         </div>
                         <div class="mb-3">
                             <a class="text-accent-blue text-decoration-none small" data-bs-toggle="collapse" href="#commissionConfig" role="button" aria-expanded="false" aria-controls="commissionConfig">
@@ -178,7 +209,7 @@
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveContract()">
-                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.register}">登録</th:block>
+                        <i class="bi bi-check-lg me-1"></i><span id="contractSaveBtnLabel" th:text="#{common.register}">登録</span>
                     </button>
                 </div>
             </div>

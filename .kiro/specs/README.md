@@ -19,7 +19,7 @@
 
 | spec | 状態 | レーン構成 | 担当ファイル範囲(概要) | 一言で着手 |
 |---|---|---|---|---|
-| `money-flow-consistency` | 未着手（2026-07-16 金銭ロジック横断調査の是正spec） | A/C並行→B→D→M | 契約UI(`contract.js`等)・集計(`Dashboard`/`Export`/`SalesPerformance`)・勤怠BP(`WorkRecord*`)・`InvoiceMapper` | `.kiro/specs/money-flow-consistency/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `money-flow-consistency` | **実装完了（2026-07-16、全レーンA/C/B/D/M）** | A/C並行→B→D→M | 契約UI(`contract.js`等)・集計(`Dashboard`/`Export`/`SalesPerformance`共通口径`MonthlyRevenueCalcService`)・勤怠BP(`WorkRecord*`)・`InvoiceMapper`・請求税率保存(`V27`) | 完了。R1〜R8を実装（契約編集/状態遷移UI・解約日確定・集計口径統一・reopen手動BP保護・営業成績未帰属行・fraction_rule注記・請求税率固定）。`mvn test` 全緑（smoke testはDocker必要でskip）。 |
 | `multi-tier-bp-management` | 未着手 | F→A/B→M | `BpPayment`関連のみ | `.kiro/specs/multi-tier-bp-management/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `skill-sheet-generation` | 未着手 | 逐次1〜4 | 新規`SkillSheetGenerator`等のみ、既存エンティティ非変更 | `.kiro/specs/skill-sheet-generation/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `engineer-availability-visualization` | 未着手 | 逐次1〜3 | 新規`AnalyticsApiController`エンドポイント追加のみ | `.kiro/specs/engineer-availability-visualization/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |

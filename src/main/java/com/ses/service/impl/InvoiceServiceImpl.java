@@ -74,6 +74,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         invoice.setSubtotal(subtotal);
         invoice.setTax(tax);
         invoice.setTotal(total);
+        // 生成時点の適用税率を保存する(税率改定後も過去請求書の表示・保存税額が矛盾しないように)。
+        invoice.setTaxRate(taxRate);
         invoice.setStatus("未送付");
         invoice.setIssuedDate(LocalDate.now());
         invoice.setDueDate(calcDueDate(billingMonth,
@@ -224,7 +226,10 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         dto.setCompanyName(systemConfigService.getString("company.name", ""));
         dto.setCompanyRegistrationNumber(systemConfigService.getString("company.invoice-registration-number", ""));
         dto.setCompanyAddress(systemConfigService.getString("company.address", ""));
-        BigDecimal rate = systemConfigService.getDecimal("billing.tax-rate", new BigDecimal("0.10"));
+        // 適用税率は保存値(生成時点)を優先し、NULL(本対応以前の既存行)のみ現在設定へフォールバックする。
+        BigDecimal rate = invoice.getTaxRate() != null
+                ? invoice.getTaxRate()
+                : systemConfigService.getDecimal("billing.tax-rate", new BigDecimal("0.10"));
         dto.setTaxRatePercent(rate.multiply(new BigDecimal("100")).stripTrailingZeros().toPlainString());
 
         return dto;

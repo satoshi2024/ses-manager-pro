@@ -30,8 +30,15 @@ public interface ContractService extends IService<Contract> {
      */
     void updateWithBusinessRules(Contract contract);
 
-    /** 契約状態を許可された遷移だけ変更する。 */
-    void changeStatus(Long contractId, String newStatus);
+    /**
+     * 契約状態を許可された遷移だけ変更する。
+     * 解約(解約)遷移のときは cancelDate(解約日=実質終了日)が必須で、end_date を当該日で上書きする。
+     * それ以外の遷移では cancelDate は無視される。
+     * @param contractId 契約ID
+     * @param newStatus 新ステータス
+     * @param cancelDate 解約日(解約遷移時のみ必須)
+     */
+    void changeStatus(Long contractId, String newStatus, LocalDate cancelDate);
 
     /**
      * 稼動中の契約があるか確認

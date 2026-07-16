@@ -85,7 +85,7 @@ class ContractApiControllerTest {
     @WithMockUser
     void page_パラメータなしで全件取得() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -96,7 +96,7 @@ class ContractApiControllerTest {
     @WithMockUser
     void page_検索パラメータ複合で絞れる_contractNo部分一致() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts?status=稼動中&customerId=10&contractNo=C-001"))
                 .andExpect(status().isOk())
@@ -111,7 +111,7 @@ class ContractApiControllerTest {
         dto.setEngineerName("テスト 太郎");
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -126,7 +126,7 @@ class ContractApiControllerTest {
         dto.setEngineerName(null);
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -153,5 +153,34 @@ class ContractApiControllerTest {
 
         verify(contractService).updateWithBusinessRules(argThat(updated -> updated.getId().equals(10L)
                 && updated.getStatus() == null));
+    }
+
+    @Test
+    @WithMockUser
+    void getById_契約詳細を返す() throws Exception {
+        Contract c = new Contract();
+        c.setId(10L);
+        c.setContractNo("C-202607-0001");
+        c.setEngineerId(1L);
+        when(contractService.getById(10L)).thenReturn(c);
+
+        mockMvc.perform(get("/api/contracts/10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.contractNo").value("C-202607-0001"));
+    }
+
+    @Test
+    @WithMockUser
+    void changeStatus_解約日を渡すとサービスへ引き継がれる() throws Exception {
+        Map<String, Object> body = Map.of("status", "解約", "cancelDate", "2026-07-15");
+
+        mockMvc.perform(put("/api/contracts/10/status").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(contractService).changeStatus(eq(10L), eq("解約"), eq(LocalDate.of(2026, 7, 15)));
     }
 }

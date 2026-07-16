@@ -49,6 +49,10 @@ class DashboardServiceImplTest {
     @Mock
     private ProposalMapper proposalMapper;
 
+    // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
+    @org.mockito.Spy
+    private MonthlyRevenueCalcServiceImpl monthlyRevenueCalcService = new MonthlyRevenueCalcServiceImpl();
+
     @InjectMocks
     private DashboardServiceImpl dashboardService;
 
@@ -169,10 +173,18 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_WithActuals() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        // 共通口径は契約単位フォールバック: 実績は該当契約に紐づく必要があるため、稼動契約を用意する
+        java.time.YearMonth actualMonth = java.time.YearMonth.now().minusMonths(5);
+        Contract c1 = new Contract();
+        c1.setId(1L);
+        c1.setStatus("稼動中");
+        c1.setStartDate(actualMonth.atDay(1));
+        c1.setEndDate(null);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
 
         WorkRecord wr = new WorkRecord();
-        wr.setWorkMonth(java.time.YearMonth.now().minusMonths(5).toString());
+        wr.setContractId(1L);
+        wr.setWorkMonth(actualMonth.toString());
         wr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
         wr.setPaymentAmount(java.math.BigDecimal.valueOf(600000));
         when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
@@ -270,15 +282,22 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_トレンド計算() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        
+        // 当月・前月ともに実績が該当契約に紐づく前提(共通口径は契約単位)
+        Contract c1 = new Contract();
+        c1.setId(1L);
+        c1.setStatus("稼動中");
+        c1.setStartDate(java.time.YearMonth.now().minusMonths(2).atDay(1));
+        c1.setEndDate(null);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+
         WorkRecord currentWr = new WorkRecord();
-        currentWr.setWorkMonth(LocalDate.now().toString().substring(0, 7)); // This won't perfectly match YearMonth.toString() without formatting but it's mock
+        currentWr.setContractId(1L);
         currentWr.setWorkMonth(java.time.YearMonth.now().toString());
         currentWr.setBillingAmount(java.math.BigDecimal.valueOf(1200000));
         currentWr.setPaymentAmount(java.math.BigDecimal.valueOf(800000));
 
         WorkRecord prevWr = new WorkRecord();
+        prevWr.setContractId(1L);
         prevWr.setWorkMonth(java.time.YearMonth.now().minusMonths(1).toString());
         prevWr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
         prevWr.setPaymentAmount(java.math.BigDecimal.valueOf(700000));

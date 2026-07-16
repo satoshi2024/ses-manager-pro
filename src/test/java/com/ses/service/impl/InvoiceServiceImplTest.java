@@ -341,4 +341,64 @@ public class InvoiceServiceImplTest {
         // 0.08 → "8"（パーセント表記）
         assertEquals("8", detail.getTaxRatePercent());
     }
+
+    // ===== R8: 請求書への適用税率の保存 =====
+
+    @Test
+    void testGenerate_SavesTaxRateAtIssue() {
+        Long customerId = 1L;
+        String billingMonth = "2026-07";
+
+        UnbilledWorkRecordDto dto = new UnbilledWorkRecordDto();
+        dto.setWorkRecordId(10L);
+        dto.setBillingAmount(new BigDecimal("100000"));
+        when(invoiceMapper.selectUnbilledWorkRecords(customerId, billingMonth))
+                .thenReturn(Collections.singletonList(dto));
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
+        when(invoiceMapper.insert(any(Invoice.class))).thenReturn(1);
+        when(invoiceItemMapper.insert(any(InvoiceItem.class))).thenReturn(1);
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+
+        Invoice invoice = invoiceService.generate(customerId, billingMonth);
+
+        // 生成時点の税率が保存されること
+        assertEquals(0, new BigDecimal("0.10").compareTo(invoice.getTaxRate()));
+    }
+
+    @Test
+    void testDetail_UsesSavedTaxRateOverCurrentConfig() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setCustomerId(5L);
+        invoice.setTaxRate(new BigDecimal("0.10")); // 生成時点は10%
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(systemConfigService.getString(any(), any())).thenReturn("");
+        // 現在の設定は8%に改定済みだが、保存値(10%)が優先されること
+        lenient().when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.08"));
+
+        var detail = invoiceService.detail(invoiceId);
+
+        assertEquals("10", detail.getTaxRatePercent());
+    }
+
+    @Test
+    void testDetail_FallsBackToConfigWhenTaxRateNull() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setCustomerId(5L);
+        invoice.setTaxRate(null); // 本対応以前の既存行
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(systemConfigService.getString(any(), any())).thenReturn("");
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+
+        var detail = invoiceService.detail(invoiceId);
+
+        assertEquals("10", detail.getTaxRatePercent());
+    }
 }

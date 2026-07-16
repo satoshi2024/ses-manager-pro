@@ -170,7 +170,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void changeStatus(Long contractId, String newStatus) {
+    public void changeStatus(Long contractId, String newStatus, LocalDate cancelDate) {
         Contract contract = this.baseMapper.selectById(contractId);
         if (contract == null) {
             throw BusinessException.of(404, "error.contract.notFound");
@@ -181,6 +181,17 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     contract.getStatus(), newStatus);
         }
         String oldStatus = contract.getStatus();
+        // 解約遷移では解約日(実質終了日)を必須とし、end_date を上書きする。
+        // 解約日以降の月は集計対象から自然に外れる(R2/R3)。
+        if (StatusConstants.CONTRACT_CANCELLED.equals(newStatus)) {
+            if (cancelDate == null) {
+                throw BusinessException.of("error.contract.cancelDateRequired");
+            }
+            if (contract.getStartDate() != null && cancelDate.isBefore(contract.getStartDate())) {
+                throw BusinessException.of("error.contract.cancelDateInvalid");
+            }
+            contract.setEndDate(cancelDate);
+        }
         contract.setStatus(newStatus);
         this.baseMapper.updateById(contract);
         if (contract.getEngineerId() != null) {

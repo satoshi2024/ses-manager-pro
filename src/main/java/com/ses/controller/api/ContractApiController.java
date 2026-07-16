@@ -14,7 +14,7 @@ import com.ses.mapper.ContractMapper;
 import org.springframework.format.annotation.DateTimeFormat;
 import java.time.LocalDate;
 import java.util.Map;
-import com.ses.dto.common.StatusChangeRequest;
+import com.ses.dto.contract.ContractStatusChangeRequest;
 
 /**
  * 契約APIコントローラー
@@ -44,9 +44,10 @@ public class ContractApiController {
             @RequestParam(required = false) String contractNo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
-            @RequestParam(required = false) Long salesUserId) {
+            @RequestParam(required = false) Long salesUserId,
+            @RequestParam(required = false) Boolean salesUnassigned) {
         Page<ContractListDto> page = new Page<>(current, size);
-        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId));
+        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned));
     }
 
     /**
@@ -99,8 +100,8 @@ public class ContractApiController {
 
     /** 契約状態変更（状態機械を通す専用 API）。 */
     @PutMapping("/{id}/status")
-    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
-        contractService.changeStatus(id, request.getStatus());
+    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody ContractStatusChangeRequest request) {
+        contractService.changeStatus(id, request.getStatus(), request.getCancelDate());
         return ApiResult.success(Boolean.TRUE);
     }
 

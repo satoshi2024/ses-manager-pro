@@ -228,6 +228,38 @@ public class SalesPerformanceServiceImplTest {
         assertEquals(0, result.get(0).getTotalSalesAmount().compareTo(BigDecimal.ZERO));
     }
 
+    @Test
+    void 担当営業なしの稼動契約は未帰属行として合算される() {
+        SysUser u1 = user(1L, "Sales1");
+        Contract attributed = contract(10L, 1L, StatusConstants.CONTRACT_ACTIVE,
+                LocalDate.of(2023, 10, 1), null, "800000", "500000",
+                LocalDateTime.of(2023, 10, 1, 10, 0), null);
+        // 担当営業なし(salesUserId=null)の稼動契約
+        Contract unassigned = contract(11L, null, StatusConstants.CONTRACT_ACTIVE,
+                LocalDate.of(2023, 10, 1), null, "600000", "400000",
+                LocalDateTime.of(2023, 10, 1, 10, 0), null);
+
+        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
+        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(attributed, unassigned));
+
+        List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
+
+        // 最終行が未帰属
+        SalesPerformanceDto last = result.get(result.size() - 1);
+        assertEquals(true, last.isUnattributed());
+        assertNull(last.getClosedRate());
+        assertEquals(0, last.getTotalSalesAmount().compareTo(new BigDecimal("600000")));
+        assertEquals(0, last.getTotalProfitAmount().compareTo(new BigDecimal("200000")));
+
+        // 全行合計 = 共通口径の全社売上(800000 + 600000)
+        BigDecimal totalSales = result.stream()
+                .map(SalesPerformanceDto::getTotalSalesAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertEquals(0, totalSales.compareTo(new BigDecimal("1400000")));
+    }
+
     private SysUser user(Long id, String realName) {
         SysUser user = new SysUser();
         user.setId(id);

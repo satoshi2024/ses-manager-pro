@@ -47,7 +47,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
         data.forEach(row => {
             const tr = document.createElement('tr');
-            
+
+            if (row.unattributed) {
+                // 未帰属(担当営業なし)行: 担当要員数・成約数・成約率・インセンティブは対象外(—)。
+                // 契約一覧(担当営業未設定で絞り込み)へのリンクを張り、R1の編集UIで帰属を解消できるようにする。
+                tr.className = 'table-active fst-italic';
+                tr.innerHTML = `
+                    <td class="fw-bold">${escapeHtml(msgUnattributed)}
+                        <a href="/contract/list?salesUserId=none" class="ms-2 small">${escapeHtml(msgUnattributedLink)}</a></td>
+                    <td class="text-end">—</td>
+                    <td class="text-end">—</td>
+                    <td class="text-end">—</td>
+                    <td class="text-end">${formatNumber(row.activeContractCount)}</td>
+                    <td class="text-end">${formatCurrency(row.totalSalesAmount)}</td>
+                    <td class="text-end">${formatCurrency(row.totalProfitAmount)}</td>
+                    <td class="text-end">${formatCurrency(row.totalCommissionAmount)}</td>
+                `;
+                tableBody.appendChild(tr);
+                return;
+            }
+
             let rateStr = '—';
             if (row.closedRate !== null && row.closedRate !== undefined) {
                 rateStr = row.closedRate + '%';

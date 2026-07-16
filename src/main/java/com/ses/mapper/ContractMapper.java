@@ -44,6 +44,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
           <if test="engineerId != null">AND c.engineer_id = #{engineerId}</if>
           <if test="projectId != null">AND c.project_id = #{projectId}</if>
           <if test="salesUserId != null">AND c.sales_user_id = #{salesUserId}</if>
+          <if test="salesUnassigned != null and salesUnassigned">AND c.sales_user_id IS NULL</if>
           <if test="contractNo != null and contractNo != ''">AND c.contract_no LIKE CONCAT('%', #{contractNo}, '%')</if>
           <if test="endDateFrom != null">AND c.end_date &gt;= #{endDateFrom}</if>
           <if test="endDateTo != null">AND c.end_date &lt;= #{endDateTo}</if>
@@ -54,5 +55,6 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("customerId") Long customerId, @org.apache.ibatis.annotations.Param("engineerId") Long engineerId,
             @org.apache.ibatis.annotations.Param("projectId") Long projectId, @org.apache.ibatis.annotations.Param("contractNo") String contractNo,
             @org.apache.ibatis.annotations.Param("endDateFrom") LocalDate endDateFrom, @org.apache.ibatis.annotations.Param("endDateTo") LocalDate endDateTo,
-            @org.apache.ibatis.annotations.Param("salesUserId") Long salesUserId);
+            @org.apache.ibatis.annotations.Param("salesUserId") Long salesUserId,
+            @org.apache.ibatis.annotations.Param("salesUnassigned") Boolean salesUnassigned);
 }
