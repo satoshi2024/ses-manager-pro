@@ -91,7 +91,12 @@ $(document).ready(function() {
             
             // If we are over a column that can scroll vertically, let it scroll vertically.
             // Otherwise, translate vertical wheel to horizontal scroll.
-            if (!hasVerticalScroll || e.shiftKey) {
+            const maxScrollLeft = slider.scrollWidth - slider.clientWidth;
+            const canScrollInDirection =
+                (e.deltaY > 0 && slider.scrollLeft < maxScrollLeft) ||
+                (e.deltaY < 0 && slider.scrollLeft > 0);
+
+            if ((!hasVerticalScroll || e.shiftKey) && canScrollInDirection) {
                 e.preventDefault();
                 slider.scrollLeft += e.deltaY;
             }

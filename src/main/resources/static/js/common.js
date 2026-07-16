@@ -341,9 +341,12 @@ const SES = {
                 const colorClass = iconColorMap[n.type] || 'text-accent-blue';
                 const bgClass = !n.isRead ? 'bg-secondary bg-opacity-50 fw-bold' : '';
                 // message には要員名等の利用者入力が含まれるため必ずエスケープする（XSS対策）
-                return `<a class="dropdown-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${SES.escapeHtml(n.linkUrl || '#')}">
-                            <i class="bi ${SES.escapeHtml(n.icon)} ${colorClass} me-2"></i>${SES.escapeHtml(n.message)}
-                            <div class="small text-muted ms-4">${SES.escapeHtml(n.date)}</div>
+                return `<a class="dropdown-item notification-item py-2 ${bgClass}" href="#" data-id="${n.id}" data-url="${SES.escapeHtml(n.linkUrl || '#')}">
+                            <i class="bi ${SES.escapeHtml(n.icon)} ${colorClass} me-2 mt-1 flex-shrink-0"></i>
+                            <span class="notification-item-body">
+                                <span class="notification-item-message">${SES.escapeHtml(n.message)}</span>
+                                <span class="small text-muted d-block">${SES.escapeHtml(n.date)}</span>
+                            </span>
                         </a>`;
             }).join('');
             

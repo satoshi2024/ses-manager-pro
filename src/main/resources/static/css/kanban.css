@@ -1,10 +1,15 @@
 /* Kanban Board Layout */
 .kanban-board-container {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     /* 100vh - header - page title - padding */
-    height: calc(100vh - 200px); 
+    height: calc(100vh - 200px);
+    height: calc(100dvh - 200px);
     overflow-x: auto;
     overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
     cursor: grab;
 }
 
@@ -32,11 +37,14 @@
 
 .kanban-board {
     display: inline-flex;
+    width: max-content;
+    min-width: max-content;
     height: 100%;
     align-items: flex-start;
 }
 
 .kanban-column {
+    flex: 0 0 300px;
     width: 300px;
     height: 100%;
     display: flex;
@@ -129,4 +137,28 @@
     border: 1px solid rgba(111, 66, 193, 0.5);
     padding: 2px 6px;
     border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+    .kanban-board-container {
+        height: calc(100vh - 240px);
+        height: calc(100dvh - 240px);
+        min-height: 360px;
+        max-height: 720px;
+        scroll-snap-type: x proximity;
+        scroll-padding-inline: 0.5rem;
+    }
+
+    .kanban-column {
+        flex-basis: min(82vw, 300px);
+        width: min(82vw, 300px);
+        scroll-snap-align: start;
+    }
+}
+
+@media (max-width: 420px) {
+    .kanban-column {
+        flex-basis: 88vw;
+        width: 88vw;
+    }
 }

@@ -6,10 +6,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -55,6 +59,10 @@ class MobileResponsiveLayoutTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return result.getResponse().getContentAsString();
+    }
+
+    private String readCss(String path) throws IOException {
+        return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
     }
 
     @ParameterizedTest(name = "{0} はモバイル用の共通レイアウト部品を含む")
@@ -129,5 +137,62 @@ class MobileResponsiveLayoutTest {
         assertThat(html)
                 .as("ページヘッダーが折り返し対象のクラス組み合わせを持つこと")
                 .contains("d-flex justify-content-between align-items-center mb-4");
+    }
+
+    @Test
+    void 幅広コンテンツはメイン領域を押し広げず内部でスクロールできる() throws Exception {
+        String commonCss = readCss("static/css/common.css");
+        String kanbanCss = readCss("static/css/kanban.css");
+        String html = render("/proposal/kanban");
+
+        assertThat(commonCss)
+                .as("Flex子要素のmain-wrapperがカンバンの最小幅で押し広げられないこと")
+                .containsPattern("(?s)\\.main-wrapper\\s*\\{[^}]*min-width:\\s*0");
+        assertThat(kanbanCss)
+                .as("カンバン全体の固定幅はスクロールコンテナ内部に保持すること")
+                .containsPattern("(?s)\\.kanban-board\\s*\\{[^}]*min-width:\\s*max-content");
+        assertThat(html)
+                .as("Bootstrapのoverflow-autoでカンバン固有の縦横スクロール指定を上書きしないこと")
+                .contains("class=\"kanban-board-container pb-3\"")
+                .doesNotContain("class=\"kanban-board-container overflow-auto");
+    }
+
+    @Test
+    void 小画面では見出しとフォームが読みやすいレイアウト契約を持つ() throws Exception {
+        String commonCss = readCss("static/css/common.css");
+        String contractHtml = render("/contract/list");
+
+        assertThat(commonCss)
+                .as("一覧画面で共通レイアウトとcontainer-fluidの余白が二重にならないこと")
+                .containsPattern("(?s)\\.content-area \\.container-fluid\\.py-4\\s*\\{[^}]*padding:\\s*0");
+        assertThat(commonCss)
+                .as("ページ見出しの長いタイトルが小画面で折り返せること")
+                .contains("overflow-wrap: anywhere");
+        assertThat(commonCss)
+                .as("モバイル入力欄はiOSの自動ズームを防ぐ16px以上であること")
+                .containsPattern("(?s)\\.content-area \\.form-control:not\\(textarea\\)[^{]*\\{[^}]*font-size:\\s*16px");
+        assertThat(commonCss)
+                .as("スマートフォン幅のモーダル本文は専用の余白に縮小されること")
+                .containsPattern("(?s)@media \\(max-width: 576px\\).*?\\.modal-body\\s*\\{[^}]*padding:\\s*1rem");
+        assertThat(contractHtml)
+                .as("契約期間の開始日・終了日はスマートフォン幅で縦積みにできること")
+                .contains("mobile-date-range");
+    }
+
+    @Test
+    void 通知ドロップダウンの長文は枠内で折り返せる() throws Exception {
+        String commonCss = readCss("static/css/common.css");
+        String commonJs = readCss("static/js/common.js");
+
+        assertThat(commonJs)
+                .as("通知項目は折り返し制御用の専用クラスを持つこと")
+                .contains("notification-item")
+                .contains("notification-item-message");
+        assertThat(commonCss)
+                .as("Bootstrap dropdown-itemのnowrapを通知項目だけ上書きすること")
+                .containsPattern("(?s)#notification-list \\.notification-item\\s*\\{[^}]*white-space:\\s*normal");
+        assertThat(commonCss)
+                .as("契約番号などの長い連続文字列も通知枠内で折り返せること")
+                .containsPattern("(?s)#notification-list \\.notification-item-message\\s*\\{[^}]*overflow-wrap:\\s*anywhere");
     }
 }
