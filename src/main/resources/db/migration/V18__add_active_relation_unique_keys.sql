@@ -14,17 +14,25 @@
 --  WHERE deleted_flag = 0 AND renewed_from_contract_id IS NOT NULL
 --  GROUP BY renewed_from_contract_id HAVING COUNT(*) > 1;
 
+-- t_bp_payment: add generated columns first
 ALTER TABLE t_bp_payment
   ADD COLUMN active_work_record_id BIGINT
     GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN work_record_id ELSE NULL END) STORED,
   ADD COLUMN active_layer_order INT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN layer_order ELSE NULL END) STORED,
+    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN layer_order ELSE NULL END) STORED;
+
+-- t_bp_payment: add unique key on generated columns
+ALTER TABLE t_bp_payment
   ADD UNIQUE KEY uk_bp_payment_active_layer (active_work_record_id, active_layer_order);
 
+-- t_contract: add generated columns first
 ALTER TABLE t_contract
   ADD COLUMN active_proposal_id BIGINT
     GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN proposal_id ELSE NULL END) STORED,
   ADD COLUMN active_renewed_from_contract_id BIGINT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN renewed_from_contract_id ELSE NULL END) STORED,
+    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN renewed_from_contract_id ELSE NULL END) STORED;
+
+-- t_contract: add unique keys on generated columns
+ALTER TABLE t_contract
   ADD UNIQUE KEY uk_contract_active_proposal (active_proposal_id),
   ADD UNIQUE KEY uk_contract_active_renewal_source (active_renewed_from_contract_id);
