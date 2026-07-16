@@ -34,17 +34,13 @@ ALTER TABLE t_contract
   ADD CONSTRAINT fk_contract_sales_user FOREIGN KEY (sales_user_id) REFERENCES sys_user(id) ON DELETE RESTRICT;
 
 -- インセンティブ既定規則（管理者が /system-config から変更可能）
-INSERT INTO m_system_config (config_key, config_value, description) VALUES
+INSERT IGNORE INTO m_system_config (config_key, config_value, description) VALUES
   ('commission.base-type', '粗利', 'インセンティブ計算基準（粗利 または 売上）'),
-  ('commission.rate',      '5.0',  'インセンティブ既定率（%）')
-AS new(config_key, config_value, description)
-ON DUPLICATE KEY UPDATE description = new.description;
+  ('commission.rate',      '5.0',  'インセンティブ既定率（%）');
 
 -- 営業成績メニュー（管理者・営業・マネージャー）
-INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
-VALUES ('sales-performance', '営業成績', '/sales-performance', '/api/sales-performance', 66)
-AS new(menu_key, menu_name, path_prefix, api_prefix, sort_order)
-ON DUPLICATE KEY UPDATE menu_name = new.menu_name;
+INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+VALUES ('sales-performance', '営業成績', '/sales-performance', '/api/sales-performance', 66);
 
 INSERT IGNORE INTO t_role_menu (role, menu_id)
 SELECT '管理者', id FROM m_menu WHERE menu_key = 'sales-performance'
