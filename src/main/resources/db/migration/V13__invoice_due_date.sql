@@ -12,8 +12,7 @@ ALTER TABLE t_invoice ADD COLUMN due_date DATE NULL COMMENT '支払期限';
 -- システム設定: 支払期限ルールと適格請求書用の自社情報
 --   billing.payment-due-rule: next-month-end(翌月末) / next-next-month-end(翌々月末)
 --   company.name は V9 で投入済みのため再投入しない
-INSERT INTO m_system_config (config_key, config_value, description) VALUES
+INSERT IGNORE INTO m_system_config (config_key, config_value, description) VALUES
   ('billing.payment-due-rule',            'next-month-end', '支払期限ルール(next-month-end/next-next-month-end)'),
   ('company.invoice-registration-number', '',               '適格請求書発行事業者 登録番号(T+13桁)'),
-  ('company.address',                     '',               '会社住所（請求書用）')
-ON DUPLICATE KEY UPDATE description = VALUES(description);
+  ('company.address',                     '',               '会社住所（請求書用）');

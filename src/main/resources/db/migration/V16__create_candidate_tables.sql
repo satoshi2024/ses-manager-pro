@@ -44,11 +44,10 @@ CREATE TABLE t_candidate_activity (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='候補者ステージ変更履歴';
 
 -- 候補者管理メニュー（管理者・営業・HR。採用は経営指標に直結するためマネージャーは対象外とする）
-INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
-VALUES ('candidate', '候補者管理', '/candidate', '/api/candidates', 67)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name);
+INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+VALUES ('candidate', '候補者管理', '/candidate', '/api/candidates', 67);
 
-INSERT INTO t_role_menu (role, menu_id)
+INSERT IGNORE INTO t_role_menu (role, menu_id)
 SELECT '管理者', id FROM m_menu WHERE menu_key = 'candidate'
 UNION ALL SELECT '営業', id FROM m_menu WHERE menu_key = 'candidate'
 UNION ALL SELECT 'HR', id FROM m_menu WHERE menu_key = 'candidate';
