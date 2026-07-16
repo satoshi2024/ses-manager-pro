@@ -17,12 +17,12 @@
 -- t_bp_payment: add generated column for work_record_id
 ALTER TABLE t_bp_payment
   ADD COLUMN active_work_record_id BIGINT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN work_record_id ELSE NULL END) STORED;
+    GENERATED ALWAYS AS (IF(deleted_flag = 0, work_record_id, NULL)) STORED;
 
 -- t_bp_payment: add generated column for layer_order
 ALTER TABLE t_bp_payment
   ADD COLUMN active_layer_order INT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN layer_order ELSE NULL END) STORED;
+    GENERATED ALWAYS AS (IF(deleted_flag = 0, layer_order, NULL)) STORED;
 
 -- t_bp_payment: add unique key on generated columns
 ALTER TABLE t_bp_payment
@@ -31,12 +31,12 @@ ALTER TABLE t_bp_payment
 -- t_contract: add generated column for proposal_id
 ALTER TABLE t_contract
   ADD COLUMN active_proposal_id BIGINT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN proposal_id ELSE NULL END) STORED;
+    GENERATED ALWAYS AS (IF(deleted_flag = 0, proposal_id, NULL)) STORED;
 
 -- t_contract: add generated column for renewed_from_contract_id
 ALTER TABLE t_contract
   ADD COLUMN active_renewed_from_contract_id BIGINT
-    GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN renewed_from_contract_id ELSE NULL END) STORED;
+    GENERATED ALWAYS AS (IF(deleted_flag = 0, renewed_from_contract_id, NULL)) STORED;
 
 -- t_contract: add unique key for active_proposal_id
 ALTER TABLE t_contract
