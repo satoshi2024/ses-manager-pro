@@ -46,7 +46,7 @@ VALUES ('sales-performance', '営業成績', '/sales-performance', '/api/sales-p
 AS new(menu_key, menu_name, path_prefix, api_prefix, sort_order)
 ON DUPLICATE KEY UPDATE menu_name = new.menu_name;
 
-INSERT INTO t_role_menu (role, menu_id)
+INSERT IGNORE INTO t_role_menu (role, menu_id)
 SELECT '管理者', id FROM m_menu WHERE menu_key = 'sales-performance'
 UNION ALL SELECT '営業', id FROM m_menu WHERE menu_key = 'sales-performance'
 UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'sales-performance';

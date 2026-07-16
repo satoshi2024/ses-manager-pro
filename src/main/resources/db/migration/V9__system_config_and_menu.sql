@@ -22,6 +22,4 @@ AS new(menu_key, menu_name, path_prefix, api_prefix, sort_order)
 ON DUPLICATE KEY UPDATE menu_name = new.menu_name;
 
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'system-config'
-AS new(role, menu_id)
-ON DUPLICATE KEY UPDATE role = new.role;
+SELECT '管理者', id FROM m_menu WHERE menu_key = 'system-config';
