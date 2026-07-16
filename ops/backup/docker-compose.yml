@@ -1,0 +1,19 @@
+services:
+  backup:
+    build: .
+    env_file: [.env.backup]
+    secrets: [restic_password, mysql_password]
+    volumes: [backup-data:/var/lib/ses-backup, uploads:/app/uploads:ro]
+    entrypoint: ["/usr/local/bin/backup-full.sh"]
+  binlog:
+    build: .
+    env_file: [.env.backup]
+    secrets: [restic_password, mysql_password]
+    volumes: [backup-data:/var/lib/ses-backup]
+    entrypoint: ["/usr/local/bin/archive-binlog.sh"]
+secrets:
+  restic_password: {file: ./secrets/restic-password}
+  mysql_password: {file: ./secrets/mysql-password}
+volumes:
+  uploads: {}
+  backup-data: {}

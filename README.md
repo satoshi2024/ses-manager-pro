@@ -106,6 +106,18 @@
    ```
    *(※システムに Maven が導入済みであれば `mvn spring-boot:run` でも起動できます)*
 
+   > 💡 既存ローカルDBで `Migration checksum mismatch` が出た場合は、過去 migration の内容が更新されたあとに古い checksum が `flyway_schema_history` に残っている状態です。SQLファイルを戻せない前提なら、内容確認のうえで次を実行して checksum を再同期してください。
+   >
+   > **Windows (PowerShell/CMD):**
+   > ```cmd
+   > set DB_URL=jdbc:mysql://localhost:3306/ses_manager_db?useUnicode=true^&characterEncoding=utf-8^&serverTimezone=Asia/Tokyo
+   > set DB_USERNAME=root
+   > set DB_PASSWORD=123456
+   > .\apache-maven-3.9.6\bin\mvn flyway:repair
+   > ```
+   >
+   > その後に再度 `.\apache-maven-3.9.6\bin\mvn spring-boot:run` を実行してください。新規DBでは `repair` は不要です。
+
 4. **アクセス**:
    アプリケーション起動後、ブラウザで以下にアクセスしてください。
    - URL: `http://localhost:8080/`

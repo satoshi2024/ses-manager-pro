@@ -36,7 +36,7 @@ class FlywayMigrationSmokeTest {
             .withPassword("ses");
 
     @Test
-    void 空DBからV1からV14まで通しで適用でき期待スキーマになる() throws Exception {
+    void 空DBから全マイグレーションを通しで適用でき期待スキーマになる() throws Exception {
         // 空DBからの全マイグレーション適用(dev プロファイルの empty-DB 起動と同等)。
         // baseline は行わず V1 から順に適用する。SQL不整合があればここで例外→テスト失敗。
         Flyway.configure()
@@ -66,6 +66,16 @@ class FlywayMigrationSmokeTest {
             // Webhook設定(V15)
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='notification.webhook-url'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='notification.webhook-types'");
+
+            // freee給与連携(V21)
+            assertTableExists(st, "t_freee_connection");
+            assertTableExists(st, "t_freee_employee_link");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='payroll'");
+
+            // 契約書テンプレート・電子署名(V20)
+            assertTableExists(st, "m_contract_template");
+            assertTableExists(st, "t_contract_document");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='contract-document'");
 
             // 候補者管理テーブル(V16)
             assertTableExists(st, "t_candidate");

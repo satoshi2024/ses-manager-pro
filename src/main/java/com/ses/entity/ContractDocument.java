@@ -1,0 +1,4 @@
+package com.ses.entity;
+import com.ses.common.base.BaseEntity; import com.baomidou.mybatisplus.annotation.TableName; import lombok.Data; import lombok.EqualsAndHashCode;
+@Data @EqualsAndHashCode(callSuper=true) @TableName("t_contract_document")
+public class ContractDocument extends BaseEntity { private Long contractId; private Long templateId; private Integer templateVersion; private String renderedHtml; private String pdfPath; private String pdfSha256; private String cloudsignDocumentId; private String cloudsignFileId; private String status; private String recipientName; private String recipientEmail; private String signedPdfPath; private String certificatePath; private java.time.LocalDateTime sentAt; private java.time.LocalDateTime completedAt; private java.time.LocalDateTime lastSyncedAt; private String errorMessage; }

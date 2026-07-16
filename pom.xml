@@ -158,6 +158,21 @@
                     </excludes>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <configuration>
+                    <url>${env.DB_URL}</url>
+                    <user>${env.DB_USERNAME}</user>
+                    <password>${env.DB_PASSWORD}</password>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration</location>
+                    </locations>
+                    <baselineOnMigrate>true</baselineOnMigrate>
+                    <baselineVersion>9</baselineVersion>
+                    <baselineDescription>手動SQL(001-009)適用済みベースライン</baselineDescription>
+                </configuration>
+            </plugin>
             <!-- JaCoCo Code Coverage Plugin -->
             <plugin>
                 <groupId>org.jacoco</groupId>

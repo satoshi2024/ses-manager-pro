@@ -24,7 +24,9 @@
 | `recruiting-pipeline` | 未着手 | F→A/B→M1 | 完全新規テーブル(`t_candidate`等) | `.kiro/specs/recruiting-pipeline/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `webhook-notifications` | 未着手 | 逐次1〜3 | `WebhookNotifier`新規+既存への1行フック | `.kiro/specs/webhook-notifications/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `business-logic-integrity-hardening` | 対応中 | A/B/C/D→E | Flyway・金額口径・契約/提案/候補者状態・BP支払権限 | `.kiro/specs/business-logic-integrity-hardening/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
-| `payroll-management` | **要ヒアリング・design/tasks未作成** | — | — | 実装指示不可。先に`requirements.md`のヒアリング事項をユーザーに確認すること。 |
+| `payroll-management` | **実装中（freee API連携）** | OAuth/連携→画面→テスト | `Freee*`・`payroll`関連 | `.kiro/specs/payroll-management/tasks.md に従ってfreee連携を実装し、完了タスクをチェックする。` |
+| `contract-document-esign` | **実装中（CloudSign）** | テンプレート→PDF→署名連携 | 契約書テンプレート・文書状態 | `.kiro/specs/contract-document-esign/tasks.md に従って実装し、CloudSign adapterとテストを完了する。` |
+| `database-backup-recovery` | **実装中（Docker/Linux）** | バックアップ→PITR→復元演習 | `ops/backup`・運用文書 | `.kiro/specs/database-backup-recovery/tasks.md に従って実装し、復元演習を完了する。` |
 
 ## 2. 既存の未完了spec（再開のみ、ドキュメント追加不要）
 

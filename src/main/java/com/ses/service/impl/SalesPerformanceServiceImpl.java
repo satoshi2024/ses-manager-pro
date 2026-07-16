@@ -121,9 +121,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
                 closedContractCountMap.put(uid, closedContractCountMap.getOrDefault(uid, 0) + 1);
             }
 
-            if (!StatusConstants.CONTRACT_PREPARING.equals(c.getStatus()) &&
-                    !c.getStartDate().isAfter(endOfMonthDate) &&
-                    (c.getEndDate() == null || !c.getEndDate().isBefore(startOfMonthDate))) {
+            if (isActiveInMonth(c, startOfMonthDate, endOfMonthDate)) {
                 
                 activeContractCountMap.put(uid, activeContractCountMap.getOrDefault(uid, 0) + 1);
 
@@ -183,6 +181,14 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
         result.sort(Comparator.comparing(SalesPerformanceDto::getSalesUserId));
         return result;
+    }
+
+    private boolean isActiveInMonth(Contract contract, LocalDate startOfMonth, LocalDate endOfMonth) {
+        if (contract.getStartDate() == null || StatusConstants.CONTRACT_PREPARING.equals(contract.getStatus())) {
+            return false;
+        }
+        return !contract.getStartDate().isAfter(endOfMonth)
+                && (contract.getEndDate() == null || !contract.getEndDate().isBefore(startOfMonth));
     }
 
     @Override
