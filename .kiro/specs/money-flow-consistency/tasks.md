@@ -1,6 +1,8 @@
 # Implementation Plan — 金銭フロー整合性・契約ライフサイクル補完（money-flow-consistency）
 
-レーン構成: **A(契約UI+解約日) → B(集計口径) → D(未帰属行)**、**C(勤怠・BP・細部)** は A/B と並行可。
+レーン構成: **(A ∥ C) → B → D → M**。D は A・B 両方の完了が前提
+（`SalesPerformanceServiceImpl` は B と、契約検索まわりは A とファイルが交差するため）。
+i18n 4ファイルは A/C/D すべてが追記するため、並行時はキー追加のみとしマージ順を決めること。
 詳細は design.md の「実装レーン分割」を参照。
 
 - [x] 0. spec ドキュメント
@@ -17,10 +19,13 @@
   - **Demo**: curl で `PUT /api/contracts/{id}/status` に `{"status":"解約","cancelDate":"..."}` を送り、
     `end_date` が更新されること、日付なしが 4xx になることを確認。
 
-- [ ] A2. 契約編集・状態変更 UI（R1）
+- [ ] A2. 契約編集・状態変更 UI（R1 + R6契約フォーム注記）
   - **Objective**: 契約一覧から編集と状態遷移ができ、成約由来ドラフトを稼動化できるようにする。
-  - **実装ガイダンス**: design.md R1。`GET /api/contracts/{id}`（未実装なら追加）、
-    モーダル共用化（`#cont-id` hidden）、PUT は全項目送信、状態変更ドロップダウン
+  - **実装ガイダンス**: design.md R1。`GET /api/contracts/{id}` は実装済みなので流用。
+    モーダル共用化（`#cont-id` hidden）に加え、**現状モーダルに無い入力欄
+    （contractType / settlementHoursMin/Max / fractionRule / autoRenew）を新設**
+    — これが無いと「PUT は全項目送信」が成立しない。fractionRule 欄の直下に
+    R6 の注記（`contract.fractionRule.note`）を表示。状態変更ドロップダウン
     （解約のみ日付入力ダイアログ）、i18n キー×4言語。
   - **テスト要件**: 既存 Contract 系テストがグリーンのまま。detail API の単体テスト追加。
   - **Demo**: ブラウザで (1) 提案カンバンで成約→生成されたドラフトを編集し原価を設定→稼動中へ遷移
@@ -55,20 +60,31 @@
   - **Demo**: 手動で2階層目を登録した月を reopen してエラーメッセージを確認。
     1階層のみの月は reopen→工数修正→再確定で BP金額が追従することを確認。
 
-- [ ] C2. 細部整備（R6 + R7）
+- [ ] C2. 細部整備（R6勤怠側注記 + R7）
   - **Objective**: 月末判定の方言依存解消、未請求クエリの deleted_flag、DBコメント単位修正、
-    金額表示の記号重複、fraction_rule 注記、設定単位注記。
+    金額表示の記号重複、勤怠グリッドの fraction_rule 注記、設定単位注記。
   - **実装ガイダンス**: design.md R6/R7。月末判定は Java 側で `#{monthEnd}` を渡す方式を第一候補。
-    V16 は既存最新マイグレーション番号+1 に読み替え。**V1 は変更しない**。
-  - **テスト要件**: `FlywayMigrationSmokeTest`（Docker あり環境）で V16 が空DBから通ること。
+    マイグレーションは `VNN` = 実装時点の最新+1（2026-07-16 時点で V22 まで存在）。**V1 は変更しない**。
+    契約フォーム側の注記は A2 の担当（本タスクでは触らない）。
+  - **テスト要件**: `FlywayMigrationSmokeTest`（Docker あり環境）で VNN が空DBから通ること。
     H2 の `@SpringBootTest` 群がグリーンのまま。
   - **Demo**: 2月の勤怠グリッドが正しく契約を列挙する。契約一覧の金額表示が `¥950,000` 形式。
     勤怠グリッドに端数ルール注記が出る。
 
-- [ ] D1. 営業成績の未帰属行（R5）※ B2 完了後
+- [ ] C3. 請求書への適用税率の保存（R8）
+  - **Objective**: 税率改定後も過去請求書の表示税率と保存済み税額が矛盾しないようにする。
+  - **実装ガイダンス**: design.md R8。`t_invoice.tax_rate` 追加（C2 と同じ VNN マイグレーションに同居可）、
+    `Invoice.taxRate`、`generate()` でセット、`detail()` は保存値優先・NULL は設定へフォールバック。
+    `engineer-schema-h2.sql` と H2 リプレイ用 ALTER スクリプトの同期を忘れないこと。
+  - **テスト要件**: 生成時保存 / NULL 行フォールバック / 設定変更が既存請求書表示に影響しない の3ケース。
+  - **Demo**: 請求書を1枚生成→システム設定で税率を変更→当該請求書の印刷画面・PDF の税率表示が
+    生成時のままであること、新規生成分は新税率になることを確認。
+
+- [ ] D1. 営業成績の未帰属行（R5）※ **A2・B2 両方の完了後**
   - **Objective**: `sales_user_id` NULL の契約売上を「未帰属」行で可視化し、全社売上と突合可能にする。
-  - **実装ガイダンス**: design.md R5。契約検索に salesUserId「未設定」オプションを追加し
-    未帰属行からリンク。
+  - **実装ガイダンス**: design.md R5。契約検索に salesUserId「未設定」オプションを追加
+    （`ContractApiController` / `ContractMapper.selectPageWithNames` / `contract.js` /
+    `contract/list.html` — レーンAの担当ファイルに触れるため A 完了後）し、未帰属行からリンク。
   - **テスト要件**: `SalesPerformanceServiceImplTest` に未帰属集計ケース追加
     （全行合計 = 共通口径の全社売上）。
   - **Demo**: 担当営業なしの稼動契約がある月で、営業成績に未帰属行が出て、

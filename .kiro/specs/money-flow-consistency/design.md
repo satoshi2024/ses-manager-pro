@@ -5,8 +5,9 @@
 - 契約: `ContractApiController` / `ContractServiceImpl` / `contract.js` / `templates/contract/list.html`
 - 集計: `DashboardServiceImpl` / `ExportApiController` / `SalesPerformanceServiceImpl` / （新規）`MonthlyRevenueCalcService`
 - 勤怠・BP: `WorkRecordServiceImpl` / `WorkRecordMapper` / `BpPaymentMapper`
-- 請求: `InvoiceMapper`
-- DB: 新規 `V16__money_flow_consistency.sql`（コメント修正のみ。番号は実装時点の最新+1に読み替える）
+- 請求: `InvoiceMapper` / `Invoice` / `InvoiceServiceImpl` / `InvoicePdfServiceImpl`
+- DB: 新規マイグレーション（以下 `VNN` と表記。**番号は実装時点の最新+1** — 2026-07-16 時点で
+  `db/migration` は V22 まで存在するため V23 以降になる。V16 等の固定番号を使わないこと）
 
 既存挙動を変えるのは「集計口径（R2/R3）」のみ。請求・精算の確定済み金額
 （`t_work_record.billing_amount` / `t_invoice.*`）には一切手を入れない。
@@ -27,9 +28,13 @@
 
 1. 一覧各行に「編集」「状態変更」ボタンを追加（既存の削除ボタン隣、`engineer.js` の編集パターン踏襲）。
 2. **編集**: 既存 `#contractModal` を新規/編集共用化する。
-   - `openEditContract(id)` が `GET /api/contracts/{id}` で全項目を取得しモーダルへプリセット
-     （`ContractApiController` に detail エンドポイントが無ければ `GET /api/contracts/{id}` を追加。
-     `ContractMapper.selectById` ベース、`ApiResult<Contract>`）。
+   - `openEditContract(id)` が `GET /api/contracts/{id}`（**実装済み**、`ContractApiController.java:58`）で
+     全項目を取得しモーダルへプリセット。
+   - **現状モーダルに存在しない入力欄を追加する**: `contractType`・`settlementHoursMin/Max`・
+     `fractionRule`・`autoRenew`（現状は engineerId/projectId/customerId/期間/単価2種/担当営業/
+     インセンティブ2種のみ）。これらが無いと「PUT は全項目送信」が成立しない。
+     併せて R6 の端数ルール注記（`contract.fractionRule.note`）もこの欄の直下に置く
+     （R6 の契約フォーム側注記は本レーンで実施。レーンCは勤怠グリッド側のみ）。
    - `saveContract()` を hidden `#cont-id` の有無で POST/PUT 分岐。**PUT 時も全フィールドを送信**
      （`FieldStrategy.ALWAYS` 前提の維持。未入力 select は明示的に `null` を積む）。
    - status はペイロードから除外（サーバ側で無視される仕様に合わせ、そもそも送らない）。
@@ -53,6 +58,9 @@
   `cancelDate < startDate` は `error.contract.cancelDateInvalid`。`end_date = cancelDate` で上書き。
 - それ以外の遷移では `cancelDate` を無視（終了は現行どおり `end_date` 不変）。
 - `StatusChangeRequest` に `cancelDate`（`LocalDate`、任意）を追加。
+  **注意**: この DTO は `ProposalApiController.changeStatus` と共用（`dto/common`）。任意項目の追加は
+  提案側に無害（無視される）だが、提案側で誤って解釈しないことをテストで担保するか、
+  契約専用 DTO（`dto/contract/ContractStatusChangeRequest`）へ分離してもよい（実装者判断、分離推奨）。
 - 解約が `稼動中` からの場合の要員ステータス連動（`releaseIfIdle`）は現行ロジックを維持。
 
 メッセージキー追加（4言語）: `error.contract.cancelDateRequired` / `error.contract.cancelDateInvalid`。
@@ -84,6 +92,8 @@ MonthlyAmount calc(YearMonth month,
      `groupingBy(WorkRecord::getWorkMonth)` → 月ごとに `toMap(contractId)` へ変換して渡す。
 2. `ExportApiController.buildMonthlyRevenueRows` を削除し共通サービスへ委譲
    （月ループと DTO 詰めのみ残す）。区分列は `hasActual ? "実績" : "見込み"`。
+   現行の**月ごとに `selectList` を発行するループ（12クエリ）**もこの機会に廃止し、
+   Dashboard と同じ「対象月一括ロード→月別 grouping」方式へ揃える。
 3. `SalesPerformanceServiceImpl` は営業別内訳が必要なため契約ループは維持するが、
    1契約分の金額決定（実績 or 契約単価）を共通サービスの契約単位メソッド
    `resolveContractAmount(Contract, WorkRecord)` として切り出し共用する。
@@ -125,10 +135,12 @@ MonthlyAmount calc(YearMonth month,
 
 ## R6. fraction_rule 注記
 
-- `templates/work-record/list.html`（グリッド上部）と契約モーダルの端数ルール入力欄下に
-  `<small class="text-muted">` で注記（i18n キー `contract.fractionRule.note`、4言語）:
+- 注記文言（i18n キー `contract.fractionRule.note`、4言語）:
   「精算計算は常に1円未満切り捨て。この欄はメモであり計算には適用されません」。
-- コード変更なし。
+- 表示箇所は2つでレーンを分ける（ファイル競合回避）:
+  - 勤怠グリッド上部（`templates/work-record/list.html`）→ **レーンC**
+  - 契約モーダルの端数ルール入力欄下 → **レーンA**（A2 で入力欄自体を新設するため同レーンで実施）
+- ロジックのコード変更なし。
 
 ## R7. 細部整備
 
@@ -138,27 +150,58 @@ MonthlyAmount calc(YearMonth month,
    要動作確認（NG の場合は Java 側で月末日文字列を組み立ててパラメータ `#{monthEnd}` を渡す方式に切替。
    こちらは方言非依存のため第一候補としてよい）。
 2. `InvoiceMapper.selectUnbilledWorkRecords`: `AND c.deleted_flag = 0` を追加。
-3. 新規 `V16__money_flow_consistency.sql`:
+3. 新規 `VNN__money_flow_consistency.sql`:
    `ALTER TABLE t_proposal MODIFY proposed_unit_price DECIMAL(10,0) COMMENT '提案単価(円)';` 等
-   コメント修正4本（`t_engineer.expected_unit_price` / `t_project.unit_price_min/max`）。
-   ※ MODIFY は型・NULL 制約を現行どおり明記すること。V1 ベースライン側のコメントも
-   同一 PR で修正してよい（CREATE TABLE の COMMENT 変更は既存DBに影響しない、
-   Flyway チェックサムは V1 が baseline 対象のため要注意 → **V1 は変更せず V16 のみ**とする）。
+   コメント修正4本（`t_engineer.expected_unit_price` / `t_project.unit_price_min/max`）
+   ＋ R8 の `ALTER TABLE t_invoice ADD COLUMN tax_rate`（下記）。
+   ※ MODIFY は型・NULL 制約を現行どおり明記すること。**V1 は変更せず VNN のみ**とする
+   （V1 のチェックサム変更を避ける）。
 4. `contract.js` の `¥${...}円` → `¥${...}`（2箇所）。
 5. `templates/system-config/list.html`: 設定説明の文言に単位（小数/百分率）を追記
-   （`m_system_config.description` はシード値のため、V16 で `UPDATE` するか画面側注記のどちらかに統一。
-   → 画面側 i18n 注記とする。DB の description は触らない）。
+   （`m_system_config.description` はシード値のため、マイグレーションで `UPDATE` するか
+   画面側注記のどちらかに統一。→ 画面側 i18n 注記とする。DB の description は触らない）。
+
+## R8. 請求書への適用税率の保存
+
+1. `VNN__money_flow_consistency.sql` に
+   `ALTER TABLE t_invoice ADD COLUMN tax_rate DECIMAL(4,3) NULL COMMENT '適用税率(小数、生成時点)';`
+   を追加（0.10 等の小数を保存。既存行は NULL のまま）。
+2. `entity/Invoice` に `taxRate`（`BigDecimal`）を追加。
+   `InvoiceServiceImpl.generate()` で税額計算に使った `taxRate` をそのままセット。
+3. `InvoiceServiceImpl.detail()`: `dto.taxRatePercent` を `invoice.taxRate` 優先で算出し、
+   NULL の場合のみ現行どおり `billing.tax-rate` 設定へフォールバック。
+   PDF（`InvoicePdfServiceImpl`）と印刷画面（`invoice/print.html`）は detail DTO を
+   読むだけなので変更不要。
+4. **テストスキーマ同期**（CLAUDE.md の二重管理規約）:
+   - `src/test/resources/sql/engineer-schema-h2.sql` の `t_invoice` に `tax_rate` を追加。
+   - `application-test.yml` の H2 リプレイは V5 で `t_invoice` を作るため、
+     `sql/` 配下の H2 用 ALTER スクリプト（既存の `schema-invoice-duedate-h2.sql` と同型）を
+     追加して `schema-locations` 末尾に登録する。
+5. テスト: 生成時に税率が保存されること / NULL 行の detail が設定値へフォールバックすること /
+   税率設定を変更しても既存請求書の表示税率が変わらないこと。
 
 ## 実装レーン分割（並行可能性）
 
-- **レーンA（契約UI + 解約日）**: R1 + R2。担当: `ContractApiController` / `ContractService(Impl)` /
-  `StatusChangeRequest` / `contract.js` / `contract/list.html` / i18n。
+- **レーンA（契約UI + 解約日）**: R1 + R2 + R6の契約フォーム注記。担当: `ContractApiController` /
+  `ContractService(Impl)` / `StatusChangeRequest`（または契約専用DTO新設） / `contract.js` /
+  `contract/list.html`。
 - **レーンB（集計口径）**: R3。担当: 新規 `MonthlyRevenueCalcService` / `DashboardServiceImpl` /
   `ExportApiController` / `SalesPerformanceServiceImpl` / 各テスト。
-- **レーンC（勤怠・BP・請求・細部）**: R4 + R6 + R7。担当: `WorkRecordServiceImpl` /
-  `WorkRecordMapper` / `InvoiceMapper` / `work-record/list.html` / V16 / i18n。
-- **レーンD（営業成績未帰属）**: R5。担当: `SalesPerformanceServiceImpl`（レーンBと同ファイルのため
-  **B完了後に着手**）/ `sales-performance.js` / i18n。
+- **レーンC（勤怠・BP・請求・細部）**: R4 + R6の勤怠グリッド注記 + R7 + R8。担当:
+  `WorkRecordServiceImpl` / `WorkRecordMapper` / `InvoiceMapper` / `Invoice` / `InvoiceServiceImpl` /
+  `work-record/list.html` / `VNN` マイグレーション / H2 スキーマ同期。
+- **レーンD（営業成績未帰属）**: R5。担当: `SalesPerformanceServiceImpl`・`sales-performance.js` に加え、
+  「担当営業未設定」絞り込みのため `ContractApiController` / `ContractMapper.selectPageWithNames` /
+  `contract/list.html` / `contract.js` にも触れる。
 
-A/C は並行可。B→D は逐次。R2 の解約日が R3 の口径テストの前提になるため、
-テスト都合上 A→B の順が安全（並行させる場合は B のテストで解約契約ケースを A マージ後に追加）。
+**依存関係と競合**:
+
+- A ∥ C は Java/テンプレートのファイル競合なしで並行可。ただし **i18n 4ファイル
+  （`messages*.properties`）は A/C/D すべてが追記する**ため、並行実施時はキー追加のみ
+  （既存行の変更禁止）とし、マージ順を決めておくこと。
+- D は `SalesPerformanceServiceImpl`（Bと同一ファイル）**かつ** 契約検索まわり（Aと同一ファイル）
+  に触れるため、**A・B 両方の完了後**に着手する。
+- R2 の解約日が R3 の口径テストの前提になるため、テスト都合上 A→B の順が安全
+  （並行させる場合は B のテストで解約契約ケースを A マージ後に追加）。
+
+推奨順序: `(A ∥ C) → B → D → M`。

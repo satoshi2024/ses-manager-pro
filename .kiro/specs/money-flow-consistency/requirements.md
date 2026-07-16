@@ -21,6 +21,14 @@
 | 10 | `selectUnbilledWorkRecords` が `t_contract.deleted_flag` を確認しない（同ファイルの `selectMonthlyGrid` は確認）。現状は「実績を持つ契約は削除不可」ガードで間接的に守られているのみ | 小 | R7 | 未対応 |
 | 11 | DBコメントの単価単位が「万円」のまま（`proposed_unit_price` / `expected_unit_price` / `unit_price_min/max`）。実装・シードデータ・UIはすべて円 | 小 | R7 | `business-logic-integrity-hardening` R2 はコード側の円統一のみ実施済み。コメント未修正 |
 | 12 | 契約一覧の金額表示が `¥950,000円` と通貨記号が重複 | 小 | R7 | 未対応 |
+| 13 | 請求書に**適用税率が保存されない**。`InvoiceServiceImpl.detail()` が表示用税率を現在の `billing.tax-rate` 設定から取得するため、税率変更後は過去の請求書のPDF・印刷画面(`InvoicePdfServiceImpl` / `invoice/print.html`)で「表示税率」と「保存済み税額」が矛盾する（適格請求書の記載事項として不正確） | 中 | R8 | `invoice-compliance` は登録番号・税率**表示**のみ実装。税率の発行時点固定は未対応 |
+| 14 | BP支払に消費税の概念がない（顧客請求は税込計算するが、支払側 `t_bp_payment.amount` は原価精算額そのままで税処理なし） | — | **対象外**（下記参照） | 未対応 |
+
+**対象外と整理した事項**: #14 のBP支払側の消費税・インボイス対応（協力会社からの適格請求書受領・仕入税額控除）は、
+支払業務モデル自体の設計（税抜/税込の持ち方、免税事業者の経過措置）を要するため本 spec の対象外とし、
+将来の独立 spec（例: `bp-payment-tax`）へ委ねる。ここに記録するのは「未認識の欠陥」ではなく「意図した留保」とするため。
+また #7 に関連する「成約件数(契約 `created_at` 口径)と成約率(提案 `closed_at` 口径)の帰属月ズレ」は
+`engineer-sales-commission` R3-4 で既知の口径注記として文書化済みのため、本 spec では扱わない。
 
 **問題なしを確認済みの領域**（参考）: 請求書の二重請求防止（`work_record_id UNIQUE`・確定後編集ガード・請求済み reopen 拒否）、
 請求書番号採番の並行リトライ、入金済請求書の取消拒否、支払済BP支払の金額編集拒否、消費税計算（小計×税率・切り捨て）、
@@ -100,3 +108,16 @@
 3. 新規マイグレーション SHALL `proposed_unit_price` / `expected_unit_price` / `unit_price_min` / `unit_price_max` のカラムコメントを「万円」→「円」へ修正する（`ALTER TABLE ... MODIFY` はデータ非破壊、V1 ベースラインは変更しない）。
 4. 契約一覧の金額表示 SHALL `¥` と `円` の重複をやめ `¥950,000` 形式へ統一する。
 5. システム設定画面 SHALL `billing.tax-rate`（小数: 0.10）と `commission.rate`（百分率: 5.0）の単位の違いを説明欄で明示する。
+
+### R8. 請求書への適用税率の保存
+
+現状: `t_invoice` は `subtotal`/`tax`/`total` を保存するが税率を保存しない。
+`InvoiceServiceImpl.detail()` は表示用税率を**現在の** `billing.tax-rate` 設定から詰めるため、
+税率改定後に過去請求書の PDF（`InvoicePdfServiceImpl`）・印刷画面（`invoice/print.html`）が
+「新税率のラベル＋旧税率で計算済みの税額」という矛盾した記載になる（適格請求書の記載事項として不正確）。
+
+#### Acceptance Criteria
+1. THE `t_invoice` SHALL 生成時に適用した税率を保持する（新規カラム `tax_rate`、既存行は NULL 許容）。
+2. WHEN 請求書詳細・PDF・印刷画面が税率を表示する場合、THE システム SHALL 保存済み税率を優先し、NULL（本対応以前の既存行）の場合のみ現在設定へフォールバックする。
+3. THE 税額計算そのもの SHALL 変更しない（生成時に使ったのと同じ値を保存するだけ）。
+4. THE スキーマ変更 SHALL 新規マイグレーション＋`engineer-schema-h2.sql` 同期＋H2 リプレイ設定の更新を伴う（CLAUDE.md のテストスキーマ二重管理規約に従う）。
