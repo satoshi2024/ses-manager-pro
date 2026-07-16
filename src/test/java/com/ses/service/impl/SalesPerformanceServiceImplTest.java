@@ -1,7 +1,6 @@
 package com.ses.service.impl;
 
 import com.ses.common.constant.StatusConstants;
-import com.ses.dto.engineersales.SalesUserAssignCountDto;
 import com.ses.dto.salesperformance.SalesPerformanceDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Proposal;
@@ -10,6 +9,7 @@ import com.ses.entity.WorkRecord;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SysUserService;
 import com.ses.service.SystemConfigService;
@@ -28,9 +28,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -44,6 +44,7 @@ public class SalesPerformanceServiceImplTest {
     @MockBean private ProposalMapper proposalMapper;
     @MockBean private WorkRecordMapper workRecordMapper;
     @MockBean private EngineerSalesMapper engineerSalesMapper;
+    @MockBean private SysUserMapper sysUserMapper;
 
     @Autowired
     private SalesPerformanceServiceImpl service;
@@ -56,13 +57,15 @@ public class SalesPerformanceServiceImplTest {
         lenient().when(engineerSalesMapper.countActivePrimaryGroupBySalesUser()).thenReturn(Collections.emptyList());
         lenient().when(proposalMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
         lenient().when(workRecordMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+        lenient().when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
     }
 
     @Test
     void 営業ユーザーは実績なしでも表示される() {
         SysUser u1 = user(1L, "Sales1");
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1), Arrays.asList(u1));
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
 
         List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
 
@@ -88,7 +91,8 @@ public class SalesPerformanceServiceImplTest {
         wonByU2.setStatus(StatusConstants.PROPOSAL_CONTRACTED);
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1, u2), Arrays.asList(u1, u2));
+                .thenReturn(Arrays.asList(u1, u2));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1, u2));
         when(proposalMapper.selectList(ArgumentMatchers.any()))
                 .thenReturn(Arrays.asList(wonByU1, lostByU1, wonByU2));
 
@@ -107,7 +111,9 @@ public class SalesPerformanceServiceImplTest {
                 LocalDateTime.of(2023, 10, 5, 10, 0), null);
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(currentSales), Arrays.asList(currentSales, formerSales));
+                .thenReturn(Arrays.asList(currentSales));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
+                .thenReturn(Arrays.asList(currentSales, formerSales));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
 
         List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
@@ -116,6 +122,26 @@ public class SalesPerformanceServiceImplTest {
         SalesPerformanceDto former = findByUserId(result, 2L);
         assertEquals("Former Sales", former.getSalesUserName());
         assertEquals(1, former.getClosedContractCount());
+    }
+
+    @Test
+    void 論理削除済み営業ユーザー名も過去契約から表示する() {
+        SysUser formerSales = user(2L, "Former Deleted Sales");
+        formerSales.setDeletedFlag(1);
+        Contract historicalContract = contract(10L, 2L, StatusConstants.CONTRACT_PREPARING,
+                LocalDate.of(2023, 10, 1), null, "800000", "500000",
+                LocalDateTime.of(2023, 10, 5, 10, 0), null);
+
+        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+                .thenReturn(Collections.emptyList());
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
+                .thenReturn(Arrays.asList(formerSales));
+        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
+
+        SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
+
+        assertEquals(2L, dto.getSalesUserId());
+        assertEquals("Former Deleted Sales", dto.getSalesUserName());
     }
 
     @Test
@@ -132,7 +158,8 @@ public class SalesPerformanceServiceImplTest {
         WorkRecord confirmed = workRecord(10L, "2023-10", "900000", "550000");
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1), Arrays.asList(u1));
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(actualContract, overrideContract));
         when(workRecordMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(confirmed));
 
@@ -154,7 +181,8 @@ public class SalesPerformanceServiceImplTest {
                 LocalDateTime.of(2023, 10, 6, 10, 0), 9L);
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1), Arrays.asList(u1));
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(newContract, renewalContract));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
@@ -172,7 +200,8 @@ public class SalesPerformanceServiceImplTest {
                 LocalDateTime.of(2023, 10, 1, 10, 0), null);
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1), Arrays.asList(u1));
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(lossContract));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
@@ -189,7 +218,8 @@ public class SalesPerformanceServiceImplTest {
                 LocalDateTime.of(2023, 9, 1, 10, 0), null);
 
         when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
-                .thenReturn(Arrays.asList(u1), Arrays.asList(u1));
+                .thenReturn(Arrays.asList(u1));
+        when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(invalidContract));
 
         List<SalesPerformanceDto> result = assertDoesNotThrow(() -> service.calculateMonthlyPerformance("2023-10"));

@@ -63,3 +63,12 @@
 #### Acceptance Criteria
 1. Engineer / Project / Customer / Proposal / Contract / User の各 API に最低限の `@WebMvcTest` または H2 統合テスト(一覧・登録・バリデーションエラー)を追加する。
 2. `mvn test` が MySQL なしで全件グリーンであること。
+
+### Requirement 9: 本番HTTPSと認証Cookie
+
+#### Acceptance Criteria
+
+1. THE production deployment SHALL honor `X-Forwarded-Proto` from the trusted reverse proxy and SHALL not generate HTTP redirects after an HTTPS login.
+2. THE production application SHALL redirect HTTP requests to HTTPS and SHALL emit HSTS on secure responses.
+3. THE `JSESSIONID` and `XSRF-TOKEN` cookies SHALL use `Secure`; the session cookie SHALL remain `HttpOnly`, and both cookies SHALL use an explicit `SameSite` policy.
+4. THE deployment SHALL rotate any shared or exposed administrator credentials before release and SHALL verify that the previous credential no longer authenticates.

@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * システムユーザーマッパー
@@ -32,4 +34,16 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     int updateLockState(@Param("id") Long id,
                         @Param("failedCount") int failedCount,
                         @Param("lockedUntil") LocalDateTime lockedUntil);
+
+    /**
+     * 営業成績の過去実績表示用に、論理削除済みユーザーも含めて取得する。
+     */
+    @Select("""
+        <script>
+        SELECT * FROM sys_user
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        </script>
+        """)
+    List<SysUser> selectByIdsIncludingDeleted(@Param("ids") Collection<Long> ids);
 }

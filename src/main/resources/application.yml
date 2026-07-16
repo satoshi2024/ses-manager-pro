@@ -3,6 +3,7 @@
 # ========================================
 server:
   port: 8080
+  forward-headers-strategy: framework
   servlet:
     encoding:
       charset: UTF-8
@@ -119,6 +120,8 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  security:
+    require-https: false
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}

@@ -13,6 +13,7 @@
 | 精算幅（清算幅）計価 | `entity/Contract.java`の`settlementHoursMin`/`settlementHoursMax` + `service/billing/SettlementCalculator.java` | 下限割れ/上限超過の按分計算は「万円単位の単価×時間」で端数切捨て。単価を`sellingPrice`(売上)と`costPrice`(原価)の両方に同一ロジックを適用しているため、**按分計算式を変更する場合は売上・原価の両方に影響する**ことを忘れないこと。`hoursMin`/`hoursMax`がnullまたは0以下の場合は固定額（按分なし）という分岐も見落としやすい。 |
 | 契約更新アラート（契約終了30日前通知） | `.kiro/specs/notification-center`の`CONTRACT_END`通知（`NotificationGenerateService`、日次バッチ`NotificationScheduler`） | 判定条件は`status='稼動中'`かつ`end_date`が[今日, +30日]。**後続契約(`renewedFromContractId`)の有無チェックが入っているか**は要確認 — `engineer-availability-visualization`(本ディレクトリの新規spec)の「まもなく空き」判定と基準をズレさせないこと。 |
 | インボイス制度対応（登録番号・税率区分表示） | `.kiro/specs/invoice-compliance`（全タスク完了済み） | 登録番号は`m_system_config`に未設定なら印字を省略する仕様（免税事業者対応）。新しい請求書関連機能を追加する際、この「未設定時は省略」という分岐を壊さないこと。 |
+| 要員担当営業・営業成績/インセンティブ管理 | `.kiro/specs/engineer-sales-commission`（全レーン完了済み） | 営業成績は契約口径の成約件数と提案口径の成約率が並ぶため、合計や率の口径を混同しないこと。論理削除済み営業ユーザーの過去契約も表示対象に含める。 |
 
 ## 1. 新規追加spec（今回作成、実装未着手）
 
@@ -34,7 +35,6 @@
 |---|---|---|
 | `dashboard-improvements` | 0/12（損益分析API・財年セレクタ・印刷CSS未実装） | `.kiro/specs/dashboard-improvements/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `rule-based-matching` | 0/5（`MatchScoreCalculator`等未実装。前提: `engineer-skill-career`完了が必要） | `.kiro/specs/rule-based-matching/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
-| `engineer-sales-commission` | 5/7（レーンB「契約帰属」・C「営業成績サービス+画面」が未完了） | レーン単位で分割可能: `.kiro/specs/engineer-sales-commission/tasks.md のタスクB(契約帰属)を実装してください。` および別セッションで `.kiro/specs/engineer-sales-commission/tasks.md のタスクC(営業成績サービス+画面)を実装してください。` |
 
 ## 3. 同時並行の組み合わせ例（最大8体まで同時実行可能）
 
@@ -46,10 +46,6 @@
 5. `webhook-notifications`
 6. `dashboard-improvements`
 7. `rule-based-matching`（ただし`engineer-skill-career`が未完了なら前提確認が先）
-8. `engineer-sales-commission`のレーンB
-9. `engineer-sales-commission`のレーンC（8と同時実行可、Contract関連ファイルをB/C双方が触るため要確認 — 下記注意）
-
-**注意**: `engineer-sales-commission`のレーンB(契約帰属)とレーンC(営業成績サービス+画面)は、tasks.md上「並行可」と明記されているが、`Contract`関連ファイルに触れる可能性があるため、実際に2体同時に走らせる場合はB完了後にCを着手する運用が安全（tasks.mdの担当ファイルタグを実行前に再確認すること）。
 
 ## 4. 新規specどうしのファイル競合チェック（確認済み）
 

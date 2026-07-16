@@ -157,3 +157,11 @@ public interface SystemConfigService {
   - `ProjectApiControllerTest`: 日付相関違反。
   - `CustomerApiControllerTest` / `ProposalApiControllerTest` / `ContractApiControllerTest` / `UserApiControllerTest`(自己削除ガード・重複 username・パスワードポリシー)。
 - `MockMvc` の CSRF: `spring-security-test` の `csrf()` ポストプロセッサを共通ヘルパー化(6.1 移行後は API テストにも必要)。
+
+## 9. 本番HTTPSとCookie
+
+- `server.forward-headers-strategy: framework` を有効にし、信頼するリバースプロキシが付与する `X-Forwarded-Proto` をSpringが認識できるようにする。
+- HTTPS強制とHSTSはprodプロファイルで有効化する。ローカル開発・H2テストはHTTPのまま動作できるよう、設定値で切り替える。
+- `server.servlet.session.cookie.secure: true`、`http-only: true`、`same-site: lax` をprodで設定する。CSRF用Cookieにも `Secure` と明示的な `SameSite=Lax` を設定する。外部OAuthコールバックとの互換性を優先し、`Strict` は採用しない。
+- HTTP→HTTPSのリダイレクトはアプリ設定だけに依存せず、Nginx/ロードバランサー側でも実施する。アプリ側の自動テストでは転送ヘッダーを含むsecure requestとCookie属性を確認する。
+- 管理者パスワードのローテーションは運用作業であり、コード変更やリポジトリへの秘密情報追加で代替しない。

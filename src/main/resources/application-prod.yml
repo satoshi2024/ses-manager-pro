@@ -4,6 +4,14 @@
 # application.yml の値をこのファイルで上書きする。
 # ========================================
 
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+        http-only: true
+        same-site: lax
+
 spring:
   # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
   flyway:
@@ -16,3 +24,7 @@ logging:
     com.ses: INFO
     com.baomidou.mybatisplus: WARN
     org.springframework.security: WARN
+
+app:
+  security:
+    require-https: true

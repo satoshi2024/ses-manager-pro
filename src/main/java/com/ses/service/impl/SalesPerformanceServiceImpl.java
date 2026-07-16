@@ -12,6 +12,7 @@ import com.ses.entity.WorkRecord;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SalesPerformanceService;
 import com.ses.service.SysUserService;
@@ -38,6 +39,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
     private final ProposalMapper proposalMapper;
     private final WorkRecordMapper workRecordMapper;
     private final EngineerSalesMapper engineerSalesMapper;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     public List<SalesPerformanceDto> calculateMonthlyPerformance(String yearMonth) {
@@ -67,7 +69,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
         Map<Long, String> userNameMap = new HashMap<>();
         if (!userIds.isEmpty()) {
-            List<SysUser> allNeededUsers = sysUserService.list(new QueryWrapper<SysUser>().in("id", userIds));
+            List<SysUser> allNeededUsers = sysUserMapper.selectByIdsIncludingDeleted(userIds);
             for (SysUser u : allNeededUsers) {
                 userNameMap.put(u.getId(), u.getRealName());
             }
