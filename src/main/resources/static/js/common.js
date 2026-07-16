@@ -548,6 +548,25 @@ $(function() {
                 setTimeout(function() {
                     window.location.href = '/login';
                 }, 1500);
+                return;
+            }
+            // API errors use the same JSON envelope as successful responses.
+            // Surface the server message even when a module did not provide an
+            // error callback (for example, a failed modal submit).
+            if (xhr.status >= 400 && xhr.status !== 401 && (this.url || '').indexOf('/api/') !== -1) {
+                let message = null;
+                try {
+                    const payload = xhr.responseJSON || JSON.parse(xhr.responseText || '{}');
+                    message = payload && payload.message;
+                } catch (e) { /* non-JSON error pages are handled by CustomErrorController */ }
+                const fallback = {
+                    400: '入力内容に誤りがあります。',
+                    403: 'アクセス権限がありません。',
+                    404: '対象データが見つかりません。',
+                    409: '他の処理と競合しました。',
+                    500: 'サーバーエラーが発生しました。'
+                }[xhr.status] || '処理に失敗しました。';
+                Toast.error(message || fallback);
             }
         }
     });

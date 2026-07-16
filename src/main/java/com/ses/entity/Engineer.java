@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Min;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -54,6 +55,7 @@ public class Engineer extends BaseEntity {
     private BigDecimal expectedUnitPrice;
     
     private LocalDate availableDate;
+    @Min(value = 0, message = "経験年数は0以上で入力してください")
     private Integer experienceYears;
     private String japaneseLevel;
     private String resumeSummary;

@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.SalesActivity;
+import com.ses.dto.salesactivity.SalesActivityCreateRequest;
+import com.ses.dto.salesactivity.SalesActivityUpdateRequest;
 import com.ses.service.SalesActivityService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +28,7 @@ public class SalesActivityApiController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String type) {
-        
+        salesActivityService.assertCustomerExists(id);
         Page<SalesActivity> page = new Page<>(current, size);
         LambdaQueryWrapper<SalesActivity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalesActivity::getCustomerId, id);
@@ -39,37 +42,35 @@ public class SalesActivityApiController {
     }
 
     @PostMapping("/{id}/activities")
-    public ApiResult<Boolean> createActivity(@PathVariable Long id, @RequestBody SalesActivity activity) {
-        activity.setCustomerId(id);
+    public ApiResult<Boolean> createActivity(@PathVariable Long id, @Valid @RequestBody SalesActivityCreateRequest request) {
         // created_by は MyBatis-Plus の MetaObjectHandler がログイン中ユーザーを自動設定する
-        return ApiResult.success(salesActivityService.save(activity));
+        salesActivityService.create(id, request);
+        return ApiResult.success(true);
     }
 
     @PutMapping("/{id}/activities/{activityId}")
     public ApiResult<Boolean> updateActivity(
             @PathVariable Long id,
             @PathVariable Long activityId,
-            @RequestBody SalesActivity activity) {
-        activity.setId(activityId);
-        activity.setCustomerId(id);
-        return ApiResult.success(salesActivityService.updateById(activity));
+            @Valid @RequestBody SalesActivityUpdateRequest request) {
+        salesActivityService.update(id, activityId, request);
+        return ApiResult.success(true);
     }
 
     @PutMapping("/{id}/activities/{activityId}/complete")
     public ApiResult<Boolean> completeActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
-        SalesActivity activity = new SalesActivity();
-        activity.setId(activityId);
-        activity.setCompletedFlag(1);
-        return ApiResult.success(salesActivityService.updateById(activity));
+        salesActivityService.complete(id, activityId);
+        return ApiResult.success(true);
     }
 
     @DeleteMapping("/{id}/activities/{activityId}")
     public ApiResult<Boolean> deleteActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
-        return ApiResult.success(salesActivityService.removeById(activityId));
+        salesActivityService.delete(id, activityId);
+        return ApiResult.success(true);
     }
 
     @GetMapping("/follow-ups")

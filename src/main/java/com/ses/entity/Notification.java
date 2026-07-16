@@ -16,6 +16,7 @@ public class Notification {
     private String title;
     private String message;
     private String linkUrl;
+    private String menuKey;
     private String dedupeKey;
     private LocalDateTime createdAt;
 }

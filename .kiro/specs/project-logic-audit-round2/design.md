@@ -61,7 +61,7 @@ Controller 内の `setCustomerId` だけに依存しない。
 
 新規 migration:
 
-- `V22__fix_contract_document_menu_prefix.sql`
+- `V22__notification_visibility_and_menu_routes.sql`（通知 menu_key と電子契約 prefix を同一 migration で追加）
 
 変更:
 
@@ -85,7 +85,7 @@ permission integration test では同長 prefix が 0 件であることを asse
 
 新規 migration:
 
-- `V23__add_notification_menu_scope.sql`
+- `V22__notification_visibility_and_menu_routes.sql`（既存 V22 に統合）
 
 DB:
 
@@ -179,7 +179,7 @@ Content-Type: application/json
 同一 `engineer_id + project_id` について、status が
 `書類選考中/一次面接/二次面接/結果待ち` の record を 1 件に制限する。
 
-新規 migration `V24__add_active_assignment_and_proposal_unique_keys.sql` で
+新規 migration `V24__engineer_sales_active_unique_keys.sql` で
 generated column を使用する。
 
 ```text
@@ -289,7 +289,7 @@ default key を削除する。
 
 新規 migration:
 
-- `V25__create_mail_delivery.sql`
+- `V26__create_mail_delivery.sql`（V25 は監査結果フィールド用に使用済み）
 
 `t_mail_delivery`:
 
@@ -393,4 +393,3 @@ DB migration 適用前:
 業務判断なしに record を削除・統合しない。
 
 既存未 commit file と重なる変更は、開始前に `git diff` を確認して手動統合する。
-

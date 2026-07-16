@@ -125,7 +125,7 @@ class CandidateApiControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"stage\":\"不採用\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code", is(500)));
 
         Candidate unchanged = candidateService.getById(candidate.getId());
@@ -139,7 +139,7 @@ class CandidateApiControllerTest {
 
         mockMvc.perform(post("/api/candidates/" + candidate.getId() + "/convert-to-engineer")
                         .with(csrf()))
-                .andExpect(status().isOk())
+                .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code", is(500)));
     }
 

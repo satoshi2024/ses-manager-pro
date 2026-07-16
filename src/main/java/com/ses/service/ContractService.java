@@ -30,6 +30,9 @@ public interface ContractService extends IService<Contract> {
      */
     void updateWithBusinessRules(Contract contract);
 
+    /** 契約状態を許可された遷移だけ変更する。 */
+    void changeStatus(Long contractId, String newStatus);
+
     /**
      * 稼動中の契約があるか確認
      * @param engineerId エンジニアID

@@ -6,6 +6,21 @@
 --   m_email_template  : deleted_flag 列を持たない
 -- H2(MySQLモード)が解釈できない ENUM / ENGINE / インライン INDEX は使用しない。
 SET REFERENTIAL_INTEGRITY FALSE;
+DROP TABLE IF EXISTS t_mail_delivery CASCADE;
+CREATE TABLE t_mail_delivery (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  recipient VARCHAR(320) NOT NULL,
+  subject VARCHAR(500) NOT NULL,
+  body VARCHAR(1000000) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  error_message VARCHAR(1000),
+  queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME,
+  failed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 DROP TABLE IF EXISTS t_proposal CASCADE;
 CREATE TABLE t_proposal (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -63,6 +78,7 @@ CREATE TABLE t_notification (
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
   link_url    VARCHAR(300),
+  menu_key    VARCHAR(50),
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );

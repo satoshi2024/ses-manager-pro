@@ -25,6 +25,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
+import java.util.Map;
+import java.util.Set;
 import com.ses.entity.WorkRecord;
 
 /**
@@ -33,6 +35,12 @@ import com.ses.entity.WorkRecord;
 @Service
 @RequiredArgsConstructor
 public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> implements ContractService {
+
+    private static final Map<String, Set<String>> ALLOWED_STATUS_TRANSITIONS = Map.of(
+            "準備中", Set.of("稼動中", "解約"),
+            "稼動中", Set.of("終了", "解約"),
+            "終了", Set.of(),
+            "解約", Set.of());
 
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
@@ -157,6 +165,31 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             engineerStatusService.onContractActive(newEngineerId);
         } else if (!engineerChanged && "稼動中".equals(old.getStatus()) && newEngineerId != null) {
             engineerStatusService.releaseIfIdle(newEngineerId);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changeStatus(Long contractId, String newStatus) {
+        Contract contract = this.baseMapper.selectById(contractId);
+        if (contract == null) {
+            throw BusinessException.of(404, "error.contract.notFound");
+        }
+        if (newStatus == null || !ALLOWED_STATUS_TRANSITIONS
+                .getOrDefault(contract.getStatus(), Set.of()).contains(newStatus)) {
+            throw BusinessException.of(409, "error.contract.statusTransitionInvalid",
+                    contract.getStatus(), newStatus);
+        }
+        String oldStatus = contract.getStatus();
+        contract.setStatus(newStatus);
+        this.baseMapper.updateById(contract);
+        if (contract.getEngineerId() != null) {
+            if ("稼動中".equals(newStatus)) {
+                engineerStatusService.onContractActive(contract.getEngineerId());
+            } else if ("稼動中".equals(oldStatus) || "終了".equals(newStatus)
+                    || "解約".equals(newStatus)) {
+                engineerStatusService.releaseIfIdle(contract.getEngineerId());
+            }
         }
     }
 

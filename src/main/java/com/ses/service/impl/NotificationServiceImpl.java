@@ -74,6 +74,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void markRead(Long notificationId, Long userId) {
+        if (notificationMapper.countVisible(notificationId, userId) == 0) return;
         try {
             NotificationRead read = new NotificationRead();
             read.setNotificationId(notificationId);
@@ -92,12 +93,35 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void publish(String type, String title, String message, String linkUrl, String dedupeKey) {
+        publishInternal(type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
+    }
+
+    private String menuKeyForType(String type) {
+        if (type == null) return null;
+        return switch (type) {
+            case "INVOICE_OVERDUE" -> "invoice";
+            case "CONTRACT_END", "CONTRACT_DRAFT" -> "contract";
+            case "BENCH_LONG" -> "engineer";
+            case "PROJECT_URGENT" -> "project";
+            case "PROPOSAL_STALE" -> "proposal";
+            case "FOLLOW_UP" -> "customer";
+            default -> null;
+        };
+    }
+
+    @Override
+    public void publish(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        publishInternal(type, title, message, linkUrl, dedupeKey, menuKey);
+    }
+
+    private void publishInternal(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         try {
             Notification notification = new Notification();
             notification.setType(type);
             notification.setTitle(title);
             notification.setMessage(message);
             notification.setLinkUrl(linkUrl);
+            notification.setMenuKey(menuKey);
             notification.setDedupeKey(dedupeKey);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);

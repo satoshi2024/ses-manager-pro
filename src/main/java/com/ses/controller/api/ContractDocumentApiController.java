@@ -10,6 +10,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.http.*;
 
 @RestController
 @RequestMapping("/api/contract-documents")
@@ -63,5 +64,10 @@ public class ContractDocumentApiController {
     public ApiResult<Boolean> sync(@PathVariable Long id) {
         service.sync(id);
         return ApiResult.success(true);
+    }
+    @GetMapping("/{id}/download")
+    @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
+    public ResponseEntity<byte[]> download(@PathVariable Long id) {
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).body(service.download(id));
     }
 }

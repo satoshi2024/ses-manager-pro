@@ -11,4 +11,7 @@ public interface NotificationService {
     void markRead(Long notificationId, Long userId);
     void markAllRead(Long userId);
     void publish(String type, String title, String message, String linkUrl, String dedupeKey);
+    default void publish(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        publish(type, title, message, linkUrl, dedupeKey);
+    }
 }

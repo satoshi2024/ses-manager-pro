@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -53,10 +55,12 @@ public class Contract extends BaseEntity {
 
     /** 売上単価 */
     @NotNull(message = "売上単価は必須です")
+    @PositiveOrZero(message = "売上単価は0以上で入力してください")
     private BigDecimal sellingPrice;
 
     /** 原価 */
     @NotNull(message = "原価は必須です")
+    @PositiveOrZero(message = "原価は0以上で入力してください")
     private BigDecimal costPrice;
 
     /** 精算基準時間（下限） */
@@ -100,6 +104,7 @@ public class Contract extends BaseEntity {
      * updateStrategy=ALWAYS: 「既定に戻す」= NULL 更新を反映させるため。
      */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    @PositiveOrZero(message = "インセンティブ率は0以上で入力してください")
     private BigDecimal commissionRate;
 
     /** 自動更新ドラフトの生成元契約ID（このIDから自動生成された更新ドラフトの場合のみ設定） */
@@ -108,4 +113,15 @@ public class Contract extends BaseEntity {
     /** 作成者ID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    @AssertTrue(message = "契約終了日は開始日以降を指定してください")
+    public boolean isDateRangeValid() {
+        return startDate == null || endDate == null || !endDate.isBefore(startDate);
+    }
+
+    @AssertTrue(message = "精算基準時間の上限は下限以上を指定してください")
+    public boolean isSettlementHoursRangeValid() {
+        return settlementHoursMin == null || settlementHoursMax == null
+                || settlementHoursMin.compareTo(settlementHoursMax) <= 0;
+    }
 }

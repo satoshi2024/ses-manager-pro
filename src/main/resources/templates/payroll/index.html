@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head><title>freee給与連携</title></head>
+<body>
+<main layout:fragment="content" class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0">freee給与連携</h1>
+    <a class="btn btn-outline-secondary" href="/integrations/freee/authorize">freeeに接続</a>
+  </div>
+  <div id="payrollStatus" class="alert alert-secondary">接続状態を確認中...</div>
+  <section class="card mb-3"><div class="card-body">
+    <h2 class="h6">freee従業員</h2>
+    <div id="payrollEmployees" class="table-responsive"></div>
+  </div></section>
+  <section class="card"><div class="card-body">
+    <h2 class="h6">給与明細</h2>
+    <form id="statementForm" class="row g-2 align-items-end">
+      <div class="col-auto"><label class="form-label" for="statementYear">年</label><input id="statementYear" class="form-control" type="number" required></div>
+      <div class="col-auto"><label class="form-label" for="statementMonth">月</label><input id="statementMonth" class="form-control" type="number" min="1" max="12" required></div>
+      <div class="col-auto"><button class="btn btn-primary" type="submit">取得</button></div>
+    </form>
+    <div id="payrollStatements" class="table-responsive mt-3"></div>
+  </div></section>
+</main>
+<th:block layout:fragment="page-js">
+<script>
+(() => {
+  const esc = v => $('<div>').text(v == null ? '' : v).html();
+  const load = async () => {
+    try {
+      const status = await SES.api.get('/api/payroll/status');
+      $('#payrollStatus').toggleClass('alert-success', !!status).toggleClass('alert-warning', !status)
+        .text(status ? 'freee接続済み' : 'freee未接続');
+      if (!status) return;
+      const employees = await SES.api.get('/api/payroll/employees');
+      $('#payrollEmployees').html('<table class="table table-sm"><thead><tr><th>氏名</th><th>freee従業員ID</th></tr></thead><tbody>' +
+        (employees || []).map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.id || e.employeeId)}</td></tr>`).join('') + '</tbody></table>');
+    } catch (e) { $('#payrollStatus').removeClass('alert-secondary').addClass('alert-danger').text(e.message || '取得に失敗しました'); }
+  };
+  $('#statementYear').val(new Date().getFullYear()); $('#statementMonth').val(new Date().getMonth() + 1);
+  $('#statementForm').on('submit', async e => { e.preventDefault(); try { const p = await SES.api.get('/api/payroll/statements', {year: $('#statementYear').val(), month: $('#statementMonth').val()}); $('#payrollStatements').text(JSON.stringify(p || [])); } catch (err) { Toast.error(err.message || '取得に失敗しました'); } });
+  load();
+})();
+</script>
+</th:block>
+</body></html>

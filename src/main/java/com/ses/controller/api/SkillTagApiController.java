@@ -6,6 +6,7 @@ import com.ses.entity.SkillTag;
 import com.ses.service.SkillTagService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.util.List;
 
@@ -46,7 +47,7 @@ public class SkillTagApiController {
      * スキルタグ登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody SkillTag skillTag) {
+    public ApiResult<Boolean> save(@Valid @RequestBody SkillTag skillTag) {
         return ApiResult.success(skillTagService.save(skillTag));
     }
 
@@ -54,7 +55,7 @@ public class SkillTagApiController {
      * スキルタグ更新
      */
     @PutMapping
-    public ApiResult<Boolean> update(@RequestBody SkillTag skillTag) {
+    public ApiResult<Boolean> update(@Valid @RequestBody SkillTag skillTag) {
         return ApiResult.success(skillTagService.updateById(skillTag));
     }
 

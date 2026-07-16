@@ -6,6 +6,7 @@ import com.ses.entity.ProjectSkill;
 import com.ses.service.ProjectSkillService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.util.List;
 
@@ -22,7 +23,7 @@ public class ProjectSkillApiController {
     }
 
     @PutMapping
-    public ApiResult<Void> replaceSkills(@PathVariable Long projectId, @RequestBody List<ProjectSkill> skills) {
+    public ApiResult<Void> replaceSkills(@PathVariable Long projectId, @RequestBody List<@Valid ProjectSkill> skills) {
         projectSkillService.replaceSkills(projectId, skills);
         return ApiResult.success(null);
     }

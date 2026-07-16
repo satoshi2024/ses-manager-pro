@@ -21,12 +21,19 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public void record(String username, String method, String uri, int status) {
+        record(username, method, uri, status, "ses-manager", status >= 200 && status < 400);
+    }
+
+    @Override
+    public void record(String username, String method, String uri, int status, String applicationCode, boolean successFlag) {
         try {
             AuditLog entry = new AuditLog();
             entry.setUsername(username);
             entry.setMethod(method);
             entry.setUri(uri);
             entry.setStatus(status);
+            entry.setApplicationCode(applicationCode);
+            entry.setSuccessFlag(successFlag);
             entry.setCreatedAt(LocalDateTime.now());
             auditLogMapper.insert(entry);
         } catch (Exception e) {

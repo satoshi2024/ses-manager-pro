@@ -8,5 +8,7 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
   method     VARCHAR(10)  NOT NULL,
   uri        VARCHAR(500) NOT NULL,
   status     INT          NOT NULL,
+  application_code VARCHAR(64),
+  success_flag BOOLEAN NOT NULL DEFAULT TRUE,
   created_at DATETIME     DEFAULT CURRENT_TIMESTAMP
 );

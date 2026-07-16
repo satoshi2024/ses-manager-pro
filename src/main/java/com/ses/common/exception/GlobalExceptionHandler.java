@@ -9,6 +9,10 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.stream.Collectors;
@@ -35,13 +39,13 @@ public class GlobalExceptionHandler {
      * @return エラーレスポンス
      */
     @ExceptionHandler(BusinessException.class)
-    public ApiResult<Void> handleBusinessException(BusinessException e) {
+    public ResponseEntity<ApiResult<Void>> handleBusinessException(BusinessException e) {
         String message = e.getMessage();
         if (e.getMessageKey() != null) {
             message = messageSource.getMessage(e.getMessageKey(), e.getArgs(), e.getMessageKey(), LocaleContextHolder.getLocale());
         }
         log.warn("業務例外が発生しました: code={}, message={}", e.getCode(), message);
-        return ApiResult.error(e.getCode(), message);
+        return ResponseEntity.status(toHttpStatus(e.getCode())).body(ApiResult.<Void>error(e.getCode(), message));
     }
 
     /**
@@ -52,14 +56,14 @@ public class GlobalExceptionHandler {
      * @return エラーレスポンス（入力エラーの詳細を含む）
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ApiResult<Void> handleValidationException(MethodArgumentNotValidException e) {
+    public ResponseEntity<ApiResult<Void>> handleValidationException(MethodArgumentNotValidException e) {
         BindingResult bindingResult = e.getBindingResult();
         String errorMessage = bindingResult.getFieldErrors().stream()
                 .map(FieldError::getDefaultMessage)
                 .collect(Collectors.joining("、"));
 
         log.warn("入力バリデーションエラー: {}", errorMessage);
-        return ApiResult.error(400, "入力内容に誤りがあります：" + errorMessage);
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "入力内容に誤りがあります：" + errorMessage));
     }
 
     /**
@@ -70,8 +74,24 @@ public class GlobalExceptionHandler {
      * @return エラーレスポンス
      */
     @ExceptionHandler(Exception.class)
-    public ApiResult<Void> handleException(Exception e) {
+    public ResponseEntity<ApiResult<Void>> handleException(Exception e) {
         log.error("システムエラーが発生しました", e);
-        return ApiResult.error("システムエラーが発生しました");
+        return ResponseEntity.internalServerError().body(ApiResult.<Void>error("システムエラーが発生しました"));
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ApiResult<Void>> handleRequestParameterException(Exception e) {
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
+    }
+
+    private HttpStatus toHttpStatus(int code) {
+        return switch (code) {
+            case 400 -> HttpStatus.BAD_REQUEST;
+            case 401 -> HttpStatus.UNAUTHORIZED;
+            case 403 -> HttpStatus.FORBIDDEN;
+            case 404 -> HttpStatus.NOT_FOUND;
+            case 409 -> HttpStatus.CONFLICT;
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
     }
 }

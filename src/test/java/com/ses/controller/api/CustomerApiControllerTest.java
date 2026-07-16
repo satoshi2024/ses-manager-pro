@@ -77,7 +77,7 @@ class CustomerApiControllerTest {
         mockMvc.perform(post("/api/customers").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
     }
 }

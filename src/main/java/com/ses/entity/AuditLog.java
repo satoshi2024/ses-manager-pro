@@ -25,6 +25,8 @@ public class AuditLog {
     private String uri;
 
     private Integer status;
+    private String applicationCode;
+    private Boolean successFlag;
 
     private LocalDateTime createdAt;
 }

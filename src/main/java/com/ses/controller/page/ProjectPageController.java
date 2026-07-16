@@ -27,11 +27,4 @@ public class ProjectPageController {
         return "project/form";
     }
 
-    /**
-     * 案件詳細画面
-     */
-    @GetMapping("/detail")
-    public String detail() {
-        return "project/detail";
-    }
 }

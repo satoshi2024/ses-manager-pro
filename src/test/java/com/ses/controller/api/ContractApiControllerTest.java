@@ -20,9 +20,12 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -74,7 +77,7 @@ class ContractApiControllerTest {
         mockMvc.perform(post("/api/contracts").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
     }
 
@@ -128,5 +131,27 @@ class ContractApiControllerTest {
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[0].engineerName").isEmpty());
+    }
+
+    @Test
+    @WithMockUser
+    void update_状態項目は専用API以外では無視する() throws Exception {
+        Contract c = new Contract();
+        c.setEngineerId(1L);
+        c.setProjectId(2L);
+        c.setCustomerId(3L);
+        c.setStartDate(LocalDate.of(2026, 7, 1));
+        c.setSellingPrice(new BigDecimal("80"));
+        c.setCostPrice(new BigDecimal("60"));
+        c.setStatus("稼動中");
+
+        mockMvc.perform(put("/api/contracts/10").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(c)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(contractService).updateWithBusinessRules(argThat(updated -> updated.getId().equals(10L)
+                && updated.getStatus() == null));
     }
 }

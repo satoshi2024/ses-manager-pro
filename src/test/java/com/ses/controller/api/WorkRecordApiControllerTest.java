@@ -40,13 +40,12 @@ public class WorkRecordApiControllerTest {
         req.setWorkMonth("2026/07"); // 不正形式
         req.setActualHours(new BigDecimal("150"));
 
-        // 本アプリの規約: バリデーション違反は GlobalExceptionHandler が
-        // HTTP 200 + ApiResult(code=400) で返す（EngineerApiControllerValidationTest と同じ）
+        // バリデーション違反は HTTP 400 と ApiResult(code=400) で返す。
         mockMvc.perform(put("/api/work-records")
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("対象月はYYYY-MM形式で指定してください")));
     }
@@ -63,7 +62,7 @@ public class WorkRecordApiControllerTest {
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("実績時間は0以上を指定してください")));
     }

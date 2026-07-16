@@ -12,4 +12,9 @@ public class AnalyticsPageController {
     public String index() {
         return "analytics/index";
     }
+
+    @GetMapping("/availability-calendar")
+    public String availabilityCalendar() {
+        return "analytics/availability-calendar";
+    }
 }

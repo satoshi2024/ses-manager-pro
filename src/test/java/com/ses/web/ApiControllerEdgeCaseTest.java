@@ -148,14 +148,14 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     @WithMockUser(username = "admin", roles = "管理者")
     void testExportApiController_MissingFiscalYear() throws Exception {
         mockMvc.perform(get("/api/dashboard/revenue-export"))
-                .andExpect(status().isOk()); // Defaults to current year
+                .andExpect(status().isBadRequest());
     }
     
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void testExportApiController_InvalidFiscalYear() throws Exception {
         mockMvc.perform(get("/api/dashboard/revenue-export?fiscalYear=xyz"))
-                .andExpect(status().isOk()); // Defaults to current year
+                .andExpect(status().isBadRequest());
     }
 
     @Test

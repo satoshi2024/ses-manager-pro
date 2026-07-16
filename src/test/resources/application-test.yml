@@ -12,6 +12,7 @@ spring:
         - classpath:db/migration/V1__create_tables.sql
         - classpath:db/migration/V2__init_master_data.sql
         - classpath:db/migration/V4__create_notification.sql
+        - classpath:db/migration/V22__notification_visibility_and_menu_routes.sql
         - classpath:db/migration/V5__create_work_record_billing.sql
         - classpath:db/migration/V6__create_sales_activity.sql
         - classpath:db/migration/V7__create_analytics_report.sql

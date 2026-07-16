@@ -70,6 +70,11 @@
                         <span th:text="#{menu.contract}">契約管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract-document')}">
+                    <a th:href="@{/contract-document}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract-document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-earmark-check me-2"></i><span>契約書・電子署名</span>
+                    </a>
+                </li>
 
                 <li class="nav-item mt-3 mb-1 px-3">
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.advanced}">高度な機能</span>

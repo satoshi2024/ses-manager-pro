@@ -2,6 +2,21 @@
 -- 本番の 001_create_tables.sql は ENUM / ENGINE=InnoDB / インライン INDEX など
 -- H2 が解釈できない構文を含むため、検証に必要な列だけを持つ簡易版を用意する。
 SET REFERENTIAL_INTEGRITY FALSE;
+DROP TABLE IF EXISTS t_mail_delivery CASCADE;
+CREATE TABLE t_mail_delivery (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  recipient VARCHAR(320) NOT NULL,
+  subject VARCHAR(500) NOT NULL,
+  body TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  error_message VARCHAR(1000),
+  queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME,
+  failed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -108,6 +123,7 @@ CREATE TABLE t_notification (
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
   link_url    VARCHAR(300),
+  menu_key    VARCHAR(50),
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -402,6 +418,8 @@ CREATE TABLE t_audit_log (
   method     VARCHAR(10) NOT NULL,
   uri        VARCHAR(500) NOT NULL,
   status     INT NOT NULL,
+  application_code VARCHAR(64),
+  success_flag BOOLEAN NOT NULL DEFAULT TRUE,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

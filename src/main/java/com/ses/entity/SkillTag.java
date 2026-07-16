@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import lombok.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
 
@@ -32,10 +34,14 @@ public class SkillTag extends BaseEntity {
     /**
      * スキル名 (Java, React 等)
      */
+    @NotBlank(message = "スキル名は必須です")
+    @Size(max = 100, message = "スキル名は100文字以内で入力してください")
     private String skillName;
 
     /**
      * 分類: 言語, FW, DB, クラウド, OS, ツール, その他
      */
+    @NotBlank(message = "カテゴリは必須です")
+    @Size(max = 50, message = "カテゴリは50文字以内で入力してください")
     private String category;
 }

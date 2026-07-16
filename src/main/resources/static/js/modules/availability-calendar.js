@@ -167,7 +167,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         const index = firstElement.index;
                         const dataPoint = chart.data.datasets[datasetIndex].data[index];
                         if (dataPoint && dataPoint.engId) {
-                            window.location.href = '/engineer/detail/' + dataPoint.engId;
+                            window.location.href = '/engineer/detail?id=' + dataPoint.engId;
                         }
                     } else {
                         // Clicked on label?
@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (yValue !== undefined && yValue >= 0 && yValue < labels.length) {
                             const eng = engineers[yValue];
                             if (eng) {
-                                window.location.href = '/engineer/detail/' + eng.id;
+                                window.location.href = '/engineer/detail?id=' + eng.id;
                             }
                         }
                     }

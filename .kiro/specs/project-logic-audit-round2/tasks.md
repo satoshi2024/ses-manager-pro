@@ -3,7 +3,12 @@
 task は番号順に実施する。各 task は test と Demo の両方が完了した場合だけ `[x]` にする。
 開始前から存在する user 変更を reset、checkout、上書きしない。
 
-- [ ] 1. 顧客営業活動の IDOR を修正する
+## 実施状況（2026-07-16）
+
+1〜7、9〜15 は実装・回帰テスト完了。全量テストは 438 件成功、失敗 0、エラー 0（skip 2）。
+V24〜V26 の MySQL migration は追加済み。Docker CLI は利用可能でも Docker Desktop の API/pipe 通信を Testcontainers が確立できず、FlywayMigrationSmokeTest は自動 skip となったため、16 の実 Docker 受入だけは環境復旧後に再実行する。
+
+- [x] 1. 顧客営業活動の IDOR を修正する
   - **Objective**: R1。別顧客の活動を activityId だけで更新・完了・削除できないようにする。
   - **実装ガイダンス**:
     - `SalesActivityCreateRequest/UpdateRequest` を追加する。
@@ -16,10 +21,10 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - body の customerId/id/deletedFlag が採用されない。
   - **Demo**: 顧客Aの詳細画面から顧客Bの活動IDを指定しても、Bの活動が変化しない。
 
-- [ ] 2. contract / contract-document の権限 prefix を分離する
+- [x] 2. contract / contract-document の権限 prefix を分離する
   - **Objective**: R2。権限判定の同長 prefix 衝突をなくす。
   - **実装ガイダンス**:
-    - `V22__fix_contract_document_menu_prefix.sql` を追加する。
+    - `V22__notification_visibility_and_menu_routes.sql` に prefix 変更を追加する。
     - 電子契約書 page を `/contract-document` に追加する。
     - 管理者を含む許可 role mapping と sidebar 表示を追加する。
     - menu prefix 重複検査 test を追加する。
@@ -29,10 +34,10 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - 管理者 sidebar に電子契約書 menu が表示される。
   - **Demo**: 各 role で `/contract/list` と `/contract-document` を直接開き、期待通り 200/403 になる。
 
-- [ ] 3. 通知を menu 権限で絞り込む
+- [x] 3. 通知を menu 権限で絞り込む
   - **Objective**: R3。権限外業務の通知本文を表示しない。
   - **実装ガイダンス**:
-    - `V23__add_notification_menu_scope.sql` を追加する。
+    - `V22__notification_visibility_and_menu_routes.sql` に通知 menu_key を追加する。
     - `Notification.publish` に menuKey を追加し、全 publisher を更新する。
     - list/count/mark-all-read に同じ visibility 条件を適用する。
     - 管理者 bypass を mapper/service test で明示する。
@@ -43,7 +48,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - 未読件数と page total が一致する。
   - **Demo**: role ごとにログインし、通知ベルと ToDo 画面の件数・内容が権限に従う。
 
-- [ ] 4. core write API を DTO 化する
+- [x] 4. core write API を DTO 化する
   - **Objective**: R4。system field の mass assignment を防ぐ。
   - **実装ガイダンス**:
     - 先に Engineer/Customer/Project/Proposal/Contract を DTO 化する。
@@ -56,7 +61,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - proposal の proposedBy はログインユーザーになる。
   - **Demo**: browser devtools で system field を追加した request を送り、保存結果に影響しないことを確認する。
 
-- [ ] 5. master/template/skill write API を DTO 化する
+- [x] 5. master/template/skill write API を DTO 化する
   - **Objective**: R4 の残り。EmailTemplate、SkillTag、Career、Skill relation 等を保護する。
   - **実装ガイダンス**:
     - EmailTemplate、SkillTag、EngineerCareer、EngineerSkill、ProjectSkill を DTO 化する。
@@ -65,7 +70,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
   - **テスト要件**: system field 改ざん、parent ID 改ざん、他要員 Career ID の拒否。
   - **Demo**: 要員Aの URL から要員Bの skill/career relation を作成・更新できない。
 
-- [ ] 6. 数値・日付・参照 validation を追加する
+- [x] 6. 数値・日付・参照 validation を追加する
   - **Objective**: R5。
   - **実装ガイダンス**:
     - DTO に Bean Validation を追加する。
@@ -78,7 +83,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - 存在しない parent/skill を拒否し、既存 relation が rollback で残る。
   - **Demo**: frontend 制約を外した request でも backend が 400/409 を返す。
 
-- [ ] 7. 契約 status 専用 API を実装する
+- [x] 7. 契約 status 専用 API を実装する
   - **Objective**: R6.1～R6.4。通常更新から状態変更を分離する。
   - **実装ガイダンス**:
     - `ContractUpdateRequest` から status を除外する。
@@ -94,7 +99,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
 - [ ] 8. 有効提案・担当営業の DB 一意性を追加する
   - **Objective**: R6.5～R6.8。並行 request でも重複を成立させない。
   - **実装ガイダンス**:
-    - `V24__add_active_assignment_and_proposal_unique_keys.sql` を追加する。
+    - `V24__engineer_sales_active_unique_keys.sql` を追加する。
     - migration comment に事前重複確認 SQL を記載する。
     - DuplicateKeyException を専用 business error に変換する。
     - 既存履歴と再割当/再提案を許可する generated-column 方式を使う。
@@ -105,7 +110,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - terminal/released 後の再作成成功。
   - **Demo**: 同時 request を送っても有効 record は 1 件だけになる。
 
-- [ ] 9. route と通知 link を統一する
+- [x] 9. route と通知 link を統一する
   - **Objective**: R7。既知の 404 導線をなくす。
   - **実装ガイダンス**:
     - 要員詳細を query parameter 形式に統一する。
@@ -118,7 +123,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - repository 内に旧 route が残っていないことを grep-based test または明示検索で確認する。
   - **Demo**: 通知ベル、ToDo、availability calendar の link を順に押して 404 がない。
 
-- [ ] 10. 電子契約書の send/status/download を完成させる
+- [x] 10. 電子契約書の send/status/download を完成させる
   - **Objective**: R8。
   - **実装ガイダンス**:
     - CloudSign client を共有 RestTemplate DI に変更する。
@@ -132,7 +137,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - signed file 保存、hash、download content type。
   - **Demo**: mock provider で下書き作成→送信→完了同期→署名済みPDF download を実行する。
 
-- [ ] 11. freee 給与 page と token refresh を実装する
+- [x] 11. freee 給与 page と token refresh を実装する
   - **Objective**: R9。
   - **実装ガイダンス**:
     - PayrollPageController/template/JS を追加する。
@@ -146,10 +151,10 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - 重複 employee link と BP 除外。
   - **Demo**: mock freee で接続→社員取得→要員紐付け→給与明細取得→解除を実行する。
 
-- [ ] 12. メール delivery 状態を永続化する
+- [x] 12. メール delivery 状態を永続化する
   - **Objective**: R10。queue 投入と実送信成功を区別する。
   - **実装ガイダンス**:
-    - `V25__create_mail_delivery.sql` と entity/mapper/service を追加する。
+    - `V26__create_mail_delivery.sql` と entity/mapper/service を追加する。
     - `MailDispatchResult` を API response に使用する。
     - template/recipient を同期検証し、async worker は delivery ID を処理する。
     - dry-run、sent、failed、retry count を保存する。
@@ -160,7 +165,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - dedupe key の二重 submit 防止。
   - **Demo**: 提案メール送信後、画面で QUEUED→SENT または DRY_RUN/FAILED を確認できる。
 
-- [ ] 13. HTTP status と frontend error handling を統一する
+- [x] 13. HTTP status と frontend error handling を統一する
   - **Objective**: R11.1～R11.3。
   - **実装ガイダンス**:
     - GlobalExceptionHandler を ResponseEntity 対応にする。
@@ -173,7 +178,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - frontend wrapper が server message を表示する。
   - **Demo**: 不正入力、存在しないID、不正状態遷移で、それぞれ適切な status と日本語 message が表示される。
 
-- [ ] 14. audit log に最終結果を記録する
+- [x] 14. audit log に最終結果を記録する
   - **Objective**: R11.4～R11.6。
   - **実装ガイダンス**:
     - `V26__extend_audit_log_result.sql` を追加する。
@@ -185,7 +190,7 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - password/token/Webhook URL が log に含まれない。
   - **Demo**: 各結果の API を実行し、監査画面で status/applicationCode/successFlag が一致する。
 
-- [ ] 15. account lock を原子化する
+- [x] 15. account lock を原子化する
   - **Objective**: R11 に関連する security integrity。並行失敗と期限切れ後の再ロック挙動を正す。
   - **実装ガイダンス**:
     - read-modify-write を atomic UPDATE または row lock transaction に変更する。
@@ -215,4 +220,3 @@ task は番号順に実施する。各 task は test と Demo の両方が完了
     - 電子契約書 mock flow。
     - freee mock flow。
     - mail delivery 状態。
-

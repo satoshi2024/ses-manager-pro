@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -26,12 +28,15 @@ public class Proposal extends BaseEntity {
     private LocalDateTime createdAt;
 
     /** エンジニアID */
+    @NotNull(message = "要員は必須です")
     private Long engineerId;
 
     /** 案件ID */
+    @NotNull(message = "案件は必須です")
     private Long projectId;
 
     /** 提案単価 */
+    @PositiveOrZero(message = "提案単価は0以上で入力してください")
     private BigDecimal proposedUnitPrice;
 
     /**

@@ -1,0 +1,15 @@
+CREATE TABLE t_mail_delivery (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  recipient VARCHAR(320) NOT NULL,
+  subject VARCHAR(500) NOT NULL,
+  body TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  error_message VARCHAR(1000),
+  queued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME,
+  failed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_mail_delivery_status_queued (status, queued_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

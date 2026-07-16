@@ -78,7 +78,7 @@ public class NotificationGenerateService {
             String name = getEngineerName(c.getEngineerId());
             String dedupeKey = "CONTRACT_END:" + c.getId() + ":" + c.getEndDate().toString();
             String message = "[\"notification.msg.CONTRACT_END\", \"" + name + "\", \"" + days + "\", \"" + c.getEndDate() + "\"]";
-            notificationService.publish("CONTRACT_END", "稼動終了間近", message, "/contract/detail/" + c.getId(), dedupeKey);
+            notificationService.publish("CONTRACT_END", "稼動終了間近", message, "/contract/list", dedupeKey);
         }
     }
 
@@ -111,7 +111,7 @@ public class NotificationGenerateService {
                 String name = getEngineerName(e.getId());
                 String dedupeKey = "BENCH_LONG:" + e.getId() + ":" + LocalDate.now().getYear() + "-" + LocalDate.now().getMonthValue();
                 String message = "[\"notification.msg.BENCH_LONG\", \"" + name + "\", \"" + days + "\"]";
-                notificationService.publish("BENCH_LONG", "待機期間警告", message, "/engineer/detail/" + e.getId(), dedupeKey);
+                notificationService.publish("BENCH_LONG", "待機期間警告", message, "/engineer/detail?id=" + e.getId(), dedupeKey);
             }
         }
     }
@@ -123,7 +123,7 @@ public class NotificationGenerateService {
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
-            notificationService.publish("PROJECT_URGENT", "急募案件", message, "/project/detail/" + p.getId(), dedupeKey);
+            notificationService.publish("PROJECT_URGENT", "急募案件", message, "/project/list", dedupeKey);
         }
     }
 

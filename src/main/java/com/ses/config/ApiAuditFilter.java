@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -35,19 +37,27 @@ public class ApiAuditFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        int observedStatus = HttpServletResponse.SC_OK;
         try {
             filterChain.doFilter(request, response);
+            observedStatus = response.getStatus();
+        } catch (AccessDeniedException e) {
+            observedStatus = HttpServletResponse.SC_FORBIDDEN;
+            throw e;
+        } catch (AuthenticationException e) {
+            observedStatus = HttpServletResponse.SC_UNAUTHORIZED;
+            throw e;
         } finally {
             if (isAuditTarget(request)) {
                 String username = SecurityUtils.currentUsername();
                 String method = request.getMethod();
                 String uri = request.getRequestURI();
-                int status = response.getStatus();
+                int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
                 log.info("操作ログ user={} method={} uri={} status={}",
                         username != null ? username : "-", method, uri, status);
                 AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
                 if (auditLogService != null) {
-                    auditLogService.record(username, method, uri, status);
+                    auditLogService.record(username, method, uri, status, "ses-manager", status >= 200 && status < 400);
                 }
             }
         }

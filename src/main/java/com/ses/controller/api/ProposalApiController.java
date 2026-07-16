@@ -7,6 +7,7 @@ import com.ses.entity.Project;
 import com.ses.service.CustomerService;
 import com.ses.service.EngineerService;
 import com.ses.service.MailService;
+import com.ses.dto.mail.MailDispatchResult;
 import com.ses.service.ProjectService;
 import com.ses.service.ProposalService;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,8 @@ import java.util.Map;
 import com.ses.common.result.ApiResult;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Proposal;
+import com.ses.dto.common.StatusChangeRequest;
+import jakarta.validation.Valid;
 
 /**
  * 提案APIコントローラー
@@ -52,9 +55,8 @@ public class ProposalApiController {
      * @return 結果
      */
     @PutMapping("/{id}/status")
-    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @RequestBody Map<String, String> request) {
-        String newStatus = request.get("status");
-        proposalService.changeStatus(id, newStatus);
+    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
+        proposalService.changeStatus(id, request.getStatus());
         return ApiResult.success(true);
     }
 
@@ -62,7 +64,7 @@ public class ProposalApiController {
      * 新規提案
      */
     @PostMapping
-    public ApiResult<Boolean> save(@RequestBody Proposal proposal) {
+    public ApiResult<Boolean> save(@Valid @RequestBody Proposal proposal) {
         return ApiResult.success(proposalService.save(proposal));
     }
 
@@ -75,7 +77,7 @@ public class ProposalApiController {
      * @param req body: { templateId, to(任意) }
      */
     @PostMapping("/{id}/send-mail")
-    public ApiResult<Boolean> sendMail(@PathVariable Long id, @RequestBody Map<String, String> req) {
+    public ApiResult<MailDispatchResult> sendMail(@PathVariable Long id, @RequestBody Map<String, String> req) {
         Proposal proposal = proposalService.getById(id);
         if (proposal == null) {
             throw BusinessException.of("error.proposal.notFound");
@@ -105,8 +107,7 @@ public class ProposalApiController {
             throw BusinessException.of("error.proposal.emailNotSpecified");
         }
 
-        mailService.sendWithTemplate(templateId, params, to);
-        return ApiResult.success(true);
+        return ApiResult.success(mailService.sendWithTemplate(templateId, params, to));
     }
 }
 

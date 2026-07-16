@@ -134,6 +134,28 @@ public class SalesActivityApiControllerTest {
 
     @Test
     @WithMockUser(username = "test", roles = {"営業"})
+    void crossCustomerActivityMutationIsRejected() throws Exception {
+        Customer anotherCustomer = new Customer();
+        anotherCustomer.setCompanyName("Another Company");
+        customerService.save(anotherCustomer);
+
+        SalesActivity activity = new SalesActivity();
+        activity.setCustomerId(testCustomer.getId());
+        activity.setActivityType("電話");
+        activity.setActivityDate(LocalDate.now());
+        activity.setTitle("Protected");
+        salesActivityService.save(activity);
+
+        mockMvc.perform(delete("/api/customers/" + anotherCustomer.getId() + "/activities/" + activity.getId())
+                        .with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(404)));
+
+        assertNotNull(salesActivityService.getById(activity.getId()));
+    }
+
+    @Test
+    @WithMockUser(username = "test", roles = {"営業"})
     void testGetFollowUps() throws Exception {
         SalesActivity activity = new SalesActivity();
         activity.setCustomerId(testCustomer.getId());

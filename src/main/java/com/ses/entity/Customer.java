@@ -3,6 +3,8 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -38,6 +40,8 @@ public class Customer extends BaseEntity {
     /**
      * メール
      */
+    @Email(message = "メールアドレスの形式が正しくありません")
+    @Size(max = 255, message = "メールアドレスは255文字以内で入力してください")
     private String contactEmail;
 
     /**

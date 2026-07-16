@@ -1,0 +1,2 @@
+ALTER TABLE t_audit_log ADD COLUMN application_code VARCHAR(64) NULL;
+ALTER TABLE t_audit_log ADD COLUMN success_flag BOOLEAN NOT NULL DEFAULT TRUE;

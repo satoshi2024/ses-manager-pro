@@ -36,6 +36,30 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
                         @Param("lockedUntil") LocalDateTime lockedUntil);
 
     /**
+     * ログイン失敗回数をデータベース上で原子的に加算する。期限切れロックは
+     * 新しいカウント周期として扱い、閾値到達時のみロック日時を設定する。
+     */
+    @Update("""
+        UPDATE sys_user
+        SET failed_count = CASE
+              WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
+                         ELSE COALESCE(failed_count, 0) + 1 END) >= #{maxFailed} THEN 0
+              WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
+              ELSE COALESCE(failed_count, 0) + 1 END,
+            locked_until = CASE
+              WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
+                         ELSE COALESCE(failed_count, 0) + 1 END) >= #{maxFailed}
+                THEN TIMESTAMPADD(MINUTE, #{lockMinutes}, #{now})
+              WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN NULL
+              ELSE locked_until END
+        WHERE id = #{id} AND deleted_flag = 0
+        """)
+    int incrementLoginFailure(@Param("id") Long id,
+                              @Param("now") LocalDateTime now,
+                              @Param("maxFailed") int maxFailed,
+                              @Param("lockMinutes") int lockMinutes);
+
+    /**
      * 営業成績の過去実績表示用に、論理削除済みユーザーも含めて取得する。
      */
     @Select("""

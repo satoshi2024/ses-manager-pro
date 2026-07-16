@@ -71,7 +71,7 @@ class EngineerApiControllerValidationTest {
         mockMvc.perform(post("/api/engineers").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(engineer)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("氏名は必須です")));
     }
@@ -90,7 +90,7 @@ class EngineerApiControllerValidationTest {
         mockMvc.perform(post("/api/engineers").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(engineer)))
-                .andExpect(status().isOk())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
     }
 }

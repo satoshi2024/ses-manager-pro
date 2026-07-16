@@ -13,6 +13,8 @@ import com.ses.dto.contract.ContractListDto;
 import com.ses.mapper.ContractMapper;
 import org.springframework.format.annotation.DateTimeFormat;
 import java.time.LocalDate;
+import java.util.Map;
+import com.ses.dto.common.StatusChangeRequest;
 
 /**
  * 契約APIコントローラー
@@ -84,11 +86,21 @@ public class ContractApiController {
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Contract contract) {
         contract.setId(id);
+        // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
+        // 準備中→稼動中などの遷移検証を迂回できないようにする。
+        contract.setStatus(null);
         contractService.updateWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
                 && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
             return ApiResult.<Boolean>success("警告: 粗利がマイナスです", Boolean.TRUE);
         }
+        return ApiResult.success(Boolean.TRUE);
+    }
+
+    /** 契約状態変更（状態機械を通す専用 API）。 */
+    @PutMapping("/{id}/status")
+    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
+        contractService.changeStatus(id, request.getStatus());
         return ApiResult.success(Boolean.TRUE);
     }
 

@@ -69,12 +69,14 @@ class NotificationServiceImplTest {
 
     @Test
     void testMarkRead_Success() {
+        when(notificationMapper.countVisible(10L, 1L)).thenReturn(1L);
         notificationService.markRead(10L, 1L);
         verify(notificationReadMapper, times(1)).insert(any(NotificationRead.class));
     }
 
     @Test
     void testMarkRead_Duplicate() {
+        when(notificationMapper.countVisible(10L, 1L)).thenReturn(1L);
         doThrow(new DuplicateKeyException("Duplicate")).when(notificationReadMapper).insert(any(NotificationRead.class));
         assertDoesNotThrow(() -> notificationService.markRead(10L, 1L));
     }
