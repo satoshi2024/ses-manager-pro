@@ -31,6 +31,12 @@
 | `contract-document-esign` | **実装中（CloudSign）** | テンプレート→PDF→署名連携 | 契約書テンプレート・文書状態 | `.kiro/specs/contract-document-esign/tasks.md に従って実装し、CloudSign adapterとテストを完了する。` |
 | `database-backup-recovery` | **実装中（Docker/Linux）** | バックアップ→PITR→復元演習 | `ops/backup`・運用文書 | `.kiro/specs/database-backup-recovery/tasks.md に従って実装し、復元演習を完了する。` |
 
+## 1.5 提案段階（spec化前・発注者の採用判断待ち）
+
+| ドキュメント | 内容 | 進め方 |
+|---|---|---|
+| `customer-feature-proposals/README.md` | 顧客視点の機能提案7件（P1作業報告書・要員セルフサービス勤怠 / P2債権管理 / P3月次締めチェックリスト / P4見積書 / P5売上着地予測 / P6単価改定履歴 / P7データスコープ権限）。既存実装・既存specとの重複なしをコード照合済み | 発注者が採用を決めた項目ごとに `.kiro/specs/<name>/`（requirements/design/tasks）を新設して本表へ登録する。推奨順序は P2→P3 先行、P1 は専用spec、P4/P5 は並行可、P6/P7 は要望具体化後 |
+
 ## 2. 既存の未完了spec（再開のみ、ドキュメント追加不要）
 
 | spec | 状態 | 一言で着手 |
