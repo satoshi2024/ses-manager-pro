@@ -158,7 +158,81 @@
 
 ## 次のアクション
 
-- 発注者が採用項目を決定 → 項目ごとに `.kiro/specs/<name>/` を新設（例: `ar-management`(P2)、
-  `monthly-closing-checklist`(P3)、`engineer-self-service-timesheet`(P1)…）。
-- 採用時は `.kiro/specs/README.md` のディスパッチ表に登録し、既存の並行実行原則
-  （担当ファイル非交差・i18nはキー追加のみ）に従ってレーンを切る。
+> **2026-07-17 追記: 全7提案が採用され、spec 化済み。** 以下の「実装全体計画」が実行の正となる。
+
+- spec ディレクトリ: `ar-management`(P2) / `monthly-closing-checklist`(P3) /
+  `quotation-management`(P4) / `revenue-forecast`(P5) / `engineer-self-service-timesheet`(P1) /
+  `contract-price-history`(P6) / `data-scope-permission`(P7)
+
+---
+
+# 実装全体計画（7 spec の実行順・競合・採番の正）
+
+各 spec の tasks.md はレーン内の順序を定める。**spec 間の順序・競合・マイグレーション採番は
+本章が唯一の正**とする（各 design の記述と食い違ったら本章を優先し、気づいた者が両方を直す）。
+
+## Wave 構成
+
+```
+Wave 1（並行可）: P2 ar-management ∥ P4 quotation-management ∥ P5 revenue-forecast
+Wave 2（並行可）: P3 monthly-closing-checklist ∥ P1 engineer-self-service-timesheet
+Wave 3        : P6 contract-price-history
+Wave 4（単独）  : P7 data-scope-permission
+```
+
+- Wave 1 の3件は担当ファイルが非交差（P2=請求系 / P4=見積新設+`ContractServiceImpl` /
+  P5=ダッシュボード系）。※P4 レーンFの `ContractServiceImpl` は Wave 1 内で唯一の共有懸念だが
+  P2/P5 は触らないため安全。
+- P3 は P2 レーンA マージ後（`InvoiceMapper` 交差・残高定義の共用）。
+- P1 は Wave 1 と非交差だが規模が大きいため Wave 2 に置く（Wave 1 と同時に始めてもよい。
+  その場合も P6 より先に完了させること）。
+- P6 は P1 完了後（`WorkRecordServiceImpl.saveHours` 交差）。
+- P7 は全完了後・**他 spec と並行禁止**（全読み経路に触れるため）。
+
+## マイグレーション採番の予約
+
+**番号は Wave 順（=想定マージ順）に割り当てる**（Flyway は既定で out-of-order を拒否するため、
+後の Wave に若い番号を与えてはならない）:
+
+| 番号 | Wave | spec | 内容 |
+|---|---|---|---|
+| V28 | 1 | ar-management | t_invoice_payment・status ENUM・(必要なら顧客メール) |
+| V29 | 1 | quotation-management | t_quotation・t_contract.quotation_id・メニューシード |
+| V30 | 1 | revenue-forecast | config シードのみ |
+| V31 | 2 | monthly-closing-checklist | メニューシードのみ |
+| V32 | 2 | engineer-self-service-timesheet | ロール/勤怠 ENUM・2テーブル・メニューシード |
+| V33 | 3 | contract-price-history | t_contract_price_history |
+| V34 | 4 | data-scope-permission | config シードのみ |
+
+**運用規則**:
+1. 同一 Wave 内の並行 spec（V28〜V30）は**マイグレーションを含むレーン（各 tasks の最初の
+   実装タスク）だけ番号順にマージ**し、以降のレーンは自由に並行する（乱序適用の回避）。
+2. マージ順が予約と入れ替わる場合は本表を先に更新し、各 spec の design 内の番号表記も
+   気づいた者が追随修正する（番号の重複・欠番の黙認は禁止）。
+3. 実装時に既存最新が V27 でなくなっていた場合（他specの割り込み）は、本表全体を
+   その時点の最新+1 から振り直す。
+
+## 共有ファイルの競合マトリクス（同時編集禁止の根拠）
+
+| ファイル | 触る spec | 取り決め |
+|---|---|---|
+| `ContractServiceImpl` | P4(F: buildAndSaveDraft 抽出) | P4 着手前に lifecycle 系マージ済み確認 |
+| `InvoiceServiceImpl` / `InvoiceMapper` | P2、P3(全顧客版クエリ) | P2 → P3 の順 |
+| `WorkRecordServiceImpl` | P1(日次・承認)、P6(単価リゾルバ) | P1 → P6 の順 |
+| `MonthlyRevenueCalcServiceImpl` | P6 のみ | — |
+| `DashboardServiceImpl` / `dashboard.js` | P5 のみ（※`dashboard-improvements` spec と排他） | — |
+| `ExcelExportService` | P2 のみ | — |
+| `contract.js` / `contract/list.html` | P6(改定UI) | P4 は quotation.js 側のため非交差 |
+| `engineer/detail.html` | P1(C2 紐付けカード) | — |
+| ほぼ全 ApiController | P7 | 単独実施 |
+| i18n 4ファイル | 全 spec | キー追加のみ・既存行変更禁止（従来規則） |
+
+## 横断の共通規則（全 spec の tasks に共通で適用）
+
+1. 新テーブル/カラムは H2 同期3点セット（engineer-schema-h2 / `sql/*-h2.sql` / application-test.yml）
+   と `FlywayMigrationSmokeTest` の assert を**同一コミット**に含める。
+2. 通知リンクは必ず `NotificationLinks` 定数へ（`NotificationLinkRouteTest` が自動検証）。
+3. セレクト用途の一覧 API 呼び出しは `size=1000` を明示（money-flow F2 の教訓）。
+4. 状態機械はサーバ側 Map が唯一の正・フロントはミラー定数＋相互参照コメント（contract の前例）。
+5. 各 spec 完了時に `mvn test` 全緑を確認し、`.kiro/specs/README.md` の状態列と本章の
+   Wave 進捗を更新する。Docker あり環境での smoke test は各 Wave 完了時にまとめて実行でよい。

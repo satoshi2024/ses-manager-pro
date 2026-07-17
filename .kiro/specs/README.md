@@ -31,11 +31,20 @@
 | `contract-document-esign` | **実装中（CloudSign）** | テンプレート→PDF→署名連携 | 契約書テンプレート・文書状態 | `.kiro/specs/contract-document-esign/tasks.md に従って実装し、CloudSign adapterとテストを完了する。` |
 | `database-backup-recovery` | **実装中（Docker/Linux）** | バックアップ→PITR→復元演習 | `ops/backup`・運用文書 | `.kiro/specs/database-backup-recovery/tasks.md に従って実装し、復元演習を完了する。` |
 
-## 1.5 提案段階（spec化前・発注者の採用判断待ち）
+## 1.5 顧客機能ロードマップ（全7件採用・spec化済み・実装未着手）
 
-| ドキュメント | 内容 | 進め方 |
-|---|---|---|
-| `customer-feature-proposals/README.md` | 顧客視点の機能提案7件（P1作業報告書・要員セルフサービス勤怠 / P2債権管理 / P3月次締めチェックリスト / P4見積書 / P5売上着地予測 / P6単価改定履歴 / P7データスコープ権限）。既存実装・既存specとの重複なしをコード照合済み | 発注者が採用を決めた項目ごとに `.kiro/specs/<name>/`（requirements/design/tasks）を新設して本表へ登録する。推奨順序は P2→P3 先行、P1 は専用spec、P4/P5 は並行可、P6/P7 は要望具体化後 |
+**実行順・spec間競合・マイグレーション採番の正は `customer-feature-proposals/README.md` の
+「実装全体計画」**（Wave 1: P2∥P4∥P5 → Wave 2: P3∥P1 → Wave 3: P6 → Wave 4: P7単独）。
+
+| spec | 提案 | 規模 | 一言で着手 |
+|---|---|---|---|
+| `ar-management` | P2 債権管理（入金消込・エイジング・督促） | M | `.kiro/specs/ar-management/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `quotation-management` | P4 見積書発行 | S〜M | `.kiro/specs/quotation-management/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `revenue-forecast` | P5 売上着地予測 | S | `.kiro/specs/revenue-forecast/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `monthly-closing-checklist` | P3 月次締めチェックリスト（※ar-management レーンA 後） | S〜M | `.kiro/specs/monthly-closing-checklist/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `engineer-self-service-timesheet` | P1 作業報告書・要員セルフサービス勤怠 | L | `.kiro/specs/engineer-self-service-timesheet/tasks.md に従い、割り当てられたレーンだけを実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `contract-price-history` | P6 単価改定履歴（※P1 完了後） | M〜L | `.kiro/specs/contract-price-history/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
+| `data-scope-permission` | P7 データスコープ権限（※最後尾・他specと並行禁止） | M | `.kiro/specs/data-scope-permission/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 
 ## 2. 既存の未完了spec（再開のみ、ドキュメント追加不要）
 
