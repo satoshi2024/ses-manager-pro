@@ -2,9 +2,12 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.entity.EngineerSales;
 import com.ses.entity.SysUser;
+import com.ses.mapper.EngineerSalesMapper;
 import com.ses.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -25,6 +28,7 @@ public class UserApiController {
 
     private final SysUserService sysUserService;
     private final PasswordEncoder passwordEncoder;
+    private final EngineerSalesMapper engineerSalesMapper;
 
     /**
      * ユーザー一覧（ページネーション）
@@ -96,6 +100,9 @@ public class UserApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
+        // 有効/無効の切替は専用エンドポイント(/{id}/status)の無効化ガードを経由させる。
+        // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
+        sysUser.setStatus(null);
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, sysUser.getUsername())
@@ -109,6 +116,14 @@ public class UserApiController {
         if (current != null && sysUser.getId() != null && current.getId().equals(sysUser.getId())
                 && StringUtils.hasText(sysUser.getRole()) && !sysUser.getRole().equals(current.getRole())) {
             throw BusinessException.of("error.user.roleSelfChange");
+        }
+        // 営業ロールから他ロールへ変更する場合、現任担当が残っていれば拒否（先に付け替えを促す）
+        if (sysUser.getId() != null && StringUtils.hasText(sysUser.getRole())) {
+            SysUser old = sysUserService.getById(sysUser.getId());
+            if (old != null && StatusConstants.ROLE_SALES.equals(old.getRole())
+                    && !StatusConstants.ROLE_SALES.equals(sysUser.getRole())) {
+                guardNoActiveSalesAssignments(sysUser.getId());
+            }
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
             validatePasswordPolicy(sysUser.getPassword());
@@ -125,6 +140,10 @@ public class UserApiController {
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> updateStatus(@PathVariable Long id, @RequestParam Integer status, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身のステータスは変更できません");
+        // 無効化(status=0)する場合、現任担当が残っていれば拒否
+        if (Integer.valueOf(0).equals(status)) {
+            guardNoActiveSalesAssignments(id);
+        }
         SysUser sysUser = new SysUser();
         sysUser.setId(id);
         sysUser.setStatus(status);
@@ -137,7 +156,21 @@ public class UserApiController {
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身は削除できません");
+        guardNoActiveSalesAssignments(id);
         return ApiResult.success(sysUserService.removeById(id));
+    }
+
+    /**
+     * 当該ユーザーが現任の担当営業割当（released_at IS NULL）を持つ場合は操作を拒否する。
+     * 過去実績（released_at 設定済みの履歴、契約の sales_user_id）には影響しない。
+     */
+    private void guardNoActiveSalesAssignments(Long id) {
+        long count = engineerSalesMapper.selectCount(new LambdaQueryWrapper<EngineerSales>()
+                .eq(EngineerSales::getSalesUserId, id)
+                .isNull(EngineerSales::getReleasedAt));
+        if (count > 0) {
+            throw BusinessException.of("error.user.hasActiveSalesAssignments", count);
+        }
     }
 
     private void guardNotSelf(Long id, Authentication authentication, String message) {

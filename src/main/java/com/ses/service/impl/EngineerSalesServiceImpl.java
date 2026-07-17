@@ -113,6 +113,33 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
+    public boolean isActiveSalesUser(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        return user != null
+                && StatusConstants.ROLE_SALES.equals(user.getRole())
+                && Integer.valueOf(1).equals(user.getStatus())
+                && !Integer.valueOf(1).equals(user.getDeletedFlag());
+    }
+
+    @Override
+    @Transactional
+    public void releaseAllByEngineerId(Long engineerId) {
+        if (engineerId == null) {
+            return;
+        }
+        // wrapper 更新は MetaObjectHandler(updated_at 自動設定)が発火しないため明示的に設定する
+        // （review-fixes G4）。
+        update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<EngineerSales>()
+                .eq(EngineerSales::getEngineerId, engineerId)
+                .isNull(EngineerSales::getReleasedAt)
+                .set(EngineerSales::getReleasedAt, LocalDate.now())
+                .set(EngineerSales::getUpdatedAt, java.time.LocalDateTime.now()));
+    }
+
+    @Override
     public Map<Long, EngineerPrimarySalesDto> mapPrimaryByEngineerIds(List<Long> engineerIds) {
         if (engineerIds == null || engineerIds.isEmpty()) {
             return Collections.emptyMap();

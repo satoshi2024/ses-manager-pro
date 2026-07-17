@@ -107,7 +107,7 @@ public class EngineerApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody Engineer engineer) {
-        return ApiResult.success(engineerService.updateById(engineer));
+        return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 
     /**

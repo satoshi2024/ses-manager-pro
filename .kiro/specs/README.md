@@ -11,7 +11,7 @@
 | 機能 | 実装箇所 | 注意点 |
 |---|---|---|
 | 精算幅（清算幅）計価 | `entity/Contract.java`の`settlementHoursMin`/`settlementHoursMax` + `service/billing/SettlementCalculator.java` | 下限割れ/上限超過の按分計算は「万円単位の単価×時間」で端数切捨て。単価を`sellingPrice`(売上)と`costPrice`(原価)の両方に同一ロジックを適用しているため、**按分計算式を変更する場合は売上・原価の両方に影響する**ことを忘れないこと。`hoursMin`/`hoursMax`がnullまたは0以下の場合は固定額（按分なし）という分岐も見落としやすい。 |
-| 契約更新アラート（契約終了30日前通知） | `.kiro/specs/notification-center`の`CONTRACT_END`通知（`NotificationGenerateService`、日次バッチ`NotificationScheduler`） | 判定条件は`status='稼動中'`かつ`end_date`が[今日, +30日]。**後続契約(`renewedFromContractId`)の有無チェックが入っているか**は要確認 — `engineer-availability-visualization`(本ディレクトリの新規spec)の「まもなく空き」判定と基準をズレさせないこと。 |
+| 契約更新アラート（契約終了30日前通知） | `.kiro/specs/notification-center`の`CONTRACT_END`通知（`NotificationGenerateService`、日次バッチ`NotificationScheduler`） | 判定条件は`status='稼動中'`かつ`end_date`が[今日, +30日]。**後続契約(`renewedFromContractId`)の有無チェック**は当初未実装だったが `lifecycle-status-consistency` S4 で**対応済み**（`renewed_from_contract_id`を持つ更新ドラフトが存在する契約は通知除外）。`engineer-availability-visualization`の「まもなく空き」判定も同一の`renewed_from_contract_id`基準を共有すること。 |
 | インボイス制度対応（登録番号・税率区分表示） | `.kiro/specs/invoice-compliance`（全タスク完了済み） | 登録番号は`m_system_config`に未設定なら印字を省略する仕様（免税事業者対応）。新しい請求書関連機能を追加する際、この「未設定時は省略」という分岐を壊さないこと。 |
 | 要員担当営業・営業成績/インセンティブ管理 | `.kiro/specs/engineer-sales-commission`（全レーン完了済み） | 営業成績は契約口径の成約件数と提案口径の成約率が並ぶため、合計や率の口径を混同しないこと。論理削除済み営業ユーザーの過去契約も表示対象に含める。 |
 
@@ -20,6 +20,7 @@
 | spec | 状態 | レーン構成 | 担当ファイル範囲(概要) | 一言で着手 |
 |---|---|---|---|---|
 | `money-flow-consistency` | **実装完了（2026-07-16、全レーンA/C/B/D/M）** | A/C並行→B→D→M | 契約UI(`contract.js`等)・集計(`Dashboard`/`Export`/`SalesPerformance`共通口径`MonthlyRevenueCalcService`)・勤怠BP(`WorkRecord*`)・`InvoiceMapper`・請求税率保存(`V27`) | 完了。R1〜R8を実装（契約編集/状態遷移UI・解約日確定・集計口径統一・reopen手動BP保護・営業成績未帰属行・fraction_rule注記・請求税率固定）。`mvn test` 全緑（smoke testはDocker必要でskip）。 |
+| `lifecycle-status-consistency` | **実装完了（2026-07-17、全レーンA/B/C＋M）** | A→C、B並行 | 営業/ユーザーライフサイクル(`UserApiController`/`EngineerSales*`)・通知(`NotificationGenerateService`/`NotificationLinks`)・要員状態/勤怠(`Engineer*`/`ContractServiceImpl.removeById`/`WorkRecordServiceImpl.saveHours`) | 完了。S1退職主担当フォールバック＋担当残存ガード・S2要員削除時の割当解放・S3通知リンク修正＋ルート整合テスト・S4更新ドラフト連動・S5要員ステータス編集ガード・S6契約削除時releaseIfIdle・S7工数の期間/状態検証。`mvn test` 全緑（486件、smoke test/PDFはskip）。 |
 | `multi-tier-bp-management` | 未着手 | F→A/B→M | `BpPayment`関連のみ | `.kiro/specs/multi-tier-bp-management/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `skill-sheet-generation` | 未着手 | 逐次1〜4 | 新規`SkillSheetGenerator`等のみ、既存エンティティ非変更 | `.kiro/specs/skill-sheet-generation/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |
 | `engineer-availability-visualization` | 未着手 | 逐次1〜3 | 新規`AnalyticsApiController`エンドポイント追加のみ | `.kiro/specs/engineer-availability-visualization/tasks.md に従って実装してください。完了したタスクは - [x] にチェックしてください。` |

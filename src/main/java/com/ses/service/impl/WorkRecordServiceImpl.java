@@ -22,8 +22,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DuplicateKeyException;
 
+import com.ses.common.constant.StatusConstants;
+
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -69,6 +73,27 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         Contract contract = contractMapper.selectById(contractId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract2");
+        }
+
+        // 縦深防御: グリッド外からのAPI直叩きで契約期間外・非稼動契約に実績を作られないよう検証する。
+        // 判定条件は勤怠グリッド(selectMonthlyGrid の WHERE)と同一に揃える。
+        YearMonth ym;
+        try {
+            ym = YearMonth.parse(workMonth);
+        } catch (DateTimeParseException e) {
+            throw BusinessException.of("error.workRecord.invalidMonth");
+        }
+        LocalDate monthStart = ym.atDay(1);
+        LocalDate monthEnd = ym.atEndOfMonth();
+        boolean inPeriod = contract.getStartDate() != null && !contract.getStartDate().isAfter(monthEnd)
+                && (contract.getEndDate() == null || !contract.getEndDate().isBefore(monthStart));
+        boolean statusOk = StatusConstants.CONTRACT_ACTIVE.equals(contract.getStatus())
+                || StatusConstants.CONTRACT_ENDED.equals(contract.getStatus());
+        // ガードは「新規に」期間外・非稼動の実績を作らせないための縦深防御。既存レコードの更新は
+        // 免除する（解約で end_date が短縮された契約の既存実績が編集不可・自動再確定の三すくみに
+        // なるのを防ぐ。review-fixes G2）。
+        if (record == null && (!inPeriod || !statusOk)) {
+            throw BusinessException.of("error.workRecord.contractNotBillable");
         }
 
         BigDecimal billingAmount = SettlementCalculator.calc(
@@ -175,7 +200,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                         "BP_AMOUNT_MISMATCH",
                         "BP支払金額の不一致",
                         "[\"notification.msg.BP_AMOUNT_MISMATCH\", \"" + root.getId() + "\"]",
-                        "/invoice",
+                        com.ses.common.constant.NotificationLinks.INVOICE,
                         "bp-amount-mismatch-" + root.getId());
             }
         }

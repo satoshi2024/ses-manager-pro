@@ -7,10 +7,8 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
 import com.ses.entity.Project;
 import com.ses.entity.Proposal;
-import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
-import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerStatusService;
@@ -46,7 +44,6 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
-    private final SysUserMapper sysUserMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
 
     @Override
@@ -62,7 +59,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (workRecords > 0) {
             throw BusinessException.of("error.contract.hasWorkRecord");
         }
-        return super.removeById(id);
+        boolean removed = super.removeById(id);
+        // 削除で稼動中契約・オープン提案が無くなった場合は要員を Bench に戻す
+        // （releaseIfIdle が両方を確認してから判定するため安全。稼動中契約は元々削除不可）。
+        if (removed && target.getEngineerId() != null) {
+            engineerStatusService.releaseIfIdle(target.getEngineerId());
+        }
+        return removed;
     }
 
     @Override
@@ -107,11 +110,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
         boolean salesUserUnchanged = old != null && Objects.equals(old.getSalesUserId(), c.getSalesUserId());
         if (c.getSalesUserId() != null && !salesUserUnchanged) {
-            SysUser salesUser = sysUserMapper.selectById(c.getSalesUserId());
-            if (salesUser == null
-                    || !StatusConstants.ROLE_SALES.equals(salesUser.getRole())
-                    || !Integer.valueOf(1).equals(salesUser.getStatus())
-                    || Integer.valueOf(1).equals(salesUser.getDeletedFlag())) {
+            // 在職判定は EngineerSalesService.isActiveSalesUser に一本化（二重定義を避ける）。
+            if (!engineerSalesService.isActiveSalesUser(c.getSalesUserId())) {
                 throw BusinessException.of("error.contract.salesUserInvalid");
             }
         }
@@ -255,7 +255,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         contract.setStartDate(LocalDate.now().plusMonths(1).withDayOfMonth(1));
         contract.setStatus("準備中");
         contract.setRemarks("提案#" + proposal.getId() + "の成約により自動生成");
-        contract.setSalesUserId(engineerSalesService.findPrimarySalesUserId(proposal.getEngineerId()));
+        // 主担当営業を引き継ぐ。ただし退職済み(無効/削除)の場合は未帰属(NULL)でドラフト生成し、
+        // 後続の担当設定に委ねる。ここで validate に落とすと成約遷移ごとロールバックし業務が止まるため。
+        Long primaryId = engineerSalesService.findPrimarySalesUserId(proposal.getEngineerId());
+        if (primaryId != null && !engineerSalesService.isActiveSalesUser(primaryId)) {
+            primaryId = null;
+        }
+        contract.setSalesUserId(primaryId);
 
         // saveWithBusinessRules で採番・検証を再利用（準備中のため要員ステータス連動は発火しない）
         saveWithBusinessRules(contract);
