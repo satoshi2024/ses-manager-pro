@@ -40,6 +40,18 @@ public interface EngineerSalesService extends IService<EngineerSales> {
     /** 要員の現任主担当営業ユーザーID（未設定なら null） */
     Long findPrimarySalesUserId(Long engineerId);
 
+    /**
+     * 指定ユーザーが担当営業として有効か（非null・role=営業・status=1・未削除）。
+     * 契約の担当営業在職判定と同一条件。判定ロジックはここに一本化する。
+     */
+    boolean isActiveSalesUser(Long userId);
+
+    /**
+     * 要員の現任担当営業割当（released_at IS NULL）すべてを本日付で解除する。
+     * 履歴保全のため物理・論理削除はしない（primary_flag も触らない）。要員削除時に呼ぶ。
+     */
+    void releaseAllByEngineerId(Long engineerId);
+
     /** 複数要員の現任主担当営業を一括取得（key=要員ID） */
     Map<Long, EngineerPrimarySalesDto> mapPrimaryByEngineerIds(List<Long> engineerIds);
 

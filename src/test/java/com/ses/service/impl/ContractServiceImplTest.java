@@ -500,13 +500,30 @@ class ContractServiceImplTest {
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class))).thenReturn(1);
         when(engineerSalesService.findPrimarySalesUserId(3L)).thenReturn(99L);
-        SysUser salesUser = new SysUser();
-        salesUser.setRole("営業");
-        salesUser.setStatus(1);
-        when(sysUserMapper.selectById(99L)).thenReturn(salesUser);
+        when(engineerSalesService.isActiveSalesUser(99L)).thenReturn(true);
 
         Contract draft = contractService.createDraftFromProposal(p);
 
         assertEquals(99L, draft.getSalesUserId());
+    }
+
+    @Test
+    void createDraftFromProposal_退職主担当なら未帰属でドラフト生成する() {
+        // S1-1: 主担当が退職済み(isActiveSalesUser=false)なら sales_user_id=NULL でドラフト生成し、
+        // validate に落として成約ごとロールバックさせない。
+        Proposal p = proposal(52L, 7L, 11L, new BigDecimal("650000"));
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        Project prj = new Project();
+        prj.setCustomerId(6L);
+        when(projectMapper.selectById(11L)).thenReturn(prj);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+        when(engineerSalesService.findPrimarySalesUserId(7L)).thenReturn(88L);
+        when(engineerSalesService.isActiveSalesUser(88L)).thenReturn(false); // 退職済み
+
+        Contract draft = contractService.createDraftFromProposal(p);
+
+        assertNull(draft.getSalesUserId(), "退職主担当は引き継がず未帰属になること");
+        assertEquals("準備中", draft.getStatus());
     }
 }

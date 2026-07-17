@@ -21,6 +21,7 @@ import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,6 +76,8 @@ class WorkRecordServiceImplTest {
         contract.setCostPrice(new BigDecimal("600000"));
         contract.setSettlementHoursMin(new BigDecimal("140"));
         contract.setSettlementHoursMax(new BigDecimal("180"));
+        contract.setStartDate(LocalDate.of(2026, 7, 1));
+        contract.setStatus("稼動中");
         when(contractMapper.selectById(contractId)).thenReturn(contract);
         when(workRecordMapper.insert(any(WorkRecord.class))).thenReturn(1);
 
@@ -346,6 +349,71 @@ class WorkRecordServiceImplTest {
                 .hasMessageContaining("error.workRecord.invoicedEdit2");
     }
 
+    // ===== S7: 工数入力の契約期間・状態検証（縦深防御） =====
+
+    private Contract billableContract(Long id, LocalDate start, LocalDate end, String status) {
+        Contract c = new Contract();
+        c.setId(id);
+        c.setSellingPrice(new BigDecimal("800000"));
+        c.setSettlementHoursMin(new BigDecimal("140"));
+        c.setSettlementHoursMax(new BigDecimal("180"));
+        c.setStartDate(start);
+        c.setEndDate(end);
+        c.setStatus(status);
+        return c;
+    }
+
+    @Test
+    void testSaveHours_契約期間外の月は拒否() {
+        Long contractId = 1L;
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        // 契約期間 2026-08〜2026-09。対象月 2026-07 は期間前。
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 9, 30), "稼動中"));
+
+        assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.contractNotBillable");
+    }
+
+    @Test
+    void testSaveHours_準備中契約は拒否() {
+        Long contractId = 1L;
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "準備中"));
+
+        assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.contractNotBillable");
+    }
+
+    @Test
+    void testSaveHours_終了契約_期間内は登録できる() {
+        Long contractId = 1L;
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "終了"));
+        when(workRecordMapper.insert(any(WorkRecord.class))).thenReturn(1);
+
+        WorkRecord record = workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x");
+
+        assertThat(record).isNotNull();
+        assertThat(record.getStatus()).isEqualTo("入力中");
+    }
+
+    @Test
+    void testSaveHours_月形式不正は拒否() {
+        Long contractId = 1L;
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "稼動中"));
+
+        assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026/07", new BigDecimal("150"), "x"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.invalidMonth");
+    }
+
     @Test
     void testSaveHours_UK衝突時にBusinessException() {
         Long contractId = 1L;
@@ -358,6 +426,8 @@ class WorkRecordServiceImplTest {
         contract.setSellingPrice(new BigDecimal("800000"));
         contract.setSettlementHoursMin(new BigDecimal("140"));
         contract.setSettlementHoursMax(new BigDecimal("180"));
+        contract.setStartDate(LocalDate.of(2026, 7, 1));
+        contract.setStatus("稼動中");
         when(contractMapper.selectById(contractId)).thenReturn(contract);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);

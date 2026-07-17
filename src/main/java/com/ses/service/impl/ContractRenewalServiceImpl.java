@@ -63,7 +63,7 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
                     "契約更新ドラフトを作成しました",
                     "契約 " + original.getContractNo() + " の自動更新ドラフトを作成しました（開始日: "
                             + draft.getStartDate() + "）",
-                    "/contract/list",
+                    com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
                     "CONTRACT_RENEWAL_DRAFT:" + original.getId()));
         }
 

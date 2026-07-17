@@ -85,7 +85,7 @@ class NotificationGenerateServiceTest {
                 eq("INVOICE_OVERDUE"),
                 eq("支払期限超過"),
                 contains("INV-202605-0001"),
-                eq("/invoice/list"),
+                eq("/invoice"),
                 contains("INVOICE_OVERDUE:7:"));
         verify(notificationService, times(1)).publish(
                 any(), any(), contains("5日"), any(), any());
@@ -98,5 +98,50 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.invoiceOverdue();
 
         verify(notificationService, never()).publish(any(), any(), any(), any(), any());
+    }
+
+    // ===== S4: CONTRACT_END と更新ドラフトの連動 =====
+
+    private com.ses.entity.Contract endingContract(Long id) {
+        com.ses.entity.Contract c = new com.ses.entity.Contract();
+        c.setId(id);
+        c.setEngineerId(50L);
+        c.setStatus("稼動中");
+        c.setEndDate(LocalDate.now().plusDays(10));
+        return c;
+    }
+
+    private com.ses.entity.Contract renewalDraftOf(Long originalId) {
+        com.ses.entity.Contract d = new com.ses.entity.Contract();
+        d.setId(999L);
+        d.setRenewedFromContractId(originalId);
+        return d;
+    }
+
+    @Test
+    void testContractEnding_更新ドラフト生成済みは通知しない() {
+        when(systemConfigService.getInt(eq("notice.contract-end-days"), any(Integer.class))).thenReturn(30);
+        // 1回目: 終了間近の契約、2回目: 更新ドラフト(renewed_from=100)
+        when(contractMapper.selectList(any()))
+                .thenReturn(List.of(endingContract(100L)))
+                .thenReturn(List.of(renewalDraftOf(100L)));
+
+        notificationGenerateService.contractEnding();
+
+        verify(notificationService, never()).publish(eq("CONTRACT_END"), any(), any(), any(), any());
+    }
+
+    @Test
+    void testContractEnding_ドラフト未生成は通知する() {
+        when(systemConfigService.getInt(eq("notice.contract-end-days"), any(Integer.class))).thenReturn(30);
+        // 1回目: 終了間近の契約、2回目: ドラフトなし
+        when(contractMapper.selectList(any()))
+                .thenReturn(List.of(endingContract(100L)))
+                .thenReturn(List.of());
+
+        notificationGenerateService.contractEnding();
+
+        verify(notificationService, times(1)).publish(
+                eq("CONTRACT_END"), any(), any(), eq("/contract/list"), contains("CONTRACT_END:100:"));
     }
 }

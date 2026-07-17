@@ -34,6 +34,12 @@ public class EngineerSalesServiceImplTest {
     @Autowired
     private SysUserMapper sysUserMapper;
 
+    @Autowired
+    private com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     private Long salesUser1Id;
     private Long salesUser2Id;
     private Long hrUserId;
@@ -160,5 +166,48 @@ public class EngineerSalesServiceImplTest {
         assertEquals(salesUser1Id, map.get(ENGINEER_ID).getSalesUserId());
         assertEquals("営業 一郎", map.get(ENGINEER_ID).getSalesUserName());
         assertTrue(engineerSalesService.mapPrimaryByEngineerIds(List.of()).isEmpty());
+    }
+
+    // ===== S1/S2: 在職判定・要員削除時の一括解除 =====
+
+    @Test
+    void isActiveSalesUserは有効な営業のみtrue() {
+        assertTrue(engineerSalesService.isActiveSalesUser(salesUser1Id));
+        assertFalse(engineerSalesService.isActiveSalesUser(disabledSalesId), "無効(status=0)はfalse");
+        assertFalse(engineerSalesService.isActiveSalesUser(hrUserId), "非営業ロールはfalse");
+        assertFalse(engineerSalesService.isActiveSalesUser(999999L), "存在しないユーザーはfalse");
+        assertFalse(engineerSalesService.isActiveSalesUser(null), "nullはfalse");
+    }
+
+    @Test
+    void releaseAllByEngineerIdは現任割当をすべて解除する() {
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+        engineerSalesService.assign(ENGINEER_ID, salesUser2Id, false, null);
+        assertEquals(2, engineerSalesService.listActive(ENGINEER_ID).size());
+
+        engineerSalesService.releaseAllByEngineerId(ENGINEER_ID);
+
+        assertTrue(engineerSalesService.listActive(ENGINEER_ID).isEmpty(), "現任割当が残らないこと");
+        // 履歴は残る（物理・論理削除しない）
+        assertEquals(2, engineerSalesService.listHistory(ENGINEER_ID).size());
+    }
+
+    @Test
+    void countActivePrimaryは削除済み要員を除外する() {
+        // S2-2: 論理削除された要員の現任主担当割当は担当要員数に数えない（t_engineer join）。
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) "
+                + "VALUES (901, '有効要員', '正社員', 'Bench', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) "
+                + "VALUES (902, '削除要員', '正社員', 'Bench', 1)");
+        engineerSalesService.assign(901L, salesUser1Id, true, null);
+        // 削除済み要員に主担当割当を直接投入（現任・主担当だが要員は deleted_flag=1）
+        jdbcTemplate.update("INSERT INTO t_engineer_sales (engineer_id, sales_user_id, primary_flag, assigned_at, deleted_flag) "
+                + "VALUES (902, ?, 1, CURRENT_DATE, 0)", salesUser1Id);
+
+        long count = engineerSalesMapper.countActivePrimaryGroupBySalesUser().stream()
+                .filter(c -> c.getSalesUserId().equals(salesUser1Id))
+                .mapToLong(c -> c.getEngineerCount() == null ? 0 : c.getEngineerCount())
+                .sum();
+        assertEquals(1, count, "有効要員1名のみ数え、削除済み要員は除外すること");
     }
 }

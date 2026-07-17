@@ -113,6 +113,30 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
+    public boolean isActiveSalesUser(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        return user != null
+                && StatusConstants.ROLE_SALES.equals(user.getRole())
+                && Integer.valueOf(1).equals(user.getStatus())
+                && !Integer.valueOf(1).equals(user.getDeletedFlag());
+    }
+
+    @Override
+    @Transactional
+    public void releaseAllByEngineerId(Long engineerId) {
+        if (engineerId == null) {
+            return;
+        }
+        update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<EngineerSales>()
+                .eq(EngineerSales::getEngineerId, engineerId)
+                .isNull(EngineerSales::getReleasedAt)
+                .set(EngineerSales::getReleasedAt, LocalDate.now()));
+    }
+
+    @Override
     public Map<Long, EngineerPrimarySalesDto> mapPrimaryByEngineerIds(List<Long> engineerIds) {
         if (engineerIds == null || engineerIds.isEmpty()) {
             return Collections.emptyMap();

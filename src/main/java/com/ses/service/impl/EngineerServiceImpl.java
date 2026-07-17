@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ses.common.constant.StatusConstants;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
 import com.ses.entity.Proposal;
@@ -9,6 +10,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
 
     private final ContractMapper contractMapper;
     private final ProposalMapper proposalMapper;
+    private final EngineerSalesService engineerSalesService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -33,7 +36,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         Long engineerId = Long.valueOf(id.toString());
         long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
-                .eq(Contract::getStatus, "稼動中"));
+                .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
         if (active > 0) {
             throw BusinessException.of("error.engineer.delete.activeContract");
         }
@@ -43,7 +46,27 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (openProposals > 0) {
             throw BusinessException.of("error.engineer.delete.activeProposal");
         }
+        // 現任の担当営業割当を解除する（released_at 設定。履歴保全のため論理削除はしない）
+        engineerSalesService.releaseAllByEngineerId(engineerId);
         return super.removeById(id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateWithStatusGuard(Engineer engineer) {
+        Engineer old = getById(engineer.getId());
+        if (old != null && engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
+            long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
+                    .eq(Contract::getEngineerId, engineer.getId())
+                    .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
+            if (StatusConstants.ENGINEER_ACTIVE.equals(engineer.getStatus()) && active == 0) {
+                throw BusinessException.of("error.engineer.statusActiveNoContract");
+            }
+            if (StatusConstants.ENGINEER_BENCH.equals(engineer.getStatus()) && active > 0) {
+                throw BusinessException.of("error.engineer.statusBenchHasContract");
+            }
+        }
+        return updateById(engineer);
     }
 }
 

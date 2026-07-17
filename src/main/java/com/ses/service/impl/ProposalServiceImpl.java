@@ -108,11 +108,16 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         // トランザクション失敗時は成約遷移ごとロールバックされる。
         if ("成約".equals(newStatus)) {
             Contract draft = contractService.createDraftFromProposal(proposal);
+            // 主担当営業が退職済み等で未帰属(sales_user_id=NULL)になった場合は担当設定を促すメッセージにする。
+            boolean unattributed = draft.getSalesUserId() == null;
+            String msgKey = unattributed
+                    ? "notification.msg.CONTRACT_DRAFT_UNATTRIBUTED"
+                    : "notification.msg.CONTRACT_DRAFT";
             notificationService.publish(
                     "CONTRACT_DRAFT",
                     "契約ドラフト作成",
-                    "[\"notification.msg.CONTRACT_DRAFT\", \"" + draft.getContractNo() + "\"]",
-                    "/contract/list",
+                    "[\"" + msgKey + "\", \"" + draft.getContractNo() + "\"]",
+                    com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
                     "contract-draft:" + proposal.getId());
         }
     }
