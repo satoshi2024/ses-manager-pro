@@ -158,7 +158,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private void syncRootBpAmount(WorkRecord record) {
         List<BpPayment> roots = bpPaymentMapper.selectList(new QueryWrapper<BpPayment>()
                 .eq("work_record_id", record.getId())
-                .isNull("parent_payment_id"));
+                .isNull("parent_payment_id")
+                .eq("layer_order", 1));
         for (BpPayment root : roots) {
             if (root.getAmount() == null || root.getAmount().compareTo(record.getPaymentAmount()) == 0) {
                 continue;
@@ -173,8 +174,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 notificationService.publish(
                         "BP_AMOUNT_MISMATCH",
                         "BP支払金額の不一致",
-                        "支払済BP支払の金額が最新の精算額と一致しません。ご確認ください。",
-                        "/invoice/bp-payments",
+                        "[\"notification.msg.BP_AMOUNT_MISMATCH\", \"" + root.getId() + "\"]",
+                        "/invoice",
                         "bp-amount-mismatch-" + root.getId());
             }
         }

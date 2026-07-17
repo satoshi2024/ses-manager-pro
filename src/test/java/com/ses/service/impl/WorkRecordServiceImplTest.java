@@ -295,9 +295,39 @@ class WorkRecordServiceImplTest {
 
         workRecordService.confirmMonth(workMonth);
 
-        // 支払済は更新せず通知に留める
+        // 支払済は更新せず通知に留める。リンク先は /invoice(存在するページ)であること。
         verify(bpPaymentMapper, never()).update(any(), any());
-        verify(notificationService, times(1)).publish(any(), any(), any(), any(), any());
+        verify(notificationService, times(1)).publish(
+                eq("BP_AMOUNT_MISMATCH"), any(), any(), eq("/invoice"), any());
+    }
+
+    @Test
+    void testConfirmMonth_金額同期は自動生成1階層目_layerOrder1_のみを対象にする() {
+        String workMonth = "2026-07";
+
+        WorkRecord record = new WorkRecord();
+        record.setId(1L);
+        record.setStatus("入力中");
+        record.setPaymentAmount(new BigDecimal("650000"));
+
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+
+        WorkRecordGridDto dto = new WorkRecordGridDto();
+        dto.setWorkRecordId(1L);
+        dto.setEmploymentType("BP");
+        when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
+        org.mockito.ArgumentCaptor<QueryWrapper> captor = org.mockito.ArgumentCaptor.forClass(QueryWrapper.class);
+        when(bpPaymentMapper.selectList(captor.capture())).thenReturn(Collections.emptyList());
+
+        workRecordService.confirmMonth(workMonth);
+
+        // 1階層目ルックアップの条件に layer_order = 1 が含まれること(design R4 準拠。親なし手動階層を除外)
+        assertThat(captor.getValue().getTargetSql()).contains("layer_order");
+        // 対象行が無ければ金額更新は行わない
+        verify(bpPaymentMapper, never()).update(any(), any());
     }
 
     @Test

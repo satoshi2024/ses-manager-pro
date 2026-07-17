@@ -3,7 +3,9 @@ $(document).ready(function() {
     loadSelectOptions();
 });
 
-// サーバの ALLOWED_STATUS_TRANSITIONS を反映(値はDB格納の日本語ステータスそのまま送る)。
+// サーバの ContractServiceImpl.ALLOWED_STATUS_TRANSITIONS の複製(唯一の権威はサーバ側)。
+// 遷移可否の最終検証はサーバが行う。ここはUI表示用のため、サーバ側を変更したら本定義も追随すること。
+// 値はDB格納の日本語ステータスそのまま送る。
 const STATUS_TRANSITIONS = {
     '準備中': ['稼動中', '解約'],
     '稼動中': ['終了', '解約']
@@ -55,8 +57,10 @@ function loadContracts() {
 }
 
 function loadSelectOptions() {
+    // マスタは全件セレクトに載せる(既定 size=10 のページングだと11件目以降の要員/案件/顧客を持つ
+    // 契約が編集不能になるため、十分大きい size を明示する)。
     // Load Engineers
-    $.get('/api/engineers', function(res) {
+    $.get('/api/engineers?size=1000', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-engineerId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
@@ -64,7 +68,7 @@ function loadSelectOptions() {
         }
     });
     // Load Projects
-    $.get('/api/projects', function(res) {
+    $.get('/api/projects?size=1000', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-projectId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
@@ -72,7 +76,7 @@ function loadSelectOptions() {
         }
     });
     // Load Customers
-    $.get('/api/customers', function(res) {
+    $.get('/api/customers?size=1000', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#cont-customerId');
             const searchSelect = $('#search-customerId');
@@ -211,6 +215,12 @@ function openEditContract(id) {
         $('#cont-engineerId').val(c.engineerId != null ? String(c.engineerId) : '');
         $('#cont-projectId').val(c.projectId != null ? String(c.projectId) : '');
         $('#cont-customerId').val(c.customerId != null ? String(c.customerId) : '');
+        // 担当営業が退職済み等でセレクト対象外(在職営業のみロードされる)の場合、原値を保持する
+        // option を動的補完する。これがないと val() が空になり PUT で salesUserId=null(ALWAYS)が
+        // 書き込まれ、成約帰属・営業成績が無警告で消える。
+        if (c.salesUserId != null && $(`#cont-salesUserId option[value="${c.salesUserId}"]`).length === 0) {
+            $('#cont-salesUserId').append(`<option value="${c.salesUserId}">${SES.escapeHtml(SES.i18n.t('contract.salesRep.inactive'))}</option>`);
+        }
         $('#cont-salesUserId').val(c.salesUserId != null ? String(c.salesUserId) : '');
         $('#cont-contractType').val(c.contractType || '準委任');
         $('#cont-startDate').val(c.startDate || '');
@@ -323,7 +333,9 @@ function changeContractStatus(id, currentStatus) {
 }
 
 function promptCancelDate(id) {
-    const today = new Date().toISOString().slice(0, 10);
+    // ローカル日付(JSTなど)で今日を組み立てる。toISOString()はUTCのため0:00〜9:00に前日になる問題を回避。
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     Swal.fire({
         title: SES.i18n.t('contract.cancel.title'),
         text: SES.i18n.t('contract.cancel.datePrompt'),

@@ -13,9 +13,14 @@
 
 指摘は 8 件。**F1〜F5 はマージ前修正を推奨（ブロッカー）**、F6〜F8 は任意（フォローアップ可）。
 
+> **対応状況（2026-07-16 追記）**: F1〜F8 すべて本ブランチで修正済み。対応するテストを同一コミットに含め、
+> `mvn test` 全緑（**463 tests / failures 0 / errors 0 / skipped 2**、skip は Docker 必須の smoke test）を再確認済み。
+> 各節見出しに **[対応済み]** を付記。残存検証課題（V27 の実MySQL smoke test・ブラウザDemo）は
+> Docker/GUI 環境が必要なため本環境では未実施（下記「残存する検証課題」参照）。
+
 ---
 
-## F1.【重大・データ破壊】退職済み担当営業の契約を編集すると sales_user_id が黙って NULL 化される
+## F1.【重大・データ破壊】退職済み担当営業の契約を編集すると sales_user_id が黙って NULL 化される　**[対応済み]**
 
 - **場所**: `static/js/modules/contract.js:214`（`openEditContract` の salesUserId プリセット）
   ＋ `buildContractPayload`（`contract.js:234`）
@@ -56,7 +61,7 @@
 - **テスト**: `ContractServiceImplTest` — 退職済み担当のままの更新が通ること /
   退職済み担当への**変更**は引き続き拒否されること、の2ケース。
 
-## F2.【重大・機能不全】選択肢APIのページング（size=10）により 11 件目以降のマスタを持つ契約が編集不能
+## F2.【重大・機能不全】選択肢APIのページング（size=10）により 11 件目以降のマスタを持つ契約が編集不能　**[対応済み]**
 
 - **場所**: `static/js/modules/contract.js:59, 67, 75`（`loadSelectOptions`）
 - **原因**: `/api/engineers`・`/api/projects`・`/api/customers` はいずれも `defaultValue size=10` の
@@ -75,7 +80,7 @@
   （id+名称のみ、ページングなし）を追加するか、Select2 等の検索型セレクトへ置換する。
 - **テスト**: 自動テスト困難（JS）。A2 の Demo 手順（編集→保存）を 11 件以上のマスタ投入状態で再実施。
 
-## F3.【中・データ破壊】confirmMonth の syncRootBpAmount が layer_order=1 条件を欠き、親なし手動階層の金額を上書きする
+## F3.【中・データ破壊】confirmMonth の syncRootBpAmount が layer_order=1 条件を欠き、親なし手動階層の金額を上書きする　**[対応済み]**
 
 - **場所**: `service/impl/WorkRecordServiceImpl.java:161`（`syncRootBpAmount` の selectList 条件）
 - **原因**: design.md R4 は「**parent_payment_id IS NULL かつ layer_order = 1** の未払行のみ金額同期」
@@ -94,7 +99,7 @@
 - **テスト**: `WorkRecordServiceImplTest` に「parent なし・layer_order=2 の未払行は confirm で
   金額更新されない」ケースを追加。
 
-## F4.【中・UX】編集 UI で nullable 非 ALWAYS フィールドのクリアが黙って無効
+## F4.【中・UX】編集 UI で nullable 非 ALWAYS フィールドのクリアが黙って無効　**[対応済み]**
 
 - **場所**: `static/js/modules/contract.js:234`（`buildContractPayload`）＋ `entity/Contract.java`
 - **原因**: `endDate` / `settlementHoursMin` / `settlementHoursMax` / `fractionRule` は
@@ -111,7 +116,7 @@
   を検証（Mockito 単体では updateStrategy を検証できないため **H2 実 DB テスト推奨**。
   `AnalyticsProjectionMapperIntegrationTest` と同じ `BaseIntegrationTest` 系を利用）。
 
-## F5.【低・1行】BP_AMOUNT_MISMATCH 通知のリンク先 /invoice/bp-payments が存在せず 404
+## F5.【低・1行】BP_AMOUNT_MISMATCH 通知のリンク先 /invoice/bp-payments が存在せず 404　**[対応済み]**
 
 - **場所**: `service/impl/WorkRecordServiceImpl.java:177`
 - **原因**: `InvoicePageController` は `/invoice` と `/invoice/{id}/print` のみ。BP支払は
@@ -136,21 +141,21 @@
 
 ## F6〜F8.（任意・フォローアップ可）
 
-### F6.【低】解約日が元 end_date より後の場合に契約期間が黙って延長される
+### F6.【低】解約日が元 end_date より後の場合に契約期間が黙って延長される　**[対応済み]**
 
 - **場所**: `service/impl/ContractServiceImpl.java:193`
 - 解約なのに end_date が延び、売上・粗利・インセンティブの計上月数が増える反直感な結果を許容している。
 - **修正案**: 元 `end_date` 非 NULL かつ `cancelDate` がそれより後なら
   `error.contract.cancelDateAfterEnd` で拒否（メッセージ4言語追加）。テスト1ケース追加。
 
-### F7.【低・保守性】STATUS_TRANSITIONS がフロントに複製されている
+### F7.【低・保守性】STATUS_TRANSITIONS がフロントに複製されている　**[対応済み: 相互参照コメント追加]**
 
 - **場所**: `static/js/modules/contract.js:7`
 - サーバの `ALLOWED_STATUS_TRANSITIONS` が唯一の権威。恒久対応は
   `GET /api/contracts/{id}` のレスポンスに `allowedTransitions` を含めてフロントはそれを表示するだけに
   する。最低限なら両者に相互参照コメントを追加。
 
-### F8.【低】解約日ダイアログの既定値が UTC 日付
+### F8.【低】解約日ダイアログの既定値が UTC 日付　**[対応済み]**
 
 - **場所**: `static/js/modules/contract.js:326`
 - `new Date().toISOString()` は UTC のため JST 0:00〜9:00 は前日がデフォルトになる。
