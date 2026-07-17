@@ -268,6 +268,19 @@ CREATE TABLE t_invoice_item (
   amount         DECIMAL(12,0) NOT NULL
 );
 
+DROP TABLE IF EXISTS t_invoice_payment CASCADE;
+CREATE TABLE t_invoice_payment (
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  invoice_id   BIGINT NOT NULL,
+  paid_date    DATE NOT NULL,
+  amount       DECIMAL(12,0) NOT NULL,
+  fee          DECIMAL(12,0) NOT NULL DEFAULT 0,
+  remarks      VARCHAR(300),
+  created_by   BIGINT,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 DROP TABLE IF EXISTS t_bp_payment CASCADE;
 CREATE TABLE t_bp_payment (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,

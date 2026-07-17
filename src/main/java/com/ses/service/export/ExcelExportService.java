@@ -2,6 +2,7 @@ package com.ses.service.export;
 
 import com.ses.dto.export.ContractExportDto;
 import com.ses.dto.export.MonthlyRevenueDto;
+import com.ses.dto.invoice.AgingReportDto;
 import com.ses.entity.Engineer;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
@@ -39,6 +40,11 @@ public class ExcelExportService {
     /** 月次売上レポートの日本語ヘッダー */
     private static final String[] REVENUE_HEADERS = {
             "対象月", "売上", "粗利", "区分"
+    };
+
+    /** エイジングレポートの日本語ヘッダー */
+    private static final String[] AGING_HEADERS = {
+            "顧客名", "期限内", "1-30日", "31-60日", "61-90日", "91日以上", "期限未設定", "残高計"
     };
 
     /**
@@ -162,6 +168,55 @@ public class ExcelExportService {
             return writeToBytes(workbook);
         } catch (IOException ex) {
             throw new UncheckedIOException("月次売上レポートExcel生成に失敗しました", ex);
+        }
+    }
+
+    /**
+     * エイジング(債権年齢)レポートをExcel化する。
+     * 顧客ごとの未回収残高を経過区分別に並べ、末尾に合計行を出す。
+     */
+    public byte[] exportAging(AgingReportDto report) {
+        try (SXSSFWorkbook workbook = new SXSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("エイジングレポート");
+            CellStyle numberStyle = createNumberStyle(workbook);
+
+            createHeaderRow(workbook, sheet, AGING_HEADERS);
+            sheet.setColumnWidth(0, 24 * 256);
+            for (int i = 1; i < AGING_HEADERS.length; i++) {
+                sheet.setColumnWidth(i, 14 * 256);
+            }
+
+            int rowIndex = 1;
+            if (report != null && report.getRows() != null) {
+                for (AgingReportDto.Row r : report.getRows()) {
+                    Row row = sheet.createRow(rowIndex++);
+                    row.createCell(0).setCellValue(sanitize(r.getCustomerName()));
+                    setBigDecimalCell(row.createCell(1), r.getNotDue(), numberStyle);
+                    setBigDecimalCell(row.createCell(2), r.getD1to30(), numberStyle);
+                    setBigDecimalCell(row.createCell(3), r.getD31to60(), numberStyle);
+                    setBigDecimalCell(row.createCell(4), r.getD61to90(), numberStyle);
+                    setBigDecimalCell(row.createCell(5), r.getD91plus(), numberStyle);
+                    setBigDecimalCell(row.createCell(6), r.getNoDueDate(), numberStyle);
+                    setBigDecimalCell(row.createCell(7), r.getBalance(), numberStyle);
+                }
+            }
+
+            if (report != null && report.getTotal() != null) {
+                AgingReportDto.Row t = report.getTotal();
+                Row row = sheet.createRow(rowIndex);
+                row.createCell(0).setCellValue("合計");
+                setBigDecimalCell(row.createCell(1), t.getNotDue(), numberStyle);
+                setBigDecimalCell(row.createCell(2), t.getD1to30(), numberStyle);
+                setBigDecimalCell(row.createCell(3), t.getD31to60(), numberStyle);
+                setBigDecimalCell(row.createCell(4), t.getD61to90(), numberStyle);
+                setBigDecimalCell(row.createCell(5), t.getD91plus(), numberStyle);
+                setBigDecimalCell(row.createCell(6), t.getNoDueDate(), numberStyle);
+                setBigDecimalCell(row.createCell(7), t.getBalance(), numberStyle);
+            }
+
+            return writeToBytes(workbook);
+        } catch (IOException ex) {
+            throw new UncheckedIOException("エイジングレポートExcel生成に失敗しました", ex);
         }
     }
 

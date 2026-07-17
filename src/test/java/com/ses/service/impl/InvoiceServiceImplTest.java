@@ -5,6 +5,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoiceItem;
+import com.ses.entity.InvoicePayment;
 import com.ses.entity.BpPayment;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
@@ -44,6 +45,12 @@ public class InvoiceServiceImplTest {
 
     @Mock
     private BpPaymentMapper bpPaymentMapper;
+
+    @Mock
+    private com.ses.mapper.InvoicePaymentMapper invoicePaymentMapper;
+
+    @Mock
+    private com.ses.service.MailService mailService;
 
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
@@ -214,7 +221,8 @@ public class InvoiceServiceImplTest {
     }
 
     @Test
-    void testChangeStatus_PaidRequiresDate() {
+    void testChangeStatus_ManualPaidRejected() {
+        // 入金済への手動遷移は廃止。送付済→入金済 は不正遷移として拒否される（入金行から遷移させる）。
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
@@ -223,23 +231,226 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
-        assertTrue(ex.getMessage().contains("error.invoice.paymentDateRequired"));
+        assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
     }
 
     @Test
-    void testChangeStatus_ClearPaidDate() {
+    void testChangeStatus_ManualRevertFromPaidRejected() {
+        // 入金済→送付済 の手動巻き戻しも廃止（入金行の削除で表現する）。
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setStatus("入金済");
-        invoice.setPaidDate(java.time.LocalDate.now());
 
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
-        when(invoiceMapper.update(any(), any())).thenReturn(1);
 
-        invoiceService.changeStatus(invoiceId, "送付済", null);
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "送付済", null));
+        assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
+    }
 
-        verify(invoiceMapper, times(1)).update(any(), any());
+    @Test
+    void testChangeStatus_SentToUnsent() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("送付済");
+
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.updateById(any(Invoice.class))).thenReturn(1);
+
+        invoiceService.changeStatus(invoiceId, "未送付", null);
+
+        verify(invoiceMapper, times(1)).updateById(any(Invoice.class));
+    }
+
+    // ===== 債権管理（ar-management / P2） =====
+
+    @Test
+    void testResolvePaymentStatus_Boundaries() {
+        BigDecimal total = new BigDecimal("110000");
+        assertEquals("送付済", InvoiceServiceImpl.resolvePaymentStatus(BigDecimal.ZERO, total));
+        assertEquals("一部入金", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("50000"), total));
+        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110000"), total));
+        // 手数料込みで到達するケースも paidTotal>=total で入金済
+        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110500"), total));
+    }
+
+    @Test
+    void testClassifyBucket_Boundaries() {
+        LocalDate asOf = LocalDate.of(2026, 7, 17);
+        // 経過0日(当日)=期限内
+        assertEquals("notDue", InvoiceServiceImpl.classifyBucket(asOf, asOf));
+        // 期限が未来=期限内
+        assertEquals("notDue", InvoiceServiceImpl.classifyBucket(asOf.plusDays(5), asOf));
+        // 1日超過=1-30
+        assertEquals("d1to30", InvoiceServiceImpl.classifyBucket(asOf.minusDays(1), asOf));
+        assertEquals("d1to30", InvoiceServiceImpl.classifyBucket(asOf.minusDays(30), asOf));
+        // 31日=31-60
+        assertEquals("d31to60", InvoiceServiceImpl.classifyBucket(asOf.minusDays(31), asOf));
+        assertEquals("d61to90", InvoiceServiceImpl.classifyBucket(asOf.minusDays(61), asOf));
+        assertEquals("d91plus", InvoiceServiceImpl.classifyBucket(asOf.minusDays(91), asOf));
+        // 期限未設定
+        assertEquals("noDueDate", InvoiceServiceImpl.classifyBucket(null, asOf));
+    }
+
+    @Test
+    void testAddPayment_PartialSetsPartiallyPaid() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setStatus("送付済");
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        InvoicePayment newPayment = new InvoicePayment();
+        newPayment.setAmount(new BigDecimal("50000"));
+        newPayment.setPaidDate(LocalDate.of(2026, 7, 10));
+
+        // sumPaid（既存なし）→ insert後 recalc（新1件）
+        when(invoicePaymentMapper.selectList(any()))
+                .thenReturn(java.util.Collections.emptyList())
+                .thenReturn(java.util.List.of(newPayment));
+        when(invoicePaymentMapper.insert(any(InvoicePayment.class))).thenReturn(1);
+
+        invoiceService.addPayment(invoiceId, newPayment);
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper> cap =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(invoiceMapper).update(any(), cap.capture());
+        assertTrue(cap.getValue().getParamNameValuePairs().containsValue("一部入金"));
+    }
+
+    @Test
+    void testAddPayment_OverPaymentRejected() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setTotal(new BigDecimal("110000"));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        InvoicePayment existing = new InvoicePayment();
+        existing.setAmount(new BigDecimal("100000"));
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+
+        InvoicePayment newPayment = new InvoicePayment();
+        newPayment.setAmount(new BigDecimal("20000"));
+        newPayment.setPaidDate(LocalDate.now());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> invoiceService.addPayment(invoiceId, newPayment));
+        assertTrue(ex.getMessage().contains("error.invoice.overPayment"));
+        verify(invoicePaymentMapper, never()).insert(any(InvoicePayment.class));
+    }
+
+    @Test
+    void testAddPayment_VoidedOrMissingInvoiceRejected() {
+        when(invoiceMapper.selectById(anyLong())).thenReturn(null);
+        InvoicePayment p = new InvoicePayment();
+        p.setAmount(new BigDecimal("1000"));
+        p.setPaidDate(LocalDate.now());
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.addPayment(9L, p));
+        assertTrue(ex.getMessage().contains("error.invoice.notFound"));
+    }
+
+    @Test
+    void testAddPayment_OnUnsentAllowed() {
+        // 先行入金は実務で発生するため許可され、ステータスは一部入金へ。
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setStatus("未送付");
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        InvoicePayment newPayment = new InvoicePayment();
+        newPayment.setAmount(new BigDecimal("30000"));
+        newPayment.setPaidDate(LocalDate.now());
+        when(invoicePaymentMapper.selectList(any()))
+                .thenReturn(java.util.Collections.emptyList())
+                .thenReturn(java.util.List.of(newPayment));
+        when(invoicePaymentMapper.insert(any(InvoicePayment.class))).thenReturn(1);
+
+        assertDoesNotThrow(() -> invoiceService.addPayment(invoiceId, newPayment));
+        verify(invoicePaymentMapper, times(1)).insert(any(InvoicePayment.class));
+    }
+
+    @Test
+    void testDeletePayment_RollsBackToSent() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setTotal(new BigDecimal("110000"));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        InvoicePayment existing = new InvoicePayment();
+        existing.setId(5L);
+        existing.setInvoiceId(invoiceId);
+        when(invoicePaymentMapper.selectById(5L)).thenReturn(existing);
+        when(invoicePaymentMapper.deleteById(5L)).thenReturn(1);
+        // recalc: 削除後は0件
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+
+        invoiceService.deletePayment(invoiceId, 5L);
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper> cap =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(invoiceMapper).update(any(), cap.capture());
+        assertTrue(cap.getValue().getParamNameValuePairs().containsValue("送付済"));
+    }
+
+    @Test
+    void testSendReminder_MissingEmail() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("送付済");
+        invoice.setCustomerId(5L);
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setDueDate(LocalDate.now().minusDays(5));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        com.ses.entity.Customer c = com.ses.entity.Customer.builder().companyName("客A").build();
+        when(customerMapper.selectById(5L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> invoiceService.sendReminder(invoiceId, 1L));
+        assertTrue(ex.getMessage().contains("error.invoice.customerEmailMissing"));
+    }
+
+    @Test
+    void testSendReminder_NotOverdueRejected() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("送付済");
+        invoice.setDueDate(LocalDate.now().plusDays(5));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> invoiceService.sendReminder(invoiceId, 1L));
+        assertTrue(ex.getMessage().contains("error.invoice.reminderNotOverdue"));
+    }
+
+    @Test
+    void testSendReminder_Success() {
+        Long invoiceId = 1L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("一部入金");
+        invoice.setCustomerId(5L);
+        invoice.setInvoiceNo("INV-202607-0001");
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setDueDate(LocalDate.now().minusDays(10));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        com.ses.entity.Customer c = com.ses.entity.Customer.builder()
+                .companyName("客A").contactEmail("ap@example.com").build();
+        when(customerMapper.selectById(5L)).thenReturn(c);
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+        when(mailService.sendWithTemplate(any(), any(), any()))
+                .thenReturn(new com.ses.dto.mail.MailDispatchResult(1L, "QUEUED"));
+
+        var result = invoiceService.sendReminder(invoiceId, 7L);
+        assertEquals("QUEUED", result.getStatus());
+        verify(mailService, times(1)).sendWithTemplate(eq(7L), any(), eq("ap@example.com"));
     }
 
     @Test

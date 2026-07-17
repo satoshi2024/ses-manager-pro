@@ -37,6 +37,9 @@ class InvoiceApiControllerTest {
     @MockBean
     private BpPaymentMapper bpPaymentMapper;
 
+    @MockBean
+    private com.ses.service.export.ExcelExportService excelExportService;
+
     @Test
     @WithMockUser
     void pdf_ContentTypeとファイル名付きで返す() throws Exception {

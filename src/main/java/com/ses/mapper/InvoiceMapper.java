@@ -2,6 +2,7 @@ package com.ses.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.entity.Invoice;
+import com.ses.dto.invoice.InvoiceBalanceDto;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -14,6 +15,37 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
 
     @Select("SELECT MAX(invoice_no) FROM t_invoice WHERE invoice_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxInvoiceNoIncludingDeleted(@Param("prefix") String prefix);
+
+    /**
+     * 請求書×入金合計の残高付き一覧。残高 = total - Σ(amount+fee)。
+     * 入金済（＝残高0の完済）と取消(deleted)を除外し、未回収残高がある請求書のみ返す。
+     * エイジングの区分振り分けは Java 側で行う（境界テストを書きやすくするため）。
+     */
+    @Select("""
+        SELECT
+            i.id            AS invoiceId,
+            i.invoice_no    AS invoiceNo,
+            i.customer_id   AS customerId,
+            c.company_name  AS customerName,
+            i.billing_month AS billingMonth,
+            i.status        AS status,
+            i.total         AS total,
+            COALESCE(p.paid_total, 0)                 AS paidTotal,
+            i.total - COALESCE(p.paid_total, 0)       AS balance,
+            i.due_date      AS dueDate
+        FROM t_invoice i
+        LEFT JOIN m_customer c ON i.customer_id = c.id
+        LEFT JOIN (
+            SELECT invoice_id, SUM(amount + fee) AS paid_total
+            FROM t_invoice_payment
+            GROUP BY invoice_id
+        ) p ON p.invoice_id = i.id
+        WHERE i.deleted_flag = 0
+          AND i.status <> '入金済'
+          AND i.total - COALESCE(p.paid_total, 0) > 0
+        ORDER BY i.customer_id, i.due_date
+    """)
+    List<InvoiceBalanceDto> selectOutstandingBalances();
 
     @Select("""
         SELECT

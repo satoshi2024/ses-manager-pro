@@ -7,12 +7,16 @@ import com.ses.dto.InvoiceDetailDto;
 import com.ses.dto.invoice.BpPaymentListDto;
 import com.ses.dto.invoice.InvoiceGenerateRequest;
 import com.ses.dto.invoice.InvoiceStatusUpdateRequest;
+import com.ses.dto.invoice.AgingReportDto;
 import com.ses.entity.BpPayment;
 import com.ses.entity.Invoice;
+import com.ses.entity.InvoicePayment;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
+import com.ses.service.export.ExcelExportService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -34,6 +39,9 @@ public class InvoiceApiController {
 
     @Autowired
     private BpPaymentMapper bpPaymentMapper;
+
+    @Autowired
+    private ExcelExportService excelExportService;
 
     @GetMapping
     public ApiResult<?> list(@RequestParam(defaultValue = "1") long current,
@@ -97,6 +105,58 @@ public class InvoiceApiController {
     public ApiResult<?> voidInvoice(@PathVariable Long id) {
         invoiceService.voidInvoice(id);
         return ApiResult.success(null);
+    }
+
+    // ===== 債権管理（ar-management / P2） =====
+
+    @GetMapping("/{id}/payments")
+    public ApiResult<?> listPayments(@PathVariable Long id) {
+        return ApiResult.success(invoiceService.listPayments(id));
+    }
+
+    @PostMapping("/{id}/payments")
+    public ApiResult<?> addPayment(@PathVariable Long id, @RequestBody InvoicePayment payment) {
+        return ApiResult.success(invoiceService.addPayment(id, payment));
+    }
+
+    @DeleteMapping("/{id}/payments/{paymentId}")
+    public ApiResult<?> deletePayment(@PathVariable Long id, @PathVariable Long paymentId) {
+        invoiceService.deletePayment(id, paymentId);
+        return ApiResult.success(null);
+    }
+
+    /** エイジング（債権年齢）レポート。asOf 省略時は今日基準。 */
+    @GetMapping("/aging")
+    public ApiResult<?> aging(@RequestParam(required = false)
+                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        return ApiResult.success(invoiceService.aging(asOf));
+    }
+
+    /** エイジングレポートのExcel出力。 */
+    @GetMapping("/aging-export")
+    public ResponseEntity<byte[]> agingExport(@RequestParam(required = false)
+                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        AgingReportDto report = invoiceService.aging(asOf);
+        byte[] bytes = excelExportService.exportAging(report);
+        String fileName = "エイジングレポート_" + report.getAsOf() + ".xlsx";
+        String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                .body(bytes);
+    }
+
+    /** 督促メール送信。body: {"templateId": N}。 */
+    @PostMapping("/{id}/reminder")
+    public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
+        return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
+    }
+
+    /** 督促メール送信リクエスト。 */
+    public static class ReminderRequest {
+        private Long templateId;
+        public Long getTemplateId() { return templateId; }
+        public void setTemplateId(Long templateId) { this.templateId = templateId; }
     }
 
     @GetMapping("/bp-payments")

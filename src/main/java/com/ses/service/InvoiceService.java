@@ -2,9 +2,13 @@ package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.InvoiceDetailDto;
+import com.ses.dto.invoice.AgingReportDto;
+import com.ses.dto.mail.MailDispatchResult;
 import com.ses.entity.Invoice;
+import com.ses.entity.InvoicePayment;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public interface InvoiceService extends IService<Invoice> {
     Invoice generate(Long customerId, String billingMonth);
@@ -13,4 +17,16 @@ public interface InvoiceService extends IService<Invoice> {
     void changeBpPaymentStatus(Long id, String status, LocalDate paidDate);
     void voidInvoice(Long id);
     InvoiceDetailDto detail(Long id);
+
+    // ===== 債権管理（ar-management / P2） =====
+    /** 入金を登録し、消込ステータスを再計算する（過入金・取消済み請求書は拒否）。 */
+    InvoicePayment addPayment(Long invoiceId, InvoicePayment payment);
+    /** 入金を削除し、消込ステータスを再計算する。 */
+    void deletePayment(Long invoiceId, Long paymentId);
+    /** 請求書の入金履歴を入金日昇順で返す。 */
+    List<InvoicePayment> listPayments(Long invoiceId);
+    /** 顧客×経過区分の未回収エイジングレポート。 */
+    AgingReportDto aging(LocalDate asOf);
+    /** 期限超過請求書への督促メールを送信する。 */
+    MailDispatchResult sendReminder(Long invoiceId, Long templateId);
 }

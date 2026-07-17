@@ -85,6 +85,15 @@ class FlywayMigrationSmokeTest {
             // 請求書への適用税率保存カラム(V27)
             assertColumnExists(st, "t_invoice", "tax_rate");
 
+            // 請求書入金テーブル(V28 / ar-management)
+            assertTableExists(st, "t_invoice_payment");
+            assertColumnExists(st, "t_invoice_payment", "amount");
+            assertColumnExists(st, "t_invoice_payment", "fee");
+            // status ENUM に「一部入金」が追加されていること
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_invoice' AND column_name='status' "
+                    + "AND column_type LIKE '%一部入金%'");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");
