@@ -36,6 +36,7 @@ import com.ses.entity.WorkRecord;
 @RequiredArgsConstructor
 public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> implements ContractService {
 
+    // 状態遷移の唯一の権威。フロントの STATUS_TRANSITIONS(contract.js)はこの複製であり、変更時は両方追随すること。
     private static final Map<String, Set<String>> ALLOWED_STATUS_TRANSITIONS = Map.of(
             "準備中", Set.of("稼動中", "解約"),
             "稼動中", Set.of("終了", "解約"),
@@ -77,10 +78,19 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     }
 
     private void validate(Contract c) {
+        validate(c, null);
+    }
+
+    /**
+     * 業務検証。old が渡された更新経路では、担当営業(salesUserId)が変更されていない場合に限り
+     * 在職チェックを免除する(帰属は成約時点の事実であり、退職後も保持する仕様。
+     * `engineer-sales-commission` R3-2 と整合)。
+     */
+    private void validate(Contract c, Contract old) {
         if (c.getEndDate() != null && c.getStartDate() != null && c.getEndDate().isBefore(c.getStartDate())) {
             throw BusinessException.of("error.contract.endDateInvalid");
         }
-        if (c.getSettlementHoursMax() != null && c.getSettlementHoursMin() != null 
+        if (c.getSettlementHoursMax() != null && c.getSettlementHoursMin() != null
                 && c.getSettlementHoursMax().compareTo(c.getSettlementHoursMin()) < 0) {
             throw BusinessException.of("error.contract.unitPriceInvalid");
         }
@@ -95,7 +105,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             }
         }
 
-        if (c.getSalesUserId() != null) {
+        boolean salesUserUnchanged = old != null && Objects.equals(old.getSalesUserId(), c.getSalesUserId());
+        if (c.getSalesUserId() != null && !salesUserUnchanged) {
             SysUser salesUser = sysUserMapper.selectById(c.getSalesUserId());
             if (salesUser == null
                     || !StatusConstants.ROLE_SALES.equals(salesUser.getRole())
@@ -144,12 +155,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateWithBusinessRules(Contract contract) {
-        validate(contract);
-
         Contract old = this.baseMapper.selectById(contract.getId());
         if (old == null) {
             throw BusinessException.of("error.contract.notFound");
         }
+        validate(contract, old);
         this.baseMapper.updateById(contract);
 
         Long oldEngineerId = old.getEngineerId();
@@ -170,7 +180,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void changeStatus(Long contractId, String newStatus) {
+    public void changeStatus(Long contractId, String newStatus, LocalDate cancelDate) {
         Contract contract = this.baseMapper.selectById(contractId);
         if (contract == null) {
             throw BusinessException.of(404, "error.contract.notFound");
@@ -181,6 +191,22 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     contract.getStatus(), newStatus);
         }
         String oldStatus = contract.getStatus();
+        // 解約遷移では解約日(実質終了日)を必須とし、end_date を上書きする。
+        // 解約日以降の月は集計対象から自然に外れる(R2/R3)。
+        if (StatusConstants.CONTRACT_CANCELLED.equals(newStatus)) {
+            if (cancelDate == null) {
+                throw BusinessException.of("error.contract.cancelDateRequired");
+            }
+            if (contract.getStartDate() != null && cancelDate.isBefore(contract.getStartDate())) {
+                throw BusinessException.of("error.contract.cancelDateInvalid");
+            }
+            // 解約は前倒しの打ち切りであり、契約期間を延長するものではない。
+            // 元の終了日より後の解約日は矛盾のため拒否する(計上月数の無警告な増加を防ぐ)。
+            if (contract.getEndDate() != null && cancelDate.isAfter(contract.getEndDate())) {
+                throw BusinessException.of("error.contract.cancelDateAfterEnd");
+            }
+            contract.setEndDate(cancelDate);
+        }
         contract.setStatus(newStatus);
         this.baseMapper.updateById(contract);
         if (contract.getEngineerId() != null) {

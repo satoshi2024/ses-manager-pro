@@ -22,7 +22,8 @@ class WorkRecordMapperTest extends BaseIntegrationTest {
         // 現在の年月 (あるいはマスターデータが登録されている年月)
         // テストデータがどうなっているかによるが、一旦実行してエラーにならないかを検証
         String currentMonth = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
-        List<WorkRecordGridDto> result = workRecordMapper.selectMonthlyGrid(currentMonth);
+        String monthEnd = java.time.YearMonth.now().atEndOfMonth().toString();
+        List<WorkRecordGridDto> result = workRecordMapper.selectMonthlyGrid(currentMonth, monthEnd);
 
         assertNotNull(result);
         // H2データベースでのクエリ実行構文(CONCAT等)が正しく解釈され、エラーが出ないことを確認するだけでも価値がある

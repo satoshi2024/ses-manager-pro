@@ -26,6 +26,7 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
         WHERE c.customer_id = #{customerId}
+          AND c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
           AND w.id NOT IN (

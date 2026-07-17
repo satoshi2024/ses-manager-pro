@@ -14,6 +14,7 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.EngineerService;
+import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.export.ExcelExportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -58,6 +59,7 @@ public class ExportApiController {
     private final CustomerMapper customerMapper;
     private final WorkRecordMapper workRecordMapper;
     private final ExcelExportService excelExportService;
+    private final MonthlyRevenueCalcService monthlyRevenueCalcService;
 
     /**
      * 要員一覧Excel出力。EngineerApiController.page と同じ検索条件を受け付ける(ページングなし)。
@@ -229,52 +231,30 @@ public class ExportApiController {
 
     /**
      * 指定年度(4月始まり12ヶ月)の月次売上・粗利・実績/見込み区分を集計する。
-     * 確定済み(status='確定')の稼働報告があればその実績値、無ければ契約の売上/原価から見込み値を算出する。
-     * (DashboardServiceImpl.getSummary の稼働報告集計ロジックと同様の考え方)
+     * 集計ロジックは共通口径サービス({@link MonthlyRevenueCalcService})へ委譲し、Dashboard と数値を一致させる。
+     * 確定実績は対象月を一括ロードし月別 grouping する(旧実装の月ごと12クエリを廃止)。
      */
     private List<MonthlyRevenueDto> buildMonthlyRevenueRows(int fiscalYear) {
         List<YearMonth> targetMonths = buildFiscalYearMonths(fiscalYear);
         List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
 
+        List<String> monthStrs = targetMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
+        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
+                new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
+        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
+                Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
+
         List<MonthlyRevenueDto> rows = new ArrayList<>();
         for (YearMonth ym : targetMonths) {
-            LocalDate monthStart = ym.atDay(1);
-            LocalDate monthEnd = ym.atEndOfMonth();
-            String monthStr = ym.toString();
             String label = ym.getYear() + "年" + ym.getMonthValue() + "月";
-
-            List<WorkRecord> confirmedRecords = workRecordMapper.selectList(
-                    new QueryWrapper<WorkRecord>().eq("work_month", monthStr).eq("status", "確定"));
-
-            long monthSales = 0;
-            long monthProfit = 0;
-            boolean isActual = false;
-
-            if (!confirmedRecords.isEmpty()) {
-                isActual = true;
-                for (WorkRecord wr : confirmedRecords) {
-                    long billing = wr.getBillingAmount() != null ? wr.getBillingAmount().longValue() : 0;
-                    long payment = wr.getPaymentAmount() != null ? wr.getPaymentAmount().longValue() : 0;
-                    monthSales += billing;
-                    monthProfit += (billing - payment);
-                }
-            } else {
-                for (Contract c : allContracts) {
-                    if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)
-                            && (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart))) {
-                        long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
-                        long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
-                        monthSales += sell;
-                        monthProfit += (sell - cost);
-                    }
-                }
-            }
+            MonthlyRevenueCalcService.MonthlyAmount amount = monthlyRevenueCalcService.calc(
+                    ym, allContracts, confirmedByMonth.getOrDefault(ym.toString(), java.util.Collections.emptyMap()));
 
             rows.add(MonthlyRevenueDto.builder()
                     .label(label)
-                    .sales(monthSales)
-                    .profit(monthProfit)
-                    .isActual(isActual)
+                    .sales(amount.getSales())
+                    .profit(amount.getProfit())
+                    .isActual(amount.isHasActual())
                     .build());
         }
         return rows;

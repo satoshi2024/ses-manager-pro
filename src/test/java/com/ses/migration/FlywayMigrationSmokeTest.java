@@ -82,6 +82,9 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_candidate_activity");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='candidate'");
 
+            // 請求書への適用税率保存カラム(V27)
+            assertColumnExists(st, "t_invoice", "tax_rate");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");

@@ -50,7 +50,12 @@ public class Contract extends BaseEntity {
     @NotNull(message = "契約開始日は必須です")
     private LocalDate startDate;
 
-    /** 契約終了日 */
+    /**
+     * 契約終了日
+     * updateStrategy=ALWAYS: グローバルの not_null 戦略を上書きし、編集で「無期限に戻す」(NULL更新)を
+     * 反映させる。契約更新は全項目を送る単一経路(updateWithBusinessRules)のため安全。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDate endDate;
 
     /** 売上単価 */
@@ -63,13 +68,25 @@ public class Contract extends BaseEntity {
     @PositiveOrZero(message = "原価は0以上で入力してください")
     private BigDecimal costPrice;
 
-    /** 精算基準時間（下限） */
+    /**
+     * 精算基準時間（下限）
+     * updateStrategy=ALWAYS: 編集で精算幅の下限をクリア(NULL更新=固定額精算に戻す)できるようにする。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal settlementHoursMin;
 
-    /** 精算基準時間（上限） */
+    /**
+     * 精算基準時間（上限）
+     * updateStrategy=ALWAYS: 編集で精算幅の上限をクリア(NULL更新)できるようにする。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal settlementHoursMax;
 
-    /** 端数処理ルール */
+    /**
+     * 端数処理ルール（自由記述メモ。精算計算には適用されない）
+     * updateStrategy=ALWAYS: 編集でメモをクリア(NULL更新)できるようにする。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String fractionRule;
 
     /** 自動更新 (1:する, 0:しない) */

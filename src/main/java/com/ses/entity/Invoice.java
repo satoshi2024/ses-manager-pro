@@ -23,6 +23,8 @@ public class Invoice {
     private BigDecimal subtotal;
     private BigDecimal tax;
     private BigDecimal total;
+    /** 生成時点の適用税率(小数。例: 0.10)。既存行はNULL=設定値へフォールバック。 */
+    private BigDecimal taxRate;
     private String status;
     private LocalDate issuedDate;
     private LocalDate paidDate;

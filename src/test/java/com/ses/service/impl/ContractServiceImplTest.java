@@ -279,6 +279,55 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void updateWithBusinessRules_退職済み担当のまま更新できる() {
+        // 既存契約の担当営業(退職済み)を変更しない更新は、在職チェックを免除して通す。
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("稼動中");
+        old.setEngineerId(100L);
+        old.setSalesUserId(99L);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStatus("稼動中");
+        update.setEngineerId(100L);
+        update.setSalesUserId(99L); // 同一(退職済みだが変更なし)
+
+        when(contractMapper.selectById(1L)).thenReturn(old);
+        when(contractMapper.updateById(update)).thenReturn(1);
+
+        contractService.updateWithBusinessRules(update);
+
+        // 在職チェック(sysUserMapper参照)は行われない
+        verify(sysUserMapper, never()).selectById(any());
+        verify(contractMapper, times(1)).updateById(update);
+    }
+
+    @Test
+    void updateWithBusinessRules_退職済み担当への変更は拒否される() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("稼動中");
+        old.setSalesUserId(null); // 元は未設定
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStatus("稼動中");
+        update.setSalesUserId(99L); // 退職済み営業へ変更
+
+        SysUser inactive = new SysUser();
+        inactive.setRole("営業");
+        inactive.setStatus(0); // 退職(無効)
+        when(contractMapper.selectById(1L)).thenReturn(old);
+        when(sysUserMapper.selectById(99L)).thenReturn(inactive);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.updateWithBusinessRules(update));
+        assertEquals("error.contract.salesUserInvalid", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
     void updateWithBusinessRules_notFoundThrowsBusinessException() {
         Contract newContract = new Contract();
         newContract.setId(999L);
@@ -289,6 +338,77 @@ class ContractServiceImplTest {
         org.junit.jupiter.api.Assertions.assertThrows(
                 com.ses.common.exception.BusinessException.class,
                 () -> contractService.updateWithBusinessRules(newContract));
+    }
+
+    // ===== R2: 解約日つき状態遷移 =====
+
+    private Contract activeContract(Long id, LocalDate startDate, LocalDate endDate) {
+        Contract c = new Contract();
+        c.setId(id);
+        c.setStatus("稼動中");
+        c.setStartDate(startDate);
+        c.setEndDate(endDate);
+        c.setEngineerId(500L);
+        return c;
+    }
+
+    @Test
+    void changeStatus_cancelRequiresCancelDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
+        when(contractMapper.selectById(1L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.changeStatus(1L, "解約", null));
+        assertEquals("error.contract.cancelDateRequired", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void changeStatus_cancelDateBeforeStartRejected() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
+        when(contractMapper.selectById(1L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.changeStatus(1L, "解約", LocalDate.of(2026, 3, 31)));
+        assertEquals("error.contract.cancelDateInvalid", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void changeStatus_cancelOverwritesEndDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+
+        contractService.changeStatus(1L, "解約", LocalDate.of(2026, 7, 15));
+
+        assertEquals(LocalDate.of(2026, 7, 15), c.getEndDate());
+        assertEquals("解約", c.getStatus());
+        verify(engineerStatusService, times(1)).releaseIfIdle(500L);
+    }
+
+    @Test
+    void changeStatus_cancelDateAfterExistingEndDateRejected() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 8, 31));
+        when(contractMapper.selectById(1L)).thenReturn(c);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.changeStatus(1L, "解約", LocalDate.of(2026, 9, 30)));
+        assertEquals("error.contract.cancelDateAfterEnd", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void changeStatus_endDoesNotChangeEndDate() {
+        Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+
+        // 終了遷移では cancelDate を渡しても end_date は不変(自然満了)
+        contractService.changeStatus(1L, "終了", LocalDate.of(2026, 7, 15));
+
+        assertEquals(LocalDate.of(2026, 12, 31), c.getEndDate());
+        assertEquals("終了", c.getStatus());
     }
 
     // ===== WS-G: 成約→契約ドラフト自動生成 =====

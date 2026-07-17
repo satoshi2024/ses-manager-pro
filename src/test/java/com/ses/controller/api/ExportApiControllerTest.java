@@ -56,6 +56,9 @@ class ExportApiControllerTest {
     @MockBean
     private ExcelExportService excelExportService;
 
+    @MockBean
+    private com.ses.service.billing.MonthlyRevenueCalcService monthlyRevenueCalcService;
+
     @Test
     @WithMockUser
     void exportEngineers_returnsXlsxWithAttachmentHeader() throws Exception {
@@ -122,6 +125,8 @@ class ExportApiControllerTest {
     void exportMonthlyRevenue_returnsXlsxWithAttachmentHeader() throws Exception {
         when(contractMapper.selectList(any())).thenReturn(List.of());
         when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(monthlyRevenueCalcService.calc(any(), any(), any()))
+                .thenReturn(new com.ses.service.billing.MonthlyRevenueCalcService.MonthlyAmount(0L, 0L, false));
         when(excelExportService.exportMonthlyRevenue(any(Integer.class), any())).thenReturn(new byte[]{1, 2, 3});
 
         mockMvc.perform(get("/api/dashboard/revenue-export").param("fiscalYear", "2026"))

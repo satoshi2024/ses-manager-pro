@@ -12,6 +12,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.DashboardService;
+import com.ses.service.billing.MonthlyRevenueCalcService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +45,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final WorkRecordMapper workRecordMapper;
     private final EngineerSkillMapper engineerSkillMapper;
     private final ProposalMapper proposalMapper;
+    private final MonthlyRevenueCalcService monthlyRevenueCalcService;
 
     @Override
     public DashboardSummaryDto getSummary(Integer year) {
@@ -60,9 +62,11 @@ public class DashboardServiceImpl implements DashboardService {
         if (!queryMonths.contains(previousMonth)) queryMonths.add(previousMonth);
 
         List<String> monthStrs = queryMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
-        Map<String, List<WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
+        // 確定実績を月別に一括ロードし、月ごとに contract_id -> record へ変換する(共通口径サービスへ渡す形)。
+        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
                 new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
-        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth));
+        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
+                Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
         List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
 
@@ -73,10 +77,11 @@ public class DashboardServiceImpl implements DashboardService {
 
         for (YearMonth ym : targetMonths) {
             monthLabels.add(ym.getMonthValue() + "月");
-            long[] amount = calcMonthlyAmount(ym, allContracts, confirmedByMonth);
-            salesData.add(amount[0]);
-            profitData.add(amount[1]);
-            isActualData.add(amount[2] == 1);
+            MonthlyRevenueCalcService.MonthlyAmount amount = monthlyRevenueCalcService.calc(
+                    ym, allContracts, confirmedByMonth.getOrDefault(ym.toString(), Collections.emptyMap()));
+            salesData.add(amount.getSales());
+            profitData.add(amount.getProfit());
+            isActualData.add(amount.isHasActual());
         }
 
         DashboardSummaryDto.RevenueChartDto revenueChart = DashboardSummaryDto.RevenueChartDto.builder()
@@ -86,22 +91,24 @@ public class DashboardServiceImpl implements DashboardService {
                 .isActual(isActualData)
                 .build();
 
-        // Calculate actual KPI trends
-        long[] currentAmount = calcMonthlyAmount(currentMonth, allContracts, confirmedByMonth);
-        long[] previousAmount = calcMonthlyAmount(previousMonth, allContracts, confirmedByMonth);
+        // Calculate actual KPI trends (チャート当月値と同一ソース: 共通口径サービス)
+        MonthlyRevenueCalcService.MonthlyAmount currentAmount = monthlyRevenueCalcService.calc(
+                currentMonth, allContracts, confirmedByMonth.getOrDefault(currentMonth.toString(), Collections.emptyMap()));
+        MonthlyRevenueCalcService.MonthlyAmount previousAmount = monthlyRevenueCalcService.calc(
+                previousMonth, allContracts, confirmedByMonth.getOrDefault(previousMonth.toString(), Collections.emptyMap()));
 
         String revenueTrend = null;
-        if (previousAmount[0] > 0) {
-            double rate = (double) (currentAmount[0] - previousAmount[0]) / (double) previousAmount[0] * 100.0;
+        if (previousAmount.getSales() > 0) {
+            double rate = (double) (currentAmount.getSales() - previousAmount.getSales()) / (double) previousAmount.getSales() * 100.0;
             revenueTrend = String.format("%+.1f%%", rate);
         }
 
         String profitTrend = null;
-        if (previousAmount[1] > 0) {
-            double rate = (double) (currentAmount[1] - previousAmount[1]) / (double) previousAmount[1] * 100.0;
+        if (previousAmount.getProfit() > 0) {
+            double rate = (double) (currentAmount.getProfit() - previousAmount.getProfit()) / (double) previousAmount.getProfit() * 100.0;
             profitTrend = String.format("%+.1f%%", rate);
-        } else if (previousAmount[1] < 0) {
-            double rate = (double) (currentAmount[1] - previousAmount[1]) / (double) Math.abs(previousAmount[1]) * 100.0;
+        } else if (previousAmount.getProfit() < 0) {
+            double rate = (double) (currentAmount.getProfit() - previousAmount.getProfit()) / (double) Math.abs(previousAmount.getProfit()) * 100.0;
             profitTrend = String.format("%+.1f%%", rate);
         }
 
@@ -146,9 +153,9 @@ public class DashboardServiceImpl implements DashboardService {
 
         double utilization = totalEngineers > 0 ? (double) (activeCount + retiringCount) / totalEngineers * 100 : 0.0;
 
-        long totalRevenue = activeContracts.stream().mapToLong(c -> c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0).sum();
-        long totalCost = activeContracts.stream().mapToLong(c -> c.getCostPrice() != null ? c.getCostPrice().longValue() : 0).sum();
-        long grossProfit = totalRevenue - totalCost;
+        // KPI「当月予想売上」「粗利率」はチャート当月値と同一ソース(共通口径の当月 calc 結果)を使用する。
+        long totalRevenue = currentAmount.getSales();
+        long grossProfit = currentAmount.getProfit();
         double profitMargin = totalRevenue > 0 ? (double) grossProfit / totalRevenue * 100 : 0.0;
 
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
@@ -230,37 +237,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .charts(charts)
                 .retiring(retiringList)
                 .build();
-    }
-
-    private long[] calcMonthlyAmount(YearMonth ym, List<Contract> allContracts, Map<String, List<WorkRecord>> confirmedByMonth) {
-        long monthSales = 0;
-        long monthProfit = 0;
-        
-        LocalDate monthStart = ym.atDay(1);
-        LocalDate monthEnd = ym.atEndOfMonth();
-        String monthStr = ym.toString();
-        List<WorkRecord> confirmedRecords = confirmedByMonth.getOrDefault(monthStr, Collections.emptyList());
-
-        if (!confirmedRecords.isEmpty()) {
-            for (WorkRecord wr : confirmedRecords) {
-                long sell = wr.getBillingAmount() != null ? wr.getBillingAmount().longValue() : 0;
-                long payment = wr.getPaymentAmount() != null ? wr.getPaymentAmount().longValue() : 0;
-                monthSales += sell;
-                monthProfit += (sell - payment);
-            }
-        } else {
-            for (Contract c : allContracts) {
-                if (c.getStartDate() != null && !c.getStartDate().isAfter(monthEnd)) {
-                    if (c.getEndDate() == null || !c.getEndDate().isBefore(monthStart)) {
-                        long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0;
-                        long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0;
-                        monthSales += sell;
-                        monthProfit += (sell - cost);
-                    }
-                }
-            }
-        }
-        return new long[]{monthSales, monthProfit, confirmedRecords.isEmpty() ? 0 : 1};
     }
 
     private List<YearMonth> buildFiscalYearMonths(int fiscalYear) {

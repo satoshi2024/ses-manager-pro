@@ -14,4 +14,6 @@ public class SalesPerformanceDto {
     private BigDecimal totalSalesAmount;
     private BigDecimal totalProfitAmount;
     private BigDecimal totalCommissionAmount;
+    /** 担当営業未設定(sales_user_id IS NULL)契約の合算行フラグ。true の行は担当要員数・成約率・インセンティブ対象外。 */
+    private boolean unattributed;
 }

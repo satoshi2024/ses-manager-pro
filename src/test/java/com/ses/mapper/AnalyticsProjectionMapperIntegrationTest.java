@@ -103,7 +103,7 @@ class AnalyticsProjectionMapperIntegrationTest {
         contractMapper.insert(contract);
 
         Page<ContractListDto> page = contractMapper.selectPageWithNames(
-                new Page<>(1, 10), null, null, null, null, null, null, null, null);
+                new Page<>(1, 10), null, null, null, null, null, null, null, null, null);
 
         assertTrue(page.getRecords().stream().anyMatch(r -> r.getId().equals(contract.getId())));
         ContractListDto row = page.getRecords().stream()
@@ -113,7 +113,7 @@ class AnalyticsProjectionMapperIntegrationTest {
 
         // salesUserId 絞り込みが機能すること
         Page<ContractListDto> filtered = contractMapper.selectPageWithNames(
-                new Page<>(1, 10), null, null, null, null, null, null, null, 1L);
+                new Page<>(1, 10), null, null, null, null, null, null, null, 1L, null);
         assertTrue(filtered.getRecords().stream().allMatch(r -> Long.valueOf(1L).equals(r.getSalesUserId())));
     }
 
@@ -150,5 +150,41 @@ class AnalyticsProjectionMapperIntegrationTest {
         org.junit.jupiter.api.Assertions.assertNull(reloaded.getCommissionBaseType(), "基準がNULLに戻ること");
         org.junit.jupiter.api.Assertions.assertNull(reloaded.getCommissionRate(), "率がNULLに戻ること");
         org.junit.jupiter.api.Assertions.assertNull(reloaded.getSalesUserId(), "担当営業がNULLに戻ること");
+    }
+
+    /**
+     * F4: 編集で終了日・精算幅・端数ルールを NULL 更新できることを検証する。
+     * これらは updateStrategy=ALWAYS のため、グローバル not_null 戦略を上書きして NULL を反映する
+     * (特に終了日の「無期限に戻す」が可能であること)。
+     */
+    @Test
+    void 契約更新_終了日と精算幅と端数ルールをNULLでクリアできる() {
+        Contract contract = new Contract();
+        contract.setEngineerId(1L);
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setStatus("稼動中");
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setEndDate(LocalDate.of(2026, 12, 31));
+        contract.setSettlementHoursMin(java.math.BigDecimal.valueOf(140));
+        contract.setSettlementHoursMax(java.math.BigDecimal.valueOf(180));
+        contract.setFractionRule("切り捨て");
+        contract.setSellingPrice(java.math.BigDecimal.valueOf(80));
+        contract.setCostPrice(java.math.BigDecimal.valueOf(60));
+        contractMapper.insert(contract);
+
+        Contract update = new Contract();
+        update.setId(contract.getId());
+        update.setEndDate(null);
+        update.setSettlementHoursMin(null);
+        update.setSettlementHoursMax(null);
+        update.setFractionRule(null);
+        contractMapper.updateById(update);
+
+        Contract reloaded = contractMapper.selectById(contract.getId());
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getEndDate(), "終了日がNULL(無期限)に戻ること");
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getSettlementHoursMin(), "精算下限がNULLに戻ること");
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getSettlementHoursMax(), "精算上限がNULLに戻ること");
+        org.junit.jupiter.api.Assertions.assertNull(reloaded.getFractionRule(), "端数ルールがNULLに戻ること");
     }
 }

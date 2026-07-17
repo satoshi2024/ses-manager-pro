@@ -17,6 +17,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SalesPerformanceService;
 import com.ses.service.SysUserService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.billing.MonthlyRevenueCalcService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +34,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
+    /** 未帰属(担当営業なし)集計用の内部キー。 */
+    private static final Long UNATTRIBUTED_ID = -1L;
+
     private final SysUserService sysUserService;
     private final SystemConfigService systemConfigService;
     private final ContractMapper contractMapper;
@@ -40,6 +44,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
     private final WorkRecordMapper workRecordMapper;
     private final EngineerSalesMapper engineerSalesMapper;
     private final SysUserMapper sysUserMapper;
+    private final MonthlyRevenueCalcService monthlyRevenueCalcService;
 
     @Override
     public List<SalesPerformanceDto> calculateMonthlyPerformance(String yearMonth) {
@@ -113,10 +118,12 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
 
         for (Contract c : allContracts) {
-            if (c.getSalesUserId() == null) continue;
-            Long uid = c.getSalesUserId();
+            boolean unattributed = (c.getSalesUserId() == null);
+            // 未帰属(担当営業なし)契約は稼動額・粗利・稼動契約数のみ UNATTRIBUTED_ID キーで集計する。
+            // 成約数・成約率・担当要員数・インセンティブは対象外(担当が存在しないため)。
+            Long uid = unattributed ? UNATTRIBUTED_ID : c.getSalesUserId();
 
-            if (c.getCreatedAt() != null &&
+            if (!unattributed && c.getCreatedAt() != null &&
                     !c.getCreatedAt().isBefore(startOfMonthTime) &&
                     !c.getCreatedAt().isAfter(endOfMonthTime) &&
                     c.getRenewedFromContractId() == null) {
@@ -124,35 +131,27 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
             }
 
             if (isActiveInMonth(c, startOfMonthDate, endOfMonthDate)) {
-                
+
                 activeContractCountMap.put(uid, activeContractCountMap.getOrDefault(uid, 0) + 1);
 
-                BigDecimal sales = BigDecimal.ZERO;
-                BigDecimal cost = BigDecimal.ZERO;
+                // 1契約分の金額決定は共通口径サービスへ委譲(確定実績優先、なければ契約単価)。
+                MonthlyRevenueCalcService.ContractAmount amount =
+                        monthlyRevenueCalcService.resolveContractAmount(c, workRecordMap.get(c.getId()));
+                BigDecimal sales = amount.getSales();
+                BigDecimal profit = amount.getProfit();
 
-                WorkRecord wr = workRecordMap.get(c.getId());
-                if (wr != null && wr.getBillingAmount() != null) {
-                    sales = wr.getBillingAmount();
-                    if (wr.getPaymentAmount() != null) {
-                        cost = wr.getPaymentAmount();
-                    }
-                } else {
-                    if (c.getSellingPrice() != null) sales = c.getSellingPrice();
-                    if (c.getCostPrice() != null) cost = c.getCostPrice();
-                }
-
-                BigDecimal profit = sales.subtract(cost);
-                
                 totalSalesMap.put(uid, totalSalesMap.getOrDefault(uid, BigDecimal.ZERO).add(sales));
                 totalProfitMap.put(uid, totalProfitMap.getOrDefault(uid, BigDecimal.ZERO).add(profit));
 
-                String baseType = c.getCommissionBaseType() != null ? c.getCommissionBaseType() : defaultRule.getBaseType();
-                BigDecimal rate = c.getCommissionRate() != null ? c.getCommissionRate() : defaultRule.getRate();
+                if (!unattributed) {
+                    String baseType = c.getCommissionBaseType() != null ? c.getCommissionBaseType() : defaultRule.getBaseType();
+                    BigDecimal rate = c.getCommissionRate() != null ? c.getCommissionRate() : defaultRule.getRate();
 
-                BigDecimal baseAmount = StatusConstants.COMMISSION_BASE_SALES.equals(baseType) ? sales : profit;
-                if (baseAmount.compareTo(BigDecimal.ZERO) > 0 && rate != null) {
-                    BigDecimal commission = baseAmount.multiply(rate).divide(new BigDecimal("100"), 0, RoundingMode.FLOOR);
-                    totalCommissionMap.put(uid, totalCommissionMap.getOrDefault(uid, BigDecimal.ZERO).add(commission));
+                    BigDecimal baseAmount = StatusConstants.COMMISSION_BASE_SALES.equals(baseType) ? sales : profit;
+                    if (baseAmount.compareTo(BigDecimal.ZERO) > 0 && rate != null) {
+                        BigDecimal commission = baseAmount.multiply(rate).divide(new BigDecimal("100"), 0, RoundingMode.FLOOR);
+                        totalCommissionMap.put(uid, totalCommissionMap.getOrDefault(uid, BigDecimal.ZERO).add(commission));
+                    }
                 }
             }
         }
@@ -182,6 +181,22 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         }
 
         result.sort(Comparator.comparing(SalesPerformanceDto::getSalesUserId));
+
+        // 未帰属(担当営業なし)の稼動契約があれば、全社売上と突合できるよう最終行として合算表示する。
+        if (activeContractCountMap.containsKey(UNATTRIBUTED_ID)) {
+            SalesPerformanceDto u = new SalesPerformanceDto();
+            u.setUnattributed(true);
+            u.setSalesUserId(UNATTRIBUTED_ID);
+            u.setSalesUserName(null);
+            u.setActivePrimaryCount(null); // 担当要員数は対象外(—)
+            u.setClosedContractCount(null); // 成約数は対象外(—)
+            u.setClosedRate(null); // 成約率は対象外(—)
+            u.setActiveContractCount(activeContractCountMap.getOrDefault(UNATTRIBUTED_ID, 0));
+            u.setTotalSalesAmount(totalSalesMap.getOrDefault(UNATTRIBUTED_ID, BigDecimal.ZERO));
+            u.setTotalProfitAmount(totalProfitMap.getOrDefault(UNATTRIBUTED_ID, BigDecimal.ZERO));
+            u.setTotalCommissionAmount(BigDecimal.ZERO);
+            result.add(u);
+        }
         return result;
     }
 
