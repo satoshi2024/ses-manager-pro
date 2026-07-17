@@ -89,7 +89,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 && (contract.getEndDate() == null || !contract.getEndDate().isBefore(monthStart));
         boolean statusOk = StatusConstants.CONTRACT_ACTIVE.equals(contract.getStatus())
                 || StatusConstants.CONTRACT_ENDED.equals(contract.getStatus());
-        if (!inPeriod || !statusOk) {
+        // ガードは「新規に」期間外・非稼動の実績を作らせないための縦深防御。既存レコードの更新は
+        // 免除する（解約で end_date が短縮された契約の既存実績が編集不可・自動再確定の三すくみに
+        // なるのを防ぐ。review-fixes G2）。
+        if (record == null && (!inPeriod || !statusOk)) {
             throw BusinessException.of("error.workRecord.contractNotBillable");
         }
 

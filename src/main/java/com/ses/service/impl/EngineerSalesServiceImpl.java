@@ -130,10 +130,13 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
         if (engineerId == null) {
             return;
         }
+        // wrapper 更新は MetaObjectHandler(updated_at 自動設定)が発火しないため明示的に設定する
+        // （review-fixes G4）。
         update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<EngineerSales>()
                 .eq(EngineerSales::getEngineerId, engineerId)
                 .isNull(EngineerSales::getReleasedAt)
-                .set(EngineerSales::getReleasedAt, LocalDate.now()));
+                .set(EngineerSales::getReleasedAt, LocalDate.now())
+                .set(EngineerSales::getUpdatedAt, java.time.LocalDateTime.now()));
     }
 
     @Override

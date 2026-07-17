@@ -29,7 +29,7 @@
 
 ---
 
-## G1.【中・APIバイパス】汎用 `PUT /api/users` に status を含めると S1-2 の無効化ガードを迂回できる
+## G1.【中・APIバイパス】[対応済み] 汎用 `PUT /api/users` に status を含めると S1-2 の無効化ガードを迂回できる
 
 - **場所**: `controller/api/UserApiController.java` の `update`（`@PutMapping`）
 - **内容**: 無効化ガードは専用エンドポイント `PUT /{id}/status` にのみ実装された。しかし汎用 update は
@@ -50,7 +50,7 @@
 - **テスト**: `UserApiControllerTest` — 担当ありユーザーへ `{"status":0,...}` を含む PUT →
   200 だが status が変更されない（`updateById` に渡る引数の status が null）ことを verify。
 
-## G2.【中低・業務詰み】解約で期間短縮された契約の実績が「編集不可・グリッド不可視・自動再確定」の三すくみになる
+## G2.【中低・業務詰み】[対応済み] 解約で期間短縮された契約の実績が「編集不可・グリッド不可視・自動再確定」の三すくみになる
 
 - **場所**: `service/impl/WorkRecordServiceImpl.java` の `saveHours`（S7 新ガード）×
   `confirmMonth` × `selectMonthlyGrid` の相互作用
@@ -77,7 +77,7 @@
 - **テスト**: `WorkRecordServiceImplTest` — 解約済み契約の既存「入力中」レコードは saveHours で
   更新できる / 解約済み契約への新規作成は引き続き拒否される、の2ケース。
 
-## G3.【低】`EngineerServiceImpl.removeById` が割当解除を削除成功の前に実行する
+## G3.【低】[対応済み] `EngineerServiceImpl.removeById` が割当解除を削除成功の前に実行する
 
 - **場所**: `service/impl/EngineerServiceImpl.java`（`releaseAllByEngineerId` の呼び出し位置）
 - **内容**: `releaseAllByEngineerId(engineerId)` → `super.removeById(id)` の順のため、
@@ -95,7 +95,7 @@
 
 - **テスト**: `removeById` が false のとき `releaseAllByEngineerId` が呼ばれないことを verify。
 
-## G4.【低・任意】`releaseAllByEngineerId` の wrapper 更新は `updated_at` 自動フィルが効かない
+## G4.【低・任意】[対応済み] `releaseAllByEngineerId` の wrapper 更新は `updated_at` 自動フィルが効かない
 
 - **場所**: `service/impl/EngineerSalesServiceImpl.java` の `releaseAllByEngineerId`
 - **内容**: エンティティを介さない `LambdaUpdateWrapper` 更新のため MyBatis-Plus の

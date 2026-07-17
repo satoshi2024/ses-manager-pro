@@ -100,6 +100,9 @@ public class UserApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
+        // 有効/無効の切替は専用エンドポイント(/{id}/status)の無効化ガードを経由させる。
+        // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
+        sysUser.setStatus(null);
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, sysUser.getUsername())

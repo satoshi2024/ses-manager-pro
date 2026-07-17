@@ -158,6 +158,32 @@ class UserApiControllerTest {
 
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
+    void update_statusを含めても無効化ガードを迂回できず_statusは無視される() throws Exception {
+        // G1: 汎用 update に status=0 を混ぜても、status は null 化され updateById に渡らない。
+        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserService.getOne(any())).thenReturn(null);
+        SysUser old = SysUser.builder().username("sales9").role("営業").build();
+        old.setId(5L);
+        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserService.updateById(any())).thenReturn(true);
+
+        SysUser body = SysUser.builder().username("sales9").role("営業").build();
+        body.setId(5L);
+        body.setStatus(0); // 無効化を混ぜる
+        mockMvc.perform(put("/api/users").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        org.mockito.ArgumentCaptor<SysUser> captor = org.mockito.ArgumentCaptor.forClass(SysUser.class);
+        verify(sysUserService).updateById(captor.capture());
+        org.junit.jupiter.api.Assertions.assertNull(captor.getValue().getStatus(),
+                "status は無視され updateById に渡らないこと");
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
     void update_ロール不変なら担当ありでも他項目編集は成功() throws Exception {
         when(sysUserService.count(any())).thenReturn(0L);
         when(sysUserService.getOne(any())).thenReturn(null);

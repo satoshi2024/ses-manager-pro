@@ -403,6 +403,40 @@ class WorkRecordServiceImplTest {
     }
 
     @Test
+    void testSaveHours_解約で期間短縮された契約でも既存レコードは更新できる() {
+        // G2: 既存レコードの更新はガード免除（解約で end_date 短縮→編集不可の三すくみを防ぐ）。
+        Long contractId = 1L;
+        WorkRecord existing = new WorkRecord();
+        existing.setId(10L);
+        existing.setStatus("入力中");
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
+        // 解約で 2026-03 まで短縮された契約。対象月 2026-07 は期間外＋状態も解約。
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31), "解約"));
+
+        WorkRecordServiceImpl spyService = spy(workRecordService);
+        doReturn(true).when(spyService).saveOrUpdate(any(WorkRecord.class));
+
+        WorkRecord result = spyService.saveHours(contractId, "2026-07", new BigDecimal("150"), "修正");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(10L);
+    }
+
+    @Test
+    void testSaveHours_解約済み契約への新規作成は拒否() {
+        Long contractId = 1L;
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null); // 新規
+        when(contractMapper.selectById(contractId))
+                .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "解約"));
+
+        assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.contractNotBillable");
+    }
+
+    @Test
     void testSaveHours_月形式不正は拒否() {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);

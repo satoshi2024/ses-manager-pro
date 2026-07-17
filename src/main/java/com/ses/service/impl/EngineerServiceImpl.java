@@ -46,9 +46,13 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (openProposals > 0) {
             throw BusinessException.of("error.engineer.delete.activeProposal");
         }
-        // 現任の担当営業割当を解除する（released_at 設定。履歴保全のため論理削除はしない）
-        engineerSalesService.releaseAllByEngineerId(engineerId);
-        return super.removeById(id);
+        boolean removed = super.removeById(id);
+        // 削除が成功したときだけ現任の担当営業割当を解除する（released_at 設定。履歴保全のため
+        // 論理削除はしない）。削除失敗(false)時に解除だけがコミットされるのを防ぐ（review-fixes G3）。
+        if (removed) {
+            engineerSalesService.releaseAllByEngineerId(engineerId);
+        }
+        return removed;
     }
 
     @Override
