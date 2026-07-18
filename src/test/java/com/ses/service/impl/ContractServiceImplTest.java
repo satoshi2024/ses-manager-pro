@@ -42,6 +42,12 @@ class ContractServiceImplTest {
     @Mock
     private SysUserMapper sysUserMapper;
 
+    @Mock
+    private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
+    @Mock
+    private com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
+
     @InjectMocks
     private ContractServiceImpl contractService;
 
@@ -588,5 +594,90 @@ class ContractServiceImplTest {
                 () -> contractService.createDraftFromQuotation(q));
         assertTrue(ex.getMessage().contains("error.quotation.engineerRequired"));
         verify(contractMapper, never()).insert(any(Contract.class));
+    }
+
+    // ===== 単価改定履歴（contract-price-history / P6） =====
+
+    private Contract contractWithPrice(Long id, java.time.LocalDate start, String selling, String cost) {
+        Contract c = new Contract();
+        c.setId(id);
+        c.setStartDate(start);
+        c.setSellingPrice(new BigDecimal(selling));
+        c.setCostPrice(new BigDecimal(cost));
+        return c;
+    }
+
+    @Test
+    void revisePrice_初回改定で初期履歴自動補完() {
+        Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        // 初回ロード=空、その後の再ロード=初期+新履歴
+        com.ses.entity.ContractPriceHistory initial = new com.ses.entity.ContractPriceHistory();
+        initial.setApplyFromMonth("2026-04");
+        initial.setSellingPrice(new BigDecimal("800000"));
+        initial.setCostPrice(new BigDecimal("600000"));
+        com.ses.entity.ContractPriceHistory rev = new com.ses.entity.ContractPriceHistory();
+        rev.setApplyFromMonth("2999-08");
+        rev.setSellingPrice(new BigDecimal("850000"));
+        rev.setCostPrice(new BigDecimal("620000"));
+        when(priceHistoryMapper.selectList(any()))
+                .thenReturn(new java.util.ArrayList<>())
+                .thenReturn(new java.util.ArrayList<>(java.util.List.of(initial, rev)));
+        when(priceHistoryMapper.insert(any(com.ses.entity.ContractPriceHistory.class))).thenReturn(1);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+
+        boolean warning = contractService.revisePrice(1L, "2999-08", new BigDecimal("850000"),
+                new BigDecimal("620000"), "改定");
+
+        assertFalse(warning, "将来予約は警告なし");
+        verify(priceHistoryMapper, times(2)).insert(any(com.ses.entity.ContractPriceHistory.class)); // 初期補完 + 新規改定
+    }
+
+    @Test
+    void revisePrice_開始月前は拒否() {
+        Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.revisePrice(1L, "2026-03", new BigDecimal("850000"), new BigDecimal("620000"), "x"));
+        assertTrue(ex.getMessage().contains("error.contract.priceRevision.beforeStart"));
+    }
+
+    @Test
+    void revisePrice_不正な月は拒否() {
+        Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.revisePrice(1L, "2026/03", new BigDecimal("850000"), new BigDecimal("620000"), "x"));
+        assertTrue(ex.getMessage().contains("error.contract.priceRevision.invalidMonth"));
+    }
+
+    @Test
+    void revisePrice_過去遡及かつ確定実績で警告() {
+        Contract c = contractWithPrice(1L, java.time.LocalDate.of(2000, 1, 1), "800000", "600000");
+        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(priceHistoryMapper.selectList(any()))
+                .thenReturn(new java.util.ArrayList<>())
+                .thenReturn(new java.util.ArrayList<>());
+        when(priceHistoryMapper.insert(any(com.ses.entity.ContractPriceHistory.class))).thenReturn(1);
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+        when(workRecordMapper.selectCount(any())).thenReturn(1L);
+
+        boolean warning = contractService.revisePrice(1L, "2000-06", new BigDecimal("850000"),
+                new BigDecimal("620000"), "遡及");
+        assertTrue(warning, "過去遡及＋確定実績ありは警告");
+    }
+
+    @Test
+    void deleteFuturePriceRevision_過去はロック() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.deleteFuturePriceRevision(1L, "2000-01"));
+        assertTrue(ex.getMessage().contains("error.contract.priceRevision.pastLocked"));
+    }
+
+    @Test
+    void deleteFuturePriceRevision_将来は削除可() {
+        when(priceHistoryMapper.delete(any())).thenReturn(1);
+        contractService.deleteFuturePriceRevision(1L, "2999-12");
+        verify(priceHistoryMapper).delete(any());
     }
 }

@@ -62,4 +62,19 @@ public interface ContractService extends IService<Contract> {
      * @return 生成（または既存）の契約
      */
     Contract createDraftFromQuotation(com.ses.entity.Quotation quotation);
+
+    // ===== 契約単価の改定履歴（contract-price-history / P6） =====
+    /**
+     * 単価改定を登録する。初回改定なら契約開始月・現行単価の初期履歴を自動補完し、
+     * 契約の現在単価を「当月時点で有効な履歴」で再計算する。
+     * @return 過去遡及かつ確定済み実績がある場合 true（警告）。
+     */
+    boolean revisePrice(Long contractId, String applyFromMonth, java.math.BigDecimal selling,
+                        java.math.BigDecimal cost, String reason);
+
+    /** 契約の単価改定履歴を適用開始月昇順で返す。 */
+    java.util.List<com.ses.entity.ContractPriceHistory> priceHistory(Long contractId);
+
+    /** 将来予約（当月より後）の改定のみ削除する。 */
+    void deleteFuturePriceRevision(Long contractId, String applyFromMonth);
 }

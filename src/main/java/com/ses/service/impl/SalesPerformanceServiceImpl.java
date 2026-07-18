@@ -136,7 +136,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
                 // 1契約分の金額決定は共通口径サービスへ委譲(確定実績優先、なければ契約単価)。
                 MonthlyRevenueCalcService.ContractAmount amount =
-                        monthlyRevenueCalcService.resolveContractAmount(c, workRecordMap.get(c.getId()));
+                        monthlyRevenueCalcService.resolveContractAmount(c, workRecordMap.get(c.getId()), targetMonth);
                 BigDecimal sales = amount.getSales();
                 BigDecimal profit = amount.getProfit();
 

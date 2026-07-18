@@ -115,6 +115,10 @@ class FlywayMigrationSmokeTest {
                     + "WHERE table_schema=DATABASE() AND table_name='t_work_record' AND column_name='status' "
                     + "AND column_type LIKE '%差戻し%'");
 
+            // 契約単価改定履歴(V33 / contract-price-history)
+            assertTableExists(st, "t_contract_price_history");
+            assertColumnExists(st, "t_contract_price_history", "apply_from_month");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");

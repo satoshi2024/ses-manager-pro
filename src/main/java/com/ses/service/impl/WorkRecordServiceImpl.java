@@ -57,6 +57,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final NotificationService notificationService;
     private final WorkRecordDailyMapper workRecordDailyMapper;
 
+    // 単価改定履歴のリゾルバ（任意）。未配線（テスト等）では契約の現在単価をそのまま用いる。
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.billing.ContractPriceResolver priceResolver;
+
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
     private static String monthEndOf(String workMonth) {
         return YearMonth.parse(workMonth).atEndOfMonth().toString();
@@ -129,17 +133,26 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             throw BusinessException.of("error.workRecord.contractNotBillable");
         }
 
+        // 対象月に有効な単価を解決する（履歴があれば期間別単価、無ければ契約の現在単価）。
+        BigDecimal sellingPrice = contract.getSellingPrice();
+        BigDecimal costPrice = contract.getCostPrice();
+        if (priceResolver != null) {
+            com.ses.service.billing.ContractPriceResolver.ResolvedPrice rp = priceResolver.resolve(contract, ym);
+            sellingPrice = rp.getSellingPrice();
+            costPrice = rp.getCostPrice();
+        }
+
         BigDecimal billingAmount = SettlementCalculator.calc(
-                contract.getSellingPrice(),
+                sellingPrice,
                 contract.getSettlementHoursMin(),
                 contract.getSettlementHoursMax(),
                 actualHours
         );
 
         BigDecimal paymentAmount = null;
-        if (contract.getCostPrice() != null) {
+        if (costPrice != null) {
             paymentAmount = SettlementCalculator.calc(
-                    contract.getCostPrice(),
+                    costPrice,
                     contract.getSettlementHoursMin(),
                     contract.getSettlementHoursMax(),
                     actualHours

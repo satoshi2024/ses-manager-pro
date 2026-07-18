@@ -127,6 +127,41 @@ public class ContractApiController {
         return ApiResult.success(contractService.removeById(id));
     }
 
+    // ===== 単価改定履歴（contract-price-history / P6） =====
+
+    @GetMapping("/{id}/price-revisions")
+    public ApiResult<?> priceRevisions(@PathVariable Long id) {
+        return ApiResult.success(contractService.priceHistory(id));
+    }
+
+    @PostMapping("/{id}/price-revisions")
+    public ApiResult<?> revisePrice(@PathVariable Long id, @RequestBody PriceRevisionRequest req) {
+        boolean warning = contractService.revisePrice(id, req.getApplyFromMonth(),
+                req.getSellingPrice(), req.getCostPrice(), req.getReason());
+        return ApiResult.success(java.util.Map.of("warning", warning));
+    }
+
+    @DeleteMapping("/{id}/price-revisions/{month}")
+    public ApiResult<?> deletePriceRevision(@PathVariable Long id, @PathVariable String month) {
+        contractService.deleteFuturePriceRevision(id, month);
+        return ApiResult.success(null);
+    }
+
+    public static class PriceRevisionRequest {
+        private String applyFromMonth;
+        private java.math.BigDecimal sellingPrice;
+        private java.math.BigDecimal costPrice;
+        private String reason;
+        public String getApplyFromMonth() { return applyFromMonth; }
+        public void setApplyFromMonth(String v) { this.applyFromMonth = v; }
+        public java.math.BigDecimal getSellingPrice() { return sellingPrice; }
+        public void setSellingPrice(java.math.BigDecimal v) { this.sellingPrice = v; }
+        public java.math.BigDecimal getCostPrice() { return costPrice; }
+        public void setCostPrice(java.math.BigDecimal v) { this.costPrice = v; }
+        public String getReason() { return reason; }
+        public void setReason(String v) { this.reason = v; }
+    }
+
     /**
      * 自動更新ドラフトの手動生成（管理者のみ。通常は日次バッチで自動実行される）。
      *

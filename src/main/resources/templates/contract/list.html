@@ -158,6 +158,11 @@
                                 <label class="form-label text-muted small"><th:block th:text="#{contract.costPrice}">原価 (円)</th:block> <span class="text-danger">*</span></label>
                                 <input type="number" id="cont-costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{contract.placeholder.costPrice}" placeholder="例: 600000" min="0" required>
                             </div>
+                            <div class="col-12" id="priceRevisionArea" style="display:none">
+                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="openPriceRevisionModal()"
+                                        th:text="#{contract.priceRevision.button}">単価改定</button>
+                                <span class="badge bg-warning text-dark ms-2" id="reservedBadge" style="display:none" th:text="#{contract.priceRevision.reserved}">改定予約あり</span>
+                            </div>
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
@@ -215,10 +220,59 @@
             </div>
         </div>
     </div>
+
+    <!-- 単価改定モーダル -->
+    <div class="modal fade" id="priceRevisionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold" th:text="#{contract.priceRevision.title}">単価改定</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div id="priceRevWarning" class="alert alert-warning d-none" th:text="#{contract.priceRevision.pastWarning}"></div>
+                    <table class="table table-sm table-dark table-bordered" id="priceRevTable">
+                        <thead><tr>
+                            <th th:text="#{contract.priceRevision.applyFrom}">適用開始月</th>
+                            <th th:text="#{contract.priceRevision.selling}">売上単価</th>
+                            <th th:text="#{contract.priceRevision.cost}">原価</th>
+                            <th th:text="#{contract.priceRevision.reason}">改定理由</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <hr class="border-dark">
+                    <form id="priceRevForm" class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted" th:text="#{contract.priceRevision.applyFrom}">適用開始月</label>
+                            <input type="month" name="applyFromMonth" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted" th:text="#{contract.priceRevision.selling}">売上単価</label>
+                            <input type="number" name="sellingPrice" class="form-control form-control-dark bg-secondary text-white border-dark" min="0" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted" th:text="#{contract.priceRevision.cost}">原価</label>
+                            <input type="number" name="costPrice" class="form-control form-control-dark bg-secondary text-white border-dark" min="0" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-muted" th:text="#{contract.priceRevision.reason}">改定理由</label>
+                            <input type="text" name="reason" class="form-control form-control-dark bg-secondary text-white border-dark">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">閉じる</button>
+                    <button type="button" class="btn btn-primary" onclick="submitPriceRevision()" th:text="#{contract.priceRevision.add}">改定を登録</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/contract.js}"></script>
+    <script th:src="@{/js/modules/contract-price-revision.js}"></script>
 </th:block>
 
 </body>

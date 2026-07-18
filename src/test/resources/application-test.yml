@@ -26,6 +26,7 @@ spring:
         - classpath:sql/schema-ar-management-h2.sql
         - classpath:sql/schema-quotation-h2.sql
         - classpath:sql/schema-self-service-h2.sql
+        - classpath:sql/schema-price-history-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

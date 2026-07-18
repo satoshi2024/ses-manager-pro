@@ -498,3 +498,18 @@ CREATE TABLE t_work_record_daily (
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_wr_daily (work_record_id, work_date)
 );
+
+-- 契約単価改定履歴（contract-price-history / V33）
+DROP TABLE IF EXISTS t_contract_price_history CASCADE;
+CREATE TABLE t_contract_price_history (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_id      BIGINT NOT NULL,
+  apply_from_month CHAR(7) NOT NULL,
+  selling_price    DECIMAL(10,0) NOT NULL,
+  cost_price       DECIMAL(10,0) NOT NULL,
+  reason           VARCHAR(300),
+  created_by       BIGINT,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_cph (contract_id, apply_from_month)
+);

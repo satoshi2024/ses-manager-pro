@@ -42,6 +42,12 @@ public interface MonthlyRevenueCalcService {
     ContractAmount resolveContractAmount(Contract contract, WorkRecord confirmed);
 
     /**
+     * 対象月を考慮した1契約分の金額決定（確定実績優先、なければ対象月に有効な単価）。
+     * 単価改定リゾルバが配線されていれば期間別単価を、無ければ契約の現在単価をフォールバックに用いる。
+     */
+    ContractAmount resolveContractAmount(Contract contract, WorkRecord confirmed, YearMonth month);
+
+    /**
      * 契約が対象月の集計対象か(準備中除外・期間重なり)。
      */
     boolean isTargetInMonth(Contract contract, YearMonth month);

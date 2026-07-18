@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
@@ -22,6 +23,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
@@ -45,6 +47,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
+    private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -322,6 +325,119 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
         saveWithBusinessRules(contract);
         return contract;
+    }
+
+    // ===== 契約単価の改定履歴（contract-price-history / P6） =====
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean revisePrice(Long contractId, String applyFromMonth, BigDecimal selling,
+                               BigDecimal cost, String reason) {
+        Contract contract = this.getById(contractId);
+        if (contract == null) {
+            throw BusinessException.of("error.contract.notFound");
+        }
+        if (selling == null || selling.signum() < 0 || cost == null || cost.signum() < 0) {
+            throw BusinessException.of("error.contract.priceRevision.invalidAmount");
+        }
+        java.time.YearMonth applyFrom;
+        try {
+            applyFrom = java.time.YearMonth.parse(applyFromMonth);
+        } catch (Exception e) {
+            throw BusinessException.of("error.contract.priceRevision.invalidMonth");
+        }
+        if (contract.getStartDate() != null
+                && applyFrom.isBefore(java.time.YearMonth.from(contract.getStartDate()))) {
+            throw BusinessException.of("error.contract.priceRevision.beforeStart");
+        }
+
+        List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
+                        .eq("contract_id", contractId));
+
+        // 初回改定なら契約開始月・現行単価の初期履歴を自動補完（R1-3）。
+        if (histories.isEmpty() && contract.getStartDate() != null) {
+            String startMonth = java.time.YearMonth.from(contract.getStartDate()).toString();
+            if (!startMonth.equals(applyFromMonth)) {
+                com.ses.entity.ContractPriceHistory initial = new com.ses.entity.ContractPriceHistory();
+                initial.setContractId(contractId);
+                initial.setApplyFromMonth(startMonth);
+                initial.setSellingPrice(contract.getSellingPrice());
+                initial.setCostPrice(contract.getCostPrice());
+                initial.setReason("初期単価(自動補完)");
+                priceHistoryMapper.insert(initial);
+                histories.add(initial);
+            }
+        }
+
+        // upsert（contract_id + apply_from_month 一意）。
+        com.ses.entity.ContractPriceHistory existing = histories.stream()
+                .filter(h -> applyFromMonth.equals(h.getApplyFromMonth()))
+                .findFirst().orElse(null);
+        if (existing != null) {
+            existing.setSellingPrice(selling);
+            existing.setCostPrice(cost);
+            existing.setReason(reason);
+            priceHistoryMapper.updateById(existing);
+        } else {
+            com.ses.entity.ContractPriceHistory rev = new com.ses.entity.ContractPriceHistory();
+            rev.setContractId(contractId);
+            rev.setApplyFromMonth(applyFromMonth);
+            rev.setSellingPrice(selling);
+            rev.setCostPrice(cost);
+            rev.setReason(reason);
+            priceHistoryMapper.insert(rev);
+            histories.add(rev);
+        }
+
+        // t_contract の現在単価を「当月時点で有効な履歴」で再計算（新履歴そのものではなくリゾルバで解決）。
+        List<com.ses.entity.ContractPriceHistory> fresh = priceHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
+                        .eq("contract_id", contractId));
+        com.ses.service.billing.ContractPriceResolver.ResolvedPrice current =
+                com.ses.service.billing.ContractPriceResolver.resolveFrom(
+                        contract, java.time.YearMonth.now(), fresh);
+        contract.setSellingPrice(current.getSellingPrice());
+        contract.setCostPrice(current.getCostPrice());
+        this.updateById(contract);
+
+        // 過去遡及かつ確定済み実績があれば警告。
+        boolean retroactive = applyFrom.isBefore(java.time.YearMonth.now());
+        if (retroactive) {
+            long confirmed = workRecordMapper.selectCount(new QueryWrapper<WorkRecord>()
+                    .eq("contract_id", contractId)
+                    .eq("status", "確定")
+                    .ge("work_month", applyFromMonth));
+            return confirmed > 0;
+        }
+        return false;
+    }
+
+    @Override
+    public List<com.ses.entity.ContractPriceHistory> priceHistory(Long contractId) {
+        return priceHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
+                        .eq("contract_id", contractId)
+                        .orderByAsc("apply_from_month"));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteFuturePriceRevision(Long contractId, String applyFromMonth) {
+        java.time.YearMonth applyFrom;
+        try {
+            applyFrom = java.time.YearMonth.parse(applyFromMonth);
+        } catch (Exception e) {
+            throw BusinessException.of("error.contract.priceRevision.invalidMonth");
+        }
+        // 将来予約（当月より後）のみ削除可。当月以前は精算に使われている可能性があるためロック。
+        if (!applyFrom.isAfter(java.time.YearMonth.now())) {
+            throw BusinessException.of("error.contract.priceRevision.pastLocked");
+        }
+        priceHistoryMapper.delete(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
+                        .eq("contract_id", contractId)
+                        .eq("apply_from_month", applyFromMonth));
     }
 
     /**
