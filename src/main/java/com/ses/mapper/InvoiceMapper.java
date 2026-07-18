@@ -67,4 +67,31 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           )
     """)
     List<UnbilledWorkRecordDto> selectUnbilledWorkRecords(@Param("customerId") Long customerId, @Param("billingMonth") String billingMonth);
+
+    /**
+     * 全顧客版の確定済み未請求実績（月次締めチェックリスト用）。
+     * WHERE 句は {@link #selectUnbilledWorkRecords} から顧客条件を除いただけ。
+     * 除外サブクエリ（有効請求書明細）と c.deleted_flag=0 は同クエリと一字一句同期させること
+     * （残高・未請求定義の二重定義を防ぐため。片方を変えたら必ず両方直す）。
+     */
+    @Select("""
+        SELECT
+            w.id AS workRecordId,
+            w.billing_amount AS billingAmount,
+            e.full_name AS engineerName,
+            p.project_name AS projectName,
+            c.customer_id AS customerId
+        FROM t_work_record w
+        INNER JOIN t_contract c ON w.contract_id = c.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_project p ON c.project_id = p.id
+        WHERE c.deleted_flag = 0
+          AND w.work_month = #{billingMonth}
+          AND w.status = '確定'
+          AND w.id NOT IN (
+              SELECT it.work_record_id FROM t_invoice_item it
+              JOIN t_invoice i ON it.invoice_id = i.id AND i.deleted_flag = 0
+          )
+    """)
+    List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsAll(@Param("billingMonth") String billingMonth);
 }

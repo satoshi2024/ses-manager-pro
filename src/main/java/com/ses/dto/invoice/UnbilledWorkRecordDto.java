@@ -9,4 +9,6 @@ public class UnbilledWorkRecordDto {
     private BigDecimal billingAmount;
     private String engineerName;
     private String projectName;
+    /** 全顧客版クエリ(月次締め)のみ設定。顧客単位クエリでは null。 */
+    private Long customerId;
 }

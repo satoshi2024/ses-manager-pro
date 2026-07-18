@@ -17,6 +17,14 @@ public final class SecurityUtils {
         return null;
     }
 
+    public static String currentRole() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof LoginUser) {
+            return ((LoginUser) authentication.getPrincipal()).getSysUser().getRole();
+        }
+        return null;
+    }
+
     public static String currentUsername() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof LoginUser) {

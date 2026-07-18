@@ -100,6 +100,13 @@
                     </a>
                 </li>
 
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('monthly-closing')}">
+                    <a th:href="@{/monthly-closing}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/monthly-closing') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-calendar-check me-2"></i>
+                        <span th:text="#{menu.monthlyClosing}">月次締め</span>
+                    </a>
+                </li>
+
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('todo')}">
                     <a th:href="@{/todo}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/todo') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bell me-2"></i>

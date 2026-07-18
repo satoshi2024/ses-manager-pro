@@ -99,6 +99,9 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_contract", "quotation_id");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='quotation'");
 
+            // 月次締めメニュー(V31 / monthly-closing-checklist)
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='monthly-closing'");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");
