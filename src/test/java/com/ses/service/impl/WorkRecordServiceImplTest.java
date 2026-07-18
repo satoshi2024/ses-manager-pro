@@ -53,6 +53,9 @@ class WorkRecordServiceImplTest {
     @Mock
     private com.ses.mapper.WorkRecordDailyMapper workRecordDailyMapper;
 
+    @Mock
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
+
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
 

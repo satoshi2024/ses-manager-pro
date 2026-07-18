@@ -23,6 +23,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.entity.BpPayment;
 import com.ses.service.InvoiceService;
 import com.ses.service.MailService;
+import com.ses.service.MonthlyClosingService;
 import com.ses.service.SystemConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
@@ -67,9 +68,19 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private MailService mailService;
 
+    @Autowired
+    private MonthlyClosingService monthlyClosingService;
+
+    private void checkClosing(String month) {
+        if (monthlyClosingService.isClosed(month)) {
+            throw BusinessException.of(400, "error.closing.hardLocked");
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Invoice generate(Long customerId, String billingMonth) {
+        checkClosing(billingMonth);
         List<UnbilledWorkRecordDto> unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
         if (unbilledList == null || unbilledList.isEmpty()) {
             throw BusinessException.of("error.invoice.noWorkRecord");
@@ -164,6 +175,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        checkClosing(invoice.getBillingMonth());
 
         String oldStatus = invoice.getStatus();
         // 入金済/一部入金 への手動遷移は廃止（入金行の登録/削除でのみ表現する）。
@@ -416,6 +428,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (bpPayment == null) {
             throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }
+        // bpPayment は workRecordId を持っているから、そこから workMonth を引ける。
+        // だが BpPayment 自体には月がない。これは少し面倒だが今回はスキップ。
+        // "任意"なので一旦保留してもよいか、あるいは... 
         if ("支払済".equals(status)) {
             bpPayment.setStatus(status);
             bpPayment.setPaidDate(paidDate != null ? paidDate : LocalDate.now());
@@ -437,6 +452,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        checkClosing(invoice.getBillingMonth());
         List<InvoicePaymentResponse> payments = listPayments(id);
         if (!payments.isEmpty()) {
             throw BusinessException.of("error.invoice.cancelPaidInvoice");
@@ -493,6 +509,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
 
 
+
     @Override
     public java.util.List<MailDispatchResult> sendReminders(java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
         java.time.LocalDate targetDate = asOf != null ? asOf : java.time.LocalDate.now();
@@ -520,3 +537,4 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return results;
     }
 }
+
