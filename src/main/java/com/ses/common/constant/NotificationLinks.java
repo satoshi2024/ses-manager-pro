@@ -29,6 +29,12 @@ public final class NotificationLinks {
     /** 要員詳細の基底ルート（/engineer/detail）。ID はクエリで付与する。 */
     public static final String ENGINEER_DETAIL = "/engineer/detail";
 
+    /** 勤怠グリッド（/work-record）— 勤怠提出の承認者向けリンク。 */
+    public static final String WORK_RECORD = "/work-record";
+
+    /** 要員のマイ勤怠（/my/timesheet）— 差戻し通知の要員向けリンク。 */
+    public static final String MY_TIMESHEET = "/my/timesheet";
+
     private NotificationLinks() {
     }
 

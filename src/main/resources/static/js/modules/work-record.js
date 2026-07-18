@@ -75,6 +75,12 @@ function renderWorkRecords(list) {
                 </td>
                 <td class="py-3 status-cell-${item.contractId}">
                     ${getStatusBadge(item.status)}
+                    ${item.status === '提出済' && item.workRecordId ? `
+                        <div class="mt-1">
+                            <button class="btn btn-sm btn-success py-0 px-1" onclick="approveWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.approve','承認')}</button>
+                            <button class="btn btn-sm btn-warning py-0 px-1" onclick="rejectWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.reject','差戻し')}</button>
+                        </div>` : ''}
+                    ${item.workRecordId ? `<a class="btn btn-sm btn-outline-info py-0 px-1 mt-1" href="/api/work-records/${item.workRecordId}/report.pdf" target="_blank">PDF</a>` : ''}
                 </td>
                 <td class="px-4 py-3">
                     ${remarksInput}
@@ -85,10 +91,33 @@ function renderWorkRecords(list) {
     });
 }
 
+function approveWorkRecord(id) {
+    fetch(`/api/work-records/${id}/approve`, { method: 'POST', headers: SES.csrf.header() })
+        .then(res => res.json()).then(data => {
+            if (data.code === 200) loadWorkRecords();
+            else alert(data.message);
+        });
+}
+
+function rejectWorkRecord(id) {
+    const comment = prompt(SES.i18n.t('my.timesheet.rejectComment', '差戻しコメント'));
+    if (comment === null) return;
+    fetch(`/api/work-records/${id}/reject`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+        body: JSON.stringify({ comment })
+    }).then(res => res.json()).then(data => {
+        if (data.code === 200) loadWorkRecords();
+        else alert(data.message);
+    });
+}
+
 function getStatusBadge(status) {
     if (!status) return `<span class="badge bg-secondary text-white">${SES.i18n.t('workRecord.status.未入力')}</span>`;
     let bg = 'bg-secondary';
     if(status === '入力中') bg = 'bg-primary';
+    if(status === '提出済') bg = 'bg-info';
+    if(status === '差戻し') bg = 'bg-warning';
     if(status === '確定') bg = 'bg-success';
     return `<span class="badge ${bg} text-white">${SES.i18n.t('workRecord.status.' + status, status)}</span>`;
 }

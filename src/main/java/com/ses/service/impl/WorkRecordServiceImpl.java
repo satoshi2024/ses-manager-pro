@@ -7,10 +7,13 @@ import com.ses.entity.BpPayment;
 import com.ses.entity.Contract;
 import com.ses.entity.WorkRecord;
 import com.ses.common.exception.BusinessException;
+import com.ses.entity.WorkRecordDaily;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
+import com.ses.mapper.WorkRecordDailyMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.common.constant.NotificationLinks;
 import com.ses.service.NotificationService;
 import com.ses.service.WorkRecordService;
 import com.ses.service.billing.SettlementCalculator;
@@ -25,10 +28,14 @@ import org.springframework.dao.DuplicateKeyException;
 import com.ses.common.constant.StatusConstants;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -37,10 +44,18 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     private static final Logger log = LoggerFactory.getLogger(WorkRecordServiceImpl.class);
 
+    // 勤怠状態遷移の唯一の権威。差戻しは入力可否では入力中と同扱い（saveHours/日次入力で許可）。
+    private static final Map<String, Set<String>> ALLOWED_STATUS = Map.of(
+            "入力中", Set.of("提出済"),
+            "差戻し", Set.of("提出済"),
+            "提出済", Set.of("確定", "差戻し"),
+            "確定", Set.of());
+
     private final ContractMapper contractMapper;
     private final BpPaymentMapper bpPaymentMapper;
     private final InvoiceItemMapper invoiceItemMapper;
     private final NotificationService notificationService;
+    private final WorkRecordDailyMapper workRecordDailyMapper;
 
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
     private static String monthEndOf(String workMonth) {
@@ -55,12 +70,30 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks) {
+        return saveHoursInternal(contractId, workMonth, actualHours, remarks, false);
+    }
+
+    /**
+     * 月次合計の保存本体。fromDaily=false（手動入力）で日次行が存在する月は拒否する（R2-5）。
+     * 日次入力（fromDaily=true）は合計の生成元が日次のため許可する。
+     */
+    private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
+                                         String remarks, boolean fromDaily) {
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
 
         if (record != null && "確定".equals(record.getStatus())) {
             throw BusinessException.of("error.workRecord.confirmedEdit2");
+        }
+
+        // 日次管理されている月は手動合計入力を禁止する。
+        if (!fromDaily && record != null) {
+            long dailyCount = workRecordDailyMapper.selectCount(new QueryWrapper<WorkRecordDaily>()
+                    .eq("work_record_id", record.getId()));
+            if (dailyCount > 0) {
+                throw BusinessException.of("error.workRecord.dailyManaged");
+            }
         }
 
         if (record != null) {
@@ -136,9 +169,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void confirmMonth(String workMonth) {
+        // 入力中・提出済 を一括確定対象とする。差戻し（＝数値誤りの明示フラグ）は黙って確定させない。
         List<WorkRecord> records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth)
-                .eq("status", "入力中"));
+                .in("status", "入力中", "提出済"));
 
         if (records.isEmpty()) {
             return;
@@ -156,23 +190,33 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 WorkRecord record = records.stream()
                         .filter(r -> r.getId().equals(dto.getWorkRecordId()))
                         .findFirst().orElse(null);
-
-                if (record != null && record.getPaymentAmount() != null) {
-                    Long count = bpPaymentMapper.selectCount(new QueryWrapper<BpPayment>()
-                            .eq("work_record_id", record.getId()));
-                    if (count == 0) {
-                        BpPayment bp = new BpPayment();
-                        bp.setWorkRecordId(record.getId());
-                        bp.setAmount(record.getPaymentAmount());
-                        bp.setStatus("未払");
-                        bpPaymentMapper.insert(bp);
-                    } else {
-                        // 既存のBP支払がある(入力中段階で手動登録済み等)。1階層目(parent NULL)の金額が
-                        // 最新の payment_amount とずれていれば、未払なら追従更新し、支払済なら更新せず通知する。
-                        syncRootBpAmount(record);
-                    }
+                if (record != null) {
+                    generateOrSyncBpFor(record);
                 }
             }
+        }
+    }
+
+    /**
+     * BP要員の確定実績1件についてBP支払を生成または同期する（confirmMonth と approve の共通合流点）。
+     * 未生成なら1階層目を作成、既存があれば syncRootBpAmount で金額同期する（二重実装禁止）。
+     */
+    private void generateOrSyncBpFor(WorkRecord record) {
+        if (record.getPaymentAmount() == null) {
+            return;
+        }
+        Long count = bpPaymentMapper.selectCount(new QueryWrapper<BpPayment>()
+                .eq("work_record_id", record.getId()));
+        if (count == 0) {
+            BpPayment bp = new BpPayment();
+            bp.setWorkRecordId(record.getId());
+            bp.setAmount(record.getPaymentAmount());
+            bp.setStatus("未払");
+            bpPaymentMapper.insert(bp);
+        } else {
+            // 既存のBP支払がある(入力中段階で手動登録済み等)。1階層目(parent NULL)の金額が
+            // 最新の payment_amount とずれていれば、未払なら追従更新し、支払済なら更新せず通知する。
+            syncRootBpAmount(record);
         }
     }
 
@@ -249,6 +293,178 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         bpPaymentMapper.delete(new QueryWrapper<BpPayment>()
                 .in("work_record_id", ids)
                 .eq("status", "未払"));
+    }
+
+    // ===== 要員セルフサービス勤怠（engineer-self-service-timesheet / P1） =====
+
+    @Override
+    @Transactional
+    public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
+        WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
+                .eq("contract_id", contractId)
+                .eq("work_month", workMonth));
+        if (record != null && "確定".equals(record.getStatus())) {
+            throw BusinessException.of("error.workRecord.confirmedEdit2");
+        }
+        if (record != null && "提出済".equals(record.getStatus())) {
+            throw BusinessException.of("error.workRecord.submittedEdit");
+        }
+
+        BigDecimal worked = computeWorkedHours(daily);
+
+        // レコードが無ければ日次由来で作成（合計0で採番・期間検証を通す）。
+        if (record == null) {
+            record = saveHoursInternal(contractId, workMonth, BigDecimal.ZERO, null, true);
+        }
+
+        WorkRecordDaily existing = workRecordDailyMapper.selectOne(new QueryWrapper<WorkRecordDaily>()
+                .eq("work_record_id", record.getId())
+                .eq("work_date", daily.getWorkDate()));
+        if (existing == null) {
+            daily.setId(null);
+            daily.setWorkRecordId(record.getId());
+            daily.setWorkedHours(worked);
+            daily.setBreakMinutes(daily.getBreakMinutes() != null ? daily.getBreakMinutes() : 0);
+            workRecordDailyMapper.insert(daily);
+        } else {
+            existing.setStartTime(daily.getStartTime());
+            existing.setEndTime(daily.getEndTime());
+            existing.setBreakMinutes(daily.getBreakMinutes() != null ? daily.getBreakMinutes() : 0);
+            existing.setWorkedHours(worked);
+            existing.setRemarks(daily.getRemarks());
+            workRecordDailyMapper.updateById(existing);
+        }
+
+        // 合計を再計算し既存精算ロジックへ連動する。
+        BigDecimal total = sumDaily(record.getId());
+        return saveHoursInternal(contractId, workMonth, total, record.getRemarks(), true);
+    }
+
+    @Override
+    @Transactional
+    public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
+        WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
+                .eq("contract_id", contractId)
+                .eq("work_month", workMonth));
+        if (record == null) {
+            return;
+        }
+        if ("確定".equals(record.getStatus())) {
+            throw BusinessException.of("error.workRecord.confirmedEdit2");
+        }
+        if ("提出済".equals(record.getStatus())) {
+            throw BusinessException.of("error.workRecord.submittedEdit");
+        }
+        workRecordDailyMapper.delete(new QueryWrapper<WorkRecordDaily>()
+                .eq("work_record_id", record.getId())
+                .eq("work_date", workDate));
+        BigDecimal total = sumDaily(record.getId());
+        saveHoursInternal(contractId, workMonth, total, record.getRemarks(), true);
+    }
+
+    @Override
+    public List<WorkRecordDaily> listDaily(Long workRecordId) {
+        return workRecordDailyMapper.selectList(new QueryWrapper<WorkRecordDaily>()
+                .eq("work_record_id", workRecordId)
+                .orderByAsc("work_date"));
+    }
+
+    private BigDecimal sumDaily(Long workRecordId) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (WorkRecordDaily d : listDaily(workRecordId)) {
+            if (d.getWorkedHours() != null) {
+                total = total.add(d.getWorkedHours());
+            }
+        }
+        return total;
+    }
+
+    /** 開始/終了/休憩、または直接入力の稼働時間から worked_hours を確定・検証する。 */
+    private BigDecimal computeWorkedHours(WorkRecordDaily daily) {
+        BigDecimal hours;
+        if (daily.getStartTime() != null && daily.getEndTime() != null) {
+            long minutes = Duration.between(daily.getStartTime(), daily.getEndTime()).toMinutes()
+                    - (daily.getBreakMinutes() != null ? daily.getBreakMinutes() : 0);
+            if (minutes < 0) {
+                throw BusinessException.of("error.workRecord.dailyInvalidTime");
+            }
+            hours = BigDecimal.valueOf(minutes).divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
+        } else if (daily.getWorkedHours() != null) {
+            hours = daily.getWorkedHours();
+        } else {
+            throw BusinessException.of("error.workRecord.dailyInvalidTime");
+        }
+        if (hours.signum() < 0 || hours.compareTo(BigDecimal.valueOf(24)) > 0) {
+            throw BusinessException.of("error.workRecord.dailyInvalidTime");
+        }
+        return hours;
+    }
+
+    private void requireTransition(WorkRecord record, String newStatus) {
+        if (!ALLOWED_STATUS.getOrDefault(record.getStatus(), Set.of()).contains(newStatus)) {
+            throw BusinessException.of("error.workRecord.statusTransitionInvalid",
+                    record.getStatus(), newStatus);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void submit(Long workRecordId) {
+        WorkRecord record = this.getById(workRecordId);
+        if (record == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
+        requireTransition(record, "提出済");
+        record.setStatus("提出済");
+        baseMapper.updateById(record);
+        notificationService.publish(
+                "TIMESHEET_SUBMITTED",
+                "勤怠が提出されました",
+                "[\"notification.msg.TIMESHEET_SUBMITTED\", \"" + record.getWorkMonth() + "\"]",
+                NotificationLinks.WORK_RECORD,
+                "timesheet-submitted-" + record.getId());
+    }
+
+    @Override
+    @Transactional
+    public void approve(Long workRecordId) {
+        WorkRecord record = this.getById(workRecordId);
+        if (record == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
+        requireTransition(record, "確定");
+        record.setStatus("確定");
+        baseMapper.updateById(record);
+
+        // confirmMonth と同じBP生成後続処理を単契約分行う（BP要員のみ）。
+        List<WorkRecordGridDto> grid = baseMapper.selectMonthlyGrid(
+                record.getWorkMonth(), monthEndOf(record.getWorkMonth()));
+        grid.stream()
+                .filter(d -> record.getId().equals(d.getWorkRecordId()))
+                .filter(d -> "BP".equals(d.getEmploymentType()))
+                .findFirst()
+                .ifPresent(d -> generateOrSyncBpFor(record));
+    }
+
+    @Override
+    @Transactional
+    public void reject(Long workRecordId, String comment) {
+        WorkRecord record = this.getById(workRecordId);
+        if (record == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
+        requireTransition(record, "差戻し");
+        record.setStatus("差戻し");
+        if (comment != null && !comment.isBlank()) {
+            record.setRemarks(comment);
+        }
+        baseMapper.updateById(record);
+        notificationService.publish(
+                "TIMESHEET_REJECTED",
+                "勤怠が差し戻されました",
+                "[\"notification.msg.TIMESHEET_REJECTED\", \"" + (comment != null ? comment : "") + "\"]",
+                NotificationLinks.MY_TIMESHEET,
+                "timesheet-rejected-" + record.getId() + "-" + System.currentTimeMillis());
     }
 }
 

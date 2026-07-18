@@ -29,6 +29,7 @@ public class UserApiController {
     private final SysUserService sysUserService;
     private final PasswordEncoder passwordEncoder;
     private final EngineerSalesMapper engineerSalesMapper;
+    private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
 
     /**
      * ユーザー一覧（ページネーション）
@@ -157,6 +158,10 @@ public class UserApiController {
     public ApiResult<Boolean> delete(@PathVariable Long id, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身は削除できません");
         guardNoActiveSalesAssignments(id);
+        // 紐付け中の要員アカウントは削除拒否（先に要員詳細から解除させる）。
+        if (engineerAccountLinkService.isUserLinked(id)) {
+            throw BusinessException.of("error.engineerAccount.linkedUserDelete");
+        }
         return ApiResult.success(sysUserService.removeById(id));
     }
 

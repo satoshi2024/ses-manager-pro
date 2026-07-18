@@ -106,6 +106,8 @@ public class SecurityConfig {
                     "/api/contracts/generate-renewals",
                     "/api/autocomplete/users"
                 ).hasRole("管理者")
+                // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
+                .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
                 // その他のリクエストは認証が必要
                 .anyRequest().authenticated()
             )

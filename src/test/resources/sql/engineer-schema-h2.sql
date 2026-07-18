@@ -473,3 +473,28 @@ CREATE TABLE t_freee_employee_link (
  confirmed_at DATETIME, confirmed_by BIGINT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
  deleted_flag TINYINT DEFAULT 0, UNIQUE(engineer_id), UNIQUE(freee_employee_id)
 );
+
+-- 要員セルフサービス勤怠（engineer-self-service-timesheet / V32）
+DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
+CREATE TABLE t_engineer_account_link (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL UNIQUE,
+  sys_user_id BIGINT NOT NULL UNIQUE,
+  linked_by   BIGINT,
+  linked_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_work_record_daily CASCADE;
+CREATE TABLE t_work_record_daily (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  work_record_id BIGINT NOT NULL,
+  work_date      DATE NOT NULL,
+  start_time     TIME,
+  end_time       TIME,
+  break_minutes  INT NOT NULL DEFAULT 0,
+  worked_hours   DECIMAL(4,2) NOT NULL,
+  remarks        VARCHAR(200),
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_wr_daily (work_record_id, work_date)
+);

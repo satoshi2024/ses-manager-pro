@@ -36,12 +36,17 @@ class EngineerServiceImplTest {
     private EngineerSalesService engineerSalesService;
     @Mock
     private EngineerMapper engineerMapper;
+    @Mock
+    private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+    @Mock
+    private com.ses.mapper.SysUserMapper sysUserMapper;
 
     private EngineerServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new EngineerServiceImpl(contractMapper, proposalMapper, engineerSalesService);
+        service = new EngineerServiceImpl(contractMapper, proposalMapper, engineerSalesService,
+                engineerAccountLinkService, sysUserMapper);
         ReflectionTestUtils.setField(service, "baseMapper", engineerMapper);
         // 削除ガードは通過する状態にする
         when(contractMapper.selectCount(any())).thenReturn(0L);

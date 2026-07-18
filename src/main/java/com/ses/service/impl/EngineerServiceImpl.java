@@ -29,6 +29,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     private final ContractMapper contractMapper;
     private final ProposalMapper proposalMapper;
     private final EngineerSalesService engineerSalesService;
+    private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -51,6 +53,17 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         // 論理削除はしない）。削除失敗(false)時に解除だけがコミットされるのを防ぐ（review-fixes G3）。
         if (removed) {
             engineerSalesService.releaseAllByEngineerId(engineerId);
+            // 削除成功後にのみ、要員アカウントの紐付けを解除し当該ユーザーを無効化する（G3規約）。
+            com.ses.entity.EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
+            if (link != null) {
+                Long userId = link.getSysUserId();
+                engineerAccountLinkService.unlinkByEngineerId(engineerId);
+                com.ses.entity.SysUser user = sysUserMapper.selectById(userId);
+                if (user != null) {
+                    user.setStatus(0);
+                    sysUserMapper.updateById(user);
+                }
+            }
         }
         return removed;
     }

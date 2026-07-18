@@ -45,6 +45,8 @@ class UserApiControllerTest {
     private PasswordEncoder passwordEncoder;
     @MockBean
     private com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
+    @MockBean
+    private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
 
     @Test
     @WithMockUser

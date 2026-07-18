@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/base :: layout(#{my.timesheet.title}, ~{::content}, ~{::script})}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.timesheet.title}">マイ勤怠</title>
+</head>
+<body>
+<div th:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <label class="form-label" th:text="#{my.timesheet.month}">対象月</label>
+                    <input type="month" id="myMonth" class="form-control">
+                </div>
+            </div>
+            <div id="myContracts"></div>
+        </div>
+    </div>
+</div>
+<th:block th:fragment="script">
+    <script src="/js/modules/my-timesheet.js"></script>
+</th:block>
+</body>
+</html>

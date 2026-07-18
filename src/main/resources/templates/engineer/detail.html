@@ -102,6 +102,21 @@
                     </ul>
                 </div>
             </div>
+
+            <!-- ログインアカウント Card（要員セルフサービス勤怠） -->
+            <div class="card bg-card border-dark shadow-sm mt-4">
+                <div class="card-header border-dark bg-transparent py-3">
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-person-badge me-2 text-info"></i><th:block th:text="#{engineer.accountLink.title}">ログインアカウント</th:block></h6>
+                </div>
+                <div class="card-body">
+                    <div id="account-link-current" class="mb-2 text-light small"></div>
+                    <div id="account-link-form" class="d-none">
+                        <select id="account-link-select" class="form-select form-select-sm mb-2"></select>
+                        <button class="btn btn-sm btn-primary" onclick="linkAccount()" th:text="#{engineer.accountLink.link}">紐付け</button>
+                    </div>
+                    <button id="account-link-unlink" class="btn btn-sm btn-outline-danger d-none" onclick="unlinkAccount()" th:text="#{engineer.accountLink.unlink}">解除</button>
+                </div>
+            </div>
         </div>
 
         <!-- Tabs & Details -->
@@ -349,6 +364,7 @@
     <script th:src="@{/js/modules/engineer-detail.js}"></script>
     <script th:src="@{/js/modules/ai-matching.js}"></script>
     <script th:src="@{/js/modules/ai-skillsheet.js}"></script>
+    <script th:src="@{/js/modules/engineer-account-link.js}"></script>
 </th:block>
 
 </body>
