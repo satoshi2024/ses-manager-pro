@@ -18,8 +18,16 @@ public interface MailService {
      */
     MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to, Long invoiceId);
 
+    default MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to) {
+        return sendWithTemplate(templateId, params, to, null);
+    }
+
     /**
      * 件名・本文を直接指定して非同期送信する（テンプレートを使わない場合）。
      */
     MailDispatchResult send(String to, String subject, String body, Long invoiceId);
+
+    default MailDispatchResult send(String to, String subject, String body) {
+        return send(to, subject, body, null);
+    }
 }

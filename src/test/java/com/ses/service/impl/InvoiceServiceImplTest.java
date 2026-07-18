@@ -193,6 +193,10 @@ public class InvoiceServiceImplTest {
         invoice.setStatus("入金済");
 
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        
+        InvoicePayment existing = new InvoicePayment();
+        existing.setAmount(new BigDecimal("100000"));
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.List.of(existing));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
         assertTrue(ex.getMessage().contains("error.invoice.cancelPaidInvoice"));
@@ -322,7 +326,11 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setStatus("送付済");
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+
+        com.ses.dto.invoice.InvoicePaymentCreateRequest req = new com.ses.dto.invoice.InvoicePaymentCreateRequest();
+        req.setAmount(new BigDecimal("50000"));
+        req.setPaidDate(LocalDate.of(2026, 7, 10));
 
         InvoicePayment newPayment = new InvoicePayment();
         newPayment.setAmount(new BigDecimal("50000"));
@@ -334,7 +342,7 @@ public class InvoiceServiceImplTest {
                 .thenReturn(java.util.List.of(newPayment));
         when(invoicePaymentMapper.insert(any(InvoicePayment.class))).thenReturn(1);
 
-        invoiceService.addPayment(invoiceId, newPayment);
+        invoiceService.addPayment(invoiceId, req);
 
         org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper> cap =
                 org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
@@ -348,29 +356,29 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setTotal(new BigDecimal("110000"));
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
         InvoicePayment existing = new InvoicePayment();
         existing.setAmount(new BigDecimal("100000"));
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.List.of(existing));
 
-        InvoicePayment newPayment = new InvoicePayment();
-        newPayment.setAmount(new BigDecimal("20000"));
-        newPayment.setPaidDate(LocalDate.now());
+        com.ses.dto.invoice.InvoicePaymentCreateRequest req = new com.ses.dto.invoice.InvoicePaymentCreateRequest();
+        req.setAmount(new BigDecimal("20000"));
+        req.setPaidDate(LocalDate.now());
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> invoiceService.addPayment(invoiceId, newPayment));
+                () -> invoiceService.addPayment(invoiceId, req));
         assertTrue(ex.getMessage().contains("error.invoice.overPayment"));
         verify(invoicePaymentMapper, never()).insert(any(InvoicePayment.class));
     }
 
     @Test
     void testAddPayment_VoidedOrMissingInvoiceRejected() {
-        when(invoiceMapper.selectById(anyLong())).thenReturn(null);
-        InvoicePayment p = new InvoicePayment();
-        p.setAmount(new BigDecimal("1000"));
-        p.setPaidDate(LocalDate.now());
-        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.addPayment(9L, p));
+        when(invoiceMapper.selectOne(any())).thenReturn(null);
+        com.ses.dto.invoice.InvoicePaymentCreateRequest req = new com.ses.dto.invoice.InvoicePaymentCreateRequest();
+        req.setAmount(new BigDecimal("1000"));
+        req.setPaidDate(LocalDate.now());
+        BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.addPayment(9L, req));
         assertTrue(ex.getMessage().contains("error.invoice.notFound"));
     }
 
@@ -382,7 +390,11 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setStatus("未送付");
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+
+        com.ses.dto.invoice.InvoicePaymentCreateRequest req = new com.ses.dto.invoice.InvoicePaymentCreateRequest();
+        req.setAmount(new BigDecimal("30000"));
+        req.setPaidDate(LocalDate.now());
 
         InvoicePayment newPayment = new InvoicePayment();
         newPayment.setAmount(new BigDecimal("30000"));
@@ -392,7 +404,7 @@ public class InvoiceServiceImplTest {
                 .thenReturn(java.util.List.of(newPayment));
         when(invoicePaymentMapper.insert(any(InvoicePayment.class))).thenReturn(1);
 
-        assertDoesNotThrow(() -> invoiceService.addPayment(invoiceId, newPayment));
+        assertDoesNotThrow(() -> invoiceService.addPayment(invoiceId, req));
         verify(invoicePaymentMapper, times(1)).insert(any(InvoicePayment.class));
     }
 
@@ -402,7 +414,7 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setTotal(new BigDecimal("110000"));
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
         InvoicePayment existing = new InvoicePayment();
         existing.setId(5L);
@@ -467,12 +479,12 @@ public class InvoiceServiceImplTest {
                 .companyName("客A").contactEmail("ap@example.com").build();
         when(customerMapper.selectById(5L)).thenReturn(c);
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
-        when(mailService.sendWithTemplate(any(), any(), any()))
+        when(mailService.sendWithTemplate(any(), any(), any(), any()))
                 .thenReturn(new com.ses.dto.mail.MailDispatchResult(1L, "QUEUED"));
 
         var result = invoiceService.sendReminder(invoiceId, 7L);
         assertEquals("QUEUED", result.getStatus());
-        verify(mailService, times(1)).sendWithTemplate(eq(7L), any(), eq("ap@example.com"));
+        verify(mailService, times(1)).sendWithTemplate(eq(7L), any(), eq("ap@example.com"), eq(1L));
     }
 
     @Test

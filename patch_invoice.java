@@ -178,10 +178,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     // ===== 債権管理（ar-management / P2） =====
     @Autowired
     private com.ses.mapper.MailDeliveryMapper mailDeliveryMapper;
+    @Autowired
+    private com.ses.mapper.MailDeliveryMapper mailDeliveryMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public InvoicePaymentResponse addPayment(Long invoiceId, InvoicePaymentCreateRequest request) {
+    public InvoicePayment addPayment(Long invoiceId, InvoicePayment payment) {
         Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", invoiceId).last("FOR UPDATE"));
         // 取消(void=論理削除)済み・存在しない請求書には入金できない。
         if (invoice == null) {
@@ -190,34 +192,31 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
         }
-        if (request.getAmount() == null || request.getAmount().signum() <= 0) {
+        if (payment.getAmount() == null || payment.getAmount().signum() <= 0) {
             throw BusinessException.of("error.invoice.paymentAmountInvalid");
         }
-        BigDecimal fee = request.getFee() != null ? request.getFee() : BigDecimal.ZERO;
+        BigDecimal fee = payment.getFee() != null ? payment.getFee() : BigDecimal.ZERO;
         if (fee.signum() < 0) {
             throw BusinessException.of("error.invoice.paymentAmountInvalid");
         }
-        if (request.getPaidDate() == null) {
+        if (payment.getPaidDate() == null) {
             throw BusinessException.of("error.invoice.paymentDateRequired");
         }
 
         BigDecimal existingPaid = sumPaid(invoiceId);
-        BigDecimal newTotal = existingPaid.add(request.getAmount()).add(fee);
+        BigDecimal newTotal = existingPaid.add(payment.getAmount()).add(fee);
         // 過入金拒否: 既存合計 + 新規(amount+fee) > total。
         if (newTotal.compareTo(invoice.getTotal()) > 0) {
             throw BusinessException.of("error.invoice.overPayment");
         }
 
-        InvoicePayment payment = new InvoicePayment();
+        payment.setId(null);
         payment.setInvoiceId(invoiceId);
-        payment.setAmount(request.getAmount());
         payment.setFee(fee);
-        payment.setPaidDate(request.getPaidDate());
-        payment.setRemarks(request.getRemarks());
         invoicePaymentMapper.insert(payment);
 
         recalcPaymentStatus(invoice);
-        return mapToResponse(payment);
+        return payment;
     }
 
     @Override
@@ -260,7 +259,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     private BigDecimal sumPaid(Long invoiceId) {
         BigDecimal total = BigDecimal.ZERO;
-        for (InvoicePaymentResponse p : listPayments(invoiceId)) {
+        for (InvoicePayment p : listPayments(invoiceId)) {
             total = total.add(p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
                          .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
         }
@@ -276,9 +275,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
      * addPayment / deletePayment の双方から呼ぶ。
      */
     private void recalcPaymentStatus(Invoice invoice) {
-        List<InvoicePaymentResponse> payments = listPayments(invoice.getId());
+        List<InvoicePayment> payments = listPayments(invoice.getId());
         BigDecimal paidTotal = BigDecimal.ZERO;
-        for (InvoicePaymentResponse p : payments) {
+        for (InvoicePayment p : payments) {
             paidTotal = paidTotal.add(p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
                                  .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
         }
@@ -287,7 +286,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         LocalDate paidDate = null;
         if ("入金済".equals(status)) {
             paidDate = payments.stream()
-                    .map(InvoicePaymentResponse::getPaidDate)
+                    .map(InvoicePayment::getPaidDate)
                     .filter(java.util.Objects::nonNull)
                     .max(Comparator.naturalOrder())
                     .orElse(LocalDate.now());
@@ -369,6 +368,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         } else {
             return "d91plus";
         }
+    }
+
+    @Override
+    public java.util.List<com.ses.entity.MailDelivery> listReminders(Long invoiceId) {
+        return mailDeliveryMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.MailDelivery>().eq("invoice_id", invoiceId).orderByDesc("id"));
     }
 
     @Override
@@ -475,7 +479,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
         return dto;
     }
-
+}
 
 
 
@@ -508,10 +512,10 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                 continue;
             }
             com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
-            String to = customer.getContactEmail();
+            String to = customer.getBillingEmail();
             java.util.Map<String, String> params = new java.util.HashMap<>();
             params.put("invoiceNo", invoice.getInvoiceNo());
-            params.put("customerName", customer.getCompanyName());
+            params.put("customerName", customer.getCustomerName());
             params.put("billingMonth", invoice.getBillingMonth());
             params.put("total", invoice.getTotal() != null ? invoice.getTotal().toString() : "0");
             params.put("dueDate", invoice.getDueDate() != null ? invoice.getDueDate().toString() : "");
@@ -519,4 +523,3 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         }
         return results;
     }
-}
