@@ -17,6 +17,11 @@ public class Notification {
     private String message;
     private String linkUrl;
     private String menuKey;
+
+    /**
+     * 宛先ユーザーID（NULLは該当ロール全体）
+     */
+    private Long recipientUserId;
     private String dedupeKey;
     private LocalDateTime createdAt;
 }
