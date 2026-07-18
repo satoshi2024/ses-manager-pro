@@ -48,6 +48,11 @@ public interface MonthlyRevenueCalcService {
     ContractAmount resolveContractAmount(Contract contract, WorkRecord confirmed, YearMonth month);
 
     /**
+     * 複数契約の一括金額決定（N+1回避）。
+     */
+    Map<Long, ContractAmount> resolveContractAmountBatch(List<Contract> contracts, Map<Long, WorkRecord> confirmedByContractId, YearMonth month);
+
+    /**
      * 契約が対象月の集計対象か(準備中除外・期間重なり)。
      */
     boolean isTargetInMonth(Contract contract, YearMonth month);

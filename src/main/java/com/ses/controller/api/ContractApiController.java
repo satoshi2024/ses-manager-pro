@@ -68,11 +68,15 @@ public class ContractApiController {
      * @param id 契約ID
      * @return 契約情報
      */
-    @GetMapping("/{id}")
-    public ApiResult<Contract> getById(@PathVariable Long id) {
+    private void assertContractVisible(Long id) {
         if (dataScopeService.isScoped() && !dataScopeService.allowedContractIds().contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
+    }
+
+    @GetMapping("/{id}")
+    public ApiResult<Contract> getById(@PathVariable Long id) {
+        assertContractVisible(id);
         return ApiResult.success(contractService.getById(id));
     }
 
@@ -146,11 +150,13 @@ public class ContractApiController {
 
     @GetMapping("/{id}/price-revisions")
     public ApiResult<?> priceRevisions(@PathVariable Long id) {
+        assertContractVisible(id);
         return ApiResult.success(contractService.priceHistory(id));
     }
 
     @PostMapping("/{id}/price-revisions")
     public ApiResult<?> revisePrice(@PathVariable Long id, @RequestBody PriceRevisionRequest req) {
+        assertContractVisible(id);
         boolean warning = contractService.revisePrice(id, req.getApplyFromMonth(),
                 req.getSellingPrice(), req.getCostPrice(), req.getReason());
         return ApiResult.success(java.util.Map.of("warning", warning));
@@ -158,6 +164,7 @@ public class ContractApiController {
 
     @DeleteMapping("/{id}/price-revisions/{month}")
     public ApiResult<?> deletePriceRevision(@PathVariable Long id, @PathVariable String month) {
+        assertContractVisible(id);
         contractService.deleteFuturePriceRevision(id, month);
         return ApiResult.success(null);
     }

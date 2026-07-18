@@ -78,6 +78,22 @@ public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService 
         return resolveWithPrice(contract, confirmed, rp);
     }
 
+    @Override
+    public Map<Long, ContractAmount> resolveContractAmountBatch(List<Contract> contracts, Map<Long, WorkRecord> confirmedByContractId, YearMonth month) {
+        Map<Long, ContractPriceResolver.ResolvedPrice> priceMap = priceResolver != null && contracts != null
+                ? priceResolver.resolveBatch(contracts, month) : null;
+        
+        Map<Long, ContractAmount> result = new java.util.HashMap<>();
+        if (contracts != null) {
+            for (Contract c : contracts) {
+                WorkRecord confirmed = confirmedByContractId != null ? confirmedByContractId.get(c.getId()) : null;
+                ContractPriceResolver.ResolvedPrice rp = priceMap != null ? priceMap.get(c.getId()) : null;
+                result.put(c.getId(), resolveWithPrice(c, confirmed, rp));
+            }
+        }
+        return result;
+    }
+
     /** 確定実績があればそれを優先し、無ければ与えられた解決済み単価（null なら契約の現在単価）を用いる。 */
     private ContractAmount resolveWithPrice(Contract contract, WorkRecord confirmed,
                                             ContractPriceResolver.ResolvedPrice resolved) {

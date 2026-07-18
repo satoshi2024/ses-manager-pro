@@ -162,6 +162,15 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (old == null) {
             throw BusinessException.of("error.contract.notFound");
         }
+
+        java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
+                        .eq("contract_id", contract.getId()));
+        if (!histories.isEmpty()) {
+            contract.setSellingPrice(old.getSellingPrice());
+            contract.setCostPrice(old.getCostPrice());
+        }
+
         validate(contract, old);
         this.baseMapper.updateById(contract);
 

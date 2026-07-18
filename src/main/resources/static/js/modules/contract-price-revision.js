@@ -21,7 +21,8 @@ function refreshPriceRevisionState(contractId) {
             const hasHistory = list.length > 0;
             // 履歴がある契約は単価直接編集を禁止し「単価改定」経由に一本化する。
             $('#cont-sellingPrice, #cont-costPrice').prop('readonly', hasHistory);
-            const nowMonth = new Date().toISOString().slice(0, 7);
+            const d = new Date();
+            const nowMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
             const hasReserved = list.some(h => h.applyFromMonth > nowMonth);
             $('#reservedBadge').toggle(hasReserved);
         });
@@ -40,7 +41,8 @@ function loadPriceRevisions(contractId) {
             if (data.code !== 200) return;
             const tbody = document.querySelector('#priceRevTable tbody');
             tbody.innerHTML = '';
-            const nowMonth = new Date().toISOString().slice(0, 7);
+            const d = new Date();
+            const nowMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
             (data.data || []).forEach(h => {
                 const future = h.applyFromMonth > nowMonth;
                 const tr = document.createElement('tr');
@@ -71,9 +73,8 @@ function submitPriceRevision() {
         body: JSON.stringify(body)
     }).then(res => res.json()).then(data => {
         if (data.code !== 200) { alert(data.message); return; }
-        if (data.data && data.data.warning) {
-            document.getElementById('priceRevWarning').classList.remove('d-none');
-        }
+        const warning = data.data && data.data.warning;
+        document.getElementById('priceRevWarning').classList.toggle('d-none', !warning);
         form.reset();
         loadPriceRevisions(contractId);
         refreshPriceRevisionState(contractId);
