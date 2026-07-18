@@ -6,6 +6,8 @@
     document.addEventListener('DOMContentLoaded', loadAccountLink);
 
     window.loadAccountLink = function () {
+        const current = document.getElementById('account-link-current');
+        if (!current) return;
         fetch(`/api/engineers/${engineerId}/account-link`)
             .then(res => res.json()).then(data => {
                 const current = document.getElementById('account-link-current');

@@ -46,6 +46,7 @@
                                 <option value="営業" th:text="#{user.role.sales}">営業</option>
                                 <option value="HR" th:text="#{user.role.hr}">HR</option>
                                 <option value="マネージャー" th:text="#{user.role.manager}">マネージャー</option>
+                                <option value="要員">要員</option>
                             </select>
                         </div>
                         <div class="col-md-3">
@@ -102,6 +103,9 @@
                             <option value="マネージャー" th:text="#{user.role.manager}">マネージャー</option>
                         </select>
                     </div>
+                    <div class="mb-3 text-info small">
+                        ※要員ロールの権限（マイ勤怠等）はシステム固定のため、編集できません。
+                    </div>
                     <div id="role-menu-checkboxes" class="d-flex flex-column gap-2 mb-3">
                         <!-- JS will populate checkboxes here -->
                     </div>
@@ -144,6 +148,7 @@
                                 <option value="営業" th:text="#{user.role.sales}">営業</option>
                                 <option value="HR" th:text="#{user.role.hr}">HR</option>
                                 <option value="マネージャー" th:text="#{user.role.manager}">マネージャー</option>
+                                <option value="要員">要員</option>
                             </select>
                         </div>
                         <div class="mb-3">

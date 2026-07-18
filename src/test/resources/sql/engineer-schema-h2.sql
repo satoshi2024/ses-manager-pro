@@ -254,6 +254,7 @@ CREATE TABLE t_work_record (
   actual_hours   DECIMAL(5,1) NOT NULL,
   billing_amount DECIMAL(12,0),
   payment_amount DECIMAL(12,0),
+  reject_comment VARCHAR(500),
   status         VARCHAR(20) DEFAULT '入力中',
   remarks        VARCHAR(500),
   created_by     BIGINT,

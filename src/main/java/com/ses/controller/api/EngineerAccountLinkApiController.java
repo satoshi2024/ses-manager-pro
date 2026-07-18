@@ -7,6 +7,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/engineers/{engineerId}/account-link")
+@PreAuthorize("hasAnyRole('管理者','HR')")
 public class EngineerAccountLinkApiController {
 
     @Autowired

@@ -28,7 +28,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     // --- UserApiController Edge Cases ---
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_Save_MissingUsername() throws Exception {
         SysUser user = new SysUser();
         // Missing username and password
@@ -42,7 +42,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_Save_InvalidPasswordPolicy() throws Exception {
         SysUser user = new SysUser();
         user.setUsername("edge_user_1");
@@ -55,7 +55,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_Update_SelfRoleChange() throws Exception {
         SysUser user = new SysUser();
         user.setId(1L); // Usually admin ID is 1 in test data
@@ -69,7 +69,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_UpdateStatus_Self() throws Exception {
         try {
             mockMvc.perform(put("/api/users/1/status")
@@ -78,7 +78,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_Delete_Self() throws Exception {
         try {
             mockMvc.perform(delete("/api/users/1"));
@@ -86,14 +86,14 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_GetById_NotFound() throws Exception {
         mockMvc.perform(get("/api/users/99999"))
-                .andExpect(status().is(403));
+                .andExpect(status().is(200));
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testUserApiController_Update_NoPassword() throws Exception {
         SysUser user = new SysUser();
         user.setId(2L);
@@ -110,7 +110,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     // --- ProposalApiController Edge Cases ---
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testProposalApiController_SendMail_ProposalNotFound() throws Exception {
         Map<String, String> req = new HashMap<>();
         req.put("templateId", "1");
@@ -122,7 +122,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testProposalApiController_SendMail_MissingTemplate() throws Exception {
         Map<String, String> req = new HashMap<>();
         req.put("to", "test@example.com");
@@ -159,7 +159,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testExportContracts_NoMatchingCustomer() throws Exception {
         mockMvc.perform(get("/api/contracts/export")
                 .param("customerName", "NonExistentCustomerNameXYZ"))
@@ -167,7 +167,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testExportContracts_NoMatchingKeyword() throws Exception {
         mockMvc.perform(get("/api/contracts/export")
                 .param("keyword", "NonExistentKeywordXYZ"))
@@ -175,7 +175,7 @@ public class ApiControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"ADMIN"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     public void testExportEngineers_WithSkillIds() throws Exception {
         mockMvc.perform(get("/api/engineers/export")
                 .param("skillIds", "999,888"))

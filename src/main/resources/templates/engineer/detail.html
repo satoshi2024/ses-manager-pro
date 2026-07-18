@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" xmlns:sec="http://www.thymeleaf.org/extras/spring-security" layout:decorate="~{layout/base}">
 <head>
     <title th:text="#{engineer.detail}">要員詳細</title>
 </head>
@@ -104,7 +104,7 @@
             </div>
 
             <!-- ログインアカウント Card（要員セルフサービス勤怠） -->
-            <div class="card bg-card border-dark shadow-sm mt-4">
+            <div class="card bg-card border-dark shadow-sm mt-4" sec:authorize="hasAnyRole('管理者','HR')">
                 <div class="card-header border-dark bg-transparent py-3">
                     <h6 class="mb-0 text-white fw-bold"><i class="bi bi-person-badge me-2 text-info"></i><th:block th:text="#{engineer.accountLink.title}">ログインアカウント</th:block></h6>
                 </div>

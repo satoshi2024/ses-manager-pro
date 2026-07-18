@@ -14,15 +14,18 @@ function loadMyTimesheet() {
     fetch('/api/my/timesheet?month=' + myMonthValue)
         .then(res => res.json()).then(data => {
             if (data.code !== 200) { document.getElementById('myContracts').innerHTML = SES.escapeHtml(data.message || ''); return; }
-            renderMy(data.data.rows || []);
+            renderMy(data.data.rows || [], data.data.engineerName);
         });
 }
 
-function renderMy(rows) {
+function renderMy(rows, engineerName) {
     const container = document.getElementById('myContracts');
     container.innerHTML = '';
+    if (engineerName) {
+        container.innerHTML += `<h5 class="mb-3 text-light"><i class="bi bi-person me-2"></i>${SES.escapeHtml(engineerName)}</h5>`;
+    }
     if (rows.length === 0) {
-        container.innerHTML = '<div class="alert alert-secondary">対象の契約がありません</div>';
+        container.innerHTML += '<div class="alert alert-secondary">対象の契約がありません</div>';
         return;
     }
     rows.forEach(row => {
@@ -62,8 +65,8 @@ function renderMy(rows) {
                 </table>
                 ${editable ? dailyForm(row.contractId) : ''}
                 <div class="mt-2">${SES.i18n.t('my.timesheet.total','合計')}: <strong>${row.actualHours || 0} h</strong></div>
-                ${(editable && row.workRecordId) ? `<button class="btn btn-primary mt-2" onclick="submitMy(${row.workRecordId})">${SES.i18n.t('my.timesheet.submit','提出')}</button>` : ''}
-                ${row.workRecordId ? `<a class="btn btn-outline-info mt-2" href="/api/my/timesheet/${row.workRecordId}/report.pdf" target="_blank">PDF</a>` : ''}
+                ${editable ? `<button class="btn btn-primary mt-2" onclick='submitMyByMonth(${row.contractId}, ${JSON.stringify(row)})'>${SES.i18n.t('my.timesheet.submit','提出')}</button>` : ''}
+                ${(row.workRecordId && ['提出済', '確定'].includes(row.status)) ? `<a class="btn btn-outline-info mt-2" href="/api/my/timesheet/${row.workRecordId}/report.pdf" target="_blank">PDF</a>` : ''}
             </div>`;
         container.appendChild(card);
     });
@@ -110,6 +113,49 @@ function deleteMyDaily(contractId, workDate) {
         if (data.code === 200) loadMyTimesheet();
         else alert(data.message);
     });
+}
+
+function submitMyByMonth(contractId, row) {
+    // missing days calculation
+    let missingDays = 0;
+    let missingDates = [];
+    if (myMonthValue) {
+        let [y, m] = myMonthValue.split('-');
+        let daysInMonth = new Date(y, m, 0).getDate();
+        let enteredDates = new Set((row.dailies || []).map(d => d.workDate));
+        
+        let cStart = row.contractStartDate ? new Date(row.contractStartDate) : null;
+        let cEnd = row.contractEndDate ? new Date(row.contractEndDate) : null;
+        
+        for (let i = 1; i <= daysInMonth; i++) {
+            let d = new Date(y, m - 1, i);
+            let dStr = y + '-' + m + '-' + String(i).padStart(2, '0');
+            
+            if (d.getDay() !== 0 && d.getDay() !== 6) { // Weekdays only
+                let inContract = true;
+                if (cStart && dStr < row.contractStartDate) inContract = false;
+                if (cEnd && dStr > row.contractEndDate) inContract = false;
+                
+                if (inContract && !enteredDates.has(dStr)) {
+                    missingDays++;
+                    missingDates.push(dStr);
+                }
+            }
+        }
+    }
+    
+    let msg = SES.i18n.t('my.timesheet.submit', '提出') + '?';
+    if (missingDays > 0) {
+        msg += "\n\n未入力の平日が " + missingDays + " 日あります:\n" + missingDates.join(', ') + "\n\nこのまま提出しますか？";
+    }
+    
+    if (!confirm(msg)) return;
+    
+    fetch(`/api/my/timesheet/submit-by-month?contractId=${contractId}&workMonth=${myMonthValue}`, { method: 'POST', headers: SES.csrf.header() })
+        .then(res => res.json()).then(data => {
+            if (data.code === 200) loadMyTimesheet();
+            else alert(data.message);
+        });
 }
 
 function submitMy(workRecordId) {

@@ -116,18 +116,24 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
 
     private PdfPTable buildDailyTable(List<WorkRecordDaily> dailies, Font headerFont, Font normalFont)
             throws DocumentException {
-        PdfPTable table = new PdfPTable(5);
+        PdfPTable table = new PdfPTable(6);
         table.setWidthPercentage(100);
-        table.setWidths(new float[]{2, 2, 2, 1.5f, 3});
+        table.setWidths(new float[]{2, 2, 2, 1.5f, 1.5f, 3});
         addHeaderCell(table, "日付", headerFont);
         addHeaderCell(table, "開始", headerFont);
         addHeaderCell(table, "終了", headerFont);
+        addHeaderCell(table, "休憩(分)", headerFont);
         addHeaderCell(table, "稼働(h)", headerFont);
         addHeaderCell(table, "備考", headerFont);
         for (WorkRecordDaily d : dailies) {
             table.addCell(new Phrase(d.getWorkDate() != null ? d.getWorkDate().toString() : "", normalFont));
             table.addCell(new Phrase(d.getStartTime() != null ? d.getStartTime().toString() : "", normalFont));
             table.addCell(new Phrase(d.getEndTime() != null ? d.getEndTime().toString() : "", normalFont));
+            
+            PdfPCell brk = new PdfPCell(new Phrase(d.getBreakMinutes() != null ? String.valueOf(d.getBreakMinutes()) : "0", normalFont));
+            brk.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            table.addCell(brk);
+
             PdfPCell h = new PdfPCell(new Phrase(d.getWorkedHours() != null ? d.getWorkedHours().toPlainString() : "", normalFont));
             h.setHorizontalAlignment(Element.ALIGN_RIGHT);
             table.addCell(h);
