@@ -46,6 +46,8 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
      * 実行環境にこれらが無い場合は app.pdf.font-path で明示的に指定する必要がある。
      */
     private static final List<String> DEFAULT_FONT_CANDIDATES = List.of(
+            "C:/Windows/Fonts/msgothic.ttc,0",
+            "C:/Windows/Fonts/meiryo.ttc,0",
             "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
             "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,0",

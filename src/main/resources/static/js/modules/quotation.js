@@ -19,6 +19,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fromProposal) {
         presetFromProposal(fromProposal);
     }
+
+    // 顧客選択時に案件リストを絞り込み
+    document.getElementById('quotationForm').customerId.addEventListener('change', function() {
+        const customerId = this.value;
+        const projectSelect = document.getElementById('quotationForm').projectId;
+        if (customerId) {
+            loadSelect(`/api/projects?current=1&size=1000&customerId=${customerId}`, projectSelect, 'id', r => r.projectName);
+        } else {
+            projectSelect.innerHTML = '<option value=""></option>';
+        }
+    });
 });
 
 function loadSelect(url, sel, valueField, labelFn, selected) {
@@ -39,9 +50,14 @@ function loadSelect(url, sel, valueField, labelFn, selected) {
 function loadSelects(q) {
     q = q || {};
     const form = document.getElementById('quotationForm');
+    
+    const projectPromise = q.customerId 
+        ? loadSelect(`/api/projects?current=1&size=1000&customerId=${q.customerId}`, form.projectId, 'id', r => r.projectName, q.projectId)
+        : Promise.resolve(form.projectId.innerHTML = '<option value=""></option>');
+
     return Promise.all([
         loadSelect('/api/customers?current=1&size=1000', form.customerId, 'id', r => r.companyName, q.customerId),
-        loadSelect('/api/projects?current=1&size=1000', form.projectId, 'id', r => r.projectName, q.projectId),
+        projectPromise,
         loadSelect('/api/engineers?current=1&size=1000', form.engineerId, 'id', r => r.fullName, q.engineerId)
     ]);
 }

@@ -26,7 +26,8 @@ public class ProjectApiController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String projectName,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long customerId) {
         
         Page<Project> page = new Page<>(current, size);
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
@@ -36,6 +37,9 @@ public class ProjectApiController {
         }
         if (org.springframework.util.StringUtils.hasText(status)) {
             queryWrapper.eq(Project::getStatus, status);
+        }
+        if (customerId != null) {
+            queryWrapper.eq(Project::getCustomerId, customerId);
         }
         
         queryWrapper.orderByDesc(Project::getId);

@@ -43,6 +43,8 @@ import java.util.List;
 public class QuotationPdfServiceImpl implements QuotationPdfService {
 
     private static final List<String> DEFAULT_FONT_CANDIDATES = List.of(
+            "C:/Windows/Fonts/msgothic.ttc,0",
+            "C:/Windows/Fonts/meiryo.ttc,0",
             "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
             "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,0",
