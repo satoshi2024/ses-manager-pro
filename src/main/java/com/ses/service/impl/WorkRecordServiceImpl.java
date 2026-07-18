@@ -57,9 +57,22 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final NotificationService notificationService;
     private final WorkRecordDailyMapper workRecordDailyMapper;
 
-    // 単価改定履歴のリゾルバ（任意）。未配線（テスト等）では契約の現在単価をそのまま用いる。
+    /**
+     * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
+     * 常に配線される。未配線は既存 {@code @InjectMocks} テストの全緑維持のための緩和であり、
+     * その場合は契約の現在単価へフォールバックする（＝改定履歴が精算に反映されない）。
+     * 誤って Bean 定義が外れた事故に気づけるよう起動時に1回 warn する（下記 {@link #warnIfResolverMissing()}）。
+     */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.billing.ContractPriceResolver priceResolver;
+
+    @jakarta.annotation.PostConstruct
+    void warnIfResolverMissing() {
+        if (priceResolver == null) {
+            log.warn("ContractPriceResolver が未配線です。精算は契約の現在単価にフォールバックします"
+                    + "（テスト専用の緩和。本番では配線されているべき）。");
+        }
+    }
 
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
     private static String monthEndOf(String workMonth) {

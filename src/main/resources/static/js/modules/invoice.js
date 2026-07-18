@@ -333,7 +333,7 @@ function loadAging() {
         if (data.code !== 200) return;
         const tbody = document.querySelector('#agingTable tbody');
         tbody.innerHTML = '';
-        const cols = ['notDue', 'd1to30', 'd31to60', 'd61to90', 'd91plus', 'noDueDate', 'balance'];
+        const cols = ['unsent', 'notDue', 'd1to30', 'd31to60', 'd61to90', 'd91plus', 'noDueDate', 'balance'];
         (data.data.rows || []).forEach(r => {
             const tr = document.createElement('tr');
             let cells = `<td>${SES.escapeHtml(r.customerName || '')}</td>`;

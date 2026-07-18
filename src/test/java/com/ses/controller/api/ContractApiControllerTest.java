@@ -87,7 +87,7 @@ class ContractApiControllerTest {
     @WithMockUser
     void page_パラメータなしで全件取得() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -98,7 +98,7 @@ class ContractApiControllerTest {
     @WithMockUser
     void page_検索パラメータ複合で絞れる_contractNo部分一致() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts?status=稼動中&customerId=10&contractNo=C-001"))
                 .andExpect(status().isOk())
@@ -113,7 +113,7 @@ class ContractApiControllerTest {
         dto.setEngineerName("テスト 太郎");
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -128,7 +128,7 @@ class ContractApiControllerTest {
         dto.setEngineerName(null);
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())

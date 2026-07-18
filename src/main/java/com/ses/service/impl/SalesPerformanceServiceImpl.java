@@ -157,9 +157,11 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         }
 
         List<SalesPerformanceDto> result = new ArrayList<>();
+        Long currentUserId = com.ses.common.util.SecurityUtils.currentUserId();
         for (Long uid : userIds) {
             SalesPerformanceDto dto = new SalesPerformanceDto();
             dto.setSalesUserId(uid);
+            dto.setSelf(uid != null && uid.equals(currentUserId));
             dto.setSalesUserName(userNameMap.getOrDefault(uid, "Unknown"));
             dto.setActivePrimaryCount(activePrimaryMap.getOrDefault(uid, 0));
             dto.setClosedContractCount(closedContractCountMap.getOrDefault(uid, 0));

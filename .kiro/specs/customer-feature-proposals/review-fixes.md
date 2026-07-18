@@ -27,7 +27,7 @@
 
 ---
 
-## Q1.【高・P7】契約一覧のスコープがページング後のメモリフィルタになっている
+## Q1.【高・P7】[対応済み] 契約一覧のスコープがページング後のメモリフィルタになっている
 
 - **場所**: `controller/api/ContractApiController.java` の `page`（`isScoped` 分岐）
 - **内容**: Engineer/Customer が正しくクエリへ `IN` を注入しているのに対し、契約一覧だけ
@@ -45,7 +45,7 @@
 - **テスト**: `DataScopeIntegrationTest` に「担当2件+他人8件で total=2・1ページ」
   「2ページ目が空にならない」を追加。ガント（`/api/contracts` 共用）も同経路で自動的に直ることを確認。
 
-## Q2.【高・P7】スコープ未適用の読み経路が残っている（tasks 3/4 のチェックと実装が乖離）
+## Q2.【高・P7】[対応済み] スコープ未適用の読み経路が残っている（tasks 3/4 のチェックと実装が乖離）
 
 - **場所と欠落内容**（`dataScopeService` 参照が存在するのは Engineer/Contract/Customer の3コントローラのみ）:
   1. **`ProposalApiController`（カンバン/一覧）** — design の「コア4領域」の1つなのに未適用。
@@ -68,7 +68,7 @@
   **tasks.md のタスク3/4のチェックは実装完了後に付け直すこと**（チェック済み表記と実態の乖離は
   後続 AI の前提を壊すため、本指摘の対応時に tasks へ注記を残す）。
 
-## Q3.【中・P2】エイジングに「未送付」列がなく、未請求が売掛の期日区分に混入する
+## Q3.【中・P2】[対応済み] エイジングに「未送付」列がなく、未請求が売掛の期日区分に混入する
 
 - **場所**: `InvoiceMapper.selectOutstandingBalances`（`status <> '入金済'` で未送付も取得）＋
   `InvoiceServiceImpl.aging`（`classifyBucket` は due_date だけで区分）
@@ -80,7 +80,7 @@
   画面・Excel（`exportAging`）にも「未請求」列を追加（design 5章のヘッダー案に既に含まれている）。
 - **テスト**: 未送付・期限超過の請求書が d31to60 でなく unsent に入ること1ケース＋Excel ヘッダー更新。
 
-## Q4.【中低・P4】提案カンバンに「見積作成」の入口がない
+## Q4.【中低・P4】[対応済み] 提案カンバンに「見積作成」の入口がない
 
 - **場所**: `static/js/modules/proposal-kanban.js`（変更なし）
 - **内容**: `quotation.js` は `?fromProposal={id}` のプリセット受け側を実装済みだが、
@@ -90,7 +90,7 @@
   `location.href = '/quotation?fromProposal=' + item.id`。i18n 1キー×4言語。
 - **テスト**: JS のため Demo 検証（カンバン→見積モーダルに単価・顧客・要員がプリセットされる）。
 
-## Q5.【低・任意・P6】単価リゾルバが `@Autowired(required = false)` の任意依存
+## Q5.【低・任意・P6】[対応済み] 単価リゾルバが `@Autowired(required = false)` の任意依存
 
 - **場所**: `WorkRecordServiceImpl` / `MonthlyRevenueCalcServiceImpl` のリゾルバフィールド
 - **内容**: 本番では `ContractPriceResolverImpl` が `@Service` のため常に配線されるが、
@@ -118,3 +118,19 @@
   Q1 と Q2-2（契約 Export）は同じ `allowedIds` パラメータ追加で一緒に直るため同一コミット推奨。
 - すべて本ブランチ（`claude/customer-feature-proposals-review-xyo84v`）上で修正し、
   完了後に `mvn test` 全緑を再確認、本ドキュメントへ `[対応済み]` を追記すること。
+
+---
+
+## 対応記録（2026-07-18）
+
+Q1〜Q5 をすべて対応し `mvn test` 全緑（570件、Docker/フォント無し環境で smoke test・PDF正常系のみ skip）を再確認。
+
+- **Q1**: `ContractMapper.selectPageWithNames` に `allowedIds`(null=無制限) を追加し WHERE へ `AND c.id IN (...)` を注入。
+  コントローラは `isScoped()` 時に `allowedContractIds()` を渡し、空集合はクエリ前に空ページ即返し。メモリフィルタは削除。
+- **Q2**: Proposal(カンバンJavaフィルタ)・Export(契約/要員は画面と同じ allowed 集合を再利用・R3-3)・
+  Quotation(顧客∪要員由来の一覧IN＋詳細404)・SkillSheet(engineerId 詳細404)・営業成績(`self` フラグ)を追加。
+- **Q3**: `AgingReportDto.Row.unsent` を追加し、未送付は期日区分でなく「未請求」列へ別掲（画面・Excel・i18n 4言語）。
+- **Q4**: 提案カンバンカードに「見積作成」ボタン（`/quotation?fromProposal=` へ遷移）を追加。
+- **Q5**: リゾルバ2箇所に `@PostConstruct` の未配線 warn と Javadoc を追記（任意依存の意図を明文化）。
+
+残存の検証課題（実 MySQL smoke・ブラウザ Demo）は実行環境依存のため本対応の対象外（従来どおり）。

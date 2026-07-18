@@ -301,7 +301,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             if (balance.signum() <= 0) {
                 continue;
             }
-            String bucket = classifyBucket(b.getDueDate(), base);
+            // 未送付は売掛の期日区分に混ぜず「未請求」列へ別掲する（R2-2）。
+            String bucket = "未送付".equals(b.getStatus()) ? "unsent" : classifyBucket(b.getDueDate(), base);
 
             AgingReportDto.Row row = byCustomer.computeIfAbsent(b.getCustomerId(), k -> {
                 AgingReportDto.Row r = new AgingReportDto.Row();

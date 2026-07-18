@@ -29,6 +29,9 @@ public class QuotationApiController {
     @Autowired
     private QuotationPdfService quotationPdfService;
 
+    @Autowired
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @GetMapping
     public ApiResult<?> list(@RequestParam(defaultValue = "1") long current,
                              @RequestParam(defaultValue = "10") long size,
@@ -37,6 +40,19 @@ public class QuotationApiController {
                              @RequestParam(required = false) String keyword) {
         Page<Quotation> page = new Page<>(current, size);
         QueryWrapper<Quotation> query = new QueryWrapper<>();
+        // データスコープ: 営業ロール制限時は担当顧客∪担当要員由来の見積のみ。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> custIds = dataScopeService.allowedCustomerIds();
+            java.util.Set<Long> engIds = dataScopeService.allowedEngineerIds();
+            if (custIds.isEmpty() && engIds.isEmpty()) {
+                return ApiResult.success(new Page<>(current, size, 0));
+            }
+            query.and(w -> {
+                boolean first = true;
+                if (!custIds.isEmpty()) { w.in("customer_id", custIds); first = false; }
+                if (!engIds.isEmpty()) { if (!first) w.or(); w.in("engineer_id", engIds); }
+            });
+        }
         if (status != null && !status.isEmpty()) {
             query.eq("status", status);
         }
@@ -52,7 +68,15 @@ public class QuotationApiController {
 
     @GetMapping("/{id}")
     public ApiResult<?> get(@PathVariable Long id) {
-        return ApiResult.success(quotationService.getById(id));
+        Quotation q = quotationService.getById(id);
+        if (dataScopeService.isScoped() && q != null) {
+            boolean visible = (q.getCustomerId() != null && dataScopeService.allowedCustomerIds().contains(q.getCustomerId()))
+                    || (q.getEngineerId() != null && dataScopeService.allowedEngineerIds().contains(q.getEngineerId()));
+            if (!visible) {
+                throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+            }
+        }
+        return ApiResult.success(q);
     }
 
     @PostMapping

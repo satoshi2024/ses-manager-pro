@@ -28,6 +28,8 @@ public class AgingReportDto {
         private BigDecimal d91plus = BigDecimal.ZERO;
         /** 支払期限未設定。 */
         private BigDecimal noDueDate = BigDecimal.ZERO;
+        /** 未請求（未送付）。売掛の期日区分には混ぜず別掲する。 */
+        private BigDecimal unsent = BigDecimal.ZERO;
         /** 残高合計。 */
         private BigDecimal balance = BigDecimal.ZERO;
 
@@ -39,6 +41,7 @@ public class AgingReportDto {
                 case "d61to90" -> d61to90 = d61to90.add(amount);
                 case "d91plus" -> d91plus = d91plus.add(amount);
                 case "noDueDate" -> noDueDate = noDueDate.add(amount);
+                case "unsent" -> unsent = unsent.add(amount);
                 default -> { /* no-op */ }
             }
             balance = balance.add(amount);

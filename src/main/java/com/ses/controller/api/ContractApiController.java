@@ -48,14 +48,17 @@ public class ContractApiController {
             @RequestParam(required = false) Long salesUserId,
             @RequestParam(required = false) Boolean salesUnassigned) {
         Page<ContractListDto> page = new Page<>(current, size);
-        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned);
-        // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみに絞る。
-        if (dataScopeService.isScoped() && result.getRecords() != null) {
+        // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
+        // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
+        java.util.List<Long> allowedIds = null;
+        if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
-            result.setRecords(result.getRecords().stream()
-                    .filter(r -> allowed.contains(r.getId()))
-                    .collect(java.util.stream.Collectors.toList()));
+            if (allowed.isEmpty()) {
+                return ApiResult.success(new Page<>(current, size, 0));
+            }
+            allowedIds = new java.util.ArrayList<>(allowed);
         }
+        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, allowedIds);
         return ApiResult.success(result);
     }
 

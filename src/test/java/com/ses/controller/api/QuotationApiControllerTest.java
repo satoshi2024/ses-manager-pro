@@ -29,6 +29,9 @@ class QuotationApiControllerTest {
     @MockBean
     private QuotationPdfService quotationPdfService;
 
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @Test
     @WithMockUser
     void list_returnsOk() throws Exception {

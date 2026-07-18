@@ -59,6 +59,9 @@ class ExportApiControllerTest {
     @MockBean
     private com.ses.service.billing.MonthlyRevenueCalcService monthlyRevenueCalcService;
 
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @Test
     @WithMockUser
     void exportEngineers_returnsXlsxWithAttachmentHeader() throws Exception {

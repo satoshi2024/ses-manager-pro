@@ -20,9 +20,22 @@ import java.util.Map;
 @Service
 public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService {
 
-    // 単価改定履歴のリゾルバ（任意）。未配線（純ロジックのテスト等）では契約の現在単価を用いる。
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MonthlyRevenueCalcServiceImpl.class);
+
+    /**
+     * 単価改定履歴のリゾルバ（任意依存）。本番では常に配線される。未配線は純ロジックの
+     * 単体テスト（no-arg 生成）向けの緩和で、その場合はフォールバックに契約の現在単価を用いる。
+     */
     @Autowired(required = false)
     private ContractPriceResolver priceResolver;
+
+    @jakarta.annotation.PostConstruct
+    void warnIfResolverMissing() {
+        if (priceResolver == null) {
+            log.warn("ContractPriceResolver が未配線です。集計フォールバックは契約の現在単価を用います"
+                    + "（テスト専用の緩和。本番では配線されているべき）。");
+        }
+    }
 
     @Override
     public MonthlyAmount calc(YearMonth month, List<Contract> contracts,

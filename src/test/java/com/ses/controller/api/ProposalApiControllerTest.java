@@ -46,6 +46,8 @@ class ProposalApiControllerTest {
     private CustomerService customerService;
     @MockBean
     private MailService mailService;
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
 
     @Test
     @WithMockUser

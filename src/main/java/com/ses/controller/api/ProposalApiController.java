@@ -36,6 +36,7 @@ public class ProposalApiController {
     private final ProjectService projectService;
     private final CustomerService customerService;
     private final MailService mailService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * かんばんリスト取得
@@ -44,7 +45,13 @@ public class ProposalApiController {
      */
     @GetMapping("/kanban")
     public ApiResult<List<ProposalKanbanDto>> getKanbanList() {
-        return ApiResult.success(proposalService.getKanbanList());
+        List<ProposalKanbanDto> list = proposalService.getKanbanList();
+        // データスコープ: 営業ロール制限時は自分∪担当要員の提案のみ（カンバンは非ページングのためJava側で絞る）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedProposalIds();
+            list = list.stream().filter(p -> allowed.contains(p.getId())).collect(java.util.stream.Collectors.toList());
+        }
+        return ApiResult.success(list);
     }
 
     /**

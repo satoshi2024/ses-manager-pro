@@ -44,7 +44,7 @@ public class ExcelExportService {
 
     /** エイジングレポートの日本語ヘッダー */
     private static final String[] AGING_HEADERS = {
-            "顧客名", "期限内", "1-30日", "31-60日", "61-90日", "91日以上", "期限未設定", "残高計"
+            "顧客名", "未請求", "期限内", "1-30日", "31-60日", "61-90日", "91日以上", "期限未設定", "残高計"
     };
 
     /**
@@ -191,13 +191,14 @@ public class ExcelExportService {
                 for (AgingReportDto.Row r : report.getRows()) {
                     Row row = sheet.createRow(rowIndex++);
                     row.createCell(0).setCellValue(sanitize(r.getCustomerName()));
-                    setBigDecimalCell(row.createCell(1), r.getNotDue(), numberStyle);
-                    setBigDecimalCell(row.createCell(2), r.getD1to30(), numberStyle);
-                    setBigDecimalCell(row.createCell(3), r.getD31to60(), numberStyle);
-                    setBigDecimalCell(row.createCell(4), r.getD61to90(), numberStyle);
-                    setBigDecimalCell(row.createCell(5), r.getD91plus(), numberStyle);
-                    setBigDecimalCell(row.createCell(6), r.getNoDueDate(), numberStyle);
-                    setBigDecimalCell(row.createCell(7), r.getBalance(), numberStyle);
+                    setBigDecimalCell(row.createCell(1), r.getUnsent(), numberStyle);
+                    setBigDecimalCell(row.createCell(2), r.getNotDue(), numberStyle);
+                    setBigDecimalCell(row.createCell(3), r.getD1to30(), numberStyle);
+                    setBigDecimalCell(row.createCell(4), r.getD31to60(), numberStyle);
+                    setBigDecimalCell(row.createCell(5), r.getD61to90(), numberStyle);
+                    setBigDecimalCell(row.createCell(6), r.getD91plus(), numberStyle);
+                    setBigDecimalCell(row.createCell(7), r.getNoDueDate(), numberStyle);
+                    setBigDecimalCell(row.createCell(8), r.getBalance(), numberStyle);
                 }
             }
 
@@ -205,13 +206,14 @@ public class ExcelExportService {
                 AgingReportDto.Row t = report.getTotal();
                 Row row = sheet.createRow(rowIndex);
                 row.createCell(0).setCellValue("合計");
-                setBigDecimalCell(row.createCell(1), t.getNotDue(), numberStyle);
-                setBigDecimalCell(row.createCell(2), t.getD1to30(), numberStyle);
-                setBigDecimalCell(row.createCell(3), t.getD31to60(), numberStyle);
-                setBigDecimalCell(row.createCell(4), t.getD61to90(), numberStyle);
-                setBigDecimalCell(row.createCell(5), t.getD91plus(), numberStyle);
-                setBigDecimalCell(row.createCell(6), t.getNoDueDate(), numberStyle);
-                setBigDecimalCell(row.createCell(7), t.getBalance(), numberStyle);
+                setBigDecimalCell(row.createCell(1), t.getUnsent(), numberStyle);
+                setBigDecimalCell(row.createCell(2), t.getNotDue(), numberStyle);
+                setBigDecimalCell(row.createCell(3), t.getD1to30(), numberStyle);
+                setBigDecimalCell(row.createCell(4), t.getD31to60(), numberStyle);
+                setBigDecimalCell(row.createCell(5), t.getD61to90(), numberStyle);
+                setBigDecimalCell(row.createCell(6), t.getD91plus(), numberStyle);
+                setBigDecimalCell(row.createCell(7), t.getNoDueDate(), numberStyle);
+                setBigDecimalCell(row.createCell(8), t.getBalance(), numberStyle);
             }
 
             return writeToBytes(workbook);

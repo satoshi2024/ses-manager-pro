@@ -294,6 +294,28 @@ public class InvoiceServiceImplTest {
     }
 
     @Test
+    void testAging_UnsentGoesToUnsentColumnNotOverdue() {
+        // 未送付かつ期限超過の請求書は d31to60 ではなく unsent 列に入る（R2-2）。
+        com.ses.dto.invoice.InvoiceBalanceDto unsent = new com.ses.dto.invoice.InvoiceBalanceDto();
+        unsent.setCustomerId(1L);
+        unsent.setCustomerName("客A");
+        unsent.setStatus("未送付");
+        unsent.setDueDate(LocalDate.now().minusDays(45)); // 期限超過だが未送付
+        unsent.setBalance(new BigDecimal("50000"));
+        com.ses.dto.invoice.InvoiceBalanceDto sent = new com.ses.dto.invoice.InvoiceBalanceDto();
+        sent.setCustomerId(1L);
+        sent.setCustomerName("客A");
+        sent.setStatus("送付済");
+        sent.setDueDate(LocalDate.now().minusDays(45)); // 31-60日
+        sent.setBalance(new BigDecimal("30000"));
+        when(invoiceMapper.selectOutstandingBalances()).thenReturn(java.util.List.of(unsent, sent));
+
+        com.ses.dto.invoice.AgingReportDto report = invoiceService.aging(LocalDate.now());
+        assertEquals(0, new BigDecimal("50000").compareTo(report.getTotal().getUnsent()));
+        assertEquals(0, new BigDecimal("30000").compareTo(report.getTotal().getD31to60()));
+    }
+
+    @Test
     void testAddPayment_PartialSetsPartiallyPaid() {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
