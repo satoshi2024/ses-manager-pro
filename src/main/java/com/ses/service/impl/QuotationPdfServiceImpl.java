@@ -49,8 +49,7 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
     private final EngineerMapper engineerMapper;
 
     @Override
-    public byte[] generate(Long quotationId) {
-        Quotation q = quotationMapper.selectById(quotationId);
+    public byte[] generate(Quotation q) {
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
         }
@@ -145,10 +144,11 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
 
     /** 客先提出物のため要員名はイニシャル表記にする。 */
     private String initialOf(Engineer engineer) {
-        if (engineer == null || !StringUtils.hasText(engineer.getFullName())) {
+        if (engineer == null || !StringUtils.hasText(engineer.getInitialName())) {
             return "-";
         }
-        return engineer.getFullName().substring(0, 1) + ".";
+        String init = engineer.getInitialName().trim();
+        return init.isEmpty() ? "-" : init;
     }
 
     private String settlementRange(Quotation q) {

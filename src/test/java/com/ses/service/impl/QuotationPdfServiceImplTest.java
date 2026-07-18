@@ -58,6 +58,7 @@ class QuotationPdfServiceImplTest {
         EngineerMapper em = Mockito.mock(EngineerMapper.class);
         Engineer e = new Engineer();
         e.setFullName("山田太郎");
+        e.setInitialName("Y.T");
         when(em.selectById(2L)).thenReturn(e);
 
         return new QuotationPdfServiceImpl(new PdfProperties(), cfg, qm, cm, em);
@@ -68,7 +69,8 @@ class QuotationPdfServiceImplTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(cjkFontAvailable(),
                 "この環境にはCJKフォントが無いため正常系PDF生成テストをスキップ");
 
-        byte[] bytes = service().generate(1L);
+        Quotation q = new Quotation(); q.setId(1L); q.setQuotationNo("Q-202607-0001"); q.setTitle("金融システム開発"); q.setUnitPrice(new java.math.BigDecimal("700000")); q.setCustomerId(1L); q.setEngineerId(2L);
+        byte[] bytes = service().generate(q);
         assertTrue(bytes.length > 0);
         assertEquals("%PDF", new String(bytes, 0, 4));
         PdfReader reader = new PdfReader(bytes);

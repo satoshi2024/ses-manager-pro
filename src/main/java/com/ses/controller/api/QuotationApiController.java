@@ -66,30 +66,73 @@ public class QuotationApiController {
         return ApiResult.success(quotationService.page(page, query));
     }
 
-    @GetMapping("/{id}")
-    public ApiResult<?> get(@PathVariable Long id) {
+    private Quotation getVisibleQuotationOr404(Long id) {
         Quotation q = quotationService.getById(id);
-        if (dataScopeService.isScoped() && q != null) {
+        if (q == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+        if (dataScopeService.isScoped()) {
             boolean visible = (q.getCustomerId() != null && dataScopeService.allowedCustomerIds().contains(q.getCustomerId()))
                     || (q.getEngineerId() != null && dataScopeService.allowedEngineerIds().contains(q.getEngineerId()));
             if (!visible) {
                 throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
             }
         }
-        return ApiResult.success(q);
+        return q;
+    }
+
+    @GetMapping("/{id}")
+    public ApiResult<?> get(@PathVariable Long id) {
+        return ApiResult.success(getVisibleQuotationOr404(id));
     }
 
     @PostMapping
-    public ApiResult<?> create(@RequestBody Quotation quotation) {
-        quotation.setId(null);
+    public ApiResult<?> create(@jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        Quotation quotation = new Quotation();
+        quotation.setCustomerId(request.getCustomerId());
+        quotation.setProjectId(request.getProjectId());
+        quotation.setEngineerId(request.getEngineerId());
+        quotation.setProposalId(request.getProposalId());
+        quotation.setTitle(request.getTitle());
+        quotation.setUnitPrice(request.getUnitPrice());
+        quotation.setSettlementHoursMin(request.getSettlementHoursMin());
+        quotation.setSettlementHoursMax(request.getSettlementHoursMax());
+        quotation.setValidUntil(request.getValidUntil());
+        quotation.setRemarks(request.getRemarks());
+        
         quotationService.saveWithBusinessRules(quotation);
         return ApiResult.success(quotation);
     }
 
     @PutMapping("/{id}")
-    public ApiResult<?> update(@PathVariable Long id, @RequestBody Quotation quotation) {
+    public ApiResult<?> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        Quotation current = quotationService.getById(id);
+        if (current != null && ("受注".equals(current.getStatus()) || "失注".equals(current.getStatus()))) {
+            throw com.ses.common.exception.BusinessException.of(400, "Terminal state quotes cannot be fully updated");
+        }
+        Quotation quotation = new Quotation();
         quotation.setId(id);
+        quotation.setCustomerId(request.getCustomerId());
+        quotation.setProjectId(request.getProjectId());
+        quotation.setEngineerId(request.getEngineerId());
+        quotation.setProposalId(request.getProposalId());
+        quotation.setTitle(request.getTitle());
+        quotation.setUnitPrice(request.getUnitPrice());
+        quotation.setSettlementHoursMin(request.getSettlementHoursMin());
+        quotation.setSettlementHoursMax(request.getSettlementHoursMax());
+        quotation.setValidUntil(request.getValidUntil());
+        quotation.setRemarks(request.getRemarks());
+        
         quotationService.updateWithBusinessRules(quotation);
+        return ApiResult.success(null);
+    }
+
+    @PostMapping("/{id}/remarks")
+    public ApiResult<?> appendRemark(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationRemarkAppendRequest req) {
+        Quotation q = getVisibleQuotationOr404(id);
+        String current = q.getRemarks();
+        q.setRemarks(current == null || current.isEmpty() ? req.getAdditionalRemark() : current + "\n" + req.getAdditionalRemark());
+        quotationService.updateById(q);
         return ApiResult.success(null);
     }
 
@@ -112,9 +155,9 @@ public class QuotationApiController {
 
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
-        Quotation quotation = quotationService.getById(id);
-        byte[] bytes = quotationPdfService.generate(id);
-        String fileName = "見積書_" + (quotation != null ? quotation.getQuotationNo() : id) + ".pdf";
+        Quotation quotation = getVisibleQuotationOr404(id);
+        byte[] bytes = quotationPdfService.generate(quotation);
+        String fileName = "見積書_" + (quotation.getQuotationNo() != null ? quotation.getQuotationNo() : id) + ".pdf";
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

@@ -12,4 +12,7 @@ public interface QuotationMapper extends BaseMapper<Quotation> {
     /** 論理削除済みも含む採番用の最大見積番号。 */
     @Select("SELECT MAX(quotation_no) FROM t_quotation WHERE quotation_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxQuotationNoIncludingDeleted(@Param("prefix") String prefix);
+
+    @Select("SELECT * FROM t_quotation WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    Quotation selectByIdForUpdate(@Param("id") Long id);
 }
