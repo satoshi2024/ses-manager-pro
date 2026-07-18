@@ -157,7 +157,7 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Contract createDraftFromQuotation(Long quotationId) {
-        Quotation q = this.getById(quotationId);
+        Quotation q = this.baseMapper.selectByIdForUpdate(quotationId);
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
         }

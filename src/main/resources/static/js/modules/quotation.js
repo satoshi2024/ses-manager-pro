@@ -78,7 +78,7 @@ function loadQuotations() {
             const expired = q.validUntil && q.validUntil < todayStr;
             const expiredBadge = expired ? ` <span class="badge bg-secondary">${SES.i18n.t('quotation.badge.expired', '期限切れ')}</span>` : '';
             const transitions = QUOTATION_TRANSITIONS[q.status] || [];
-            let actions = `<button class="btn btn-sm btn-outline-primary" onclick='openQuotationModal(${JSON.stringify(q)})'>${SES.i18n.t('common.btn.edit', '編集')}</button>`;
+            let actions = `<button class="btn btn-sm btn-outline-primary" onclick="openQuotationModalById(${q.id})">${SES.i18n.t('common.btn.edit', '編集')}</button>`;
             actions += ` <a href="/api/quotations/${q.id}/pdf" class="btn btn-sm btn-info">${SES.i18n.t('quotation.btn.pdf', 'PDF')}</a>`;
             transitions.forEach(t => {
                 const label = t === '提出済' ? SES.i18n.t('quotation.btn.submit', '提出')
@@ -86,6 +86,9 @@ function loadQuotations() {
                     : t === '失注' ? SES.i18n.t('quotation.btn.lose', '失注') : t;
                 actions += ` <button class="btn btn-sm btn-outline-success" onclick="changeQuotationStatus(${q.id}, '${t}')">${label}</button>`;
             });
+            if (q.status === '受注') {
+                actions += ` <button class="btn btn-sm btn-outline-primary" onclick="createQuotationDraft(${q.id})">${SES.i18n.t('quotation.btn.createDraft', '契約ドラフト生成')}</button>`;
+            }
             if (q.status === '下書き') {
                 actions += ` <button class="btn btn-sm btn-danger" onclick="deleteQuotation(${q.id})">${SES.i18n.t('common.btn.delete', '削除')}</button>`;
             }
@@ -100,6 +103,12 @@ function loadQuotations() {
                 <td>${actions}</td>`;
             tbody.appendChild(tr);
         });
+    });
+}
+
+function openQuotationModalById(id) {
+    fetch('/api/quotations/' + id).then(res => res.json()).then(data => {
+        if(data.code === 200) openQuotationModal(data.data);
     });
 }
 
@@ -149,29 +158,28 @@ function saveQuotation() {
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('quotationModal')).hide();
-            (SES.toast || alert)(SES.i18n.t('common.msg.saveSuccess', '保存しました'), 'success');
+            SES.toast.success(SES.i18n.t('common.msg.saveSuccess', '保存しました'));
             loadQuotations();
         } else {
-            alert(data.message);
+            SES.toast.error(data.message);
         }
-    });
+    }).catch(err => SES.toast.error(err.message));
 }
 
 function changeQuotationStatus(id, newStatus) {
-    const proceed = () => {
+    const proceed = (createDraft) => {
         fetch(`/api/quotations/${id}/status`, {
             method: 'PUT',
             headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
             body: JSON.stringify({ status: newStatus })
         }).then(res => res.json()).then(data => {
-            if (data.code !== 200) { alert(data.message); return; }
-            if (newStatus === '受注' && document.getElementById('createDraftChecked') !== null
-                && document.getElementById('createDraftChecked').checked) {
+            if (data.code !== 200) { SES.toast.error(data.message); return; }
+            if (newStatus === '受注' && createDraft) {
                 createQuotationDraft(id);
             } else {
                 loadQuotations();
             }
-        });
+        }).catch(err => SES.toast.error(err.message));
     };
 
     if (newStatus === '受注') {
@@ -181,10 +189,14 @@ function changeQuotationStatus(id, newStatus) {
                    <div class="form-check mt-2 d-inline-block">
                      <input class="form-check-input" type="checkbox" id="createDraftChecked" checked>
                    </div>`,
-            showCancelButton: true
-        }).then(r => { if (r.isConfirmed) proceed(); });
+            showCancelButton: true,
+            preConfirm: () => {
+                const cb = document.getElementById('createDraftChecked');
+                return cb ? cb.checked : false;
+            }
+        }).then(r => { if (r.isConfirmed) proceed(r.value); });
     } else {
-        proceed();
+        proceed(false);
     }
 }
 
@@ -194,12 +206,12 @@ function createQuotationDraft(id) {
         headers: SES.csrf.header()
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
-            (SES.toast || alert)(SES.i18n.t('quotation.btn.createDraft', '契約ドラフト生成') + ' OK', 'success');
+            SES.toast.success(SES.i18n.t('quotation.btn.createDraft', '契約ドラフト生成') + ' OK');
         } else {
-            alert(data.message);
+            SES.toast.error(data.message);
         }
         loadQuotations();
-    });
+    }).catch(err => SES.toast.error(err.message));
 }
 
 function deleteQuotation(id) {

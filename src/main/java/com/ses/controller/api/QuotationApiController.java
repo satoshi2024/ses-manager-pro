@@ -66,17 +66,24 @@ public class QuotationApiController {
         return ApiResult.success(quotationService.page(page, query));
     }
 
-    @GetMapping("/{id}")
-    public ApiResult<?> get(@PathVariable Long id) {
+    private Quotation getVisibleQuotationOr404(Long id) {
         Quotation q = quotationService.getById(id);
-        if (dataScopeService.isScoped() && q != null) {
+        if (q == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+        if (dataScopeService.isScoped()) {
             boolean visible = (q.getCustomerId() != null && dataScopeService.allowedCustomerIds().contains(q.getCustomerId()))
                     || (q.getEngineerId() != null && dataScopeService.allowedEngineerIds().contains(q.getEngineerId()));
             if (!visible) {
                 throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
             }
         }
-        return ApiResult.success(q);
+        return q;
+    }
+
+    @GetMapping("/{id}")
+    public ApiResult<?> get(@PathVariable Long id) {
+        return ApiResult.success(getVisibleQuotationOr404(id));
     }
 
     @PostMapping
@@ -135,9 +142,9 @@ public class QuotationApiController {
 
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
-        Quotation quotation = quotationService.getById(id);
-        byte[] bytes = quotationPdfService.generate(id);
-        String fileName = "見積書_" + (quotation != null ? quotation.getQuotationNo() : id) + ".pdf";
+        Quotation quotation = getVisibleQuotationOr404(id);
+        byte[] bytes = quotationPdfService.generate(quotation);
+        String fileName = "見積書_" + (quotation.getQuotationNo() != null ? quotation.getQuotationNo() : id) + ".pdf";
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

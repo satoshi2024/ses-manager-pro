@@ -49,8 +49,7 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
     private final EngineerMapper engineerMapper;
 
     @Override
-    public byte[] generate(Long quotationId) {
-        Quotation q = quotationMapper.selectById(quotationId);
+    public byte[] generate(Quotation q) {
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
         }
