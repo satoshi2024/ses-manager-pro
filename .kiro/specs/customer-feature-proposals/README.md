@@ -236,3 +236,22 @@ Wave 4（単独）  : P7 data-scope-permission
 4. 状態機械はサーバ側 Map が唯一の正・フロントはミラー定数＋相互参照コメント（contract の前例）。
 5. 各 spec 完了時に `mvn test` 全緑を確認し、`.kiro/specs/README.md` の状態列と本章の
    Wave 進捗を更新する。Docker あり環境での smoke test は各 Wave 完了時にまとめて実行でよい。
+
+---
+
+## 実装進捗（2026-07-18 更新）
+
+**全7 spec 実装完了・`mvn test` 全緑（569件、Docker/フォント無し環境では smoke test・PDF正常系のみ skip）。**
+
+| Wave | spec | 採番 | 状態 |
+|---|---|---|---|
+| 1 | ar-management (P2) | V28 | 完了 |
+| 1 | quotation-management (P4) | V29 | 完了 |
+| 1 | revenue-forecast (P5) | V30 | 完了 |
+| 2 | monthly-closing-checklist (P3) | V31 | 完了 |
+| 2 | engineer-self-service-timesheet (P1) | V32 | 完了 |
+| 3 | contract-price-history (P6) | V33 | 完了 |
+| 4 | data-scope-permission (P7) | V34 | 完了 |
+
+採番は予約どおり V28〜V34 を Wave 順に割り当て（欠番・重複なし）。共通規則（H2同期3点セット・
+`FlywayMigrationSmokeTest` assert・`NotificationLinks` 定数・i18n 4ファイル同期）は各コミットで遵守。
