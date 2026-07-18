@@ -47,7 +47,7 @@ function loadInvoices() {
         if (data.code === 200) {
             const tbody = document.querySelector('#invoiceTable tbody');
             tbody.innerHTML = '';
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString();
             data.data.records.forEach(inv => {
                 const tr = document.createElement('tr');
                 // 未入金かつ支払期限を過ぎている場合は期限を赤字で強調する
@@ -68,7 +68,7 @@ function loadInvoices() {
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
                         ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('invoice.btn.markSent')}</button>` : ''}
-                        ${['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-success" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
+                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
                         ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder', '督促')}</button>` : ''}
                         ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.void')}</button>` : ''}
                     </td>
@@ -82,7 +82,7 @@ function loadInvoices() {
 function updateInvoiceStatus(id, status, requireDate = false) {
     let paidDate = null;
     if (requireDate) {
-        paidDate = prompt(SES.i18n.t('invoice.prompt.paidDate'), new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paidDate'), getLocalDateString());
         if (!paidDate) return;
     } else {
         if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateBpPaymentStatus(id, status) {
     let paidDate = null;
     if (status === '支払済') {
-        paidDate = prompt(SES.i18n.t('invoice.prompt.paymentDate'), new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paymentDate'), getLocalDateString());
         if (!paidDate) return;
     } else {
         if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
@@ -242,7 +242,7 @@ function openPaymentModal(invoiceId, invoiceNo, total) {
     currentPaymentInvoiceId = invoiceId;
     currentPaymentInvoiceTotal = total;
     document.getElementById('paymentInvoiceNo').textContent = invoiceNo;
-    document.querySelector('#paymentForm [name="paidDate"]').value = new Date().toISOString().split('T')[0];
+    document.querySelector('#paymentForm [name="paidDate"]').value = getLocalDateString();
     document.querySelector('#paymentForm [name="amount"]').value = '';
     document.querySelector('#paymentForm [name="fee"]').value = '0';
     document.querySelector('#paymentForm [name="remarks"]').value = '';
@@ -273,6 +273,13 @@ function loadPayments() {
             balanceEl.textContent = '￥' + balance.toLocaleString();
             document.getElementById('paymentRemaining').textContent =
                 balance > 0 ? SES.i18n.t('invoice.payment.remaining', 'あと {0} 円で入金済').replace('{0}', balance.toLocaleString()) : '';
+            
+            const disableForm = balance <= 0;
+            document.querySelector('#paymentForm [name="amount"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="fee"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="paidDate"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="remarks"]').disabled = disableForm;
+            document.getElementById('btnSubmitPayment').disabled = disableForm;
         });
 }
 
@@ -337,7 +344,15 @@ function loadAging() {
         (data.data.rows || []).forEach(r => {
             const tr = document.createElement('tr');
             let cells = `<td>${SES.escapeHtml(r.customerName || '')}</td>`;
-            cols.forEach(c => { cells += `<td class="text-right">￥${Number(r[c] || 0).toLocaleString()}</td>`; });
+            cols.forEach(c => {
+                const val = Number(r[c] || 0);
+                const str = `￥${val.toLocaleString()}`;
+                if (val > 0 && r.customerId) {
+                    cells += `<td class="text-right"><a href="/invoice/list?customerId=${r.customerId}">${str}</a></td>`;
+                } else {
+                    cells += `<td class="text-right">${str}</td>`;
+                }
+            });
             tr.innerHTML = cells;
             tbody.appendChild(tr);
         });
@@ -364,7 +379,7 @@ function openReminderModal(invoiceId, invoiceNo) {
     document.getElementById('reminderInvoiceNo').textContent = invoiceNo;
     const sel = document.getElementById('reminderTemplate');
     sel.innerHTML = '';
-    fetch('/api/email-templates').then(res => res.json()).then(data => {
+    fetch('/api/invoices/reminder-templates').then(res => res.json()).then(data => {
         if (data.code === 200) {
             data.data.forEach(t => {
                 const opt = document.createElement('option');
@@ -387,7 +402,13 @@ function submitReminder() {
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
-            (SES.toast || alert)(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'), 'success');
+            if (data.data && data.data.status === 'FAILED') {
+                if (window.SES && SES.toast) SES.toast('メール送信に失敗しました', 'error');
+                else alert('メール送信に失敗しました');
+            } else {
+                if (window.SES && SES.toast) SES.toast(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'), 'success');
+                else alert(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
+            }
         } else {
             alert(data.message);
         }
@@ -406,3 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const agingTab = document.getElementById('aging-tab');
     if (agingTab) agingTab.addEventListener('shown.bs.tab', loadAging);
 });
+
+function getLocalDateString() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}

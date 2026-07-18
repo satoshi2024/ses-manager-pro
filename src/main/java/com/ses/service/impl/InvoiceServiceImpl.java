@@ -12,6 +12,9 @@ import com.ses.entity.Customer;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoiceItem;
 import com.ses.entity.InvoicePayment;
+import com.ses.dto.invoice.InvoicePaymentCreateRequest;
+import com.ses.dto.invoice.InvoicePaymentResponse;
+import java.util.stream.Collectors;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
@@ -173,14 +176,21 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     // ===== 債権管理（ar-management / P2） =====
+    @Autowired
+    private com.ses.mapper.MailDeliveryMapper mailDeliveryMapper;
+    @Autowired
+    private com.ses.mapper.MailDeliveryMapper mailDeliveryMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public InvoicePayment addPayment(Long invoiceId, InvoicePayment payment) {
-        Invoice invoice = this.getById(invoiceId);
+        Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", invoiceId).last("FOR UPDATE"));
         // 取消(void=論理削除)済み・存在しない請求書には入金できない。
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
+        }
+        if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
+            throw BusinessException.of("error.invoice.legacyPaidData");
         }
         if (payment.getAmount() == null || payment.getAmount().signum() <= 0) {
             throw BusinessException.of("error.invoice.paymentAmountInvalid");
@@ -212,9 +222,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deletePayment(Long invoiceId, Long paymentId) {
-        Invoice invoice = this.getById(invoiceId);
+        Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", invoiceId).last("FOR UPDATE"));
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
+        }
+        if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
+            throw BusinessException.of("error.invoice.legacyPaidData");
         }
         InvoicePayment payment = invoicePaymentMapper.selectById(paymentId);
         if (payment == null || !invoiceId.equals(payment.getInvoiceId())) {
@@ -225,11 +238,24 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     @Override
-    public List<InvoicePayment> listPayments(Long invoiceId) {
+    public List<InvoicePaymentResponse> listPayments(Long invoiceId) {
         return invoicePaymentMapper.selectList(new QueryWrapper<InvoicePayment>()
                 .eq("invoice_id", invoiceId)
-                .orderByAsc("paid_date", "id"));
+                .orderByAsc("paid_date", "id"))
+                .stream().map(this::mapToResponse).collect(Collectors.toList());
     }
+
+    private InvoicePaymentResponse mapToResponse(InvoicePayment payment) {
+        InvoicePaymentResponse res = new InvoicePaymentResponse();
+        res.setId(payment.getId());
+        res.setInvoiceId(payment.getInvoiceId());
+        res.setAmount(payment.getAmount());
+        res.setFee(payment.getFee());
+        res.setPaidDate(payment.getPaidDate());
+        res.setRemarks(payment.getRemarks());
+        return res;
+    }
+
 
     private BigDecimal sumPaid(Long invoiceId) {
         BigDecimal total = BigDecimal.ZERO;
@@ -345,6 +371,16 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     @Override
+    public java.util.List<com.ses.entity.MailDelivery> listReminders(Long invoiceId) {
+        return mailDeliveryMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.MailDelivery>().eq("invoice_id", invoiceId).orderByDesc("id"));
+    }
+
+    @Override
+    public java.util.List<com.ses.entity.MailDelivery> listReminders(Long invoiceId) {
+        return mailDeliveryMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.MailDelivery>().eq("invoice_id", invoiceId).orderByDesc("id"));
+    }
+
+    @Override
     public MailDispatchResult sendReminder(Long invoiceId, Long templateId) {
         Invoice invoice = this.getById(invoiceId);
         if (invoice == null) {
@@ -375,7 +411,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         params.put("dueDate", invoice.getDueDate().toString());
         params.put("overdueDays", String.valueOf(overdueDays));
 
-        return mailService.sendWithTemplate(templateId, params, to);
+        return mailService.sendWithTemplate(templateId, params, to, invoiceId);
     }
 
     @Override
@@ -405,7 +441,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        if ("入金済".equals(invoice.getStatus())) {
+        List<InvoicePaymentResponse> payments = listPayments(id);
+        if (!payments.isEmpty()) {
             throw BusinessException.of("error.invoice.cancelPaidInvoice");
         }
         invoiceItemMapper.delete(new QueryWrapper<InvoiceItem>().eq("invoice_id", id));
@@ -459,3 +496,30 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
 
 
+
+    @Override
+    public java.util.List<MailDispatchResult> sendReminders(java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
+        java.time.LocalDate targetDate = asOf != null ? asOf : java.time.LocalDate.now();
+        java.util.List<MailDispatchResult> results = new java.util.ArrayList<>();
+        for (Long id : invoiceIds) {
+            Invoice invoice = this.baseMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
+            if (invoice == null || ("入金済".equals(invoice.getStatus()) && listPayments(id).isEmpty())) {
+                results.add(new MailDispatchResult(null, "FAILED"));
+                continue;
+            }
+            if (!("送付済".equals(invoice.getStatus()) || "一部入金".equals(invoice.getStatus())) || invoice.getDueDate() == null || !invoice.getDueDate().isBefore(targetDate)) {
+                results.add(new MailDispatchResult(null, "SKIPPED"));
+                continue;
+            }
+            com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
+            String to = customer.getBillingEmail();
+            java.util.Map<String, String> params = new java.util.HashMap<>();
+            params.put("invoiceNo", invoice.getInvoiceNo());
+            params.put("customerName", customer.getCustomerName());
+            params.put("billingMonth", invoice.getBillingMonth());
+            params.put("total", invoice.getTotal() != null ? invoice.getTotal().toString() : "0");
+            params.put("dueDate", invoice.getDueDate() != null ? invoice.getDueDate().toString() : "");
+            results.add(mailService.sendWithTemplate(templateId, params, to, id));
+        }
+        return results;
+    }

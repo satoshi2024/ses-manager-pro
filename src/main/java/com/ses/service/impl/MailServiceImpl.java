@@ -60,7 +60,7 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
-    public MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to) {
+    public MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to, Long invoiceId) {
         if (!StringUtils.hasText(to) || !to.contains("@")) {
             throw new IllegalArgumentException("メール宛先が不正です");
         }
@@ -71,11 +71,11 @@ public class MailServiceImpl implements MailService {
         }
         String subject = TemplateRenderer.render(template.getSubjectTemplate(), params);
         String body = TemplateRenderer.render(template.getBodyTemplate(), params);
-        return send(to, subject, body);
+        return send(to, subject, body, invoiceId);
     }
 
     @Override
-    public MailDispatchResult send(String to, String subject, String body) {
+    public MailDispatchResult send(String to, String subject, String body, Long invoiceId) {
         MailDelivery delivery = new MailDelivery();
         delivery.setRecipient(to);
         delivery.setSubject(subject == null ? "" : subject);
@@ -83,6 +83,7 @@ public class MailServiceImpl implements MailService {
         delivery.setStatus("QUEUED");
         delivery.setAttemptCount(0);
         delivery.setQueuedAt(java.time.LocalDateTime.now());
+        delivery.setInvoiceId(invoiceId);
         if (mailDeliveryMapper != null) {
             mailDeliveryMapper.insert(delivery);
         }
@@ -99,6 +100,7 @@ public class MailServiceImpl implements MailService {
             delivery.setAttemptCount(1);
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
             log.info("【メールドライラン】from={} to={} subject={}\n{}", from, delivery.getRecipient(), delivery.getSubject(), delivery.getBody());
+            return;
         }
         try {
             SimpleMailMessage message = new SimpleMailMessage();

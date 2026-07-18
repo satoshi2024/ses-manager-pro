@@ -11,9 +11,12 @@ import com.ses.dto.invoice.AgingReportDto;
 import com.ses.entity.BpPayment;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoicePayment;
+import com.ses.dto.invoice.InvoicePaymentCreateRequest;
+import jakarta.validation.Valid;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
+import com.ses.service.EmailTemplateService;
 import com.ses.service.export.ExcelExportService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -36,6 +39,9 @@ public class InvoiceApiController {
 
     @Autowired
     private InvoicePdfService invoicePdfService;
+
+    @Autowired
+    private EmailTemplateService emailTemplateService;
 
     @Autowired
     private BpPaymentMapper bpPaymentMapper;
@@ -132,9 +138,9 @@ public class InvoiceApiController {
     }
 
     @PostMapping("/{id}/payments")
-    public ApiResult<?> addPayment(@PathVariable Long id, @RequestBody InvoicePayment payment) {
+    public ApiResult<?> addPayment(@PathVariable Long id, @RequestBody @Valid InvoicePaymentCreateRequest request) {
         assertInvoiceVisible(id);
-        return ApiResult.success(invoiceService.addPayment(id, payment));
+        return ApiResult.success(invoiceService.addPayment(id, request));
     }
 
     @DeleteMapping("/{id}/payments/{paymentId}")
@@ -166,6 +172,13 @@ public class InvoiceApiController {
     }
 
     /** 督促メール送信。body: {"templateId": N}。 */
+    @GetMapping("/reminder-templates")
+    public ApiResult<?> reminderTemplates() {
+        return ApiResult.success(emailTemplateService.list());
+    }
+
+
+
     @PostMapping("/{id}/reminder")
     public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
         assertInvoiceVisible(id);
@@ -173,6 +186,24 @@ public class InvoiceApiController {
     }
 
     /** 督促メール送信リクエスト。 */
+    
+    @PostMapping("/reminders")
+    public ApiResult<?> sendRemindersBulk(@RequestBody BulkReminderRequest request) {
+        return ApiResult.success(invoiceService.sendReminders(request.getInvoiceIds(), request.getTemplateId(), request.getAsOf()));
+    }
+
+    public static class BulkReminderRequest {
+        private List<Long> invoiceIds;
+        private Long templateId;
+        private LocalDate asOf;
+        public List<Long> getInvoiceIds() { return invoiceIds; }
+        public void setInvoiceIds(List<Long> invoiceIds) { this.invoiceIds = invoiceIds; }
+        public Long getTemplateId() { return templateId; }
+        public void setTemplateId(Long templateId) { this.templateId = templateId; }
+        public LocalDate getAsOf() { return asOf; }
+        public void setAsOf(LocalDate asOf) { this.asOf = asOf; }
+    }
+
     public static class ReminderRequest {
         private Long templateId;
         public Long getTemplateId() { return templateId; }

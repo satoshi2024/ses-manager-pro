@@ -20,6 +20,7 @@ public class MailDelivery {
     private String status;
     private Integer attemptCount;
     private String errorMessage;
+    private Long invoiceId;
     private LocalDateTime queuedAt;
     private LocalDateTime sentAt;
     private LocalDateTime failedAt;
