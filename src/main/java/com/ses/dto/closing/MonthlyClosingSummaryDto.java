@@ -7,6 +7,7 @@ import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import com.ses.entity.WorkRecord;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -21,8 +22,18 @@ public class MonthlyClosingSummaryDto {
     private List<WorkRecordGridDto> unenteredWork;
     /** (b) 入力中のまま残っている実績（未確定）。 */
     private List<WorkRecord> unconfirmedRecords;
-    /** (c) 確定済み未請求実績（全顧客）。 */
-    private List<UnbilledWorkRecordDto> unbilledConfirmed;
+    
+    @Data
+    public static class CustomerUnbilledDto {
+        private Long customerId;
+        private String customerName;
+        private BigDecimal subtotal;
+        private List<UnbilledWorkRecordDto> items;
+    }
+    
+    /** (c) 確定済み未請求実績（全顧客）。顧客単位でグループ化。 */
+    private List<CustomerUnbilledDto> unbilledConfirmed;
+    
     /** (d) 未払BP。 */
     private List<BpPaymentListDto> unpaidBp;
     /** (e) 期限超過請求（残高付き）。 */
@@ -40,5 +51,6 @@ public class MonthlyClosingSummaryDto {
     /** 締め済みか。 */
     private boolean closed;
     private Long closedBy;
+    private String closedByName;
     private LocalDateTime closedAt;
 }

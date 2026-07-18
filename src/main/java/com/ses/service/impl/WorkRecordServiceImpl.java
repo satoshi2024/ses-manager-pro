@@ -14,6 +14,7 @@ import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordDailyMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.common.constant.NotificationLinks;
+import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationService;
 import com.ses.service.WorkRecordService;
 import com.ses.service.billing.SettlementCalculator;
@@ -56,6 +57,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final InvoiceItemMapper invoiceItemMapper;
     private final NotificationService notificationService;
     private final WorkRecordDailyMapper workRecordDailyMapper;
+    private final MonthlyClosingService monthlyClosingService;
 
     /**
      * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
@@ -74,6 +76,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
     }
 
+    private void checkClosing(String month) {
+        if (monthlyClosingService.isClosed(month)) {
+            throw BusinessException.of(400, "error.closing.hardLocked");
+        }
+    }
+
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
     private static String monthEndOf(String workMonth) {
         return YearMonth.parse(workMonth).atEndOfMonth().toString();
@@ -87,6 +95,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks) {
+        checkClosing(workMonth);
         return saveHoursInternal(contractId, workMonth, actualHours, remarks, false);
     }
 
@@ -195,6 +204,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void confirmMonth(String workMonth) {
+        checkClosing(workMonth);
         // 入力中・提出済 を一括確定対象とする。差戻し（＝数値誤りの明示フラグ）は黙って確定させない。
         List<WorkRecord> records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth)
@@ -279,6 +289,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void reopenMonth(String workMonth) {
+        checkClosing(workMonth);
         List<WorkRecord> records = this.list(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth)
                 .eq("status", "確定"));
@@ -326,6 +337,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
+        checkClosing(workMonth);
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
@@ -369,6 +381,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
+        checkClosing(workMonth);
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
@@ -443,6 +456,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
+        checkClosing(record.getWorkMonth());
         requireTransition(record, "提出済");
         record.setStatus("提出済");
         baseMapper.updateById(record);
@@ -462,6 +476,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
+        checkClosing(record.getWorkMonth());
         requireTransition(record, "確定");
         record.setStatus("確定");
         baseMapper.updateById(record);
@@ -483,6 +498,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
+        checkClosing(record.getWorkMonth());
         requireTransition(record, "差戻し");
         record.setStatus("差戻し");
         baseMapper.updateById(record);
@@ -495,20 +511,3 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 "my-timesheet");
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,26 +1,37 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.closing.MonthlyClosingSummaryDto;
 import com.ses.dto.invoice.InvoiceBalanceDto;
+import com.ses.dto.invoice.UnbilledWorkRecordDto;
+import com.ses.entity.SysUser;
+import com.ses.entity.SystemConfig;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 月次締めチェックリストサービス実装。
@@ -40,17 +51,21 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     private final InvoiceMapper invoiceMapper;
     private final BpPaymentMapper bpPaymentMapper;
     private final SystemConfigService systemConfigService;
+    private final SystemConfigMapper systemConfigMapper;
+    private final SysUserMapper sysUserMapper;
 
     /** 締め記録1件。 */
     public static class ClosingRecord {
         public String month;
-        public Long userId;
-        public LocalDateTime confirmedAt;
+        @JsonAlias("userId")
+        public Long by;
+        @JsonAlias("confirmedAt")
+        public LocalDateTime at;
         public ClosingRecord() {}
-        public ClosingRecord(String month, Long userId, LocalDateTime confirmedAt) {
+        public ClosingRecord(String month, Long by, LocalDateTime at) {
             this.month = month;
-            this.userId = userId;
-            this.confirmedAt = confirmedAt;
+            this.by = by;
+            this.at = at;
         }
     }
 
@@ -58,13 +73,13 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         try {
             YearMonth.parse(month);
         } catch (Exception e) {
-            throw BusinessException.of("error.closing.invalidMonth");
+            throw BusinessException.of(400, "error.closing.invalidMonth");
         }
     }
 
     private void requireCloserRole(String role) {
         if (!"管理者".equals(role) && !"マネージャー".equals(role)) {
-            throw BusinessException.of("error.closing.roleDenied");
+            throw BusinessException.of(403, "error.closing.roleDenied");
         }
     }
 
@@ -87,7 +102,22 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
                 .ne("status", "確定")));
 
         // (c) 確定済み未請求（全顧客）
-        dto.setUnbilledConfirmed(invoiceMapper.selectUnbilledWorkRecordsAll(month));
+        List<UnbilledWorkRecordDto> items = invoiceMapper.selectUnbilledWorkRecordsAll(month);
+        Map<Long, MonthlyClosingSummaryDto.CustomerUnbilledDto> map = new LinkedHashMap<>();
+        for (UnbilledWorkRecordDto item : items) {
+            Long cid = item.getCustomerId();
+            MonthlyClosingSummaryDto.CustomerUnbilledDto group = map.computeIfAbsent(cid, k -> {
+                MonthlyClosingSummaryDto.CustomerUnbilledDto g = new MonthlyClosingSummaryDto.CustomerUnbilledDto();
+                g.setCustomerId(cid);
+                g.setCustomerName(item.getCustomerName());
+                g.setSubtotal(BigDecimal.ZERO);
+                g.setItems(new ArrayList<>());
+                return g;
+            });
+            group.setSubtotal(group.getSubtotal().add(item.getBillingAmount()));
+            group.getItems().add(item);
+        }
+        dto.setUnbilledConfirmed(new ArrayList<>(map.values()));
 
         // (d) 未払BP
         dto.setUnpaidBp(bpPaymentMapper.selectListWithDetails(month, "未払"));
@@ -104,7 +134,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
 
         dto.setUnenteredCount(dto.getUnenteredWork().size());
         dto.setUnconfirmedCount(dto.getUnconfirmedRecords().size());
-        dto.setUnbilledCount(dto.getUnbilledConfirmed().size());
+        dto.setUnbilledCount(items.size());
         dto.setUnpaidBpCount(dto.getUnpaidBp().size());
         dto.setOverdueCount(overdue.size());
 
@@ -115,36 +145,50 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         ClosingRecord rec = findRecord(month);
         if (rec != null) {
             dto.setClosed(true);
-            dto.setClosedBy(rec.userId);
-            dto.setClosedAt(rec.confirmedAt);
+            dto.setClosedBy(rec.by);
+            dto.setClosedAt(rec.at);
+            if (rec.by != null) {
+                SysUser u = sysUserMapper.selectById(rec.by);
+                if (u != null) {
+                    dto.setClosedByName(StringUtils.hasText(u.getRealName()) ? u.getRealName() : u.getUsername());
+                } else {
+                    dto.setClosedByName("ID:" + rec.by);
+                }
+            } else {
+                dto.setClosedByName("");
+            }
         }
         return dto;
     }
 
+    @Transactional
     @Override
     public void confirmClosing(String month, Long userId, String role) {
         validateMonth(month);
         requireCloserRole(role);
         MonthlyClosingSummaryDto s = summary(month);
         if (!s.isReadyToClose()) {
-            throw BusinessException.of("error.closing.notReady");
+            throw BusinessException.of(400, "error.closing.notReady");
         }
-        List<ClosingRecord> records = loadRecords();
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
         records.removeIf(r -> month.equals(r.month));
         records.add(new ClosingRecord(month, userId, LocalDateTime.now()));
-        saveRecords(records);
+        saveRecordsToJson(records, config);
     }
 
+    @Transactional
     @Override
     public void reopenClosing(String month, Long userId, String role) {
         validateMonth(month);
         requireCloserRole(role);
-        List<ClosingRecord> records = loadRecords();
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
         boolean removed = records.removeIf(r -> month.equals(r.month));
         if (!removed) {
-            throw BusinessException.of("error.closing.notClosed");
+            throw BusinessException.of(400, "error.closing.notClosed");
         }
-        saveRecords(records);
+        saveRecordsToJson(records, config);
     }
 
     @Override
@@ -153,11 +197,12 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     }
 
     private ClosingRecord findRecord(String month) {
-        return loadRecords().stream().filter(r -> month.equals(r.month)).findFirst().orElse(null);
+        SystemConfig config = systemConfigMapper.selectById(CONFIG_KEY);
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), false);
+        return records.stream().filter(r -> month.equals(r.month)).findFirst().orElse(null);
     }
 
-    private List<ClosingRecord> loadRecords() {
-        String json = systemConfigService.getString(CONFIG_KEY, "");
+    private List<ClosingRecord> loadRecordsFromJson(String json, boolean throwOnError) {
         if (json == null || json.isBlank()) {
             return new ArrayList<>();
         }
@@ -165,16 +210,26 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
             return OBJECT_MAPPER.readValue(json, new TypeReference<List<ClosingRecord>>() {});
         } catch (Exception e) {
             log.warn("締め記録JSONの解析に失敗しました。空として扱います: {}", json, e);
+            if (throwOnError) {
+                throw BusinessException.of(500, "JSON形式が不正です");
+            }
             return new ArrayList<>();
         }
     }
 
-    private void saveRecords(List<ClosingRecord> records) {
+    private void saveRecordsToJson(List<ClosingRecord> records, SystemConfig config) {
         try {
             String json = OBJECT_MAPPER.writeValueAsString(records);
+            if (config == null) {
+                config = new SystemConfig(CONFIG_KEY, json, "月次締め済み月の記録(JSON)");
+                systemConfigMapper.insert(config);
+            } else {
+                config.setConfigValue(json);
+                systemConfigMapper.updateById(config);
+            }
             systemConfigService.put(CONFIG_KEY, json, "月次締め済み月の記録(JSON)");
         } catch (Exception e) {
-            throw new BusinessException("締め記録の保存に失敗しました");
+            throw BusinessException.of(500, "締め記録の保存に失敗しました");
         }
     }
 }

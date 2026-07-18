@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.SystemConfig;
 import com.ses.service.SystemConfigService;
@@ -24,12 +25,17 @@ public class SystemConfigApiController {
     /** マスキング済みであることを示すプレースホルダー値。保存時にこの値のまま送られてきた項目は更新しない。 */
     private static final String MASK_PLACEHOLDER = "********";
 
+    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
+    private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months");
+
     private final SystemConfigService systemConfigService;
 
     /** 全設定一覧（機微情報はマスキングして返す） */
     @GetMapping
     public ApiResult<List<SystemConfig>> list() {
         List<SystemConfig> configs = systemConfigService.all();
+        configs.removeIf(c -> SYSTEM_MANAGED_KEYS.contains(c.getConfigKey()));
+        
         for (SystemConfig c : configs) {
             if (MASKED_KEYS.contains(c.getConfigKey()) && StringUtils.hasText(c.getConfigValue())) {
                 c.setConfigValue(MASK_PLACEHOLDER);
@@ -43,6 +49,9 @@ public class SystemConfigApiController {
     public ApiResult<Boolean> update(@RequestBody List<SystemConfig> configs) {
         if (configs != null) {
             for (SystemConfig c : configs) {
+                if (SYSTEM_MANAGED_KEYS.contains(c.getConfigKey())) {
+                    throw BusinessException.of(400, "システム管理キーは編集できません");
+                }
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;

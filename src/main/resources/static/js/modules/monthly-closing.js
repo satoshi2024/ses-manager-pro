@@ -30,13 +30,13 @@ function card(titleKey, count, items, linkFn, isGrey) {
     const color = isGrey ? 'bg-secondary' : (zero ? 'bg-success' : 'bg-warning text-dark');
     const div = document.createElement('div');
     div.className = 'col-md-4 col-lg-2';
-    div.innerHTML = `
-        <div class="card h-100" style="cursor:pointer" onclick='showClosingDetail("${titleKey}")'>
+    div.innerHTML = 
+        <div class="card h-100" style="cursor:pointer" onclick='showClosingDetail("")'>
             <div class="card-body text-center">
-                <div class="small">${SES.i18n.t(titleKey)}</div>
-                <span class="badge ${color} fs-5">${count}</span>
+                <div class="small"> + SES.i18n.t(titleKey) + </div>
+                <span class="badge  + color +  fs-5"> + count + </span>
             </div>
-        </div>`;
+        </div>;
     return div;
 }
 
@@ -56,8 +56,7 @@ function renderCards() {
     const reopenBtn = document.getElementById('btnReopenClosing');
     if (s.closed) {
         banner.classList.remove('d-none');
-        banner.textContent = SES.i18n.t('closing.status.closed', '締め済み（{0} / {1}）')
-            .replace('{0}', s.closedBy || '').replace('{1}', (s.closedAt || '').replace('T', ' '));
+        banner.textContent = SES.i18n.t('closing.status.closed', [s.closedByName || '', (s.closedAt || '').replace('T', ' ')]);
         reopenBtn.classList.remove('d-none');
     } else {
         banner.classList.add('d-none');
@@ -65,7 +64,7 @@ function renderCards() {
     }
 
     const diff = document.getElementById('diffWarning');
-    const hasRemaining = s.unenteredCount + s.unconfirmedCount + s.unbilledCount + s.unpaidBpCount + s.overdueCount > 0;
+    const hasRemaining = s.unenteredCount + s.unconfirmedCount + s.unbilledCount + s.unpaidBpCount > 0;
     diff.classList.toggle('d-none', !(s.closed && hasRemaining));
 
     document.getElementById('closingDetail').innerHTML = '';
@@ -73,29 +72,51 @@ function renderCards() {
 
 function showClosingDetail(key) {
     const s = closingSummary;
+    const month = s.month;
     let rows = [];
     let headers = [];
     if (key === 'closing.item.unentered') {
-        headers = ['契約番号', '要員', '案件'];
-        rows = s.unenteredWork.map(r => [r.contractNo, r.engineerName, r.projectName]);
+        headers = ['契約番号', '要員', '案件', '操作'];
+        rows = s.unenteredWork.map(r => [r.contractNo, r.engineerName, r.projectName, <a href="/work-record?month= + month + " class="btn btn-sm btn-outline-primary">修正画面</a>]);
     } else if (key === 'closing.item.unconfirmed') {
-        headers = ['契約ID', 'ステータス', '工数'];
-        rows = s.unconfirmedRecords.map(r => [r.contractId, r.status, r.actualHours]);
+        headers = ['契約ID', 'ステータス', '工数', '操作'];
+        rows = s.unconfirmedRecords.map(r => [r.contractId, r.status, r.actualHours, <a href="/work-record?month= + month + " class="btn btn-sm btn-outline-primary">修正画面</a>]);
     } else if (key === 'closing.item.unbilled') {
-        headers = ['要員', '案件', '請求額'];
-        rows = s.unbilledConfirmed.map(r => [r.engineerName, r.projectName, r.billingAmount]);
+        headers = ['顧客名 / 要員', '案件', '金額', '操作'];
+        let html = <h5> + SES.i18n.t(key) + </h5>;
+        s.unbilledConfirmed.forEach(g => {
+            html += <h6> + SES.escapeHtml(g.customerName) +  (小計:  + g.subtotal + )</h6>;
+            html += <table class="table table-sm table-bordered"><thead><tr>;
+            headers.forEach(h => html += <th> + h + </th>);
+            html += </tr></thead><tbody>;
+            g.items.forEach(r => {
+                html += <tr>
+                    <td> + SES.escapeHtml(r.engineerName) + </td>
+                    <td> + SES.escapeHtml(r.projectName) + </td>
+                    <td> + r.billingAmount + </td>
+                    <td><a href="/invoice?month= + month + &customerId= + g.customerId + " class="btn btn-sm btn-outline-primary">請求作成</a></td>
+                </tr>;
+            });
+            html += </tbody></table>;
+        });
+        document.getElementById('closingDetail').innerHTML = html;
+        return;
     } else if (key === 'closing.item.unpaidBp') {
-        headers = ['要員', '案件', '金額'];
-        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, r.amount]);
+        headers = ['要員', '案件', '金額', '操作'];
+        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, r.amount, <a href="/invoice?tab=bp-payment&month= + month + " class="btn btn-sm btn-outline-primary">支払画面</a>]);
     } else if (key === 'closing.item.overdue') {
-        headers = ['請求書番号', '顧客', '残高', '期限'];
-        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, r.balance, r.dueDate]);
+        headers = ['請求書番号', '顧客', '残高', '期限', '操作'];
+        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, r.balance, r.dueDate, <a href="/invoice?invoiceId= + r.invoiceId + " class="btn btn-sm btn-outline-primary">督促</a>]);
     }
-    let html = `<h5>${SES.i18n.t(key)}</h5><table class="table table-sm table-bordered"><thead><tr>`;
-    headers.forEach(h => html += `<th>${h}</th>`);
+    let html = <h5> + SES.i18n.t(key) + </h5><table class="table table-sm table-bordered"><thead><tr>;
+    headers.forEach(h => html += <th> + h + </th>);
     html += '</tr></thead><tbody>';
     rows.forEach(r => {
-        html += '<tr>' + r.map(c => `<td>${SES.escapeHtml(String(c == null ? '' : c))}</td>`).join('') + '</tr>';
+        html += '<tr>';
+        for(let i=0; i<r.length-1; i++) {
+            html += <td> + SES.escapeHtml(String(r[i] == null ? '' : r[i])) + </td>;
+        }
+        html += <td> + r[r.length-1] + </td></tr>;
     });
     html += '</tbody></table>';
     document.getElementById('closingDetail').innerHTML = html;
@@ -108,8 +129,10 @@ function confirmClosing() {
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
         body: JSON.stringify({ month })
     }).then(res => res.json()).then(data => {
-        if (data.code === 200) { (SES.toast || alert)(SES.i18n.t('closing.btn.confirm') + ' OK', 'success'); loadClosing(); }
+        if (data.code === 200) { SES.toast.success(SES.i18n.t('closing.btn.confirm') + ' OK'); loadClosing(); }
         else alert(data.message);
+    }).catch(e => {
+        SES.toast.error("通信エラーが発生しました");
     });
 }
 

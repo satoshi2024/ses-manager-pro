@@ -9,6 +9,8 @@ import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.SystemConfigMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,16 +37,20 @@ class MonthlyClosingServiceImplTest {
     @Mock private InvoiceMapper invoiceMapper;
     @Mock private BpPaymentMapper bpPaymentMapper;
     @Mock private SystemConfigService systemConfigService;
+    @Mock private SystemConfigMapper systemConfigMapper;
+    @Mock private SysUserMapper sysUserMapper;
 
     @InjectMocks
     private MonthlyClosingServiceImpl service;
 
     private void stubEmptyAll() {
-        when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString())).thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectListWithDetails(anyString(), any())).thenReturn(Collections.emptyList());
-        when(invoiceMapper.selectOutstandingBalances()).thenReturn(Collections.emptyList());
+        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
+        lenient().when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString())).thenReturn(Collections.emptyList());
+        lenient().when(bpPaymentMapper.selectListWithDetails(anyString(), any())).thenReturn(Collections.emptyList());
+        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(Collections.emptyList());
+        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(new com.ses.entity.SystemConfig());
+        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
     }
 
     @Test
@@ -53,20 +59,24 @@ class MonthlyClosingServiceImplTest {
         entered.setWorkRecordId(5L);
         WorkRecordGridDto unentered = new WorkRecordGridDto();
         unentered.setWorkRecordId(null);
-        when(workRecordMapper.selectMonthlyGrid(anyString(), anyString()))
+        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString()))
                 .thenReturn(List.of(entered, unentered));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(new WorkRecord()));
-        when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString()))
-                .thenReturn(List.of(new UnbilledWorkRecordDto()));
-        when(bpPaymentMapper.selectListWithDetails(anyString(), eq("未払")))
+        WorkRecord wr = new WorkRecord();
+        wr.setBillingAmount(new BigDecimal("1000")); // fix NPE
+        lenient().when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
+        UnbilledWorkRecordDto unbilled = new UnbilledWorkRecordDto();
+        unbilled.setBillingAmount(new BigDecimal("2000")); // fix NPE
+        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString()))
+                .thenReturn(List.of(unbilled));
+        lenient().when(bpPaymentMapper.selectListWithDetails(anyString(), eq("未払")))
                 .thenReturn(List.of(new com.ses.dto.invoice.BpPaymentListDto()));
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(5));
         overdue.setBalance(new BigDecimal("1000"));
         InvoiceBalanceDto notDue = new InvoiceBalanceDto();
         notDue.setDueDate(LocalDate.now().plusDays(5));
-        when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue, notDue));
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any())).thenReturn("");
+        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue, notDue));
+        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
 
@@ -81,14 +91,10 @@ class MonthlyClosingServiceImplTest {
 
     @Test
     void summary_readyWhenAllZero_eveIfOverdueRemains() {
-        when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString())).thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectListWithDetails(anyString(), any())).thenReturn(Collections.emptyList());
+        stubEmptyAll();
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(1));
-        when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue));
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any())).thenReturn("");
+        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue));
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
         assertTrue(s.isReadyToClose(), "(e)期限超過は締めを妨げない");
@@ -98,7 +104,7 @@ class MonthlyClosingServiceImplTest {
     @Test
     void confirm_recordsWhenReady() {
         stubEmptyAll();
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any())).thenReturn("");
+        lenient().when(sysUserMapper.selectById(any())).thenReturn(new com.ses.entity.SysUser());
 
         service.confirmClosing("2026-06", 7L, "管理者");
 
@@ -110,12 +116,10 @@ class MonthlyClosingServiceImplTest {
 
     @Test
     void confirm_notReadyThrows() {
-        when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(new WorkRecord())); // (b) 残あり
-        when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString())).thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectListWithDetails(anyString(), any())).thenReturn(Collections.emptyList());
-        when(invoiceMapper.selectOutstandingBalances()).thenReturn(Collections.emptyList());
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any())).thenReturn("");
+        stubEmptyAll();
+        WorkRecord wr = new WorkRecord();
+        wr.setBillingAmount(new BigDecimal("100"));
+        lenient().when(workRecordMapper.selectList(any())).thenReturn(List.of(wr)); // (b) 残あり
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.confirmClosing("2026-06", 7L, "管理者"));
@@ -139,17 +143,22 @@ class MonthlyClosingServiceImplTest {
 
     @Test
     void isClosed_reflectsRecord() {
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any()))
-                .thenReturn("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
+        com.ses.entity.SystemConfig config = new com.ses.entity.SystemConfig();
+        config.setConfigValue("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
+        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(config);
+        
         assertTrue(service.isClosed("2026-06"));
         assertFalse(service.isClosed("2026-05"));
     }
 
     @Test
     void reopen_removesRecord() {
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any()))
-                .thenReturn("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
+        com.ses.entity.SystemConfig config = new com.ses.entity.SystemConfig();
+        config.setConfigValue("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
+        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(config);
+        
         service.reopenClosing("2026-06", 7L, "マネージャー");
+        
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(systemConfigService).put(eq("closing.confirmed-months"), json.capture(), anyString());
         assertFalse(json.getValue().contains("2026-06"));
@@ -157,7 +166,7 @@ class MonthlyClosingServiceImplTest {
 
     @Test
     void reopen_notClosedThrows() {
-        when(systemConfigService.getString(eq("closing.confirmed-months"), any())).thenReturn("");
+        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(new com.ses.entity.SystemConfig());
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.reopenClosing("2026-06", 7L, "管理者"));
         assertTrue(ex.getMessage().contains("error.closing.notClosed"));

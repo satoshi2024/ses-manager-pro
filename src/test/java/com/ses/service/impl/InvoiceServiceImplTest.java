@@ -44,6 +44,9 @@ public class InvoiceServiceImplTest {
     private SystemConfigService systemConfigService;
 
     @Mock
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
+
+    @Mock
     private BpPaymentMapper bpPaymentMapper;
 
     @Mock

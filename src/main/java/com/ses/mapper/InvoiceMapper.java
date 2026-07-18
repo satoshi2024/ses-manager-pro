@@ -80,11 +80,13 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
             w.billing_amount AS billingAmount,
             e.full_name AS engineerName,
             p.project_name AS projectName,
-            c.customer_id AS customerId
+            c.customer_id AS customerId,
+            cst.company_name AS customerName
         FROM t_work_record w
         INNER JOIN t_contract c ON w.contract_id = c.id
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
+        LEFT JOIN m_customer cst ON c.customer_id = cst.id
         WHERE c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
