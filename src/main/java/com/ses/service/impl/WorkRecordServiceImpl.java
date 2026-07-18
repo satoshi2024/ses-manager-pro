@@ -326,6 +326,29 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
+        if (!YearMonth.from(daily.getWorkDate()).equals(YearMonth.parse(workMonth))) {
+            throw BusinessException.of("error.workRecord.invalidMonth");
+        }
+        Contract contract = contractMapper.selectById(contractId);
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract2");
+        }
+        if (contract.getStartDate() != null && daily.getWorkDate().isBefore(contract.getStartDate())) {
+            throw BusinessException.of("error.workRecord.contractNotBillable");
+        }
+        if (contract.getEndDate() != null && daily.getWorkDate().isAfter(contract.getEndDate())) {
+            throw BusinessException.of("error.workRecord.contractNotBillable");
+        }
+        if (daily.getStartTime() == null || daily.getEndTime() == null) {
+            throw BusinessException.of("error.workRecord.dailyInvalidTime");
+        }
+        if (daily.getBreakMinutes() == null) {
+            daily.setBreakMinutes(0);
+        }
+        if (daily.getBreakMinutes() < 0 || daily.getBreakMinutes() > 1440) {
+            throw BusinessException.of("error.workRecord.dailyInvalidTime");
+        }
+
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
@@ -434,6 +457,23 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             throw BusinessException.of("error.workRecord.statusTransitionInvalid",
                     record.getStatus(), newStatus);
         }
+    }
+
+    @Override
+    @Transactional
+    public void submitByMonth(Long contractId, String workMonth) {
+        WorkRecord w = baseMapper.selectOne(new QueryWrapper<WorkRecord>()
+                .eq("contract_id", contractId)
+                .eq("work_month", workMonth), false);
+        if (w == null) {
+            w = new WorkRecord();
+            w.setContractId(contractId);
+            w.setWorkMonth(workMonth);
+            w.setActualHours(BigDecimal.ZERO);
+            w.setStatus("入力中");
+            baseMapper.insert(w);
+        }
+        submit(w.getId());
     }
 
     @Override

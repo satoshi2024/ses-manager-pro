@@ -85,7 +85,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
 
     @Test
     @DisplayName("Request random non-existent endpoint should map to 404")
-    @WithMockUser
+    @WithMockUser(username = "admin", roles = {"管理者"})
     void testRandomNonExistentEndpoint() throws Exception {
         // Without mocked user, it might redirect to login (302) first.
         // With mock user, it hits the non-existent endpoint and returns 404.

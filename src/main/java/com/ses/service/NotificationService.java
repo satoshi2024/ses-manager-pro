@@ -14,4 +14,5 @@ public interface NotificationService {
     default void publish(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         publish(type, title, message, linkUrl, dedupeKey);
     }
+    void publishToUser(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey, Long recipientUserId);
 }

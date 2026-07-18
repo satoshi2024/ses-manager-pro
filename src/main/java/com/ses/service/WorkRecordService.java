@@ -24,6 +24,7 @@ public interface WorkRecordService extends IService<WorkRecord> {
     List<WorkRecordDaily> listDaily(Long workRecordId);
     /** 入力中/差戻し→提出済（承認者へ通知）。 */
     void submit(Long workRecordId);
+    void submitByMonth(Long contractId, String workMonth);
     /** 提出済→確定（confirmMonth と同じBP生成後続処理を単契約分）。 */
     void approve(Long workRecordId);
     /** 提出済→差戻し（要員へコメント付き通知）。 */

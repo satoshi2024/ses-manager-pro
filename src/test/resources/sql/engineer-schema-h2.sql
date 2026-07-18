@@ -124,6 +124,7 @@ CREATE TABLE t_notification (
   message     VARCHAR(500),
   link_url    VARCHAR(300),
   menu_key    VARCHAR(50),
+  recipient_user_id BIGINT,
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -252,6 +253,7 @@ CREATE TABLE t_work_record (
   actual_hours   DECIMAL(5,1) NOT NULL,
   billing_amount DECIMAL(12,0),
   payment_amount DECIMAL(12,0),
+  reject_comment VARCHAR(500),
   status         VARCHAR(20) DEFAULT '入力中',
   remarks        VARCHAR(500),
   created_by     BIGINT,

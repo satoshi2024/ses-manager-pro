@@ -30,7 +30,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.billing_amount AS billingAmount,
             w.payment_amount AS paymentAmount,
             w.status AS status,
-            w.remarks AS remarks
+            w.remarks AS remarks,
+            w.reject_comment AS rejectComment
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -65,7 +66,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.billing_amount AS billingAmount,
             w.payment_amount AS paymentAmount,
             w.status AS status,
-            w.remarks AS remarks
+            w.remarks AS remarks,
+            w.reject_comment AS rejectComment
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id

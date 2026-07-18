@@ -101,6 +101,9 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
     }
 
     private boolean isMenuControlledPath(String uri) {
+        if (uri.startsWith("/api/notifications") && !uri.startsWith("/api/notifications/generate")) {
+            return false;
+        }
         return !uri.equals("/logout") && !uri.equals("/") && (uri.startsWith("/api/") || !uri.contains("."));
     }
 

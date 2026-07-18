@@ -117,6 +117,11 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     private void publishInternal(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        publishToUser(type, title, message, linkUrl, dedupeKey, menuKey, null);
+    }
+
+    @Override
+    public void publishToUser(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey, Long recipientUserId) {
         try {
             Notification notification = new Notification();
             notification.setType(type);
@@ -125,6 +130,7 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setLinkUrl(linkUrl);
             notification.setMenuKey(menuKey);
             notification.setDedupeKey(dedupeKey);
+            notification.setRecipientUserId(recipientUserId);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);
             webhookNotifier.notify(notification);

@@ -578,6 +578,10 @@ class WorkRecordServiceImplTest {
         existing.setId(10L);
         existing.setStatus("入力中");
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        
+        com.ses.entity.Contract mockContract = new com.ses.entity.Contract();
+        mockContract.setId(1L);
+        when(contractMapper.selectById(1L)).thenReturn(mockContract);
         com.ses.entity.WorkRecordDaily daily = new com.ses.entity.WorkRecordDaily();
         daily.setWorkDate(LocalDate.of(2026, 7, 1));
         daily.setStartTime(java.time.LocalTime.of(9, 0));
