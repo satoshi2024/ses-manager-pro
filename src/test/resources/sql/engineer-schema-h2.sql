@@ -11,6 +11,7 @@ CREATE TABLE t_mail_delivery (
   status VARCHAR(20) NOT NULL,
   attempt_count INT NOT NULL DEFAULT 0,
   error_message VARCHAR(1000),
+  invoice_id BIGINT,
   queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   sent_at DATETIME,
   failed_at DATETIME,
