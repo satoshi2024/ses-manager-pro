@@ -58,6 +58,7 @@ class QuotationPdfServiceImplTest {
         EngineerMapper em = Mockito.mock(EngineerMapper.class);
         Engineer e = new Engineer();
         e.setFullName("山田太郎");
+        e.setInitialName("Y.T");
         when(em.selectById(2L)).thenReturn(e);
 
         return new QuotationPdfServiceImpl(new PdfProperties(), cfg, qm, cm, em);

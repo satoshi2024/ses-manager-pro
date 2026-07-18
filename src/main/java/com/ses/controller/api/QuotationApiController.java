@@ -80,15 +80,38 @@ public class QuotationApiController {
     }
 
     @PostMapping
-    public ApiResult<?> create(@RequestBody Quotation quotation) {
-        quotation.setId(null);
+    public ApiResult<?> create(@jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        Quotation quotation = new Quotation();
+        quotation.setCustomerId(request.getCustomerId());
+        quotation.setProjectId(request.getProjectId());
+        quotation.setEngineerId(request.getEngineerId());
+        quotation.setProposalId(request.getProposalId());
+        quotation.setTitle(request.getTitle());
+        quotation.setUnitPrice(request.getUnitPrice());
+        quotation.setSettlementHoursMin(request.getSettlementHoursMin());
+        quotation.setSettlementHoursMax(request.getSettlementHoursMax());
+        quotation.setValidUntil(request.getValidUntil());
+        quotation.setRemarks(request.getRemarks());
+        
         quotationService.saveWithBusinessRules(quotation);
         return ApiResult.success(quotation);
     }
 
     @PutMapping("/{id}")
-    public ApiResult<?> update(@PathVariable Long id, @RequestBody Quotation quotation) {
+    public ApiResult<?> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        Quotation quotation = new Quotation();
         quotation.setId(id);
+        quotation.setCustomerId(request.getCustomerId());
+        quotation.setProjectId(request.getProjectId());
+        quotation.setEngineerId(request.getEngineerId());
+        quotation.setProposalId(request.getProposalId());
+        quotation.setTitle(request.getTitle());
+        quotation.setUnitPrice(request.getUnitPrice());
+        quotation.setSettlementHoursMin(request.getSettlementHoursMin());
+        quotation.setSettlementHoursMax(request.getSettlementHoursMax());
+        quotation.setValidUntil(request.getValidUntil());
+        quotation.setRemarks(request.getRemarks());
+        
         quotationService.updateWithBusinessRules(quotation);
         return ApiResult.success(null);
     }

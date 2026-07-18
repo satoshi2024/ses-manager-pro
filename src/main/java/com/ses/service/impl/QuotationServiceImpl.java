@@ -138,6 +138,9 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         if (!ALLOWED.getOrDefault(q.getStatus(), Set.of()).contains(newStatus)) {
             throw BusinessException.of("error.quotation.statusTransitionInvalid", q.getStatus(), newStatus);
         }
+        if ("受注".equals(newStatus) && q.getEngineerId() == null) {
+            throw BusinessException.of(409, "error.quotation.engineerRequired");
+        }
         q.setStatus(newStatus);
         this.updateById(q);
     }
@@ -157,6 +160,9 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         Quotation q = this.getById(quotationId);
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
+        }
+        if (!"受注".equals(q.getStatus())) {
+            throw BusinessException.of(409, "error.quotation.notAccepted");
         }
         return contractService.createDraftFromQuotation(q);
     }
