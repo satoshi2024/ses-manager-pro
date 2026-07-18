@@ -10,7 +10,7 @@ B1 を最初に修正すること。
 
 ---
 
-## B1.【高・ビルド赤】故障修正コミットが i18n 4言語同期を破りテストが失敗している
+## B1.【高・ビルド赤】故障修正コミットが i18n 4言語同期を破りテストが失敗している [対応済み]
 
 - **場所**: `messages.properties`（`66b2bc1` で追加された `menu.workRecord` / `menu.invoice` /
   `menu.payroll` / `common.btn.edit` の4キー）
@@ -20,7 +20,7 @@ B1 を最初に修正すること。
 - **修正**: 4キーを en/zh_CN/ko へ追加（サイドバーのセクション見出し・編集ボタンの訳）。
 - **テスト**: `MessageBundleConsistencyTest` グリーン復帰＝完了条件。
 
-## B2.【中高・P1】差戻し→再提出の通知が永久デデュープされ承認者に届かない
+## B2.【中高・P1】差戻し→再提出の通知が永久デデュープされ承認者に届かない [対応済み]
 
 - **場所**: `WorkRecordServiceImpl.submit`（dedupeKey `"timesheet-submitted-" + record.getId()`）
 - **内容**: 通知の dedupe_key は UNIQUE＋`DuplicateKeyException` 握り潰しの**永久冪等**。
@@ -34,7 +34,7 @@ B1 を最初に修正すること。
 - **テスト**: `WorkRecordServiceImplTest` — submit→reject→submit で publish が2回呼ばれ、
   dedupeKey が異なることを verify。
 
-## B3.【中・P1】TIMESHEET_* 通知が menu_key NULL で全ロール可視（差戻しコメントの漏えい）
+## B3.【中・P1】TIMESHEET_* 通知が menu_key NULL で全ロール可視（差戻しコメントの漏えい） [対応済み]
 
 - **場所**: `NotificationServiceImpl.menuKeyForType`（`TIMESHEET_SUBMITTED/REJECTED` の case なし）
   ＋ `NotificationMapper`（`n.menu_key IS NULL` は**全員可視**）
@@ -50,7 +50,7 @@ B1 を最初に修正すること。
   （コメントは record 側で本人が参照できる。B4 参照）。通知の個人宛先化は将来課題として注記。
 - **テスト**: menuKeyForType の2 case 追加検証＋REJECTED の message にコメントが含まれないこと。
 
-## B4.【中低・P1】reject が要員の備考（remarks）を差戻しコメントで上書きする
+## B4.【中低・P1】reject が要員の備考（remarks）を差戻しコメントで上書きする [対応済み]
 
 - **場所**: `WorkRecordServiceImpl.reject`（`record.setRemarks(comment)`）
 - **内容**: 実績の `remarks` は要員/管理部が入力した業務メモ。差戻しコメントで**無警告に上書き**され
@@ -60,7 +60,7 @@ B1 を最初に修正すること。
   API レスポンスで返す」方式でも可。どちらを採るか実装時に判断し本節へ記録。
 - **テスト**: reject 後も既存 remarks が不変であること。
 
-## B5.【低・P1】通知 message の JSON 組み立てでコメント未エスケープ
+## B5.【低・P1】通知 message の JSON 組み立てでコメント未エスケープ [対応済み]
 
 - **場所**: `WorkRecordServiceImpl.reject`（`"[\"…\", \"" + comment + "\"]"` の文字列連結）
 - **内容**: コメントに `"` や `\` が含まれると i18n JSON 配列が壊れ、ベルに生文字列が表示される。
@@ -68,7 +68,7 @@ B1 を最初に修正すること。
 - **修正**: B3/B4 でコメントを message から外せば同時に解消（外さない場合は Jackson で配列を
   シリアライズして組み立てる共通ヘルパを `NotificationService` に追加）。
 
-## B6.【中低・P7】DataScope の設計逸脱2点（キャッシュなし・営業活動由来の顧客が不可視）
+## B6.【中低・P7】DataScope の設計逸脱2点（キャッシュなし・営業活動由来の顧客が不可視） [対応済み]
 
 - **場所**: `DataScopeServiceImpl`
 - **内容**:
@@ -83,7 +83,7 @@ B1 を最初に修正すること。
   2. `t_sales_activity` の担当（assignee カラムは実装時に確認）で顧客IDを補完する。
 - **テスト**: 営業活動のみ紐づく顧客が本人に見える／他営業に見えないこと。
 
-## B7.【低・P1・既知制限化でも可】日跨ぎ勤務（夜勤）が入力できない
+## B7.【低・P1・既知制限化でも可】日跨ぎ勤務（夜勤）が入力できない [対応済み]
 
 - **場所**: `WorkRecordServiceImpl.computeWorkedHours`（start > end で負分数→エラー）
 - **内容**: 22:00→翌5:00 のような夜勤は `dailyInvalidTime` で拒否される。SES では夜間保守
@@ -92,7 +92,7 @@ B1 を最初に修正すること。
   (b) 対応しない場合、マイ勤怠画面に「日跨ぎは2行に分けて入力」の注記を出し、
   本節を既知制限として requirements に追記する。
 
-## B8.【低・66b2bc1】PDF フォントに Windows 絶対パスがハードコード追加された
+## B8.【低・66b2bc1】PDF フォントに Windows 絶対パスがハードコード追加された [対応済み]
 
 - **場所**: `InvoicePdfServiceImpl` / `QuotationPdfServiceImpl` / `TimesheetPdfServiceImpl`
   （`C:/Windows/Fonts/msgothic.ttc,0` 等のフォールバック追加）

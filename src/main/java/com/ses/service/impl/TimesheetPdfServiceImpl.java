@@ -47,15 +47,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TimesheetPdfServiceImpl implements TimesheetPdfService {
 
-    private static final List<String> DEFAULT_FONT_CANDIDATES = List.of(
-            "C:/Windows/Fonts/msgothic.ttc,0",
-            "C:/Windows/Fonts/meiryo.ttc,0",
-            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,0",
-            "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf"
-    );
-
     private final PdfProperties pdfProperties;
     private final WorkRecordMapper workRecordMapper;
     private final WorkRecordDailyMapper workRecordDailyMapper;
@@ -177,7 +168,7 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
         if (StringUtils.hasText(pdfProperties.getFontPath())) {
             candidates.add(pdfProperties.getFontPath());
         }
-        candidates.addAll(DEFAULT_FONT_CANDIDATES);
+        candidates.addAll(pdfProperties.getDefaultFontCandidates());
         for (String candidate : candidates) {
             String filePath = candidate.contains(",") ? candidate.substring(0, candidate.indexOf(',')) : candidate;
             if (!Files.exists(Paths.get(filePath))) {

@@ -99,6 +99,8 @@ public class NotificationServiceImpl implements NotificationService {
     private String menuKeyForType(String type) {
         if (type == null) return null;
         return switch (type) {
+            case "TIMESHEET_SUBMITTED" -> "work-record";
+            case "TIMESHEET_REJECTED" -> "my-timesheet";
             case "INVOICE_OVERDUE" -> "invoice";
             case "CONTRACT_END", "CONTRACT_DRAFT" -> "contract";
             case "BENCH_LONG" -> "engineer";

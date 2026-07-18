@@ -409,8 +409,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private BigDecimal computeWorkedHours(WorkRecordDaily daily) {
         BigDecimal hours;
         if (daily.getStartTime() != null && daily.getEndTime() != null) {
-            long minutes = Duration.between(daily.getStartTime(), daily.getEndTime()).toMinutes()
-                    - (daily.getBreakMinutes() != null ? daily.getBreakMinutes() : 0);
+            long minutes = Duration.between(daily.getStartTime(), daily.getEndTime()).toMinutes();
+            if (minutes < 0) {
+                minutes += 24 * 60; // 翌日跨ぎ対応
+            }
+            minutes -= (daily.getBreakMinutes() != null ? daily.getBreakMinutes() : 0);
             if (minutes < 0) {
                 throw BusinessException.of("error.workRecord.dailyInvalidTime");
             }
@@ -448,7 +451,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 "勤怠が提出されました",
                 "[\"notification.msg.TIMESHEET_SUBMITTED\", \"" + record.getWorkMonth() + "\"]",
                 NotificationLinks.WORK_RECORD,
-                "timesheet-submitted-" + record.getId());
+                "timesheet-submitted-" + record.getId() + "-" + System.currentTimeMillis(),
+                "work-record");
     }
 
     @Override
@@ -481,16 +485,14 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         requireTransition(record, "差戻し");
         record.setStatus("差戻し");
-        if (comment != null && !comment.isBlank()) {
-            record.setRemarks(comment);
-        }
         baseMapper.updateById(record);
         notificationService.publish(
                 "TIMESHEET_REJECTED",
                 "勤怠が差し戻されました",
-                "[\"notification.msg.TIMESHEET_REJECTED\", \"" + (comment != null ? comment : "") + "\"]",
+                "[\"notification.msg.TIMESHEET_REJECTED\", \"" + record.getWorkMonth() + "\"]",
                 NotificationLinks.MY_TIMESHEET,
-                "timesheet-rejected-" + record.getId() + "-" + System.currentTimeMillis());
+                "timesheet-rejected-" + record.getId() + "-" + System.currentTimeMillis(),
+                "my-timesheet");
     }
 }
 

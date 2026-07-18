@@ -10,10 +10,12 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.mapper.SalesActivityMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.annotation.RequestScope;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -26,6 +28,7 @@ import java.util.stream.Collectors;
  * 各集合はメソッド呼び出しごとに解決する（数百件規模想定）。
  */
 @Service
+@RequestScope
 @RequiredArgsConstructor
 public class DataScopeServiceImpl implements DataScopeService {
 
@@ -36,6 +39,12 @@ public class DataScopeServiceImpl implements DataScopeService {
     private final ContractMapper contractMapper;
     private final ProposalMapper proposalMapper;
     private final ProjectMapper projectMapper;
+    private final SalesActivityMapper salesActivityMapper;
+
+    private Set<Long> engineerIdsCache;
+    private Set<Long> contractIdsCache;
+    private Set<Long> proposalIdsCache;
+    private Set<Long> customerIdsCache;
 
     @Override
     public boolean isScoped() {
@@ -71,30 +80,35 @@ public class DataScopeServiceImpl implements DataScopeService {
         if (userId == null) {
             return Collections.emptySet();
         }
-        return engineerSalesMapper.selectList(new QueryWrapper<EngineerSales>()
+        if (engineerIdsCache != null) return engineerIdsCache;
+        engineerIdsCache = engineerSalesMapper.selectList(new QueryWrapper<EngineerSales>()
                         .eq("sales_user_id", userId)
                         .isNull("released_at"))
                 .stream().map(EngineerSales::getEngineerId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
+        return engineerIdsCache;
     }
 
     Set<Long> computeContractIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
+        if (contractIdsCache != null) return contractIdsCache;
         // sales_user_id=自分 ∪ 未帰属(NULL) を可視とする。
-        return contractMapper.selectList(new QueryWrapper<Contract>()
+        contractIdsCache = contractMapper.selectList(new QueryWrapper<Contract>()
                         .and(w -> w.eq("sales_user_id", userId).or().isNull("sales_user_id")))
                 .stream().map(Contract::getId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
+        return contractIdsCache;
     }
 
     Set<Long> computeProposalIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
+        if (proposalIdsCache != null) return proposalIdsCache;
         Set<Long> engineerIds = computeEngineerIds(userId);
-        return proposalMapper.selectList(new QueryWrapper<Proposal>()
+        proposalIdsCache = proposalMapper.selectList(new QueryWrapper<Proposal>()
                         .and(w -> {
                             w.eq("proposed_by", userId);
                             if (!engineerIds.isEmpty()) {
@@ -103,12 +117,14 @@ public class DataScopeServiceImpl implements DataScopeService {
                         }))
                 .stream().map(Proposal::getId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
+        return proposalIdsCache;
     }
 
     Set<Long> computeCustomerIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
+        if (customerIdsCache != null) return customerIdsCache;
         Set<Long> customerIds = new HashSet<>();
         // 担当契約の顧客
         contractMapper.selectList(new QueryWrapper<Contract>()
@@ -126,6 +142,12 @@ public class DataScopeServiceImpl implements DataScopeService {
                         .forEach(p -> { if (p.getCustomerId() != null) customerIds.add(p.getCustomerId()); });
             }
         }
-        return customerIds;
+        // 営業活動の担当が自分由来の顧客を追加
+        salesActivityMapper.selectList(new QueryWrapper<com.ses.entity.SalesActivity>()
+                        .eq("created_by", userId))
+                .forEach(sa -> { if (sa.getCustomerId() != null) customerIds.add(sa.getCustomerId()); });
+                
+        customerIdsCache = customerIds;
+        return customerIdsCache;
     }
 }

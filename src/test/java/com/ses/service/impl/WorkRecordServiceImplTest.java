@@ -503,7 +503,10 @@ class WorkRecordServiceImplTest {
         workRecordService.submit(5L);
 
         assertThat(r.getStatus()).isEqualTo("提出済");
-        verify(notificationService).publish(eq("TIMESHEET_SUBMITTED"), any(), any(), any(), any());
+        verify(notificationService).publish(
+                eq("TIMESHEET_SUBMITTED"), any(), any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("timesheet-submitted-5-"),
+                eq("work-record"));
     }
 
     @Test
@@ -555,14 +558,18 @@ class WorkRecordServiceImplTest {
         WorkRecord r = new WorkRecord();
         r.setId(5L);
         r.setStatus("提出済");
+        r.setRemarks("既存の備考");
         when(workRecordMapper.selectById(5L)).thenReturn(r);
         when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
 
         workRecordService.reject(5L, "工数が誤っています");
 
         assertThat(r.getStatus()).isEqualTo("差戻し");
-        assertThat(r.getRemarks()).isEqualTo("工数が誤っています");
-        verify(notificationService).publish(eq("TIMESHEET_REJECTED"), any(), any(), any(), any());
+        assertThat(r.getRemarks()).isEqualTo("既存の備考");
+        verify(notificationService).publish(
+                eq("TIMESHEET_REJECTED"), any(), any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("timesheet-rejected-5-"),
+                eq("my-timesheet"));
     }
 
     @Test
@@ -573,9 +580,9 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
         com.ses.entity.WorkRecordDaily daily = new com.ses.entity.WorkRecordDaily();
         daily.setWorkDate(LocalDate.of(2026, 7, 1));
-        daily.setStartTime(java.time.LocalTime.of(18, 0));
-        daily.setEndTime(java.time.LocalTime.of(9, 0));
-        daily.setBreakMinutes(60);
+        daily.setStartTime(java.time.LocalTime.of(9, 0));
+        daily.setEndTime(java.time.LocalTime.of(10, 0));
+        daily.setBreakMinutes(120);
 
         assertThatThrownBy(() -> workRecordService.saveDaily(1L, "2026-07", daily))
                 .isInstanceOf(BusinessException.class)
