@@ -49,6 +49,12 @@ public class DashboardSummaryDto {
         private List<Long> sales;
         private List<Long> profit;
         private List<Boolean> isActual;
+        /** 売上着地予測（無効時 null、有効時は labels と同じ長さ）。 */
+        private List<Long> forecast;
+        /** 予測の内訳: オープン提案件数（無効時 null）。 */
+        private Integer forecastPipelineCount;
+        /** 予測の内訳: 月あたり加重合計（無効時 null）。 */
+        private Long forecastPipelineAmount;
     }
 
     @Data

@@ -12,10 +12,15 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.DashboardService;
+import com.ses.service.SystemConfigService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
+import com.ses.common.constant.StatusConstants;
+import com.ses.entity.Proposal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -46,6 +51,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final EngineerSkillMapper engineerSkillMapper;
     private final ProposalMapper proposalMapper;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
+    private final SystemConfigService systemConfigService;
 
     @Override
     public DashboardSummaryDto getSummary(Integer year) {
@@ -90,6 +96,31 @@ public class DashboardServiceImpl implements DashboardService {
                 .profit(profitData)
                 .isActual(isActualData)
                 .build();
+
+        // 売上着地予測（パイプライン加重）: 確定契約ベース(既存 sales)に、オープン提案の
+        // 提示単価×ステージ確率を翌月以降の各月へ加算した別系列を重ねる（実績口径は汚さない）。
+        if ("true".equalsIgnoreCase(systemConfigService.getString("forecast.enabled", "true"))) {
+            List<Proposal> openProposals = proposalMapper.selectList(new QueryWrapper<Proposal>()
+                    .in("status", Arrays.asList(
+                            StatusConstants.PROPOSAL_DOCUMENT_SCREENING,
+                            StatusConstants.PROPOSAL_FIRST_INTERVIEW,
+                            StatusConstants.PROPOSAL_SECOND_INTERVIEW,
+                            StatusConstants.PROPOSAL_WAITING_RESULT)));
+            Map<String, BigDecimal> rates = loadWinRates();
+            long pipelinePerMonth = computePipelinePerMonth(openProposals, rates);
+            // 開始月仮定はドラフト規約（成約→翌月1日開始）と同一。
+            YearMonth assumedStart = YearMonth.from(LocalDate.now()).plusMonths(1);
+            List<Long> forecastData = new ArrayList<>();
+            for (int i = 0; i < targetMonths.size(); i++) {
+                YearMonth ym = targetMonths.get(i);
+                long base = salesData.get(i);
+                forecastData.add(!ym.isBefore(assumedStart) ? base + pipelinePerMonth : base);
+            }
+            revenueChart.setForecast(forecastData);
+            revenueChart.setForecastPipelineCount((int) openProposals.stream()
+                    .filter(p -> p.getProposedUnitPrice() != null).count());
+            revenueChart.setForecastPipelineAmount(pipelinePerMonth);
+        }
 
         // Calculate actual KPI trends (チャート当月値と同一ソース: 共通口径サービス)
         MonthlyRevenueCalcService.MonthlyAmount currentAmount = monthlyRevenueCalcService.calc(
@@ -237,6 +268,44 @@ public class DashboardServiceImpl implements DashboardService {
                 .charts(charts)
                 .retiring(retiringList)
                 .build();
+    }
+
+    /** ステージ→受注確率(%)のマップを config から解決する。 */
+    private Map<String, BigDecimal> loadWinRates() {
+        Map<String, BigDecimal> rates = new LinkedHashMap<>();
+        rates.put(StatusConstants.PROPOSAL_DOCUMENT_SCREENING,
+                systemConfigService.getDecimal("forecast.win-rate.screening", new BigDecimal("20")));
+        rates.put(StatusConstants.PROPOSAL_FIRST_INTERVIEW,
+                systemConfigService.getDecimal("forecast.win-rate.first-interview", new BigDecimal("40")));
+        rates.put(StatusConstants.PROPOSAL_SECOND_INTERVIEW,
+                systemConfigService.getDecimal("forecast.win-rate.second-interview", new BigDecimal("60")));
+        rates.put(StatusConstants.PROPOSAL_WAITING_RESULT,
+                systemConfigService.getDecimal("forecast.win-rate.awaiting", new BigDecimal("80")));
+        return rates;
+    }
+
+    /**
+     * オープン提案の月あたり加重売上見込み合計を計算する（純関数・テスト容易化のため static）。
+     * 提案ごとに 提示単価 × 確率% ÷ 100 を円未満切り捨て（DOWN）で合算する
+     * （合算後には丸めない——件数内訳と一致させるため）。
+     * NULL 単価・未知ステータス（rates に無い）は 0 として扱う。
+     */
+    static long computePipelinePerMonth(List<Proposal> openProposals, Map<String, BigDecimal> rates) {
+        if (openProposals == null) {
+            return 0L;
+        }
+        long sum = 0L;
+        for (Proposal p : openProposals) {
+            if (p.getProposedUnitPrice() == null) {
+                continue;
+            }
+            BigDecimal rate = rates.getOrDefault(p.getStatus(), BigDecimal.ZERO);
+            sum += p.getProposedUnitPrice()
+                    .multiply(rate)
+                    .divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN)
+                    .longValue();
+        }
+        return sum;
     }
 
     private List<YearMonth> buildFiscalYearMonths(int fiscalYear) {

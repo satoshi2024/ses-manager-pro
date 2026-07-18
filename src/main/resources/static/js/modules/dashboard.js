@@ -136,7 +136,17 @@ function renderCharts(chartsData) {
                     borderWidth: 1,
                     borderRadius: 4
                 }
-            ]
+            ].concat(chartsData.revenue.forecast ? [{
+                    // 売上着地予測（パイプライン加重）: 確定ベースに提案パイプラインを重ねた参考系列
+                    type: 'line',
+                    label: SES.i18n.t('dashboard.chart.forecast_label', '着地予測'),
+                    data: chartsData.revenue.forecast,
+                    borderColor: 'rgba(59, 130, 246, 0.6)',
+                    borderDash: [6, 4],
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    fill: false
+                }] : [])
         },
         options: {
             responsive: true,
@@ -156,6 +166,14 @@ function renderCharts(chartsData) {
                             }
                             if (context.parsed.y !== null) {
                                 label += context.parsed.y;
+                            }
+                            // 予測系列は内訳（確定ベース + パイプライン加重）を表示する
+                            if (chartsData.revenue.forecast && context.dataset.type === 'line') {
+                                const base = chartsData.revenue.sales[context.dataIndex] || 0;
+                                const pipeline = (context.parsed.y || 0) - base;
+                                return label + ' (確定 ¥' + base.toLocaleString()
+                                    + ' + パイプライン ¥' + pipeline.toLocaleString()
+                                    + '／' + (chartsData.revenue.forecastPipelineCount || 0) + '件加重)';
                             }
                             const isActual = chartsData.revenue.isActual && chartsData.revenue.isActual[context.dataIndex];
                             label += isActual ? ' (' + SES.i18n.t('dashboard.chart.actual') + ')' : ' (' + SES.i18n.t('dashboard.chart.estimate') + ')';
@@ -177,6 +195,14 @@ function renderCharts(chartsData) {
             }
         }
     });
+
+    const forecastNote = document.getElementById('forecastNote');
+    if (forecastNote) {
+        forecastNote.textContent = chartsData.revenue.forecast
+            ? SES.i18n.t('dashboard.forecast.note',
+                '※着地予測は確定契約に加え、オープン提案の提示単価×ステージ確率を翌月以降に加重した参考値です。')
+            : '';
+    }
 
     // Status Chart
     const statusCtx = document.getElementById('statusChart').getContext('2d');

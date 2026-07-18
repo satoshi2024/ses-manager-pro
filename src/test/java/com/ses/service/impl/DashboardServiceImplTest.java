@@ -26,6 +26,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,6 +49,9 @@ class DashboardServiceImplTest {
 
     @Mock
     private ProposalMapper proposalMapper;
+
+    @Mock
+    private com.ses.service.SystemConfigService systemConfigService;
 
     // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
     @org.mockito.Spy
@@ -157,6 +161,39 @@ class DashboardServiceImplTest {
         assertEquals(12, result.getCharts().getRevenue().getLabels().size());
         assertEquals("4月", result.getCharts().getRevenue().getLabels().get(0));
         assertEquals("3月", result.getCharts().getRevenue().getLabels().get(11));
+    }
+
+    @Test
+    void testGetSummary_ForecastEnabled_addsPipelineToFutureMonths() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("true");
+        when(systemConfigService.getDecimal(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        com.ses.entity.Proposal p = new com.ses.entity.Proposal();
+        p.setStatus(com.ses.common.constant.StatusConstants.PROPOSAL_DOCUMENT_SCREENING);
+        p.setProposedUnitPrice(new java.math.BigDecimal("500000")); // 20% = 100000/月
+        when(proposalMapper.selectList(any())).thenReturn(List.of(p));
+
+        var revenue = dashboardService.getSummary(2027).getCharts().getRevenue();
+        assertNotNull(revenue.getForecast());
+        assertEquals(12, revenue.getForecast().size());
+        assertEquals(1, revenue.getForecastPipelineCount());
+        assertEquals(100000L, revenue.getForecastPipelineAmount());
+        // 2027年度は全月が翌月以降のため、売上0に対し予測は各月100000が乗る
+        assertEquals(100000L, revenue.getForecast().get(11));
+    }
+
+    @Test
+    void testGetSummary_ForecastDisabled_forecastNull() {
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("false");
+
+        var revenue = dashboardService.getSummary(2026).getCharts().getRevenue();
+        assertNull(revenue.getForecast());
+        assertNull(revenue.getForecastPipelineAmount());
     }
 
     @Test
