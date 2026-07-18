@@ -30,4 +30,13 @@ public interface DataScopeService {
 
     /** proposed_by=自分 ∪ engineer_id ∈ allowedEngineerIds の提案ID集合。 */
     Set<Long> allowedProposalIds();
+
+    /** 担当案件のID集合。 */
+    Set<Long> allowedProjectIds();
+
+    void assertAllowedCustomer(Long customerId);
+    void assertAllowedEngineer(Long engineerId);
+    void assertAllowedContract(Long contractId);
+    void assertAllowedProject(Long projectId);
+    void assertAllowedProposal(Long proposalId);
 }

@@ -120,6 +120,24 @@ public class DataScopeServiceImpl implements DataScopeService {
         return proposalIdsCache;
     }
 
+    private Set<Long> projectIdsCache;
+
+    Set<Long> computeProjectIds(Long userId) {
+        if (userId == null) {
+            return Collections.emptySet();
+        }
+        if (projectIdsCache != null) return projectIdsCache;
+        Set<Long> proposalIds = computeProposalIds(userId);
+        if (proposalIds.isEmpty()) {
+            projectIdsCache = Collections.emptySet();
+        } else {
+            projectIdsCache = proposalMapper.selectList(new QueryWrapper<Proposal>().in("id", proposalIds))
+                    .stream().map(Proposal::getProjectId).filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toSet());
+        }
+        return projectIdsCache;
+    }
+
     Set<Long> computeCustomerIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
