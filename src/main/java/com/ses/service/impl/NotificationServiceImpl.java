@@ -93,7 +93,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void publish(String type, String title, String message, String linkUrl, String dedupeKey) {
-        publishInternal(type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
+        publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
     }
 
     private String menuKeyForType(String type) {
@@ -113,12 +113,23 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void publish(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
-        publishInternal(type, title, message, linkUrl, dedupeKey, menuKey);
+        publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKey);
     }
 
-    private void publishInternal(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+    @Override
+    public void publishToUser(Long userId, String type, String title, String message, String linkUrl, String dedupeKey) {
+        publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
+    }
+
+    @Override
+    public void publishToUser(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey);
+    }
+
+    private void publishInternal(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         try {
             Notification notification = new Notification();
+            notification.setRecipientUserId(userId);
             notification.setType(type);
             notification.setTitle(title);
             notification.setMessage(message);

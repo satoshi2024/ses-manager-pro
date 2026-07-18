@@ -32,6 +32,9 @@ class QuotationApiControllerTest {
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    @MockBean
+    private com.ses.service.CustomerService customerService;
+
     @Test
     @WithMockUser
     void list_returnsOk() throws Exception {
@@ -45,6 +48,7 @@ class QuotationApiControllerTest {
     @Test
     @WithMockUser
     void changeStatus_delegatesToService() throws Exception {
+        when(quotationService.getById(anyLong())).thenReturn(new Quotation());
         mockMvc.perform(put("/api/quotations/1/status")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
                         .contentType("application/json")
@@ -56,6 +60,7 @@ class QuotationApiControllerTest {
     @Test
     @WithMockUser
     void delete_delegatesToService() throws Exception {
+        when(quotationService.getById(anyLong())).thenReturn(new Quotation());
         when(quotationService.removeById(anyLong())).thenReturn(true);
         mockMvc.perform(delete("/api/quotations/5")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
@@ -66,6 +71,7 @@ class QuotationApiControllerTest {
     @Test
     @WithMockUser
     void createDraft_delegatesToService() throws Exception {
+        when(quotationService.getById(anyLong())).thenReturn(new Quotation());
         when(quotationService.createDraftFromQuotation(anyLong())).thenReturn(new com.ses.entity.Contract());
         mockMvc.perform(post("/api/quotations/3/create-draft")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))

@@ -36,6 +36,9 @@ class ProjectApiControllerTest {
     @MockBean
     private ProjectService projectService;
 
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @Test
     @WithMockUser
     void page_一覧は200() throws Exception {

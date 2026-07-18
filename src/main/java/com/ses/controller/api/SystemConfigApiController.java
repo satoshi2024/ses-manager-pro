@@ -38,7 +38,6 @@ public class SystemConfigApiController {
         return ApiResult.success(configs);
     }
 
-    /** 設定の一括更新。マスキング対象キーがプレースホルダーのまま送信された場合は既存値を維持する。 */
     @PutMapping
     public ApiResult<Boolean> update(@RequestBody List<SystemConfig> configs) {
         if (configs != null) {
@@ -46,6 +45,16 @@ public class SystemConfigApiController {
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;
+                }
+                if (c.getConfigKey() != null && c.getConfigKey().startsWith("forecast.win-rate.")) {
+                    try {
+                        int rate = Integer.parseInt(c.getConfigValue());
+                        if (rate < 0 || rate > 100) {
+                            return ApiResult.error(400, "受注確率は0〜100の範囲で入力してください: " + c.getConfigKey());
+                        }
+                    } catch (NumberFormatException e) {
+                        return ApiResult.error(400, "受注確率は数値で入力してください: " + c.getConfigKey());
+                    }
                 }
                 systemConfigService.put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
             }

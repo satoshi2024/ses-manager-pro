@@ -16,9 +16,11 @@ import java.util.List;
 public class EngineerCareerApiController {
 
     private final EngineerCareerService engineerCareerService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @GetMapping
     public ApiResult<List<EngineerCareer>> list(@PathVariable Long engineerId) {
+        dataScopeService.assertAllowedEngineer(engineerId);
         LambdaQueryWrapper<EngineerCareer> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(EngineerCareer::getEngineerId, engineerId);
         wrapper.orderByDesc(EngineerCareer::getPeriodFrom);
@@ -27,11 +29,13 @@ public class EngineerCareerApiController {
 
     @GetMapping("/{id}")
     public ApiResult<EngineerCareer> getById(@PathVariable Long engineerId, @PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(engineerId);
         return ApiResult.success(findOwnedOrThrow(engineerId, id));
     }
 
     @PostMapping
     public ApiResult<Boolean> save(@PathVariable Long engineerId, @RequestBody EngineerCareer career) {
+        dataScopeService.assertAllowedEngineer(engineerId);
         validatePeriod(career);
         career.setId(null);
         career.setEngineerId(engineerId);
@@ -40,6 +44,7 @@ public class EngineerCareerApiController {
 
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long engineerId, @PathVariable Long id, @RequestBody EngineerCareer career) {
+        dataScopeService.assertAllowedEngineer(engineerId);
         // 更新対象が本当にこの要員に属する経歴かを確認する（他要員のIDを指定した書き換えを防止）
         findOwnedOrThrow(engineerId, id);
         validatePeriod(career);
@@ -50,6 +55,7 @@ public class EngineerCareerApiController {
 
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long engineerId, @PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(engineerId);
         // 削除対象が本当にこの要員に属する経歴かを確認する（他要員の経歴を削除できてしまう不備を防止）
         findOwnedOrThrow(engineerId, id);
         return ApiResult.success(engineerCareerService.removeById(id));

@@ -74,6 +74,46 @@ public class DataScopeServiceImpl implements DataScopeService {
         return computeCustomerIds(SecurityUtils.currentUserId());
     }
 
+    @Override
+    public Set<Long> allowedProjectIds() {
+        return computeProjectIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
+    public void assertAllowedCustomer(Long customerId) {
+        if (isScoped() && !allowedCustomerIds().contains(customerId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    @Override
+    public void assertAllowedEngineer(Long engineerId) {
+        if (isScoped() && !allowedEngineerIds().contains(engineerId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    @Override
+    public void assertAllowedContract(Long contractId) {
+        if (isScoped() && !allowedContractIds().contains(contractId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    @Override
+    public void assertAllowedProject(Long projectId) {
+        if (isScoped() && !allowedProjectIds().contains(projectId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    @Override
+    public void assertAllowedProposal(Long proposalId) {
+        if (isScoped() && !allowedProposalIds().contains(proposalId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
     // ===== 純ロジック（テスト容易化のため userId を引数に取る） =====
 
     Set<Long> computeEngineerIds(Long userId) {

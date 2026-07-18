@@ -100,6 +100,9 @@ public class CustomerApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody Customer customer) {
+        if (customer.getId() != null) {
+            dataScopeService.assertAllowedCustomer(customer.getId());
+        }
         return ApiResult.success(customerService.updateById(customer));
     }
 
@@ -108,6 +111,7 @@ public class CustomerApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        dataScopeService.assertAllowedCustomer(id);
         return ApiResult.success(customerService.removeById(id));
     }
 
@@ -116,6 +120,7 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}/summary")
     public ApiResult<CustomerSummaryDto> getSummary(@PathVariable Long id) {
+        dataScopeService.assertAllowedCustomer(id);
 
         CustomerSummaryDto dto = new CustomerSummaryDto();
 

@@ -121,6 +121,9 @@ public class EngineerApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody Engineer engineer) {
+        if (engineer.getId() != null) {
+            dataScopeService.assertAllowedEngineer(engineer.getId());
+        }
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 
@@ -129,6 +132,7 @@ public class EngineerApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerService.removeById(id));
     }
 }

@@ -43,6 +43,17 @@ public class InvoiceApiController {
     @Autowired
     private ExcelExportService excelExportService;
 
+    @Autowired
+    private com.ses.service.security.DataScopeService dataScopeService;
+
+    private void assertInvoiceVisible(Long id) {
+        if (!dataScopeService.isScoped()) return;
+        Invoice inv = invoiceService.getById(id);
+        if (inv == null || !dataScopeService.allowedCustomerIds().contains(inv.getCustomerId())) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
     @GetMapping
     public ApiResult<?> list(@RequestParam(defaultValue = "1") long current,
                           @RequestParam(defaultValue = "10") long size,
@@ -73,18 +84,21 @@ public class InvoiceApiController {
 
     @PostMapping("/generate")
     public ApiResult<?> generate(@RequestBody InvoiceGenerateRequest request) {
+        dataScopeService.assertAllowedCustomer(request.getCustomerId());
         Invoice invoice = invoiceService.generate(request.getCustomerId(), request.getBillingMonth());
         return ApiResult.success(invoice);
     }
 
     @GetMapping("/{id}")
     public ApiResult<?> detail(@PathVariable Long id) {
+        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.detail(id));
     }
 
     /** 請求書PDFダウンロード。 */
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
+        assertInvoiceVisible(id);
         InvoiceDetailDto detail = invoiceService.detail(id);
         byte[] bytes = invoicePdfService.generate(detail);
         String fileName = "請求書_" + detail.getInvoiceNo() + ".pdf";
@@ -97,12 +111,14 @@ public class InvoiceApiController {
 
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
+        assertInvoiceVisible(id);
         invoiceService.changeStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }
 
     @PutMapping("/{id}/void")
     public ApiResult<?> voidInvoice(@PathVariable Long id) {
+        assertInvoiceVisible(id);
         invoiceService.voidInvoice(id);
         return ApiResult.success(null);
     }
@@ -111,16 +127,19 @@ public class InvoiceApiController {
 
     @GetMapping("/{id}/payments")
     public ApiResult<?> listPayments(@PathVariable Long id) {
+        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.listPayments(id));
     }
 
     @PostMapping("/{id}/payments")
     public ApiResult<?> addPayment(@PathVariable Long id, @RequestBody InvoicePayment payment) {
+        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.addPayment(id, payment));
     }
 
     @DeleteMapping("/{id}/payments/{paymentId}")
     public ApiResult<?> deletePayment(@PathVariable Long id, @PathVariable Long paymentId) {
+        assertInvoiceVisible(id);
         invoiceService.deletePayment(id, paymentId);
         return ApiResult.success(null);
     }
@@ -149,6 +168,7 @@ public class InvoiceApiController {
     /** 督促メール送信。body: {"templateId": N}。 */
     @PostMapping("/{id}/reminder")
     public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
+        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
     }
 
@@ -173,6 +193,7 @@ public class InvoiceApiController {
      */
     @PutMapping("/bp-payments/{id}")
     public ApiResult<?> updateBpPaymentStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
+        assertInvoiceVisible(id);
         invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }

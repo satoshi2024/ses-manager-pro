@@ -105,6 +105,7 @@ public class ContractApiController {
      */
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Contract contract) {
+        assertContractVisible(id);
         contract.setId(id);
         // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
         // 準備中→稼動中などの遷移検証を迂回できないようにする。
@@ -120,6 +121,7 @@ public class ContractApiController {
     /** 契約状態変更（状態機械を通す専用 API）。 */
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody ContractStatusChangeRequest request) {
+        assertContractVisible(id);
         contractService.changeStatus(id, request.getStatus(), request.getCancelDate());
         return ApiResult.success(Boolean.TRUE);
     }
@@ -143,6 +145,7 @@ public class ContractApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        assertContractVisible(id);
         return ApiResult.success(contractService.removeById(id));
     }
 

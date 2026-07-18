@@ -8,8 +8,8 @@ const QUOTATION_TRANSITIONS = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadQuotations();
-    document.getElementById('btnSearchQuotation').addEventListener('click', loadQuotations);
+    loadQuotations(1);
+    document.getElementById('btnSearchQuotation').addEventListener('click', () => loadQuotations(1));
     document.getElementById('btnNewQuotation').addEventListener('click', () => openQuotationModal());
     document.getElementById('btnSaveQuotation').addEventListener('click', saveQuotation);
 
@@ -62,10 +62,56 @@ function loadSelects(q) {
     ]);
 }
 
-function loadQuotations() {
+function renderPagination(pageData, loadFuncName) {
+    const paginationContainer = $('.card-footer');
+    if (pageData.total === 0) {
+        paginationContainer.html(`<div class="text-muted small ps-2">${SES.i18n.t('common.page.totalZero', 'データがありません')}</div>`);
+        return;
+    }
+    
+    const start = (pageData.current - 1) * pageData.size + 1;
+    const end = Math.min(pageData.current * pageData.size, pageData.total);
+    
+    let html = `
+        <div class="text-muted small ps-2">
+            ${SES.i18n.t('common.page.info', [pageData.total, start, end], `全${pageData.total}件中 ${start}〜${end}件`)}
+        </div>
+        <nav aria-label="Page navigation">
+            <ul class="pagination pagination-sm mb-0 pe-2">
+    `;
+    
+    if (pageData.current > 1) {
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
+    } else {
+        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-muted" href="javascript:void(0)" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left"></i></a></li>`;
+    }
+    
+    for (let i = 1; i <= pageData.pages; i++) {
+        if (i === pageData.current) {
+            html += `<li class="page-item active" aria-current="page"><a class="page-link bg-info border-info text-dark fw-bold" href="javascript:void(0)">${i}</a></li>`;
+        } else if (i <= 3 || i >= pageData.pages - 2 || Math.abs(i - pageData.current) <= 1) {
+            html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${i})">${i}</a></li>`;
+        } else if (i === 4 && pageData.current > 5) {
+            html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light disabled border-0"><span class="bg-transparent border-0 text-muted">...</span></a></li>`;
+        } else if (i === pageData.pages - 3 && pageData.current < pageData.pages - 4) {
+             html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light disabled border-0"><span class="bg-transparent border-0 text-muted">...</span></a></li>`;
+        }
+    }
+    
+    if (pageData.current < pageData.pages) {
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
+    } else {
+        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)"><i class="bi bi-chevron-right"></i></a></li>`;
+    }
+    
+    html += `</ul></nav>`;
+    paginationContainer.html(html);
+}
+
+function loadQuotations(page = 1) {
     const keyword = document.getElementById('quotationKeyword').value;
     const status = document.getElementById('quotationStatusFilter').value;
-    let url = '/api/quotations?current=1&size=100';
+    let url = `/api/quotations?current=${page}&size=10`;
     if (keyword) url += '&keyword=' + encodeURIComponent(keyword);
     if (status) url += '&status=' + encodeURIComponent(status);
 
@@ -73,8 +119,12 @@ function loadQuotations() {
         if (data.code !== 200) return;
         const tbody = document.querySelector('#quotationTable tbody');
         tbody.innerHTML = '';
-        const todayStr = new Date().toISOString().split('T')[0];
-        data.data.records.forEach(q => {
+        
+        const d = new Date();
+        const todayStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        
+        const records = data.data.records || data.data || [];
+        records.forEach(q => {
             const expired = q.validUntil && q.validUntil < todayStr;
             const expiredBadge = expired ? ` <span class="badge bg-secondary">${SES.i18n.t('quotation.badge.expired', '期限切れ')}</span>` : '';
             const transitions = QUOTATION_TRANSITIONS[q.status] || [];
@@ -95,7 +145,7 @@ function loadQuotations() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${SES.escapeHtml(q.quotationNo)}</td>
-                <td>${q.customerId || ''}</td>
+                <td>${SES.escapeHtml(q.customerName || q.customerId || '')}</td>
                 <td>${SES.escapeHtml(q.title)}</td>
                 <td class="text-right">￥${Number(q.unitPrice).toLocaleString()}</td>
                 <td>${SES.i18n.t('quotation.status.' + q.status, q.status)}${expiredBadge}</td>
@@ -103,6 +153,10 @@ function loadQuotations() {
                 <td>${actions}</td>`;
             tbody.appendChild(tr);
         });
+        
+        if (data.data.total !== undefined) {
+            renderPagination(data.data, 'loadQuotations');
+        }
     });
 }
 
@@ -159,7 +213,7 @@ function saveQuotation() {
         if (data.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('quotationModal')).hide();
             SES.toast.success(SES.i18n.t('common.msg.saveSuccess', '保存しました'));
-            loadQuotations();
+            loadQuotations(1);
         } else {
             SES.toast.error(data.message);
         }
@@ -177,7 +231,7 @@ function changeQuotationStatus(id, newStatus) {
             if (newStatus === '受注' && createDraft) {
                 createQuotationDraft(id);
             } else {
-                loadQuotations();
+                loadQuotations(1);
             }
         }).catch(err => SES.toast.error(err.message));
     };
@@ -210,7 +264,7 @@ function createQuotationDraft(id) {
         } else {
             SES.toast.error(data.message);
         }
-        loadQuotations();
+        loadQuotations(1);
     }).catch(err => SES.toast.error(err.message));
 }
 
@@ -223,7 +277,7 @@ function deleteQuotation(id) {
         if (!r.isConfirmed) return;
         fetch(`/api/quotations/${id}`, { method: 'DELETE', headers: SES.csrf.header() })
             .then(res => res.json()).then(data => {
-                if (data.code === 200) loadQuotations();
+                if (data.code === 200) loadQuotations(1);
                 else alert(data.message);
             });
     });

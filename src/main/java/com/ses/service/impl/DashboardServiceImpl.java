@@ -108,18 +108,23 @@ public class DashboardServiceImpl implements DashboardService {
                             StatusConstants.PROPOSAL_WAITING_RESULT)));
             Map<String, BigDecimal> rates = loadWinRates();
             long pipelinePerMonth = computePipelinePerMonth(openProposals, rates);
-            // 開始月仮定はドラフト規約（成約→翌月1日開始）と同一。
-            YearMonth assumedStart = YearMonth.from(LocalDate.now()).plusMonths(1);
-            List<Long> forecastData = new ArrayList<>();
-            for (int i = 0; i < targetMonths.size(); i++) {
-                YearMonth ym = targetMonths.get(i);
-                long base = salesData.get(i);
-                forecastData.add(!ym.isBefore(assumedStart) ? base + pipelinePerMonth : base);
+            if (!openProposals.isEmpty() && pipelinePerMonth > 0) {
+                // 開始月仮定はドラフト規約（成約→翌月1日開始）と同一。
+                YearMonth assumedStart = YearMonth.from(LocalDate.now()).plusMonths(1);
+                List<Long> forecastData = new ArrayList<>();
+                for (int i = 0; i < targetMonths.size(); i++) {
+                    YearMonth ym = targetMonths.get(i);
+                    long base = salesData.get(i);
+                    forecastData.add(!ym.isBefore(assumedStart) ? base + pipelinePerMonth : null);
+                }
+                revenueChart.setForecast(forecastData);
+                revenueChart.setForecastPipelineCount(openProposals.size());
+                revenueChart.setForecastPipelineAmount(pipelinePerMonth);
+            } else {
+                revenueChart.setForecast(null);
+                revenueChart.setForecastPipelineCount(0);
+                revenueChart.setForecastPipelineAmount(0L);
             }
-            revenueChart.setForecast(forecastData);
-            revenueChart.setForecastPipelineCount((int) openProposals.stream()
-                    .filter(p -> p.getProposedUnitPrice() != null).count());
-            revenueChart.setForecastPipelineAmount(pipelinePerMonth);
         }
 
         // Calculate actual KPI trends (チャート当月値と同一ソース: 共通口径サービス)

@@ -88,6 +88,9 @@ public class ProposalApiController {
      */
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         proposalService.changeStatus(id, request.getStatus());
         return ApiResult.success(true);
     }
@@ -110,6 +113,9 @@ public class ProposalApiController {
      */
     @PostMapping("/{id}/send-mail")
     public ApiResult<MailDispatchResult> sendMail(@PathVariable Long id, @RequestBody Map<String, String> req) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         Proposal proposal = proposalService.getById(id);
         if (proposal == null) {
             throw BusinessException.of("error.proposal.notFound");

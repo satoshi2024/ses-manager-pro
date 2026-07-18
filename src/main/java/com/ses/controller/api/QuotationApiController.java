@@ -27,6 +27,9 @@ public class QuotationApiController {
     private QuotationService quotationService;
 
     @Autowired
+    private com.ses.service.CustomerService customerService;
+
+    @Autowired
     private QuotationPdfService quotationPdfService;
 
     @Autowired
@@ -63,7 +66,24 @@ public class QuotationApiController {
             query.and(w -> w.like("title", keyword).or().like("quotation_no", keyword));
         }
         query.orderByDesc("id");
-        return ApiResult.success(quotationService.page(page, query));
+        Page<Quotation> pageResult = quotationService.page(page, query);
+        
+        java.util.List<com.ses.dto.quotation.QuotationListDto> dtoList = pageResult.getRecords().stream().map(q -> {
+            com.ses.dto.quotation.QuotationListDto dto = new com.ses.dto.quotation.QuotationListDto();
+            org.springframework.beans.BeanUtils.copyProperties(q, dto);
+            return dto;
+        }).collect(java.util.stream.Collectors.toList());
+
+        java.util.Set<Long> customerIds = dtoList.stream().map(com.ses.dto.quotation.QuotationListDto::getCustomerId).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        if (!customerIds.isEmpty()) {
+            java.util.Map<Long, String> customerMap = customerService.listByIds(customerIds).stream()
+                    .collect(java.util.stream.Collectors.toMap(com.ses.entity.Customer::getId, com.ses.entity.Customer::getCompanyName));
+            dtoList.forEach(dto -> dto.setCustomerName(customerMap.get(dto.getCustomerId())));
+        }
+        
+        Page<com.ses.dto.quotation.QuotationListDto> dtoPage = new Page<>(pageResult.getCurrent(), pageResult.getSize(), pageResult.getTotal());
+        dtoPage.setRecords(dtoList);
+        return ApiResult.success(dtoPage);
     }
 
     private Quotation getVisibleQuotationOr404(Long id) {
@@ -106,7 +126,7 @@ public class QuotationApiController {
 
     @PutMapping("/{id}")
     public ApiResult<?> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
-        Quotation current = quotationService.getById(id);
+        Quotation current = getVisibleQuotationOr404(id);
         if (current != null && ("受注".equals(current.getStatus()) || "失注".equals(current.getStatus()))) {
             throw com.ses.common.exception.BusinessException.of(400, "Terminal state quotes cannot be fully updated");
         }
@@ -138,17 +158,20 @@ public class QuotationApiController {
 
     @DeleteMapping("/{id}")
     public ApiResult<?> delete(@PathVariable Long id) {
+        getVisibleQuotationOr404(id);
         return ApiResult.success(quotationService.removeById(id));
     }
 
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody StatusRequest request) {
+        getVisibleQuotationOr404(id);
         quotationService.changeStatus(id, request.getStatus());
         return ApiResult.success(null);
     }
 
     @PostMapping("/{id}/create-draft")
     public ApiResult<?> createDraft(@PathVariable Long id) {
+        getVisibleQuotationOr404(id);
         Contract contract = quotationService.createDraftFromQuotation(id);
         return ApiResult.success(contract);
     }

@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 public class ProjectApiController {
 
     private final ProjectService projectService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * 案件一覧（ページネーション）
@@ -32,6 +33,14 @@ public class ProjectApiController {
         Page<Project> page = new Page<>(current, size);
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(new Page<>(current, size, 0));
+            }
+            queryWrapper.in(Project::getCustomerId, allowed);
+        }
+
         if (org.springframework.util.StringUtils.hasText(projectName)) {
             queryWrapper.like(Project::getProjectName, projectName);
         }
@@ -51,7 +60,11 @@ public class ProjectApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Project> getById(@PathVariable Long id) {
-        return ApiResult.success(projectService.getById(id));
+        Project p = projectService.getById(id);
+        if (p != null) {
+            dataScopeService.assertAllowedCustomer(p.getCustomerId());
+        }
+        return ApiResult.success(p);
     }
 
     /**
@@ -59,6 +72,9 @@ public class ProjectApiController {
      */
     @PostMapping
     public ApiResult<Project> save(@Valid @RequestBody Project project) {
+        if (project.getCustomerId() != null) {
+            dataScopeService.assertAllowedCustomer(project.getCustomerId());
+        }
         projectService.save(project);
         return ApiResult.success(project);
     }
@@ -68,6 +84,9 @@ public class ProjectApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody Project project) {
+        if (project.getCustomerId() != null) {
+            dataScopeService.assertAllowedCustomer(project.getCustomerId());
+        }
         return ApiResult.success(projectService.updateById(project));
     }
 
@@ -76,6 +95,10 @@ public class ProjectApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        Project p = projectService.getById(id);
+        if (p != null) {
+            dataScopeService.assertAllowedCustomer(p.getCustomerId());
+        }
         return ApiResult.success(projectService.removeById(id));
     }
 }

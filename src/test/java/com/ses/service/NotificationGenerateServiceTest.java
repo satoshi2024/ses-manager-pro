@@ -81,14 +81,15 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.invoiceOverdue();
 
         // メッセージに請求書番号・顧客名・超過日数(5日)を含み、dedupeKeyが所定形式であること
-        verify(notificationService, times(1)).publish(
+        verify(notificationService, times(1)).publishToUser(
+                any(),
                 eq("INVOICE_OVERDUE"),
                 eq("支払期限超過"),
                 contains("INV-202605-0001"),
                 eq("/invoice"),
                 contains("INVOICE_OVERDUE:7:"));
-        verify(notificationService, times(1)).publish(
-                any(), any(), contains("5日"), any(), any());
+        verify(notificationService, times(1)).publishToUser(
+                any(), any(), any(), contains("5日"), any(), any());
     }
 
     @Test
@@ -97,7 +98,7 @@ class NotificationGenerateServiceTest {
 
         notificationGenerateService.invoiceOverdue();
 
-        verify(notificationService, never()).publish(any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
     }
 
     // ===== S4: CONTRACT_END と更新ドラフトの連動 =====
@@ -128,7 +129,7 @@ class NotificationGenerateServiceTest {
 
         notificationGenerateService.contractEnding();
 
-        verify(notificationService, never()).publish(eq("CONTRACT_END"), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(any(), eq("CONTRACT_END"), any(), any(), any(), any());
     }
 
     @Test
@@ -141,7 +142,7 @@ class NotificationGenerateServiceTest {
 
         notificationGenerateService.contractEnding();
 
-        verify(notificationService, times(1)).publish(
-                eq("CONTRACT_END"), any(), any(), eq("/contract/list"), contains("CONTRACT_END:100:"));
+        verify(notificationService, times(1)).publishToUser(
+                any(), eq("CONTRACT_END"), any(), any(), eq("/contract/list"), contains("CONTRACT_END:100:"));
     }
 }
