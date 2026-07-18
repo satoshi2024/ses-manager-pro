@@ -64,6 +64,12 @@
                         <span th:text="#{menu.proposal}">提案管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('quotation')}">
+                    <a th:href="@{/quotation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/quotation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-earmark-ruled me-2"></i>
+                        <span th:text="#{menu.quotation}">見積管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract')}">
                     <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-text me-2"></i>

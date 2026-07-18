@@ -526,4 +526,67 @@ class ContractServiceImplTest {
         assertNull(draft.getSalesUserId(), "退職主担当は引き継がず未帰属になること");
         assertEquals("準備中", draft.getStatus());
     }
+
+    // ===== 見積からのドラフト生成（quotation-management / P4） =====
+
+    private com.ses.entity.Quotation quotation(Long id, Long engineerId, Long projectId, Long customerId,
+                                               BigDecimal unitPrice) {
+        com.ses.entity.Quotation q = new com.ses.entity.Quotation();
+        q.setId(id);
+        q.setQuotationNo("Q-202607-0001");
+        q.setEngineerId(engineerId);
+        q.setProjectId(projectId);
+        q.setCustomerId(customerId);
+        q.setUnitPrice(unitPrice);
+        q.setStatus("受注");
+        return q;
+    }
+
+    @Test
+    void createDraftFromQuotation_引継ぎ値でドラフト生成() {
+        com.ses.entity.Quotation q = quotation(30L, 2L, 9L, 4L, new BigDecimal("700000"));
+        q.setSettlementHoursMin(new BigDecimal("140"));
+        q.setSettlementHoursMax(new BigDecimal("180"));
+        when(contractMapper.selectOne(any())).thenReturn(null);
+        Project prj = new Project();
+        prj.setCustomerId(4L);
+        when(projectMapper.selectById(9L)).thenReturn(prj);
+        when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class))).thenReturn(1);
+
+        Contract draft = contractService.createDraftFromQuotation(q);
+
+        assertEquals(30L, draft.getQuotationId());
+        assertEquals(2L, draft.getEngineerId());
+        assertEquals("準備中", draft.getStatus());
+        assertEquals(0, new BigDecimal("700000").compareTo(draft.getSellingPrice()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(draft.getCostPrice()));
+        assertEquals(0, new BigDecimal("140").compareTo(draft.getSettlementHoursMin()));
+        assertEquals(0, new BigDecimal("180").compareTo(draft.getSettlementHoursMax()));
+    }
+
+    @Test
+    void createDraftFromQuotation_冪等() {
+        com.ses.entity.Quotation q = quotation(30L, 2L, 9L, 4L, new BigDecimal("700000"));
+        Contract existing = new Contract();
+        existing.setId(88L);
+        when(contractMapper.selectOne(any())).thenReturn(existing);
+
+        Contract result = contractService.createDraftFromQuotation(q);
+
+        assertEquals(88L, result.getId());
+        verify(contractMapper, never()).insert(any(Contract.class));
+    }
+
+    @Test
+    void createDraftFromQuotation_要員なしは拒否() {
+        com.ses.entity.Quotation q = quotation(30L, null, 9L, 4L, new BigDecimal("700000"));
+        when(contractMapper.selectOne(any())).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.createDraftFromQuotation(q));
+        assertTrue(ex.getMessage().contains("error.quotation.engineerRequired"));
+        verify(contractMapper, never()).insert(any(Contract.class));
+    }
 }

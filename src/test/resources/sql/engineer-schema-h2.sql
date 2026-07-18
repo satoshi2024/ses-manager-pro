@@ -183,10 +183,32 @@ CREATE TABLE t_contract (
   commission_base_type    VARCHAR(10),
   commission_rate         DECIMAL(5,2),
   renewed_from_contract_id BIGINT,
+  quotation_id            BIGINT,
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag            TINYINT DEFAULT 0
+);
+
+DROP TABLE IF EXISTS t_quotation CASCADE;
+CREATE TABLE t_quotation (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  quotation_no          VARCHAR(30) NOT NULL UNIQUE,
+  customer_id           BIGINT NOT NULL,
+  project_id            BIGINT,
+  engineer_id           BIGINT,
+  proposal_id           BIGINT,
+  title                 VARCHAR(200) NOT NULL,
+  unit_price            DECIMAL(10,0) NOT NULL,
+  settlement_hours_min  DECIMAL(5,1),
+  settlement_hours_max  DECIMAL(5,1),
+  valid_until           DATE,
+  status                VARCHAR(20) NOT NULL DEFAULT '下書き',
+  remarks               VARCHAR(500),
+  created_by            BIGINT,
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag          TINYINT DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_proposal CASCADE;

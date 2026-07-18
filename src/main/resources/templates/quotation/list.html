@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout/base :: layout(#{quotation.title}, ~{::content}, ~{::script})}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{quotation.title}">見積管理</title>
+</head>
+<body>
+<div th:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div class="row mb-3 align-items-end">
+                <div class="col-md-3">
+                    <input type="text" id="quotationKeyword" class="form-control" placeholder="件名・見積番号">
+                </div>
+                <div class="col-md-3">
+                    <select id="quotationStatusFilter" class="form-select">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="下書き" th:text="#{quotation.status.下書き}">下書き</option>
+                        <option value="提出済" th:text="#{quotation.status.提出済}">提出済</option>
+                        <option value="受注" th:text="#{quotation.status.受注}">受注</option>
+                        <option value="失注" th:text="#{quotation.status.失注}">失注</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button id="btnSearchQuotation" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                    <button id="btnNewQuotation" class="btn btn-primary" th:text="#{quotation.btn.new}">見積作成</button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped" id="quotationTable">
+                    <thead>
+                        <tr>
+                            <th th:text="#{quotation.table.no}">見積番号</th>
+                            <th th:text="#{quotation.table.customer}">顧客</th>
+                            <th th:text="#{quotation.table.title}">件名</th>
+                            <th th:text="#{quotation.table.unitPrice}">単価</th>
+                            <th th:text="#{quotation.table.status}">ステータス</th>
+                            <th th:text="#{quotation.table.validUntil}">有効期限</th>
+                            <th th:text="#{quotation.table.actions}">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 見積モーダル -->
+    <div class="modal fade" id="quotationModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{quotation.btn.new}">見積作成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="quotationForm" class="row g-2">
+                        <input type="hidden" name="id">
+                        <input type="hidden" name="proposalId">
+                        <div class="col-md-6">
+                            <label class="form-label" th:text="#{quotation.modal.customer}">顧客</label>
+                            <select class="form-select" name="customerId" required></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" th:text="#{quotation.modal.project}">案件</label>
+                            <select class="form-select" name="projectId"></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" th:text="#{quotation.modal.engineer}">要員</label>
+                            <select class="form-select" name="engineerId"></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" th:text="#{quotation.modal.title}">件名</label>
+                            <input type="text" class="form-control" name="title" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{quotation.modal.unitPrice}">単価(円/月)</label>
+                            <input type="number" class="form-control" name="unitPrice" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" th:text="#{quotation.modal.settlementMin}">精算下限</label>
+                            <input type="number" step="0.1" class="form-control" name="settlementHoursMin">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" th:text="#{quotation.modal.settlementMax}">精算上限</label>
+                            <input type="number" step="0.1" class="form-control" name="settlementHoursMax">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{quotation.modal.validUntil}">有効期限</label>
+                            <input type="date" class="form-control" name="validUntil">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" th:text="#{quotation.modal.remarks}">備考</label>
+                            <textarea class="form-control" name="remarks"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveQuotation" th:text="#{common.btn.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block th:fragment="script">
+    <script src="/js/modules/quotation.js"></script>
+</th:block>
+</body>
+</html>

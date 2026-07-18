@@ -127,6 +127,9 @@ public class Contract extends BaseEntity {
     /** 自動更新ドラフトの生成元契約ID（このIDから自動生成された更新ドラフトの場合のみ設定） */
     private Long renewedFromContractId;
 
+    /** 生成元見積ID（見積受注からのドラフトのみ設定） */
+    private Long quotationId;
+
     /** 作成者ID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;

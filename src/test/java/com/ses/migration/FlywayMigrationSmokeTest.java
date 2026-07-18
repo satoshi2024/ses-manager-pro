@@ -94,6 +94,11 @@ class FlywayMigrationSmokeTest {
                     + "WHERE table_schema=DATABASE() AND table_name='t_invoice' AND column_name='status' "
                     + "AND column_type LIKE '%一部入金%'");
 
+            // 見積(V29 / quotation-management)
+            assertTableExists(st, "t_quotation");
+            assertColumnExists(st, "t_contract", "quotation_id");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='quotation'");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");

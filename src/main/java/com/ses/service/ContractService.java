@@ -54,4 +54,12 @@ public interface ContractService extends IService<Contract> {
      * @return 生成（または既存）の契約
      */
     Contract createDraftFromProposal(Proposal proposal);
+
+    /**
+     * 受注した見積から契約ドラフト（準備中）を生成する。
+     * 既に同一見積から生成済みの契約があれば既存契約を返す（冪等）。要員未設定は拒否する。
+     * @param quotation 受注した見積
+     * @return 生成（または既存）の契約
+     */
+    Contract createDraftFromQuotation(com.ses.entity.Quotation quotation);
 }
