@@ -27,6 +27,7 @@ public class ContractApiController {
     private final ContractService contractService;
     private final ContractRenewalService contractRenewalService;
     private final ContractMapper contractMapper;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * 契約一覧取得
@@ -47,7 +48,15 @@ public class ContractApiController {
             @RequestParam(required = false) Long salesUserId,
             @RequestParam(required = false) Boolean salesUnassigned) {
         Page<ContractListDto> page = new Page<>(current, size);
-        return ApiResult.success(contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned));
+        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned);
+        // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみに絞る。
+        if (dataScopeService.isScoped() && result.getRecords() != null) {
+            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
+            result.setRecords(result.getRecords().stream()
+                    .filter(r -> allowed.contains(r.getId()))
+                    .collect(java.util.stream.Collectors.toList()));
+        }
+        return ApiResult.success(result);
     }
 
     /**
@@ -58,6 +67,9 @@ public class ContractApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Contract> getById(@PathVariable Long id) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedContractIds().contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         return ApiResult.success(contractService.getById(id));
     }
 

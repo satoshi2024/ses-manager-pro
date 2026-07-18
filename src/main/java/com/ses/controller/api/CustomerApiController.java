@@ -36,6 +36,7 @@ public class CustomerApiController {
     private final ProposalService proposalService;
     private final ContractService contractService;
     private final SalesActivityService salesActivityService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * 顧客一覧（ページネーション）
@@ -49,7 +50,17 @@ public class CustomerApiController {
             @RequestParam(required = false) String trustLevel) {
 
         Page<Customer> page = new Page<>(current, size);
+        // データスコープ: 営業ロール制限時は担当顧客のみ。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(new Page<>(current, size, 0));
+            }
+        }
         LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
+        if (dataScopeService.isScoped()) {
+            queryWrapper.in(Customer::getId, dataScopeService.allowedCustomerIds());
+        }
 
         if (StringUtils.hasText(companyName)) {
             queryWrapper.like(Customer::getCompanyName, companyName);
@@ -70,6 +81,9 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Customer> getById(@PathVariable Long id) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedCustomerIds().contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         return ApiResult.success(customerService.getById(id));
     }
 
