@@ -232,6 +232,12 @@ function openEditContract(id) {
         $('#cont-fractionRule').val(c.fractionRule || '');
         $('#cont-autoRenew').val(c.autoRenew != null ? String(c.autoRenew) : '0');
         $('#cont-commissionBaseType').val(c.commissionBaseType || '');
+        if (c.quotationId) {
+            $('#cont-quotationLinkWrapper').show();
+            $('#cont-quotationLink').attr('href', '/api/quotations/' + c.quotationId + '/pdf');
+        } else {
+            $('#cont-quotationLinkWrapper').hide();
+        }
         $('#cont-commissionRate').val(c.commissionRate != null ? c.commissionRate : '');
         $('#contractModalTitle').text(SES.i18n.t('contract.edit'));
         $('#contractSaveBtnLabel').text(SES.i18n.t('common.save'));

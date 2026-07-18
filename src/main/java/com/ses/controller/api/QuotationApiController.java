@@ -106,6 +106,10 @@ public class QuotationApiController {
 
     @PutMapping("/{id}")
     public ApiResult<?> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        Quotation current = quotationService.getById(id);
+        if (current != null && ("受注".equals(current.getStatus()) || "失注".equals(current.getStatus()))) {
+            throw com.ses.common.exception.BusinessException.of(400, "Terminal state quotes cannot be fully updated");
+        }
         Quotation quotation = new Quotation();
         quotation.setId(id);
         quotation.setCustomerId(request.getCustomerId());
@@ -120,6 +124,15 @@ public class QuotationApiController {
         quotation.setRemarks(request.getRemarks());
         
         quotationService.updateWithBusinessRules(quotation);
+        return ApiResult.success(null);
+    }
+
+    @PostMapping("/{id}/remarks")
+    public ApiResult<?> appendRemark(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationRemarkAppendRequest req) {
+        Quotation q = getVisibleQuotationOr404(id);
+        String current = q.getRemarks();
+        q.setRemarks(current == null || current.isEmpty() ? req.getAdditionalRemark() : current + "\n" + req.getAdditionalRemark());
+        quotationService.updateById(q);
         return ApiResult.success(null);
     }
 

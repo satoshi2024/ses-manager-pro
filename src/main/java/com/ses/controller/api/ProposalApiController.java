@@ -43,6 +43,31 @@ public class ProposalApiController {
      *
      * @return 提案かんばんDTOリスト
      */
+    @GetMapping("/{id}")
+    public ApiResult<com.ses.dto.proposal.ProposalQuotationPresetDto> getPreset(@PathVariable Long id) {
+        Proposal p = proposalService.getById(id);
+        if (p == null) {
+            throw BusinessException.of(404, "error.proposal.notFound");
+        }
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedProposalIds();
+            if (!allowed.contains(p.getId())) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+        }
+        com.ses.dto.proposal.ProposalQuotationPresetDto dto = new com.ses.dto.proposal.ProposalQuotationPresetDto();
+        dto.setId(p.getId());
+        dto.setEngineerId(p.getEngineerId());
+        dto.setProjectId(p.getProjectId());
+        dto.setProposedUnitPrice(p.getProposedUnitPrice());
+        Project proj = projectService.getById(p.getProjectId());
+        if (proj != null) {
+            dto.setCustomerId(proj.getCustomerId());
+            dto.setProjectName(proj.getProjectName());
+        }
+        return ApiResult.success(dto);
+    }
+
     @GetMapping("/kanban")
     public ApiResult<List<ProposalKanbanDto>> getKanbanList() {
         List<ProposalKanbanDto> list = proposalService.getKanbanList();
