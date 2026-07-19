@@ -549,13 +549,16 @@ function renderCsvResult(result) {
     if (errors.length === 0) {
         $('#csvErrorArea').html('<div class="text-muted small">' + SES.i18n.t('engineer.csv.noError') + '</div>');
     } else {
-        let html = '<div class="text-danger small mb-1">' + SES.i18n.t('engineer.csv.errorLines') + '</div>';
-        html += '<ul class="list-group list-group-flush">';
+        let $container = $('<div></div>');
+        $container.append($('<div class="text-danger small mb-1"></div>').text(SES.i18n.t('engineer.csv.errorLines')));
+        let $ul = $('<ul class="list-group list-group-flush"></ul>');
         errors.forEach(function(e) {
-            html += `<li class="list-group-item bg-transparent text-light small border-dark py-1">${e.line} ' + SES.i18n.t('engineer.csv.line') + ': ${e.message}</li>`;
+            let $li = $('<li class="list-group-item bg-transparent text-light small border-dark py-1"></li>');
+            $li.text(`${e.line} ${SES.i18n.t('engineer.csv.line')}: ${e.message}`);
+            $ul.append($li);
         });
-        html += '</ul>';
-        $('#csvErrorArea').html(html);
+        $container.append($ul);
+        $('#csvErrorArea').empty().append($container);
     }
     const modal = new bootstrap.Modal(document.getElementById('csvResultModal'));
     modal.show();

@@ -56,8 +56,8 @@ $(document).ready(function() {
                     return `
                         <div class="p-2">
                             <div class="fw-bold mb-1">${task.name}</div>
-                            <div class="small">' + SES.i18n.t('js.gantt.period') + ': ${task.start} ~ ${task.end}</div>
-                            <div class="small mt-1 text-accent-green">' + SES.i18n.t('js.gantt.progress') + ': ${task.progress}%</div>
+                            <div class="small">${SES.i18n.t('js.gantt.period')}: ${task.start} ~ ${task.end}</div>
+                            <div class="small mt-1 text-accent-green">${SES.i18n.t('js.gantt.progress')}: ${task.progress}%</div>
                         </div>
                     `;
                 }

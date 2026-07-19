@@ -159,7 +159,9 @@ public class QuotationApiController {
     @DeleteMapping("/{id}")
     public ApiResult<?> delete(@PathVariable Long id) {
         getVisibleQuotationOr404(id);
-        return ApiResult.success(quotationService.removeById(id));
+        boolean success = quotationService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     @PutMapping("/{id}/status")

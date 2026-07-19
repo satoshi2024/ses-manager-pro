@@ -82,4 +82,12 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
     List<WorkRecordGridDto> selectMonthlyGridForEngineer(@Param("engineerId") Long engineerId,
                                                          @Param("workMonth") String workMonth,
                                                          @Param("monthEnd") String monthEnd);
+
+    @Select("""
+        SELECT e.employment_type
+        FROM t_contract c
+        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        WHERE c.id = #{contractId}
+    """)
+    String selectEmploymentTypeByContractId(@Param("contractId") Long contractId);
 }

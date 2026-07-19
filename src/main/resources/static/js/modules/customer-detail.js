@@ -83,7 +83,7 @@ function renderActivities(records) {
     let html = '<div class="timeline position-relative ps-4 py-2" style="border-left: 2px solid #343a40;">';
     
     // Create Date object for today and reset time to compare correctly
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = SES.util.getLocalDateString();
 
     records.forEach(act => {
         let icon = 'bi-list';
@@ -96,22 +96,22 @@ function renderActivities(records) {
         let borderClass = isOverdue ? 'border-danger' : 'border-secondary';
         let bgClass = isOverdue ? 'bg-danger bg-opacity-10' : 'bg-dark';
         
-        let followUpBadge = isOverdue ? '<span class="badge bg-danger ms-2"><i class="bi bi-exclamation-circle me-1"></i>' + SES.i18n.t('customer.followUpNeeded') + '</span>' : '';
+        let followUpBadge = isOverdue ? `<span class="badge bg-danger ms-2"><i class="bi bi-exclamation-circle me-1"></i>${SES.i18n.t('customer.followUpNeeded')}</span>` : '';
         if (act.completedFlag === 1) {
-            followUpBadge = '<span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>' + SES.i18n.t('customer.activity.completed') + '</span>';
+            followUpBadge = `<span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>${SES.i18n.t('customer.activity.completed')}</span>`;
         }
 
         let nextActionHtml = '';
         if (act.nextActionDate) {
             let color = isOverdue ? 'text-danger fw-bold' : 'text-info';
-            nextActionHtml = `<div class="mt-3 small ${color}"><i class="bi bi-calendar-event me-1"></i>' + SES.i18n.t('customer.activity.nextDate') + ': ${act.nextActionDate}</div>`;
+            nextActionHtml = `<div class="mt-3 small ${color}"><i class="bi bi-calendar-event me-1"></i>${SES.i18n.t('customer.activity.nextDate')}: ${act.nextActionDate}</div>`;
         }
 
         let completeBtn = '';
         if (isOverdue) {
-            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>' + SES.i18n.t('customer.activity.markCompleted') + '</button>`;
+            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         } else if (act.completedFlag === 0 && act.nextActionDate) {
-            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>' + SES.i18n.t('customer.activity.markCompleted') + '</button>`;
+            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         }
 
         html += `

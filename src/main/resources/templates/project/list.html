@@ -123,11 +123,11 @@
                         </div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label text-muted small" th:text="#{project.modal.price_min}">単価下限 (万円)</label>
+                                <label class="form-label text-muted small" th:text="#{project.modal.price_min}">単価下限 (円)</label>
                                 <input type="number" id="proj-unitPriceMin" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{project.modal.price_min.placeholder}" placeholder="例: 600000" min="0">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label text-muted small" th:text="#{project.modal.price_max}">単価上限 (万円)</label>
+                                <label class="form-label text-muted small" th:text="#{project.modal.price_max}">単価上限 (円)</label>
                                 <input type="number" id="proj-unitPriceMax" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{project.modal.price_max.placeholder}" placeholder="例: 800000" min="0">
                             </div>
                         </div>
@@ -148,6 +148,12 @@
                                     <option value="充足" th:text="#{project.status.filled_detail}">参画決定 (充足)</option>
                                     <option value="クローズ" th:text="#{project.status.closed}">クローズ</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{project.requiredCount}">必要人数</label>
+                                <input type="number" id="proj-requiredCount" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" value="1">
                             </div>
                         </div>
 

@@ -23,6 +23,7 @@ function loadProjects(page = 1) {
         current: page,
         size: 10,
         projectName: $('#searchProjectName').val(),
+        customerName: $('#searchCustomer').val(),
         status: $('#searchStatus').val()
     };
 
@@ -123,8 +124,8 @@ function renderProjects(records) {
     records.forEach(proj => {
         // Remote Badge
         let remoteIcon = '';
-        if (proj.remoteType === SES.i18n.t('js.project.remote.full')) remoteIcon = '<i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル';
-        else if (proj.remoteType === SES.i18n.t('js.project.remote.hybrid') || proj.remoteType === SES.i18n.t('js.project.remote.hybrid')) remoteIcon = '<i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部';
+        if (proj.remoteType === 'フルリモート') remoteIcon = '<i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル';
+        else if (proj.remoteType === 'ハイブリッド') remoteIcon = '<i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部';
         else remoteIcon = '<i class="bi bi-x-circle text-danger" title="不可"></i> 不可';
 
         // Status Badge
@@ -134,8 +135,8 @@ function renderProjects(records) {
         else if (proj.status === '選考中') statusBadge = `<span class="status-badge status-warning">${localizedStatus}</span>`;
         else if (proj.status === '充足') statusBadge = `<span class="status-badge status-primary">${localizedStatus}</span>`;
 
-        const min = proj.unitPriceMin ? (proj.unitPriceMin / 10000) + '万' : '-';
-        const max = proj.unitPriceMax ? (proj.unitPriceMax / 10000) + '万' : '-';
+        const min = proj.unitPriceMin ? '¥' + proj.unitPriceMin.toLocaleString() : '-';
+        const max = proj.unitPriceMax ? '¥' + proj.unitPriceMax.toLocaleString() : '-';
         const priceStr = `${min} 〜 ${max}`;
 
         const tr = `
@@ -144,7 +145,7 @@ function renderProjects(records) {
                     <div class="fw-bold text-light">${SES.escapeHtml(proj.projectName)}</div>
                     <div class="text-muted small"><i class="bi bi-code-slash me-1"></i>${SES.escapeHtml(proj.description || '')}</div>
                 </td>
-                <td>${proj.customerId || SES.i18n.t('js.project.match.expected_price_not_set')} (ID)</td> <!-- Ideally we join with Customer table on backend to get name -->
+                <td>${SES.escapeHtml(proj.customerName || '')}</td>
                 <td class="font-monospace">${priceStr}</td>
                 <td class="text-center">${proj.requiredCount || 1}名</td>
                 <td class="text-center">${remoteIcon}</td>
@@ -203,6 +204,7 @@ function editProject(id) {
                 $('#proj-customerId').val(proj.customerId || '');
                 $('#proj-unitPriceMin').val(proj.unitPriceMin);
                 $('#proj-unitPriceMax').val(proj.unitPriceMax);
+                $('#proj-requiredCount').val(proj.requiredCount || 1);
                 $('#proj-remoteType').val(proj.remoteType);
                 $('#proj-status').val(proj.status);
                 
@@ -238,6 +240,7 @@ function saveProject() {
         customerId: $('#proj-customerId').val() ? parseInt($('#proj-customerId').val()) : null,
         unitPriceMin: $('#proj-unitPriceMin').val() ? parseInt($('#proj-unitPriceMin').val()) : null,
         unitPriceMax: $('#proj-unitPriceMax').val() ? parseInt($('#proj-unitPriceMax').val()) : null,
+        requiredCount: $('#proj-requiredCount').val() ? parseInt($('#proj-requiredCount').val()) : 1,
         remoteType: $('#proj-remoteType').val(),
         status: $('#proj-status').val()
     };
@@ -267,6 +270,8 @@ function saveProject() {
         return;
     }
 
+    data.skills = skills;
+
     $.ajax({
         url: '/api/projects',
         method: id ? 'PUT' : 'POST',
@@ -274,17 +279,8 @@ function saveProject() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                if (id) {
-                    saveProjectSkills(id, skills);
-                } else {
-                    // Use the returned project ID directly
-                    if (res.data && res.data.id) {
-                        saveProjectSkills(res.data.id, skills);
-                    } else {
-                        Toast.success(SES.i18n.t('js.project.success.save'));
-                        finishSave();
-                    }
-                }
+                Toast.success(SES.i18n.t('js.project.success.save'));
+                finishSave();
             } else {
                 Toast.error(res.message || SES.i18n.t('js.project.error.save'));
             }
@@ -292,23 +288,6 @@ function saveProject() {
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('js.common.error_network'));
-        }
-    });
-}
-
-function saveProjectSkills(projectId, skills) {
-    $.ajax({
-        url: '/api/projects/' + projectId + '/skills',
-        method: 'PUT',
-        contentType: 'application/json',
-        data: JSON.stringify(skills),
-        success: function(res) {
-            Toast.success(SES.i18n.t('js.project.success.save_general'));
-            finishSave();
-        },
-        error: function() {
-            Toast.error(SES.i18n.t('js.project.error.save_skill'));
-            finishSave();
         }
     });
 }
@@ -423,8 +402,8 @@ function findMatchingEngineers(projectId) {
                 let html = '<p class="mb-3">' + SES.i18n.t('js.project.match.recommend') + '</p>';
                 results.forEach(match => {
                     const scoreColor = match.score >= 90 ? 'text-success' : (match.score >= 70 ? 'text-warning' : 'text-danger');
-                    const priceText = match.proposedPrice ? match.proposedPrice + '万' : SES.i18n.t('js.project.match.expected_price_not_set');
-                    const proposalPriceYen = match.proposedPrice ? match.proposedPrice * 10000 : 'null';
+                    const priceText = match.proposedPrice ? '¥' + Number(match.proposedPrice).toLocaleString() : SES.i18n.t('js.project.match.expected_price_not_set');
+                    const proposalPriceYen = match.proposedPrice ? match.proposedPrice : 'null';
                     html += `
                         <div class="card bg-secondary border-dark mb-3 shadow-sm">
                             <div class="card-body p-3">

@@ -105,7 +105,9 @@ public class EngineerApiController {
         if (dataScopeService.isScoped() && !dataScopeService.allowedEngineerIds().contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        return ApiResult.success(engineerService.getById(id));
+        var entity = engineerService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
@@ -133,6 +135,8 @@ public class EngineerApiController {
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
         dataScopeService.assertAllowedEngineer(id);
-        return ApiResult.success(engineerService.removeById(id));
+        boolean success = engineerService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 }

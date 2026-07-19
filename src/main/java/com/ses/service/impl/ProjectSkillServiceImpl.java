@@ -17,7 +17,15 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @Service
-public class ProjectSkillServiceImpl extends ServiceImpl<ProjectSkillMapper, ProjectSkill> implements ProjectSkillService {
+public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectSkillMapper, ProjectSkill> implements ProjectSkillService {
+
+    private final com.ses.mapper.ProjectMapper projectMapper;
+    private final com.ses.mapper.SkillTagMapper skillTagMapper;
+
+    public ProjectSkillServiceImpl(com.ses.mapper.ProjectMapper projectMapper, com.ses.mapper.SkillTagMapper skillTagMapper) {
+        this.projectMapper = projectMapper;
+        this.skillTagMapper = skillTagMapper;
+    }
 
     @Override
     public List<ProjectSkillDetailDto> listDetail(Long projectId) {
@@ -27,6 +35,22 @@ public class ProjectSkillServiceImpl extends ServiceImpl<ProjectSkillMapper, Pro
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void replaceSkills(Long projectId, List<ProjectSkill> skills) {
+        // Validate Project existence
+        if (projectMapper.selectById(projectId) == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.project.notFound");
+        }
+
+        if (skills != null && !skills.isEmpty()) {
+            List<Long> skillIds = skills.stream()
+                    .map(ProjectSkill::getSkillId)
+                    .distinct()
+                    .collect(Collectors.toList());
+            List<com.ses.entity.SkillTag> existingSkills = skillTagMapper.selectBatchIds(skillIds);
+            if (existingSkills.size() != skillIds.size()) {
+                throw com.ses.common.exception.BusinessException.of(400, "error.skill.notFound");
+            }
+        }
+
         // 1. Delete existing skills for this project
         remove(new LambdaQueryWrapper<ProjectSkill>().eq(ProjectSkill::getProjectId, projectId));
 

@@ -63,7 +63,16 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         proposal.setProposedAt(LocalDateTime.now());
         proposal.setProposedBy(SecurityUtils.currentUserId());
 
-        boolean result = super.save(proposal);
+        boolean result;
+        try {
+            result = super.save(proposal);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            if (e.getMessage() != null && e.getMessage().contains("uk_proposal_active_engineer_project")) {
+                throw com.ses.common.exception.BusinessException.of(409, "この要員はすでに同じ案件に提案中です。");
+            }
+            throw e;
+        }
+
         if (result && proposal.getEngineerId() != null) {
             engineerStatusService.onProposalCreated(proposal.getEngineerId());
         }

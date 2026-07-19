@@ -132,7 +132,9 @@ public class UserApiController {
         } else {
             sysUser.setPassword(null);
         }
-        return ApiResult.success(sysUserService.updateById(sysUser));
+        boolean success = sysUserService.updateById(sysUser);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -148,7 +150,9 @@ public class UserApiController {
         SysUser sysUser = new SysUser();
         sysUser.setId(id);
         sysUser.setStatus(status);
-        return ApiResult.success(sysUserService.updateById(sysUser));
+        boolean success = sysUserService.updateById(sysUser);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -162,7 +166,9 @@ public class UserApiController {
         if (engineerAccountLinkService.isUserLinked(id)) {
             throw BusinessException.of("error.engineerAccount.linkedUserDelete");
         }
-        return ApiResult.success(sysUserService.removeById(id));
+        boolean success = sysUserService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**

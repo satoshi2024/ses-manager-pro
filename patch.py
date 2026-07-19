@@ -1,37 +1,32 @@
-import sys
+import os
+import glob
+import re
 
-path = 'src/main/java/com/ses/service/impl/InvoiceServiceImpl.java'
-with open(path, 'r', encoding='utf-8') as f:
-    text = f.read()
+controllers_dir = r'c:\Users\pc\Documents\ses-manager-pro\src\main\java\com\ses\controller\api'
+for file in glob.glob(os.path.join(controllers_dir, '*ApiController.java')):
+    with open(file, 'r', encoding='utf-8') as f:
+        content = f.read()
 
-text = text.replace('Invoice invoice = this.getById(invoiceId);', 'Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", invoiceId).last("FOR UPDATE"));')
+    # getById(id)
+    content = re.sub(
+        r'return ApiResult\.success\(([\w]+Service)\.getById\((id)\)\);',
+        r'var entity = \1.getById(\2);\n        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");\n        return ApiResult.success(entity);',
+        content
+    )
 
-find2 = '''        if (invoice == null) {
-            throw BusinessException.of("error.invoice.notFound");
-        }'''
-rep2 = '''        if (invoice == null) {
-            throw BusinessException.of("error.invoice.notFound");
-        }
-        if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
-            throw BusinessException.of("error.invoice.legacyPaidData");
-        }'''
-text = text.replace(find2.replace('\r\n', '\n'), rep2)
+    # updateById(entity)
+    content = re.sub(
+        r'return ApiResult\.success\(([\w]+Service)\.updateById\(([\w]+)\)\);',
+        r'boolean success = \1.updateById(\2);\n        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");\n        return ApiResult.success(true);',
+        content
+    )
 
-find3 = '''        Invoice invoice = this.getById(id);
-        if (invoice == null) {
-            throw BusinessException.of("error.invoice.notFound");
-        }
-        if ("入金済".equals(invoice.getStatus())) {
-            throw BusinessException.of("error.invoice.cancelPaidInvoice");
-        }'''
-rep3 = '''        Invoice invoice = this.getById(id);
-        if (invoice == null) {
-            throw BusinessException.of("error.invoice.notFound");
-        }
-        if (!listPayments(id).isEmpty()) {
-            throw BusinessException.of("error.invoice.cancelPaidInvoice");
-        }'''
-text = text.replace(find3.replace('\r\n', '\n'), rep3)
+    # removeById(id)
+    content = re.sub(
+        r'return ApiResult\.success\(([\w]+Service)\.removeById\((id)\)\);',
+        r'boolean success = \1.removeById(\2);\n        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");\n        return ApiResult.success(true);',
+        content
+    )
 
-with open(path, 'w', encoding='utf-8') as f:
-    f.write(text)
+    with open(file, 'w', encoding='utf-8') as f:
+        f.write(content)

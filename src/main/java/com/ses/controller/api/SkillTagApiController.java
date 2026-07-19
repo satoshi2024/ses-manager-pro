@@ -40,7 +40,9 @@ public class SkillTagApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<SkillTag> getById(@PathVariable Long id) {
-        return ApiResult.success(skillTagService.getById(id));
+        var entity = skillTagService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
@@ -56,7 +58,9 @@ public class SkillTagApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody SkillTag skillTag) {
-        return ApiResult.success(skillTagService.updateById(skillTag));
+        boolean success = skillTagService.updateById(skillTag);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -64,6 +68,8 @@ public class SkillTagApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
-        return ApiResult.success(skillTagService.removeById(id));
+        boolean success = skillTagService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 }

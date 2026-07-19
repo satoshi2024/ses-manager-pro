@@ -34,7 +34,9 @@ public class ProfileApiController {
         SysUser update = new SysUser();
         update.setId(user.getId());
         update.setPassword(passwordEncoder.encode(req.getNewPassword()));
-        return ApiResult.success(sysUserService.updateById(update));
+        boolean success = sysUserService.updateById(update);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 }
 

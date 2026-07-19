@@ -165,7 +165,7 @@ function renderCharts(chartsData) {
                                 label += ': ';
                             }
                             if (context.parsed.y !== null) {
-                                label += context.parsed.y;
+                                label += '¥' + Number(context.parsed.y).toLocaleString();
                             }
                             // 予測系列は内訳（確定ベース + パイプライン加重）を表示する
                             if (chartsData.revenue.forecast && context.dataset.type === 'line') {

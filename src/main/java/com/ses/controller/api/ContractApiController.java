@@ -77,7 +77,9 @@ public class ContractApiController {
     @GetMapping("/{id}")
     public ApiResult<Contract> getById(@PathVariable Long id) {
         assertContractVisible(id);
-        return ApiResult.success(contractService.getById(id));
+        var entity = contractService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
@@ -87,7 +89,9 @@ public class ContractApiController {
      * @return 結果
      */
     @PostMapping
-    public ApiResult<Boolean> create(@Valid @RequestBody Contract contract) {
+    public ApiResult<Boolean> create(@Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+        Contract contract = new Contract();
+        org.springframework.beans.BeanUtils.copyProperties(dto, contract);
         contractService.saveWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
                 && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
@@ -104,7 +108,9 @@ public class ContractApiController {
      * @return 結果
      */
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Contract contract) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+        Contract contract = new Contract();
+        org.springframework.beans.BeanUtils.copyProperties(dto, contract);
         assertContractVisible(id);
         contract.setId(id);
         // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
@@ -146,7 +152,9 @@ public class ContractApiController {
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
         assertContractVisible(id);
-        return ApiResult.success(contractService.removeById(id));
+        boolean success = contractService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     // ===== 単価改定履歴（contract-price-history / P6） =====

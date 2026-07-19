@@ -49,10 +49,10 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
     @Override
     public List<SalesPerformanceDto> calculateMonthlyPerformance(String yearMonth) {
         YearMonth targetMonth;
-        if (yearMonth == null || yearMonth.isEmpty()) {
+        if (yearMonth == null || yearMonth.isBlank()) {
             targetMonth = YearMonth.now();
         } else {
-            targetMonth = YearMonth.parse(yearMonth, DateTimeFormatter.ofPattern("yyyy-MM"));
+            targetMonth = com.ses.common.util.DateUtils.parseYearMonth(yearMonth);
         }
         String ymStr = targetMonth.toString();
         

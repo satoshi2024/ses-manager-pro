@@ -31,7 +31,9 @@ public class EmailTemplateApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<EmailTemplate> getTemplateById(@PathVariable Long id) {
-        return ApiResult.success(emailTemplateService.getById(id));
+        var entity = emailTemplateService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
@@ -48,7 +50,9 @@ public class EmailTemplateApiController {
     @PutMapping("/{id}")
     public ApiResult<Boolean> updateTemplate(@PathVariable Long id, @RequestBody EmailTemplate emailTemplate) {
         emailTemplate.setId(id);
-        return ApiResult.success(emailTemplateService.updateById(emailTemplate));
+        boolean success = emailTemplateService.updateById(emailTemplate);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -56,6 +60,8 @@ public class EmailTemplateApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> deleteTemplate(@PathVariable Long id) {
-        return ApiResult.success(emailTemplateService.removeById(id));
+        boolean success = emailTemplateService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 }

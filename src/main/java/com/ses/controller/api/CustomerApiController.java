@@ -84,7 +84,9 @@ public class CustomerApiController {
         if (dataScopeService.isScoped() && !dataScopeService.allowedCustomerIds().contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        return ApiResult.success(customerService.getById(id));
+        var entity = customerService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
@@ -103,7 +105,9 @@ public class CustomerApiController {
         if (customer.getId() != null) {
             dataScopeService.assertAllowedCustomer(customer.getId());
         }
-        return ApiResult.success(customerService.updateById(customer));
+        boolean success = customerService.updateById(customer);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -112,7 +116,9 @@ public class CustomerApiController {
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
         dataScopeService.assertAllowedCustomer(id);
-        return ApiResult.success(customerService.removeById(id));
+        boolean success = customerService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**

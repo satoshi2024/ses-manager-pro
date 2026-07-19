@@ -26,7 +26,7 @@ public class BusinessException extends RuntimeException {
      */
     public BusinessException(String message) {
         super(message);
-        this.code = 500;
+        this.code = 400;
         this.messageKey = null;
         this.args = null;
     }
@@ -52,7 +52,7 @@ public class BusinessException extends RuntimeException {
     }
 
     public static BusinessException of(String messageKey, Object... args) {
-        return new BusinessException(500, messageKey, args);
+        return new BusinessException(400, messageKey, args);
     }
 
     public static BusinessException of(int code, String messageKey, Object... args) {

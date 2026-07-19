@@ -7,12 +7,18 @@
 <main layout:fragment="content" class="container-fluid py-3">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0">freee給与連携</h1>
-    <a class="btn btn-outline-secondary" href="/integrations/freee/authorize">freeeに接続</a>
+    <a th:if="${#authorization.expression('hasRole(''管理者'')')}" class="btn btn-outline-secondary" href="/integrations/freee/authorize">freeeに接続</a>
   </div>
   <div id="payrollStatus" class="alert alert-secondary">接続状態を確認中...</div>
   <section class="card mb-3"><div class="card-body">
     <h2 class="h6">freee従業員</h2>
     <div id="payrollEmployees" class="table-responsive"></div>
+    <form id="linkForm" class="row g-2 align-items-end mt-2">
+      <div class="col-auto"><label class="form-label">SES要員ID</label><input id="linkEngineerId" class="form-control" type="number" required></div>
+      <div class="col-auto"><label class="form-label">freee従業員ID</label><input id="linkEmployeeId" class="form-control" type="text" required></div>
+      <div class="col-auto"><button class="btn btn-primary" type="submit">連携</button></div>
+      <div class="col-auto"><button class="btn btn-danger" type="button" id="unlinkBtn">解除</button></div>
+    </form>
   </div></section>
   <section class="card"><div class="card-body">
     <h2 class="h6">給与明細</h2>
@@ -40,7 +46,26 @@
     } catch (e) { $('#payrollStatus').removeClass('alert-secondary').addClass('alert-danger').text(e.message || '取得に失敗しました'); }
   };
   $('#statementYear').val(new Date().getFullYear()); $('#statementMonth').val(new Date().getMonth() + 1);
-  $('#statementForm').on('submit', async e => { e.preventDefault(); try { const p = await SES.api.get('/api/payroll/statements', {year: $('#statementYear').val(), month: $('#statementMonth').val()}); $('#payrollStatements').text(JSON.stringify(p || [])); } catch (err) { Toast.error(err.message || '取得に失敗しました'); } });
+  $('#statementForm').on('submit', async e => { e.preventDefault(); try { const p = await SES.api.get('/api/payroll/statements', {year: $('#statementYear').val(), month: $('#statementMonth').val()}); 
+    $('#payrollStatements').html('<table class="table table-sm"><thead><tr><th>従業員ID</th><th>年</th><th>月</th><th>種別</th><th>総支給額</th><th>控除額</th><th>差引支給額</th></tr></thead><tbody>' +
+      (p || []).map(s => `<tr><td>${esc(s.employeeId)}</td><td>${esc(s.year)}</td><td>${esc(s.month)}</td><td>${esc(s.type)}</td><td>${esc(s.grossAmount)}</td><td>${esc(s.deductions)}</td><td>${esc(s.netAmount)}</td></tr>`).join('') + '</tbody></table>');
+  } catch (err) { Toast.error(err.message || '取得に失敗しました'); } });
+  
+  $('#linkForm').on('submit', async e => {
+    e.preventDefault();
+    try {
+      await SES.api.put(`/api/payroll/links/${$('#linkEngineerId').val()}?employeeId=${$('#linkEmployeeId').val()}`);
+      Toast.success('連携しました');
+    } catch (err) { Toast.error(err.message || '失敗しました'); }
+  });
+  $('#unlinkBtn').on('click', async () => {
+    if (!$('#linkEngineerId').val()) { Toast.warning('SES要員IDを入力してください'); return; }
+    try {
+      await SES.api.delete(`/api/payroll/links/${$('#linkEngineerId').val()}`);
+      Toast.success('解除しました');
+    } catch (err) { Toast.error(err.message || '失敗しました'); }
+  });
+
   load();
 })();
 </script>

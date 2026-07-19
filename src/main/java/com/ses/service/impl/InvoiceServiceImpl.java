@@ -118,7 +118,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             item.setWorkRecordId(dto.getWorkRecordId());
             item.setDescription(String.format("【%s】%s", dto.getEngineerName(), dto.getProjectName()));
             item.setAmount(dto.getBillingAmount() != null ? dto.getBillingAmount() : BigDecimal.ZERO);
-            invoiceItemMapper.insert(item);
+            try {
+                invoiceItemMapper.insert(item);
+            } catch (DuplicateKeyException e) {
+                throw BusinessException.of(409, "error.invoice.alreadyGenerated");
+            }
         }
 
         return invoice;
@@ -150,7 +154,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
      * next-next-month-end は翌々月末、それ以外(不正値含む)は翌月末。
      */
     static LocalDate calcDueDate(String billingMonth, String rule) {
-        java.time.YearMonth ym = java.time.YearMonth.parse(billingMonth);
+        java.time.YearMonth ym = com.ses.common.util.DateUtils.parseYearMonth(billingMonth);
         int plus = "next-next-month-end".equals(rule) ? 2 : 1;
         return ym.plusMonths(plus).atEndOfMonth();
     }

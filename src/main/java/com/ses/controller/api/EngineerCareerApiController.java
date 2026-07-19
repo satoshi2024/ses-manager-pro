@@ -50,7 +50,9 @@ public class EngineerCareerApiController {
         validatePeriod(career);
         career.setId(id);
         career.setEngineerId(engineerId);
-        return ApiResult.success(engineerCareerService.updateById(career));
+        boolean success = engineerCareerService.updateById(career);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     @DeleteMapping("/{id}")
@@ -58,7 +60,9 @@ public class EngineerCareerApiController {
         dataScopeService.assertAllowedEngineer(engineerId);
         // 削除対象が本当にこの要員に属する経歴かを確認する（他要員の経歴を削除できてしまう不備を防止）
         findOwnedOrThrow(engineerId, id);
-        return ApiResult.success(engineerCareerService.removeById(id));
+        boolean success = engineerCareerService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**

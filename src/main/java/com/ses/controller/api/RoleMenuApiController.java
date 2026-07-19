@@ -48,6 +48,25 @@ public class RoleMenuApiController {
     @PutMapping
     @Transactional
     public ApiResult<Boolean> update(@RequestParam String role, @RequestBody List<Long> menuIds) {
+        List<String> validRoles = List.of(
+            com.ses.common.constant.StatusConstants.ROLE_ADMIN,
+            com.ses.common.constant.StatusConstants.ROLE_SALES,
+            com.ses.common.constant.StatusConstants.ROLE_HR,
+            com.ses.common.constant.StatusConstants.ROLE_MANAGER
+        );
+        if (!validRoles.contains(role)) {
+            throw com.ses.common.exception.BusinessException.of(400, "無効なロールです");
+        }
+
+        if (menuIds != null && !menuIds.isEmpty()) {
+            Long count = menuMapper.selectCount(
+                new LambdaQueryWrapper<Menu>().in(Menu::getId, menuIds)
+            );
+            if (count == null || count < menuIds.size()) {
+                throw com.ses.common.exception.BusinessException.of(400, "存在しないメニューが含まれています");
+            }
+        }
+
         roleMenuService.remove(new LambdaQueryWrapper<RoleMenu>().eq(RoleMenu::getRole, role));
         if (menuIds != null && !menuIds.isEmpty()) {
             List<RoleMenu> roleMenus = menuIds.stream()

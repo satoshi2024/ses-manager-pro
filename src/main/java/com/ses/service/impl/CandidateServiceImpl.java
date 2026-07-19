@@ -125,6 +125,12 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         if (candidate == null) {
             throw BusinessException.of("error.candidate.notFound");
         }
+        if (!StatusConstants.CANDIDATE_STAGE_HIRED.equals(candidate.getCurrentStage())) {
+            throw BusinessException.of("error.candidate.notHiredStage");
+        }
+        if (candidate.getConvertedEngineerId() != null) {
+            throw BusinessException.of("error.candidate.alreadyLinked");
+        }
         Candidate update = new Candidate();
         update.setId(candidateId);
         update.setConvertedEngineerId(engineerId);

@@ -137,14 +137,14 @@ function loadKanbanData() {
 }
 
 function loadSelectOptions() {
-    $.get('/api/engineers', function(res) {
+    $.get('/api/engineers?size=1000', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-engineerId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
             (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
         }
     });
-    $.get('/api/projects', function(res) {
+    $.get('/api/projects?size=1000', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-projectId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
@@ -209,7 +209,7 @@ function createKanbanCard(item) {
                 <span class="kanban-card-price">¥${item.proposedUnitPrice != null ? item.proposedUnitPrice.toLocaleString() : '---'}</span>
 
                 ${item.aiMatchScore ? `
-                <div class="ai-score-badge small" title="' + SES.i18n.t('js.kanban.ai_score') + '">
+                <div class="ai-score-badge small" title="${SES.i18n.t('js.kanban.ai_score')}">
                     <i class="bi ${scoreIcon} me-1"></i>${item.aiMatchScore}%
                 </div>
                 ` : ''}

@@ -86,7 +86,7 @@ function renderEngineerDetail(eng) {
         $('#det-resume').html(`
             <div class="position-relative mb-4">
                 <div class="position-absolute bg-accent-blue rounded-circle" style="width: 12px; height: 12px; left: -1.85rem; top: 0.3rem;"></div>
-                <div class="text-muted small mb-1">' + SES.i18n.t('engineer.resumeSummary') + '</div>
+                <div class="text-muted small mb-1">${SES.i18n.t('engineer.resumeSummary')}</div>
                 <p class="text-light small mb-2" style="white-space: pre-wrap;">${SES.escapeHtml(eng.resumeSummary)}</p>
             </div>
         `);
@@ -101,7 +101,7 @@ function renderEngineerDetail(eng) {
 function renderAvatar(eng) {
     const $avatar = $('#det-avatar');
     if (eng.photoUrl) {
-        $avatar.html(`<img src="/api/files/${SES.escapeHtml(eng.photoUrl)}" alt="' + SES.i18n.t('engineer.photo') + '" style="width:100%;height:100%;object-fit:cover;">`);
+        $avatar.html(`<img src="/api/files/${SES.escapeHtml(eng.photoUrl)}" alt="${SES.i18n.t('engineer.photo')}" style="width:100%;height:100%;object-fit:cover;">`);
     } else {
         // 写真が無い場合はイニシャル or 氏名先頭文字
         const label = (eng.initialName && eng.initialName.trim())
@@ -261,15 +261,15 @@ function addSkillRow(skill = null) {
     // Proficiency Select
     const profSelect = $(`
         <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark skill-prof-select">
-            <option value="初級">' + SES.i18n.t('engineer.skill.proficiency.beginner') + '</option>
-            <option value="中級">' + SES.i18n.t('engineer.skill.proficiency.intermediate') + '</option>
-            <option value="上級">' + SES.i18n.t('engineer.skill.proficiency.advanced') + '</option>
+            <option value="初級">${SES.i18n.t('engineer.skill.proficiency.beginner')}</option>
+            <option value="中級">${SES.i18n.t('engineer.skill.proficiency.intermediate')}</option>
+            <option value="上級">${SES.i18n.t('engineer.skill.proficiency.advanced')}</option>
         </select>
     `);
     if (skill && skill.proficiency) profSelect.val(skill.proficiency);
     
     // Experience Years Input
-    const expInput = $(`<input type="number" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark skill-exp-input" min="0" placeholder="' + SES.i18n.t('engineer.experience.unit') + '">`);
+    const expInput = $(`<input type="number" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark skill-exp-input" min="0" placeholder="${SES.i18n.t('engineer.experience.unit')}">`);
     if (skill && skill.experienceYears) expInput.val(skill.experienceYears);
     
     // Delete Button
@@ -460,7 +460,6 @@ function deleteCareer(id) {
                     }
                 }
             });
-        }
         }
     });
 }

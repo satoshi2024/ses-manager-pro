@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.constant.StatusConstants;
 import com.ses.dto.candidate.CandidateEngineerInitialDto;
 import com.ses.entity.Candidate;
 import com.ses.entity.CandidateActivity;
@@ -64,6 +65,10 @@ public class CandidateApiController {
     public ApiResult<List<Candidate>> getOverdue() {
         LambdaQueryWrapper<Candidate> wrapper = new LambdaQueryWrapper<>();
         wrapper.le(Candidate::getNextActionDate, LocalDate.now())
+               .notIn(Candidate::getCurrentStage, 
+                       StatusConstants.CANDIDATE_STAGE_HIRED, 
+                       StatusConstants.CANDIDATE_STAGE_REJECTED, 
+                       StatusConstants.CANDIDATE_STAGE_OFFER_DECLINED)
                .orderByAsc(Candidate::getNextActionDate);
         return ApiResult.success(candidateService.list(wrapper));
     }
@@ -73,14 +78,18 @@ public class CandidateApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Candidate> getById(@PathVariable Long id) {
-        return ApiResult.success(candidateService.getById(id));
+        var entity = candidateService.getById(id);
+        if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(entity);
     }
 
     /**
      * 候補者新規登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@Valid @RequestBody Candidate candidate) {
+    public ApiResult<Boolean> save(@Valid @RequestBody com.ses.dto.candidate.CandidateSaveDto dto) {
+        Candidate candidate = new Candidate();
+        org.springframework.beans.BeanUtils.copyProperties(dto, candidate);
         return ApiResult.success(candidateService.save(candidate));
     }
 
@@ -88,11 +97,17 @@ public class CandidateApiController {
      * 候補者基本情報更新(ステージ変更はこのエンドポイントでは行わない。/activities を使うこと)
      */
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Candidate candidate) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.candidate.CandidateSaveDto dto) {
+        Candidate candidate = new Candidate();
+        org.springframework.beans.BeanUtils.copyProperties(dto, candidate);
         candidate.setId(id);
         // currentStageの直接上書きを防ぐ(ステージ変更は必ずchangeStage経由にする)
         candidate.setCurrentStage(null);
-        return ApiResult.success(candidateService.updateById(candidate));
+        // convertedEngineerIdの直接上書きを防ぐ
+        candidate.setConvertedEngineerId(null);
+        boolean success = candidateService.updateById(candidate);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**
@@ -100,7 +115,9 @@ public class CandidateApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
-        return ApiResult.success(candidateService.removeById(id));
+        boolean success = candidateService.removeById(id);
+        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        return ApiResult.success(true);
     }
 
     /**

@@ -101,7 +101,7 @@ function renderCandidates(records) {
         return;
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = SES.util.getLocalDateString();
 
     records.forEach(c => {
         const isOverdue = c.nextActionDate && c.nextActionDate <= todayStr

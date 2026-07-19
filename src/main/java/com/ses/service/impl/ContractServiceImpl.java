@@ -98,7 +98,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
         if (c.getSettlementHoursMax() != null && c.getSettlementHoursMin() != null
                 && c.getSettlementHoursMax().compareTo(c.getSettlementHoursMin()) < 0) {
-            throw BusinessException.of("error.contract.unitPriceInvalid");
+            throw BusinessException.of(400, "error.contract.unitPriceInvalid");
+        }
+        if (c.getSettlementHoursMin() != null && c.getSettlementHoursMin().compareTo(BigDecimal.ZERO) < 0) {
+            throw BusinessException.of(400, "error.contract.settlementHoursInvalid");
+        }
+        if (c.getCommissionRate() != null && (c.getCommissionRate().compareTo(BigDecimal.ZERO) < 0 || c.getCommissionRate().compareTo(new BigDecimal("100")) > 0)) {
+            throw BusinessException.of(400, "error.contract.commissionRateInvalid");
         }
 
         if (c.getProjectId() != null) {
@@ -127,6 +133,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (!StringUtils.hasText(contract.getContractType())) {
             contract.setContractType("準委任");
         }
+        contract.setStatus("準備中");
         
         if (contract.getContractNo() == null || contract.getContractNo().isEmpty()) {
             LocalDate baseDate = contract.getStartDate() != null ? contract.getStartDate() : LocalDate.now();

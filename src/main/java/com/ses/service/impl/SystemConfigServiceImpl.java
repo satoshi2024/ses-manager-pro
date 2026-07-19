@@ -77,6 +77,27 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Override
     public void put(String key, String value, String description) {
+        if ("billing.tax-rate".equals(key)) {
+            try {
+                BigDecimal rate = new BigDecimal(value);
+                if (rate.compareTo(BigDecimal.ZERO) < 0) {
+                    throw com.ses.common.exception.BusinessException.of(400, "消費税率は0以上を指定してください");
+                }
+            } catch (NumberFormatException e) {
+                throw com.ses.common.exception.BusinessException.of(400, "消費税率は数値を指定してください");
+            }
+        }
+        if ("commission.rate".equals(key)) {
+            try {
+                BigDecimal rate = new BigDecimal(value);
+                if (rate.compareTo(BigDecimal.ZERO) < 0 || rate.compareTo(new BigDecimal("100")) > 0) {
+                    throw com.ses.common.exception.BusinessException.of(400, "還元率は0から100の間で指定してください");
+                }
+            } catch (NumberFormatException e) {
+                throw com.ses.common.exception.BusinessException.of(400, "還元率は数値を指定してください");
+            }
+        }
+
         SystemConfig existing = systemConfigMapper.selectById(key);
         SystemConfig config = new SystemConfig(key, value, description);
         if (existing == null) {

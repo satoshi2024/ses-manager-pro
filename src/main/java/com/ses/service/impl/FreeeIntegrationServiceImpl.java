@@ -64,7 +64,23 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         JsonNode arr = get("/hr/api/v1/employees"); List<FreeeEmployeeDto> out = new ArrayList<>();
         if (arr != null) for (JsonNode n : arr.path("employees")) { if ("BP".equalsIgnoreCase(n.path("employment_type").asText())) continue; FreeeEmployeeDto d=new FreeeEmployeeDto(); d.setId(n.path("id").asText()); d.setDisplayName(n.path("display_name").asText(n.path("name").asText())); d.setEmploymentType(n.path("employment_type").asText()); out.add(d); } return out;
     }
-    public void link(Long engineerId,String employeeId,Long userId) { Engineer e=engineerMapper.selectById(engineerId); if(e==null||"BP".equalsIgnoreCase(e.getEmploymentType())) throw BusinessException.of("error.payroll.bpExcluded"); FreeeEmployeeLink old=linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>().eq(FreeeEmployeeLink::getEngineerId,engineerId)); FreeeEmployeeLink x=old==null?new FreeeEmployeeLink():old; x.setEngineerId(engineerId); x.setFreeeEmployeeId(employeeId); x.setConfirmedAt(LocalDateTime.now()); x.setConfirmedBy(userId); if(old==null)linkMapper.insert(x); else linkMapper.updateById(x); }
+    public void link(Long engineerId,String employeeId,Long userId) { 
+        if (employeeId == null || employeeId.isBlank()) {
+            throw BusinessException.of(400, "error.payroll.invalidEmployeeId");
+        }
+        if (employees().stream().noneMatch(e -> e.getId().equals(employeeId))) {
+            throw BusinessException.of(400, "error.payroll.invalidEmployeeId");
+        }
+        Engineer e=engineerMapper.selectById(engineerId); 
+        if(e==null||"BP".equalsIgnoreCase(e.getEmploymentType())) throw BusinessException.of("error.payroll.bpExcluded"); 
+        FreeeEmployeeLink old=linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>().eq(FreeeEmployeeLink::getEngineerId,engineerId)); 
+        FreeeEmployeeLink x=old==null?new FreeeEmployeeLink():old; 
+        x.setEngineerId(engineerId); 
+        x.setFreeeEmployeeId(employeeId); 
+        x.setConfirmedAt(LocalDateTime.now()); 
+        x.setConfirmedBy(com.ses.common.util.SecurityUtils.currentUserId()); 
+        if(old==null)linkMapper.insert(x); else linkMapper.updateById(x); 
+    }
     public void unlink(Long engineerId){ linkMapper.delete(new LambdaQueryWrapper<FreeeEmployeeLink>().eq(FreeeEmployeeLink::getEngineerId,engineerId)); }
     public List<PayrollStatementDto> statements(int year,int month,String type){ if(year<2000||month<1||month>12) throw BusinessException.of("error.payroll.invalidPeriod"); JsonNode arr=get("/hr/api/v1/payroll-statements?year="+year+"&month="+month+"&type="+type); List<PayrollStatementDto> out=new ArrayList<>(); if(arr!=null) for(JsonNode n:arr.path("statements")){ PayrollStatementDto d=new PayrollStatementDto(); d.setEmployeeId(n.path("employee_id").asText()); d.setYear(year); d.setMonth(month); d.setType(type); d.setGrossAmount(decimal(n,"gross_amount")); d.setDeductions(decimal(n,"deductions")); d.setNetAmount(decimal(n,"net_amount")); out.add(d);} return out; }
     private BigDecimal decimal(JsonNode n,String k){return n.has(k)?n.path(k).decimalValue():BigDecimal.ZERO;}

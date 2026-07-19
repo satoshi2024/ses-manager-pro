@@ -84,7 +84,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
     private static String monthEndOf(String workMonth) {
-        return YearMonth.parse(workMonth).atEndOfMonth().toString();
+        return com.ses.common.util.DateUtils.parseYearMonth(workMonth).atEndOfMonth().toString();
     }
 
     @Override
@@ -136,12 +136,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         // 縦深防御: グリッド外からのAPI直叩きで契約期間外・非稼動契約に実績を作られないよう検証する。
         // 判定条件は勤怠グリッド(selectMonthlyGrid の WHERE)と同一に揃える。
-        YearMonth ym;
-        try {
-            ym = YearMonth.parse(workMonth);
-        } catch (DateTimeParseException e) {
-            throw BusinessException.of("error.workRecord.invalidMonth");
-        }
+        YearMonth ym = com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         LocalDate monthStart = ym.atDay(1);
         LocalDate monthEnd = ym.atEndOfMonth();
         boolean inPeriod = contract.getStartDate() != null && !contract.getStartDate().isAfter(monthEnd)
@@ -220,15 +215,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
 
         // BP支払を生成(雇用形態がBPの要員に紐づく契約の確定実績について)
-        List<WorkRecordGridDto> grid = baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth));
-        for (WorkRecordGridDto dto : grid) {
-            if ("BP".equals(dto.getEmploymentType()) && dto.getWorkRecordId() != null) {
-                WorkRecord record = records.stream()
-                        .filter(r -> r.getId().equals(dto.getWorkRecordId()))
-                        .findFirst().orElse(null);
-                if (record != null) {
-                    generateOrSyncBpFor(record);
-                }
+        for (WorkRecord record : records) {
+            String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+            if ("BP".equals(employmentType)) {
+                generateOrSyncBpFor(record);
             }
         }
     }
@@ -338,7 +328,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Transactional
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
         checkClosing(workMonth);
-if (!YearMonth.from(daily.getWorkDate()).equals(YearMonth.parse(workMonth))) {
+if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
             throw BusinessException.of("error.workRecord.invalidMonth");
         }
         Contract contract = contractMapper.selectById(contractId);
@@ -523,13 +513,10 @@ if (!YearMonth.from(daily.getWorkDate()).equals(YearMonth.parse(workMonth))) {
         baseMapper.updateById(record);
 
         // confirmMonth と同じBP生成後続処理を単契約分行う（BP要員のみ）。
-        List<WorkRecordGridDto> grid = baseMapper.selectMonthlyGrid(
-                record.getWorkMonth(), monthEndOf(record.getWorkMonth()));
-        grid.stream()
-                .filter(d -> record.getId().equals(d.getWorkRecordId()))
-                .filter(d -> "BP".equals(d.getEmploymentType()))
-                .findFirst()
-                .ifPresent(d -> generateOrSyncBpFor(record));
+        String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+        if ("BP".equals(employmentType)) {
+            generateOrSyncBpFor(record);
+        }
     }
 
     @Override

@@ -58,10 +58,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             LocalDate monthEnd = ym.atEndOfMonth();
             LocalDateTime monthEndDateTime = LocalDateTime.of(monthEnd, LocalTime.of(23, 59, 59));
 
-            int totalCount = (int) allEngineers.stream()
-                    .filter(e -> e.getCreatedAt() != null && !e.getCreatedAt().isAfter(monthEndDateTime))
-                    .count();
-
             Set<Long> activeEngineerIds = new HashSet<>();
             for (ContractDateRangeDto c : allContracts) {
                 boolean startedByMonthEnd = !c.getStartDate().isAfter(monthEnd);
@@ -70,6 +66,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     activeEngineerIds.add(c.getEngineerId());
                 }
             }
+
+            int totalCount = (int) allEngineers.stream()
+                    .filter(e -> e.getCreatedAt() != null && !e.getCreatedAt().isAfter(monthEndDateTime))
+                    .filter(e -> e.getDeletedFlag() == null || e.getDeletedFlag() == 0 || activeEngineerIds.contains(e.getId()))
+                    .count();
             int activeCount = activeEngineerIds.size();
             int benchCount = Math.max(totalCount - activeCount, 0);
 
@@ -122,6 +123,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             List<Contract> engineerContracts = contractsByEngineer.getOrDefault(e.getId(), Collections.emptyList());
 
             LocalDate referenceDate = engineerContracts.stream()
+                    .filter(c -> c.getStartDate() != null && !c.getStartDate().isAfter(today))
                     .map(Contract::getEndDate)
                     .filter(java.util.Objects::nonNull)
                     .max(Comparator.naturalOrder())
@@ -202,17 +204,16 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             return dto;
         }
 
-        LocalDate fromDate = YearMonth.parse(fromMonth).atDay(1);
-        LocalDate toDate = YearMonth.parse(toMonth).atEndOfMonth();
+        LocalDate fromDate = com.ses.common.util.DateUtils.parseYearMonth(fromMonth).atDay(1);
+        LocalDate toDate = com.ses.common.util.DateUtils.parseYearMonth(toMonth).atEndOfMonth();
 
         List<Long> engineerIds = allEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
         List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getEngineerId, engineerIds)
                 .and(wrapper -> wrapper
-                        .eq(Contract::getStatus, "稼動中")
-                        .or(w -> w.eq(Contract::getStatus, "終了")
-                                  .and(w2 -> w2.isNull(Contract::getEndDate).or().ge(Contract::getEndDate, fromDate))
-                                  .le(Contract::getStartDate, toDate))
+                        .in(Contract::getStatus, java.util.Arrays.asList("稼動中", "終了"))
+                        .le(Contract::getStartDate, toDate)
+                        .and(w2 -> w2.isNull(Contract::getEndDate).or().ge(Contract::getEndDate, fromDate))
                 )
                 .orderByAsc(Contract::getStartDate));
 

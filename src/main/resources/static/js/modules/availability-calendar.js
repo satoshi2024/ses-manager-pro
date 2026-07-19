@@ -11,8 +11,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
     const toDate = new Date(today.getFullYear(), today.getMonth() + 5, 1);
     
-    fromMonthInput.value = fromDate.toISOString().slice(0, 7);
-    toMonthInput.value = toDate.toISOString().slice(0, 7);
+    fromMonthInput.value = SES.util.getLocalDateString(fromDate).slice(0, 7);
+    toMonthInput.value = SES.util.getLocalDateString(toDate).slice(0, 7);
 
     // Fetch initial data (defaulting to those ending soon to prevent heavy rendering)
     fetchData(true);
@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!endStr) {
                     const toDate = new Date(toStr + '-01');
                     const lastDay = new Date(toDate.getFullYear(), toDate.getMonth() + 1, 0);
-                    endStr = lastDay.toISOString().slice(0, 10);
+                    endStr = SES.util.getLocalDateString(lastDay);
                 }
 
                 const dataPoint = {
