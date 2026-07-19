@@ -78,9 +78,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     private void checkClosing(String month) {
-        if (monthlyClosingService.isClosed(month)) {
-            throw BusinessException.of(400, "error.closing.hardLocked");
-        }
+        // 締め設定行をロックして直列化し、締め成立後の工数変更を防ぐ（R3R-05）。
+        // 呼び出し元はいずれも @Transactional のため FOR UPDATE ロックが呼び出し側commitまで保持される。
+        monthlyClosingService.assertOpenForUpdate(month);
     }
 
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
