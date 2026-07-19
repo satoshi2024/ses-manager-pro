@@ -72,9 +72,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     private MonthlyClosingService monthlyClosingService;
 
     private void checkClosing(String month) {
-        if (monthlyClosingService.isClosed(month)) {
-            throw BusinessException.of(400, "error.closing.hardLocked");
-        }
+        // 締め設定行をロックし confirm と直列化する（締め成立後の請求差分commit防止 / R3R-05）。
+        monthlyClosingService.assertOpenForUpdate(month);
     }
 
     @Override
@@ -174,12 +173,18 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, String status, LocalDate paidDate) {
-        Invoice invoice = this.getById(id);
+        // 同一請求書の全更新を直列化するため FOR UPDATE で行ロックする（R3R-18）。
+        Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
         checkClosing(invoice.getBillingMonth());
+        // 完済（入金済）からの手動状態変更は拒否する（入金行由来の最終状態を保護）。
+        if ("入金済".equals(invoice.getStatus())) {
+            throw BusinessException.of("error.invoice.statusTransitionInvalid", invoice.getStatus(), status);
+        }
 
         String oldStatus = invoice.getStatus();
         // 入金済/一部入金 への手動遷移は廃止（入金行の登録/削除でのみ表現する）。
@@ -452,13 +457,15 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void voidInvoice(Long id) {
-        Invoice invoice = this.getById(id);
+        // FOR UPDATE で行ロックし入金追加/状態変更と直列化する（R3R-18）。
+        Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
         checkClosing(invoice.getBillingMonth());
         List<InvoicePaymentResponse> payments = listPayments(id);
-        if (!payments.isEmpty()) {
+        // 入金行あり、または status=入金済（入金行0件のlegacy完済含む）のどちらでも取消を拒否する。
+        if (!payments.isEmpty() || "入金済".equals(invoice.getStatus())) {
             throw BusinessException.of("error.invoice.cancelPaidInvoice");
         }
         invoiceItemMapper.delete(new QueryWrapper<InvoiceItem>().eq("invoice_id", id));
