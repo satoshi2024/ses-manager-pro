@@ -119,7 +119,9 @@ class UserApiControllerTest {
     void delete_担当なしは成功() throws Exception {
         when(sysUserService.getOne(any())).thenReturn(null);
         when(engineerSalesMapper.selectCount(any())).thenReturn(0L);
-        when(sysUserService.removeById(any())).thenReturn(true);
+        // removeById(Serializable) を明示スタブする（any() は entity 版オーバーロードに解決され、
+        // コントローラが呼ぶ removeById(Long) が未スタブ=false になり404となるのを防ぐ）。
+        when(sysUserService.removeById(any(Long.class))).thenReturn(true);
 
         mockMvc.perform(delete("/api/users/5").with(csrf()))
                 .andExpect(status().isOk())

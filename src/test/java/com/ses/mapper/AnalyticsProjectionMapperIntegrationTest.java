@@ -35,7 +35,9 @@ class AnalyticsProjectionMapperIntegrationTest {
     private ContractMapper contractMapper;
 
     @Test
-    void selectCreatedAtOnly_論理削除済みは除外される() {
+    void selectCreatedAtOnly_論理削除フラグ付きで全件返す() {
+        // 本プロジェクションは論理削除行も deleted_flag 付きで返す（絞り込みは呼び出し側=
+        // AnalyticsServiceImpl が担当し、対象期間に稼動していた削除済み要員を残すため）。
         Engineer active = new Engineer();
         active.setFullName("稼働太郎");
         active.setEmploymentType("正社員");
@@ -51,8 +53,12 @@ class AnalyticsProjectionMapperIntegrationTest {
 
         List<EngineerCreatedAtDto> result = engineerMapper.selectCreatedAtOnly();
 
-        assertTrue(result.stream().anyMatch(e -> e.getId().equals(active.getId())));
-        assertTrue(result.stream().noneMatch(e -> e.getId().equals(deleted.getId())));
+        // 稼動中は deleted_flag=0 で返る。
+        assertTrue(result.stream().anyMatch(e -> e.getId().equals(active.getId())
+                && (e.getDeletedFlag() == null || e.getDeletedFlag() == 0)));
+        // 論理削除済みも返るが deleted_flag=1 が付き、呼び出し側で除外できる。
+        assertTrue(result.stream().anyMatch(e -> e.getId().equals(deleted.getId())
+                && e.getDeletedFlag() != null && e.getDeletedFlag() == 1));
     }
 
     @Test
