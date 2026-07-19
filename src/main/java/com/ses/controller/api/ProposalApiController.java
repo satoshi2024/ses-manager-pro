@@ -100,6 +100,11 @@ public class ProposalApiController {
      */
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody Proposal proposal) {
+        // 参照する要員・案件が担当スコープ内であることを検証する（担当外ID参照の登録IDOR防止 / R3R-32）。
+        if (dataScopeService.isScoped()) {
+            if (proposal.getEngineerId() != null) dataScopeService.assertAllowedEngineer(proposal.getEngineerId());
+            if (proposal.getProjectId() != null) dataScopeService.assertAllowedProject(proposal.getProjectId());
+        }
         return ApiResult.success(proposalService.save(proposal));
     }
 

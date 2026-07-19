@@ -28,13 +28,18 @@ public class AutocompleteApiController {
     private final CustomerService customerService;
     private final ProjectService projectService;
     private final SysUserService sysUserService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @GetMapping("/engineers")
     public ApiResult<List<String>> getEngineers() {
-        List<String> names = engineerService.listObjs(
-                new QueryWrapper<Engineer>().select("full_name"),
-                obj -> (String) obj
-        );
+        QueryWrapper<Engineer> qw = new QueryWrapper<Engineer>().select("full_name");
+        // スコープONの営業には担当要員のみ返す（全件列挙IDOR防止 / R3R-31）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> ids = dataScopeService.allowedEngineerIds();
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            qw.in("id", ids);
+        }
+        List<String> names = engineerService.listObjs(qw, obj -> (String) obj);
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
@@ -43,10 +48,13 @@ public class AutocompleteApiController {
 
     @GetMapping("/customers")
     public ApiResult<List<String>> getCustomers() {
-        List<String> names = customerService.listObjs(
-                new QueryWrapper<Customer>().select("company_name"),
-                obj -> (String) obj
-        );
+        QueryWrapper<Customer> qw = new QueryWrapper<Customer>().select("company_name");
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> ids = dataScopeService.allowedCustomerIds();
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            qw.in("id", ids);
+        }
+        List<String> names = customerService.listObjs(qw, obj -> (String) obj);
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
@@ -55,10 +63,13 @@ public class AutocompleteApiController {
 
     @GetMapping("/projects")
     public ApiResult<List<String>> getProjects() {
-        List<String> names = projectService.listObjs(
-                new QueryWrapper<Project>().select("project_name"),
-                obj -> (String) obj
-        );
+        QueryWrapper<Project> qw = new QueryWrapper<Project>().select("project_name");
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> ids = dataScopeService.allowedProjectIds();
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            qw.in("id", ids);
+        }
+        List<String> names = projectService.listObjs(qw, obj -> (String) obj);
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()

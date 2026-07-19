@@ -38,6 +38,7 @@ public class CsvApiController {
     private final EngineerService engineerService;
     private final ProjectService projectService;
     private final EngineerCsvService engineerCsvService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /** 要員一覧CSV出力（一覧の検索条件を反映）。 */
     @GetMapping("/api/engineers/export-csv")
@@ -63,6 +64,12 @@ public class CsvApiController {
                         "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
             }
         }
+        // スコープONの営業には担当要員のみ出力する（全件CSV流出防止 / R3R-31）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> ids = dataScopeService.allowedEngineerIds();
+            if (ids.isEmpty()) return csvResponse(engineerCsvService.exportCsv(List.of()), "要員一覧");
+            qw.in(Engineer::getId, ids);
+        }
         qw.orderByDesc(Engineer::getId);
         byte[] bytes = engineerCsvService.exportCsv(engineerService.list(qw));
         return csvResponse(bytes, "要員一覧");
@@ -81,12 +88,19 @@ public class CsvApiController {
         if (StringUtils.hasText(status)) {
             qw.eq(Project::getStatus, status);
         }
+        // スコープONの営業には担当案件のみ出力する（全件CSV流出防止 / R3R-31）。
+        boolean scopedEmpty = false;
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> ids = dataScopeService.allowedProjectIds();
+            if (ids.isEmpty()) scopedEmpty = true;
+            else qw.in(Project::getId, ids);
+        }
         qw.orderByDesc(Project::getId);
 
         StringBuilder sb = new StringBuilder(CsvUtils.UTF8_BOM);
         CsvUtils.appendLine(sb, "案件名", "商流", "ステータス", "優先度",
                 "単価下限", "単価上限", "勤務地", "開始日", "終了日");
-        for (Project p : projectService.list(qw)) {
+        for (Project p : (scopedEmpty ? java.util.List.<Project>of() : projectService.list(qw))) {
             CsvUtils.appendLine(sb,
                     nz(p.getProjectName()), nz(p.getCommercialFlow()), nz(p.getStatus()), nz(p.getPriority()),
                     p.getUnitPriceMin() != null ? p.getUnitPriceMin().toPlainString() : "",
