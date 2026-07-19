@@ -20,22 +20,26 @@ import java.util.Map;
 public class EngineerSalesApiController {
 
     private final EngineerSalesService engineerSalesService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /** 現任担当営業一覧 */
     @GetMapping("/{id}/sales-reps")
     public ApiResult<List<EngineerSalesDto>> listActive(@PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerSalesService.listActive(id));
     }
 
     /** 担当営業履歴（解除済み含む） */
     @GetMapping("/{id}/sales-reps/history")
     public ApiResult<List<EngineerSalesDto>> listHistory(@PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerSalesService.listHistory(id));
     }
 
     /** 担当営業の割当 */
     @PostMapping("/{id}/sales-reps")
     public ApiResult<Boolean> assign(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        dataScopeService.assertAllowedEngineer(id);
         Long salesUserId = body.get("salesUserId") == null ? null
                 : Long.valueOf(String.valueOf(body.get("salesUserId")));
         boolean primaryFlag = Boolean.parseBoolean(String.valueOf(body.getOrDefault("primaryFlag", "false")))
@@ -48,6 +52,7 @@ public class EngineerSalesApiController {
     /** 主担当の変更 */
     @PutMapping("/{id}/sales-reps/{assignmentId}/primary")
     public ApiResult<Boolean> setPrimary(@PathVariable Long id, @PathVariable Long assignmentId) {
+        dataScopeService.assertAllowedEngineer(id);
         engineerSalesService.setPrimary(id, assignmentId);
         return ApiResult.success(true);
     }
@@ -55,6 +60,7 @@ public class EngineerSalesApiController {
     /** 担当の解除（released_at 設定） */
     @DeleteMapping("/{id}/sales-reps/{assignmentId}")
     public ApiResult<Boolean> release(@PathVariable Long id, @PathVariable Long assignmentId) {
+        dataScopeService.assertAllowedEngineer(id);
         engineerSalesService.release(id, assignmentId);
         return ApiResult.success(true);
     }
