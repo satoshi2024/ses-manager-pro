@@ -33,5 +33,6 @@ public interface InvoiceService extends IService<Invoice> {
     /** 期限超過請求書への督促メールを送信する。 */
     MailDispatchResult sendReminder(Long invoiceId, Long templateId);
     List<MailDelivery> listReminders(Long invoiceId);
-    List<MailDispatchResult> sendReminders(List<Long> invoiceIds, Long templateId, LocalDate asOf);
+    /** 一括督促（行単位継続・結果集約）。請求書単位の結果行を返す（R3R-20）。 */
+    List<com.ses.dto.mail.BulkReminderRowResult> sendReminders(List<Long> invoiceIds, Long templateId, LocalDate asOf);
 }

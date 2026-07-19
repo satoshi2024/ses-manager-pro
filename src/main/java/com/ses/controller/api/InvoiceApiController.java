@@ -185,10 +185,27 @@ public class InvoiceApiController {
         return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
     }
 
+    /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
+    @GetMapping("/{id}/reminders")
+    public ApiResult<?> reminders(@PathVariable Long id) {
+        assertInvoiceVisible(id);
+        return ApiResult.success(invoiceService.listReminders(id));
+    }
+
     /** 督促メール送信リクエスト。 */
-    
+
     @PostMapping("/reminders")
     public ApiResult<?> sendRemindersBulk(@RequestBody BulkReminderRequest request) {
+        if (request == null || request.getInvoiceIds() == null || request.getInvoiceIds().isEmpty()) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.invoice.reminderNoTarget");
+        }
+        if (request.getTemplateId() == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.proposal.templateNotSelected");
+        }
+        // 担当外の請求書IDを一括督促の対象に混ぜられないよう各IDを可視性検証する（R3R-20）。
+        for (Long id : request.getInvoiceIds()) {
+            assertInvoiceVisible(id);
+        }
         return ApiResult.success(invoiceService.sendReminders(request.getInvoiceIds(), request.getTemplateId(), request.getAsOf()));
     }
 

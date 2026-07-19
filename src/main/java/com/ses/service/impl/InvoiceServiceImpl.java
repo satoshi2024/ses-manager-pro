@@ -42,6 +42,7 @@ import java.util.Set;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
 @Service
+@lombok.extern.slf4j.Slf4j
 public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> implements InvoiceService {
 
     // 手動ステータス遷移は 未送付⇄送付済 のみ。入金済/一部入金 は入金行の登録/削除からのみ遷移する。
@@ -522,28 +523,62 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
 
     @Override
-    public java.util.List<MailDispatchResult> sendReminders(java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
+    public java.util.List<com.ses.dto.mail.BulkReminderRowResult> sendReminders(
+            java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
         java.time.LocalDate targetDate = asOf != null ? asOf : java.time.LocalDate.now();
-        java.util.List<MailDispatchResult> results = new java.util.ArrayList<>();
+        java.util.List<com.ses.dto.mail.BulkReminderRowResult> results = new java.util.ArrayList<>();
+        if (invoiceIds == null) {
+            return results;
+        }
         for (Long id : invoiceIds) {
-            Invoice invoice = this.baseMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
-            if (invoice == null || ("入金済".equals(invoice.getStatus()) && listPayments(id).isEmpty())) {
-                results.add(new MailDispatchResult(null, "FAILED"));
-                continue;
+            // 各行を独立に検証・例外処理し、1件失敗してもloopを止めない（R3R-20）。
+            try {
+                Invoice invoice = this.baseMapper.selectOne(
+                        new QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
+                if (invoice == null) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "請求書が存在しません", null));
+                    continue;
+                }
+                if ("入金済".equals(invoice.getStatus())) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
+                    continue;
+                }
+                if (!("送付済".equals(invoice.getStatus()) || "一部入金".equals(invoice.getStatus()))) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "督促対象の状態ではありません", null));
+                    continue;
+                }
+                if (invoice.getDueDate() == null || !invoice.getDueDate().isBefore(targetDate)) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "期限内のため対象外", null));
+                    continue;
+                }
+                com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
+                if (customer == null) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客が存在しません", null));
+                    continue;
+                }
+                String to = customer.getContactEmail();
+                if (to == null || to.isBlank()) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客メールアドレス未設定", null));
+                    continue;
+                }
+                // 単発送信(sendReminder)と同一の必須変数を渡す（残高・経過日数を含む / R3R-19）。
+                BigDecimal balance = invoice.getTotal().subtract(sumPaid(id));
+                long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), targetDate);
+                java.util.Map<String, String> params = new java.util.HashMap<>();
+                params.put("invoiceNo", invoice.getInvoiceNo());
+                params.put("customerName", customer.getCompanyName());
+                params.put("billingMonth", invoice.getBillingMonth());
+                params.put("total", invoice.getTotal() != null ? invoice.getTotal().toPlainString() : "0");
+                params.put("balance", balance.toPlainString());
+                params.put("dueDate", invoice.getDueDate().toString());
+                params.put("overdueDays", String.valueOf(overdueDays));
+                MailDispatchResult sent = mailService.sendWithTemplate(templateId, params, to, id);
+                results.add(new com.ses.dto.mail.BulkReminderRowResult(
+                        id, sent.getStatus(), null, sent.getDeliveryId()));
+            } catch (Exception e) {
+                log.warn("一括督促の送信に失敗しました invoiceId={}", id, e);
+                results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", e.getMessage(), null));
             }
-            if (!("送付済".equals(invoice.getStatus()) || "一部入金".equals(invoice.getStatus())) || invoice.getDueDate() == null || !invoice.getDueDate().isBefore(targetDate)) {
-                results.add(new MailDispatchResult(null, "SKIPPED"));
-                continue;
-            }
-            com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
-            String to = customer.getContactEmail();
-            java.util.Map<String, String> params = new java.util.HashMap<>();
-            params.put("invoiceNo", invoice.getInvoiceNo());
-            params.put("customerName", customer.getCompanyName());
-            params.put("billingMonth", invoice.getBillingMonth());
-            params.put("total", invoice.getTotal() != null ? invoice.getTotal().toString() : "0");
-            params.put("dueDate", invoice.getDueDate() != null ? invoice.getDueDate().toString() : "");
-            results.add(mailService.sendWithTemplate(templateId, params, to, id));
         }
         return results;
     }
