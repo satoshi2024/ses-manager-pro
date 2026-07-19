@@ -30,6 +30,8 @@ public interface InvoiceService extends IService<Invoice> {
     List<InvoicePaymentResponse> listPayments(Long invoiceId);
     /** 顧客×経過区分の未回収エイジングレポート。 */
     AgingReportDto aging(LocalDate asOf);
+    /** エイジング表の1セル（顧客×区分×基準日）を構成する請求書明細を返す（R3R-22）。 */
+    List<com.ses.dto.invoice.InvoiceBalanceDto> agingDetail(Long customerId, String bucket, LocalDate asOf);
     /** 期限超過請求書への督促メールを送信する。 */
     MailDispatchResult sendReminder(Long invoiceId, Long templateId);
     List<MailDelivery> listReminders(Long invoiceId);

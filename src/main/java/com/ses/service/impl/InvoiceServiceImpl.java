@@ -370,6 +370,28 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return dto;
     }
 
+    @Override
+    public List<InvoiceBalanceDto> agingDetail(Long customerId, String bucket, LocalDate asOf) {
+        LocalDate base = asOf != null ? asOf : LocalDate.now();
+        List<InvoiceBalanceDto> out = new java.util.ArrayList<>();
+        for (InvoiceBalanceDto b : baseMapper.selectOutstandingBalances()) {
+            BigDecimal balance = b.getBalance() != null ? b.getBalance() : BigDecimal.ZERO;
+            if (balance.signum() <= 0) {
+                continue;
+            }
+            if (customerId != null && !customerId.equals(b.getCustomerId())) {
+                continue;
+            }
+            // aging() と同一の区分ロジックでセルを再構成する。
+            String rowBucket = "未送付".equals(b.getStatus()) ? "unsent" : classifyBucket(b.getDueDate(), base);
+            if (bucket != null && !bucket.equals(rowBucket)) {
+                continue;
+            }
+            out.add(b);
+        }
+        return out;
+    }
+
     /**
      * 支払期限と基準日から経過区分を判定する。
      * 期限未設定=noDueDate / 経過0日(=当日以前)＝期限内 notDue /

@@ -347,8 +347,9 @@ function loadAging() {
             cols.forEach(c => {
                 const val = Number(r[c] || 0);
                 const str = `￥${val.toLocaleString()}`;
-                if (val > 0 && r.customerId) {
-                    cells += `<td class="text-right"><a href="/invoice/list?customerId=${r.customerId}">${str}</a></td>`;
+                // 合計列(balance)は区分ではないためドリルダウン対象外。区分セルのみ明細を開ける（R3R-22）。
+                if (val > 0 && r.customerId && c !== 'balance') {
+                    cells += `<td class="text-right"><a href="#" class="aging-cell text-info" data-customer-id="${SES.escapeHtml(String(r.customerId))}" data-bucket="${SES.escapeHtml(c)}">${str}</a></td>`;
                 } else {
                     cells += `<td class="text-right">${str}</td>`;
                 }
@@ -356,12 +357,46 @@ function loadAging() {
             tr.innerHTML = cells;
             tbody.appendChild(tr);
         });
+        tbody.querySelectorAll('.aging-cell').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                showAgingDetail(a.dataset.customerId, a.dataset.bucket);
+            });
+        });
         const t = data.data.total || {};
         const tfoot = document.querySelector('#agingTable tfoot');
         let tcells = `<td><strong>${SES.i18n.t('common.total', '合計')}</strong></td>`;
         cols.forEach(c => { tcells += `<td class="text-right"><strong>￥${Number(t[c] || 0).toLocaleString()}</strong></td>`; });
         tfoot.innerHTML = `<tr>${tcells}</tr>`;
     });
+}
+
+// エイジングのセルを構成する請求書明細をmodalで表示する（R3R-22）。
+function showAgingDetail(customerId, bucket) {
+    const asOf = document.getElementById('agingAsOf').value;
+    let url = `/api/invoices/aging/detail?customerId=${encodeURIComponent(customerId)}&bucket=${encodeURIComponent(bucket)}`;
+    if (asOf) url += '&asOf=' + encodeURIComponent(asOf);
+    fetch(url).then(res => res.json()).then(data => {
+        if (data.code !== 200) { SES.toast.error(data.message); return; }
+        const rows = data.data || [];
+        const today = asOf ? new Date(asOf) : new Date();
+        let html = '<table class="table table-sm table-dark table-bordered"><thead><tr>'
+            + '<th>請求番号</th><th class="text-end">残高</th><th>期限</th><th class="text-end">経過日数</th></tr></thead><tbody>';
+        rows.forEach(r => {
+            let days = '';
+            if (r.dueDate) {
+                const d = Math.floor((today - new Date(r.dueDate)) / 86400000);
+                days = d > 0 ? d + '日' : '-';
+            }
+            html += `<tr><td>${SES.escapeHtml(r.invoiceNo || '')}</td>`
+                + `<td class="text-end">￥${Number(r.balance || 0).toLocaleString()}</td>`
+                + `<td>${SES.escapeHtml(r.dueDate || '')}</td>`
+                + `<td class="text-end">${days}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        if (rows.length === 0) html = '<div class="text-muted">対象の請求書がありません</div>';
+        Swal.fire({ title: '請求明細', html: html, width: 640, background: '#1e1e2d', color: '#fff' });
+    }).catch(err => SES.toast.error(err.message));
 }
 
 function exportAging() {

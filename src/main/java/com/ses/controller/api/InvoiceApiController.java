@@ -157,6 +157,17 @@ public class InvoiceApiController {
         return ApiResult.success(invoiceService.aging(asOf));
     }
 
+    /** エイジング表のセル（顧客×区分×基準日）を構成する請求書明細（R3R-22）。 */
+    @GetMapping("/aging/detail")
+    public ApiResult<?> agingDetail(@RequestParam Long customerId,
+                                    @RequestParam String bucket,
+                                    @RequestParam(required = false)
+                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        // 顧客スコープ検証（担当外顧客の明細を返さない）。
+        dataScopeService.assertAllowedCustomer(customerId);
+        return ApiResult.success(invoiceService.agingDetail(customerId, bucket, asOf));
+    }
+
     /** エイジングレポートのExcel出力。 */
     @GetMapping("/aging-export")
     public ResponseEntity<byte[]> agingExport(@RequestParam(required = false)
