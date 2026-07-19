@@ -95,6 +95,7 @@ class ContractServiceImplTest {
     void saveWithBusinessRules_successWithAutoNumbering() {
         Contract contract = new Contract();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
+        // 呼び出し側が稼動中を指定しても、新規作成は常に準備中で開始する（状態機械の入口を一本化）。
         contract.setStatus("稼動中");
         contract.setEngineerId(100L);
 
@@ -104,8 +105,11 @@ class ContractServiceImplTest {
         contractService.saveWithBusinessRules(contract);
 
         assertEquals("C-202607-0001", contract.getContractNo());
+        // 新規契約は必ず準備中で作成される。
+        assertEquals("準備中", contract.getStatus());
         verify(contractMapper, times(1)).insert(contract);
-        verify(engineerStatusService, times(1)).onContractActive(100L);
+        // 準備中で作成されるため、作成時点では要員を稼動中にしない（稼動中への遷移は状態変更API経由）。
+        verify(engineerStatusService, never()).onContractActive(any());
     }
 
     @Test
