@@ -16,8 +16,8 @@
                 </div>
                 <div class="col-md-6">
                     <button id="btnLoadClosing" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
-                    <button id="btnConfirmClosing" class="btn btn-success" th:text="#{closing.btn.confirm}">締め完了</button>
-                    <button id="btnReopenClosing" class="btn btn-outline-warning d-none" th:text="#{closing.btn.reopen}">締め解除</button>
+                    <button th:if="${canConfirm}" id="btnConfirmClosing" class="btn btn-success" th:text="#{closing.btn.confirm}">締め完了</button>
+                    <button th:if="${canReopen}" id="btnReopenClosing" class="btn btn-outline-warning d-none" th:text="#{closing.btn.reopen}">締め解除</button>
                 </div>
             </div>
             <div id="closedBanner" class="alert alert-info d-none"></div>

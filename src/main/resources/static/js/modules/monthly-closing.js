@@ -9,8 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
         prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2, '0');
 
     document.getElementById('btnLoadClosing').addEventListener('click', loadClosing);
-    document.getElementById('btnConfirmClosing').addEventListener('click', confirmClosing);
-    document.getElementById('btnReopenClosing').addEventListener('click', reopenClosing);
+    // 締め完了/解除ボタンは権限のないロール（HR等）には描画されないためnullガードする（R3R-08）。
+    const btnConfirm = document.getElementById('btnConfirmClosing');
+    if (btnConfirm) btnConfirm.addEventListener('click', confirmClosing);
+    const btnReopen = document.getElementById('btnReopenClosing');
+    if (btnReopen) btnReopen.addEventListener('click', reopenClosing);
     loadClosing();
 });
 
@@ -52,17 +55,18 @@ function renderCards() {
     cards.appendChild(card('closing.item.unpaidBp', s.unpaidBpCount));
     cards.appendChild(card('closing.item.overdue', s.overdueCount, null, null, true));
 
-    document.getElementById('btnConfirmClosing').disabled = !s.readyToClose || s.closed;
+    const confirmBtn = document.getElementById('btnConfirmClosing');
+    if (confirmBtn) confirmBtn.disabled = !s.readyToClose || s.closed;
 
     const banner = document.getElementById('closedBanner');
     const reopenBtn = document.getElementById('btnReopenClosing');
     if (s.closed) {
         banner.classList.remove('d-none');
         banner.textContent = SES.i18n.t('closing.status.closed', [s.closedByName || '', (s.closedAt || '').replace('T', ' ')]);
-        reopenBtn.classList.remove('d-none');
+        if (reopenBtn) reopenBtn.classList.remove('d-none');
     } else {
         banner.classList.add('d-none');
-        reopenBtn.classList.add('d-none');
+        if (reopenBtn) reopenBtn.classList.add('d-none');
     }
 
     const diff = document.getElementById('diffWarning');
