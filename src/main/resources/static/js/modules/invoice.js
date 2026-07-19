@@ -117,14 +117,14 @@ function voidInvoice(id, invoiceNo) {
             }).then(res => res.json()).then(data => {
                 if (data.code === 200) {
                     if (window.SES && SES.toast) {
-                        SES.toast(SES.i18n.t('invoice.toast.voidSuccess'), 'success');
+                        SES.toast.success(SES.i18n.t('invoice.toast.voidSuccess'));
                     } else {
                         alert(SES.i18n.t('invoice.toast.voidSuccess'));
                     }
                     loadInvoices();
                 } else {
                     if (window.SES && SES.toast) {
-                        SES.toast(data.message, 'error');
+                        SES.toast.error(data.message);
                     } else {
                         alert(data.message);
                     }
@@ -403,10 +403,10 @@ function submitReminder() {
         if (data.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
             if (data.data && data.data.status === 'FAILED') {
-                if (window.SES && SES.toast) SES.toast('メール送信に失敗しました', 'error');
+                if (window.SES && SES.toast) SES.toast.error('メール送信に失敗しました');
                 else alert('メール送信に失敗しました');
             } else {
-                if (window.SES && SES.toast) SES.toast(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'), 'success');
+                if (window.SES && SES.toast) SES.toast.success(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
                 else alert(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
             }
         } else {
