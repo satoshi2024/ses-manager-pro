@@ -252,7 +252,9 @@ public class InvoiceApiController {
      */
     @PutMapping("/bp-payments/{id}")
     public ApiResult<?> updateBpPaymentStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
-        assertInvoiceVisible(id);
+        // BP支払は請求書に紐づかない原価側データのため、請求書スコープ検証(assertInvoiceVisible)は
+        // 誤り（BP支払IDを請求書IDとして扱ってしまう）。BP支払はメニュー権限で保護される管理業務であり、
+        // データスコープ対象外のため請求書可視性検証は行わない（R3R-35）。
         invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }
