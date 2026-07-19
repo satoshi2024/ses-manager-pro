@@ -234,7 +234,9 @@ function openEditContract(id) {
         $('#cont-commissionBaseType').val(c.commissionBaseType || '');
         if (c.quotationId) {
             $('#cont-quotationLinkWrapper').show();
-            $('#cont-quotationLink').attr('href', '/api/quotations/' + c.quotationId + '/pdf');
+            // 元見積の画面（scope検証済み詳細API経由でmodal表示）とPDFを別導線で提供する（R3R-28）。
+            $('#cont-quotationDetailLink').attr('href', '/quotation?openId=' + encodeURIComponent(c.quotationId));
+            $('#cont-quotationLink').attr('href', '/api/quotations/' + encodeURIComponent(c.quotationId) + '/pdf');
         } else {
             $('#cont-quotationLinkWrapper').hide();
         }

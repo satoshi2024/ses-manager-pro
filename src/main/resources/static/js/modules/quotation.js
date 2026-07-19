@@ -20,6 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
         presetFromProposal(fromProposal);
     }
 
+    // 契約からの導線（?openId=ID）: scope検証済み詳細APIで見積を開く（担当外は404 / R3R-28）。
+    const openId = params.get('openId');
+    if (openId) {
+        openQuotationModalById(openId);
+    }
+
     // 顧客選択時に案件リストを絞り込み
     document.getElementById('quotationForm').customerId.addEventListener('change', function() {
         const customerId = this.value;
@@ -161,9 +167,10 @@ function loadQuotations(page = 1) {
 }
 
 function openQuotationModalById(id) {
-    fetch('/api/quotations/' + id).then(res => res.json()).then(data => {
+    fetch('/api/quotations/' + encodeURIComponent(id)).then(res => res.json()).then(data => {
         if(data.code === 200) openQuotationModal(data.data);
-    });
+        else SES.toast.error(data.message);
+    }).catch(err => SES.toast.error(err.message));
 }
 
 function openQuotationModal(q) {
@@ -228,10 +235,10 @@ function changeQuotationStatus(id, newStatus) {
             body: JSON.stringify({ status: newStatus })
         }).then(res => res.json()).then(data => {
             if (data.code !== 200) { SES.toast.error(data.message); return; }
+            // 状態遷移成功直後に必ず一覧をreloadし、受注状態と再試行ボタンを即時反映する（R3R-27）。
+            loadQuotations(1);
             if (newStatus === '受注' && createDraft) {
                 createQuotationDraft(id);
-            } else {
-                loadQuotations(1);
             }
         }).catch(err => SES.toast.error(err.message));
     };
@@ -265,7 +272,11 @@ function createQuotationDraft(id) {
             SES.toast.error(data.message);
         }
         loadQuotations(1);
-    }).catch(err => SES.toast.error(err.message));
+    }).catch(err => {
+        // draft生成が通信失敗しても一覧を再読込し、受注状態と再試行ボタンを表示する（R3R-27）。
+        SES.toast.error(err.message);
+        loadQuotations(1);
+    });
 }
 
 function deleteQuotation(id) {
