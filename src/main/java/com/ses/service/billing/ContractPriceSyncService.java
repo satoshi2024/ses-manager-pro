@@ -49,7 +49,8 @@ public class ContractPriceSyncService {
 
         for (Map.Entry<Long, List<ContractPriceHistory>> entry : historyByContract.entrySet()) {
             Long contractId = entry.getKey();
-            Contract contract = contractMapper.selectById(contractId);
+            // 行ロックで通常更新と直列化し、ロック取得後に最新状態で履歴を再解決する（R3R-29）。
+            Contract contract = contractMapper.selectByIdForUpdate(contractId);
             if (contract == null) continue;
 
             ContractPriceResolver.ResolvedPrice resolved = ContractPriceResolver.resolveFrom(
@@ -66,9 +67,8 @@ public class ContractPriceSyncService {
                     log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
                             contractId, contract.getSellingPrice(), resolvedSelling,
                             contract.getCostPrice(), resolvedCost);
-                    contract.setSellingPrice(resolvedSelling);
-                    contract.setCostPrice(resolvedCost);
-                    contractMapper.updateById(contract);
+                    // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
+                    contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
                     updateCount++;
                 }
             }

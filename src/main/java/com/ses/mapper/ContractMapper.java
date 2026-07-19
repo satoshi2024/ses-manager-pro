@@ -25,6 +25,18 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT MAX(contract_no) FROM t_contract WHERE contract_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxContractNoIncludingDeleted(@org.apache.ibatis.annotations.Param("prefix") String prefix);
 
+    /** 契約行を FOR UPDATE でロックして取得する（通常更新と単価同期/改定を直列化する / R3R-29）。 */
+    @Select("SELECT * FROM t_contract WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    Contract selectByIdForUpdate(@org.apache.ibatis.annotations.Param("id") Long id);
+
+    /** 単価列のみを部分更新する（同期/改定が他項目を旧値で上書きしないようにする / R3R-29）。 */
+    @org.apache.ibatis.annotations.Update(
+            "UPDATE t_contract SET selling_price = #{sellingPrice}, cost_price = #{costPrice} "
+            + "WHERE id = #{id} AND deleted_flag = 0")
+    int updatePriceOnly(@org.apache.ibatis.annotations.Param("id") Long id,
+                        @org.apache.ibatis.annotations.Param("sellingPrice") java.math.BigDecimal sellingPrice,
+                        @org.apache.ibatis.annotations.Param("costPrice") java.math.BigDecimal costPrice);
+
     @Select("""
         <script>
         SELECT c.id, c.contract_no AS contractNo, c.engineer_id AS engineerId,
