@@ -130,7 +130,10 @@ public class NotificationGenerateService {
                 String name = getEngineerName(e.getId());
                 String dedupeKey = "BENCH_LONG:" + e.getId() + ":" + LocalDate.now().getYear() + "-" + LocalDate.now().getMonthValue();
                 String message = "[\"notification.msg.BENCH_LONG\", \"" + name + "\", \"" + days + "\"]";
-                notificationService.publish("BENCH_LONG", "待機期間警告", message, NotificationLinks.engineerDetail(e.getId()), dedupeKey);
+                // 待機警告は現任の主担当営業へ個別配信する（全体通知にしない / R3R-33）。
+                Long primarySalesUserId = resolvePrimarySalesUserId(e.getId());
+                notificationService.publishToUser(primarySalesUserId, "BENCH_LONG", "待機期間警告", message,
+                        NotificationLinks.engineerDetail(e.getId()), dedupeKey);
             }
         }
     }
@@ -144,6 +147,16 @@ public class NotificationGenerateService {
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
             notificationService.publishToUser(null, "PROJECT_URGENT", "急募案件", message, NotificationLinks.PROJECT_LIST, dedupeKey);
         }
+    }
+
+    /** 要員の現任主担当営業のユーザーIDを解決する（未割当は null=全体通知フォールバック）。 */
+    private Long resolvePrimarySalesUserId(Long engineerId) {
+        EngineerSales primary = engineerSalesMapper.selectOne(new QueryWrapper<EngineerSales>()
+                .eq("engineer_id", engineerId)
+                .eq("primary_flag", 1)
+                .isNull("released_at")
+                .last("LIMIT 1"));
+        return primary == null ? null : primary.getSalesUserId();
     }
 
     private String getEngineerName(Long engineerId) {
