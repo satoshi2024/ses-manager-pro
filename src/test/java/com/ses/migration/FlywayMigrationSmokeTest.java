@@ -119,6 +119,30 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_contract_price_history");
             assertColumnExists(st, "t_contract_price_history", "apply_from_month");
 
+            // メール配信の invoice_id と索引(R3R-01: V26 CREATEへ内包・V15重複解消)。索引は一度だけ。
+            assertColumnExists(st, "t_mail_delivery", "invoice_id");
+            assertRowExists(st, "SELECT 1 FROM (SELECT COUNT(*) c FROM information_schema.statistics "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_mail_delivery' "
+                    + "AND index_name='idx_mail_delivery_invoice') t WHERE c > 0");
+
+            // 通知宛先(R3R-02: V36が唯一の追加。V37は reject_comment のみ)。索引は一度だけ。
+            assertColumnExists(st, "t_notification", "recipient_user_id");
+            assertColumnExists(st, "t_work_record", "reject_comment");
+            assertRowExists(st, "SELECT 1 FROM (SELECT COUNT(DISTINCT index_name) c FROM information_schema.statistics "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_notification' "
+                    + "AND index_name='idx_notification_recipient') t WHERE c = 1");
+
+            // 工数精度の統一(R3R-13: 日次・月次とも小数2桁)。
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_work_record' AND column_name='actual_hours' "
+                    + "AND numeric_scale=2");
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_work_record_daily' AND column_name='worked_hours' "
+                    + "AND numeric_scale=2");
+
+            // 督促テンプレートseed(R3R-19)。
+            assertRowExists(st, "SELECT 1 FROM m_email_template WHERE template_name='請求督促メール'");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");
