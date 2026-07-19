@@ -55,7 +55,8 @@ public class MyTimesheetApiController {
     private Long currentEngineerId() {
         Long engineerId = linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
         if (engineerId == null) {
-            throw BusinessException.of("error.my.notLinked");
+            // 認可違反（未紐付け）は403とし、system障害(500)へ混入させない（R3R-17）。
+            throw BusinessException.of(403, "error.my.notLinked");
         }
         return engineerId;
     }
@@ -63,15 +64,20 @@ public class MyTimesheetApiController {
     /** contractId が本人の担当契約かを検証する（越権防止）。 */
     private void assertOwnedContract(Long engineerId, Long contractId) {
         Contract c = contractMapper.selectById(contractId);
-        if (c == null || !engineerId.equals(c.getEngineerId())) {
-            throw BusinessException.of("error.my.notLinked");
+        if (c == null) {
+            // 純粋な不存在は404（R3R-17）。
+            throw BusinessException.of(404, "error.workRecord.noContract2");
+        }
+        if (!engineerId.equals(c.getEngineerId())) {
+            // 所有者不一致は認可違反=403（R3R-17）。
+            throw BusinessException.of(403, "error.my.notOwner");
         }
     }
 
     private void assertOwnedWorkRecord(Long engineerId, Long workRecordId) {
         WorkRecord w = workRecordService.getById(workRecordId);
         if (w == null) {
-            throw BusinessException.of("error.workRecord.notFound2");
+            throw BusinessException.of(404, "error.workRecord.notFound2");
         }
         assertOwnedContract(engineerId, w.getContractId());
     }
@@ -79,7 +85,8 @@ public class MyTimesheetApiController {
     @GetMapping
     public ApiResult<?> myTimesheet(@RequestParam String month) {
         Long engineerId = currentEngineerId();
-        String monthEnd = YearMonth.parse(month).atEndOfMonth().toString();
+        // 不正な年月形式は400へ統一する（YearMonth.parse直呼びだと500になる／R3R-15）。
+        String monthEnd = com.ses.common.util.DateUtils.parseYearMonth(month).atEndOfMonth().toString();
         List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGridForEngineer(engineerId, month, monthEnd);
         List<Map<String, Object>> result = new ArrayList<>();
         for (WorkRecordGridDto row : rows) {
@@ -96,6 +103,7 @@ public class MyTimesheetApiController {
             }
             m.put("actualHours", row.getActualHours());
             m.put("remarks", row.getRemarks());
+            m.put("rejectComment", row.getRejectComment());
             m.put("dailies", row.getWorkRecordId() != null
                     ? workRecordService.listDaily(row.getWorkRecordId())
                     : List.of());

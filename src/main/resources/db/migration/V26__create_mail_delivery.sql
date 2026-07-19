@@ -6,10 +6,12 @@ CREATE TABLE t_mail_delivery (
   status VARCHAR(20) NOT NULL,
   attempt_count INT NOT NULL DEFAULT 0,
   error_message VARCHAR(1000),
+  invoice_id BIGINT COMMENT '関連請求書ID',
   queued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sent_at DATETIME,
   failed_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_mail_delivery_status_queued (status, queued_at)
+  INDEX idx_mail_delivery_status_queued (status, queued_at),
+  INDEX idx_mail_delivery_invoice (invoice_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

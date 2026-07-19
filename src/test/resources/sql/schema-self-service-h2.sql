@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS t_work_record_daily (
   start_time     TIME,
   end_time       TIME,
   break_minutes  INT NOT NULL DEFAULT 0,
-  worked_hours   DECIMAL(4,2) NOT NULL,
+  worked_hours   DECIMAL(6,2) NOT NULL,
   remarks        VARCHAR(200),
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -25,3 +25,7 @@ CREATE TABLE IF NOT EXISTS t_work_record_daily (
 INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
   SELECT 'my-timesheet', 'マイ勤怠', '/my', '/api/my', 92
   WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'my-timesheet');
+
+-- V36/V37 相当: 通知宛先とAND勤怠差戻しコメント（MySQL migrationと同一構造へ同期）
+ALTER TABLE t_notification ADD COLUMN IF NOT EXISTS recipient_user_id BIGINT;
+ALTER TABLE t_work_record ADD COLUMN IF NOT EXISTS reject_comment VARCHAR(500);

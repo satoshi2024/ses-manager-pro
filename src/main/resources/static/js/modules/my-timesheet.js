@@ -8,12 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 let myMonthValue = null;
+// 行データはインラインhandlerへ埋め込まず、contractIdをキーにJS Mapで保持する（保存型XSS対策 / R3R-16）。
+const myRowMap = new Map();
 
 function loadMyTimesheet() {
     myMonthValue = document.getElementById('myMonth').value;
-    fetch('/api/my/timesheet?month=' + myMonthValue)
+    fetch('/api/my/timesheet?month=' + encodeURIComponent(myMonthValue))
         .then(res => res.json()).then(data => {
-            if (data.code !== 200) { document.getElementById('myContracts').innerHTML = SES.escapeHtml(data.message || ''); return; }
+            if (data.code !== 200) { document.getElementById('myContracts').textContent = data.message || ''; return; }
             renderMy(data.data.rows || [], data.data.engineerName);
         });
 }
@@ -21,6 +23,7 @@ function loadMyTimesheet() {
 function renderMy(rows, engineerName) {
     const container = document.getElementById('myContracts');
     container.innerHTML = '';
+    myRowMap.clear();
     if (engineerName) {
         container.innerHTML += `<h5 class="mb-3 text-light"><i class="bi bi-person me-2"></i>${SES.escapeHtml(engineerName)}</h5>`;
     }
@@ -29,25 +32,27 @@ function renderMy(rows, engineerName) {
         return;
     }
     rows.forEach(row => {
+        myRowMap.set(String(row.contractId), row);
         const editable = !row.status || ['入力中', '差戻し'].includes(row.status);
         const card = document.createElement('div');
         card.className = 'card mb-3';
         let dailyRows = (row.dailies || []).map(d => `
             <tr>
                 <td>${SES.escapeHtml(d.workDate)}</td>
-                <td>${d.startTime || ''}</td>
-                <td>${d.endTime || ''}</td>
-                <td>${d.breakMinutes || 0}</td>
-                <td>${d.workedHours || ''}</td>
+                <td>${SES.escapeHtml(d.startTime || '')}</td>
+                <td>${SES.escapeHtml(d.endTime || '')}</td>
+                <td>${SES.escapeHtml(String(d.breakMinutes || 0))}</td>
+                <td>${SES.escapeHtml(String(d.workedHours || ''))}</td>
                 <td>${d.remarks ? SES.escapeHtml(d.remarks) : ''}</td>
-                <td>${editable ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteMyDaily(${row.contractId}, '${d.workDate}')">×</button>` : ''}</td>
+                <td>${editable ? `<button class="btn btn-sm btn-outline-danger" data-action="delete-daily" data-contract-id="${SES.escapeHtml(String(row.contractId))}" data-work-date="${SES.escapeHtml(String(d.workDate))}">×</button>` : ''}</td>
             </tr>`).join('');
-        const rejectBanner = row.status === '差戻し'
-            ? `<div class="alert alert-warning py-1">${SES.i18n.t('my.timesheet.rejectComment', '差戻しコメント')}: ${SES.escapeHtml(row.remarks || '')}</div>` : '';
+        // 差戻し理由は専用フィールド(rejectComment)を表示する。業務備考(remarks)は表示しない（R3R-12）。
+        const rejectBanner = (row.status === '差戻し' && row.rejectComment)
+            ? `<div class="alert alert-warning py-1">${SES.escapeHtml(SES.i18n.t('my.timesheet.rejectComment', '差戻しコメント'))}: ${SES.escapeHtml(row.rejectComment)}</div>` : '';
         card.innerHTML = `
             <div class="card-header d-flex justify-content-between">
                 <span>${SES.escapeHtml(row.projectName || '')} <small class="text-muted">${SES.escapeHtml(row.contractNo || '')}</small></span>
-                <span class="badge bg-info">${SES.i18n.t('workRecord.status.' + (row.status || '入力中'), row.status || '入力中')}</span>
+                <span class="badge bg-info">${SES.escapeHtml(SES.i18n.t('workRecord.status.' + (row.status || '入力中'), row.status || '入力中'))}</span>
             </div>
             <div class="card-body">
                 ${rejectBanner}
@@ -64,11 +69,25 @@ function renderMy(rows, engineerName) {
                     <tbody>${dailyRows}</tbody>
                 </table>
                 ${editable ? dailyForm(row.contractId) : ''}
-                <div class="mt-2">${SES.i18n.t('my.timesheet.total','合計')}: <strong>${row.actualHours || 0} h</strong></div>
-                ${editable ? `<button class="btn btn-primary mt-2" onclick='submitMyByMonth(${row.contractId}, ${JSON.stringify(row)})'>${SES.i18n.t('my.timesheet.submit','提出')}</button>` : ''}
-                ${(row.workRecordId && ['提出済', '確定'].includes(row.status)) ? `<a class="btn btn-outline-info mt-2" href="/api/my/timesheet/${row.workRecordId}/report.pdf" target="_blank">PDF</a>` : ''}
+                <div class="mt-2">${SES.i18n.t('my.timesheet.total','合計')}: <strong>${SES.escapeHtml(String(row.actualHours || 0))} h</strong></div>
+                ${editable ? `<button class="btn btn-primary mt-2" data-action="submit-month" data-contract-id="${SES.escapeHtml(String(row.contractId))}">${SES.i18n.t('my.timesheet.submit','提出')}</button>` : ''}
+                ${(row.workRecordId && ['提出済', '確定'].includes(row.status)) ? `<a class="btn btn-outline-info mt-2" href="/api/my/timesheet/${encodeURIComponent(row.workRecordId)}/report.pdf" target="_blank">PDF</a>` : ''}
             </div>`;
         container.appendChild(card);
+    });
+    wireMyHandlers(container);
+}
+
+// data-action属性を持つ要素へイベントリスナーを紐付ける（インラインhandler廃止）。
+function wireMyHandlers(container) {
+    container.querySelectorAll('[data-action="delete-daily"]').forEach(btn => {
+        btn.addEventListener('click', () => deleteMyDaily(btn.dataset.contractId, btn.dataset.workDate));
+    });
+    container.querySelectorAll('[data-action="submit-month"]').forEach(btn => {
+        btn.addEventListener('click', () => submitMyByMonth(btn.dataset.contractId));
+    });
+    container.querySelectorAll('[data-action="save-daily"]').forEach(btn => {
+        btn.addEventListener('click', () => saveMyDaily(btn.dataset.contractId));
     });
 }
 
@@ -80,7 +99,7 @@ function dailyForm(contractId) {
             <div class="col"><input type="time" class="form-control form-control-sm" name="endTime"></div>
             <div class="col"><input type="number" class="form-control form-control-sm" name="breakMinutes" value="60"></div>
             <div class="col"><input type="text" class="form-control form-control-sm" name="remarks" placeholder="備考"></div>
-            <div class="col"><button class="btn btn-sm btn-success" onclick="saveMyDaily(${contractId})">追加</button></div>
+            <div class="col"><button class="btn btn-sm btn-success" data-action="save-daily" data-contract-id="${SES.escapeHtml(String(contractId))}">追加</button></div>
         </div>`;
 }
 
@@ -107,7 +126,7 @@ function saveMyDaily(contractId) {
 }
 
 function deleteMyDaily(contractId, workDate) {
-    fetch(`/api/my/timesheet/daily?contractId=${contractId}&workMonth=${myMonthValue}&workDate=${workDate}`, {
+    fetch(`/api/my/timesheet/daily?contractId=${encodeURIComponent(contractId)}&workMonth=${encodeURIComponent(myMonthValue)}&workDate=${encodeURIComponent(workDate)}`, {
         method: 'DELETE', headers: SES.csrf.header()
     }).then(res => res.json()).then(data => {
         if (data.code === 200) loadMyTimesheet();
@@ -115,7 +134,8 @@ function deleteMyDaily(contractId, workDate) {
     });
 }
 
-function submitMyByMonth(contractId, row) {
+function submitMyByMonth(contractId) {
+    const row = myRowMap.get(String(contractId)) || {};
     // missing days calculation
     let missingDays = 0;
     let missingDates = [];
@@ -151,7 +171,7 @@ function submitMyByMonth(contractId, row) {
     
     if (!confirm(msg)) return;
     
-    fetch(`/api/my/timesheet/submit-by-month?contractId=${contractId}&workMonth=${myMonthValue}`, { method: 'POST', headers: SES.csrf.header() })
+    fetch(`/api/my/timesheet/submit-by-month?contractId=${encodeURIComponent(contractId)}&workMonth=${encodeURIComponent(myMonthValue)}`, { method: 'POST', headers: SES.csrf.header() })
         .then(res => res.json()).then(data => {
             if (data.code === 200) loadMyTimesheet();
             else alert(data.message);

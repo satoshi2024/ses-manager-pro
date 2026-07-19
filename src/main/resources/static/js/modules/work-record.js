@@ -41,17 +41,19 @@ function renderWorkRecords(list) {
     }
     
     list.forEach(item => {
-        const isConfirmed = item.status === '確定';
-        const hoursInput = `<input type="number" step="0.1" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark actual-hours-input" 
-                                data-contract-id="${item.contractId}" 
-                                value="${item.actualHours || ''}" 
-                                ${isConfirmed ? 'readonly' : ''} 
+        // 保存可能なのは「入力中」「差戻し」のみ（提出済・確定は編集不可）
+        const editable = item.status === '入力中' || item.status === '差戻し';
+        const readonly = editable ? '' : 'readonly';
+        const hoursInput = `<input type="number" step="0.01" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark actual-hours-input"
+                                data-contract-id="${item.contractId}"
+                                value="${item.actualHours || ''}"
+                                ${readonly}
                                 onblur="saveHours(this)">`;
-                                
+
         const remarksInput = `<input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark remarks-input"
                                 data-contract-id="${item.contractId}"
                                 value="${SES.escapeHtml(item.remarks || '')}"
-                                ${isConfirmed ? 'readonly' : ''}
+                                ${readonly}
                                 onblur="saveHours(this)">`;
 
         const tr = `

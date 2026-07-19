@@ -77,6 +77,7 @@ function saveConfigs() {
 }
 
 // 単位が紛らわしい設定キーの注記(小数/百分率)。i18n から取得。
+function unitNoteFor(key) {
     if (key === 'billing.tax-rate') return SES.i18n.t('systemConfig.note.taxRate');
     if (key === 'commission.rate') return SES.i18n.t('systemConfig.note.commissionRate');
     if (key && key.indexOf('forecast.win-rate.') === 0) return SES.i18n.t('systemConfig.note.winRate');

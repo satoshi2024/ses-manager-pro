@@ -23,4 +23,5 @@ public class WorkRecordGridDto {
     private BigDecimal paymentAmount;
     private String status;
     private String remarks;
+    private String rejectComment;
 }
