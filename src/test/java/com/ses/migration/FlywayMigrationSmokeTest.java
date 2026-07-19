@@ -119,7 +119,7 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_contract_price_history");
             assertColumnExists(st, "t_contract_price_history", "apply_from_month");
 
-            // メール配信の invoice_id と索引(R3R-01: V26 CREATEへ内包・V15重複解消)。索引は一度だけ。
+            // メール配信の invoice_id と索引(R3R-01: 重複V15を解消しV38で追加)。索引は一度だけ。
             assertColumnExists(st, "t_mail_delivery", "invoice_id");
             assertRowExists(st, "SELECT 1 FROM (SELECT COUNT(*) c FROM information_schema.statistics "
                     + "WHERE table_schema=DATABASE() AND table_name='t_mail_delivery' "
