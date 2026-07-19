@@ -165,7 +165,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateWithBusinessRules(Contract contract) {
-        Contract old = this.baseMapper.selectById(contract.getId());
+        // 行ロックで単価同期/改定と直列化する（R3R-29）。
+        Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());
         if (old == null) {
             throw BusinessException.of("error.contract.notFound");
         }
@@ -173,9 +174,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
                         .eq("contract_id", contract.getId()));
+        // 改定履歴がある契約は単価を「単価改定」経由に一本化する。通常更新SQLからは単価列を除外し
+        // （null化＝update-strategy:not_null によりUPDATE対象外）、同期後の新単価を旧値へ戻さない。
         if (!histories.isEmpty()) {
-            contract.setSellingPrice(old.getSellingPrice());
-            contract.setCostPrice(old.getCostPrice());
+            contract.setSellingPrice(null);
+            contract.setCostPrice(null);
         }
 
         validate(contract, old);
@@ -349,7 +352,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public boolean revisePrice(Long contractId, String applyFromMonth, BigDecimal selling,
                                BigDecimal cost, String reason) {
-        Contract contract = this.getById(contractId);
+        // 行ロックで同月改定同士・通常更新・同期と直列化する（R3R-29）。
+        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of("error.contract.notFound");
         }
@@ -413,9 +417,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         com.ses.service.billing.ContractPriceResolver.ResolvedPrice current =
                 com.ses.service.billing.ContractPriceResolver.resolveFrom(
                         contract, java.time.YearMonth.now(), fresh);
-        contract.setSellingPrice(current.getSellingPrice());
-        contract.setCostPrice(current.getCostPrice());
-        this.updateById(contract);
+        // 単価列だけを部分UPDATEし、他項目を巻き戻さない（R3R-29）。
+        this.baseMapper.updatePriceOnly(contractId, current.getSellingPrice(), current.getCostPrice());
 
         // 過去遡及かつ確定済み実績があれば警告。
         boolean retroactive = applyFrom.isBefore(java.time.YearMonth.now());

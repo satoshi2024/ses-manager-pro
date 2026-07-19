@@ -79,6 +79,15 @@ public class ProjectApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody ProjectSaveDto project) {
+        // 先にDB上の既存案件を認可する（担当外案件を自分の顧客へ付け替えるIDOR防止 / R3R-32）。
+        if (project.getId() != null) {
+            Project existing = projectService.getById(project.getId());
+            if (existing == null) {
+                throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+            }
+            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        }
+        // 変更後の顧客も担当スコープ内であることを検証する。
         if (project.getCustomerId() != null) {
             dataScopeService.assertAllowedCustomer(project.getCustomerId());
         }

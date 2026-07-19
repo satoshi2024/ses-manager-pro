@@ -28,17 +28,27 @@ function refreshPriceRevisionState(contractId) {
         });
 }
 
+// 遡及改定警告を初期化する（別契約のmodalへ旧warningが残らないようにする / R3R-30）。
+function hidePriceRevWarning() {
+    const el = document.getElementById('priceRevWarning');
+    if (el) el.classList.add('d-none');
+}
+
 function openPriceRevisionModal() {
     const id = $('#cont-id').val();
     if (!id) return;
+    // modal open時に必ず警告を初期化する。
+    hidePriceRevWarning();
     loadPriceRevisions(id);
     new bootstrap.Modal(document.getElementById('priceRevisionModal')).show();
 }
 
 function loadPriceRevisions(contractId) {
+    // 履歴load開始時に警告を初期化する。
+    hidePriceRevWarning();
     fetch(`/api/contracts/${contractId}/price-revisions`)
         .then(res => res.json()).then(data => {
-            if (data.code !== 200) return;
+            if (data.code !== 200) { hidePriceRevWarning(); return; }
             const tbody = document.querySelector('#priceRevTable tbody');
             tbody.innerHTML = '';
             const d = new Date();
@@ -54,7 +64,7 @@ function loadPriceRevisions(contractId) {
                     <td>${future ? `<button class="btn btn-sm btn-outline-danger" onclick="deletePriceRevision(${contractId}, '${h.applyFromMonth}')">×</button>` : ''}</td>`;
                 tbody.appendChild(tr);
             });
-        });
+        }).catch(() => hidePriceRevWarning());
 }
 
 function submitPriceRevision() {

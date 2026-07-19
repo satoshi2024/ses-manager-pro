@@ -88,8 +88,17 @@ public class ContractApiController {
      * @param contract 契約情報
      * @return 結果
      */
+    /** payload が参照する顧客・案件・要員が担当スコープ内であることを検証する（R3R-32）。 */
+    private void assertReferencedAllowed(com.ses.dto.contract.ContractSaveDto dto) {
+        if (!dataScopeService.isScoped()) return;
+        if (dto.getCustomerId() != null) dataScopeService.assertAllowedCustomer(dto.getCustomerId());
+        if (dto.getEngineerId() != null) dataScopeService.assertAllowedEngineer(dto.getEngineerId());
+        if (dto.getProjectId() != null) dataScopeService.assertAllowedProject(dto.getProjectId());
+    }
+
     @PostMapping
     public ApiResult<Boolean> create(@Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+        assertReferencedAllowed(dto);
         Contract contract = new Contract();
         org.springframework.beans.BeanUtils.copyProperties(dto, contract);
         contractService.saveWithBusinessRules(contract);
@@ -109,9 +118,10 @@ public class ContractApiController {
      */
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+        assertContractVisible(id);
+        assertReferencedAllowed(dto);
         Contract contract = new Contract();
         org.springframework.beans.BeanUtils.copyProperties(dto, contract);
-        assertContractVisible(id);
         contract.setId(id);
         // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
         // 準備中→稼動中などの遷移検証を迂回できないようにする。
@@ -140,6 +150,8 @@ public class ContractApiController {
      */
     @GetMapping("/check-active")
     public ApiResult<Boolean> checkActive(@RequestParam Long engineerId) {
+        // 担当外要員の稼働有無を推測させない（R3R-31）。
+        dataScopeService.assertAllowedEngineer(engineerId);
         return ApiResult.success(contractService.hasActiveContract(engineerId));
     }
 

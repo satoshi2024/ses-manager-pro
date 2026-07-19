@@ -122,7 +122,9 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
             String msgKey = unattributed
                     ? "notification.msg.CONTRACT_DRAFT_UNATTRIBUTED"
                     : "notification.msg.CONTRACT_DRAFT";
-            notificationService.publish(
+            // 契約ドラフト確認通知は担当営業本人へ個別配信する（未帰属時のみ全体通知 / R3R-33）。
+            notificationService.publishToUser(
+                    draft.getSalesUserId(),
                     "CONTRACT_DRAFT",
                     "契約ドラフト作成",
                     "[\"" + msgKey + "\", \"" + draft.getContractNo() + "\"]",

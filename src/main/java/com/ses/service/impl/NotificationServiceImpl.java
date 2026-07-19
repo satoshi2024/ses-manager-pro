@@ -135,7 +135,9 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setMessage(message);
             notification.setLinkUrl(linkUrl);
             notification.setMenuKey(menuKey);
-            notification.setDedupeKey(dedupeKey);
+            // dedupe_key はグローバル一意のため、宛先ユーザーごとに個別発行するイベントでは受信者を含める。
+            // これがないと同一eventの2人目以降がユニーク制約で破棄される（R3R-33）。
+            notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);
             webhookNotifier.notify(notification);

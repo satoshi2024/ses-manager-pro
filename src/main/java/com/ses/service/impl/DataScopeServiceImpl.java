@@ -184,9 +184,10 @@ public class DataScopeServiceImpl implements DataScopeService {
         }
         if (customerIdsCache != null) return customerIdsCache;
         Set<Long> customerIds = new HashSet<>();
-        // 担当契約の顧客
+        // 担当契約の顧客。customer権限は「自分が担当」の契約由来のみとする（未帰属契約1件で顧客全体へ
+        // 権限拡大するのを防ぐ / R3R-34）。未帰属契約は contract 一覧では見えるが顧客アクセス根拠にはしない。
         contractMapper.selectList(new QueryWrapper<Contract>()
-                        .and(w -> w.eq("sales_user_id", userId).or().isNull("sales_user_id")))
+                        .eq("sales_user_id", userId))
                 .forEach(c -> { if (c.getCustomerId() != null) customerIds.add(c.getCustomerId()); });
         // 担当要員/自分の提案の案件→顧客
         Set<Long> proposalIds = computeProposalIds(userId);

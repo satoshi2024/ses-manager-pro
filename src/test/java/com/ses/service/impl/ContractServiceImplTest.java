@@ -95,6 +95,7 @@ class ContractServiceImplTest {
     void saveWithBusinessRules_successWithAutoNumbering() {
         Contract contract = new Contract();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
+        // 呼び出し側が稼動中を指定しても、新規作成は常に準備中で開始する（状態機械の入口を一本化）。
         contract.setStatus("稼動中");
         contract.setEngineerId(100L);
 
@@ -104,8 +105,11 @@ class ContractServiceImplTest {
         contractService.saveWithBusinessRules(contract);
 
         assertEquals("C-202607-0001", contract.getContractNo());
+        // 新規契約は必ず準備中で作成される。
+        assertEquals("準備中", contract.getStatus());
         verify(contractMapper, times(1)).insert(contract);
-        verify(engineerStatusService, times(1)).onContractActive(100L);
+        // 準備中で作成されるため、作成時点では要員を稼動中にしない（稼動中への遷移は状態変更API経由）。
+        verify(engineerStatusService, never()).onContractActive(any());
     }
 
     @Test
@@ -213,7 +217,7 @@ class ContractServiceImplTest {
         newContract.setStatus("終了");
         newContract.setEngineerId(200L);
 
-        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
         when(contractMapper.updateById(newContract)).thenReturn(1);
 
         contractService.updateWithBusinessRules(newContract);
@@ -233,7 +237,7 @@ class ContractServiceImplTest {
         newContract.setStatus("稼動中");
         newContract.setEngineerId(200L);
 
-        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
         when(contractMapper.updateById(newContract)).thenReturn(1);
 
         contractService.updateWithBusinessRules(newContract);
@@ -254,7 +258,7 @@ class ContractServiceImplTest {
         newContract.setStatus("終了");
         newContract.setEngineerId(200L);
 
-        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
         when(contractMapper.updateById(newContract)).thenReturn(1);
 
         contractService.updateWithBusinessRules(newContract);
@@ -275,7 +279,7 @@ class ContractServiceImplTest {
         newContract.setStatus("稼動中");
         newContract.setEngineerId(300L);
 
-        when(contractMapper.selectById(1L)).thenReturn(oldContract);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
         when(contractMapper.updateById(newContract)).thenReturn(1);
 
         contractService.updateWithBusinessRules(newContract);
@@ -299,7 +303,7 @@ class ContractServiceImplTest {
         update.setEngineerId(100L);
         update.setSalesUserId(99L); // 同一(退職済みだが変更なし)
 
-        when(contractMapper.selectById(1L)).thenReturn(old);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
         when(contractMapper.updateById(update)).thenReturn(1);
 
         contractService.updateWithBusinessRules(update);
@@ -324,7 +328,7 @@ class ContractServiceImplTest {
         SysUser inactive = new SysUser();
         inactive.setRole("営業");
         inactive.setStatus(0); // 退職(無効)
-        when(contractMapper.selectById(1L)).thenReturn(old);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
         when(sysUserMapper.selectById(99L)).thenReturn(inactive);
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -339,7 +343,7 @@ class ContractServiceImplTest {
         newContract.setId(999L);
         newContract.setStatus("稼動中");
 
-        when(contractMapper.selectById(999L)).thenReturn(null);
+        when(contractMapper.selectByIdForUpdate(999L)).thenReturn(null);
 
         org.junit.jupiter.api.Assertions.assertThrows(
                 com.ses.common.exception.BusinessException.class,
@@ -610,7 +614,7 @@ class ContractServiceImplTest {
     @Test
     void revisePrice_初回改定で初期履歴自動補完() {
         Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         // 初回ロード=空、その後の再ロード=初期+新履歴
         com.ses.entity.ContractPriceHistory initial = new com.ses.entity.ContractPriceHistory();
         initial.setApplyFromMonth("2026-04");
@@ -636,7 +640,7 @@ class ContractServiceImplTest {
     @Test
     void revisePrice_開始月前は拒否() {
         Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.revisePrice(1L, "2026-03", new BigDecimal("850000"), new BigDecimal("620000"), "x"));
         assertTrue(ex.getMessage().contains("error.contract.priceRevision.beforeStart"));
@@ -645,7 +649,7 @@ class ContractServiceImplTest {
     @Test
     void revisePrice_不正な月は拒否() {
         Contract c = contractWithPrice(1L, java.time.LocalDate.of(2026, 4, 1), "800000", "600000");
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.revisePrice(1L, "2026/03", new BigDecimal("850000"), new BigDecimal("620000"), "x"));
         assertTrue(ex.getMessage().contains("error.contract.priceRevision.invalidMonth"));
@@ -654,7 +658,7 @@ class ContractServiceImplTest {
     @Test
     void revisePrice_過去遡及かつ確定実績で警告() {
         Contract c = contractWithPrice(1L, java.time.LocalDate.of(2000, 1, 1), "800000", "600000");
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         when(priceHistoryMapper.selectList(any()))
                 .thenReturn(new java.util.ArrayList<>())
                 .thenReturn(new java.util.ArrayList<>());

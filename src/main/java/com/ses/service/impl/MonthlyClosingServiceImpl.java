@@ -114,7 +114,9 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
                 g.setItems(new ArrayList<>());
                 return g;
             });
-            group.setSubtotal(group.getSubtotal().add(item.getBillingAmount()));
+            // NULL金額（旧データ等）は0として集計する（R3R-09）。
+            BigDecimal amount = item.getBillingAmount() != null ? item.getBillingAmount() : BigDecimal.ZERO;
+            group.setSubtotal(group.getSubtotal().add(amount));
             group.getItems().add(item);
         }
         dto.setUnbilledConfirmed(new ArrayList<>(map.values()));
@@ -166,13 +168,18 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     public void confirmClosing(String month, Long userId, String role) {
         validateMonth(month);
         requireCloserRole(role);
+        // 先に締め設定行をロックし、confirm と保護対象更新（工数保存・請求取消）を直列化する（R3R-05）。
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
+        // 冪等: 既に締め済みなら実行者・締め日時を保持したまま no-op（R3R-07）。
+        if (records.stream().anyMatch(r -> month.equals(r.month))) {
+            return;
+        }
+        // ロック取得後に summary を再計算する（締め成立直前の残件を確実に検出する / R3R-05）。
         MonthlyClosingSummaryDto s = summary(month);
         if (!s.isReadyToClose()) {
             throw BusinessException.of(400, "error.closing.notReady");
         }
-        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
-        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
-        records.removeIf(r -> month.equals(r.month));
         records.add(new ClosingRecord(month, userId, LocalDateTime.now()));
         saveRecordsToJson(records, config);
     }
@@ -196,9 +203,22 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         return findRecord(month) != null;
     }
 
+    @Transactional
+    @Override
+    public void assertOpenForUpdate(String month) {
+        // 締め設定行を FOR UPDATE でロックし、confirm と直列化する。
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        // 締めJSON破損時は throwOnError=true で fail-closed（更新拒否）とする（R3R-06）。
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
+        if (records.stream().anyMatch(r -> month.equals(r.month))) {
+            throw BusinessException.of(400, "error.closing.hardLocked");
+        }
+    }
+
     private ClosingRecord findRecord(String month) {
         SystemConfig config = systemConfigMapper.selectById(CONFIG_KEY);
-        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), false);
+        // 読取（isClosed/summary）も締めJSON破損時は fail-closed とし、締め状態を推測で解除しない（R3R-06）。
+        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
         return records.stream().filter(r -> month.equals(r.month)).findFirst().orElse(null);
     }
 
@@ -211,7 +231,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         } catch (Exception e) {
             log.warn("締め記録JSONの解析に失敗しました。空として扱います: {}", json, e);
             if (throwOnError) {
-                throw BusinessException.of(500, "JSON形式が不正です");
+                throw BusinessException.of(500, "error.closing.corrupted");
             }
             return new ArrayList<>();
         }

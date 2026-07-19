@@ -58,6 +58,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final NotificationService notificationService;
     private final WorkRecordDailyMapper workRecordDailyMapper;
     private final MonthlyClosingService monthlyClosingService;
+    private final com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     /**
      * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
@@ -77,9 +78,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     private void checkClosing(String month) {
-        if (monthlyClosingService.isClosed(month)) {
-            throw BusinessException.of(400, "error.closing.hardLocked");
-        }
+        // 締め設定行をロックして直列化し、締め成立後の工数変更を防ぐ（R3R-05）。
+        // 呼び出し元はいずれも @Transactional のため FOR UPDATE ロックが呼び出し側commitまで保持される。
+        monthlyClosingService.assertOpenForUpdate(month);
     }
 
     /** 対象月の末日文字列(yyyy-MM-dd)。方言依存の CONCAT(...,'-31') を避けるため Java 側で確定する。 */
@@ -109,8 +110,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
 
+        // 保存許可状態は「入力中」「差戻し」のみ（提出済・確定は編集不可）。
         if (record != null && "確定".equals(record.getStatus())) {
             throw BusinessException.of("error.workRecord.confirmedEdit2");
+        }
+        if (record != null && "提出済".equals(record.getStatus())) {
+            throw BusinessException.of("error.workRecord.submittedEdit");
         }
 
         // 日次管理されている月は手動合計入力を禁止する。
@@ -466,16 +471,13 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
     @Override
     @Transactional
     public void submitByMonth(Long contractId, String workMonth) {
+        checkClosing(workMonth);
         WorkRecord w = baseMapper.selectOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth), false);
         if (w == null) {
-            w = new WorkRecord();
-            w.setContractId(contractId);
-            w.setWorkMonth(workMonth);
-            w.setActualHours(BigDecimal.ZERO);
-            w.setStatus("入力中");
-            baseMapper.insert(w);
+            // 0h提出も契約期間・状態検証済みの内部保存経路を通す（R3R-15）。
+            w = saveHoursInternal(contractId, workMonth, BigDecimal.ZERO, null, false);
         }
         submit(w.getId());
     }
@@ -489,8 +491,15 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
         }
         checkClosing(record.getWorkMonth());
         requireTransition(record, "提出済");
-        record.setStatus("提出済");
-        baseMapper.updateById(record);
+        // 条件付きUPDATE（CAS）。再提出で差戻しコメントをクリアする（R3R-10/R3R-12）。
+        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
+                .eq("id", workRecordId)
+                .in("status", "入力中", "差戻し")
+                .set("status", "提出済")
+                .set("reject_comment", null));
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
+        }
         notificationService.publish(
                 "TIMESHEET_SUBMITTED",
                 "勤怠が提出されました",
@@ -509,8 +518,15 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
         }
         checkClosing(record.getWorkMonth());
         requireTransition(record, "確定");
+        // 条件付きUPDATE（CAS）。提出済のときのみ確定へ遷移させ、後続BP生成を行う（R3R-10）。
+        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
+                .eq("id", workRecordId)
+                .eq("status", "提出済")
+                .set("status", "確定"));
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
+        }
         record.setStatus("確定");
-        baseMapper.updateById(record);
 
         // confirmMonth と同じBP生成後続処理を単契約分行う（BP要員のみ）。
         String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
@@ -527,15 +543,49 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
             throw BusinessException.of("error.workRecord.notFound2");
         }
         checkClosing(record.getWorkMonth());
+        // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
+        String trimmed = comment == null ? "" : comment.trim();
+        if (trimmed.isEmpty()) {
+            throw BusinessException.of(400, "error.workRecord.rejectCommentRequired");
+        }
+        if (trimmed.length() > 500) {
+            throw BusinessException.of(400, "error.workRecord.rejectCommentTooLong");
+        }
         requireTransition(record, "差戻し");
-        record.setStatus("差戻し");
-        baseMapper.updateById(record);
-        notificationService.publish(
-                "TIMESHEET_REJECTED",
-                "勤怠が差し戻されました",
-                "[\"notification.msg.TIMESHEET_REJECTED\", \"" + record.getWorkMonth() + "\"]",
-                NotificationLinks.MY_TIMESHEET,
-                "timesheet-rejected-" + record.getId() + "-" + System.currentTimeMillis(),
-                "my-timesheet");
+        // 条件付きUPDATE（CAS）で差戻しコメントを保存する（R3R-10/R3R-12）。
+        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
+                .eq("id", workRecordId)
+                .eq("status", "提出済")
+                .set("status", "差戻し")
+                .set("reject_comment", trimmed));
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
+        }
+        // 差戻し通知は対象要員本人だけに配信する（R3R-11）。
+        Long engineerUserId = resolveEngineerUserId(record.getContractId());
+        if (engineerUserId != null) {
+            notificationService.publishToUser(
+                    engineerUserId,
+                    "TIMESHEET_REJECTED",
+                    "勤怠が差し戻されました",
+                    "[\"notification.msg.TIMESHEET_REJECTED\", \"" + record.getWorkMonth() + "\"]",
+                    NotificationLinks.MY_TIMESHEET,
+                    "timesheet-rejected-" + record.getId() + "-" + System.currentTimeMillis(),
+                    "my-timesheet");
+        } else {
+            // 紐付け不明の場合は全体配信せず警告ログに留める（他要員への漏洩防止）。
+            log.warn("勤怠差戻し通知の宛先要員アカウントが解決できません: workRecordId={}", workRecordId);
+        }
+    }
+
+    /** 契約IDから稼働要員に紐付くログインユーザーIDを解決する（未紐付けは null）。 */
+    private Long resolveEngineerUserId(Long contractId) {
+        Contract contract = contractMapper.selectById(contractId);
+        if (contract == null || contract.getEngineerId() == null) {
+            return null;
+        }
+        com.ses.entity.EngineerAccountLink link =
+                engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        return link == null ? null : link.getSysUserId();
     }
 }

@@ -90,9 +90,8 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
     @Transactional(rollbackFor = Exception.class)
     public void saveWithBusinessRules(Quotation q) {
         validate(q);
-        if (q.getStatus() == null || q.getStatus().isBlank()) {
-            q.setStatus("下書き");
-        }
+        // 全登録経路を下書き開始に固定する（内部経路からの受注等の状態注入を防ぐ / R3R-26）。
+        q.setStatus("下書き");
         LocalDate baseDate = LocalDate.now();
         final int maxAttempts = 3;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
@@ -110,17 +109,14 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateWithBusinessRules(Quotation q) {
-        Quotation current = this.getById(q.getId());
+        // 行ロックで状態遷移と直列化し、終端化後に金額等を上書きされないようにする（R3R-25）。
+        Quotation current = this.baseMapper.selectByIdForUpdate(q.getId());
         if (current == null) {
             throw BusinessException.of("error.quotation.notFound");
         }
-        // 受注/失注後は備考以外の編集を拒否する。
+        // 受注/失注後は通常updateを拒否する（備考追記は専用APIへ / R3R-24）。
         if (CLOSED.contains(current.getStatus())) {
-            Quotation onlyRemarks = new Quotation();
-            onlyRemarks.setId(current.getId());
-            onlyRemarks.setRemarks(q.getRemarks());
-            this.updateById(onlyRemarks);
-            return;
+            throw BusinessException.of(400, "error.quotation.terminalUpdate");
         }
         validate(q);
         // 採番・ステータスは更新経路では変更しない。
@@ -130,8 +126,10 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, String newStatus) {
-        Quotation q = this.getById(id);
+        // 行ロックで並行遷移を直列化する（提出済→受注/失注の同時要求を片方のみ成功させる / R3R-25）。
+        Quotation q = this.baseMapper.selectByIdForUpdate(id);
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
         }
@@ -143,6 +141,23 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         }
         q.setStatus(newStatus);
         this.updateById(q);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void appendRemark(Long id, String additional) {
+        // 行ロック内で最新値へ追記し、並行追記の後勝ちによる履歴喪失を防ぐ（R3R-24）。
+        Quotation q = this.baseMapper.selectByIdForUpdate(id);
+        if (q == null) {
+            throw BusinessException.of("error.quotation.notFound");
+        }
+        String current = q.getRemarks();
+        String merged = (current == null || current.isEmpty())
+                ? additional : current + "\n" + additional;
+        Quotation upd = new Quotation();
+        upd.setId(id);
+        upd.setRemarks(merged);
+        this.updateById(upd);
     }
 
     @Override

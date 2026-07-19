@@ -157,6 +157,17 @@ public class InvoiceApiController {
         return ApiResult.success(invoiceService.aging(asOf));
     }
 
+    /** エイジング表のセル（顧客×区分×基準日）を構成する請求書明細（R3R-22）。 */
+    @GetMapping("/aging/detail")
+    public ApiResult<?> agingDetail(@RequestParam Long customerId,
+                                    @RequestParam String bucket,
+                                    @RequestParam(required = false)
+                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+        // 顧客スコープ検証（担当外顧客の明細を返さない）。
+        dataScopeService.assertAllowedCustomer(customerId);
+        return ApiResult.success(invoiceService.agingDetail(customerId, bucket, asOf));
+    }
+
     /** エイジングレポートのExcel出力。 */
     @GetMapping("/aging-export")
     public ResponseEntity<byte[]> agingExport(@RequestParam(required = false)
@@ -185,10 +196,27 @@ public class InvoiceApiController {
         return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
     }
 
+    /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
+    @GetMapping("/{id}/reminders")
+    public ApiResult<?> reminders(@PathVariable Long id) {
+        assertInvoiceVisible(id);
+        return ApiResult.success(invoiceService.listReminders(id));
+    }
+
     /** 督促メール送信リクエスト。 */
-    
+
     @PostMapping("/reminders")
     public ApiResult<?> sendRemindersBulk(@RequestBody BulkReminderRequest request) {
+        if (request == null || request.getInvoiceIds() == null || request.getInvoiceIds().isEmpty()) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.invoice.reminderNoTarget");
+        }
+        if (request.getTemplateId() == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.proposal.templateNotSelected");
+        }
+        // 担当外の請求書IDを一括督促の対象に混ぜられないよう各IDを可視性検証する（R3R-20）。
+        for (Long id : request.getInvoiceIds()) {
+            assertInvoiceVisible(id);
+        }
         return ApiResult.success(invoiceService.sendReminders(request.getInvoiceIds(), request.getTemplateId(), request.getAsOf()));
     }
 
@@ -224,7 +252,9 @@ public class InvoiceApiController {
      */
     @PutMapping("/bp-payments/{id}")
     public ApiResult<?> updateBpPaymentStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
-        assertInvoiceVisible(id);
+        // BP支払は請求書に紐づかない原価側データのため、請求書スコープ検証(assertInvoiceVisible)は
+        // 誤り（BP支払IDを請求書IDとして扱ってしまう）。BP支払はメニュー権限で保護される管理業務であり、
+        // データスコープ対象外のため請求書可視性検証は行わない（R3R-35）。
         invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }

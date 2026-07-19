@@ -17,6 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @ActiveProfiles("test")
 @Transactional
 @org.springframework.test.context.jdbc.Sql("/sql/engineer-schema-h2.sql")
+// replaceSkills は要員・スキルタグの存在を検証するため、対象データをseedする。
+@org.springframework.test.context.jdbc.Sql(statements = {
+        "INSERT INTO t_engineer (id, full_name) VALUES (1, 'テスト要員')",
+        "INSERT INTO m_skill_tag (id, skill_name) VALUES (10, 'Java'), (20, 'Python')"
+})
 public class EngineerSkillServiceImplTest {
 
     @Autowired

@@ -37,6 +37,9 @@ class ProjectApiControllerTest {
     private ProjectService projectService;
 
     @MockBean
+    private com.ses.mapper.ProjectMapper projectMapper;
+
+    @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @Test

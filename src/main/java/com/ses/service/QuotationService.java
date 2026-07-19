@@ -23,6 +23,9 @@ public interface QuotationService extends IService<Quotation> {
     /** 状態機械にもとづくステータス遷移。 */
     void changeStatus(Long id, String newStatus);
 
+    /** 備考追記（行ロック内で最新値へ追加。終端状態でも許可）。 */
+    void appendRemark(Long id, String additional);
+
     /** 受注した見積から契約ドラフトを生成する（冪等・要員必須）。 */
     Contract createDraftFromQuotation(Long quotationId);
 }

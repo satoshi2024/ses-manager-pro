@@ -1,5 +1,2 @@
-
-ALTER TABLE t_notification ADD COLUMN recipient_user_id BIGINT;
-CREATE INDEX idx_notification_recipient ON t_notification(recipient_user_id);
-
-ALTER TABLE t_work_record ADD COLUMN reject_comment VARCHAR(500);
+-- C15: 勤怠差戻しコメント列を追加（recipient_user_id はV36で追加済みのため再追加しない）
+ALTER TABLE t_work_record ADD COLUMN reject_comment VARCHAR(500) COMMENT '差戻しコメント';

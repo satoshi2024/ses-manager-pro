@@ -178,7 +178,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("未送付");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
         when(invoiceItemMapper.delete(any())).thenReturn(1);
         when(invoiceMapper.deleteById(invoiceId)).thenReturn(1);
 
@@ -195,7 +195,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("入金済");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
         
         InvoicePayment existing = new InvoicePayment();
         existing.setAmount(new BigDecimal("100000"));
@@ -208,7 +208,7 @@ public class InvoiceServiceImplTest {
     @Test
     void testVoidInvoice_NotFoundThrowsException() {
         Long invoiceId = 1L;
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(null);
+        when(invoiceMapper.selectOne(any())).thenReturn(null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.voidInvoice(invoiceId));
         assertTrue(ex.getMessage().contains("error.invoice.notFound"));
@@ -221,7 +221,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("未送付");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
         assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
@@ -235,7 +235,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("送付済");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "入金済", null));
         assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
@@ -249,7 +249,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("入金済");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeStatus(invoiceId, "送付済", null));
         assertTrue(ex.getMessage().contains("error.invoice.statusTransitionInvalid"));
@@ -262,7 +262,7 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("送付済");
 
-        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
         when(invoiceMapper.updateById(any(Invoice.class))).thenReturn(1);
 
         invoiceService.changeStatus(invoiceId, "未送付", null);

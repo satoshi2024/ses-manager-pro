@@ -96,8 +96,8 @@ class UserApiControllerTest {
         mockMvc.perform(post("/api/users").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.code").value(500));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     // ===== S1-2: 現任担当を持つ営業ユーザーのライフサイクル操作ガード =====
@@ -109,7 +109,7 @@ class UserApiControllerTest {
         when(engineerSalesMapper.selectCount(any())).thenReturn(3L);
 
         mockMvc.perform(delete("/api/users/5").with(csrf()))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("3")));
         verify(sysUserService, never()).removeById(any());
     }
@@ -119,7 +119,9 @@ class UserApiControllerTest {
     void delete_担当なしは成功() throws Exception {
         when(sysUserService.getOne(any())).thenReturn(null);
         when(engineerSalesMapper.selectCount(any())).thenReturn(0L);
-        when(sysUserService.removeById(any())).thenReturn(true);
+        // removeById(Serializable) を明示スタブする（any() は entity 版オーバーロードに解決され、
+        // コントローラが呼ぶ removeById(Long) が未スタブ=false になり404となるのを防ぐ）。
+        when(sysUserService.removeById(any(Long.class))).thenReturn(true);
 
         mockMvc.perform(delete("/api/users/5").with(csrf()))
                 .andExpect(status().isOk())
@@ -133,7 +135,7 @@ class UserApiControllerTest {
         when(engineerSalesMapper.selectCount(any())).thenReturn(2L);
 
         mockMvc.perform(put("/api/users/5/status?status=0").with(csrf()))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("2")));
         verify(sysUserService, never()).updateById(any());
     }
@@ -153,7 +155,7 @@ class UserApiControllerTest {
         mockMvc.perform(put("/api/users").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("1")));
         verify(sysUserService, never()).updateById(any());
     }

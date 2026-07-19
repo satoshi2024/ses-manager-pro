@@ -106,8 +106,17 @@ public class QuotationApiController {
         return ApiResult.success(getVisibleQuotationOr404(id));
     }
 
+    /** payload が参照する顧客・案件・要員が担当スコープ内であることを検証する（R3R-32）。 */
+    private void assertReferencedAllowed(com.ses.dto.quotation.QuotationSaveRequest request) {
+        if (!dataScopeService.isScoped()) return;
+        if (request.getCustomerId() != null) dataScopeService.assertAllowedCustomer(request.getCustomerId());
+        if (request.getEngineerId() != null) dataScopeService.assertAllowedEngineer(request.getEngineerId());
+        if (request.getProjectId() != null) dataScopeService.assertAllowedProject(request.getProjectId());
+    }
+
     @PostMapping
     public ApiResult<?> create(@jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
+        assertReferencedAllowed(request);
         Quotation quotation = new Quotation();
         quotation.setCustomerId(request.getCustomerId());
         quotation.setProjectId(request.getProjectId());
@@ -126,10 +135,9 @@ public class QuotationApiController {
 
     @PutMapping("/{id}")
     public ApiResult<?> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationSaveRequest request) {
-        Quotation current = getVisibleQuotationOr404(id);
-        if (current != null && ("受注".equals(current.getStatus()) || "失注".equals(current.getStatus()))) {
-            throw com.ses.common.exception.BusinessException.of(400, "Terminal state quotes cannot be fully updated");
-        }
+        getVisibleQuotationOr404(id);
+        assertReferencedAllowed(request);
+        // 終端状態の拒否はサービス側（行ロック内）でも実施する（R3R-24/25）。
         Quotation quotation = new Quotation();
         quotation.setId(id);
         quotation.setCustomerId(request.getCustomerId());
@@ -149,10 +157,9 @@ public class QuotationApiController {
 
     @PostMapping("/{id}/remarks")
     public ApiResult<?> appendRemark(@PathVariable Long id, @jakarta.validation.Valid @RequestBody com.ses.dto.quotation.QuotationRemarkAppendRequest req) {
-        Quotation q = getVisibleQuotationOr404(id);
-        String current = q.getRemarks();
-        q.setRemarks(current == null || current.isEmpty() ? req.getAdditionalRemark() : current + "\n" + req.getAdditionalRemark());
-        quotationService.updateById(q);
+        getVisibleQuotationOr404(id);
+        // 行ロック内で最新値へ追記する（並行追記の履歴喪失防止 / R3R-24）。
+        quotationService.appendRemark(id, req.getAdditionalRemark());
         return ApiResult.success(null);
     }
 

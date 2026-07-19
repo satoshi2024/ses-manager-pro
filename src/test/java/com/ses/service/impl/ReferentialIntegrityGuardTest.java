@@ -60,6 +60,11 @@ class ReferentialIntegrityGuardTest {
         c.setStatus(status);
         c.setStartDate(LocalDate.now());
         contractService.saveWithBusinessRules(c);
+        // saveWithBusinessRules は新規契約を常に準備中で作成するため、テストが意図する状態を直接反映する。
+        if (!"準備中".equals(status)) {
+            jdbcTemplate.update("UPDATE t_contract SET status = ? WHERE id = ?", status, c.getId());
+            c.setStatus(status);
+        }
         return c;
     }
 
