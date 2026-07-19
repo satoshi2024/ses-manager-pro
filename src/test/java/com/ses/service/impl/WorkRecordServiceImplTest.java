@@ -56,6 +56,9 @@ class WorkRecordServiceImplTest {
     @Mock
     private com.ses.service.MonthlyClosingService monthlyClosingService;
 
+    @Mock
+    private com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
+
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
 
@@ -138,6 +141,7 @@ class WorkRecordServiceImplTest {
         dto.setWorkRecordId(1L);
         dto.setEmploymentType("BP");
         when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+        when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
         // BP支払未存在
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
@@ -260,6 +264,7 @@ class WorkRecordServiceImplTest {
         dto.setWorkRecordId(1L);
         dto.setEmploymentType("BP");
         when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+        when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
         // 既存BP支払あり(手動登録などで入力中に生成済み)
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
@@ -294,6 +299,7 @@ class WorkRecordServiceImplTest {
         dto.setWorkRecordId(1L);
         dto.setEmploymentType("BP");
         when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+        when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
         BpPayment root = new BpPayment();
@@ -327,6 +333,7 @@ class WorkRecordServiceImplTest {
         dto.setWorkRecordId(1L);
         dto.setEmploymentType("BP");
         when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
+        when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
         org.mockito.ArgumentCaptor<QueryWrapper> captor = org.mockito.ArgumentCaptor.forClass(QueryWrapper.class);
@@ -450,9 +457,10 @@ class WorkRecordServiceImplTest {
         when(contractMapper.selectById(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "稼動中"));
 
+        // R3R-15: 不正な年月形式は400のBusinessExceptionで拒否される（500にしない）。
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026/07", new BigDecimal("150"), "x"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("error.workRecord.invalidMonth");
+                .satisfies(e -> assertThat(((BusinessException) e).getCode()).isEqualTo(400));
     }
 
     @Test
@@ -501,11 +509,12 @@ class WorkRecordServiceImplTest {
         r.setStatus("入力中");
         r.setWorkMonth("2026-07");
         when(workRecordMapper.selectById(5L)).thenReturn(r);
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        // R3R-10: 条件付きUPDATE(CAS)へ変更。update件数1で後続処理。
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
 
         workRecordService.submit(5L);
 
-        assertThat(r.getStatus()).isEqualTo("提出済");
+        verify(workRecordMapper).update(isNull(), any());
         verify(notificationService).publish(
                 eq("TIMESHEET_SUBMITTED"), any(), any(), any(),
                 org.mockito.ArgumentMatchers.startsWith("timesheet-submitted-5-"),
@@ -531,11 +540,9 @@ class WorkRecordServiceImplTest {
         r.setWorkMonth("2026-07");
         r.setPaymentAmount(new BigDecimal("600000"));
         when(workRecordMapper.selectById(5L)).thenReturn(r);
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
-        WorkRecordGridDto dto = new WorkRecordGridDto();
-        dto.setWorkRecordId(5L);
-        dto.setEmploymentType("BP");
-        when(workRecordMapper.selectMonthlyGrid(eq("2026-07"), any())).thenReturn(Collections.singletonList(dto));
+        // R3R-10: 条件付きUPDATE(CAS)。
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.insert(any(BpPayment.class))).thenReturn(1);
 
@@ -561,16 +568,25 @@ class WorkRecordServiceImplTest {
         WorkRecord r = new WorkRecord();
         r.setId(5L);
         r.setStatus("提出済");
+        r.setContractId(7L);
         r.setRemarks("既存の備考");
         when(workRecordMapper.selectById(5L)).thenReturn(r);
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        // R3R-10/12: CASでコメント保存。R3R-11: 対象要員本人へ配信。
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        Contract c = new Contract();
+        c.setId(7L);
+        c.setEngineerId(3L);
+        when(contractMapper.selectById(7L)).thenReturn(c);
+        com.ses.entity.EngineerAccountLink link = new com.ses.entity.EngineerAccountLink();
+        link.setSysUserId(99L);
+        when(engineerAccountLinkMapper.selectByEngineerId(3L)).thenReturn(link);
 
         workRecordService.reject(5L, "工数が誤っています");
 
-        assertThat(r.getStatus()).isEqualTo("差戻し");
+        // 業務備考は差戻しコメントで上書きしない（R3R-12）。
         assertThat(r.getRemarks()).isEqualTo("既存の備考");
-        verify(notificationService).publish(
-                eq("TIMESHEET_REJECTED"), any(), any(), any(),
+        verify(notificationService).publishToUser(
+                eq(99L), eq("TIMESHEET_REJECTED"), any(), any(), any(),
                 org.mockito.ArgumentMatchers.startsWith("timesheet-rejected-5-"),
                 eq("my-timesheet"));
     }
