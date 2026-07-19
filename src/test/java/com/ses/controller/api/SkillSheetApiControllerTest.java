@@ -32,6 +32,9 @@ class SkillSheetApiControllerTest {
     @MockBean
     private SkillSheetGenerator skillSheetGenerator;
 
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @Test
     void downloadPdf_ShouldReturnPdfContentType() throws Exception {
         byte[] fakePdf = "%PDF-1.4...".getBytes();

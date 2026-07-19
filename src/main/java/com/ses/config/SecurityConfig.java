@@ -106,8 +106,12 @@ public class SecurityConfig {
                     "/api/contracts/generate-renewals",
                     "/api/autocomplete/users"
                 ).hasRole("管理者")
-                // その他のリクエストは認証が必要
-                .anyRequest().authenticated()
+                // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
+                .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
+                // 通知APIは要員を含めて全ロールがアクセス可能（/api/notifications/generate は管理者限定で処理済み）
+                .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
+                // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する
+                .anyRequest().hasAnyRole("管理者", "営業", "HR", "マネージャー")
             )
             // フォームログインの設定
             .formLogin(form -> form

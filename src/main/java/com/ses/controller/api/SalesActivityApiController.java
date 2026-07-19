@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/customers")
@@ -21,6 +27,7 @@ import java.util.List;
 public class SalesActivityApiController {
 
     private final SalesActivityService salesActivityService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @GetMapping("/{id}/activities")
     public ApiResult<Page<SalesActivity>> getActivities(
@@ -28,6 +35,7 @@ public class SalesActivityApiController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String type) {
+        dataScopeService.assertAllowedCustomer(id);
         salesActivityService.assertCustomerExists(id);
         Page<SalesActivity> page = new Page<>(current, size);
         LambdaQueryWrapper<SalesActivity> wrapper = new LambdaQueryWrapper<>();
@@ -43,6 +51,7 @@ public class SalesActivityApiController {
 
     @PostMapping("/{id}/activities")
     public ApiResult<Boolean> createActivity(@PathVariable Long id, @Valid @RequestBody SalesActivityCreateRequest request) {
+        dataScopeService.assertAllowedCustomer(id);
         // created_by は MyBatis-Plus の MetaObjectHandler がログイン中ユーザーを自動設定する
         salesActivityService.create(id, request);
         return ApiResult.success(true);
@@ -53,6 +62,7 @@ public class SalesActivityApiController {
             @PathVariable Long id,
             @PathVariable Long activityId,
             @Valid @RequestBody SalesActivityUpdateRequest request) {
+        dataScopeService.assertAllowedCustomer(id);
         salesActivityService.update(id, activityId, request);
         return ApiResult.success(true);
     }
@@ -61,6 +71,7 @@ public class SalesActivityApiController {
     public ApiResult<Boolean> completeActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
+        dataScopeService.assertAllowedCustomer(id);
         salesActivityService.complete(id, activityId);
         return ApiResult.success(true);
     }
@@ -69,6 +80,7 @@ public class SalesActivityApiController {
     public ApiResult<Boolean> deleteActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
+        dataScopeService.assertAllowedCustomer(id);
         salesActivityService.delete(id, activityId);
         return ApiResult.success(true);
     }
@@ -79,6 +91,13 @@ public class SalesActivityApiController {
         wrapper.le(SalesActivity::getNextActionDate, LocalDate.now())
                .eq(SalesActivity::getCompletedFlag, 0)
                .orderByAsc(SalesActivity::getNextActionDate);
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+            wrapper.in(SalesActivity::getCustomerId, allowed);
+        }
         return ApiResult.success(salesActivityService.list(wrapper));
     }
 }

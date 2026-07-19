@@ -25,7 +25,10 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
         accountLockService.onLoginSuccess(authentication.getName());
-        setDefaultTargetUrl("/dashboard");
+        // 要員ロールはダッシュボード権限が無いためマイ勤怠へ、それ以外はダッシュボードへ遷移する。
+        boolean isEngineer = authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_要員".equals(a.getAuthority()));
+        setDefaultTargetUrl(isEngineer ? "/my/timesheet" : "/dashboard");
         setAlwaysUseDefaultTargetUrl(true);
         super.onAuthenticationSuccess(request, response, authentication);
     }

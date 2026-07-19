@@ -31,6 +31,22 @@
 | `contract-document-esign` | **実装中（CloudSign）** | テンプレート→PDF→署名連携 | 契約書テンプレート・文書状態 | `.kiro/specs/contract-document-esign/tasks.md に従って実装し、CloudSign adapterとテストを完了する。` |
 | `database-backup-recovery` | **実装中（Docker/Linux）** | バックアップ→PITR→復元演習 | `ops/backup`・運用文書 | `.kiro/specs/database-backup-recovery/tasks.md に従って実装し、復元演習を完了する。` |
 
+## 1.5 顧客機能ロードマップ（全7件採用・spec化済み・**全件実装完了 2026-07-18**）
+
+**実行順・spec間競合・マイグレーション採番の正は `customer-feature-proposals/README.md` の
+「実装全体計画」**（Wave 1: P2∥P4∥P5 → Wave 2: P3∥P1 → Wave 3: P6 → Wave 4: P7単独）。
+**採番実績: V28(P2)・V29(P4)・V30(P5)・V31(P3)・V32(P1)・V33(P6)・V34(P7)。`mvn test` 全緑（569件、smoke test/PDFはDocker・フォント無しでskip）。**
+
+| spec | 提案 | 規模 | 状態 |
+|---|---|---|---|
+| `ar-management` | P2 債権管理（入金消込・エイジング・督促） | M | **実装完了（V28）**。t_invoice_payment・消込recalc一元化・手動遷移を未送付⇄送付済に限定・エイジング+Excel・督促メール。 |
+| `quotation-management` | P4 見積書発行 | S〜M | **実装完了（V29）**。t_quotation・状態機械・採番・見積書PDF・buildAndSaveDraft共通化・見積受注→契約ドラフト。 |
+| `revenue-forecast` | P5 売上着地予測 | S | **実装完了（V30）**。computePipelinePerMonth純関数・翌月以降にパイプライン加重を重ねる別系列・点線チャート。 |
+| `monthly-closing-checklist` | P3 月次締めチェックリスト | S〜M | **実装完了（V31）**。5項目集計・selectUnbilledWorkRecordsAll・締め記録(config JSON)・管理者/マネージャーのみ。 |
+| `engineer-self-service-timesheet` | P1 作業報告書・要員セルフサービス勤怠 | L | **実装完了（V32）**。要員ロール・日次勤怠・提出/承認/差戻し・作業報告書PDF・アカウント紐付け・本人スコープ。 |
+| `contract-price-history` | P6 単価改定履歴 | M〜L | **実装完了（V33）**。ContractPriceResolver・saveHours精算へ適用・revisePrice(初期補完/再計算/警告)・改定UI。 |
+| `data-scope-permission` | P7 データスコープ権限 | M | **実装完了（V34）**。オプトイン(既定false)・営業担当データのみ・契約/要員/顧客の一覧IN+詳細404。 |
+
 ## 2. 既存の未完了spec（再開のみ、ドキュメント追加不要）
 
 | spec | 状態 | 一言で着手 |

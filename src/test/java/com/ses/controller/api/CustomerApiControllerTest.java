@@ -47,6 +47,8 @@ class CustomerApiControllerTest {
     private ContractService contractService;
     @MockBean
     private SalesActivityService salesActivityService;
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
 
     @Test
     @WithMockUser

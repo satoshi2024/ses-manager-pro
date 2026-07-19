@@ -32,6 +32,12 @@ public class WorkRecordApiControllerTest {
     @MockBean
     private WorkRecordService workRecordService;
 
+    @MockBean
+    private com.ses.service.TimesheetPdfService timesheetPdfService;
+
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @Test
     @WithMockUser(roles = "管理者")
     void testSaveHours_workMonth不正() throws Exception {

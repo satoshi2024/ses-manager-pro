@@ -40,18 +40,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class InvoicePdfServiceImpl implements InvoicePdfService {
 
-    /**
-     * 主要Linuxディストリビューションで日本語PDF生成によく使われるフォントパッケージの
-     * 標準インストールパス（fonts-japanese-gothic / fonts-ipafont 等）。
-     * 実行環境にこれらが無い場合は app.pdf.font-path で明示的に指定する必要がある。
-     */
-    private static final List<String> DEFAULT_FONT_CANDIDATES = List.of(
-            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,0",
-            "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf"
-    );
-
     private final PdfProperties pdfProperties;
     private final SystemConfigService systemConfigService;
 
@@ -167,7 +155,7 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
         if (StringUtils.hasText(pdfProperties.getFontPath())) {
             candidates.add(pdfProperties.getFontPath());
         }
-        candidates.addAll(DEFAULT_FONT_CANDIDATES);
+        candidates.addAll(pdfProperties.getDefaultFontCandidates());
 
         for (String candidate : candidates) {
             String filePath = candidate.contains(",") ? candidate.substring(0, candidate.indexOf(',')) : candidate;

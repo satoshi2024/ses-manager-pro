@@ -17,4 +17,15 @@ public class PdfProperties {
 
     /** 明示的に指定するCJKフォントファイルパス（空なら既定候補を順に探索） */
     private String fontPath = "";
+
+    /** 
+     * 主要Linuxディストリビューションの日本語フォント標準インストールパス。
+     * Windows環境でのテスト時は application.yml の app.pdf.font-path で明示的に指定すること。
+     */
+    private java.util.List<String> defaultFontCandidates = java.util.List.of(
+            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,0",
+            "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf"
+    );
 }

@@ -16,9 +16,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class SkillSheetApiController {
 
     private final SkillSheetGenerator skillSheetGenerator;
+    private final com.ses.service.security.DataScopeService dataScopeService;
+
+    /** データスコープ発動中に担当外要員のスキルシートを秘匿する（詳細404パターン）。 */
+    private void assertEngineerVisible(Long id) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedEngineerIds().contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
 
     @GetMapping("/skill-sheet.pdf")
     public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id) {
+        assertEngineerVisible(id);
         byte[] pdfBytes = skillSheetGenerator.generatePdf(id);
         
         HttpHeaders headers = new HttpHeaders();
@@ -32,6 +41,7 @@ public class SkillSheetApiController {
 
     @GetMapping("/skill-sheet.xlsx")
     public ResponseEntity<byte[]> downloadExcel(@PathVariable Long id) {
+        assertEngineerVisible(id);
         byte[] excelBytes = skillSheetGenerator.generateExcel(id);
         
         HttpHeaders headers = new HttpHeaders();

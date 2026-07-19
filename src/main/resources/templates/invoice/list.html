@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
-      th:replace="~{layout/base :: layout(#{invoice.title}, ~{::content}, ~{::script})}">
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
 <head>
     <meta charset="UTF-8">
     <title th:text="#{invoice.title}">請求・支払</title>
 </head>
 <body>
-<div th:fragment="content">
+<div layout:fragment="content">
     <div class="row">
         <div class="col-12">
             <div class="card">
@@ -17,6 +18,9 @@
                         </li>
                         <li class="nav-item">
                             <a class="nav-link" id="bp-payment-tab" data-bs-toggle="tab" href="#bp-payment" role="tab" aria-controls="bp-payment" aria-selected="false" th:text="#{invoice.tab.bpPayment}">BP支払</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="aging-tab" data-bs-toggle="tab" href="#aging" role="tab" aria-controls="aging" aria-selected="false" th:text="#{invoice.aging.tab}">エイジング</a>
                         </li>
                     </ul>
                 </div>
@@ -88,7 +92,119 @@
                                 </table>
                             </div>
                         </div>
+                        <!-- エイジングタブ -->
+                        <div class="tab-pane fade" id="aging" role="tabpanel" aria-labelledby="aging-tab">
+                            <div class="row mb-3 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label" th:text="#{invoice.aging.asOf}">基準日</label>
+                                    <input type="date" id="agingAsOf" class="form-control">
+                                </div>
+                                <div class="col-md-3">
+                                    <button id="btnLoadAging" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                                    <button id="btnExportAging" class="btn btn-outline-success" th:text="#{invoice.aging.export}">Excel出力</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-striped" id="agingTable">
+                                    <thead>
+                                        <tr>
+                                            <th th:text="#{invoice.aging.customer}">顧客名</th>
+                                            <th th:text="#{invoice.aging.unsent}">未請求</th>
+                                            <th th:text="#{invoice.aging.notDue}">期限内</th>
+                                            <th th:text="#{invoice.aging.d1to30}">1-30日</th>
+                                            <th th:text="#{invoice.aging.d31to60}">31-60日</th>
+                                            <th th:text="#{invoice.aging.d61to90}">61-90日</th>
+                                            <th th:text="#{invoice.aging.d91plus}">91日以上</th>
+                                            <th th:text="#{invoice.aging.noDueDate}">期限未設定</th>
+                                            <th th:text="#{invoice.aging.balance}">残高計</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                    <tfoot></tfoot>
+                                </table>
+                            </div>
+                        </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 入金管理モーダル -->
+    <div class="modal fade" id="paymentModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <span th:text="#{invoice.payment.title}">入金管理</span>
+                        <small class="text-muted" id="paymentInvoiceNo"></small>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <strong th:text="#{invoice.payment.balance}">残高</strong>:
+                        <span id="paymentBalance"></span>
+                        <span class="text-success ms-2" id="paymentRemaining"></span>
+                    </div>
+                    <table class="table table-sm table-bordered" id="paymentHistoryTable">
+                        <thead>
+                            <tr>
+                                <th th:text="#{invoice.payment.paidDate}">入金日</th>
+                                <th th:text="#{invoice.payment.amount}">入金額</th>
+                                <th th:text="#{invoice.payment.fee}">振込手数料</th>
+                                <th th:text="#{invoice.payment.remarks}">備考</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <hr>
+                    <form id="paymentForm" class="row g-2">
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{invoice.payment.paidDate}">入金日</label>
+                            <input type="date" class="form-control" name="paidDate" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{invoice.payment.amount}">入金額</label>
+                            <input type="number" class="form-control" name="amount" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" th:text="#{invoice.payment.fee}">手数料</label>
+                            <input type="number" class="form-control" name="fee" value="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{invoice.payment.remarks}">備考</label>
+                            <input type="text" class="form-control" name="remarks">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">閉じる</button>
+                    <button type="button" class="btn btn-primary" id="btnSubmitPayment" th:text="#{invoice.payment.add}">入金を追加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 督促メールモーダル -->
+    <div class="modal fade" id="reminderModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <span th:text="#{invoice.reminder.title}">督促メール</span>
+                        <small class="text-muted" id="reminderInvoiceNo"></small>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label" th:text="#{invoice.reminder.selectTemplate}">テンプレートを選択</label>
+                    <select id="reminderTemplate" class="form-select"></select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btnSubmitReminder" th:text="#{invoice.reminder.send}">送信</button>
                 </div>
             </div>
         </div>
@@ -161,7 +277,7 @@
     </div>
 </div>
 
-<th:block th:fragment="script">
+<th:block layout:fragment="page-js">
     <script src="/js/modules/invoice.js"></script>
 </th:block>
 </body>

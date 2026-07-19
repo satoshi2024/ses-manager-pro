@@ -29,6 +29,12 @@
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.business}">業務管理</span>
                 </li>
                 
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
+                    <a th:href="@{/my/timesheet}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-person-workspace me-2"></i>
+                        <span th:text="#{menu.myTimesheet}">マイ勤怠</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
                     <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
@@ -64,6 +70,12 @@
                         <span th:text="#{menu.proposal}">提案管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('quotation')}">
+                    <a th:href="@{/quotation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/quotation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-earmark-ruled me-2"></i>
+                        <span th:text="#{menu.quotation}">見積管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract')}">
                     <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-text me-2"></i>
@@ -73,6 +85,24 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract-document')}">
                     <a th:href="@{/contract-document}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract-document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-check me-2"></i><span>契約書・電子署名</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('work-record')}">
+                    <a th:href="@{/work-record}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/work-record') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-clock-history me-2"></i>
+                        <span th:text="#{menu.workRecord}">勤怠・請求</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('invoice')}">
+                    <a th:href="@{/invoice}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/invoice') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-receipt me-2"></i>
+                        <span th:text="#{menu.invoice}">請求・支払</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('payroll')}">
+                    <a th:href="@{/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/payroll') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-cash-stack me-2"></i>
+                        <span th:text="#{menu.payroll}">給与</span>
                     </a>
                 </li>
 
@@ -91,6 +121,13 @@
                     <a th:href="@{/sales-performance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/sales-performance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-award me-2"></i>
                         <span th:text="#{menu.salesPerformance}">営業成績</span>
+                    </a>
+                </li>
+
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('monthly-closing')}">
+                    <a th:href="@{/monthly-closing}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/monthly-closing') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-calendar-check me-2"></i>
+                        <span th:text="#{menu.monthlyClosing}">月次締め</span>
                     </a>
                 </li>
 

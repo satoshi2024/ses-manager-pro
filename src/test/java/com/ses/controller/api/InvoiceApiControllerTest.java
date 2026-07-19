@@ -35,7 +35,16 @@ class InvoiceApiControllerTest {
     private InvoicePdfService invoicePdfService;
 
     @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
+    @MockBean
     private BpPaymentMapper bpPaymentMapper;
+
+    @MockBean
+    private com.ses.service.export.ExcelExportService excelExportService;
+
+    @MockBean
+    private com.ses.service.EmailTemplateService emailTemplateService;
 
     @Test
     @WithMockUser

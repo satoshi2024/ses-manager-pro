@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,6 +49,12 @@ class WorkRecordServiceImplTest {
 
     @Mock
     private com.ses.service.NotificationService notificationService;
+
+    @Mock
+    private com.ses.mapper.WorkRecordDailyMapper workRecordDailyMapper;
+
+    @Mock
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
 
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
@@ -470,5 +477,122 @@ class WorkRecordServiceImplTest {
         assertThatThrownBy(() -> spyService.saveHours(contractId, workMonth, new BigDecimal("150"), "テスト"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("error.workRecord.userNotFound2");
+    }
+
+    // ===== 要員セルフサービス勤怠（engineer-self-service-timesheet / P1） =====
+
+    @Test
+    void saveHours_dailyManagedMonthRejectsManualTotal() {
+        WorkRecord existing = new WorkRecord();
+        existing.setId(10L);
+        existing.setStatus("入力中");
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        when(workRecordDailyMapper.selectCount(any())).thenReturn(1L);
+
+        assertThatThrownBy(() -> workRecordService.saveHours(1L, "2026-07", new BigDecimal("160"), "手動"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.dailyManaged");
+    }
+
+    @Test
+    void submit_入力中から提出済で通知() {
+        WorkRecord r = new WorkRecord();
+        r.setId(5L);
+        r.setStatus("入力中");
+        r.setWorkMonth("2026-07");
+        when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+
+        workRecordService.submit(5L);
+
+        assertThat(r.getStatus()).isEqualTo("提出済");
+        verify(notificationService).publish(
+                eq("TIMESHEET_SUBMITTED"), any(), any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("timesheet-submitted-5-"),
+                eq("work-record"));
+    }
+
+    @Test
+    void submit_確定からは不正遷移() {
+        WorkRecord r = new WorkRecord();
+        r.setId(5L);
+        r.setStatus("確定");
+        when(workRecordMapper.selectById(5L)).thenReturn(r);
+        assertThatThrownBy(() -> workRecordService.submit(5L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.statusTransitionInvalid");
+    }
+
+    @Test
+    void approve_提出済から確定しBP生成() {
+        WorkRecord r = new WorkRecord();
+        r.setId(5L);
+        r.setStatus("提出済");
+        r.setWorkMonth("2026-07");
+        r.setPaymentAmount(new BigDecimal("600000"));
+        when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        WorkRecordGridDto dto = new WorkRecordGridDto();
+        dto.setWorkRecordId(5L);
+        dto.setEmploymentType("BP");
+        when(workRecordMapper.selectMonthlyGrid(eq("2026-07"), any())).thenReturn(Collections.singletonList(dto));
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
+        when(bpPaymentMapper.insert(any(BpPayment.class))).thenReturn(1);
+
+        workRecordService.approve(5L);
+
+        assertThat(r.getStatus()).isEqualTo("確定");
+        verify(bpPaymentMapper, times(1)).insert(any(BpPayment.class));
+    }
+
+    @Test
+    void approve_入力中からは不正遷移() {
+        WorkRecord r = new WorkRecord();
+        r.setId(5L);
+        r.setStatus("入力中");
+        when(workRecordMapper.selectById(5L)).thenReturn(r);
+        assertThatThrownBy(() -> workRecordService.approve(5L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.statusTransitionInvalid");
+    }
+
+    @Test
+    void reject_提出済から差戻しで通知() {
+        WorkRecord r = new WorkRecord();
+        r.setId(5L);
+        r.setStatus("提出済");
+        r.setRemarks("既存の備考");
+        when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+
+        workRecordService.reject(5L, "工数が誤っています");
+
+        assertThat(r.getStatus()).isEqualTo("差戻し");
+        assertThat(r.getRemarks()).isEqualTo("既存の備考");
+        verify(notificationService).publish(
+                eq("TIMESHEET_REJECTED"), any(), any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("timesheet-rejected-5-"),
+                eq("my-timesheet"));
+    }
+
+    @Test
+    void saveDaily_不正な時刻は拒否() {
+        WorkRecord existing = new WorkRecord();
+        existing.setId(10L);
+        existing.setStatus("入力中");
+        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        
+        com.ses.entity.Contract mockContract = new com.ses.entity.Contract();
+        mockContract.setId(1L);
+        when(contractMapper.selectById(1L)).thenReturn(mockContract);
+        com.ses.entity.WorkRecordDaily daily = new com.ses.entity.WorkRecordDaily();
+        daily.setWorkDate(LocalDate.of(2026, 7, 1));
+        daily.setStartTime(java.time.LocalTime.of(9, 0));
+        daily.setEndTime(java.time.LocalTime.of(10, 0));
+        daily.setBreakMinutes(120);
+
+        assertThatThrownBy(() -> workRecordService.saveDaily(1L, "2026-07", daily))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.workRecord.dailyInvalidTime");
     }
 }

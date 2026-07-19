@@ -117,6 +117,8 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         Map<Long, WorkRecord> workRecordMap = workRecords.stream()
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
 
+        Map<Long, MonthlyRevenueCalcService.ContractAmount> amountBatchMap = monthlyRevenueCalcService.resolveContractAmountBatch(allContracts, workRecordMap, targetMonth);
+
         for (Contract c : allContracts) {
             boolean unattributed = (c.getSalesUserId() == null);
             // 未帰属(担当営業なし)契約は稼動額・粗利・稼動契約数のみ UNATTRIBUTED_ID キーで集計する。
@@ -136,7 +138,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
                 // 1契約分の金額決定は共通口径サービスへ委譲(確定実績優先、なければ契約単価)。
                 MonthlyRevenueCalcService.ContractAmount amount =
-                        monthlyRevenueCalcService.resolveContractAmount(c, workRecordMap.get(c.getId()));
+                        amountBatchMap.get(c.getId());
                 BigDecimal sales = amount.getSales();
                 BigDecimal profit = amount.getProfit();
 
@@ -157,9 +159,11 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         }
 
         List<SalesPerformanceDto> result = new ArrayList<>();
+        Long currentUserId = com.ses.common.util.SecurityUtils.currentUserId();
         for (Long uid : userIds) {
             SalesPerformanceDto dto = new SalesPerformanceDto();
             dto.setSalesUserId(uid);
+            dto.setSelf(uid != null && uid.equals(currentUserId));
             dto.setSalesUserName(userNameMap.getOrDefault(uid, "Unknown"));
             dto.setActivePrimaryCount(activePrimaryMap.getOrDefault(uid, 0));
             dto.setClosedContractCount(closedContractCountMap.getOrDefault(uid, 0));

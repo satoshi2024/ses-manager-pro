@@ -75,6 +75,12 @@ function renderWorkRecords(list) {
                 </td>
                 <td class="py-3 status-cell-${item.contractId}">
                     ${getStatusBadge(item.status)}
+                    ${item.status === '提出済' && item.workRecordId ? `
+                        <div class="mt-1">
+                            <button class="btn btn-sm btn-success py-0 px-1" onclick="approveWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.approve','承認')}</button>
+                            <button class="btn btn-sm btn-warning py-0 px-1" onclick="rejectWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.reject','差戻し')}</button>
+                        </div>` : ''}
+                    ${item.workRecordId ? `<div class="mt-1"><button class="btn btn-sm btn-outline-secondary py-0 px-1 me-1" onclick="showDaily(${item.workRecordId})">日次明細</button><a class="btn btn-sm btn-outline-info py-0 px-1" href="/api/work-records/${item.workRecordId}/report.pdf" target="_blank">PDF</a></div>` : ''}
                 </td>
                 <td class="px-4 py-3">
                     ${remarksInput}
@@ -85,10 +91,33 @@ function renderWorkRecords(list) {
     });
 }
 
+function approveWorkRecord(id) {
+    fetch(`/api/work-records/${id}/approve`, { method: 'POST', headers: SES.csrf.header() })
+        .then(res => res.json()).then(data => {
+            if (data.code === 200) loadWorkRecords();
+            else alert(data.message);
+        });
+}
+
+function rejectWorkRecord(id) {
+    const comment = prompt(SES.i18n.t('my.timesheet.rejectComment', '差戻しコメント'));
+    if (comment === null) return;
+    fetch(`/api/work-records/${id}/reject`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+        body: JSON.stringify({ comment })
+    }).then(res => res.json()).then(data => {
+        if (data.code === 200) loadWorkRecords();
+        else alert(data.message);
+    });
+}
+
 function getStatusBadge(status) {
     if (!status) return `<span class="badge bg-secondary text-white">${SES.i18n.t('workRecord.status.未入力')}</span>`;
     let bg = 'bg-secondary';
     if(status === '入力中') bg = 'bg-primary';
+    if(status === '提出済') bg = 'bg-info';
+    if(status === '差戻し') bg = 'bg-warning';
     if(status === '確定') bg = 'bg-success';
     return `<span class="badge ${bg} text-white">${SES.i18n.t('workRecord.status.' + status, status)}</span>`;
 }
@@ -169,5 +198,39 @@ function confirmMonth() {
                 }
             });
         }
+    });
+}
+
+const dailyCache = {};
+function showDaily(id) {
+    if (dailyCache[id]) {
+        renderDailyModal(dailyCache[id]);
+        return;
+    }
+    fetch(`/api/work-records/${id}/daily`)
+        .then(res => res.json()).then(data => {
+            if (data.code === 200) {
+                dailyCache[id] = data.data;
+                renderDailyModal(data.data);
+            } else {
+                Toast.error(data.message);
+            }
+        }).catch(err => Toast.error('Failed to load'));
+}
+
+function renderDailyModal(list) {
+    let rows = list.map(d => `<tr><td>${SES.escapeHtml(d.workDate||'')}</td><td>${d.startTime||''}</td><td>${d.endTime||''}</td><td>${d.breakMinutes||0}</td><td>${d.workedHours||0}</td><td>${SES.escapeHtml(d.remarks||'')}</td></tr>`).join('');
+    if (!rows) rows = '<tr><td colspan="6" class="text-center text-muted">明細なし</td></tr>';
+    const html = `<table class="table table-sm table-bordered text-start">
+        <thead class="table-dark"><tr><th>日付</th><th>開始</th><th>終了</th><th>休憩(分)</th><th>稼働(h)</th><th>備考</th></tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+    Swal.fire({
+        title: '日次明細',
+        html: html,
+        width: '600px',
+        showConfirmButton: true,
+        confirmButtonText: '閉じる',
+        confirmButtonColor: '#6c757d'
     });
 }

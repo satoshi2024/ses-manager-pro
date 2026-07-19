@@ -16,6 +16,8 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.EngineerSalesMapper;
+import com.ses.entity.EngineerSales;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +38,7 @@ public class NotificationGenerateService {
     private final SalesActivityMapper salesActivityMapper;
     private final CustomerMapper customerMapper;
     private final InvoiceMapper invoiceMapper;
+    private final EngineerSalesMapper engineerSalesMapper;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
 
@@ -65,7 +68,7 @@ public class NotificationGenerateService {
             long days = ChronoUnit.DAYS.between(inv.getDueDate(), today);
             String dedupeKey = "INVOICE_OVERDUE:" + inv.getId() + ":" + today;
             String message = "[\"notification.msg.INVOICE_OVERDUE\", \"" + inv.getInvoiceNo() + "\", \"" + customerName + "\", \"" + days + "日\"]";
-            notificationService.publish("INVOICE_OVERDUE", "支払期限超過", message, NotificationLinks.INVOICE, dedupeKey);
+            notificationService.publishToUser(null, "INVOICE_OVERDUE", "支払期限超過", message, NotificationLinks.INVOICE, dedupeKey);
         }
     }
 
@@ -94,7 +97,7 @@ public class NotificationGenerateService {
             String name = getEngineerName(c.getEngineerId());
             String dedupeKey = "CONTRACT_END:" + c.getId() + ":" + c.getEndDate().toString();
             String message = "[\"notification.msg.CONTRACT_END\", \"" + name + "\", \"" + days + "\", \"" + c.getEndDate() + "\"]";
-            notificationService.publish("CONTRACT_END", "稼動終了間近", message, NotificationLinks.CONTRACT_LIST, dedupeKey);
+            notificationService.publishToUser(c.getSalesUserId(), "CONTRACT_END", "稼動終了間近", message, NotificationLinks.CONTRACT_LIST, dedupeKey);
         }
     }
 
@@ -108,7 +111,7 @@ public class NotificationGenerateService {
         for (Proposal p : proposals) {
             String dedupeKey = "PROPOSAL_STALE:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROPOSAL_STALE\", \"" + p.getId() + "\", \"" + days + "\", \"" + p.getStatus() + "\"]";
-            notificationService.publish("PROPOSAL_STALE", "提案ステータス停滞", message, NotificationLinks.PROPOSAL_KANBAN, dedupeKey);
+            notificationService.publishToUser(p.getProposedBy(), "PROPOSAL_STALE", "提案ステータス停滞", message, NotificationLinks.PROPOSAL_KANBAN, dedupeKey);
         }
     }
 
@@ -139,7 +142,7 @@ public class NotificationGenerateService {
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
-            notificationService.publish("PROJECT_URGENT", "急募案件", message, NotificationLinks.PROJECT_LIST, dedupeKey);
+            notificationService.publishToUser(null, "PROJECT_URGENT", "急募案件", message, NotificationLinks.PROJECT_LIST, dedupeKey);
         }
     }
 
@@ -166,7 +169,7 @@ public class NotificationGenerateService {
             String title = "【フォロー】" + customerName;
             String message = a.getTitle();
             String linkUrl = NotificationLinks.customer(a.getCustomerId());
-            notificationService.publish("FOLLOW_UP", title, message, linkUrl, dedupeKey);
+            notificationService.publishToUser(a.getCreatedBy(), "FOLLOW_UP", title, message, linkUrl, dedupeKey);
         }
     }
 

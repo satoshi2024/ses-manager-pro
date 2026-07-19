@@ -18,6 +18,7 @@ public class EngineerApiController {
 
     private final EngineerService engineerService;
     private final com.ses.service.EngineerSalesService engineerSalesService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * エンジニア一覧（ページネーション）
@@ -33,8 +34,18 @@ public class EngineerApiController {
             @RequestParam(required = false) Long salesUserId) {
         
         Page<Engineer> page = new Page<>(current, size);
+        // データスコープ: 営業ロール制限時は担当要員のみ。空集合なら空ページを即返す。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(new Page<>(current, size, 0));
+            }
+        }
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        
+        if (dataScopeService.isScoped()) {
+            queryWrapper.in(Engineer::getId, dataScopeService.allowedEngineerIds());
+        }
+
         if (org.springframework.util.StringUtils.hasText(fullName)) {
             queryWrapper.like(Engineer::getFullName, fullName);
         }
@@ -91,6 +102,9 @@ public class EngineerApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Engineer> getById(@PathVariable Long id) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedEngineerIds().contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         return ApiResult.success(engineerService.getById(id));
     }
 
@@ -107,6 +121,9 @@ public class EngineerApiController {
      */
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody Engineer engineer) {
+        if (engineer.getId() != null) {
+            dataScopeService.assertAllowedEngineer(engineer.getId());
+        }
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 
@@ -115,6 +132,7 @@ public class EngineerApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerService.removeById(id));
     }
 }

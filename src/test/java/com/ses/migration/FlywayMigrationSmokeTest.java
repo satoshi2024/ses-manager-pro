@@ -85,6 +85,40 @@ class FlywayMigrationSmokeTest {
             // 請求書への適用税率保存カラム(V27)
             assertColumnExists(st, "t_invoice", "tax_rate");
 
+            // 請求書入金テーブル(V28 / ar-management)
+            assertTableExists(st, "t_invoice_payment");
+            assertColumnExists(st, "t_invoice_payment", "amount");
+            assertColumnExists(st, "t_invoice_payment", "fee");
+            // status ENUM に「一部入金」が追加されていること
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_invoice' AND column_name='status' "
+                    + "AND column_type LIKE '%一部入金%'");
+
+            // 見積(V29 / quotation-management)
+            assertTableExists(st, "t_quotation");
+            assertColumnExists(st, "t_contract", "quotation_id");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='quotation'");
+
+            // 月次締めメニュー(V31 / monthly-closing-checklist)
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='monthly-closing'");
+
+            // 要員セルフサービス勤怠(V32 / engineer-self-service-timesheet)
+            assertTableExists(st, "t_engineer_account_link");
+            assertTableExists(st, "t_work_record_daily");
+            assertColumnExists(st, "t_work_record_daily", "worked_hours");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='my-timesheet'");
+            // role ENUM に「要員」、work_record status ENUM に「提出済」「差戻し」
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='sys_user' AND column_name='role' "
+                    + "AND column_type LIKE '%要員%'");
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_work_record' AND column_name='status' "
+                    + "AND column_type LIKE '%差戻し%'");
+
+            // 契約単価改定履歴(V33 / contract-price-history)
+            assertTableExists(st, "t_contract_price_history");
+            assertColumnExists(st, "t_contract_price_history", "apply_from_month");
+
             // 一意性制約カラム(V18) - 生成列の検証
             assertColumnExists(st, "t_bp_payment", "active_work_record_id");
             assertColumnExists(st, "t_bp_payment", "active_layer_order");

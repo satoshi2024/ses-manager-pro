@@ -47,7 +47,7 @@ function loadInvoices() {
         if (data.code === 200) {
             const tbody = document.querySelector('#invoiceTable tbody');
             tbody.innerHTML = '';
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString();
             data.data.records.forEach(inv => {
                 const tr = document.createElement('tr');
                 // 未入金かつ支払期限を過ぎている場合は期限を赤字で強調する
@@ -68,9 +68,9 @@ function loadInvoices() {
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
                         ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('invoice.btn.markSent')}</button>` : ''}
-                        ${inv.status === '送付済' ? `<button class="btn btn-sm btn-success" onclick="updateInvoiceStatus(${inv.id}, '入金済', true)">${SES.i18n.t('invoice.btn.markPaid')}</button>` : ''}
+                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
+                        ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder', '督促')}</button>` : ''}
                         ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.void')}</button>` : ''}
-                        ${inv.status === '入金済' ? `<button class="btn btn-sm btn-warning" onclick="updateInvoiceStatus(${inv.id}, '送付済', false)">${SES.i18n.t('invoice.btn.revertToSent')}</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -82,7 +82,7 @@ function loadInvoices() {
 function updateInvoiceStatus(id, status, requireDate = false) {
     let paidDate = null;
     if (requireDate) {
-        paidDate = prompt(SES.i18n.t('invoice.prompt.paidDate'), new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paidDate'), getLocalDateString());
         if (!paidDate) return;
     } else {
         if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateBpPaymentStatus(id, status) {
     let paidDate = null;
     if (status === '支払済') {
-        paidDate = prompt(SES.i18n.t('invoice.prompt.paymentDate'), new Date().toISOString().split('T')[0]);
+        paidDate = prompt(SES.i18n.t('invoice.prompt.paymentDate'), getLocalDateString());
         if (!paidDate) return;
     } else {
         if (!confirm(SES.i18n.t('invoice.confirm.changeStatus', { status: SES.i18n.t('invoice.status.' + status, status) }))) return;
@@ -231,4 +231,204 @@ function updateBpPaymentStatus(id, status) {
             alert(data.message);
         }
     });
+}
+
+// ===== 債権管理（ar-management / P2） =====
+
+let currentPaymentInvoiceId = null;
+let currentPaymentInvoiceTotal = 0;
+
+function openPaymentModal(invoiceId, invoiceNo, total) {
+    currentPaymentInvoiceId = invoiceId;
+    currentPaymentInvoiceTotal = total;
+    document.getElementById('paymentInvoiceNo').textContent = invoiceNo;
+    document.querySelector('#paymentForm [name="paidDate"]').value = getLocalDateString();
+    document.querySelector('#paymentForm [name="amount"]').value = '';
+    document.querySelector('#paymentForm [name="fee"]').value = '0';
+    document.querySelector('#paymentForm [name="remarks"]').value = '';
+    loadPayments();
+    new bootstrap.Modal(document.getElementById('paymentModal')).show();
+}
+
+function loadPayments() {
+    fetch(`/api/invoices/${currentPaymentInvoiceId}/payments`)
+        .then(res => res.json()).then(data => {
+            if (data.code !== 200) return;
+            const tbody = document.querySelector('#paymentHistoryTable tbody');
+            tbody.innerHTML = '';
+            let paid = 0;
+            data.data.forEach(p => {
+                paid += Number(p.amount) + Number(p.fee || 0);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${SES.escapeHtml(p.paidDate)}</td>
+                    <td class="text-right">￥${Number(p.amount).toLocaleString()}</td>
+                    <td class="text-right">￥${Number(p.fee || 0).toLocaleString()}</td>
+                    <td>${p.remarks ? SES.escapeHtml(p.remarks) : ''}</td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deletePayment(${p.id})">${SES.i18n.t('common.btn.delete', '削除')}</button></td>`;
+                tbody.appendChild(tr);
+            });
+            const balance = currentPaymentInvoiceTotal - paid;
+            const balanceEl = document.getElementById('paymentBalance');
+            balanceEl.textContent = '￥' + balance.toLocaleString();
+            document.getElementById('paymentRemaining').textContent =
+                balance > 0 ? SES.i18n.t('invoice.payment.remaining', 'あと {0} 円で入金済').replace('{0}', balance.toLocaleString()) : '';
+            
+            const disableForm = balance <= 0;
+            document.querySelector('#paymentForm [name="amount"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="fee"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="paidDate"]').disabled = disableForm;
+            document.querySelector('#paymentForm [name="remarks"]').disabled = disableForm;
+            document.getElementById('btnSubmitPayment').disabled = disableForm;
+        });
+}
+
+function submitPayment() {
+    const amount = parseFloat(document.querySelector('#paymentForm [name="amount"]').value);
+    const fee = parseFloat(document.querySelector('#paymentForm [name="fee"]').value) || 0;
+    const paidDate = document.querySelector('#paymentForm [name="paidDate"]').value;
+    const remarks = document.querySelector('#paymentForm [name="remarks"]').value;
+    if (!amount || amount <= 0 || !paidDate) {
+        alert(SES.i18n.t('invoice.alert.inputRequired', '入力してください'));
+        return;
+    }
+    fetch(`/api/invoices/${currentPaymentInvoiceId}/payments`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+        body: JSON.stringify({ amount, fee, paidDate, remarks })
+    }).then(res => res.json()).then(data => {
+        if (data.code === 200) {
+            document.querySelector('#paymentForm [name="amount"]').value = '';
+            document.querySelector('#paymentForm [name="fee"]').value = '0';
+            document.querySelector('#paymentForm [name="remarks"]').value = '';
+            loadPayments();
+            loadInvoices();
+        } else {
+            alert(data.message);
+        }
+    });
+}
+
+function deletePayment(paymentId) {
+    Swal.fire({
+        title: SES.i18n.t('common.title.confirm', '確認'),
+        text: SES.i18n.t('invoice.payment.deleteConfirm', 'この入金記録を削除しますか？'),
+        icon: 'warning',
+        showCancelButton: true
+    }).then(result => {
+        if (!result.isConfirmed) return;
+        fetch(`/api/invoices/${currentPaymentInvoiceId}/payments/${paymentId}`, {
+            method: 'DELETE',
+            headers: SES.csrf.header()
+        }).then(res => res.json()).then(data => {
+            if (data.code === 200) {
+                loadPayments();
+                loadInvoices();
+            } else {
+                alert(data.message);
+            }
+        });
+    });
+}
+
+// ----- エイジング -----
+function loadAging() {
+    const asOf = document.getElementById('agingAsOf').value;
+    let url = '/api/invoices/aging';
+    if (asOf) url += '?asOf=' + asOf;
+    fetch(url).then(res => res.json()).then(data => {
+        if (data.code !== 200) return;
+        const tbody = document.querySelector('#agingTable tbody');
+        tbody.innerHTML = '';
+        const cols = ['unsent', 'notDue', 'd1to30', 'd31to60', 'd61to90', 'd91plus', 'noDueDate', 'balance'];
+        (data.data.rows || []).forEach(r => {
+            const tr = document.createElement('tr');
+            let cells = `<td>${SES.escapeHtml(r.customerName || '')}</td>`;
+            cols.forEach(c => {
+                const val = Number(r[c] || 0);
+                const str = `￥${val.toLocaleString()}`;
+                if (val > 0 && r.customerId) {
+                    cells += `<td class="text-right"><a href="/invoice/list?customerId=${r.customerId}">${str}</a></td>`;
+                } else {
+                    cells += `<td class="text-right">${str}</td>`;
+                }
+            });
+            tr.innerHTML = cells;
+            tbody.appendChild(tr);
+        });
+        const t = data.data.total || {};
+        const tfoot = document.querySelector('#agingTable tfoot');
+        let tcells = `<td><strong>${SES.i18n.t('common.total', '合計')}</strong></td>`;
+        cols.forEach(c => { tcells += `<td class="text-right"><strong>￥${Number(t[c] || 0).toLocaleString()}</strong></td>`; });
+        tfoot.innerHTML = `<tr>${tcells}</tr>`;
+    });
+}
+
+function exportAging() {
+    const asOf = document.getElementById('agingAsOf').value;
+    let url = '/api/invoices/aging-export';
+    if (asOf) url += '?asOf=' + asOf;
+    window.location.href = url;
+}
+
+// ----- 督促メール -----
+let currentReminderInvoiceId = null;
+
+function openReminderModal(invoiceId, invoiceNo) {
+    currentReminderInvoiceId = invoiceId;
+    document.getElementById('reminderInvoiceNo').textContent = invoiceNo;
+    const sel = document.getElementById('reminderTemplate');
+    sel.innerHTML = '';
+    fetch('/api/invoices/reminder-templates').then(res => res.json()).then(data => {
+        if (data.code === 200) {
+            data.data.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.templateName;
+                sel.appendChild(opt);
+            });
+        }
+    });
+    new bootstrap.Modal(document.getElementById('reminderModal')).show();
+}
+
+function submitReminder() {
+    const templateId = document.getElementById('reminderTemplate').value;
+    if (!templateId) return;
+    fetch(`/api/invoices/${currentReminderInvoiceId}/reminder`, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+        body: JSON.stringify({ templateId: Number(templateId) })
+    }).then(res => res.json()).then(data => {
+        if (data.code === 200) {
+            bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
+            if (data.data && data.data.status === 'FAILED') {
+                if (window.SES && SES.toast) SES.toast('メール送信に失敗しました', 'error');
+                else alert('メール送信に失敗しました');
+            } else {
+                if (window.SES && SES.toast) SES.toast(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'), 'success');
+                else alert(SES.i18n.t('invoice.reminder.sent', '督促メールを送信しました'));
+            }
+        } else {
+            alert(data.message);
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btnPay = document.getElementById('btnSubmitPayment');
+    if (btnPay) btnPay.addEventListener('click', submitPayment);
+    const btnAging = document.getElementById('btnLoadAging');
+    if (btnAging) btnAging.addEventListener('click', loadAging);
+    const btnAgingExport = document.getElementById('btnExportAging');
+    if (btnAgingExport) btnAgingExport.addEventListener('click', exportAging);
+    const btnReminder = document.getElementById('btnSubmitReminder');
+    if (btnReminder) btnReminder.addEventListener('click', submitReminder);
+    const agingTab = document.getElementById('aging-tab');
+    if (agingTab) agingTab.addEventListener('shown.bs.tab', loadAging);
+});
+
+function getLocalDateString() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }

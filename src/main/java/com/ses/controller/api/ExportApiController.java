@@ -60,6 +60,7 @@ public class ExportApiController {
     private final WorkRecordMapper workRecordMapper;
     private final ExcelExportService excelExportService;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * 要員一覧Excel出力。EngineerApiController.page と同じ検索条件を受け付ける(ページングなし)。
@@ -89,6 +90,14 @@ public class ExportApiController {
                 queryWrapper.inSql(Engineer::getId,
                         "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
             }
+        }
+        // データスコープ: 画面と同じ担当集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
+            if (allowed.isEmpty()) {
+                return buildFileResponse(excelExportService.exportEngineers(List.of()), "要員一覧");
+            }
+            queryWrapper.in(Engineer::getId, allowed);
         }
         queryWrapper.orderByDesc(Engineer::getId);
 
@@ -168,6 +177,14 @@ public class ExportApiController {
                     w.in("project_id", projectIds);
                 }
             });
+        }
+        // データスコープ: 画面と同じ担当契約集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
+            if (allowed.isEmpty()) {
+                return buildFileResponse(excelExportService.exportContracts(List.of()), "契約一覧");
+            }
+            queryWrapper.in("id", allowed);
         }
         queryWrapper.orderByDesc("id");
 

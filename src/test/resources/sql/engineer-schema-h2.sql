@@ -11,6 +11,7 @@ CREATE TABLE t_mail_delivery (
   status VARCHAR(20) NOT NULL,
   attempt_count INT NOT NULL DEFAULT 0,
   error_message VARCHAR(1000),
+  invoice_id BIGINT,
   queued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   sent_at DATETIME,
   failed_at DATETIME,
@@ -124,6 +125,7 @@ CREATE TABLE t_notification (
   message     VARCHAR(500),
   link_url    VARCHAR(300),
   menu_key    VARCHAR(50),
+  recipient_user_id BIGINT,
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -183,10 +185,32 @@ CREATE TABLE t_contract (
   commission_base_type    VARCHAR(10),
   commission_rate         DECIMAL(5,2),
   renewed_from_contract_id BIGINT,
+  quotation_id            BIGINT,
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag            TINYINT DEFAULT 0
+);
+
+DROP TABLE IF EXISTS t_quotation CASCADE;
+CREATE TABLE t_quotation (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  quotation_no          VARCHAR(30) NOT NULL UNIQUE,
+  customer_id           BIGINT NOT NULL,
+  project_id            BIGINT,
+  engineer_id           BIGINT,
+  proposal_id           BIGINT,
+  title                 VARCHAR(200) NOT NULL,
+  unit_price            DECIMAL(10,0) NOT NULL,
+  settlement_hours_min  DECIMAL(5,1),
+  settlement_hours_max  DECIMAL(5,1),
+  valid_until           DATE,
+  status                VARCHAR(20) NOT NULL DEFAULT '下書き',
+  remarks               VARCHAR(500),
+  created_by            BIGINT,
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag          TINYINT DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_proposal CASCADE;
@@ -230,6 +254,7 @@ CREATE TABLE t_work_record (
   actual_hours   DECIMAL(5,1) NOT NULL,
   billing_amount DECIMAL(12,0),
   payment_amount DECIMAL(12,0),
+  reject_comment VARCHAR(500),
   status         VARCHAR(20) DEFAULT '入力中',
   remarks        VARCHAR(500),
   created_by     BIGINT,
@@ -266,6 +291,19 @@ CREATE TABLE t_invoice_item (
   work_record_id BIGINT NOT NULL UNIQUE,
   description    VARCHAR(300),
   amount         DECIMAL(12,0) NOT NULL
+);
+
+DROP TABLE IF EXISTS t_invoice_payment CASCADE;
+CREATE TABLE t_invoice_payment (
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  invoice_id   BIGINT NOT NULL,
+  paid_date    DATE NOT NULL,
+  amount       DECIMAL(12,0) NOT NULL,
+  fee          DECIMAL(12,0) NOT NULL DEFAULT 0,
+  remarks      VARCHAR(300),
+  created_by   BIGINT,
+  created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 DROP TABLE IF EXISTS t_bp_payment CASCADE;
@@ -437,4 +475,44 @@ CREATE TABLE t_freee_employee_link (
  id BIGINT AUTO_INCREMENT PRIMARY KEY, engineer_id BIGINT NOT NULL, freee_employee_id VARCHAR(100) NOT NULL,
  confirmed_at DATETIME, confirmed_by BIGINT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
  deleted_flag TINYINT DEFAULT 0, UNIQUE(engineer_id), UNIQUE(freee_employee_id)
+);
+
+-- 要員セルフサービス勤怠（engineer-self-service-timesheet / V32）
+DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
+CREATE TABLE t_engineer_account_link (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL UNIQUE,
+  sys_user_id BIGINT NOT NULL UNIQUE,
+  linked_by   BIGINT,
+  linked_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_work_record_daily CASCADE;
+CREATE TABLE t_work_record_daily (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  work_record_id BIGINT NOT NULL,
+  work_date      DATE NOT NULL,
+  start_time     TIME,
+  end_time       TIME,
+  break_minutes  INT NOT NULL DEFAULT 0,
+  worked_hours   DECIMAL(4,2) NOT NULL,
+  remarks        VARCHAR(200),
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_wr_daily (work_record_id, work_date)
+);
+
+-- 契約単価改定履歴（contract-price-history / V33）
+DROP TABLE IF EXISTS t_contract_price_history CASCADE;
+CREATE TABLE t_contract_price_history (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_id      BIGINT NOT NULL,
+  apply_from_month CHAR(7) NOT NULL,
+  selling_price    DECIMAL(10,0) NOT NULL,
+  cost_price       DECIMAL(10,0) NOT NULL,
+  reason           VARCHAR(300),
+  created_by       BIGINT,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_cph (contract_id, apply_from_month)
 );

@@ -36,15 +36,47 @@ public class ProposalApiController {
     private final ProjectService projectService;
     private final CustomerService customerService;
     private final MailService mailService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     /**
      * かんばんリスト取得
      *
      * @return 提案かんばんDTOリスト
      */
+    @GetMapping("/{id}")
+    public ApiResult<com.ses.dto.proposal.ProposalQuotationPresetDto> getPreset(@PathVariable Long id) {
+        Proposal p = proposalService.getById(id);
+        if (p == null) {
+            throw BusinessException.of(404, "error.proposal.notFound");
+        }
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedProposalIds();
+            if (!allowed.contains(p.getId())) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+        }
+        com.ses.dto.proposal.ProposalQuotationPresetDto dto = new com.ses.dto.proposal.ProposalQuotationPresetDto();
+        dto.setId(p.getId());
+        dto.setEngineerId(p.getEngineerId());
+        dto.setProjectId(p.getProjectId());
+        dto.setProposedUnitPrice(p.getProposedUnitPrice());
+        Project proj = projectService.getById(p.getProjectId());
+        if (proj != null) {
+            dto.setCustomerId(proj.getCustomerId());
+            dto.setProjectName(proj.getProjectName());
+        }
+        return ApiResult.success(dto);
+    }
+
     @GetMapping("/kanban")
     public ApiResult<List<ProposalKanbanDto>> getKanbanList() {
-        return ApiResult.success(proposalService.getKanbanList());
+        List<ProposalKanbanDto> list = proposalService.getKanbanList();
+        // データスコープ: 営業ロール制限時は自分∪担当要員の提案のみ（カンバンは非ページングのためJava側で絞る）。
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedProposalIds();
+            list = list.stream().filter(p -> allowed.contains(p.getId())).collect(java.util.stream.Collectors.toList());
+        }
+        return ApiResult.success(list);
     }
 
     /**
@@ -56,6 +88,9 @@ public class ProposalApiController {
      */
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         proposalService.changeStatus(id, request.getStatus());
         return ApiResult.success(true);
     }
@@ -78,6 +113,9 @@ public class ProposalApiController {
      */
     @PostMapping("/{id}/send-mail")
     public ApiResult<MailDispatchResult> sendMail(@PathVariable Long id, @RequestBody Map<String, String> req) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         Proposal proposal = proposalService.getById(id);
         if (proposal == null) {
             throw BusinessException.of("error.proposal.notFound");

@@ -213,9 +213,13 @@ function createKanbanCard(item) {
                     <i class="bi ${scoreIcon} me-1"></i>${item.aiMatchScore}%
                 </div>
                 ` : ''}
-                <button class="btn btn-sm btn-link text-info p-0 ms-auto" title="' + SES.i18n.t('js.kanban.mail_send') + '"
+                <button class="btn btn-sm btn-link text-info p-0 ms-auto" title="${SES.i18n.t('js.kanban.mail_send')}"
                         onclick="event.stopPropagation(); openMailModal(${item.id})">
                     <i class="bi bi-envelope"></i>
+                </button>
+                <button class="btn btn-sm btn-link text-warning p-0 ms-2" title="${SES.i18n.t('quotation.btn.new', '見積作成')}"
+                        onclick="event.stopPropagation(); location.href='/quotation?fromProposal=${item.id}'">
+                    <i class="bi bi-file-earmark-ruled"></i>
                 </button>
             </div>
         </div>

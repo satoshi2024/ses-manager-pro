@@ -48,6 +48,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
           <if test="contractNo != null and contractNo != ''">AND c.contract_no LIKE CONCAT('%', #{contractNo}, '%')</if>
           <if test="endDateFrom != null">AND c.end_date &gt;= #{endDateFrom}</if>
           <if test="endDateTo != null">AND c.end_date &lt;= #{endDateTo}</if>
+          <!-- データスコープ: allowedIds!=null なら担当契約のみに絞る(件数・ページングもスコープ後の値) -->
+          <if test="allowedIds != null">AND c.id IN <foreach collection="allowedIds" item="cid" open="(" separator="," close=")">#{cid}</foreach></if>
         ORDER BY c.id DESC
         </script>
         """)
@@ -56,5 +58,6 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("projectId") Long projectId, @org.apache.ibatis.annotations.Param("contractNo") String contractNo,
             @org.apache.ibatis.annotations.Param("endDateFrom") LocalDate endDateFrom, @org.apache.ibatis.annotations.Param("endDateTo") LocalDate endDateTo,
             @org.apache.ibatis.annotations.Param("salesUserId") Long salesUserId,
-            @org.apache.ibatis.annotations.Param("salesUnassigned") Boolean salesUnassigned);
+            @org.apache.ibatis.annotations.Param("salesUnassigned") Boolean salesUnassigned,
+            @org.apache.ibatis.annotations.Param("allowedIds") java.util.List<Long> allowedIds);
 }
