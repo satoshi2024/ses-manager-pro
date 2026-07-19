@@ -18,4 +18,5 @@ SELECT '請求督促メール',
          '本メールと行き違いにご入金済みの場合は、何卒ご容赦ください。\n'
        ),
        'その他'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM m_email_template WHERE template_name = '請求督促メール');
