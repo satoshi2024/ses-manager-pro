@@ -1,8 +1,10 @@
 # 第3回全面不具合対応後レビュー
 
-作成日: 2026-07-19  
-レビュー対象: `main` / `841750c` までの第3回対応  
-参照資料: `README.md`、`bug-hunt-round3.md`、関連 requirements / design / tests
+- 作成日: 2026-07-19
+- レビュー対象: `main` / `95cbf6a` までの第3回対応
+- 参照資料: `README.md`、`bug-hunt-round3.md`、関連 requirements / design / tests
+
+注記: 初回確認は `841750c` を基準に実施した。レビュー中に `95cbf6a` が追加されたため、`841750c..95cbf6a` の差分を全指摘へ再照合し、37件すべてが引き続き有効であることを確認した。
 
 ## 1. 結論
 
