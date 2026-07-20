@@ -41,6 +41,9 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
         }
 
         if (skills != null && !skills.isEmpty()) {
+            if (skills.stream().anyMatch(s -> s.getSkillId() == null)) {
+                throw com.ses.common.exception.BusinessException.of(400, "error.skill.notFound");
+            }
             List<Long> skillIds = skills.stream()
                     .map(EngineerSkill::getSkillId)
                     .distinct()

@@ -130,7 +130,7 @@ function uploadPhoto(input) {
                 // 要員の photoUrl を保存名で更新
                 const updated = Object.assign({}, detailEngineer, { photoUrl: res.data.storedName });
                 $.ajax({
-                    url: '/api/engineers',
+                    url: '/api/engineers/' + updated.id,
                     method: 'PUT',
                     contentType: 'application/json',
                     data: JSON.stringify(updated),

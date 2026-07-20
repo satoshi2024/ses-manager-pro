@@ -187,6 +187,55 @@ function openQuotationModal(q) {
             form.validUntil.value = q.validUntil || '';
             form.remarks.value = q.remarks || '';
         }
+
+        const isTerminal = q && (q.status === '受注' || q.status === '失注');
+        const appendSection = document.getElementById('appendRemarksSection');
+        const appendBtn = document.getElementById('btnAppendRemark');
+        const appendText = document.getElementById('additionalRemarks');
+        const btnSave = document.getElementById('btnSaveQuotation');
+
+        Array.from(form.elements).forEach(el => {
+            if (el.tagName !== 'BUTTON' && el.id !== 'additionalRemarks') {
+                if (el.tagName === 'SELECT') {
+                    el.disabled = isTerminal;
+                } else {
+                    el.readOnly = isTerminal;
+                }
+            }
+        });
+
+        if (isTerminal) {
+            btnSave.style.display = 'none';
+            if (appendSection) {
+                appendSection.style.display = 'block';
+                appendText.value = '';
+                appendBtn.onclick = () => {
+                    const txt = appendText.value.trim();
+                    if(!txt) {
+                        if(window.SES && SES.toast) SES.toast.error('追記内容を入力してください');
+                        else alert('追記内容を入力してください');
+                        return;
+                    }
+                    fetch(`/api/quotations/${q.id}/remarks`, {
+                        method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+                        body: JSON.stringify({ additional: txt })
+                    }).then(res => res.json()).then(resData => {
+                        if (resData.code === 200) {
+                            if(window.SES && SES.toast) SES.toast.success('備考を追記しました');
+                            bootstrap.Modal.getInstance(document.getElementById('quotationModal')).hide();
+                            loadQuotations(1);
+                        } else {
+                            if(window.SES && SES.toast) SES.toast.error(resData.message);
+                            else alert(resData.message);
+                        }
+                    });
+                };
+            }
+        } else {
+            btnSave.style.display = 'inline-block';
+            if (appendSection) appendSection.style.display = 'none';
+        }
     });
     new bootstrap.Modal(document.getElementById('quotationModal')).show();
 }

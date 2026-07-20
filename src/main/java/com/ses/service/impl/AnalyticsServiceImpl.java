@@ -69,7 +69,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
             int totalCount = (int) allEngineers.stream()
                     .filter(e -> e.getCreatedAt() != null && !e.getCreatedAt().isAfter(monthEndDateTime))
-                    .filter(e -> e.getDeletedFlag() == null || e.getDeletedFlag() == 0 || activeEngineerIds.contains(e.getId()))
+                    .filter(e -> e.getDeletedFlag() == null || e.getDeletedFlag() == 0 || activeEngineerIds.contains(e.getId()) || (e.getUpdatedAt() != null && e.getUpdatedAt().isAfter(monthEndDateTime)))
                     .count();
             int activeCount = activeEngineerIds.size();
             int benchCount = Math.max(totalCount - activeCount, 0);
@@ -123,6 +123,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             List<Contract> engineerContracts = contractsByEngineer.getOrDefault(e.getId(), Collections.emptyList());
 
             LocalDate referenceDate = engineerContracts.stream()
+                    .filter(c -> !com.ses.common.constant.StatusConstants.CONTRACT_PREPARING.equals(c.getStatus()) && !com.ses.common.constant.StatusConstants.CONTRACT_CANCELLED.equals(c.getStatus()))
                     .filter(c -> c.getStartDate() != null && !c.getStartDate().isAfter(today))
                     .map(Contract::getEndDate)
                     .filter(java.util.Objects::nonNull)

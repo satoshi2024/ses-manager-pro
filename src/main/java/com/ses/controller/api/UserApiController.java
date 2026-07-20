@@ -78,6 +78,7 @@ public class UserApiController {
      */
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(sysUser);
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw BusinessException.of("error.user.credentialsRequired");
         }
@@ -99,8 +100,9 @@ public class UserApiController {
      * ユーザー更新
      * パスワードが空の場合は既存パスワードを維持する
      */
-    @PutMapping
-    public ApiResult<Boolean> update(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
+    @PutMapping("/{id}")
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SysUser sysUser, Authentication authentication) {
+        sysUser.setId(id);
         // 有効/無効の切替は専用エンドポイント(/{id}/status)の無効化ガードを経由させる。
         // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
         sysUser.setStatus(null);

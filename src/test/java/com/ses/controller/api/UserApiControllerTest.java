@@ -152,7 +152,7 @@ class UserApiControllerTest {
 
         SysUser body = SysUser.builder().username("sales9").role("HR").build();
         body.setId(5L);
-        mockMvc.perform(put("/api/users").with(csrf())
+        mockMvc.perform(put("/api/users/5").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isBadRequest())
@@ -174,7 +174,7 @@ class UserApiControllerTest {
         SysUser body = SysUser.builder().username("sales9").role("営業").build();
         body.setId(5L);
         body.setStatus(0); // 無効化を混ぜる
-        mockMvc.perform(put("/api/users").with(csrf())
+        mockMvc.perform(put("/api/users/5").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isOk())
@@ -199,7 +199,7 @@ class UserApiControllerTest {
         // ロールは営業のまま（変更なし）→ 担当ガードは発動しない
         SysUser body = SysUser.builder().username("sales9").role("営業").build();
         body.setId(5L);
-        mockMvc.perform(put("/api/users").with(csrf())
+        mockMvc.perform(put("/api/users/5").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isOk())

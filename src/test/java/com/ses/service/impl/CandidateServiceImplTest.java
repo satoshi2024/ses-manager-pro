@@ -41,6 +41,9 @@ class CandidateServiceImplTest {
     @Autowired
     private CandidateActivityMapper candidateActivityMapper;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     private MockedStatic<com.ses.common.util.SecurityUtils> mockedSecurityUtils;
 
     @BeforeEach
@@ -172,6 +175,7 @@ class CandidateServiceImplTest {
     void linkConvertedEngineer_convertedEngineerIdが設定される() {
         Candidate candidate = seedCandidate("入社");
 
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) VALUES (42, 'Test Eng', '正社員', '稼働中', 0)");
         candidateService.linkConvertedEngineer(candidate.getId(), 42L);
 
         Candidate updated = candidateMapper.selectById(candidate.getId());

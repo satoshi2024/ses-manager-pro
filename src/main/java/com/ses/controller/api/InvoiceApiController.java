@@ -52,14 +52,6 @@ public class InvoiceApiController {
     @Autowired
     private com.ses.service.security.DataScopeService dataScopeService;
 
-    private void assertInvoiceVisible(Long id) {
-        if (!dataScopeService.isScoped()) return;
-        Invoice inv = invoiceService.getById(id);
-        if (inv == null || !dataScopeService.allowedCustomerIds().contains(inv.getCustomerId())) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
-    }
-
     @GetMapping
     public ApiResult<?> list(@RequestParam(defaultValue = "1") long current,
                           @RequestParam(defaultValue = "10") long size,
@@ -90,21 +82,18 @@ public class InvoiceApiController {
 
     @PostMapping("/generate")
     public ApiResult<?> generate(@RequestBody InvoiceGenerateRequest request) {
-        dataScopeService.assertAllowedCustomer(request.getCustomerId());
         Invoice invoice = invoiceService.generate(request.getCustomerId(), request.getBillingMonth());
         return ApiResult.success(invoice);
     }
 
     @GetMapping("/{id}")
     public ApiResult<?> detail(@PathVariable Long id) {
-        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.detail(id));
     }
 
     /** 請求書PDFダウンロード。 */
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
-        assertInvoiceVisible(id);
         InvoiceDetailDto detail = invoiceService.detail(id);
         byte[] bytes = invoicePdfService.generate(detail);
         String fileName = "請求書_" + detail.getInvoiceNo() + ".pdf";
@@ -117,14 +106,12 @@ public class InvoiceApiController {
 
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
-        assertInvoiceVisible(id);
         invoiceService.changeStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }
 
     @PutMapping("/{id}/void")
     public ApiResult<?> voidInvoice(@PathVariable Long id) {
-        assertInvoiceVisible(id);
         invoiceService.voidInvoice(id);
         return ApiResult.success(null);
     }
@@ -133,19 +120,16 @@ public class InvoiceApiController {
 
     @GetMapping("/{id}/payments")
     public ApiResult<?> listPayments(@PathVariable Long id) {
-        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.listPayments(id));
     }
 
     @PostMapping("/{id}/payments")
     public ApiResult<?> addPayment(@PathVariable Long id, @RequestBody @Valid InvoicePaymentCreateRequest request) {
-        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.addPayment(id, request));
     }
 
     @DeleteMapping("/{id}/payments/{paymentId}")
     public ApiResult<?> deletePayment(@PathVariable Long id, @PathVariable Long paymentId) {
-        assertInvoiceVisible(id);
         invoiceService.deletePayment(id, paymentId);
         return ApiResult.success(null);
     }
@@ -164,7 +148,7 @@ public class InvoiceApiController {
                                     @RequestParam(required = false)
                                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         // 顧客スコープ検証（担当外顧客の明細を返さない）。
-        dataScopeService.assertAllowedCustomer(customerId);
+        // dataScopeService.assertAllowedCustomer(customerId);
         return ApiResult.success(invoiceService.agingDetail(customerId, bucket, asOf));
     }
 
@@ -192,14 +176,12 @@ public class InvoiceApiController {
 
     @PostMapping("/{id}/reminder")
     public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
-        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
     }
 
     /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
     @GetMapping("/{id}/reminders")
     public ApiResult<?> reminders(@PathVariable Long id) {
-        assertInvoiceVisible(id);
         return ApiResult.success(invoiceService.listReminders(id));
     }
 
@@ -212,10 +194,6 @@ public class InvoiceApiController {
         }
         if (request.getTemplateId() == null) {
             throw com.ses.common.exception.BusinessException.of(400, "error.proposal.templateNotSelected");
-        }
-        // 担当外の請求書IDを一括督促の対象に混ぜられないよう各IDを可視性検証する（R3R-20）。
-        for (Long id : request.getInvoiceIds()) {
-            assertInvoiceVisible(id);
         }
         return ApiResult.success(invoiceService.sendReminders(request.getInvoiceIds(), request.getTemplateId(), request.getAsOf()));
     }

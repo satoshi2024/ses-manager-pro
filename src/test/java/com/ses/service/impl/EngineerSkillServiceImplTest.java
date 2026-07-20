@@ -12,6 +12,9 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.ses.common.exception.BusinessException;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -74,5 +77,23 @@ public class EngineerSkillServiceImplTest {
                         .eq(EngineerSkill::getEngineerId, engineerId)
         );
         assertEquals(0, afterEmpty.size());
+    }
+
+    @Test
+    public void testReplaceSkills_nullSkillIdThrowsException() {
+        Long engineerId = 1L;
+
+        EngineerSkill s1 = new EngineerSkill();
+        s1.setSkillId(10L);
+        s1.setProficiency("上級");
+
+        EngineerSkill s2 = new EngineerSkill();
+        s2.setSkillId(null);
+        s2.setProficiency("中級");
+
+        List<EngineerSkill> skills = Arrays.asList(s1, s2);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> engineerSkillService.replaceSkills(engineerId, skills));
+        assertTrue(ex.getMessage().contains("error.skill.notFound"));
     }
 }

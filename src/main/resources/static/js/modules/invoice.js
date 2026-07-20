@@ -56,6 +56,7 @@ function loadInvoices() {
                     ? `<td class="${overdue ? 'text-danger fw-bold' : ''}">${SES.escapeHtml(inv.dueDate)}</td>`
                     : '<td>-</td>';
                 tr.innerHTML = `
+                    <td class="text-center"><input type="checkbox" class="invoice-select" value="${inv.id}"></td>
                     <td>${SES.escapeHtml(inv.invoiceNo)}</td>
                     <td>${SES.escapeHtml(inv.billingMonth)}</td>
                     <td class="text-right">￥${inv.subtotal.toLocaleString()}</td>
@@ -408,10 +409,15 @@ function exportAging() {
 
 // ----- 督促メール -----
 let currentReminderInvoiceId = null;
+let isBulkReminder = false;
+let selectedInvoiceIds = [];
 
 function openReminderModal(invoiceId, invoiceNo) {
     currentReminderInvoiceId = invoiceId;
+    isBulkReminder = false;
     document.getElementById('reminderInvoiceNo').textContent = invoiceNo;
+    document.getElementById('history-reminder-li').style.display = 'block';
+
     const sel = document.getElementById('reminderTemplate');
     sel.innerHTML = '';
     fetch('/api/invoices/reminder-templates').then(res => res.json()).then(data => {
@@ -424,12 +430,69 @@ function openReminderModal(invoiceId, invoiceNo) {
             });
         }
     });
+
+    fetch(`/api/invoices/${invoiceId}/reminders`).then(res => res.json()).then(data => {
+        if (data.code === 200) {
+            const tbody = document.querySelector('#reminderHistoryTable tbody');
+            tbody.innerHTML = '';
+            data.data.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${SES.escapeHtml(r.sentAt || r.failedAt || r.queuedAt || '')}</td>
+                    <td>${SES.escapeHtml(r.recipient || '')}</td>
+                    <td>${SES.escapeHtml(r.subject || '')}</td>
+                    <td>${SES.escapeHtml(r.status || '')}</td>
+                    <td>${SES.escapeHtml(r.errorMessage || '')}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    });
+
+    const sendTab = document.getElementById('send-reminder-tab');
+    if(sendTab) new bootstrap.Tab(sendTab).show();
+
     new bootstrap.Modal(document.getElementById('reminderModal')).show();
 }
 
 function submitReminder() {
     const templateId = document.getElementById('reminderTemplate').value;
     if (!templateId) return;
+
+    if (isBulkReminder) {
+        fetch('/api/invoices/reminders', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+            body: JSON.stringify({ invoiceIds: selectedInvoiceIds, templateId: Number(templateId) })
+        }).then(res => res.json()).then(data => {
+            if (data.code === 200) {
+                bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
+                let sent = 0, skipped = 0, failed = 0;
+                const tbody = document.querySelector('#bulkReminderResultTable tbody');
+                tbody.innerHTML = '';
+                data.data.forEach(r => {
+                    if (r.status === 'SENT') sent++;
+                    else if (r.status === 'SKIPPED') skipped++;
+                    else failed++;
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${SES.escapeHtml(String(r.invoiceId))}</td>
+                        <td>${SES.escapeHtml(r.status)}</td>
+                        <td>${SES.escapeHtml(r.reason || '')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                document.getElementById('bulkSentCount').textContent = sent;
+                document.getElementById('bulkSkippedCount').textContent = skipped;
+                document.getElementById('bulkFailedCount').textContent = failed;
+                new bootstrap.Modal(document.getElementById('bulkReminderResultModal')).show();
+            } else {
+                alert(data.message);
+            }
+        });
+        return;
+    }
+
     fetch(`/api/invoices/${currentReminderInvoiceId}/reminder`, {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
@@ -451,6 +514,48 @@ function submitReminder() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const selectAll = document.getElementById('selectAllInvoices');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            const checked = this.checked;
+            document.querySelectorAll('.invoice-select').forEach(cb => cb.checked = checked);
+        });
+    }
+
+    const btnBulk = document.getElementById('btnBulkReminder');
+    if (btnBulk) {
+        btnBulk.addEventListener('click', () => {
+            const checkedCbs = document.querySelectorAll('.invoice-select:checked');
+            if (checkedCbs.length === 0) {
+                alert(SES.i18n.t('invoice.alert.selectRequired', '請求書を選択してください'));
+                return;
+            }
+            selectedInvoiceIds = Array.from(checkedCbs).map(cb => Number(cb.value));
+            isBulkReminder = true;
+            currentReminderInvoiceId = null;
+            document.getElementById('reminderInvoiceNo').textContent = '一括 ' + selectedInvoiceIds.length + '件';
+            document.getElementById('history-reminder-li').style.display = 'none';
+
+            const sel = document.getElementById('reminderTemplate');
+            sel.innerHTML = '';
+            fetch('/api/invoices/reminder-templates').then(res => res.json()).then(data => {
+                if (data.code === 200) {
+                    data.data.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.id;
+                        opt.textContent = t.templateName;
+                        sel.appendChild(opt);
+                    });
+                }
+            });
+
+            const sendTab = document.getElementById('send-reminder-tab');
+            if(sendTab) new bootstrap.Tab(sendTab).show();
+
+            new bootstrap.Modal(document.getElementById('reminderModal')).show();
+        });
+    }
+
     const btnPay = document.getElementById('btnSubmitPayment');
     if (btnPay) btnPay.addEventListener('click', submitPayment);
     const btnAging = document.getElementById('btnLoadAging');

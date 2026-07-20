@@ -440,7 +440,7 @@ function saveEngineer() {
     }
 
     $.ajax({
-        url: '/api/engineers',
+        url: id ? '/api/engineers/' + id : '/api/engineers',
         method: id ? 'PUT' : 'POST',
         contentType: 'application/json',
         data: JSON.stringify(data),
@@ -451,8 +451,13 @@ function saveEngineer() {
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerModal')).hide();
 
                 // 候補者からの変換導線: 新規登録が完了したら、候補者側にconvertedEngineerIdを紐付ける
-                if (!id && prefillCandidateId) {
-                    linkConvertedEngineer(prefillCandidateId);
+                if (!id && prefillCandidateId && res.data && res.data.id) {
+                    $.ajax({
+                        url: '/api/candidates/' + prefillCandidateId + '/converted-engineer',
+                        method: 'PUT',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ engineerId: res.data.id })
+                    });
                     prefillCandidateId = null;
                 }
 
@@ -470,26 +475,7 @@ function saveEngineer() {
     });
 }
 
-// 新規登録された要員のIDをレスポンスから直接得られないため(POST /api/engineersはBoolean応答)、
-// 直近登録分を氏名で再取得して候補者へ紐付ける。
-function linkConvertedEngineer(candidateId) {
-    $.ajax({
-        url: '/api/engineers',
-        method: 'GET',
-        data: { current: 1, size: 1, fullName: $('#eng-fullName').val() },
-        success: function(res) {
-            const records = res.data && (res.data.records || res.data);
-            const engineer = records && records[0];
-            if (!engineer) return;
-            $.ajax({
-                url: '/api/candidates/' + candidateId + '/converted-engineer',
-                method: 'PUT',
-                contentType: 'application/json',
-                data: JSON.stringify({ engineerId: engineer.id })
-            });
-        }
-    });
-}
+
 
 // 現在の検索条件を反映してExcel出力する。
 // バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる

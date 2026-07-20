@@ -27,14 +27,6 @@ public class WorkRecordApiController {
     private final TimesheetPdfService timesheetPdfService;
     private final com.ses.service.security.DataScopeService dataScopeService;
 
-    private void assertWorkRecordVisible(Long id) {
-        if (!dataScopeService.isScoped()) return;
-        WorkRecord wr = workRecordService.getById(id);
-        if (wr == null || !dataScopeService.allowedContractIds().contains(wr.getContractId())) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
-    }
-
     @GetMapping("/grid")
     public ApiResult<List<WorkRecordGridDto>> getGrid(@RequestParam String month) {
         return ApiResult.success(workRecordService.monthlyGrid(month));
@@ -42,9 +34,6 @@ public class WorkRecordApiController {
 
     @PutMapping
     public ApiResult<WorkRecord> saveHours(@Valid @RequestBody com.ses.dto.workrecord.WorkRecordSaveRequest request) {
-        if (dataScopeService.isScoped() && !dataScopeService.allowedContractIds().contains(request.getContractId())) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
         return ApiResult.success(workRecordService.saveHours(
                 request.getContractId(),
                 request.getWorkMonth(),
@@ -74,27 +63,23 @@ public class WorkRecordApiController {
 
     @PostMapping("/{id}/approve")
     public ApiResult<Void> approve(@PathVariable Long id) {
-        assertWorkRecordVisible(id);
         workRecordService.approve(id);
         return ApiResult.success(null);
     }
 
     @PostMapping("/{id}/reject")
     public ApiResult<Void> reject(@PathVariable Long id, @RequestBody RejectRequest request) {
-        assertWorkRecordVisible(id);
         workRecordService.reject(id, request.getComment());
         return ApiResult.success(null);
     }
 
     @GetMapping("/{id}/daily")
     public ApiResult<List<WorkRecordDaily>> daily(@PathVariable Long id) {
-        assertWorkRecordVisible(id);
         return ApiResult.success(workRecordService.listDaily(id));
     }
 
     @GetMapping("/{id}/report.pdf")
     public ResponseEntity<byte[]> report(@PathVariable Long id) {
-        assertWorkRecordVisible(id);
         byte[] bytes = timesheetPdfService.generate(id);
         String fileName = "作業報告書_" + id + ".pdf";
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");

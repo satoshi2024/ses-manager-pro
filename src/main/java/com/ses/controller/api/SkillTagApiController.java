@@ -50,14 +50,16 @@ public class SkillTagApiController {
      */
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody SkillTag skillTag) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(skillTag);
         return ApiResult.success(skillTagService.save(skillTag));
     }
 
     /**
      * スキルタグ更新
      */
-    @PutMapping
-    public ApiResult<Boolean> update(@Valid @RequestBody SkillTag skillTag) {
+    @PutMapping("/{id}")
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SkillTag skillTag) {
+        skillTag.setId(id);
         boolean success = skillTagService.updateById(skillTag);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);

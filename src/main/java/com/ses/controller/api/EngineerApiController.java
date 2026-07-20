@@ -114,18 +114,16 @@ public class EngineerApiController {
      * エンジニア登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@Valid @RequestBody Engineer engineer) {
-        return ApiResult.success(engineerService.save(engineer));
+    public ApiResult<Engineer> save(@Valid @RequestBody Engineer engineer) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
+        engineerService.save(engineer);
+        return ApiResult.success(engineer);
     }
 
-    /**
-     * エンジニア更新
-     */
-    @PutMapping
-    public ApiResult<Boolean> update(@Valid @RequestBody Engineer engineer) {
-        if (engineer.getId() != null) {
-            dataScopeService.assertAllowedEngineer(engineer.getId());
-        }
+    @PutMapping("/{id}")
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Engineer engineer) {
+        engineer.setId(id);
+        dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 

@@ -163,7 +163,7 @@ function saveUser() {
     }
 
     $.ajax({
-        url: '/api/users',
+        url: id ? '/api/users/' + id : '/api/users',
         method: id ? 'PUT' : 'POST',
         contentType: 'application/json',
         data: JSON.stringify(data),

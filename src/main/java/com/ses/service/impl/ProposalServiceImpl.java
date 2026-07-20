@@ -68,7 +68,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
             result = super.save(proposal);
         } catch (org.springframework.dao.DuplicateKeyException e) {
             if (e.getMessage() != null && e.getMessage().contains("uk_proposal_active_engineer_project")) {
-                throw com.ses.common.exception.BusinessException.of(409, "この要員はすでに同じ案件に提案中です。");
+                throw com.ses.common.exception.BusinessException.of(409, "error.proposal.alreadyProposed");
             }
             throw e;
         }

@@ -96,6 +96,13 @@
                             <label class="form-label" th:text="#{quotation.modal.remarks}">備考</label>
                             <textarea class="form-control" name="remarks"></textarea>
                         </div>
+                        <div class="col-12 mt-3" id="appendRemarksSection" style="display: none;">
+                            <label class="form-label text-warning" th:text="#{quotation.modal.appendRemarks}">備考追記 (確定後)</label>
+                            <div class="input-group">
+                                <textarea class="form-control" id="additionalRemarks"></textarea>
+                                <button type="button" class="btn btn-outline-warning" id="btnAppendRemark" th:text="#{quotation.btn.append}">追記</button>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">

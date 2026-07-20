@@ -15,7 +15,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
      * 稼動率推移の集計用に id/created_at のみを取得する軽量プロジェクション。
      * remarks 等の大きな列を含む全カラムをメモリに載せずに済む。
      */
-    @Select("SELECT id, created_at, deleted_flag FROM t_engineer")
+    @Select("SELECT id, created_at, updated_at, deleted_flag FROM t_engineer")
     List<EngineerCreatedAtDto> selectCreatedAtOnly();
 
     /** 孤児ファイル清掃用: 参照中の顔写真保存名を軽量取得する。 */

@@ -13,5 +13,6 @@ import java.time.LocalDateTime;
 public class EngineerCreatedAtDto {
     private Long id;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
     private Integer deletedFlag;
 }

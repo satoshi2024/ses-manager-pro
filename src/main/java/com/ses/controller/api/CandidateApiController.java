@@ -90,6 +90,10 @@ public class CandidateApiController {
     public ApiResult<Boolean> save(@Valid @RequestBody com.ses.dto.candidate.CandidateSaveDto dto) {
         Candidate candidate = new Candidate();
         org.springframework.beans.BeanUtils.copyProperties(dto, candidate);
+        candidate.setId(null);
+        candidate.setConvertedEngineerId(null);
+        candidate.setCurrentStage(null);
+        com.ses.common.util.EntityProtectUtil.protectForCreate(candidate);
         return ApiResult.success(candidateService.save(candidate));
     }
 

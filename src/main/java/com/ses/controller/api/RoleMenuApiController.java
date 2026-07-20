@@ -48,6 +48,10 @@ public class RoleMenuApiController {
     @PutMapping
     @Transactional
     public ApiResult<Boolean> update(@RequestParam String role, @RequestBody List<Long> menuIds) {
+        if (com.ses.common.constant.StatusConstants.ROLE_ADMIN.equals(role)) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.roleMenu.adminUnchangeable");
+        }
+
         List<String> validRoles = List.of(
             com.ses.common.constant.StatusConstants.ROLE_ADMIN,
             com.ses.common.constant.StatusConstants.ROLE_SALES,
@@ -55,21 +59,23 @@ public class RoleMenuApiController {
             com.ses.common.constant.StatusConstants.ROLE_MANAGER
         );
         if (!validRoles.contains(role)) {
-            throw com.ses.common.exception.BusinessException.of(400, "無効なロールです");
+            throw com.ses.common.exception.BusinessException.of(400, "error.roleMenu.invalidRole");
         }
+        
+        List<Long> distinctMenuIds = menuIds != null ? menuIds.stream().distinct().toList() : java.util.Collections.emptyList();
 
-        if (menuIds != null && !menuIds.isEmpty()) {
+        if (!distinctMenuIds.isEmpty()) {
             Long count = menuMapper.selectCount(
-                new LambdaQueryWrapper<Menu>().in(Menu::getId, menuIds)
+                new LambdaQueryWrapper<Menu>().in(Menu::getId, distinctMenuIds)
             );
-            if (count == null || count < menuIds.size()) {
-                throw com.ses.common.exception.BusinessException.of(400, "存在しないメニューが含まれています");
+            if (count == null || count < distinctMenuIds.size()) {
+                throw com.ses.common.exception.BusinessException.of(400, "error.roleMenu.menuNotFound");
             }
         }
 
         roleMenuService.remove(new LambdaQueryWrapper<RoleMenu>().eq(RoleMenu::getRole, role));
-        if (menuIds != null && !menuIds.isEmpty()) {
-            List<RoleMenu> roleMenus = menuIds.stream()
+        if (!distinctMenuIds.isEmpty()) {
+            List<RoleMenu> roleMenus = distinctMenuIds.stream()
                     .map(menuId -> RoleMenu.builder().role(role).menuId(menuId).build())
                     .toList();
             roleMenuService.saveBatch(roleMenus);

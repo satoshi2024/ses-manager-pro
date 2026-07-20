@@ -138,7 +138,7 @@ class MonthlyClosingServiceImplTest {
     void confirm_invalidMonth() {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.confirmClosing("2026/6", 7L, "管理者"));
-        assertTrue(ex.getMessage().contains("error.closing.invalidMonth"));
+        assertTrue(ex.getMessage().contains("error.date.invalidYearMonth"));
     }
 
     @Test

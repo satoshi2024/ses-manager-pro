@@ -21,8 +21,22 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Run tests
         run: mvn -B test
+
+      - name: Ensure no tests were skipped
+        run: |
+          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml | grep -vE 'InvoicePdfServiceImplTest|QuotationPdfServiceImplTest' || true)
+          if [ -n "$skipped_files" ]; then
+            echo "Error: Tests were skipped. This is not allowed to prevent silent regressions."
+            echo "$skipped_files"
+            exit 1
+          fi
 
       - name: Upload surefire reports
         if: always()

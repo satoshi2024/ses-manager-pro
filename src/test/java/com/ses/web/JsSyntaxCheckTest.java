@@ -28,7 +28,11 @@ class JsSyntaxCheckTest {
 
     @Test
     void allJsModulesParse() throws IOException, InterruptedException {
-        assumeTrue(nodeAvailable(), "Node.js が利用できないため JS 構文検査をskipします");
+        if ("true".equals(System.getenv("CI"))) {
+            assertTrue(nodeAvailable(), "CI環境では JS 構文検査のための Node.js が必須です");
+        } else {
+            assumeTrue(nodeAvailable(), "Node.js が利用できないため JS 構文検査をskipします");
+        }
         assumeTrue(Files.isDirectory(JS_ROOT), "JSディレクトリが存在しません: " + JS_ROOT);
 
         List<String> failures = new ArrayList<>();

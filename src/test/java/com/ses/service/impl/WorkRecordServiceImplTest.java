@@ -318,6 +318,13 @@ class WorkRecordServiceImplTest {
     }
 
     @Test
+    void testConfirmMonth_invalidMonthFormatThrows400() {
+        assertThatThrownBy(() -> workRecordService.confirmMonth("2026-99"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> assertThat(((BusinessException) e).getCode()).isEqualTo(400));
+    }
+
+    @Test
     void testConfirmMonth_金額同期は自動生成1階層目_layerOrder1_のみを対象にする() {
         String workMonth = "2026-07";
 
@@ -345,6 +352,13 @@ class WorkRecordServiceImplTest {
         assertThat(captor.getValue().getTargetSql()).contains("layer_order");
         // 対象行が無ければ金額更新は行わない
         verify(bpPaymentMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void testReopenMonth_invalidMonthFormatThrows400() {
+        assertThatThrownBy(() -> workRecordService.reopenMonth("invalid-month"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> assertThat(((BusinessException) e).getCode()).isEqualTo(400));
     }
 
     @Test

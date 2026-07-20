@@ -204,6 +204,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void confirmMonth(String workMonth) {
+        com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
         // 入力中・提出済 を一括確定対象とする。差戻し（＝数値誤りの明示フラグ）は黙って確定させない。
         List<WorkRecord> records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
@@ -284,6 +285,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void reopenMonth(String workMonth) {
+        com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
         List<WorkRecord> records = this.list(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth)

@@ -96,14 +96,14 @@ function renderPagination(pageData, loadFuncName) {
 
 function loadCustomersForSelect() {
     $.ajax({
-        url: '/api/customers',
+        url: '/api/customers?size=1000',
         method: 'GET',
         success: function(res) {
             if (res.code === 200 && res.data) {
                 const customers = res.data.records || res.data;
                 const select = $('#proj-customerId');
                 select.empty();
-                select.append('<option value="">顧客を選択してください...</option>');
+                select.append(`<option value="">${SES.i18n.t('project.modal.customer.placeholder') || '顧客を選択してください...'}</option>`);
                 customers.forEach(c => {
                     select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
                 });
@@ -117,16 +117,20 @@ function renderProjects(records) {
     tbody.empty();
     
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">データがありません</td></tr>');
+        tbody.append(`<tr><td colspan="7" class="text-center text-muted py-4">${SES.i18n.t('common.msg.noData') || 'データがありません'}</td></tr>`);
         return;
     }
     
     records.forEach(proj => {
         // Remote Badge
         let remoteIcon = '';
-        if (proj.remoteType === 'フルリモート') remoteIcon = '<i class="bi bi-check-circle-fill text-success" title="フルリモート"></i> フル';
-        else if (proj.remoteType === 'ハイブリッド') remoteIcon = '<i class="bi bi-check-circle text-success" title="ハイブリッド"></i> 一部';
-        else remoteIcon = '<i class="bi bi-x-circle text-danger" title="不可"></i> 不可';
+        const fullStr = SES.i18n.e('remoteType', 'フルリモート') || 'フル';
+        const hybridStr = SES.i18n.e('remoteType', 'ハイブリッド') || '一部';
+        const noneStr = SES.i18n.e('remoteType', '不可') || '不可';
+        
+        if (proj.remoteType === 'フルリモート') remoteIcon = `<i class="bi bi-check-circle-fill text-success" title="${fullStr}"></i> ${fullStr}`;
+        else if (proj.remoteType === 'ハイブリッド') remoteIcon = `<i class="bi bi-check-circle text-success" title="${hybridStr}"></i> ${hybridStr}`;
+        else remoteIcon = `<i class="bi bi-x-circle text-danger" title="${noneStr}"></i> ${noneStr}`;
 
         // Status Badge
         const localizedStatus = SES.i18n.e('projectStatus', proj.status);
@@ -147,7 +151,7 @@ function renderProjects(records) {
                 </td>
                 <td>${SES.escapeHtml(proj.customerName || '')}</td>
                 <td class="font-monospace">${priceStr}</td>
-                <td class="text-center">${proj.requiredCount || 1}名</td>
+                <td class="text-center">${proj.requiredCount != null ? proj.requiredCount + (SES.i18n.t('project.requiredCount.unit') || '名') : (SES.i18n.t('common.label.notSet') || '未設定')}</td>
                 <td class="text-center">${remoteIcon}</td>
                 <td id="list-skills-${proj.id}"><div class="spinner-border spinner-border-sm text-secondary" role="status"></div></td>
                 <td>${statusBadge}</td>
@@ -201,10 +205,16 @@ function editProject(id) {
                 const proj = res.data;
                 $('#proj-id').val(proj.id);
                 $('#proj-projectName').val(proj.projectName);
+                
+                if (proj.customerId) {
+                    if ($('#proj-customerId option[value="' + proj.customerId + '"]').length === 0) {
+                        $('#proj-customerId').append(`<option value="${proj.customerId}">${SES.escapeHtml(proj.customerName || 'Unknown')}</option>`);
+                    }
+                }
                 $('#proj-customerId').val(proj.customerId || '');
                 $('#proj-unitPriceMin').val(proj.unitPriceMin);
                 $('#proj-unitPriceMax').val(proj.unitPriceMax);
-                $('#proj-requiredCount').val(proj.requiredCount || 1);
+                $('#proj-requiredCount').val(proj.requiredCount != null ? proj.requiredCount : '');
                 $('#proj-remoteType').val(proj.remoteType);
                 $('#proj-status').val(proj.status);
                 
@@ -240,7 +250,7 @@ function saveProject() {
         customerId: $('#proj-customerId').val() ? parseInt($('#proj-customerId').val()) : null,
         unitPriceMin: $('#proj-unitPriceMin').val() ? parseInt($('#proj-unitPriceMin').val()) : null,
         unitPriceMax: $('#proj-unitPriceMax').val() ? parseInt($('#proj-unitPriceMax').val()) : null,
-        requiredCount: $('#proj-requiredCount').val() ? parseInt($('#proj-requiredCount').val()) : 1,
+        requiredCount: $('#proj-requiredCount').val() ? parseInt($('#proj-requiredCount').val()) : null,
         remoteType: $('#proj-remoteType').val(),
         status: $('#proj-status').val()
     };
@@ -303,7 +313,7 @@ function finishSave() {
 function addProjectSkillRow(skill = null) {
     const container = $('#project-skills-container');
     
-    let optionsHtml = '<option value="">選択してください</option>';
+    let optionsHtml = `<option value="">${SES.i18n.t('common.label.select') || '選択してください'}</option>`;
     
     // Group skills by category
     const categories = [...new Set(allSkillTags.map(t => t.category))];
@@ -328,15 +338,15 @@ function addProjectSkillRow(skill = null) {
             </div>
             <div class="col-md-3">
                 <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark level-select">
-                    <option value="初級" ${level === '初級' ? 'selected' : ''}>初級</option>
-                    <option value="中級" ${level === '中級' ? 'selected' : ''}>中級</option>
-                    <option value="上級" ${level === '上級' ? 'selected' : ''}>上級</option>
+                    <option value="初級" ${level === '初級' ? 'selected' : ''}>${SES.i18n.e('proficiency', '初級') || '初級'}</option>
+                    <option value="中級" ${level === '中級' ? 'selected' : ''}>${SES.i18n.e('proficiency', '中級') || '中級'}</option>
+                    <option value="上級" ${level === '上級' ? 'selected' : ''}>${SES.i18n.e('proficiency', '上級') || '上級'}</option>
                 </select>
             </div>
             <div class="col-md-3">
                 <div class="form-check form-switch mt-1">
                     <input class="form-check-input is-must-check" type="checkbox" role="switch" ${isMustChecked}>
-                    <label class="form-check-label text-light small">必須</label>
+                    <label class="form-check-label text-light small">${SES.i18n.t('project.skill.must') || '必須'}</label>
                 </div>
             </div>
             <div class="col-md-1 text-end">

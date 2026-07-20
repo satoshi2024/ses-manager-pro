@@ -26,6 +26,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
 
     private final ContractMapper contractMapper;
     private final ProposalMapper proposalMapper;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.ProjectSkillService> projectSkillServiceProvider;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -52,12 +53,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         this.save(project);
         dto.setId(project.getId());
         if (dto.getSkills() != null) {
-            com.ses.service.ProjectSkillService projectSkillService = 
-                    org.springframework.web.context.support.WebApplicationContextUtils
-                    .getRequiredWebApplicationContext(
-                        ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()).getRequest().getServletContext()
-                    ).getBean(com.ses.service.ProjectSkillService.class);
-            projectSkillService.replaceSkills(dto.getId(), dto.getSkills());
+            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
         }
     }
 
@@ -81,12 +77,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         org.springframework.beans.BeanUtils.copyProperties(dto, project);
         boolean updated = this.updateById(project);
         if (dto.getSkills() != null) {
-            com.ses.service.ProjectSkillService projectSkillService = 
-                    org.springframework.web.context.support.WebApplicationContextUtils
-                    .getRequiredWebApplicationContext(
-                        ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes()).getRequest().getServletContext()
-                    ).getBean(com.ses.service.ProjectSkillService.class);
-            projectSkillService.replaceSkills(dto.getId(), dto.getSkills());
+            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
         }
         return updated;
     }

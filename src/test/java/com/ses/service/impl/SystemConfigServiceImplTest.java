@@ -60,25 +60,25 @@ class SystemConfigServiceImplTest {
 
     @Test
     void put_後はキャッシュから新しい値を返す() {
-        seed(new SystemConfig("company.name", "Old", "会社名"));
-        when(mapper.selectById("company.name")).thenReturn(new SystemConfig("company.name", "Old", "会社名"));
+        seed(new SystemConfig("company_name", "Old", "会社名"));
+        when(mapper.selectById("company_name")).thenReturn(new SystemConfig("company_name", "Old", "会社名"));
 
-        assertEquals("Old", service.getString("company.name", ""));
+        assertEquals("Old", service.getString("company_name", ""));
 
-        service.put("company.name", "New", "会社名");
+        service.put("company_name", "New", "会社名");
 
-        assertEquals("New", service.getString("company.name", ""), "putでキャッシュが更新される");
+        assertEquals("New", service.getString("company_name", ""), "putでキャッシュが更新される");
         verify(mapper).updateById(any(SystemConfig.class));
     }
 
     @Test
     void put_新規キーはinsertされる() {
         seed();
-        when(mapper.selectById("new.key")).thenReturn(null);
+        when(mapper.selectById("notification.webhook-url")).thenReturn(null);
 
-        service.put("new.key", "v", "d");
+        service.put("notification.webhook-url", "v", "d");
 
         verify(mapper).insert(any(SystemConfig.class));
-        assertEquals("v", service.getString("new.key", "def"));
+        assertEquals("v", service.getString("notification.webhook-url", "def"));
     }
 }

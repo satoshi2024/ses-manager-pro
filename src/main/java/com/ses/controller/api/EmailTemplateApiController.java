@@ -41,6 +41,7 @@ public class EmailTemplateApiController {
      */
     @PostMapping
     public ApiResult<Boolean> createTemplate(@RequestBody EmailTemplate emailTemplate) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(emailTemplate);
         return ApiResult.success(emailTemplateService.save(emailTemplate));
     }
 

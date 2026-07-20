@@ -10,6 +10,7 @@ import com.ses.entity.Candidate;
 import com.ses.entity.CandidateActivity;
 import com.ses.mapper.CandidateActivityMapper;
 import com.ses.mapper.CandidateMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.service.CandidateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     );
 
     private final CandidateActivityMapper candidateActivityMapper;
+    private final EngineerMapper engineerMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -128,12 +130,42 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         if (!StatusConstants.CANDIDATE_STAGE_HIRED.equals(candidate.getCurrentStage())) {
             throw BusinessException.of("error.candidate.notHiredStage");
         }
-        if (candidate.getConvertedEngineerId() != null) {
-            throw BusinessException.of("error.candidate.alreadyLinked");
+        
+        if (engineerId == null) {
+            throw BusinessException.of(400, "error.candidate.invalidEngineerId");
         }
-        Candidate update = new Candidate();
-        update.setId(candidateId);
-        update.setConvertedEngineerId(engineerId);
-        this.updateById(update);
+        com.ses.entity.Engineer eng = engineerMapper.selectById(engineerId);
+        if (eng == null) {
+            throw BusinessException.of(404, "error.engineer.notFound");
+        }
+
+        if (candidate.getConvertedEngineerId() != null) {
+            if (candidate.getConvertedEngineerId().equals(engineerId)) {
+                return; // 冪等成功
+            }
+            throw BusinessException.of(409, "error.candidate.alreadyLinked");
+        }
+        
+        // 他候補者との重複チェック
+        LambdaQueryWrapper<Candidate> dupCheck = new LambdaQueryWrapper<>();
+        dupCheck.eq(Candidate::getConvertedEngineerId, engineerId);
+        if (this.count(dupCheck) > 0) {
+            throw BusinessException.of(409, "error.candidate.alreadyLinked");
+        }
+
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Candidate> updateWrapper = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        updateWrapper.eq(Candidate::getId, candidateId)
+                     .isNull(Candidate::getConvertedEngineerId)
+                     .set(Candidate::getConvertedEngineerId, engineerId);
+        
+        boolean updated = this.update(updateWrapper);
+        if (!updated) {
+            // Concurrent modification check
+            Candidate current = this.getById(candidateId);
+            if (current != null && engineerId.equals(current.getConvertedEngineerId())) {
+                return;
+            }
+            throw BusinessException.of(409, "error.candidate.alreadyLinked");
+        }
     }
 }

@@ -70,11 +70,8 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     }
 
     private void validateMonth(String month) {
-        try {
-            YearMonth.parse(month);
-        } catch (Exception e) {
-            throw BusinessException.of(400, "error.closing.invalidMonth");
-        }
+        // Use common DateUtils to share same 400 error logic.
+        com.ses.common.util.DateUtils.parseYearMonth(month);
     }
 
     private void requireCloserRole(String role) {
@@ -206,6 +203,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     @Transactional
     @Override
     public void assertOpenForUpdate(String month) {
+        validateMonth(month);
         // 締め設定行を FOR UPDATE でロックし、confirm と直列化する。
         SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
         // 締めJSON破損時は throwOnError=true で fail-closed（更新拒否）とする（R3R-06）。

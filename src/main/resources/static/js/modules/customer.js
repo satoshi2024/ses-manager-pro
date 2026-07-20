@@ -202,7 +202,7 @@ function saveCustomer() {
     }
 
     $.ajax({
-        url: '/api/customers',
+        url: id ? '/api/customers/' + id : '/api/customers',
         method: id ? 'PUT' : 'POST',
         contentType: 'application/json',
         data: JSON.stringify(data),

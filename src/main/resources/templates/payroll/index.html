@@ -14,7 +14,7 @@
     <h2 class="h6">freee従業員</h2>
     <div id="payrollEmployees" class="table-responsive"></div>
     <form id="linkForm" class="row g-2 align-items-end mt-2">
-      <div class="col-auto"><label class="form-label">SES要員ID</label><input id="linkEngineerId" class="form-control" type="number" required></div>
+      <div class="col-auto"><label class="form-label">SES要員</label><select id="linkEngineerId" class="form-select" required><option value="">選択してください</option></select></div>
       <div class="col-auto"><label class="form-label">freee従業員ID</label><input id="linkEmployeeId" class="form-control" type="text" required></div>
       <div class="col-auto"><button class="btn btn-primary" type="submit">連携</button></div>
       <div class="col-auto"><button class="btn btn-danger" type="button" id="unlinkBtn">解除</button></div>
@@ -41,14 +41,18 @@
         .text(status ? 'freee接続済み' : 'freee未接続');
       if (!status) return;
       const employees = await SES.api.get('/api/payroll/employees');
-      $('#payrollEmployees').html('<table class="table table-sm"><thead><tr><th>氏名</th><th>freee従業員ID</th></tr></thead><tbody>' +
-        (employees || []).map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.id || e.employeeId)}</td></tr>`).join('') + '</tbody></table>');
+      $('#payrollEmployees').html('<table class="table table-sm"><thead><tr><th>氏名</th><th>freee従業員ID</th><th>紐付け状態</th></tr></thead><tbody>' +
+        (employees || []).map(e => `<tr><td>${esc(e.displayName)}</td><td>${esc(e.id || e.employeeId)}</td><td>${e.linkedEngineerId ? '済 (' + esc(e.linkedEngineerName) + ')' : '未連携'}</td></tr>`).join('') + '</tbody></table>');
+      
+      const engRes = await SES.api.get('/api/engineers?size=1000');
+      const engs = (engRes && engRes.records) ? engRes.records : [];
+      $('#linkEngineerId').html('<option value="">選択してください</option>' + engs.filter(eng => eng.employmentType !== 'BP').map(eng => `<option value="${eng.id}">${esc(eng.fullName)}</option>`).join(''));
     } catch (e) { $('#payrollStatus').removeClass('alert-secondary').addClass('alert-danger').text(e.message || '取得に失敗しました'); }
   };
   $('#statementYear').val(new Date().getFullYear()); $('#statementMonth').val(new Date().getMonth() + 1);
   $('#statementForm').on('submit', async e => { e.preventDefault(); try { const p = await SES.api.get('/api/payroll/statements', {year: $('#statementYear').val(), month: $('#statementMonth').val()}); 
-    $('#payrollStatements').html('<table class="table table-sm"><thead><tr><th>従業員ID</th><th>年</th><th>月</th><th>種別</th><th>総支給額</th><th>控除額</th><th>差引支給額</th></tr></thead><tbody>' +
-      (p || []).map(s => `<tr><td>${esc(s.employeeId)}</td><td>${esc(s.year)}</td><td>${esc(s.month)}</td><td>${esc(s.type)}</td><td>${esc(s.grossAmount)}</td><td>${esc(s.deductions)}</td><td>${esc(s.netAmount)}</td></tr>`).join('') + '</tbody></table>');
+    $('#payrollStatements').html((!p || p.length === 0) ? '<p class="text-muted">データがありません</p>' : '<table class="table table-sm"><thead><tr><th>従業員ID</th><th>年</th><th>月</th><th>種別</th><th>総支給額</th><th>控除額</th><th>差引支給額</th></tr></thead><tbody>' +
+      p.map(s => `<tr><td>${esc(s.employeeId)}</td><td>${esc(s.year)}</td><td>${esc(s.month)}</td><td>${esc(s.type)}</td><td>${Number(s.grossAmount||0).toLocaleString()}</td><td>${Number(s.deductions||0).toLocaleString()}</td><td>${Number(s.netAmount||0).toLocaleString()}</td></tr>`).join('') + '</tbody></table>');
   } catch (err) { Toast.error(err.message || '取得に失敗しました'); } });
   
   $('#linkForm').on('submit', async e => {
@@ -56,6 +60,7 @@
     try {
       await SES.api.put(`/api/payroll/links/${$('#linkEngineerId').val()}?employeeId=${$('#linkEmployeeId').val()}`);
       Toast.success('連携しました');
+      load();
     } catch (err) { Toast.error(err.message || '失敗しました'); }
   });
   $('#unlinkBtn').on('click', async () => {
@@ -63,6 +68,7 @@
     try {
       await SES.api.delete(`/api/payroll/links/${$('#linkEngineerId').val()}`);
       Toast.success('解除しました');
+      load();
     } catch (err) { Toast.error(err.message || '失敗しました'); }
   });
 

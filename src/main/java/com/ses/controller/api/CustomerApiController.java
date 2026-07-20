@@ -94,17 +94,17 @@ public class CustomerApiController {
      */
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody Customer customer) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(customer);
         return ApiResult.success(customerService.save(customer));
     }
 
     /**
      * 顧客更新
      */
-    @PutMapping
-    public ApiResult<Boolean> update(@Valid @RequestBody Customer customer) {
-        if (customer.getId() != null) {
-            dataScopeService.assertAllowedCustomer(customer.getId());
-        }
+    @PutMapping("/{id}")
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Customer customer) {
+        customer.setId(id);
+        dataScopeService.assertAllowedCustomer(id);
         boolean success = customerService.updateById(customer);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);

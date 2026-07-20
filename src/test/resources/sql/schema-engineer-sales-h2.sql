@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS t_engineer_sales (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL,
+  sales_user_id BIGINT NOT NULL,
+  primary_flag TINYINT NOT NULL DEFAULT 0,
+  assigned_at DATE NOT NULL,
+  released_at DATE NULL,
+  remarks VARCHAR(500),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS sales_user_id BIGINT NULL;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS commission_base_type VARCHAR(10) NULL;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS commission_rate DECIMAL(5,2) NULL;

@@ -53,7 +53,6 @@ spring:
   # 差し込み、admin初期パスワードのBCrypt化(V10)のみ prod 限定で適用する。
   flyway:
     enabled: true
-    validate-on-migrate: false
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 9

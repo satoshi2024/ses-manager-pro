@@ -25,6 +25,58 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
     private volatile boolean loaded = false;
 
+    private enum ConfigType { STRING, INT, DECIMAL, BOOLEAN, ENUM }
+
+    private static class ConfigSchema {
+        final ConfigType type;
+        final java.util.Set<String> allowedValues;
+        final BigDecimal min;
+        final BigDecimal max;
+
+        ConfigSchema(ConfigType type, java.util.Set<String> allowedValues, BigDecimal min, BigDecimal max) {
+            this.type = type;
+            this.allowedValues = allowedValues;
+            this.min = min;
+            this.max = max;
+        }
+
+        static ConfigSchema string() { return new ConfigSchema(ConfigType.STRING, null, null, null); }
+        static ConfigSchema integer(Integer min, Integer max) { return new ConfigSchema(ConfigType.INT, null, min != null ? new BigDecimal(min) : null, max != null ? new BigDecimal(max) : null); }
+        static ConfigSchema decimal(String min, String max) { return new ConfigSchema(ConfigType.DECIMAL, null, min != null ? new BigDecimal(min) : null, max != null ? new BigDecimal(max) : null); }
+        static ConfigSchema bool() { return new ConfigSchema(ConfigType.BOOLEAN, java.util.Set.of("true", "false"), null, null); }
+        static ConfigSchema enumOf(String... values) { return new ConfigSchema(ConfigType.ENUM, java.util.Set.of(values), null, null); }
+    }
+
+    private static final java.util.Map<String, ConfigSchema> SCHEMAS = new java.util.HashMap<>();
+    static {
+        SCHEMAS.put("company.name", ConfigSchema.string());
+        SCHEMAS.put("company.email", ConfigSchema.string());
+        SCHEMAS.put("company.address", ConfigSchema.string());
+        SCHEMAS.put("company.invoice-registration-number", ConfigSchema.string());
+        SCHEMAS.put("company.bank-info", ConfigSchema.string());
+        SCHEMAS.put("company_name", ConfigSchema.string());
+        SCHEMAS.put("company_email", ConfigSchema.string());
+        SCHEMAS.put("default_settlement_min", ConfigSchema.integer(0, null));
+        SCHEMAS.put("default_settlement_max", ConfigSchema.integer(0, null));
+        SCHEMAS.put("ai_enabled", ConfigSchema.bool());
+        SCHEMAS.put("billing.tax-rate", ConfigSchema.decimal("0", "100"));
+        SCHEMAS.put("billing.payment-due-rule", ConfigSchema.enumOf("next-month-end", "next-next-month-end"));
+        SCHEMAS.put("notice.contract-end-days", ConfigSchema.integer(0, null));
+        SCHEMAS.put("notice.proposal-stale-days", ConfigSchema.integer(0, null));
+        SCHEMAS.put("notice.bench-warn-days", ConfigSchema.integer(0, null));
+        SCHEMAS.put("scope.sales-own-data-only", ConfigSchema.bool());
+        SCHEMAS.put("commission.base-type", ConfigSchema.enumOf("粗利", "売上"));
+        SCHEMAS.put("commission.rate", ConfigSchema.decimal("0", "100"));
+        SCHEMAS.put("notification.webhook-url", ConfigSchema.string());
+        SCHEMAS.put("notification.webhook-types", ConfigSchema.string());
+        SCHEMAS.put("forecast.enabled", ConfigSchema.bool());
+        SCHEMAS.put("forecast.win-rate.screening", ConfigSchema.integer(0, 100));
+        SCHEMAS.put("forecast.win-rate.first-interview", ConfigSchema.integer(0, 100));
+        SCHEMAS.put("forecast.win-rate.second-interview", ConfigSchema.integer(0, 100));
+        SCHEMAS.put("forecast.win-rate.awaiting", ConfigSchema.integer(0, 100));
+        SCHEMAS.put("closing.confirmed-months", ConfigSchema.string()); // Actually JSON but string is fine
+    }
+
     private void ensureLoaded() {
         if (!loaded) {
             synchronized (this) {
@@ -77,24 +129,30 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Override
     public void put(String key, String value, String description) {
-        if ("billing.tax-rate".equals(key)) {
-            try {
-                BigDecimal rate = new BigDecimal(value);
-                if (rate.compareTo(BigDecimal.ZERO) < 0) {
-                    throw com.ses.common.exception.BusinessException.of(400, "消費税率は0以上を指定してください");
-                }
-            } catch (NumberFormatException e) {
-                throw com.ses.common.exception.BusinessException.of(400, "消費税率は数値を指定してください");
-            }
+        ConfigSchema schema = SCHEMAS.get(key);
+        if (schema == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.config.unknownKey");
         }
-        if ("commission.rate".equals(key)) {
-            try {
-                BigDecimal rate = new BigDecimal(value);
-                if (rate.compareTo(BigDecimal.ZERO) < 0 || rate.compareTo(new BigDecimal("100")) > 0) {
-                    throw com.ses.common.exception.BusinessException.of(400, "還元率は0から100の間で指定してください");
+        if (value != null && !value.isBlank()) {
+            if (schema.type == ConfigType.BOOLEAN || schema.type == ConfigType.ENUM) {
+                if (schema.allowedValues != null && !schema.allowedValues.contains(value)) {
+                    throw com.ses.common.exception.BusinessException.of(400, "error.config.invalidValue");
                 }
-            } catch (NumberFormatException e) {
-                throw com.ses.common.exception.BusinessException.of(400, "還元率は数値を指定してください");
+            } else if (schema.type == ConfigType.INT || schema.type == ConfigType.DECIMAL) {
+                try {
+                    BigDecimal num = new BigDecimal(value.trim());
+                    if (schema.min != null && num.compareTo(schema.min) < 0) {
+                        throw com.ses.common.exception.BusinessException.of(400, "error.config.invalidValue");
+                    }
+                    if (schema.max != null && num.compareTo(schema.max) > 0) {
+                        throw com.ses.common.exception.BusinessException.of(400, "error.config.invalidValue");
+                    }
+                    if (schema.type == ConfigType.INT && num.scale() > 0 && num.stripTrailingZeros().scale() > 0) {
+                        throw com.ses.common.exception.BusinessException.of(400, "error.config.invalidValue");
+                    }
+                } catch (NumberFormatException e) {
+                    throw com.ses.common.exception.BusinessException.of(400, "error.config.invalidValue");
+                }
             }
         }
 

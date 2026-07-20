@@ -100,6 +100,7 @@ public class ProposalApiController {
      */
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody Proposal proposal) {
+        com.ses.common.util.EntityProtectUtil.protectForCreate(proposal);
         // 参照する要員・案件が担当スコープ内であることを検証する（担当外ID参照の登録IDOR防止 / R3R-32）。
         if (dataScopeService.isScoped()) {
             if (proposal.getEngineerId() != null) dataScopeService.assertAllowedEngineer(proposal.getEngineerId());

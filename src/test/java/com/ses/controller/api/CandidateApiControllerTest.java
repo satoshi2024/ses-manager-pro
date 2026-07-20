@@ -160,6 +160,7 @@ class CandidateApiControllerTest {
     @WithMockUser(username = "test", roles = {"管理者"})
     void testLinkConvertedEngineer() throws Exception {
         Candidate candidate = seedCandidate("入社");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) VALUES (123, 'Test Eng', '正社員', '稼働中', 0)");
 
         mockMvc.perform(put("/api/candidates/" + candidate.getId() + "/converted-engineer")
                         .with(csrf())

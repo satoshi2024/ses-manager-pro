@@ -37,7 +37,7 @@ public class EngineerCareerApiController {
     public ApiResult<Boolean> save(@PathVariable Long engineerId, @RequestBody EngineerCareer career) {
         dataScopeService.assertAllowedEngineer(engineerId);
         validatePeriod(career);
-        career.setId(null);
+        com.ses.common.util.EntityProtectUtil.protectForCreate(career);
         career.setEngineerId(engineerId);
         return ApiResult.success(engineerCareerService.save(career));
     }
