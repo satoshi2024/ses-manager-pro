@@ -14,28 +14,42 @@ document.addEventListener('DOMContentLoaded', function() {
     monthFilter.addEventListener('change', loadPerformance);
 
     function loadCommissionRule() {
-        axios.get('/api/sales-performance/commission-rule')
-            .then(res => {
-                const rule = res.data.data;
-                const note = msgRuleNote.replace('{0}', rule.baseType).replace('{1}', rule.rate);
-                ruleNoteText.textContent = note;
-            })
-            .catch(err => console.error('Error loading rule', err));
+        $.ajax({
+            url: '/api/sales-performance/commission-rule',
+            type: 'GET',
+            success: function(res) {
+                if (res && res.code === 200) {
+                    const rule = res.data;
+                    const note = msgRuleNote.replace('{0}', rule.baseType).replace('{1}', rule.rate);
+                    ruleNoteText.textContent = note;
+                }
+            },
+            error: function(err) {
+                console.error('Error loading rule', err);
+            }
+        });
     }
 
     function loadPerformance() {
         const month = monthFilter.value;
         if (!month) return;
 
-        axios.get('/api/sales-performance', { params: { month } })
-            .then(res => {
-                const data = res.data.data;
-                renderTable(data);
-            })
-            .catch(err => {
+        $.ajax({
+            url: '/api/sales-performance',
+            type: 'GET',
+            data: { month: month },
+            success: function(res) {
+                if (res && res.code === 200) {
+                    renderTable(res.data);
+                } else {
+                    Swal.fire('Error', res.message || 'データの取得に失敗しました', 'error');
+                }
+            },
+            error: function(err) {
                 console.error('Error loading performance', err);
                 Swal.fire('Error', 'データの取得に失敗しました', 'error');
-            });
+            }
+        });
     }
 
     function renderTable(data) {

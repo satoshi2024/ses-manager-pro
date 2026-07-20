@@ -22,6 +22,9 @@ $(document).ready(function() {
             scroll: true,
             scrollSensitivity: 100, // How close to the edge to trigger scrolling
             scrollSpeed: 20, // px per frame
+            delay: 200,
+            delayOnTouchOnly: true,
+            fallbackTolerance: 3,
             
             // Triggered when an item is dropped into this list from another list
             onAdd: function (evt) {

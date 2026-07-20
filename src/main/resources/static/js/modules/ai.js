@@ -159,6 +159,10 @@ function loadContextData() {
             records.forEach(eng => {
                 select.append(`<option value="${eng.id}">${SES.escapeHtml(eng.fullName)} (${eng.expectedUnitPrice ? '¥' + Number(eng.expectedUnitPrice).toLocaleString() : '-'})</option>`);
             });
+            const engId = new URLSearchParams(location.search).get('engineerId');
+            if (engId) {
+                select.val(engId);
+            }
         }
     });
 

@@ -14,6 +14,30 @@ document.addEventListener('DOMContentLoaded', function() {
     fromMonthInput.value = SES.util.getLocalDateString(fromDate).slice(0, 7);
     toMonthInput.value = SES.util.getLocalDateString(toDate).slice(0, 7);
 
+    // Fetch initial data for selects
+    fetch('/api/skill-tags').then(r => r.json()).then(res => {
+        if (res.code === 200) {
+            const select = document.getElementById('skillId');
+            (res.data.records || res.data).forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.skillName || s.id;
+                select.appendChild(opt);
+            });
+        }
+    });
+    fetch('/api/engineers/sales-user-options').then(r => r.json()).then(res => {
+        if (res.code === 200) {
+            const select = document.getElementById('salesUserId');
+            res.data.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.id;
+                opt.textContent = u.name || u.realName;
+                select.appendChild(opt);
+            });
+        }
+    });
+
     // Fetch initial data (defaulting to those ending soon to prevent heavy rendering)
     fetchData(true);
 

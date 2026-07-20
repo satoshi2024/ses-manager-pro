@@ -93,13 +93,13 @@ function wireMyHandlers(container) {
 
 function dailyForm(contractId) {
     return `
-        <div class="row g-1 align-items-end" id="dailyForm-${contractId}">
-            <div class="col"><input type="date" class="form-control form-control-sm" name="workDate"></div>
-            <div class="col"><input type="time" class="form-control form-control-sm" name="startTime"></div>
-            <div class="col"><input type="time" class="form-control form-control-sm" name="endTime"></div>
-            <div class="col"><input type="number" class="form-control form-control-sm" name="breakMinutes" value="60"></div>
-            <div class="col"><input type="text" class="form-control form-control-sm" name="remarks" placeholder="備考"></div>
-            <div class="col"><button class="btn btn-sm btn-success" data-action="save-daily" data-contract-id="${SES.escapeHtml(String(contractId))}">追加</button></div>
+        <div class="row g-2 align-items-end" id="dailyForm-${contractId}">
+            <div class="col-12 col-md"><input type="date" class="form-control form-control-sm" name="workDate"></div>
+            <div class="col-6 col-md"><input type="time" class="form-control form-control-sm" name="startTime"></div>
+            <div class="col-6 col-md"><input type="time" class="form-control form-control-sm" name="endTime"></div>
+            <div class="col-6 col-md"><input type="number" class="form-control form-control-sm" name="breakMinutes" value="60"></div>
+            <div class="col-6 col-md"><input type="text" class="form-control form-control-sm" name="remarks" placeholder="備考"></div>
+            <div class="col-12 col-md-auto"><button class="btn btn-sm btn-success w-100" data-action="save-daily" data-contract-id="${SES.escapeHtml(String(contractId))}">追加</button></div>
         </div>`;
 }
 

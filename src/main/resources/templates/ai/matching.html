@@ -1,5 +1,5 @@
-﻿<!DOCTYPE html>
-<html lang="ja" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org"
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
@@ -121,7 +121,7 @@
                         </select>
                     </div>
                     <div class="col-12 mt-3 text-end">
-                        <button class="btn btn-primary btn-sm px-4" id="saveSettingsBtn">th:text="#{common.btn.saveSettings}">設定を保存</button>
+                        <button class="btn btn-primary btn-sm px-4" id="saveSettingsBtn" th:text="#{common.btn.saveSettings}">設定を保存</button>
                     </div>
                 </div>
             </div>
@@ -153,7 +153,7 @@
         </div>
     </div>
 
-    <th:block layout:fragment="scripts">
+    <th:block layout:fragment="page-js">
         <script src="/js/modules/ai.js"></script>
     </th:block>
 </body>

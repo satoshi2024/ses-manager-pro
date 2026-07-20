@@ -44,6 +44,8 @@ If your local database fails to start due to a Flyway checksum mismatch (e.g. fr
 - Drop the `ses_manager_db` database and recreate it as an empty database to run all migrations from scratch (Recommended).
 - Run `flyway repair` using the Maven plugin to realign checksums without dropping data: `mvn org.flywaydb:flyway-maven-plugin:repair -Dflyway.url=jdbc:mysql://localhost:3306/ses_manager_db -Dflyway.user=root -Dflyway.password=123456`.
 
+**IMPORTANT**: Never modify a migration script after it has been applied. Doing so causes `FlywayValidateException` (checksum mismatch) for anyone who has already applied the original script. If you need to change the schema or data, always create a new `Vxx__...sql` migration script.
+
 **`V1__create_tables.sql` is a *consolidated baseline schema***, not the original first migration — later structural additions (e.g. `t_engineer.prefecture`/`railway_company`, `sys_user.failed_count`/`locked_until`) have been folded back into V1's `CREATE TABLE`s. Because of this, the incremental migrations that originally added those columns (`V3`, `V8`) are kept as **no-ops** (`SELECT 1;` only — an empty script is rejected by `spring.sql.init`). **When you add a column, add it to V1's `CREATE TABLE` and make sure no later migration re-`ADD COLUMN`s it** — a duplicate `ADD COLUMN` breaks *both* the empty-DB Flyway startup *and* test context init (see below), and MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. New columns/tables introduced *after* the baseline (e.g. V12/V14) are added by their own migration as usual.
 
 `prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/V10__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
@@ -101,6 +103,11 @@ Links engineers to sales users (`sys_user.role = '営業'`), attributes contract
 ### Frontend structure
 
 No SPA framework, no bundler. Each feature page is `templates/<area>/list.html` (+ occasional `form.html`/`detail.html`) using the Thymeleaf Layout Dialect against `templates/layout/base.html` (which pulls in `layout/header.html` and `layout/sidebar.html` as fragments and loads Bootstrap 5, SweetAlert2, Chart.js, and `common.js` from CDN/static). Page-specific behavior lives in one JS file per area under `static/js/modules/<area>.js`, loaded via the `page-js` Thymeleaf fragment slot.
+
+**Layout Fragments**: The base layout (`layout/base.html`) provides exactly three slots for child pages to use via `layout:fragment`:
+- `content`: For the main page HTML body.
+- `page-css`: For page-specific `<style>` or `<link rel="stylesheet">`.
+- `page-js`: For page-specific `<script>` tags. Do not use generic names like `scripts`.
 
 Conventions used across every module JS file (`engineer.js`, `customer.js`, `project.js`, `contract.js`, `proposal-kanban.js`, `email-template.js`, etc.) — follow these when adding a new CRUD screen rather than inventing a new pattern:
 - List/search/pagination via `$.ajax` GET to `/api/<area>`, re-rendered into a table.
