@@ -51,7 +51,7 @@ public class MyBatisPlusConfig {
      * INSERT時にcreatedAt・updatedAt・createdByを設定
      * UPDATE時にupdatedAtを設定
      */
-    static class AutoFillMetaObjectHandler implements MetaObjectHandler {
+    public static class AutoFillMetaObjectHandler implements MetaObjectHandler {
 
         /**
          * INSERT時の自動フィールド入力処理
