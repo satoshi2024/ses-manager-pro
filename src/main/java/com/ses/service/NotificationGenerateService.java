@@ -59,7 +59,7 @@ public class NotificationGenerateService {
     public void invoiceOverdue() {
         LocalDate today = LocalDate.now();
         QueryWrapper<Invoice> qw = new QueryWrapper<>();
-        qw.ne("status", "入金済")
+        qw.in("status", "送付済", "一部入金")
           .isNotNull("due_date")
           .lt("due_date", today);
         List<Invoice> invoices = invoiceMapper.selectList(qw);
@@ -125,8 +125,8 @@ public class NotificationGenerateService {
             QueryWrapper<Contract> cQw = new QueryWrapper<>();
             cQw.eq("engineer_id", e.getId()).orderByDesc("end_date").last("LIMIT 1");
             Contract lastContract = contractMapper.selectOne(cQw);
-            LocalDate dateToCheck = (lastContract != null && lastContract.getEndDate() != null) ? lastContract.getEndDate() : e.getCreatedAt().toLocalDate();
-            if (dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
+            LocalDate dateToCheck = (lastContract != null && lastContract.getEndDate() != null) ? lastContract.getEndDate() : (e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate() : null);
+            if (dateToCheck != null && dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
                 String name = getEngineerName(e.getId());
                 String dedupeKey = "BENCH_LONG:" + e.getId() + ":" + LocalDate.now().getYear() + "-" + LocalDate.now().getMonthValue();
                 String message = "[\"notification.msg.BENCH_LONG\", \"" + name + "\", \"" + days + "\"]";

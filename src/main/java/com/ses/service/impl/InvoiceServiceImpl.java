@@ -549,14 +549,22 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
         java.time.LocalDate targetDate = asOf != null ? asOf : java.time.LocalDate.now();
         java.util.List<com.ses.dto.mail.BulkReminderRowResult> results = new java.util.ArrayList<>();
-        if (invoiceIds == null) {
+        if (invoiceIds == null || invoiceIds.isEmpty()) {
             return results;
         }
+        
+        List<Invoice> invoices = this.baseMapper.selectBatchIds(invoiceIds);
+        Map<Long, Invoice> invoiceMap = invoices.stream().collect(Collectors.toMap(Invoice::getId, i -> i));
+        
+        List<Long> customerIds = invoices.stream().map(Invoice::getCustomerId).filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
+        Map<Long, Customer> customerMap = customerIds.isEmpty() ? java.util.Collections.emptyMap() : customerMapper.selectBatchIds(customerIds).stream().collect(Collectors.toMap(Customer::getId, c -> c));
+        
+        List<InvoicePayment> allPayments = invoicePaymentMapper.selectList(new QueryWrapper<InvoicePayment>().in("invoice_id", invoiceIds));
+        Map<Long, List<InvoicePayment>> paymentsByInvoice = allPayments.stream().collect(Collectors.groupingBy(InvoicePayment::getInvoiceId));
+
         for (Long id : invoiceIds) {
-            // 各行を独立に検証・例外処理し、1件失敗してもloopを止めない（R3R-20）。
             try {
-                Invoice invoice = this.baseMapper.selectOne(
-                        new QueryWrapper<Invoice>().eq("id", id).last("FOR UPDATE"));
+                Invoice invoice = invoiceMap.get(id);
                 if (invoice == null) {
                     results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "請求書が存在しません", null));
                     continue;
@@ -573,7 +581,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "期限内のため対象外", null));
                     continue;
                 }
-                com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
+                com.ses.entity.Customer customer = customerMap.get(invoice.getCustomerId());
                 if (customer == null) {
                     results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客が存在しません", null));
                     continue;
@@ -583,8 +591,15 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客メールアドレス未設定", null));
                     continue;
                 }
-                // 単発送信(sendReminder)と同一の必須変数を渡す（残高・経過日数を含む / R3R-19）。
-                BigDecimal balance = invoice.getTotal().subtract(sumPaid(id));
+                
+                BigDecimal paidTotal = BigDecimal.ZERO;
+                List<InvoicePayment> payments = paymentsByInvoice.getOrDefault(id, java.util.Collections.emptyList());
+                for (InvoicePayment p : payments) {
+                    paidTotal = paidTotal.add(p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
+                                         .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
+                }
+                BigDecimal balance = invoice.getTotal().subtract(paidTotal);
+                
                 long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), targetDate);
                 java.util.Map<String, String> params = new java.util.HashMap<>();
                 params.put("invoiceNo", invoice.getInvoiceNo());
@@ -594,6 +609,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                 params.put("balance", balance.toPlainString());
                 params.put("dueDate", invoice.getDueDate().toString());
                 params.put("overdueDays", String.valueOf(overdueDays));
+                
                 MailDispatchResult sent = mailService.sendWithTemplate(templateId, params, to, id);
                 results.add(new com.ses.dto.mail.BulkReminderRowResult(
                         id, sent.getStatus(), null, sent.getDeliveryId()));

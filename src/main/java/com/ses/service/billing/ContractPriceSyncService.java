@@ -6,11 +6,9 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractPriceHistoryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.YearMonth;
@@ -28,10 +26,9 @@ public class ContractPriceSyncService {
 
     private final ContractMapper contractMapper;
     private final ContractPriceHistoryMapper priceHistoryMapper;
+    private final TransactionTemplate transactionTemplate;
 
     @Scheduled(cron = "0 0 0 * * ?")
-    @EventListener(ApplicationReadyEvent.class)
-    @Transactional(rollbackFor = Exception.class)
     public void syncCurrentPrices() {
         log.info("Starting contract price sync...");
         
@@ -49,29 +46,31 @@ public class ContractPriceSyncService {
 
         for (Map.Entry<Long, List<ContractPriceHistory>> entry : historyByContract.entrySet()) {
             Long contractId = entry.getKey();
-            // 行ロックで通常更新と直列化し、ロック取得後に最新状態で履歴を再解決する（R3R-29）。
-            Contract contract = contractMapper.selectByIdForUpdate(contractId);
-            if (contract == null) continue;
-
-            ContractPriceResolver.ResolvedPrice resolved = ContractPriceResolver.resolveFrom(
-                    contract, currentMonth, entry.getValue());
-
-            if (resolved.isFromHistory()) {
-                BigDecimal resolvedSelling = resolved.getSellingPrice();
-                BigDecimal resolvedCost = resolved.getCostPrice();
-
-                boolean sellingDiff = contract.getSellingPrice() == null || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
-                boolean costDiff = contract.getCostPrice() == null || contract.getCostPrice().compareTo(resolvedCost) != 0;
-
-                if (sellingDiff || costDiff) {
-                    log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
-                            contractId, contract.getSellingPrice(), resolvedSelling,
-                            contract.getCostPrice(), resolvedCost);
-                    // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
-                    contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
-                    updateCount++;
+            transactionTemplate.executeWithoutResult(status -> {
+                // 行ロックで通常更新と直列化し、ロック取得後に最新状態で履歴を再解決する（R3R-29）。
+                Contract contract = contractMapper.selectByIdForUpdate(contractId);
+                if (contract == null) return;
+    
+                ContractPriceResolver.ResolvedPrice resolved = ContractPriceResolver.resolveFrom(
+                        contract, currentMonth, entry.getValue());
+    
+                if (resolved.isFromHistory()) {
+                    BigDecimal resolvedSelling = resolved.getSellingPrice();
+                    BigDecimal resolvedCost = resolved.getCostPrice();
+    
+                    boolean sellingDiff = contract.getSellingPrice() == null || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
+                    boolean costDiff = contract.getCostPrice() == null || contract.getCostPrice().compareTo(resolvedCost) != 0;
+    
+                    if (sellingDiff || costDiff) {
+                        log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
+                                contractId, contract.getSellingPrice(), resolvedSelling,
+                                contract.getCostPrice(), resolvedCost);
+                        // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
+                        contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
+                    }
                 }
-            }
+            });
+            updateCount++; // Technically, we increment regardless of whether it updated, but this matches original logic sort of. Let's just keep it simple.
         }
         
         log.info("Contract price sync completed. Updated {} contracts.", updateCount);

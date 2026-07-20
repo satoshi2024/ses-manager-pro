@@ -48,6 +48,15 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
             StatusConstants.CANDIDATE_STAGE_OFFER_DECLINED
     );
 
+    private static final List<String> STAGE_SEQUENCE = List.of(
+            StatusConstants.CANDIDATE_STAGE_APPLIED,
+            StatusConstants.CANDIDATE_STAGE_DOCUMENT_SCREENING,
+            StatusConstants.CANDIDATE_STAGE_FIRST_INTERVIEW,
+            StatusConstants.CANDIDATE_STAGE_FINAL_INTERVIEW,
+            StatusConstants.CANDIDATE_STAGE_OFFER,
+            StatusConstants.CANDIDATE_STAGE_HIRED
+    );
+
     private final CandidateActivityMapper candidateActivityMapper;
     private final EngineerMapper engineerMapper;
 
@@ -75,6 +84,20 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         validateStage(newStage);
         if (REASON_REQUIRED_STAGES.contains(newStage) && !StringUtils.hasText(reason)) {
             throw BusinessException.of("error.candidate.reasonRequired");
+        }
+
+        String currentStage = candidate.getCurrentStage();
+        if (!newStage.equals(currentStage)) {
+            if (candidate.getConvertedEngineerId() != null && StatusConstants.CANDIDATE_STAGE_HIRED.equals(currentStage)) {
+                throw BusinessException.of(400, "error.candidate.cannotChangeHiredWithEngineer");
+            }
+            if (!StatusConstants.CANDIDATE_STAGE_REJECTED.equals(newStage) && !StatusConstants.CANDIDATE_STAGE_OFFER_DECLINED.equals(newStage)) {
+                int oldIdx = STAGE_SEQUENCE.indexOf(currentStage);
+                int newIdx = STAGE_SEQUENCE.indexOf(newStage);
+                if (oldIdx == -1 || newIdx == -1 || Math.abs(newIdx - oldIdx) > 1) {
+                    throw BusinessException.of(400, "error.candidate.invalidStageTransition");
+                }
+            }
         }
 
         // 履歴の記録

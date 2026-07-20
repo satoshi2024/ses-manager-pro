@@ -238,16 +238,9 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     private void saveRecordsToJson(List<ClosingRecord> records, SystemConfig config) {
         try {
             String json = OBJECT_MAPPER.writeValueAsString(records);
-            if (config == null) {
-                config = new SystemConfig(CONFIG_KEY, json, "月次締め済み月の記録(JSON)");
-                systemConfigMapper.insert(config);
-            } else {
-                config.setConfigValue(json);
-                systemConfigMapper.updateById(config);
-            }
             systemConfigService.put(CONFIG_KEY, json, "月次締め済み月の記録(JSON)");
         } catch (Exception e) {
-            throw BusinessException.of(500, "締め記録の保存に失敗しました");
+            throw BusinessException.of(500, "error.closing.saveFailed");
         }
     }
 }

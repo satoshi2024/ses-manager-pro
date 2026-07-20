@@ -39,6 +39,7 @@ public class CsvApiController {
     private final ProjectService projectService;
     private final EngineerCsvService engineerCsvService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final org.springframework.context.MessageSource messageSource;
 
     /** 要員一覧CSV出力（一覧の検索条件を反映）。 */
     @GetMapping("/api/engineers/export-csv")
@@ -116,13 +117,13 @@ public class CsvApiController {
     @PostMapping("/api/engineers/import-csv")
     public ApiResult<CsvImportResultDto> importEngineers(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            return ApiResult.error(400, "ファイルが空です");
+            return ApiResult.error(400, messageSource.getMessage("error.csv.emptyFile", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()));
         }
         try (var in = file.getInputStream()) {
             return ApiResult.success(engineerCsvService.importCsv(in));
         } catch (IOException e) {
             log.error("CSVインポートに失敗しました", e);
-            return ApiResult.error("CSVインポートに失敗しました");
+            return ApiResult.error(messageSource.getMessage("error.csv.importFailed", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()));
         }
     }
 

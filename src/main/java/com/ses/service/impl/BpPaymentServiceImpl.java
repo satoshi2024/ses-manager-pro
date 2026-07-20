@@ -136,7 +136,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         UpdateWrapper<BpPayment> update = new UpdateWrapper<BpPayment>()
                 .eq("id", id)
                 .set(bpPayment.getAmount() != null, "amount", bpPayment.getAmount())
-                .set("remarks", bpPayment.getRemarks());
+                .set(bpPayment.getRemarks() != null, "remarks", bpPayment.getRemarks());
         bpPaymentMapper.update(null, update);
         return existing;
     }

@@ -1,5 +1,7 @@
 package com.ses.service.csv.impl;
 
+import com.ses.common.i18n.EnumMappings;
+
 import com.ses.common.util.CsvUtils;
 import com.ses.dto.csv.CsvImportResultDto;
 import com.ses.entity.Engineer;
@@ -81,6 +83,20 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
             }
             try {
                 Engineer e = toEngineer(cols);
+                
+                if (e.getGender() != null && !e.getGender().isBlank() && !EnumMappings.GROUPS.get("gender").containsKey(e.getGender())) {
+                    result.addError(lineNo, "性別の区分値が不正です");
+                    continue;
+                }
+                if (e.getEmploymentType() != null && !e.getEmploymentType().isBlank() && !EnumMappings.GROUPS.get("employmentType").containsKey(e.getEmploymentType())) {
+                    result.addError(lineNo, "雇用形態の区分値が不正です");
+                    continue;
+                }
+                if (e.getStatus() != null && !e.getStatus().isBlank() && !EnumMappings.GROUPS.get("engineerStatus").containsKey(e.getStatus())) {
+                    result.addError(lineNo, "ステータスの区分値が不正です");
+                    continue;
+                }
+
                 Set<ConstraintViolation<Engineer>> violations = validator.validate(e);
                 if (!violations.isEmpty()) {
                     String msg = violations.iterator().next().getMessage();
@@ -92,7 +108,8 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
             } catch (NumberFormatException nfe) {
                 result.addError(lineNo, "数値項目の形式が不正です");
             } catch (Exception ex) {
-                result.addError(lineNo, "取込に失敗しました: " + ex.getMessage());
+                log.error("CSV import error at line {}", lineNo, ex);
+                result.addError(lineNo, "取込に失敗しました");
             }
         }
         return result;

@@ -9,8 +9,12 @@ $(document).ready(function() {
     // Load engineers on page load
     loadEngineers();
 
-    // Load station names for autocomplete
-    loadAllStations();
+    // Load station names lazily when the modal is opened
+    $('#engineerModal').on('show.bs.modal', function () {
+        if (!window.stationsLoaded) {
+            loadAllStations();
+        }
+    });
 
     // Load skills for search filter
     loadSearchSkills();
@@ -86,6 +90,7 @@ function loadSalesUsers() {
 }
 
 function loadAllStations() {
+    window.stationsLoaded = true;
     $.ajax({
         url: '/data/station_names.json',
         method: 'GET',

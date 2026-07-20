@@ -74,7 +74,11 @@ public class DashboardServiceImpl implements DashboardService {
         ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
                 Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+        LocalDate limitDate = currentMonth.atEndOfMonth().plusMonths(1);
+        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<Contract>()
+                .in("status", Arrays.asList("稼動中", "終了", "解約"))
+                .le("start_date", limitDate)
+        );
 
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();
@@ -333,12 +337,29 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<ContractProfitDto> getProfitAnalysis() {
-        List<Contract> contracts = contractMapper.selectList(new QueryWrapper<>());
+        List<Contract> contracts = contractMapper.selectList(new QueryWrapper<Contract>()
+                .in("status", "稼動中", "終了"));
         List<ContractProfitDto> result = new ArrayList<>();
 
+        List<Long> engineerIds = contracts.stream()
+                .map(Contract::getEngineerId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        List<Long> projectIds = contracts.stream()
+                .map(Contract::getProjectId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<Long, Engineer> engineerMap = engineerIds.isEmpty() ? Collections.emptyMap() :
+                engineerMapper.selectBatchIds(engineerIds).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+        Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() :
+                projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
+
         for (Contract c : contracts) {
-            Engineer e = c.getEngineerId() != null ? engineerMapper.selectById(c.getEngineerId()) : null;
-            Project p = c.getProjectId() != null ? projectMapper.selectById(c.getProjectId()) : null;
+            Engineer e = c.getEngineerId() != null ? engineerMap.get(c.getEngineerId()) : null;
+            Project p = c.getProjectId() != null ? projectMap.get(c.getProjectId()) : null;
 
             int sell = c.getSellingPrice() != null ? c.getSellingPrice().intValue() : 0;
             int cost = c.getCostPrice() != null ? c.getCostPrice().intValue() : 0;

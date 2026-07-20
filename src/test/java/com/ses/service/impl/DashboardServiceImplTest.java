@@ -93,8 +93,8 @@ class DashboardServiceImplTest {
         Project p1 = createProject(1L, "Test Project 1");
 
         when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
-        when(engineerMapper.selectById(1L)).thenReturn(e1);
-        when(projectMapper.selectById(1L)).thenReturn(p1);
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
         List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
 
@@ -116,8 +116,8 @@ class DashboardServiceImplTest {
         Project p1 = createProject(1L, "Test Project 1");
 
         when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
-        when(engineerMapper.selectById(1L)).thenReturn(e1);
-        when(projectMapper.selectById(1L)).thenReturn(p1);
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
         List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
 
@@ -133,8 +133,8 @@ class DashboardServiceImplTest {
         Contract c2 = createContract(2L, "C002", 800000, 500000, LocalDate.of(2026, 8, 1)); // Newer
         
         when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1, c2));
-        when(engineerMapper.selectById(any())).thenReturn(createEngineer(1L, "Eng"));
-        when(projectMapper.selectById(any())).thenReturn(createProject(1L, "Proj"));
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(createEngineer(1L, "Eng")));
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(createProject(1L, "Proj")));
 
         List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
 

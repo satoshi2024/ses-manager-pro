@@ -22,6 +22,7 @@ public class NotificationApiController {
     private final NotificationService notificationService;
     private final NotificationGenerateService notificationGenerateService;
     private final SysUserService sysUserService;
+    private final org.springframework.context.MessageSource messageSource;
 
     @GetMapping
     public ApiResult<List<NotificationDto>> getNotifications(Authentication authentication) {
@@ -39,7 +40,7 @@ public class NotificationApiController {
             @RequestParam(required = false) Boolean unreadOnly,
             Authentication authentication) {
         Long userId = getCurrentUserId(authentication);
-        if (userId == null) return ApiResult.error(401, "認証されていません");
+        if (userId == null) return ApiResult.error(401, messageSource.getMessage("error.unauthorized", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()));
         return ApiResult.success(notificationService.pageForUser(userId, current, size, type, unreadOnly));
     }
 

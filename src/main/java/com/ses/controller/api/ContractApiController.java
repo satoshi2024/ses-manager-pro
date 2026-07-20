@@ -28,6 +28,7 @@ public class ContractApiController {
     private final ContractRenewalService contractRenewalService;
     private final ContractMapper contractMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final org.springframework.context.MessageSource messageSource;
 
     /**
      * 契約一覧取得
@@ -104,7 +105,7 @@ public class ContractApiController {
         contractService.saveWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
                 && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
-            return ApiResult.<Boolean>success("警告: 粗利がマイナスです", Boolean.TRUE);
+            return ApiResult.<Boolean>success(messageSource.getMessage("error.contract.negativeProfit", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()), Boolean.TRUE);
         }
         return ApiResult.success(Boolean.TRUE);
     }
@@ -129,7 +130,7 @@ public class ContractApiController {
         contractService.updateWithBusinessRules(contract);
         if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
                 && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
-            return ApiResult.<Boolean>success("警告: 粗利がマイナスです", Boolean.TRUE);
+            return ApiResult.<Boolean>success(messageSource.getMessage("error.contract.negativeProfit", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()), Boolean.TRUE);
         }
         return ApiResult.success(Boolean.TRUE);
     }

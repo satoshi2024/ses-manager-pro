@@ -82,9 +82,10 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
             BigDecimal pMin = p.getUnitPriceMin() != null ? p.getUnitPriceMin().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
             BigDecimal pMax = p.getUnitPriceMax() != null ? p.getUnitPriceMax().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
 
+            BigDecimal ePrice = engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
             MatchScore score = MatchScoreCalculator.calculate(
                     mustIds, niceIds, engSkillIds, pMin, pMax,
-                    engineer.getExpectedUnitPrice(), p.getStartDate(), engineer.getAvailableDate()
+                    ePrice, p.getStartDate(), engineer.getAvailableDate()
             );
 
             if (score.isExcluded()) continue;
@@ -144,9 +145,10 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
             BigDecimal pMin = project.getUnitPriceMin() != null ? project.getUnitPriceMin().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
             BigDecimal pMax = project.getUnitPriceMax() != null ? project.getUnitPriceMax().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
 
+            BigDecimal ePrice = e.getExpectedUnitPrice() != null ? e.getExpectedUnitPrice().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
             MatchScore score = MatchScoreCalculator.calculate(
                     mustIds, niceIds, eSkills, pMin, pMax,
-                    e.getExpectedUnitPrice(), project.getStartDate(), e.getAvailableDate()
+                    ePrice, project.getStartDate(), e.getAvailableDate()
             );
 
             if (score.isExcluded()) continue;

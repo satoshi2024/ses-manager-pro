@@ -63,7 +63,10 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
         List<SysUser> salesUsers = sysUserService.list(new QueryWrapper<SysUser>().eq("role", StatusConstants.ROLE_SALES).eq("status", 1));
 
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<Contract>()
+                .in("status", Arrays.asList("稼動中", "終了", "解約"))
+                .and(w -> w.le("start_date", endOfMonthDate).or().between("created_at", startOfMonthTime, endOfMonthTime))
+        );
 
         Set<Long> userIds = salesUsers.stream().map(SysUser::getId).collect(Collectors.toSet());
         for (Contract c : allContracts) {
@@ -128,7 +131,8 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
             if (!unattributed && c.getCreatedAt() != null &&
                     !c.getCreatedAt().isBefore(startOfMonthTime) &&
                     !c.getCreatedAt().isAfter(endOfMonthTime) &&
-                    c.getRenewedFromContractId() == null) {
+                    c.getRenewedFromContractId() == null &&
+                    !StatusConstants.CONTRACT_CANCELLED.equals(c.getStatus())) {
                 closedContractCountMap.put(uid, closedContractCountMap.getOrDefault(uid, 0) + 1);
             }
 
