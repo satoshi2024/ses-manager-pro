@@ -29,7 +29,7 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void onProposalCreated(Long engineerId) {
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer != null && "Bench".equals(engineer.getStatus())) {
             engineer.setStatus("提案中");
             engineerMapper.updateById(engineer);
@@ -39,7 +39,7 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void onContractActive(Long engineerId) {
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer != null) {
             engineer.setStatus("稼動中");
             engineerMapper.updateById(engineer);
@@ -49,7 +49,7 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void releaseIfIdle(Long engineerId) {
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer == null) {
             return;
         }

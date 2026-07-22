@@ -1,5 +1,7 @@
 let allSkillTags = [];
 
+let customersPromise = null;
+
 $(document).ready(function() {
     loadProjects();
     loadCustomersForSelect();
@@ -95,21 +97,32 @@ function renderPagination(pageData, loadFuncName) {
 }
 
 function loadCustomersForSelect() {
-    $.ajax({
-        url: '/api/customers?size=1000',
-        method: 'GET',
-        success: function(res) {
-            if (res.code === 200 && res.data) {
-                const customers = res.data.records || res.data;
-                const select = $('#proj-customerId');
-                select.empty();
-                select.append(`<option value="">${SES.i18n.t('project.modal.customer.placeholder') || '顧客を選択してください...'}</option>`);
-                customers.forEach(c => {
-                    select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
-                });
-            }
-        }
-    });
+    if (!customersPromise) {
+        customersPromise = new Promise((resolve, reject) => {
+            $.ajax({
+                url: '/api/customers?size=1000',
+                method: 'GET',
+                success: function(res) {
+                    if (res.code === 200 && res.data) {
+                        const customers = res.data.records || res.data;
+                        const select = $('#proj-customerId');
+                        select.empty();
+                        select.append(`<option value="">${SES.i18n.t('project.modal.customer.placeholder') || '顧客を選択してください...'}</option>`);
+                        customers.forEach(c => {
+                            select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                        });
+                        resolve();
+                    } else {
+                        resolve(); // Resolve anyway to not block execution
+                    }
+                },
+                error: function() {
+                    resolve(); // Resolve anyway to not block execution
+                }
+            });
+        });
+    }
+    return customersPromise;
 }
 
 function renderProjects(records) {
@@ -197,43 +210,44 @@ function fetchAndRenderProjectSkills(projectId) {
 }
 
 function editProject(id) {
-    $.ajax({
-        url: '/api/projects/' + id,
-        method: 'GET',
-        success: function(res) {
-            if (res.code === 200 && res.data) {
-                const proj = res.data;
-                $('#proj-id').val(proj.id);
-                $('#proj-projectName').val(proj.projectName);
-                
-                if (proj.customerId) {
-                    if ($('#proj-customerId option[value="' + proj.customerId + '"]').length === 0) {
-                        $('#proj-customerId').append(`<option value="${proj.customerId}">${SES.escapeHtml(proj.customerName || 'Unknown')}</option>`);
-                    }
+    Promise.all([
+        loadCustomersForSelect(),
+        $.ajax({ url: '/api/projects/' + id, method: 'GET' })
+    ]).then(([_, res]) => {
+        if (res.code === 200 && res.data) {
+            const proj = res.data;
+            $('#proj-id').val(proj.id);
+            $('#proj-projectName').val(proj.projectName);
+            
+            if (proj.customerId) {
+                if ($('#proj-customerId option[value="' + proj.customerId + '"]').length === 0) {
+                    $('#proj-customerId').append(`<option value="${proj.customerId}">${SES.escapeHtml(proj.customerName || 'Unknown')}</option>`);
                 }
-                $('#proj-customerId').val(proj.customerId || '');
-                $('#proj-unitPriceMin').val(proj.unitPriceMin);
-                $('#proj-unitPriceMax').val(proj.unitPriceMax);
-                $('#proj-requiredCount').val(proj.requiredCount != null ? proj.requiredCount : '');
-                $('#proj-remoteType').val(proj.remoteType);
-                $('#proj-status').val(proj.status);
-                
-                // Fetch skills
-                $.ajax({
-                    url: '/api/projects/' + id + '/skills',
-                    method: 'GET',
-                    success: function(skillRes) {
-                        $('#project-skills-container').empty();
-                        if (skillRes.code === 200 && skillRes.data) {
-                            skillRes.data.forEach(s => addProjectSkillRow(s));
-                        }
-                        bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).show();
-                    }
-                });
-            } else {
-                Toast.error(SES.i18n.t('js.common.error_fetch'));
             }
+            $('#proj-customerId').val(proj.customerId || '');
+            $('#proj-unitPriceMin').val(proj.unitPriceMin);
+            $('#proj-unitPriceMax').val(proj.unitPriceMax);
+            $('#proj-requiredCount').val(proj.requiredCount != null ? proj.requiredCount : '');
+            $('#proj-remoteType').val(proj.remoteType);
+            $('#proj-status').val(proj.status);
+            
+            // Fetch skills
+            $.ajax({
+                url: '/api/projects/' + id + '/skills',
+                method: 'GET',
+                success: function(skillRes) {
+                    $('#project-skills-container').empty();
+                    if (skillRes.code === 200 && skillRes.data) {
+                        skillRes.data.forEach(s => addProjectSkillRow(s));
+                    }
+                    bootstrap.Modal.getOrCreateInstance(document.getElementById('projectModal')).show();
+                }
+            });
+        } else {
+            Toast.error(SES.i18n.t('js.common.error_fetch'));
         }
+    }).catch(err => {
+        Toast.error(SES.i18n.t('js.common.error_network'));
     });
 }
 

@@ -27,6 +27,7 @@ import com.ses.common.util.PasswordPolicyValidator;
 public class UserApiController {
 
     private final SysUserService sysUserService;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
     private final EngineerSalesMapper engineerSalesMapper;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
@@ -82,8 +83,7 @@ public class UserApiController {
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw BusinessException.of("error.user.credentialsRequired");
         }
-        long duplicated = sysUserService.count(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, sysUser.getUsername()));
+        long duplicated = sysUserMapper.countUsernameIncludingDeleted(sysUser.getUsername(), null);
         if (duplicated > 0) {
             throw BusinessException.of("error.user.loginIdDuplicate");
         }
@@ -107,9 +107,7 @@ public class UserApiController {
         // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
         sysUser.setStatus(null);
         if (StringUtils.hasText(sysUser.getUsername())) {
-            long duplicated = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getUsername, sysUser.getUsername())
-                    .ne(sysUser.getId() != null, SysUser::getId, sysUser.getId()));
+            long duplicated = sysUserMapper.countUsernameIncludingDeleted(sysUser.getUsername(), id);
             if (duplicated > 0) {
                 throw BusinessException.of("error.user.loginIdDuplicate");
             }
@@ -144,9 +142,12 @@ public class UserApiController {
      */
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> updateStatus(@PathVariable Long id, @RequestParam Integer status, Authentication authentication) {
+        if (status == null || (status != 0 && status != 1)) {
+            throw BusinessException.of(400, "error.user.invalidStatus");
+        }
         guardNotSelf(id, authentication, "自分自身のステータスは変更できません");
-        // 無効化(status=0)する場合、現任担当が残っていれば拒否
-        if (Integer.valueOf(0).equals(status)) {
+        // 有効(status=1)以外へ切り替える場合、現任担当が残っていれば拒否
+        if (status != 1) {
             guardNoActiveSalesAssignments(id);
         }
         SysUser sysUser = new SysUser();

@@ -44,7 +44,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testOnProposalCreated() {
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         
         engineerStatusService.onProposalCreated(1L);
 
@@ -55,7 +55,7 @@ class EngineerStatusServiceImplTest {
     @Test
     void testOnProposalCreated_NotBench() {
         engineer.setStatus("稼動中");
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         
         engineerStatusService.onProposalCreated(1L);
 
@@ -65,7 +65,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testOnContractActive() {
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         
         engineerStatusService.onContractActive(1L);
 
@@ -75,7 +75,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testReleaseIfIdle_HasProposals() {
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
         engineerStatusService.releaseIfIdle(1L);
@@ -85,7 +85,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testReleaseIfIdle_HasContracts() {
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
@@ -97,7 +97,7 @@ class EngineerStatusServiceImplTest {
     @Test
     void testReleaseIfIdle_Idle() {
         engineer.setStatus("提案中");
-        when(engineerMapper.selectById(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
         when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 

@@ -66,6 +66,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "入力内容に誤りがあります：" + errorMessage));
     }
 
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ApiResult<Void>> handleAccessDeniedException(org.springframework.security.access.AccessDeniedException e) {
+        String message = messageSource.getMessage("error.accessDenied", null, "アクセス権限がありません", LocaleContextHolder.getLocale());
+        log.warn("アクセス拒否エラー: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResult.<Void>error(403, message));
+    }
+
     /**
      * 予期しない例外のハンドリング
      * 全てのキャッチされていない例外を処理する

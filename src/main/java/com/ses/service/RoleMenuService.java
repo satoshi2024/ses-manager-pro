@@ -17,4 +17,11 @@ public interface RoleMenuService extends IService<RoleMenu> {
      * @return メニューキー一覧
      */
     List<String> getMenuKeysByRole(String role);
+
+    /**
+     * マスタ内の全メニューキー一覧を取得する（管理者特権用）
+     *
+     * @return 全メニューキー一覧
+     */
+    List<String> getAllMenuKeys();
 }

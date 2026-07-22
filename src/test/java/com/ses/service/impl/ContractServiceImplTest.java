@@ -365,7 +365,7 @@ class ContractServiceImplTest {
     @Test
     void changeStatus_cancelRequiresCancelDate() {
         Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.changeStatus(1L, "解約", null));
@@ -376,7 +376,7 @@ class ContractServiceImplTest {
     @Test
     void changeStatus_cancelDateBeforeStartRejected() {
         Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), null);
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.changeStatus(1L, "解約", LocalDate.of(2026, 3, 31)));
@@ -387,7 +387,7 @@ class ContractServiceImplTest {
     @Test
     void changeStatus_cancelOverwritesEndDate() {
         Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
 
         contractService.changeStatus(1L, "解約", LocalDate.of(2026, 7, 15));
@@ -400,7 +400,7 @@ class ContractServiceImplTest {
     @Test
     void changeStatus_cancelDateAfterExistingEndDateRejected() {
         Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 8, 31));
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.changeStatus(1L, "解約", LocalDate.of(2026, 9, 30)));
@@ -411,7 +411,7 @@ class ContractServiceImplTest {
     @Test
     void changeStatus_endDoesNotChangeEndDate() {
         Contract c = activeContract(1L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 31));
-        when(contractMapper.selectById(1L)).thenReturn(c);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
 
         // 終了遷移では cancelDate を渡しても end_date は不変(自然満了)

@@ -121,8 +121,16 @@ public class MailServiceImpl implements MailService {
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
             log.error("メール送信に失敗しました: to={} subject={}", delivery.getRecipient(), delivery.getSubject(), e);
             notificationServiceProvider.ifAvailable(ns ->
-                    ns.publish("MAIL_FAILED", "メール送信失敗", delivery.getRecipient() + " 宛のメール送信に失敗しました",
+                    ns.publish("MAIL_FAILED", "メール送信失敗", maskEmail(delivery.getRecipient()) + " 宛のメール送信に失敗しました",
                             null, "MAIL_FAILED:" + delivery.getRecipient() + ":" + System.currentTimeMillis()));
         }
     }
+
+    private String maskEmail(String email) {
+        if (email == null || !email.contains("@")) return "***";
+        int atIdx = email.indexOf("@");
+        if (atIdx <= 2) return email.charAt(0) + "***" + email.substring(atIdx);
+        return email.substring(0, 2) + "***" + email.substring(atIdx);
+    }
 }
+

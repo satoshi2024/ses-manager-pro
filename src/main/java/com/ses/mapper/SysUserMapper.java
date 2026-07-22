@@ -70,4 +70,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
         </script>
         """)
     List<SysUser> selectByIdsIncludingDeleted(@Param("ids") Collection<Long> ids);
+
+    /**
+     * sys_user.username のテーブル一意制約違反を防止するため、論理削除済みも含めて重複件数を取得する。
+     */
+    @Select("SELECT COUNT(*) FROM sys_user WHERE username = #{username} AND (#{excludeId} IS NULL OR id != #{excludeId})")
+    long countUsernameIncludingDeleted(@Param("username") String username, @Param("excludeId") Long excludeId);
 }

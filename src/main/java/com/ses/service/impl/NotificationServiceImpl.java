@@ -101,12 +101,13 @@ public class NotificationServiceImpl implements NotificationService {
         return switch (type) {
             case "TIMESHEET_SUBMITTED" -> "work-record";
             case "TIMESHEET_REJECTED" -> "my-timesheet";
-            case "INVOICE_OVERDUE" -> "invoice";
-            case "CONTRACT_END", "CONTRACT_DRAFT" -> "contract";
+            case "INVOICE_OVERDUE", "BP_AMOUNT_MISMATCH" -> "invoice";
+            case "CONTRACT_END", "CONTRACT_DRAFT", "CONTRACT_RENEWAL_DRAFT" -> "contract";
             case "BENCH_LONG" -> "engineer";
             case "PROJECT_URGENT" -> "project";
             case "PROPOSAL_STALE" -> "proposal";
             case "FOLLOW_UP" -> "customer";
+            case "MAIL_FAILED" -> "user";
             default -> null;
         };
     }
@@ -140,7 +141,19 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);
-            webhookNotifier.notify(notification);
+            final Notification finalNotification = notification;
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            webhookNotifier.notify(finalNotification);
+                        }
+                    }
+                );
+            } else {
+                webhookNotifier.notify(notification);
+            }
         } catch (DuplicateKeyException e) {
             // idempotent
         }

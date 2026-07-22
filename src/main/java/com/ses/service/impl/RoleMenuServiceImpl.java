@@ -18,4 +18,9 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
     public List<String> getMenuKeysByRole(String role) {
         return baseMapper.selectMenuKeysByRole(role);
     }
+
+    @Override
+    public List<String> getAllMenuKeys() {
+        return baseMapper.selectAllMenuKeys();
+    }
 }

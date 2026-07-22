@@ -106,6 +106,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
      */
     private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
                                          String remarks, boolean fromDaily) {
+        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract2");
+        }
+
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
@@ -132,11 +137,6 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             if (!nos.isEmpty()) {
                 throw BusinessException.of("error.workRecord.invoicedEdit2", nos.get(0));
             }
-        }
-
-        Contract contract = contractMapper.selectById(contractId);
-        if (contract == null) {
-            throw BusinessException.of("error.workRecord.noContract2");
         }
 
         // 縦深防御: グリッド外からのAPI直叩きで契約期間外・非稼動契約に実績を作られないよう検証する。
@@ -215,16 +215,35 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return;
         }
 
+        // ロック順序の統一: Contract -> WorkRecord。デッドロック防止のため contractId 順でロック
+        List<Long> contractIds = records.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
+        for (Long cid : contractIds) {
+            contractMapper.selectByIdForUpdate(cid);
+        }
+
+        // ロック後に再取得し、並行する revisePrice や saveHours の最新単価・状態を反映する
+        records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
+                .eq("work_month", workMonth)
+                .in("status", "入力中", "提出済"));
+
         for (WorkRecord record : records) {
-            record.setStatus("確定");
-            baseMapper.updateById(record);
+            // updateById ではなく、ステータスのみを条件付き(CAS)で安全に更新する
+            int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
+                    .eq("id", record.getId())
+                    .in("status", "入力中", "提出済")
+                    .set("status", "確定"));
+            if (updated == 1) {
+                record.setStatus("確定");
+            }
         }
 
         // BP支払を生成(雇用形態がBPの要員に紐づく契約の確定実績について)
         for (WorkRecord record : records) {
-            String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
-            if ("BP".equals(employmentType)) {
-                generateOrSyncBpFor(record);
+            if ("確定".equals(record.getStatus())) {
+                String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+                if ("BP".equals(employmentType)) {
+                    generateOrSyncBpFor(record);
+                }
             }
         }
     }
@@ -338,7 +357,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
             throw BusinessException.of("error.workRecord.invalidMonth");
         }
-        Contract contract = contractMapper.selectById(contractId);
+        Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract2");
         }
@@ -403,6 +422,10 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
     @Transactional
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
         checkClosing(workMonth);
+        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract2");
+        }
         WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
                 .eq("contract_id", contractId)
                 .eq("work_month", workMonth));
@@ -519,6 +542,13 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
             throw BusinessException.of("error.workRecord.notFound2");
         }
         checkClosing(record.getWorkMonth());
+
+        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract2");
+        }
+        record = this.getById(workRecordId); // 再取得して最新の単価・状態を反映
+
         requireTransition(record, "確定");
         // 条件付きUPDATE（CAS）。提出済のときのみ確定へ遷移させ、後続BP生成を行う（R3R-10）。
         int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
@@ -526,6 +556,7 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
                 .eq("status", "提出済")
                 .set("status", "確定"));
         if (updated != 1) {
+            // 再試行。状態が変わったか、他のトランザクションが確定した
             throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
         record.setStatus("確定");

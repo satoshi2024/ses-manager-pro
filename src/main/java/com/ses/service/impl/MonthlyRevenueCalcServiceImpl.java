@@ -50,11 +50,12 @@ public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService 
 
         if (contracts != null) {
             for (Contract c : contracts) {
-                if (!isTargetInMonth(c, month)) {
-                    continue;
-                }
                 WorkRecord confirmed = confirmedByContractId == null ? null
                         : confirmedByContractId.get(c.getId());
+                boolean hasConfirmedRecord = confirmed != null && confirmed.getBillingAmount() != null;
+                if (!hasConfirmedRecord && !isTargetInMonth(c, month)) {
+                    continue;
+                }
                 ContractAmount amount = resolveWithPrice(c, confirmed,
                         priceMap != null ? priceMap.get(c.getId()) : null);
                 totalSales += amount.getSales().longValue();
@@ -118,6 +119,11 @@ public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService 
     public boolean isTargetInMonth(Contract contract, YearMonth month) {
         if (contract == null || contract.getStartDate() == null
                 || StatusConstants.CONTRACT_PREPARING.equals(contract.getStatus())) {
+            return false;
+        }
+        if ((StatusConstants.CONTRACT_ENDED.equals(contract.getStatus()) || "終了".equals(contract.getStatus())
+                || StatusConstants.CONTRACT_CANCELLED.equals(contract.getStatus()) || "解約".equals(contract.getStatus()))
+                && contract.getEndDate() == null) {
             return false;
         }
         LocalDate monthStart = month.atDay(1);

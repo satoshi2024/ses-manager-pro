@@ -88,7 +88,7 @@ class WorkRecordServiceImplTest {
         contract.setSettlementHoursMax(new BigDecimal("180"));
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         contract.setStatus("稼動中");
-        when(contractMapper.selectById(contractId)).thenReturn(contract);
+        when(contractMapper.selectByIdForUpdate(contractId)).thenReturn(contract);
         when(workRecordMapper.insert(any(WorkRecord.class))).thenReturn(1);
 
         // 実績150時間（範囲内）→ 基本料金のみ
@@ -396,7 +396,7 @@ class WorkRecordServiceImplTest {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
         // 契約期間 2026-08〜2026-09。対象月 2026-07 は期間前。
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 9, 30), "稼動中"));
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
@@ -408,7 +408,7 @@ class WorkRecordServiceImplTest {
     void testSaveHours_準備中契約は拒否() {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "準備中"));
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
@@ -420,7 +420,7 @@ class WorkRecordServiceImplTest {
     void testSaveHours_終了契約_期間内は登録できる() {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "終了"));
         when(workRecordMapper.insert(any(WorkRecord.class))).thenReturn(1);
 
@@ -440,7 +440,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         // 解約で 2026-03 まで短縮された契約。対象月 2026-07 は期間外＋状態も解約。
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31), "解約"));
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
@@ -456,7 +456,7 @@ class WorkRecordServiceImplTest {
     void testSaveHours_解約済み契約への新規作成は拒否() {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null); // 新規
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "解約"));
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, "2026-07", new BigDecimal("150"), "x"))
@@ -468,7 +468,7 @@ class WorkRecordServiceImplTest {
     void testSaveHours_月形式不正は拒否() {
         Long contractId = 1L;
         when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
-        when(contractMapper.selectById(contractId))
+        when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "稼動中"));
 
         // R3R-15: 不正な年月形式は400のBusinessExceptionで拒否される（500にしない）。
@@ -491,7 +491,7 @@ class WorkRecordServiceImplTest {
         contract.setSettlementHoursMax(new BigDecimal("180"));
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         contract.setStatus("稼動中");
-        when(contractMapper.selectById(contractId)).thenReturn(contract);
+        when(contractMapper.selectByIdForUpdate(contractId)).thenReturn(contract);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doThrow(new org.springframework.dao.DuplicateKeyException("Duplicate entry")).when(spyService).saveOrUpdate(any(WorkRecord.class));
@@ -614,7 +614,7 @@ class WorkRecordServiceImplTest {
         
         com.ses.entity.Contract mockContract = new com.ses.entity.Contract();
         mockContract.setId(1L);
-        when(contractMapper.selectById(1L)).thenReturn(mockContract);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(mockContract);
         com.ses.entity.WorkRecordDaily daily = new com.ses.entity.WorkRecordDaily();
         daily.setWorkDate(LocalDate.of(2026, 7, 1));
         daily.setStartTime(java.time.LocalTime.of(9, 0));

@@ -90,4 +90,14 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         WHERE c.id = #{contractId}
     """)
     String selectEmploymentTypeByContractId(@Param("contractId") Long contractId);
+
+    @org.apache.ibatis.annotations.Update("""
+        UPDATE t_work_record
+        SET billing_amount = #{billingAmount}, payment_amount = #{paymentAmount}, updated_at = NOW()
+        WHERE id = #{id} AND status != '確定' AND actual_hours = #{actualHours}
+    """)
+    int updateBillingAndPayment(@Param("id") Long id,
+                                @Param("actualHours") java.math.BigDecimal actualHours,
+                                @Param("billingAmount") java.math.BigDecimal billingAmount,
+                                @Param("paymentAmount") java.math.BigDecimal paymentAmount);
 }

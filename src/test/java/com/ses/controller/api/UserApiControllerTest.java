@@ -42,6 +42,8 @@ class UserApiControllerTest {
     @MockBean
     private SysUserService sysUserService;
     @MockBean
+    private com.ses.mapper.SysUserMapper sysUserMapper;
+    @MockBean
     private PasswordEncoder passwordEncoder;
     @MockBean
     private com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
@@ -60,7 +62,7 @@ class UserApiControllerTest {
     @Test
     @WithMockUser
     void save_正常は200() throws Exception {
-        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(passwordEncoder.encode(anyString())).thenReturn("ENC");
         when(sysUserService.save(any())).thenReturn(true);
 
@@ -90,7 +92,7 @@ class UserApiControllerTest {
     @Test
     @WithMockUser
     void save_弱いパスワードは業務エラー() throws Exception {
-        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         // 数字なし・8文字未満のパスワード → パスワードポリシー違反(BusinessException=500)
         Map<String, Object> body = Map.of("username", "tester", "password", "abc", "role", "営業");
         mockMvc.perform(post("/api/users").with(csrf())
@@ -143,7 +145,7 @@ class UserApiControllerTest {
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void update_営業から他ロールへの変更で現任担当ありは拒否() throws Exception {
-        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(sysUserService.getOne(any())).thenReturn(null); // 自己変更ガード通過
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);
@@ -164,7 +166,7 @@ class UserApiControllerTest {
     @WithMockUser(username = "admin", roles = "管理者")
     void update_statusを含めても無効化ガードを迂回できず_statusは無視される() throws Exception {
         // G1: 汎用 update に status=0 を混ぜても、status は null 化され updateById に渡らない。
-        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(sysUserService.getOne(any())).thenReturn(null);
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);
@@ -189,7 +191,7 @@ class UserApiControllerTest {
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void update_ロール不変なら担当ありでも他項目編集は成功() throws Exception {
-        when(sysUserService.count(any())).thenReturn(0L);
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(sysUserService.getOne(any())).thenReturn(null);
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);

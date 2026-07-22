@@ -24,7 +24,7 @@ public class EngineerPageController {
      */
     @GetMapping("/form")
     public String form() {
-        return "engineer/form";
+        return "redirect:/engineer/list";
     }
 
     /**

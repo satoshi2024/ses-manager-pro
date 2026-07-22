@@ -203,7 +203,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long contractId, String newStatus, LocalDate cancelDate) {
-        Contract contract = this.baseMapper.selectById(contractId);
+        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of(404, "error.contract.notFound");
         }
@@ -228,6 +228,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 throw BusinessException.of("error.contract.cancelDateAfterEnd");
             }
             contract.setEndDate(cancelDate);
+        } else if (StatusConstants.CONTRACT_ENDED.equals(newStatus) || "終了".equals(newStatus)) {
+            if (contract.getEndDate() == null) {
+                contract.setEndDate(cancelDate != null ? cancelDate : LocalDate.now());
+            }
         }
         contract.setStatus(newStatus);
         this.baseMapper.updateById(contract);
@@ -419,6 +423,31 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                         contract, java.time.YearMonth.now(), fresh);
         // 単価列だけを部分UPDATEし、他項目を巻き戻さない（R3R-29）。
         this.baseMapper.updatePriceOnly(contractId, current.getSellingPrice(), current.getCostPrice());
+
+        // 未確定の既存勤怠（applyFromMonth以降）の金額を再計算
+        List<WorkRecord> unconfirmedRecords = workRecordMapper.selectList(
+                new QueryWrapper<WorkRecord>()
+                        .eq("contract_id", contractId)
+                        .ge("work_month", applyFromMonth)
+                        .ne("status", "確定"));
+        for (WorkRecord wr : unconfirmedRecords) {
+            if (wr.getActualHours() != null) {
+                java.time.YearMonth ym = java.time.YearMonth.parse(wr.getWorkMonth());
+                com.ses.service.billing.ContractPriceResolver.ResolvedPrice rp =
+                        com.ses.service.billing.ContractPriceResolver.resolveFrom(contract, ym, fresh);
+                BigDecimal bAmt = com.ses.service.billing.SettlementCalculator.calc(
+                        rp.getSellingPrice(),
+                        contract.getSettlementHoursMin(),
+                        contract.getSettlementHoursMax(),
+                        wr.getActualHours());
+                BigDecimal pAmt = rp.getCostPrice() != null ? com.ses.service.billing.SettlementCalculator.calc(
+                        rp.getCostPrice(),
+                        contract.getSettlementHoursMin(),
+                        contract.getSettlementHoursMax(),
+                        wr.getActualHours()) : null;
+                workRecordMapper.updateBillingAndPayment(wr.getId(), wr.getActualHours(), bAmt, pAmt);
+            }
+        }
 
         // 過去遡及かつ確定済み実績があれば警告。
         boolean retroactive = applyFrom.isBefore(java.time.YearMonth.now());

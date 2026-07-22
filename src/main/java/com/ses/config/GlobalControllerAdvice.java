@@ -80,6 +80,9 @@ public class GlobalControllerAdvice {
             return Collections.emptyList();
         }
         try {
+            if ("管理者".equals(role)) {
+                return roleMenuService.getAllMenuKeys();
+            }
             return roleMenuService.getMenuKeysByRole(role);
         } catch (Exception e) {
             log.warn("メニュー権限の取得に失敗しました（role={}）", role, e);

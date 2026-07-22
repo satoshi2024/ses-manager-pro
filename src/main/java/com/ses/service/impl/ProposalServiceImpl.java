@@ -34,6 +34,10 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     private final ContractService contractService;
     private final NotificationService notificationService;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     private static final Map<String, Set<String>> ALLOWED = Map.of(
         "書類選考中", Set.of("一次面接", "見送り"),
         "一次面接",   Set.of("二次面接", "結果待ち", "見送り"),
@@ -82,9 +86,17 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, String newStatus) {
-        Proposal proposal = this.getById(id);
+        Proposal proposal = this.baseMapper.selectByIdForUpdate(id);
         if (proposal == null) {
             throw BusinessException.of("error.proposal.notFound");
+        }
+        if (dataScopeService != null) {
+            if (proposal.getEngineerId() != null) {
+                dataScopeService.assertAllowedEngineer(proposal.getEngineerId());
+            }
+            if (proposal.getProjectId() != null) {
+                dataScopeService.assertAllowedProject(proposal.getProjectId());
+            }
         }
         
         String oldStatus = proposal.getStatus();

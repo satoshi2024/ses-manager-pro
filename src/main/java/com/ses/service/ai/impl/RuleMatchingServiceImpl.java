@@ -42,9 +42,13 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
     private final SkillTagMapper skillTagMapper;
     private final AiLogMapper aiLogMapper;
     private final ObjectMapper objectMapper;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @Override
     public List<MatchResultDto> findMatchingProjects(Long engineerId) {
+        if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+        }
         Engineer engineer = engineerMapper.selectById(engineerId);
         if (engineer == null) {
             return Collections.emptyList();
@@ -55,9 +59,15 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
                 .map(EngineerSkillDetailDto::getSkillId)
                 .collect(Collectors.toSet());
 
-        List<Project> activeProjects = projectMapper.selectList(
-                new LambdaQueryWrapper<Project>().eq(Project::getStatus, "募集中")
-        );
+        LambdaQueryWrapper<Project> pWrapper = new LambdaQueryWrapper<Project>().eq(Project::getStatus, "募集中");
+        if (dataScopeService.isScoped()) {
+            Set<Long> allowedProjectIds = dataScopeService.allowedProjectIds();
+            if (allowedProjectIds == null || allowedProjectIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            pWrapper.in(Project::getId, allowedProjectIds);
+        }
+        List<Project> activeProjects = projectMapper.selectList(pWrapper);
         if (activeProjects.isEmpty()) {
             return Collections.emptyList();
         }
@@ -109,6 +119,9 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
 
     @Override
     public List<MatchResultDto> findMatchingEngineers(Long projectId) {
+        if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedProject(projectId);
+        }
         Project project = projectMapper.selectById(projectId);
         if (project == null) {
             return Collections.emptyList();
@@ -120,9 +133,15 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
         Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
-        List<Engineer> candidates = engineerMapper.selectList(
-                new LambdaQueryWrapper<Engineer>().in(Engineer::getStatus, Arrays.asList("Bench", "提案中"))
-        );
+        LambdaQueryWrapper<Engineer> eWrapper = new LambdaQueryWrapper<Engineer>().in(Engineer::getStatus, Arrays.asList("Bench", "提案中"));
+        if (dataScopeService.isScoped()) {
+            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
+            if (allowedEngineerIds == null || allowedEngineerIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            eWrapper.in(Engineer::getId, allowedEngineerIds);
+        }
+        List<Engineer> candidates = engineerMapper.selectList(eWrapper);
         if (candidates.isEmpty()) {
             return Collections.emptyList();
         }

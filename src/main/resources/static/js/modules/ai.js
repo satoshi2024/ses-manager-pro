@@ -1,6 +1,6 @@
 $(document).ready(function() {
-    // Load API Key from localStorage
-    const savedApiKey = localStorage.getItem('geminiApiKey');
+    // Load API Key from sessionStorage (not stored permanently in localStorage)
+    const savedApiKey = sessionStorage.getItem('geminiApiKey');
     if (savedApiKey) {
         $('#geminiApiKey').val(savedApiKey);
     } else {
@@ -18,11 +18,11 @@ $(document).ready(function() {
     $('#saveSettingsBtn').click(function() {
         const key = $('#geminiApiKey').val().trim();
         if (key) {
-            localStorage.setItem('geminiApiKey', key);
-            Toast.success('APIキーを保存しました');
+            sessionStorage.setItem('geminiApiKey', key);
+            Toast.success('APIキーを設定しました（セッション保持）');
             $('#settingsPanel').collapse('hide');
         } else {
-            localStorage.removeItem('geminiApiKey');
+            sessionStorage.removeItem('geminiApiKey');
             Toast.warning('APIキーがクリアされました');
         }
     });
@@ -235,14 +235,14 @@ function sendMessage() {
             if (res.code === 200) {
                 appendMessage('ai', res.data);
             } else {
-                appendMessage('ai', `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> エラー: ${res.message}</span>`, false);
+                appendMessage('ai', `エラー: ${res.message}`, false);
             }
         },
         error: function(err) {
             console.error(err);
             // Remove thinking dots
             $('#thinkingMessage').remove();
-            appendMessage('ai', '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> サーバー通信エラーが発生しました。</span>', false);
+            appendMessage('ai', 'サーバー通信エラーが発生しました。', false);
         },
         complete: function() {
             // Restore UI state
@@ -284,20 +284,30 @@ function appendMessage(sender, text, parseMarkdown = true) {
         const contentEl = document.getElementById(msgId);
 
         if (parseMarkdown) {
-            const renderedHtml = marked.parse(text);
+            const rawHtml = marked.parse(text);
+            const renderedHtml = sanitizeHtml(rawHtml);
             // Use HTML typewriter for markdown content
             typeWriterHtml(contentEl, renderedHtml, 20, function() {
                 // Finalize: ensure the container has clean HTML (remove wrapper)
                 const $container = $(contentEl).find('.typewriter-html-container');
                 const finalHtml = $container.html();
-                $(contentEl).html(finalHtml);
+                $(contentEl).html(sanitizeHtml(finalHtml));
             });
         } else {
-            // Error messages - show immediately without animation
-            $(contentEl).html(text);
+            // Error messages - render icon and escaped text safely
+            const $errSpan = $('<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> </span>');
+            $errSpan.append(document.createTextNode(text));
+            $(contentEl).empty().append($errSpan);
             chatBox.scrollTop(chatBox[0].scrollHeight);
         }
     }
+}
+
+function sanitizeHtml(html) {
+    if (window.DOMPurify) {
+        return DOMPurify.sanitize(html);
+    }
+    return escapeHtml(html);
 }
 
 function escapeHtml(unsafe) {

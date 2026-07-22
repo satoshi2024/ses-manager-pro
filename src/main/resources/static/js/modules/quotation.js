@@ -219,7 +219,7 @@ function openQuotationModal(q) {
                     fetch(`/api/quotations/${q.id}/remarks`, {
                         method: 'POST',
                         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
-                        body: JSON.stringify({ additional: txt })
+                        body: JSON.stringify({ additionalRemark: txt })
                     }).then(res => res.json()).then(resData => {
                         if (resData.code === 200) {
                             if(window.SES && SES.toast) SES.toast.success('備考を追記しました');

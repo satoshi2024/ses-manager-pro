@@ -1,11 +1,13 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
+import com.ses.config.AiConfig;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
 import com.ses.service.GeminiService;
+import com.ses.service.security.DataScopeService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +20,8 @@ public class AiRestController {
     private final GeminiService geminiService;
     private final EngineerService engineerService;
     private final ProjectService projectService;
+    private final DataScopeService dataScopeService;
+    private final AiConfig aiConfig;
 
     @Data
     public static class AiChatRequest {
@@ -29,11 +33,15 @@ public class AiRestController {
 
     @PostMapping("/chat")
     public ApiResult<String> chat(@RequestBody AiChatRequest request) {
+        if (!aiConfig.isEnabled()) {
+            return ApiResult.error(400, "AI機能は現在無効化されています。");
+        }
         try {
             StringBuilder finalPrompt = new StringBuilder();
 
             // コンテキストの追加
             if (request.getEngineerId() != null) {
+                dataScopeService.assertAllowedEngineer(request.getEngineerId());
                 Engineer eng = engineerService.getById(request.getEngineerId());
                 if (eng != null) {
                     finalPrompt.append("【要員情報】\n")
@@ -45,6 +53,7 @@ public class AiRestController {
             }
 
             if (request.getProjectId() != null) {
+                dataScopeService.assertAllowedProject(request.getProjectId());
                 Project proj = projectService.getById(request.getProjectId());
                 if (proj != null) {
                     finalPrompt.append("【案件情報】\n")
@@ -67,3 +76,4 @@ public class AiRestController {
         }
     }
 }
+

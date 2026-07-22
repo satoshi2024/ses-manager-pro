@@ -7,6 +7,7 @@ import com.ses.entity.Customer;
 import com.ses.entity.Project;
 import com.ses.entity.Quotation;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.ContractService;
@@ -45,6 +46,9 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
 
     @Autowired
     private ProjectMapper projectMapper;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
 
     // ContractServiceImpl も QuotationMapperではないがドラフトはContract側で生成。循環回避のため Lazy。
     @Autowired
@@ -136,8 +140,19 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         if (!ALLOWED.getOrDefault(q.getStatus(), Set.of()).contains(newStatus)) {
             throw BusinessException.of("error.quotation.statusTransitionInvalid", q.getStatus(), newStatus);
         }
-        if ("受注".equals(newStatus) && q.getEngineerId() == null) {
-            throw BusinessException.of(409, "error.quotation.engineerRequired");
+        if ("受注".equals(newStatus)) {
+            if (q.getEngineerId() == null) {
+                throw BusinessException.of(409, "error.quotation.engineerRequired");
+            }
+            if (q.getProjectId() == null) {
+                throw BusinessException.of(409, "error.quotation.projectRequired");
+            }
+            if (engineerMapper.selectById(q.getEngineerId()) == null) {
+                throw BusinessException.of(404, "error.engineer.notFound");
+            }
+            if (projectMapper.selectById(q.getProjectId()) == null) {
+                throw BusinessException.of(404, "error.project.notFound");
+            }
         }
         q.setStatus(newStatus);
         this.updateById(q);

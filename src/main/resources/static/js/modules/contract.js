@@ -1,3 +1,5 @@
+let optionsPromise = null;
+
 $(document).ready(function() {
     loadContracts();
     loadSelectOptions();
@@ -57,74 +59,74 @@ function loadContracts() {
 }
 
 function loadSelectOptions() {
-    // マスタは全件セレクトに載せる(既定 size=10 のページングだと11件目以降の要員/案件/顧客を持つ
-    // 契約が編集不能になるため、十分大きい size を明示する)。
-    // Load Engineers
-    $.get('/api/engineers?size=1000', function(res) {
-        if(res.code === 200 && res.data) {
-            const select = $('#cont-engineerId');
-            select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
-            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
-        }
-    });
-    // Load Projects
-    $.get('/api/projects?size=1000', function(res) {
-        if(res.code === 200 && res.data) {
-            const select = $('#cont-projectId');
-            select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
-            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
-        }
-    });
-    // Load Customers
-    $.get('/api/customers?size=1000', function(res) {
-        if(res.code === 200 && res.data) {
-            const select = $('#cont-customerId');
-            const searchSelect = $('#search-customerId');
-            select.empty().append(`<option value="">${SES.i18n.t('contract.customer.select')}</option>`);
-            searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.customer.filter')}</option>`);
-            (res.data.records || res.data).forEach(c => {
-                select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
-                searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
-            });
-        }
-    });
-    // Load Sales Reps
-    $.get('/api/engineers/sales-user-options', function(res) {
-        if(res.code === 200 && res.data) {
-            const select = $('#cont-salesUserId');
-            const searchSelect = $('#search-salesUserId');
-            select.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.select')}</option>`);
-            searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.filter')}</option>`);
-            // 担当営業未設定での絞り込みオプション(営業成績「未帰属」行からのリンク先)
-            searchSelect.append(`<option value="none">${SES.i18n.t('contract.salesRep.unassigned')}</option>`);
-            res.data.forEach(u => {
-                select.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
-                searchSelect.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
-            });
-            // URL に ?salesUserId=none が付いていれば未設定フィルタを初期選択して再検索する
-            const urlSales = new URLSearchParams(window.location.search).get('salesUserId');
-            if (urlSales === 'none') {
-                searchSelect.val('none');
-                loadContracts();
+    if (!optionsPromise) {
+        const p1 = $.get('/api/engineers?size=1000').then(res => {
+            if(res.code === 200 && res.data) {
+                const select = $('#cont-engineerId');
+                select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
+                (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
             }
-        }
-    });
-
-    // Auto preset primary sales rep when engineer is selected (新規登録時のみ有効。編集時のプリセットを壊さないよう、ユーザー操作の change でのみ発火)
-    $('#cont-engineerId').on('change', function() {
-        const engId = $(this).val();
-        $('#cont-salesUserId').val('');
-        if (engId) {
-            $.get(`/api/engineers/${engId}/sales-reps`, function(res) {
-                if(res.code === 200 && res.data) {
-                    const primary = res.data.find(r => r.primaryFlag === 1);
-                    if (primary) {
-                        $('#cont-salesUserId').val(primary.salesUserId);
-                    }
+        });
+        const p2 = $.get('/api/projects?size=1000').then(res => {
+            if(res.code === 200 && res.data) {
+                const select = $('#cont-projectId');
+                select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
+                (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
+            }
+        });
+        const p3 = $.get('/api/customers?size=1000').then(res => {
+            if(res.code === 200 && res.data) {
+                const select = $('#cont-customerId');
+                const searchSelect = $('#search-customerId');
+                select.empty().append(`<option value="">${SES.i18n.t('contract.customer.select')}</option>`);
+                searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.customer.filter')}</option>`);
+                (res.data.records || res.data).forEach(c => {
+                    select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                    searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                });
+            }
+        });
+        const p4 = $.get('/api/engineers/sales-user-options').then(res => {
+            if(res.code === 200 && res.data) {
+                const select = $('#cont-salesUserId');
+                const searchSelect = $('#search-salesUserId');
+                const currentSalesVal = select.val();
+                select.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.select')}</option>`);
+                searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.salesRep.filter')}</option>`);
+                searchSelect.append(`<option value="none">${SES.i18n.t('contract.salesRep.unassigned')}</option>`);
+                res.data.forEach(u => {
+                    select.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
+                    searchSelect.append(`<option value="${u.id}">${SES.escapeHtml(u.realName)}</option>`);
+                });
+                if (currentSalesVal && select.find(`option[value="${currentSalesVal}"]`).length > 0) {
+                    select.val(currentSalesVal);
                 }
-            });
-        }
-    });
+                const urlSales = new URLSearchParams(window.location.search).get('salesUserId');
+                if (urlSales === 'none') {
+                    searchSelect.val('none');
+                    loadContracts();
+                }
+            }
+        });
+
+        $('#cont-engineerId').on('change', function() {
+            const engId = $(this).val();
+            $('#cont-salesUserId').val('');
+            if (engId) {
+                $.get(`/api/engineers/${engId}/sales-reps`, function(res) {
+                    if(res.code === 200 && res.data) {
+                        const primary = res.data.find(r => r.primaryFlag === 1);
+                        if (primary) {
+                            $('#cont-salesUserId').val(primary.salesUserId);
+                        }
+                    }
+                });
+            }
+        });
+
+        optionsPromise = Promise.all([p1, p2, p3, p4]);
+    }
+    return optionsPromise;
 }
 
 function renderContracts(list) {
@@ -202,9 +204,11 @@ function openNewContract() {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).show();
 }
 
-// 編集モーダルを開く。GET /api/contracts/{id} で全項目を取得しプリセット。
 function openEditContract(id) {
-    $.get('/api/contracts/' + id, function(res) {
+    Promise.all([
+        loadSelectOptions(),
+        $.get('/api/contracts/' + id)
+    ]).then(([_, res]) => {
         if (res.code !== 200 || !res.data) {
             Toast.error(res.message || SES.i18n.t('js.common.error_fetch'));
             return;
@@ -215,11 +219,10 @@ function openEditContract(id) {
         $('#cont-engineerId').val(c.engineerId != null ? String(c.engineerId) : '');
         $('#cont-projectId').val(c.projectId != null ? String(c.projectId) : '');
         $('#cont-customerId').val(c.customerId != null ? String(c.customerId) : '');
-        // 担当営業が退職済み等でセレクト対象外(在職営業のみロードされる)の場合、原値を保持する
-        // option を動的補完する。これがないと val() が空になり PUT で salesUserId=null(ALWAYS)が
-        // 書き込まれ、成約帰属・営業成績が無警告で消える。
+        
         if (c.salesUserId != null && $(`#cont-salesUserId option[value="${c.salesUserId}"]`).length === 0) {
-            $('#cont-salesUserId').append(`<option value="${c.salesUserId}">${SES.escapeHtml(SES.i18n.t('contract.salesRep.inactive'))}</option>`);
+            const displayName = c.salesUserName || SES.i18n.t('contract.salesRep.inactive');
+            $('#cont-salesUserId').append(`<option value="${c.salesUserId}">${SES.escapeHtml(displayName)}</option>`);
         }
         $('#cont-salesUserId').val(c.salesUserId != null ? String(c.salesUserId) : '');
         $('#cont-contractType').val(c.contractType || '準委任');
@@ -234,7 +237,6 @@ function openEditContract(id) {
         $('#cont-commissionBaseType').val(c.commissionBaseType || '');
         if (c.quotationId) {
             $('#cont-quotationLinkWrapper').show();
-            // 元見積の画面（scope検証済み詳細API経由でmodal表示）とPDFを別導線で提供する（R3R-28）。
             $('#cont-quotationDetailLink').attr('href', '/quotation?openId=' + encodeURIComponent(c.quotationId));
             $('#cont-quotationLink').attr('href', '/api/quotations/' + encodeURIComponent(c.quotationId) + '/pdf');
         } else {
@@ -244,6 +246,8 @@ function openEditContract(id) {
         $('#contractModalTitle').text(SES.i18n.t('contract.edit'));
         $('#contractSaveBtnLabel').text(SES.i18n.t('common.save'));
         bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).show();
+    }).catch(err => {
+        Toast.error(SES.i18n.t('js.common.error_network'));
     });
 }
 

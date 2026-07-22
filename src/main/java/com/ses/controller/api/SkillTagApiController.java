@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import java.util.List;
 
 /**
@@ -49,6 +51,7 @@ public class SkillTagApiController {
      * スキルタグ登録
      */
     @PostMapping
+    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
     public ApiResult<Boolean> save(@Valid @RequestBody SkillTag skillTag) {
         com.ses.common.util.EntityProtectUtil.protectForCreate(skillTag);
         return ApiResult.success(skillTagService.save(skillTag));
@@ -58,6 +61,7 @@ public class SkillTagApiController {
      * スキルタグ更新
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SkillTag skillTag) {
         skillTag.setId(id);
         boolean success = skillTagService.updateById(skillTag);
@@ -69,6 +73,7 @@ public class SkillTagApiController {
      * スキルタグ削除
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
         boolean success = skillTagService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");

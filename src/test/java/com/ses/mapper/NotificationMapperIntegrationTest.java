@@ -2,6 +2,8 @@ package com.ses.mapper;
 
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationRead;
+import com.ses.entity.SysUser;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,9 +30,36 @@ class NotificationMapperIntegrationTest {
     @Autowired
     private NotificationReadMapper notificationReadMapper;
 
+    @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @BeforeEach
+    void setUp() {
+        ensureAdminUser(1L, "admin_test1");
+        ensureAdminUser(2L, "admin_test2");
+    }
+
+    private void ensureAdminUser(Long id, String username) {
+        SysUser user = sysUserMapper.selectById(id);
+        if (user == null) {
+            user = new SysUser();
+            user.setId(id);
+            user.setUsername(username);
+            user.setPassword("password");
+            user.setRealName("Test Admin");
+            user.setRole("管理者");
+            user.setStatus(1);
+            sysUserMapper.insert(user);
+        } else {
+            user.setRole("管理者");
+            sysUserMapper.updateById(user);
+        }
+    }
+
     private Long insertNotification(String dedupeKey) {
         Notification n = new Notification();
         n.setType("CONTRACT_END");
+        n.setMenuKey("contract");
         n.setTitle("title");
         n.setMessage("message");
         n.setDedupeKey(dedupeKey);

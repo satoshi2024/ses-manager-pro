@@ -163,11 +163,33 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         } else {
             systemConfigMapper.updateById(config);
         }
-        // キャッシュ更新
-        if (value != null) {
-            cache.put(key, value);
+        // キャッシュ更新 (トランザクションコミット後にのみ可視化し、ロールバック時は破棄)
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        if (value != null) {
+                            cache.put(key, value);
+                        } else {
+                            cache.remove(key);
+                        }
+                    }
+
+                    @Override
+                    public void afterCompletion(int status) {
+                        if (status != STATUS_COMMITTED) {
+                            cache.remove(key);
+                        }
+                    }
+                }
+            );
         } else {
-            cache.remove(key);
+            if (value != null) {
+                cache.put(key, value);
+            } else {
+                cache.remove(key);
+            }
         }
     }
 

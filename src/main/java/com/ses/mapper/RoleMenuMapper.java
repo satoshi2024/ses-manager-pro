@@ -23,4 +23,7 @@ public interface RoleMenuMapper extends BaseMapper<RoleMenu> {
             "JOIN m_menu m ON m.id = rm.menu_id " +
             "WHERE rm.role = #{role}")
     List<String> selectMenuKeysByRole(@Param("role") String role);
+
+    @Select("SELECT menu_key FROM m_menu ORDER BY sort_order ASC")
+    List<String> selectAllMenuKeys();
 }

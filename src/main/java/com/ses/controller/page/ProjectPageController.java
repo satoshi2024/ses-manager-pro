@@ -24,7 +24,7 @@ public class ProjectPageController {
      */
     @GetMapping("/form")
     public String form() {
-        return "project/form";
+        return "redirect:/project/list";
     }
 
 }

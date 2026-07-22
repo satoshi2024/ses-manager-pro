@@ -186,6 +186,11 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
                 log.warn("CJKフォントの読み込みに失敗しました: {}", candidate, e);
             }
         }
+        try {
+            return BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
+        } catch (Exception e) {
+            log.warn("フォールバックフォントの作成に失敗しました", e);
+        }
         throw new BusinessException(
                 "PDF生成用の日本語フォントが見つかりません。app.pdf.font-path でフォントファイルのパスを指定してください。");
     }
