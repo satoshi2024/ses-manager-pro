@@ -537,3 +537,23 @@ CREATE TABLE t_resume_ingestion (
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT
 );
+
+DROP TABLE IF EXISTS t_project_ingestion;
+CREATE TABLE t_project_ingestion (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  source_type         VARCHAR(10) NOT NULL,
+  original_file_name  VARCHAR(255),
+  stored_file_name    VARCHAR(120),
+  raw_text            LONGTEXT,
+  status              VARCHAR(20) NOT NULL DEFAULT '取込待ち',
+  parsed_json         LONGTEXT,
+  ai_provider         VARCHAR(30),
+  ai_model            VARCHAR(60),
+  error_message       VARCHAR(500),
+  converted_project_id BIGINT,
+  review_note         VARCHAR(500),
+  created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag        TINYINT NOT NULL DEFAULT 0,
+  created_by          BIGINT
+);

@@ -22,7 +22,7 @@ import com.ses.service.EngineerService;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.FileStorageService;
 import com.ses.service.ResumeIngestionService;
-import com.ses.service.ResumeTextExtractor;
+import com.ses.service.DocumentTextExtractor;
 import com.ses.service.SkillTagResolver;
 import com.ses.service.ai.ResumeParseService;
 import lombok.RequiredArgsConstructor;
@@ -55,7 +55,7 @@ public class ResumeIngestionServiceImpl
     private static final String STATUS_FAILED   = "\u5931\u6557";
 
     private final FileStorageService fileStorageService;
-    private final ResumeTextExtractor resumeTextExtractor;
+    private final DocumentTextExtractor documentTextExtractor;
     private final ResumeParseService resumeParseService;
     private final EngineerService engineerService;
     private final EngineerSkillService engineerSkillService;
@@ -115,7 +115,7 @@ public class ResumeIngestionServiceImpl
 
         try {
             // 1. テキスト抽出
-            String text = resumeTextExtractor.extract(job.getStoredFileName(), job.getFileExt());
+            String text = documentTextExtractor.extract(job.getStoredFileName(), job.getFileExt());
             if (text == null || text.isBlank()) {
                 log.warn("テキストの抽出結果が空でした: jobId={}", id);
                 updateFailed(id, "テキスト抽出に失敗しました。画像 PDF または空ファイルの可能性があります。");

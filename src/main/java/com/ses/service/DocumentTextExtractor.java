@@ -3,7 +3,7 @@ package com.ses.service;
 /**
  * ファイルからプレーンテキストを抽出するサービスインターフェース。
  */
-public interface ResumeTextExtractor {
+public interface DocumentTextExtractor {
 
     /**
      * 保存済みファイルからプレーンテキストを抽出する。

@@ -48,9 +48,15 @@
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
-                    <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project') ? 'active bg-tertiary text-white' : 'text-secondary'}">
-                        <i class="bi bi-folder me-2"></i>
+                    <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project') and !#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-briefcase me-2"></i>
                         <span th:text="#{menu.project}">案件管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project-ingestion')}">
+                    <a th:href="@{/project-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-envelope-open me-2"></i>
+                        <span>案件メール取込</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('candidate')}">

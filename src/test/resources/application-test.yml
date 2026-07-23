@@ -30,6 +30,7 @@ spring:
         - classpath:sql/schema-self-service-h2.sql
         - classpath:sql/schema-price-history-h2.sql
         - classpath:sql/schema-resume-ingestion-h2.sql
+        - classpath:sql/schema-project-ingestion-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

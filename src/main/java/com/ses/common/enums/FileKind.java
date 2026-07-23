@@ -22,7 +22,13 @@ public enum FileKind {
     PHOTO(
             Set.of("png", "jpg", "jpeg"),
             2L * 1024 * 1024,
-            Set.of("image/", "application/octet-stream"));
+            Set.of("image/", "application/octet-stream")),
+
+    /** 案件メール: eml / txt、最大10MB */
+    PROJECT_EMAIL(
+            Set.of("eml", "txt"),
+            10L * 1024 * 1024,
+            Set.of("message/rfc822", "text/plain", "application/octet-stream"));
 
     private final Set<String> allowedExtensions;
     private final long maxBytes;

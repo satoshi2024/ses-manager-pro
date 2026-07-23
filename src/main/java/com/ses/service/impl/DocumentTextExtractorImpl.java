@@ -3,7 +3,7 @@ package com.ses.service.impl;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.ses.config.UploadProperties;
-import com.ses.service.ResumeTextExtractor;
+import com.ses.service.DocumentTextExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -22,7 +22,7 @@ import java.nio.file.Paths;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ResumeTextExtractorImpl implements ResumeTextExtractor {
+public class DocumentTextExtractorImpl implements DocumentTextExtractor {
 
     /** 抽出テキストの上限文字数（AIトークン超過防止） */
     private static final int MAX_CHARS = 60_000;
@@ -47,6 +47,7 @@ public class ResumeTextExtractorImpl implements ResumeTextExtractor {
                 case "pdf" -> extractPdf(filePath);
                 case "docx" -> extractDocx(filePath);
                 case "xlsx" -> extractXlsx(filePath);
+                case "txt", "eml" -> Files.readString(filePath);
                 default -> {
                     log.warn("未対応のファイル形式: {}", ext);
                     yield "";

@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-public class ResumeTextExtractorImplTest {
+public class DocumentTextExtractorImplTest {
 
     @Mock
     private UploadProperties uploadProperties;
 
     @InjectMocks
-    private ResumeTextExtractorImpl extractor;
+    private DocumentTextExtractorImpl extractor;
 
     @Test
     void extract_fileNotFound_returnsEmpty() {
