@@ -1,4 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const month = urlParams.get('month');
+    if (month) {
+        const el = document.getElementById('billingMonth');
+        if (el) el.value = month;
+    }
     loadInvoices();
     
     document.getElementById('btnGenerateInvoice').addEventListener('click', () => {

@@ -49,6 +49,7 @@ public class CustomerApiController {
             @RequestParam(required = false) String commercialFlow,
             @RequestParam(required = false) String trustLevel) {
 
+        if (size <= 0) size = 10;
         Page<Customer> page = new Page<>(current, size);
         // データスコープ: 営業ロール制限時は担当顧客のみ。
         if (dataScopeService.isScoped()) {
@@ -77,6 +78,27 @@ public class CustomerApiController {
     }
 
     /**
+     * ドロップダウン用顧客一覧（軽量化）
+     */
+    @GetMapping("/options")
+    public ApiResult<List<com.ses.dto.common.OptionDto>> getOptions() {
+        LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+            queryWrapper.in(Customer::getId, allowed);
+        }
+        queryWrapper.select(Customer::getId, Customer::getCompanyName)
+                    .orderByDesc(Customer::getId);
+        List<com.ses.dto.common.OptionDto> options = customerService.list(queryWrapper).stream()
+                .map(c -> new com.ses.dto.common.OptionDto(c.getId(), c.getCompanyName()))
+                .collect(Collectors.toList());
+        return ApiResult.success(options);
+    }
+
+    /**
      * 顧客詳細
      */
     @GetMapping("/{id}")
@@ -93,7 +115,9 @@ public class CustomerApiController {
      * 顧客登録
      */
     @PostMapping
-    public ApiResult<Boolean> save(@Valid @RequestBody Customer customer) {
+    public ApiResult<Boolean> save(@Valid @RequestBody com.ses.dto.customer.CustomerSaveDto customerDto) {
+        Customer customer = new Customer();
+        org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
         com.ses.common.util.EntityProtectUtil.protectForCreate(customer);
         return ApiResult.success(customerService.save(customer));
     }
@@ -102,7 +126,9 @@ public class CustomerApiController {
      * 顧客更新
      */
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Customer customer) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.customer.CustomerSaveDto customerDto) {
+        Customer customer = new Customer();
+        org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
         customer.setId(id);
         dataScopeService.assertAllowedCustomer(id);
         boolean success = customerService.updateById(customer);

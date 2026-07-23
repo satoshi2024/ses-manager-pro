@@ -50,7 +50,7 @@ spring:
   # 既存の手動構築済みDBに対して初めて導入する場合は baseline-on-migrate により
   # 「既にV9まで適用済み」とみなして以降のマイグレーションのみ実行する。
   # prod では application-prod.yml が db/migration-prod を追加ロケーションとして
-  # 差し込み、admin初期パスワードのBCrypt化(V10)のみ prod 限定で適用する。
+  # 差し込み、admin初期パスワードのBCrypt化(Repeatable)のみ prod 限定で適用する。
   flyway:
     enabled: true
     locations: classpath:db/migration

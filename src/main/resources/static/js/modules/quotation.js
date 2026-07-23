@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const customerId = this.value;
         const projectSelect = document.getElementById('quotationForm').projectId;
         if (customerId) {
-            loadSelect(`/api/projects?current=1&size=1000&customerId=${customerId}`, projectSelect, 'id', r => r.projectName);
+            loadSelect(`/api/projects/options?customerId=${customerId}`, projectSelect, 'id', r => r.name);
         } else {
             projectSelect.innerHTML = '<option value=""></option>';
         }
@@ -58,13 +58,13 @@ function loadSelects(q) {
     const form = document.getElementById('quotationForm');
     
     const projectPromise = q.customerId 
-        ? loadSelect(`/api/projects?current=1&size=1000&customerId=${q.customerId}`, form.projectId, 'id', r => r.projectName, q.projectId)
+        ? loadSelect(`/api/projects/options?customerId=${q.customerId}`, form.projectId, 'id', r => r.name, q.projectId)
         : Promise.resolve(form.projectId.innerHTML = '<option value=""></option>');
 
     return Promise.all([
-        loadSelect('/api/customers?current=1&size=1000', form.customerId, 'id', r => r.companyName, q.customerId),
+        loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, q.customerId),
         projectPromise,
-        loadSelect('/api/engineers?current=1&size=1000', form.engineerId, 'id', r => r.fullName, q.engineerId)
+        loadSelect('/api/engineers/options', form.engineerId, 'id', r => r.name, q.engineerId)
     ]);
 }
 

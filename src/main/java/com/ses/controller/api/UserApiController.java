@@ -89,6 +89,8 @@ public class UserApiController {
         }
         validatePasswordPolicy(sysUser.getPassword());
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
+        // MI-26: 作成時は常に有効（1）に強制する
+        sysUser.setStatus(1);
         return ApiResult.success(sysUserService.save(sysUser));
     }
 

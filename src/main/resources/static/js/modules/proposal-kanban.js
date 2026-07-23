@@ -140,18 +140,18 @@ function loadKanbanData() {
 }
 
 function loadSelectOptions() {
-    $.get('/api/engineers?size=1000', function(res) {
+    $.get('/api/engineers/options', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-engineerId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
-            (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
+            res.data.forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.name)}</option>`));
         }
     });
-    $.get('/api/projects?size=1000', function(res) {
+    $.get('/api/projects/options', function(res) {
         if(res.code === 200 && res.data) {
             const select = $('#prop-projectId');
             select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
-            (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
+            res.data.forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.name)}</option>`));
         }
     });
 }

@@ -170,11 +170,22 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
     }
 
     private BaseFont resolveCjkFont() {
+        try {
+            // First try the bundled font
+            byte[] fontBytes = org.springframework.util.StreamUtils.copyToByteArray(
+                getClass().getClassLoader().getResourceAsStream("fonts/ipaexg.ttf")
+            );
+            return BaseFont.createFont("ipaexg.ttf", BaseFont.IDENTITY_H, BaseFont.EMBEDDED, true, fontBytes, null);
+        } catch (Exception ex) {
+            log.warn("Bundled font load failed, falling back to system fonts", ex);
+        }
+
         List<String> candidates = new ArrayList<>();
         if (StringUtils.hasText(pdfProperties.getFontPath())) {
             candidates.add(pdfProperties.getFontPath());
         }
         candidates.addAll(pdfProperties.getDefaultFontCandidates());
+
         for (String candidate : candidates) {
             String filePath = candidate.contains(",") ? candidate.substring(0, candidate.indexOf(',')) : candidate;
             if (!Files.exists(Paths.get(filePath))) {

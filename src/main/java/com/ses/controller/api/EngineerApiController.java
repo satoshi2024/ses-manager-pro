@@ -33,6 +33,7 @@ public class EngineerApiController {
             @RequestParam(required = false) java.util.List<Long> skillIds,
             @RequestParam(required = false) Long salesUserId) {
         
+        if (size <= 0) size = 1000;
         Page<Engineer> page = new Page<>(current, size);
         // データスコープ: 営業ロール制限時は担当要員のみ。空集合なら空ページを即返す。
         if (dataScopeService.isScoped()) {
@@ -98,6 +99,27 @@ public class EngineerApiController {
     }
 
     /**
+     * ドロップダウン用要員一覧（軽量化）
+     */
+    @GetMapping("/options")
+    public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+            queryWrapper.in(Engineer::getId, allowed);
+        }
+        queryWrapper.select(Engineer::getId, Engineer::getFullName)
+                    .orderByDesc(Engineer::getId);
+        java.util.List<com.ses.dto.common.OptionDto> options = engineerService.list(queryWrapper).stream()
+                .map(e -> new com.ses.dto.common.OptionDto(e.getId(), e.getFullName()))
+                .collect(java.util.stream.Collectors.toList());
+        return ApiResult.success(options);
+    }
+
+    /**
      * エンジニア詳細
      */
     @GetMapping("/{id}")
@@ -114,14 +136,18 @@ public class EngineerApiController {
      * エンジニア登録
      */
     @PostMapping
-    public ApiResult<Engineer> save(@Valid @RequestBody Engineer engineer) {
+    public ApiResult<Engineer> save(@Valid @RequestBody com.ses.dto.engineer.EngineerSaveDto engineerDto) {
+        Engineer engineer = new Engineer();
+        org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         return ApiResult.success(engineer);
     }
 
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Engineer engineer) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.engineer.EngineerSaveDto engineerDto) {
+        Engineer engineer = new Engineer();
+        org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         engineer.setId(id);
         dataScopeService.assertAllowedEngineer(id);
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));

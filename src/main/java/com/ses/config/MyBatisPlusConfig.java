@@ -29,8 +29,8 @@ public class MyBatisPlusConfig {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // MySQL用ページネーションプラグインを追加
         PaginationInnerInterceptor paginationInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
-        // 最大ページサイズを制限（パフォーマンス保護）
-        paginationInterceptor.setMaxLimit(500L);
+        // MI-21: ページネーションの最大件数制限を1000件に設定（大表保護のため）
+        paginationInterceptor.setMaxLimit(1000L);
         interceptor.addInnerInterceptor(paginationInterceptor);
         return interceptor;
     }

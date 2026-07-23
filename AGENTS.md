@@ -42,7 +42,7 @@ If you already have a database that was set up by manually running the old `sql/
 
 **`V1__create_tables.sql` is a *consolidated baseline schema***, not the original first migration — later structural additions (e.g. `t_engineer.prefecture`/`railway_company`, `sys_user.failed_count`/`locked_until`) have been folded back into V1's `CREATE TABLE`s. Because of this, the incremental migrations that originally added those columns (`V3`, `V8`) are kept as **no-ops** (`SELECT 1;` only — an empty script is rejected by `spring.sql.init`). **When you add a column, add it to V1's `CREATE TABLE` and make sure no later migration re-`ADD COLUMN`s it** — a duplicate `ADD COLUMN` breaks *both* the empty-DB Flyway startup *and* test context init (see below), and MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. New columns/tables introduced *after* the baseline (e.g. V12/V14) are added by their own migration as usual.
 
-`prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/V10__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
+`prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/R__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
 
 ### Tests and the DB
 

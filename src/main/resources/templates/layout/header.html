@@ -75,17 +75,17 @@
             </div>
 
             <!-- Quick Add Dropdown -->
-            <div class="dropdown">
+            <div class="dropdown" th:if="${allowedMenus != null and (allowedMenus.contains('engineer') or allowedMenus.contains('project') or allowedMenus.contains('customer') or allowedMenus.contains('proposal') or allowedMenus.contains('contract'))}">
                 <button class="btn btn-primary btn-sm rounded-pill shadow-sm bg-gradient-blue border-0 px-3 py-1 dropdown-toggle" type="button" id="quickAddDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="bi bi-plus-lg me-1"></i><span class="quick-add-label" th:text="#{common.create}">新規作成</span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="quickAddDropdown">
-                    <li><a class="dropdown-item py-2" href="/engineer/list"><i class="bi bi-person-plus me-2 text-accent-blue"></i><span th:text="#{quickAdd.engineer}">要員を登録</span></a></li>
-                    <li><a class="dropdown-item py-2" href="/project/list"><i class="bi bi-briefcase me-2 text-success"></i><span th:text="#{quickAdd.project}">案件を登録</span></a></li>
-                    <li><a class="dropdown-item py-2" href="/customer/list"><i class="bi bi-building-add me-2 text-info"></i><span th:text="#{quickAdd.customer}">顧客を登録</span></a></li>
-                    <li><hr class="dropdown-divider border-dark"></li>
-                    <li><a class="dropdown-item py-2" href="/proposal/kanban"><i class="bi bi-kanban me-2 text-accent-purple"></i><span th:text="#{quickAdd.proposal}">提案を作成</span></a></li>
-                    <li><a class="dropdown-item py-2" href="/contract/list"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i><span th:text="#{quickAdd.contract}">契約を作成</span></a></li>
+                    <li th:if="${allowedMenus != null and allowedMenus.contains('engineer')}"><a class="dropdown-item py-2" href="/engineer/list"><i class="bi bi-person-plus me-2 text-accent-blue"></i><span th:text="#{quickAdd.engineer}">要員を登録</span></a></li>
+                    <li th:if="${allowedMenus != null and allowedMenus.contains('project')}"><a class="dropdown-item py-2" href="/project/list"><i class="bi bi-briefcase me-2 text-success"></i><span th:text="#{quickAdd.project}">案件を登録</span></a></li>
+                    <li th:if="${allowedMenus != null and allowedMenus.contains('customer')}"><a class="dropdown-item py-2" href="/customer/list"><i class="bi bi-building-add me-2 text-info"></i><span th:text="#{quickAdd.customer}">顧客を登録</span></a></li>
+                    <li th:if="${allowedMenus != null and (allowedMenus.contains('engineer') or allowedMenus.contains('project') or allowedMenus.contains('customer')) and (allowedMenus.contains('proposal') or allowedMenus.contains('contract'))}"><hr class="dropdown-divider border-dark"></li>
+                    <li th:if="${allowedMenus != null and allowedMenus.contains('proposal')}"><a class="dropdown-item py-2" href="/proposal/kanban"><i class="bi bi-kanban me-2 text-accent-purple"></i><span th:text="#{quickAdd.proposal}">提案を作成</span></a></li>
+                    <li th:if="${allowedMenus != null and allowedMenus.contains('contract')}"><a class="dropdown-item py-2" href="/contract/list"><i class="bi bi-file-earmark-plus me-2 text-accent-green"></i><span th:text="#{quickAdd.contract}">契約を作成</span></a></li>
                 </ul>
             </div>
 

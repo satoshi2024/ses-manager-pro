@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Arrays;
 
 @Service
+@Transactional
 public class EngineerStatusServiceImpl implements EngineerStatusService {
 
     private final EngineerMapper engineerMapper;
@@ -27,7 +28,6 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void onProposalCreated(Long engineerId) {
         Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer != null && "Bench".equals(engineer.getStatus())) {
@@ -37,7 +37,6 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void onContractActive(Long engineerId) {
         Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer != null) {
@@ -47,7 +46,6 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void releaseIfIdle(Long engineerId) {
         Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
         if (engineer == null) {

@@ -17,12 +17,12 @@ $(document).ready(function() {
 });
 
 function loadContracts() {
-    $.get('/api/contracts?size=1000', function(res) {
+    $.get('/api/contracts/options', function(res) {
         if (res.code === 200) {
-            allContracts = res.data.records;
+            allContracts = res.data;
             let options = '<option value="">契約を選択...</option>';
             allContracts.forEach(c => {
-                options += `<option value="${c.id}">${c.contractNo || 'No Number'} - ${c.status}</option>`;
+                options += `<option value="${c.id}">${SES.escapeHtml(c.name)}</option>`;
             });
             $('#contractIdSelect').html(options);
             $('#newDocContractId').html(options);

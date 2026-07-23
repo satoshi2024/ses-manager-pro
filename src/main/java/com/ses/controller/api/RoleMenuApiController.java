@@ -62,8 +62,21 @@ public class RoleMenuApiController {
             throw com.ses.common.exception.BusinessException.of(400, "error.roleMenu.invalidRole");
         }
         
-        List<Long> distinctMenuIds = menuIds != null ? menuIds.stream().distinct().toList() : java.util.Collections.emptyList();
-
+        List<Long> distinctMenuIds = menuIds != null ? new java.util.ArrayList<>(menuIds.stream().distinct().toList()) : new java.util.ArrayList<>();
+        
+        // MI-17: 依存関係の保護（engineer または project がある場合は skill-tag を強制追加）
+        if (!distinctMenuIds.isEmpty()) {
+            List<Menu> allMenus = menuMapper.selectList(null);
+            Long engineerMenuId = allMenus.stream().filter(m -> "engineer".equals(m.getMenuKey())).findFirst().map(Menu::getId).orElse(null);
+            Long projectMenuId = allMenus.stream().filter(m -> "project".equals(m.getMenuKey())).findFirst().map(Menu::getId).orElse(null);
+            Long skillTagMenuId = allMenus.stream().filter(m -> "skill-tag".equals(m.getMenuKey())).findFirst().map(Menu::getId).orElse(null);
+            
+            if (skillTagMenuId != null && !distinctMenuIds.contains(skillTagMenuId)) {
+                if (distinctMenuIds.contains(engineerMenuId) || distinctMenuIds.contains(projectMenuId)) {
+                    distinctMenuIds.add(skillTagMenuId);
+                }
+            }
+        }
         if (!distinctMenuIds.isEmpty()) {
             Long count = menuMapper.selectCount(
                 new LambdaQueryWrapper<Menu>().in(Menu::getId, distinctMenuIds)

@@ -1,4 +1,4 @@
-﻿let templateModal = null;
+let templateModal = null;
 let currentTemplates = [];
 
 $(document).ready(function() {
@@ -17,12 +17,10 @@ function loadTemplates() {
                 renderTemplates(res.data);
             } else {
                 Toast.error(res.message);
-                renderTemplates(getMockData()); // Fallback
             }
         },
         error: function(err) {
             console.error(err);
-            renderTemplates(getMockData()); // Fallback
         }
     });
 }
@@ -156,21 +154,3 @@ function deleteTemplate(id) {
     });
 }
 
-function getMockData() {
-    return [
-        {
-            id: 1,
-            templateName: '標準提案メール',
-            templateType: '提案',
-            subjectTemplate: '【ご提案】エンジニアのご紹介（{engineer_name}）',
-            bodyTemplate: '{customer_name} ご担当者様\n\nお世話になっております。SES Manager Proの{sender_name}です。\n\n貴社の{project_name}案件につきまして、弊社の{engineer_name}をご提案させていただきます。\n\n【アピールポイント】\n・\n・\n\nスキルシートを添付いたしますので、ご査収のほどよろしくお願いいたします。'
-        },
-        {
-            id: 2,
-            templateName: '事前面談依頼',
-            templateType: '面接依頼',
-            subjectTemplate: '【面談のお願い】{engineer_name}について',
-            bodyTemplate: '{customer_name} ご担当者様\n\nお世話になっております。{sender_name}です。\n\n先日ご提案した{engineer_name}につきまして、書類選考を通過とのこと、誠にありがとうございます。\n事前面談の日程調整をお願いしたく存じます。'
-        }
-    ];
-}

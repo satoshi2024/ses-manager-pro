@@ -18,7 +18,7 @@
         <!-- Navigation Menu -->
         <div class="sidebar-menu flex-grow-1 overflow-auto mt-3 px-2">
             <ul class="nav flex-column gap-1">
-                <li class="nav-item">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('dashboard')}">
                     <a th:href="@{/dashboard}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentUri == '/dashboard' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-speedometer2 me-2"></i>
                         <span th:text="#{menu.dashboard}">ダッシュボード</span>

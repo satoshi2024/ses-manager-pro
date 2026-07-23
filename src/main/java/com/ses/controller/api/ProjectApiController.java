@@ -35,7 +35,7 @@ public class ProjectApiController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) String customerName) {
-        
+        if (size <= 0) size = 1000;
         Page<ProjectListDto> page = new Page<>(current, size);
         
         Collection<Long> allowedIds = null;
@@ -48,6 +48,30 @@ public class ProjectApiController {
         }
 
         return ApiResult.success(projectMapper.selectPageWithNames(page, projectName, status, customerId, customerName, allowedIds));
+    }
+
+    /**
+     * ドロップダウン用案件一覧（軽量化）
+     */
+    @GetMapping("/options")
+    public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions(@RequestParam(required = false) Long customerId) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        if (customerId != null) {
+            queryWrapper.eq(Project::getCustomerId, customerId);
+        }
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+            queryWrapper.in(Project::getCustomerId, allowed);
+        }
+        queryWrapper.select(Project::getId, Project::getProjectName)
+                    .orderByDesc(Project::getId);
+        java.util.List<com.ses.dto.common.OptionDto> options = projectService.list(queryWrapper).stream()
+                .map(p -> new com.ses.dto.common.OptionDto(p.getId(), p.getProjectName()))
+                .collect(java.util.stream.Collectors.toList());
+        return ApiResult.success(options);
     }
 
     /**

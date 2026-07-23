@@ -40,15 +40,18 @@ App listens on `http://localhost:8080`. Login page is at `/login`; default seede
 
 If you already have a database that was set up by manually running the old `sql/001`–`sql/008` scripts (pre-Flyway), Flyway's `baseline-on-migrate: true` (configured with `baseline-version: 9`) treats it as already at V9 and only applies anything newer — it will NOT re-run V1–V9 against a non-empty schema.
 
-If your local database fails to start due to a Flyway checksum mismatch (e.g. from modified `V15` or `V37` scripts), you can either:
-- Drop the `ses_manager_db` database and recreate it as an empty database to run all migrations from scratch (Recommended).
-- Run `flyway repair` using the Maven plugin to realign checksums without dropping data: `mvn org.flywaydb:flyway-maven-plugin:repair -Dflyway.url=jdbc:mysql://localhost:3306/ses_manager_db -Dflyway.user=root -Dflyway.password=123456`.
+If your local database or production database fails to start due to a Flyway checksum mismatch (e.g. from modified scripts or legacy DB upgrades), follow this strict `flyway repair` runbook:
+1. **Backup**: Take a full database dump before proceeding.
+2. **Verify Checksums**: Check which scripts are failing validation and ensure they are on the allowed repair list.
+3. **Execute Repair**: Run `mvn org.flywaydb:flyway-maven-plugin:repair -Dflyway.url=jdbc:mysql://localhost:3306/ses_manager_db -Dflyway.user=root -Dflyway.password=123456`.
+4. **Schema Alignment Check**: Start the application and verify that `LegacyDatabaseFlywayCallback` has completed any necessary schema compensations (e.g., adding missing columns).
+5. **Login Test**: Verify that the application starts successfully and you can log in.
 
 **IMPORTANT**: Never modify a migration script after it has been applied. Doing so causes `FlywayValidateException` (checksum mismatch) for anyone who has already applied the original script. If you need to change the schema or data, always create a new `Vxx__...sql` migration script.
 
 **`V1__create_tables.sql` is a *consolidated baseline schema***, not the original first migration — later structural additions (e.g. `t_engineer.prefecture`/`railway_company`, `sys_user.failed_count`/`locked_until`) have been folded back into V1's `CREATE TABLE`s. Because of this, the incremental migrations that originally added those columns (`V3`, `V8`) are kept as **no-ops** (`SELECT 1;` only — an empty script is rejected by `spring.sql.init`). **When you add a column, add it to V1's `CREATE TABLE` and make sure no later migration re-`ADD COLUMN`s it** — a duplicate `ADD COLUMN` breaks *both* the empty-DB Flyway startup *and* test context init (see below), and MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. New columns/tables introduced *after* the baseline (e.g. V12/V14) are added by their own migration as usual.
 
-`prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/V10__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
+`prod` profile (`application-prod.yml`) additionally applies `db/migration-prod/R__update_admin_password_bcrypt.sql`, which rewrites the seeded plaintext `admin123` password to its BCrypt hash (required because `prod` uses `BCryptPasswordEncoder` while `dev`/`test` use `NoOpPasswordEncoder`). Change the admin password immediately after first login in any real deployment.
 
 ### Tests and the DB
 

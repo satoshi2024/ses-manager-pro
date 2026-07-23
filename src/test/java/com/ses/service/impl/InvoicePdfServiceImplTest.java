@@ -33,18 +33,6 @@ import static org.mockito.Mockito.when;
  */
 class InvoicePdfServiceImplTest {
 
-    /** InvoicePdfServiceImpl.DEFAULT_FONT_CANDIDATES と同じ既定候補（,以降のインデックスは除去）。 */
-    private static final List<String> FONT_CANDIDATE_PATHS = List.of(
-            "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.ttf"
-    );
-
-    private static boolean cjkFontAvailable() {
-        return FONT_CANDIDATE_PATHS.stream().anyMatch(p -> new java.io.File(p).exists());
-    }
-
     private SystemConfigService systemConfigService() {
         SystemConfigService s = Mockito.mock(SystemConfigService.class);
         when(s.getString(anyString(), any())).thenAnswer(inv -> inv.getArgument(1));
@@ -73,11 +61,7 @@ class InvoicePdfServiceImplTest {
     }
 
     @Test
-    void generate_有効なPDFバイト列を返す() throws Exception {
-        // CJKフォントが無い環境（CI等）ではPDF生成不可のためスキップする
-        org.junit.jupiter.api.Assumptions.assumeTrue(cjkFontAvailable(),
-                "この環境にはCJKフォントが無いため正常系PDF生成テストをスキップ");
-
+    void generate_有効なPDFバイト列を返し日本語テキストが抽出できること() throws Exception {
         InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(new PdfProperties(), systemConfigService());
 
         byte[] bytes = service.generate(sampleDetail());
@@ -88,25 +72,12 @@ class InvoicePdfServiceImplTest {
         PdfReader reader = new PdfReader(bytes);
         try {
             assertEquals(1, reader.getNumberOfPages());
+            com.lowagie.text.pdf.parser.PdfTextExtractor extractor = new com.lowagie.text.pdf.parser.PdfTextExtractor(reader);
+            String text = extractor.getTextFromPage(1);
+            assertTrue(text.contains("請求書"), "抽出テキストに '請求書' が含まれていません");
+            assertTrue(text.contains("株式会社テスト商事"), "抽出テキストに '株式会社テスト商事' が含まれていません");
         } finally {
             reader.close();
         }
-    }
-
-    @Test
-    void generate_フォントが1件も見つからない場合はBusinessException() {
-        PdfProperties props = new PdfProperties();
-        props.setFontPath("/path/does/not/exist.ttf");
-        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(props, systemConfigService()) {
-            // DEFAULT_FONT_CANDIDATES はstatic finalで差し替えられないため、
-            // 実環境にフォントが無い体で検証したい場合は別途モック戦略が必要。
-            // ここでは「指定パスが存在しない」ケースのみを直接検証する。
-        };
-
-        // 実行環境に既定候補フォントが存在する場合はこのテストは成立しないため事前にスキップする。
-        org.junit.jupiter.api.Assumptions.assumeTrue(!cjkFontAvailable(),
-                "この環境には既定のCJKフォントが存在するためスキップ");
-
-        assertThrows(BusinessException.class, () -> service.generate(sampleDetail()));
     }
 }

@@ -113,6 +113,13 @@ public class SecurityConfig {
                 // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する
                 .anyRequest().hasAnyRole("管理者", "営業", "HR", "マネージャー")
             )
+            // 例外処理: API(/api/**)への未認証アクセスは302リダイレクトではなく401 JSONを返す
+            .exceptionHandling(ex -> ex
+                .defaultAuthenticationEntryPointFor(
+                    new org.springframework.security.web.authentication.HttpStatusEntryPoint(org.springframework.http.HttpStatus.UNAUTHORIZED),
+                    new AntPathRequestMatcher("/api/**")
+                )
+            )
             // フォームログインの設定
             .formLogin(form -> form
                 .loginPage("/login")

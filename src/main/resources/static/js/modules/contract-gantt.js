@@ -3,7 +3,7 @@ $(document).ready(function() {
 
     // Load data and init gantt
     $.ajax({
-        url: '/api/contracts',
+        url: '/api/contracts?size=1000',
         method: 'GET',
         success: function(res) {
             $('#gantt-loading').hide();
@@ -14,8 +14,7 @@ $(document).ready(function() {
             if (res.code === 200 && res.data) {
                 list = res.data.records || res.data;
             }
-            if (!list || list.length === 0) list = getMockData();
-
+            
             
             list.forEach((c, index) => {
                 let pClass = 'bar-wrapper';
@@ -95,10 +94,3 @@ function calculateProgress(startStr, endStr) {
     return Math.round((passed / total) * 100);
 }
 
-function getMockData() {
-    return [
-        { id: 1, engineerName: '田中 太郎', customerName: 'メガバンク', startDate: '2026-04-01', endDate: '2026-09-30', status: '稼動中' },
-        { id: 2, engineerName: '鈴木 花子', customerName: 'ECソリューション', startDate: '2026-06-01', endDate: '2026-11-30', status: '準備中' },
-        { id: 3, engineerName: '佐藤 次郎', customerName: 'テックベンチャー', startDate: '2026-05-15', endDate: '2026-08-15', status: '稼動中' }
-    ];
-}

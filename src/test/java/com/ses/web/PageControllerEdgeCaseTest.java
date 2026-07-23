@@ -94,18 +94,17 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("Unauthenticated request to protected endpoint should redirect to login")
+    @DisplayName("Unauthenticated request to protected endpoint should redirect to login (or 401 if API)")
     void testUnauthenticatedRequestToProtectedEndpoint() throws Exception {
-        // Assuming /dashboard or similar requires authentication
-        mockMvc.perform(get("/dashboard"))
-                .andExpect(status().is3xxRedirection());
+        // Assuming /api/dashboard or similar requires authentication
+        mockMvc.perform(get("/api/users"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
-    @DisplayName("Unauthenticated request to non-existent endpoint should redirect to login (or 404 if public)")
+    @DisplayName("Unauthenticated request to non-existent endpoint should redirect to login (or 401 if API)")
     void testUnauthenticatedRequestToNonExistentEndpoint() throws Exception {
-        // Typically, spring security protects /** and redirects to login, or 401.
-        mockMvc.perform(get("/another-non-existent-endpoint"))
-                .andExpect(status().is3xxRedirection());
+        mockMvc.perform(get("/api/another-non-existent-endpoint"))
+                .andExpect(status().isUnauthorized());
     }
 }

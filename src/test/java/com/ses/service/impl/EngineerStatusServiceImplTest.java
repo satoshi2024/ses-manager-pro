@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+
+
 @ExtendWith(MockitoExtension.class)
 class EngineerStatusServiceImplTest {
 
@@ -30,13 +32,13 @@ class EngineerStatusServiceImplTest {
     @Mock
     private ContractMapper contractMapper;
 
-    @InjectMocks
     private EngineerStatusServiceImpl engineerStatusService;
 
     private Engineer engineer;
 
     @BeforeEach
     void setUp() {
+        engineerStatusService = new EngineerStatusServiceImpl(engineerMapper, proposalMapper, contractMapper);
         engineer = new Engineer();
         engineer.setId(1L);
         engineer.setStatus("Bench");

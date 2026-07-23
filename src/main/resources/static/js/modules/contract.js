@@ -1,8 +1,24 @@
 let optionsPromise = null;
 
 $(document).ready(function() {
-    loadContracts();
-    loadSelectOptions();
+    loadSelectOptions().then(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        const customerId = urlParams.get('customerId');
+        if (customerId) {
+            $('#search-customerId').val(customerId);
+        }
+        
+        const salesUserId = urlParams.get('salesUserId');
+        if (salesUserId) {
+            $('#search-salesUserId').val(salesUserId);
+        }
+        
+        loadContracts();
+    }).catch(err => {
+        console.error("Failed to load options", err);
+        loadContracts();
+    });
 });
 
 // サーバの ContractServiceImpl.ALLOWED_STATUS_TRANSITIONS の複製(唯一の権威はサーバ側)。
@@ -60,29 +76,29 @@ function loadContracts() {
 
 function loadSelectOptions() {
     if (!optionsPromise) {
-        const p1 = $.get('/api/engineers?size=1000').then(res => {
+        const p1 = $.get('/api/engineers/options').then(res => {
             if(res.code === 200 && res.data) {
                 const select = $('#cont-engineerId');
                 select.empty().append(`<option value="">${SES.i18n.t('proposal.engineer.select')}</option>`);
-                (res.data.records || res.data).forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.fullName)}</option>`));
+                res.data.forEach(e => select.append(`<option value="${e.id}">${SES.escapeHtml(e.name)}</option>`));
             }
         });
-        const p2 = $.get('/api/projects?size=1000').then(res => {
+        const p2 = $.get('/api/projects/options').then(res => {
             if(res.code === 200 && res.data) {
                 const select = $('#cont-projectId');
                 select.empty().append(`<option value="">${SES.i18n.t('proposal.project.select')}</option>`);
-                (res.data.records || res.data).forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.projectName)}</option>`));
+                res.data.forEach(p => select.append(`<option value="${p.id}">${SES.escapeHtml(p.name)}</option>`));
             }
         });
-        const p3 = $.get('/api/customers?size=1000').then(res => {
+        const p3 = $.get('/api/customers/options').then(res => {
             if(res.code === 200 && res.data) {
                 const select = $('#cont-customerId');
                 const searchSelect = $('#search-customerId');
                 select.empty().append(`<option value="">${SES.i18n.t('contract.customer.select')}</option>`);
                 searchSelect.empty().append(`<option value="">${SES.i18n.t('contract.customer.filter')}</option>`);
-                (res.data.records || res.data).forEach(c => {
-                    select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
-                    searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                res.data.forEach(c => {
+                    select.append(`<option value="${c.id}">${SES.escapeHtml(c.name)}</option>`);
+                    searchSelect.append(`<option value="${c.id}">${SES.escapeHtml(c.name)}</option>`);
                 });
             }
         });
@@ -104,7 +120,6 @@ function loadSelectOptions() {
                 const urlSales = new URLSearchParams(window.location.search).get('salesUserId');
                 if (urlSales === 'none') {
                     searchSelect.val('none');
-                    loadContracts();
                 }
             }
         });
@@ -124,7 +139,10 @@ function loadSelectOptions() {
             }
         });
 
-        optionsPromise = Promise.all([p1, p2, p3, p4]);
+        optionsPromise = Promise.all([p1, p2, p3, p4]).catch(err => {
+            optionsPromise = null;
+            throw err;
+        });
     }
     return optionsPromise;
 }

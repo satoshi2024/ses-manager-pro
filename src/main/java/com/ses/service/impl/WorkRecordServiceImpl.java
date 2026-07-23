@@ -108,12 +108,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                                          String remarks, boolean fromDaily) {
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
-            throw BusinessException.of("error.workRecord.noContract2");
+            throw BusinessException.of("error.workRecord.noContract");
         }
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
 
-        WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
-                .eq("contract_id", contractId)
-                .eq("work_month", workMonth));
 
         // 保存許可状態は「入力中」「差戻し」のみ（提出済・確定は編集不可）。
         if (record != null && "確定".equals(record.getStatus())) {
@@ -181,7 +179,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             );
         }
 
-        if (record == null) {
+        boolean isNew = (record == null || record.getId() == null);
+        if (isNew) {
             record = new WorkRecord();
             record.setContractId(contractId);
             record.setWorkMonth(workMonth);
@@ -198,6 +197,14 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         } catch (DuplicateKeyException e) {
             throw BusinessException.of("error.workRecord.userNotFound2");
         }
+
+        if (!isNew && record.getPaymentAmount() != null) {
+            String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+            if ("BP".equals(employmentType)) {
+                syncRootBpAmount(record);
+            }
+        }
+
         return record;
     }
 
@@ -221,10 +228,14 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             contractMapper.selectByIdForUpdate(cid);
         }
 
-        // ロック後に再取得し、並行する revisePrice や saveHours の最新単価・状態を反映する
-        records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
-                .eq("work_month", workMonth)
-                .in("status", "入力中", "提出済"));
+        // ロック後に再取得し、並行する revisePrice や saveHours の最新単価・状態を反映する。
+        // InnoDB REPEATABLE READ では最初の SELECT で snapshot が固定されるため、
+        // FOR UPDATE による current read が必要（ロック待ち中に commit された値を確実に読む）。
+        List<Long> recordIds = records.stream().map(WorkRecord::getId).distinct().sorted().collect(Collectors.toList());
+        records = recordIds.stream()
+                .map(baseMapper::selectByIdForUpdate)
+                .filter(r -> r != null && ("入力中".equals(r.getStatus()) || "提出済".equals(r.getStatus())))
+                .collect(Collectors.toList());
 
         for (WorkRecord record : records) {
             // updateById ではなく、ステータスのみを条件付き(CAS)で安全に更新する
@@ -306,9 +317,24 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     public void reopenMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
-        List<WorkRecord> records = this.list(new QueryWrapper<WorkRecord>()
+        List<WorkRecord> initialRecords = this.list(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth)
                 .eq("status", "確定"));
+
+        if (initialRecords.isEmpty()) {
+            return;
+        }
+
+        List<Long> contractIds = initialRecords.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
+        for (Long cid : contractIds) {
+            contractMapper.selectByIdForUpdate(cid);
+        }
+
+        List<Long> recordIds = initialRecords.stream().map(WorkRecord::getId).sorted().collect(Collectors.toList());
+        List<WorkRecord> records = recordIds.stream()
+                .map(baseMapper::selectByIdForUpdate)
+                .filter(r -> r != null && "確定".equals(r.getStatus()))
+                .collect(Collectors.toList());
 
         if (records.isEmpty()) {
             return;
@@ -354,13 +380,17 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Transactional
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
         checkClosing(workMonth);
-if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
+        if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
             throw BusinessException.of("error.workRecord.invalidMonth");
         }
+        
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
-            throw BusinessException.of("error.workRecord.noContract2");
+            throw BusinessException.of("error.workRecord.noContract");
         }
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+
+
         if (contract.getStartDate() != null && daily.getWorkDate().isBefore(contract.getStartDate())) {
             throw BusinessException.of("error.workRecord.contractNotBillable");
         }
@@ -378,9 +408,7 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
         }
 
 
-        WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
-                .eq("contract_id", contractId)
-                .eq("work_month", workMonth));
+
         if (record != null && "確定".equals(record.getStatus())) {
             throw BusinessException.of("error.workRecord.confirmedEdit2");
         }
@@ -424,11 +452,9 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
         checkClosing(workMonth);
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
-            throw BusinessException.of("error.workRecord.noContract2");
+            throw BusinessException.of("error.workRecord.noContract");
         }
-        WorkRecord record = this.getOne(new QueryWrapper<WorkRecord>()
-                .eq("contract_id", contractId)
-                .eq("work_month", workMonth));
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
         if (record == null) {
             return;
         }
@@ -515,6 +541,13 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
             throw BusinessException.of("error.workRecord.notFound2");
         }
         checkClosing(record.getWorkMonth());
+
+        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract");
+        }
+        record = this.getById(workRecordId); // 再取得して最新状態を反映
+
         requireTransition(record, "提出済");
         // 条件付きUPDATE（CAS）。再提出で差戻しコメントをクリアする（R3R-10/R3R-12）。
         int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
@@ -545,7 +578,7 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
 
         Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
         if (contract == null) {
-            throw BusinessException.of("error.workRecord.noContract2");
+            throw BusinessException.of("error.workRecord.noContract");
         }
         record = this.getById(workRecordId); // 再取得して最新の単価・状態を反映
 
@@ -576,6 +609,13 @@ if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.pa
             throw BusinessException.of("error.workRecord.notFound2");
         }
         checkClosing(record.getWorkMonth());
+        
+        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.noContract");
+        }
+        record = this.getById(workRecordId); // 再取得して最新状態を反映
+        
         // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
         String trimmed = comment == null ? "" : comment.trim();
         if (trimmed.isEmpty()) {

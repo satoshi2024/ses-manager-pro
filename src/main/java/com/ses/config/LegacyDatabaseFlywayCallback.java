@@ -75,48 +75,7 @@ public class LegacyDatabaseFlywayCallback implements Callback {
             return;
         }
 
-        // 2. Check if flyway_schema_history has the real V10
-        boolean hasRealV10 = false;
-        boolean hasFlywayHistory = false;
-        try (Statement st = conn.createStatement();
-             ResultSet rs = st.executeQuery("SELECT 1 FROM information_schema.tables WHERE table_schema = '" + dbName + "' AND table_name = 'flyway_schema_history'")) {
-            hasFlywayHistory = rs.next();
-        }
 
-        if (hasFlywayHistory) {
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT description FROM flyway_schema_history WHERE version = '10' AND success = 1")) {
-                while (rs.next()) {
-                    String desc = rs.getString("description");
-                    // The old prod V10 was "update admin password bcrypt"
-                    // The new real V10 is "fix bp payment unique key"
-                    if ("fix bp payment unique key".equals(desc)) {
-                        hasRealV10 = true;
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("Could not read flyway_schema_history: " + e.getMessage());
-            }
-        }
-
-        if (hasRealV10) {
-            log.info("Real V10 is marked as applied. Checking if schema compensation is needed due to flyway repair...");
-            if (indexExists(conn, dbName, "t_bp_payment", "uk_work_record_layer")) {
-                log.info("Compensating missing V10 execution: dropping uk_work_record_layer");
-                try (Statement st = conn.createStatement()) {
-                    st.execute("ALTER TABLE t_bp_payment DROP INDEX uk_work_record_layer");
-                }
-            }
-            if (!indexExists(conn, dbName, "t_bp_payment", "idx_bp_payment_work_record")) {
-                log.info("Compensating missing V10 execution: creating idx_bp_payment_work_record");
-                try (Statement st = conn.createStatement()) {
-                    st.execute("CREATE INDEX idx_bp_payment_work_record ON t_bp_payment(work_record_id)");
-                }
-            }
-            return;
-        }
-
-        log.info("Legacy DB detected (V10 missing or mismatched). Executing pre-migration schema compensations...");
 
         // 3. Compensate missing columns
         addColumnIfNotExists(conn, dbName, "t_bp_payment", "layer_order", "INT NOT NULL DEFAULT 1 COMMENT '階層番号(1=技術者に最も近い一次請)'");
@@ -124,19 +83,44 @@ public class LegacyDatabaseFlywayCallback implements Callback {
         addColumnIfNotExists(conn, dbName, "t_bp_payment", "parent_payment_id", "BIGINT COMMENT '上位階層への自己参照(同一work_record_id内)'");
         addColumnIfNotExists(conn, dbName, "t_bp_payment", "deleted_flag", "TINYINT NOT NULL DEFAULT 0");
 
-        // 4. Create uk_work_record_layer before dropping old indexes
-        if (!indexExists(conn, dbName, "t_bp_payment", "uk_work_record_layer")) {
-            log.info("Creating unique index uk_work_record_layer");
-            try (Statement st = conn.createStatement()) {
-                st.execute("ALTER TABLE t_bp_payment ADD UNIQUE KEY uk_work_record_layer (work_record_id, layer_order)");
-            }
-        }
-
-        // 5. Create fk_bp_payment_parent
+        // 4. Create fk_bp_payment_parent
         if (!constraintExists(conn, dbName, "t_bp_payment", "fk_bp_payment_parent")) {
             log.info("Creating foreign key fk_bp_payment_parent");
             try (Statement st = conn.createStatement()) {
                 st.execute("ALTER TABLE t_bp_payment ADD CONSTRAINT fk_bp_payment_parent FOREIGN KEY (parent_payment_id) REFERENCES t_bp_payment(id)");
+            }
+        }
+
+        // 5. Check if this DB should have V10 index state or pre-V10 index state.
+        boolean shouldHaveV10Indexes = false;
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT 1 FROM flyway_schema_history WHERE version = '10' AND success = 1 AND description = 'fix bp payment unique key'")) {
+            if (rs.next()) {
+                shouldHaveV10Indexes = true;
+            }
+        } catch (Exception e) {}
+
+        if (shouldHaveV10Indexes) {
+            // State: idx_bp_payment_work_record should exist, uk_work_record_layer should NOT exist.
+            if (!indexExists(conn, dbName, "t_bp_payment", "idx_bp_payment_work_record")) {
+                log.info("Creating idx_bp_payment_work_record BEFORE dropping uk_work_record_layer to preserve FK");
+                try (Statement st = conn.createStatement()) {
+                    st.execute("CREATE INDEX idx_bp_payment_work_record ON t_bp_payment(work_record_id)");
+                }
+            }
+            if (indexExists(conn, dbName, "t_bp_payment", "uk_work_record_layer")) {
+                log.info("Dropping uk_work_record_layer");
+                try (Statement st = conn.createStatement()) {
+                    st.execute("ALTER TABLE t_bp_payment DROP INDEX uk_work_record_layer");
+                }
+            }
+        } else {
+            // State: uk_work_record_layer SHOULD exist.
+            if (!indexExists(conn, dbName, "t_bp_payment", "uk_work_record_layer")) {
+                log.info("Creating unique index uk_work_record_layer");
+                try (Statement st = conn.createStatement()) {
+                    st.execute("ALTER TABLE t_bp_payment ADD UNIQUE KEY uk_work_record_layer (work_record_id, layer_order)");
+                }
             }
         }
 
@@ -150,6 +134,7 @@ public class LegacyDatabaseFlywayCallback implements Callback {
                      "  AND s.table_name = 't_bp_payment' " +
                      "  AND s.index_name != 'PRIMARY' " +
                      "  AND s.index_name != 'uk_work_record_layer' " +
+                     "  AND s.index_name != 'idx_bp_payment_work_record' " +
                      "GROUP BY s.index_name " +
                      "HAVING COUNT(*) = 1 AND MAX(s.column_name) = 'work_record_id'")) {
             while (rs.next()) {

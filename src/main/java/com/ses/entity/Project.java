@@ -84,6 +84,7 @@ public class Project extends BaseEntity {
     /**
      * ステータス
      */
+    @jakarta.validation.constraints.Pattern(regexp = "^(準備中|提案中|稼動中|完了|保留|)$", message = "ステータスが不正です")
     private String status;
 
     /**

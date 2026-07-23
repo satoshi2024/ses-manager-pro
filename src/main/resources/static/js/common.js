@@ -92,18 +92,25 @@ const SES = {
             try {
                 const response = await fetch(url, options);
                 
+                // Fetch API follows redirects by default. If redirected to login or returns HTML...
+                const contentType = response.headers.get('content-type') || '';
+                if (response.redirected && (response.url.indexOf('/login') !== -1 || contentType.indexOf('text/html') !== -1)) {
+                    window.location.href = '/login?error=timeout';
+                    throw new Error('Session timeout');
+                }
+
                 // HTTPステータスエラーハンドリング
                 if (response.status === 401) {
                     window.location.href = '/login?error=timeout';
-                    return null;
+                    throw new Error('Unauthorized');
                 }
                 if (response.status === 403) {
                     SES.toast.error('アクセス権限がありません。');
-                    return null;
+                    throw new Error('Forbidden');
                 }
                 if (response.status >= 500) {
                     SES.toast.error('サーバーエラーが発生しました。');
-                    return null;
+                    throw new Error('Server Error');
                 }
                 
                 // ApiResult形式のパース

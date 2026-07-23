@@ -52,7 +52,9 @@ public class SkillTagApiController {
      */
     @PostMapping
     @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
-    public ApiResult<Boolean> save(@Valid @RequestBody SkillTag skillTag) {
+    public ApiResult<Boolean> save(@Valid @RequestBody com.ses.dto.skill.SkillTagSaveDto skillDto) {
+        SkillTag skillTag = new SkillTag();
+        org.springframework.beans.BeanUtils.copyProperties(skillDto, skillTag);
         com.ses.common.util.EntityProtectUtil.protectForCreate(skillTag);
         return ApiResult.success(skillTagService.save(skillTag));
     }
@@ -62,7 +64,9 @@ public class SkillTagApiController {
      */
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SkillTag skillTag) {
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.skill.SkillTagSaveDto skillDto) {
+        SkillTag skillTag = new SkillTag();
+        org.springframework.beans.BeanUtils.copyProperties(skillDto, skillTag);
         skillTag.setId(id);
         boolean success = skillTagService.updateById(skillTag);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");

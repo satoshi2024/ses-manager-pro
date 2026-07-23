@@ -40,6 +40,15 @@ class MobileResponsiveLayoutTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private com.ses.service.RoleMenuService roleMenuService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        org.mockito.Mockito.when(roleMenuService.getAllMenuKeys())
+            .thenReturn(java.util.List.of("engineer", "project", "customer", "proposal", "contract"));
+    }
+
     /** 共通レイアウト(base.html)を継承する全ページ。 */
     static final String[] ALL_PAGES = {
             "/dashboard",

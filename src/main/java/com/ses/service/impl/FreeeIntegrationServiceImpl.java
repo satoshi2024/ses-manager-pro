@@ -96,6 +96,8 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             throw BusinessException.of(409, "error.payroll.duplicateEmployeeLink");
         }
 
+        linkMapper.deleteSoftDeletedConflicts(engineerId, employeeId);
+
         FreeeEmployeeLink old=linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>().eq(FreeeEmployeeLink::getEngineerId,engineerId)); 
         FreeeEmployeeLink x=old==null?new FreeeEmployeeLink():old; 
         x.setEngineerId(engineerId); 
@@ -108,7 +110,7 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             throw BusinessException.of(409, "error.payroll.duplicateEmployeeLink");
         }
     }
-    public void unlink(Long engineerId){ linkMapper.delete(new LambdaQueryWrapper<FreeeEmployeeLink>().eq(FreeeEmployeeLink::getEngineerId,engineerId)); }
+    public void unlink(Long engineerId){ linkMapper.deleteByEngineerIdHard(engineerId); }
     public List<PayrollStatementDto> statements(int year,int month,String type){ if(year<2000||month<1||month>12) throw BusinessException.of("error.payroll.invalidPeriod"); JsonNode arr=get("/hr/api/v1/payroll-statements?year="+year+"&month="+month+"&type="+type); List<PayrollStatementDto> out=new ArrayList<>(); if(arr!=null) for(JsonNode n:arr.path("statements")){ PayrollStatementDto d=new PayrollStatementDto(); d.setEmployeeId(n.path("employee_id").asText()); d.setYear(year); d.setMonth(month); d.setType(type); d.setGrossAmount(decimal(n,"gross_amount")); d.setDeductions(decimal(n,"deductions")); d.setNetAmount(decimal(n,"net_amount")); out.add(d);} return out; }
     private BigDecimal decimal(JsonNode n,String k){return n.has(k)?n.path(k).decimalValue():BigDecimal.ZERO;}
     private JsonNode get(String path){FreeeConnection c=connectionMapper.selectOne(new LambdaQueryWrapper<FreeeConnection>().orderByDesc(FreeeConnection::getId).last("LIMIT 1")); if(c==null)throw BusinessException.of("error.payroll.notConnected"); if(c.getTokenExpiresAt()!=null&&c.getTokenExpiresAt().isBefore(LocalDateTime.now().plusMinutes(1))) refresh(c); HttpHeaders h=new HttpHeaders(); h.setBearerAuth(decrypt(c.getAccessTokenEncrypted())); h.setAccept(List.of(MediaType.APPLICATION_JSON)); try{return restTemplate.exchange(apiBase+path,HttpMethod.GET,new HttpEntity<>(h),JsonNode.class).getBody();}catch(org.springframework.web.client.HttpClientErrorException.Unauthorized ex){ refresh(c); h.setBearerAuth(decrypt(c.getAccessTokenEncrypted())); try{return restTemplate.exchange(apiBase+path,HttpMethod.GET,new HttpEntity<>(h),JsonNode.class).getBody();}catch(Exception e){throw BusinessException.of(503, "error.payroll.providerUnavailable");} }catch(Exception ex){throw BusinessException.of(503, "error.payroll.providerUnavailable");}}

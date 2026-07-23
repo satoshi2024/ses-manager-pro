@@ -11,6 +11,11 @@ import java.util.List;
 
 @Mapper
 public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
+    @Select("SELECT * FROM t_work_record WHERE id = #{id} FOR UPDATE")
+    WorkRecord selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM t_work_record WHERE contract_id = #{contractId} AND work_month = #{workMonth} FOR UPDATE")
+    WorkRecord selectByContractIdAndMonthForUpdate(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);
 
     @Select("""
         SELECT

@@ -48,6 +48,7 @@ public class ContractApiController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
             @RequestParam(required = false) Long salesUserId,
             @RequestParam(required = false) Boolean salesUnassigned) {
+        if (size <= 0) size = 1000;
         Page<ContractListDto> page = new Page<>(current, size);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
         // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
@@ -61,6 +62,28 @@ public class ContractApiController {
         }
         Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, allowedIds);
         return ApiResult.success(result);
+    }
+
+    /**
+     * ドロップダウン用契約一覧（軽量化）
+     */
+    @GetMapping("/options")
+    public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+            queryWrapper.in(Contract::getId, allowed);
+        }
+        queryWrapper.select(Contract::getId, Contract::getContractNo, Contract::getStatus)
+                    .orderByDesc(Contract::getId);
+        java.util.List<com.ses.dto.common.OptionDto> options = contractService.list(queryWrapper).stream()
+                .map(c -> new com.ses.dto.common.OptionDto(c.getId(), 
+                        (c.getContractNo() != null ? c.getContractNo() : "No Number") + " - " + c.getStatus()))
+                .collect(java.util.stream.Collectors.toList());
+        return ApiResult.success(options);
     }
 
     /**

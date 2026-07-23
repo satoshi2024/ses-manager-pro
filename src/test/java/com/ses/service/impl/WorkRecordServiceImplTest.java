@@ -77,7 +77,7 @@ class WorkRecordServiceImplTest {
         String workMonth = "2026-07";
 
         // まだ実績なし
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
 
         // 契約データを準備
         Contract contract = new Contract();
@@ -107,12 +107,14 @@ class WorkRecordServiceImplTest {
     void testSaveHours_confirmedRecordThrowsException() {
         Long contractId = 1L;
         String workMonth = "2026-07";
+        Contract contract = new Contract(); contract.setId(contractId);
+        when(contractMapper.selectByIdForUpdate(contractId)).thenReturn(contract);
 
         // すでにerror.workRecord.confirmedEditの実績が存在
         WorkRecord existingRecord = new WorkRecord();
         existingRecord.setId(10L);
         existingRecord.setStatus("確定");
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existingRecord);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existingRecord);
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, workMonth, new BigDecimal("160"), "再入力"))
                 .isInstanceOf(BusinessException.class)
@@ -129,12 +131,17 @@ class WorkRecordServiceImplTest {
         // 確定対象の実績
         WorkRecord record = new WorkRecord();
         record.setId(1L);
+        record.setContractId(10L);
         record.setStatus("入力中");
         record.setPaymentAmount(new BigDecimal("600000"));
 
         when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
+        // ロック後の current read (selectByIdForUpdate) スタブ
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(record);
         // baseMapper.updateById を使うため Mapper にスタブ
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        // Contract ロック取得
+        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(new Contract());
 
         // グリッドDTOでBPを返す
         WorkRecordGridDto dto = new WorkRecordGridDto();
@@ -155,8 +162,12 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_支払済BP支払ありで例外() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
-        
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
         
@@ -173,8 +184,12 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_未払のみ成功() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
-        
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
         doReturn(true).when(spyService).updateBatchById(any());
@@ -192,8 +207,12 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_有効請求書の明細ありで例外() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
-        
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
         
@@ -207,8 +226,12 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_取消済み請求書のみで成功() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
-        
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
         doReturn(true).when(spyService).updateBatchById(any());
@@ -227,7 +250,11 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_手動BP階層ありで拒否() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定");
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
@@ -254,11 +281,14 @@ class WorkRecordServiceImplTest {
 
         WorkRecord record = new WorkRecord();
         record.setId(1L);
+        record.setContractId(10L);
         record.setStatus("入力中");
         record.setPaymentAmount(new BigDecimal("650000"));
 
         when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(new Contract());
 
         WorkRecordGridDto dto = new WorkRecordGridDto();
         dto.setWorkRecordId(1L);
@@ -289,11 +319,14 @@ class WorkRecordServiceImplTest {
 
         WorkRecord record = new WorkRecord();
         record.setId(1L);
+        record.setContractId(10L);
         record.setStatus("入力中");
         record.setPaymentAmount(new BigDecimal("650000"));
 
         when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(new Contract());
 
         WorkRecordGridDto dto = new WorkRecordGridDto();
         dto.setWorkRecordId(1L);
@@ -330,11 +363,14 @@ class WorkRecordServiceImplTest {
 
         WorkRecord record = new WorkRecord();
         record.setId(1L);
+        record.setContractId(10L);
         record.setStatus("入力中");
         record.setPaymentAmount(new BigDecimal("650000"));
 
         when(workRecordMapper.selectList(any())).thenReturn(Collections.singletonList(record));
-        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
+        when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(new Contract());
 
         WorkRecordGridDto dto = new WorkRecordGridDto();
         dto.setWorkRecordId(1L);
@@ -369,7 +405,10 @@ class WorkRecordServiceImplTest {
         WorkRecord existingRecord = new WorkRecord();
         existingRecord.setId(10L);
         existingRecord.setStatus("入力中");
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existingRecord);
+        Contract contract = new Contract();
+        contract.setId(contractId);
+        when(contractMapper.selectByIdForUpdate(contractId)).thenReturn(contract);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existingRecord);
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.singletonList("INV-202607-0001"));
 
         assertThatThrownBy(() -> workRecordService.saveHours(contractId, workMonth, new BigDecimal("160"), "再入力"))
@@ -394,7 +433,7 @@ class WorkRecordServiceImplTest {
     @Test
     void testSaveHours_契約期間外の月は拒否() {
         Long contractId = 1L;
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
         // 契約期間 2026-08〜2026-09。対象月 2026-07 は期間前。
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 9, 30), "稼動中"));
@@ -407,7 +446,7 @@ class WorkRecordServiceImplTest {
     @Test
     void testSaveHours_準備中契約は拒否() {
         Long contractId = 1L;
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "準備中"));
 
@@ -419,7 +458,7 @@ class WorkRecordServiceImplTest {
     @Test
     void testSaveHours_終了契約_期間内は登録できる() {
         Long contractId = 1L;
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "終了"));
         when(workRecordMapper.insert(any(WorkRecord.class))).thenReturn(1);
@@ -437,7 +476,7 @@ class WorkRecordServiceImplTest {
         WorkRecord existing = new WorkRecord();
         existing.setId(10L);
         existing.setStatus("入力中");
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existing);
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         // 解約で 2026-03 まで短縮された契約。対象月 2026-07 は期間外＋状態も解約。
         when(contractMapper.selectByIdForUpdate(contractId))
@@ -455,7 +494,7 @@ class WorkRecordServiceImplTest {
     @Test
     void testSaveHours_解約済み契約への新規作成は拒否() {
         Long contractId = 1L;
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null); // 新規
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null); // 新規
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), "解約"));
 
@@ -467,7 +506,7 @@ class WorkRecordServiceImplTest {
     @Test
     void testSaveHours_月形式不正は拒否() {
         Long contractId = 1L;
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 7, 1), null, "稼動中"));
 
@@ -482,7 +521,7 @@ class WorkRecordServiceImplTest {
         Long contractId = 1L;
         String workMonth = "2026-07";
 
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(null);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(null);
 
         Contract contract = new Contract();
         contract.setId(contractId);
@@ -505,10 +544,12 @@ class WorkRecordServiceImplTest {
 
     @Test
     void saveHours_dailyManagedMonthRejectsManualTotal() {
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         WorkRecord existing = new WorkRecord();
         existing.setId(10L);
         existing.setStatus("入力中");
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existing);
         when(workRecordDailyMapper.selectCount(any())).thenReturn(1L);
 
         assertThatThrownBy(() -> workRecordService.saveHours(1L, "2026-07", new BigDecimal("160"), "手動"))
@@ -522,7 +563,11 @@ class WorkRecordServiceImplTest {
         r.setId(5L);
         r.setStatus("入力中");
         r.setWorkMonth("2026-07");
+        r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
         // R3R-10: 条件付きUPDATE(CAS)へ変更。update件数1で後続処理。
         when(workRecordMapper.update(isNull(), any())).thenReturn(1);
 
@@ -540,7 +585,11 @@ class WorkRecordServiceImplTest {
         WorkRecord r = new WorkRecord();
         r.setId(5L);
         r.setStatus("確定");
+        r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
         assertThatThrownBy(() -> workRecordService.submit(5L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("error.workRecord.statusTransitionInvalid");
@@ -553,7 +602,12 @@ class WorkRecordServiceImplTest {
         r.setStatus("提出済");
         r.setWorkMonth("2026-07");
         r.setPaymentAmount(new BigDecimal("600000"));
+        r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        Contract c = new Contract();
+        c.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
+        when(contractMapper.selectById(1L)).thenReturn(c);
         // R3R-10: 条件付きUPDATE(CAS)。
         when(workRecordMapper.update(isNull(), any())).thenReturn(1);
         when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
@@ -571,7 +625,15 @@ class WorkRecordServiceImplTest {
         WorkRecord r = new WorkRecord();
         r.setId(5L);
         r.setStatus("入力中");
+        r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        Contract contract = new Contract(); contract.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+        Contract c = new Contract();
+        c.setId(1L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
+        when(contractMapper.selectById(1L)).thenReturn(c);
         assertThatThrownBy(() -> workRecordService.approve(5L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("error.workRecord.statusTransitionInvalid");
@@ -590,6 +652,7 @@ class WorkRecordServiceImplTest {
         Contract c = new Contract();
         c.setId(7L);
         c.setEngineerId(3L);
+        when(contractMapper.selectByIdForUpdate(7L)).thenReturn(c);
         when(contractMapper.selectById(7L)).thenReturn(c);
         com.ses.entity.EngineerAccountLink link = new com.ses.entity.EngineerAccountLink();
         link.setSysUserId(99L);
@@ -610,7 +673,7 @@ class WorkRecordServiceImplTest {
         WorkRecord existing = new WorkRecord();
         existing.setId(10L);
         existing.setStatus("入力中");
-        when(workRecordMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existing);
         
         com.ses.entity.Contract mockContract = new com.ses.entity.Contract();
         mockContract.setId(1L);

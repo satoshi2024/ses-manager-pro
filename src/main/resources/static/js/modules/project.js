@@ -4,20 +4,33 @@ let customersPromise = null;
 
 $(document).ready(function() {
     loadProjects();
-    loadCustomersForSelect();
-    loadAllSkillTags();
+    Promise.all([loadCustomersForSelect(), loadAllSkillTags()]).catch(e => console.error(e));
 });
 
+let skillTagsPromise = null;
 function loadAllSkillTags() {
-    $.ajax({
-        url: '/api/skill-tags',
-        method: 'GET',
-        success: function(res) {
-            if (res.code === 200 && res.data) {
-                allSkillTags = res.data;
-            }
-        }
-    });
+    if (!skillTagsPromise) {
+        skillTagsPromise = new Promise((resolve, reject) => {
+            $.ajax({
+                url: '/api/skill-tags',
+                method: 'GET',
+                success: function(res) {
+                    if (res.code === 200 && res.data) {
+                        allSkillTags = res.data;
+                        resolve();
+                    } else {
+                        skillTagsPromise = null;
+                        reject();
+                    }
+                },
+                error: function() {
+                    skillTagsPromise = null;
+                    reject();
+                }
+            });
+        });
+    }
+    return skillTagsPromise;
 }
 
 function loadProjects(page = 1) {
@@ -100,24 +113,26 @@ function loadCustomersForSelect() {
     if (!customersPromise) {
         customersPromise = new Promise((resolve, reject) => {
             $.ajax({
-                url: '/api/customers?size=1000',
+                url: '/api/customers/options',
                 method: 'GET',
                 success: function(res) {
                     if (res.code === 200 && res.data) {
-                        const customers = res.data.records || res.data;
+                        const customers = res.data;
                         const select = $('#proj-customerId');
                         select.empty();
                         select.append(`<option value="">${SES.i18n.t('project.modal.customer.placeholder') || '顧客を選択してください...'}</option>`);
                         customers.forEach(c => {
-                            select.append(`<option value="${c.id}">${SES.escapeHtml(c.companyName)}</option>`);
+                            select.append(`<option value="${c.id}">${SES.escapeHtml(c.name)}</option>`);
                         });
                         resolve();
                     } else {
-                        resolve(); // Resolve anyway to not block execution
+                        customersPromise = null;
+                        reject();
                     }
                 },
                 error: function() {
-                    resolve(); // Resolve anyway to not block execution
+                    customersPromise = null;
+                    reject();
                 }
             });
         });
@@ -212,8 +227,9 @@ function fetchAndRenderProjectSkills(projectId) {
 function editProject(id) {
     Promise.all([
         loadCustomersForSelect(),
+        loadAllSkillTags(),
         $.ajax({ url: '/api/projects/' + id, method: 'GET' })
-    ]).then(([_, res]) => {
+    ]).then(([_, __, res]) => {
         if (res.code === 200 && res.data) {
             const proj = res.data;
             $('#proj-id').val(proj.id);
@@ -255,6 +271,11 @@ function saveProject() {
     const projectName = $('#proj-projectName').val();
     if (!projectName) {
         Toast.error(SES.i18n.t('js.project.error.name_required'));
+        return;
+    }
+    
+    if (!$('#proj-customerId').val()) {
+        Toast.error(SES.i18n.t('project.modal.customer.required') || '顧客は必須です');
         return;
     }
     
