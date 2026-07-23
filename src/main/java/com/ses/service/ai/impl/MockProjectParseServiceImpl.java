@@ -29,8 +29,7 @@ public class MockProjectParseServiceImpl implements ProjectParseService {
     private static final Pattern LOCATION_PATTERN = Pattern.compile(
             "【?勤務地?】?\\s*[::\uff1a]　?\\s*([^\n\r]+)");
     private static final Pattern TECH_SKILL = Pattern.compile(
-            "\\b(Java|Python|PHP|Ruby|Go|C\\+\\+|TypeScript|JavaScript|React|Vue|Angular|AWS|Azure|GCP|Docker|Kubernetes|Spring|Spring Boot|MySQL|PostgreSQL|Oracle|MongoDB|C#|\\.NET)\\b",
-            Pattern.CASE_INSENSITIVE);
+            "(?i)(Java|Python|PHP|Ruby|Go|C\\+\\+|TypeScript|JavaScript|React|Vue|Angular|AWS|Azure|GCP|Docker|Kubernetes|Spring Boot|Spring|MySQL|PostgreSQL|Oracle|MongoDB|C#|\\.NET)");
 
     @Override
     public ParsedProjectDto parse(String extractedText) {
