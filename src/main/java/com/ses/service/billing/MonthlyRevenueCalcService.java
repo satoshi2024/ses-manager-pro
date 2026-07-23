@@ -57,6 +57,12 @@ public interface MonthlyRevenueCalcService {
      */
     boolean isTargetInMonth(Contract contract, YearMonth month);
 
+    /**
+     * 契約が対象月の集計対象か（確定実績の有無を考慮）。
+     * 確定実績があれば期間外でも対象とする（MI-09確定済み過去売上の保護）。
+     */
+    boolean isTargetInMonthWithActual(Contract contract, YearMonth month, WorkRecord confirmed);
+
     /** 月次集計結果。 */
     class MonthlyAmount {
         private final long sales;

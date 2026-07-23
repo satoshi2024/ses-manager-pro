@@ -305,7 +305,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                                  .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
         }
 
-        String status = resolvePaymentStatus(paidTotal, invoice.getTotal());
+        String status = resolvePaymentStatus(paidTotal, invoice.getTotal(), invoice.getStatus());
         LocalDate paidDate = null;
         if ("入金済".equals(status)) {
             paidDate = payments.stream()
@@ -324,14 +324,17 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     /**
      * 入金合計と請求総額から請求ステータスを決定する（判定の一元化・テスト容易化のため純関数）。
-     * paidTotal >= total → 入金済 / paidTotal > 0 → 一部入金 / それ以外 → 送付済。
+     * paidTotal >= total → 入金済 / paidTotal > 0 → 一部入金 / それ以外 → 送付済（未送付の場合は未送付を維持）。
      */
-    static String resolvePaymentStatus(BigDecimal paidTotal, BigDecimal total) {
+    static String resolvePaymentStatus(BigDecimal paidTotal, BigDecimal total, String currentStatus) {
         if (paidTotal.compareTo(total) >= 0) {
             return "入金済";
         } else if (paidTotal.signum() > 0) {
             return "一部入金";
         } else {
+            if ("未送付".equals(currentStatus)) {
+                return "未送付";
+            }
             return "送付済";
         }
     }
@@ -422,16 +425,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     @Override
     public MailDispatchResult sendReminder(Long invoiceId, Long templateId) {
-        Invoice invoice = this.getById(invoiceId);
+        Invoice invoice = baseMapper.selectById(invoiceId);
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        // 送付済/一部入金 かつ 期限超過(due_date < today) のみ督促可能。
-        if (!("送付済".equals(invoice.getStatus()) || "一部入金".equals(invoice.getStatus()))) {
+        if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), LocalDate.now())) {
             throw BusinessException.of("error.invoice.reminderNotAllowed");
-        }
-        if (invoice.getDueDate() == null || !invoice.getDueDate().isBefore(LocalDate.now())) {
-            throw BusinessException.of("error.invoice.reminderNotOverdue");
         }
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
@@ -460,9 +459,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (bpPayment == null) {
             throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }
-        // bpPayment は workRecordId を持っているから、そこから workMonth を引ける。
-        // だが BpPayment 自体には月がない。これは少し面倒だが今回はスキップ。
-        // "任意"なので一旦保留してもよいか、あるいは... 
+        // TODO(A7-05): workRecordId 経由で workMonth を解決し assertOpenForUpdate を呼ぶことで
+        //              締め済み月の BP 支払変更を拒否する（月次締め保護の統一化）。
         if ("支払済".equals(status)) {
             bpPayment.setStatus(status);
             bpPayment.setPaidDate(paidDate != null ? paidDate : LocalDate.now());
@@ -570,15 +568,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     continue;
                 }
                 if ("入金済".equals(invoice.getStatus())) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
+            results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
                     continue;
                 }
-                if (!("送付済".equals(invoice.getStatus()) || "一部入金".equals(invoice.getStatus()))) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "督促対象の状態ではありません", null));
-                    continue;
-                }
-                if (invoice.getDueDate() == null || !invoice.getDueDate().isBefore(targetDate)) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "期限内のため対象外", null));
+                if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), targetDate)) {
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "期限超過の督促対象ではありません", null));
                     continue;
                 }
                 com.ses.entity.Customer customer = customerMap.get(invoice.getCustomerId());

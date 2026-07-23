@@ -35,6 +35,24 @@ public interface InvoiceService extends IService<Invoice> {
     /** 期限超過請求書への督促メールを送信する。 */
     MailDispatchResult sendReminder(Long invoiceId, Long templateId);
     List<MailDelivery> listReminders(Long invoiceId);
-    /** 一括督促（行単位継続・結果集約）。請求書単位の結果行を返す（R3R-20）。 */
     List<com.ses.dto.mail.BulkReminderRowResult> sendReminders(List<Long> invoiceIds, Long templateId, LocalDate asOf);
+
+    /**
+     * 請求書が督促対象（未入金で期限超過）か判定する（A7-12）。
+     */
+    static boolean isOverdue(String status, LocalDate dueDate, LocalDate targetDate) {
+        if (!("送付済".equals(status) || "一部入金".equals(status))) {
+            return false;
+        }
+        return dueDate != null && dueDate.isBefore(targetDate);
+    }
+
+    /**
+     * 一覧用：支払期限超過(未入金かつ期限日 < 今日)のみに絞り込む（A7-12）。
+     */
+    static void applyOverdueFilter(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Invoice> query) {
+        query.in("status", "送付済", "一部入金")
+             .isNotNull("due_date")
+             .lt("due_date", java.time.LocalDate.now());
+    }
 }

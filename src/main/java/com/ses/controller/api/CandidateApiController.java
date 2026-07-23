@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.constant.StatusConstants;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.candidate.CandidateEngineerInitialDto;
 import com.ses.entity.Candidate;
 import com.ses.entity.CandidateActivity;
@@ -41,7 +42,8 @@ public class CandidateApiController {
             @RequestParam(required = false) String stage,
             @RequestParam(required = false) String skillKeyword) {
 
-        Page<Candidate> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
+        Page<Candidate> page = PageUtils.safePage(current, size);
         LambdaQueryWrapper<Candidate> wrapper = new LambdaQueryWrapper<>();
 
         if (StringUtils.hasText(name)) {

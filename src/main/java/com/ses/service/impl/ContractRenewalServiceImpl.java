@@ -34,9 +34,10 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
     private final ContractService contractService;
     private final SystemConfigService systemConfigService;
     private final ObjectProvider<NotificationService> notificationServiceProvider;
+    private final com.ses.service.EngineerSalesService engineerSalesService;
+    private final org.springframework.context.ApplicationContext applicationContext;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public int generateRenewalDrafts() {
         int days = systemConfigService.getInt("notice.contract-end-days", 30);
         LocalDate today = LocalDate.now();
@@ -50,21 +51,19 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
                 .le(Contract::getEndDate, horizon));
 
         int created = 0;
+        ContractRenewalService self = applicationContext.getBean(ContractRenewalService.class);
         for (Contract original : candidates) {
-            if (hasExistingDraft(original.getId())) {
-                continue;
+            try {
+                self.processSingleRenewal(original);
+                created++;
+            } catch (Exception e) {
+                log.warn("契約更新ドラフト作成失敗: {}", original.getContractNo(), e);
+                notificationServiceProvider.ifAvailable(ns -> ns.publish(
+                        "SYSTEM",
+                        "契約更新ドラフト作成エラー",
+                        "契約 " + original.getContractNo() + " の自動更新でエラーが発生しました: " + e.getMessage(),
+                        null, null));
             }
-            Contract draft = buildDraft(original);
-            contractService.saveWithBusinessRules(draft);
-            created++;
-
-            notificationServiceProvider.ifAvailable(ns -> ns.publish(
-                    "CONTRACT_RENEWAL_DRAFT",
-                    "契約更新ドラフトを作成しました",
-                    "契約 " + original.getContractNo() + " の自動更新ドラフトを作成しました（開始日: "
-                            + draft.getStartDate() + "）",
-                    com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
-                    "CONTRACT_RENEWAL_DRAFT:" + original.getId()));
         }
 
         if (created > 0) {
@@ -73,9 +72,26 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
         return created;
     }
 
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void processSingleRenewal(Contract original) {
+        if (hasExistingDraft(original.getId())) {
+            return;
+        }
+        Contract draft = buildDraft(original);
+        contractService.saveWithBusinessRules(draft);
+
+        notificationServiceProvider.ifAvailable(ns -> ns.publish(
+                "CONTRACT_RENEWAL_DRAFT",
+                "契約更新ドラフトを作成しました",
+                "契約 " + original.getContractNo() + " の自動更新ドラフトを作成しました（開始日: "
+                        + draft.getStartDate() + "）",
+                com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
+                "CONTRACT_RENEWAL_DRAFT:" + original.getId()));
+    }
+
     private boolean hasExistingDraft(Long originalContractId) {
-        return contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getRenewedFromContractId, originalContractId)) > 0;
+        return contractMapper.countRenewedDraftsIncludingDeleted(originalContractId) > 0;
     }
 
     private Contract buildDraft(Contract original) {
@@ -92,7 +108,13 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
         draft.setSettlementHoursMax(original.getSettlementHoursMax());
         draft.setFractionRule(original.getFractionRule());
         draft.setAutoRenew(original.getAutoRenew());
-        draft.setSalesUserId(original.getSalesUserId());
+        
+        Long primaryId = original.getSalesUserId();
+        if (primaryId != null && !engineerSalesService.isActiveSalesUser(primaryId)) {
+            primaryId = null;
+        }
+        draft.setSalesUserId(primaryId);
+        
         draft.setCommissionBaseType(original.getCommissionBaseType());
         draft.setCommissionRate(original.getCommissionRate());
         draft.setStatus("準備中");

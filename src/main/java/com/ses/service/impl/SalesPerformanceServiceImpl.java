@@ -136,7 +136,8 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
                 closedContractCountMap.put(uid, closedContractCountMap.getOrDefault(uid, 0) + 1);
             }
 
-            if (isActiveInMonth(c, startOfMonthDate, endOfMonthDate)) {
+            WorkRecord confirmed = workRecordMap.get(c.getId());
+            if (monthlyRevenueCalcService.isTargetInMonthWithActual(c, targetMonth, confirmed)) {
 
                 activeContractCountMap.put(uid, activeContractCountMap.getOrDefault(uid, 0) + 1);
 
@@ -208,13 +209,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         return result;
     }
 
-    private boolean isActiveInMonth(Contract contract, LocalDate startOfMonth, LocalDate endOfMonth) {
-        if (contract.getStartDate() == null || StatusConstants.CONTRACT_PREPARING.equals(contract.getStatus())) {
-            return false;
-        }
-        return !contract.getStartDate().isAfter(endOfMonth)
-                && (contract.getEndDate() == null || !contract.getEndDate().isBefore(startOfMonth));
-    }
+
 
     @Override
     public CommissionRuleDto getCommissionRule() {

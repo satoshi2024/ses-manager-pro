@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.Project;
 import com.ses.dto.project.ProjectListDto;
 import com.ses.dto.project.ProjectSaveDto;
@@ -35,8 +36,8 @@ public class ProjectApiController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) String customerName) {
-        if (size <= 0) size = 1000;
-        Page<ProjectListDto> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
+        Page<ProjectListDto> page = PageUtils.safePage(current, size, 1000L);
         
         Collection<Long> allowedIds = null;
         if (dataScopeService.isScoped()) {

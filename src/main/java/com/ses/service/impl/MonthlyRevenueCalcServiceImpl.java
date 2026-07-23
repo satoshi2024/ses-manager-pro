@@ -52,8 +52,7 @@ public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService 
             for (Contract c : contracts) {
                 WorkRecord confirmed = confirmedByContractId == null ? null
                         : confirmedByContractId.get(c.getId());
-                boolean hasConfirmedRecord = confirmed != null && confirmed.getBillingAmount() != null;
-                if (!hasConfirmedRecord && !isTargetInMonth(c, month)) {
+                if (!isTargetInMonthWithActual(c, month, confirmed)) {
                     continue;
                 }
                 ContractAmount amount = resolveWithPrice(c, confirmed,
@@ -130,5 +129,11 @@ public class MonthlyRevenueCalcServiceImpl implements MonthlyRevenueCalcService 
         LocalDate monthEnd = month.atEndOfMonth();
         return !contract.getStartDate().isAfter(monthEnd)
                 && (contract.getEndDate() == null || !contract.getEndDate().isBefore(monthStart));
+    }
+
+    @Override
+    public boolean isTargetInMonthWithActual(Contract contract, YearMonth month, WorkRecord confirmed) {
+        boolean hasConfirmedRecord = confirmed != null && confirmed.getBillingAmount() != null;
+        return hasConfirmedRecord || isTargetInMonth(contract, month);
     }
 }

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.EngineerSales;
 import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerSalesMapper;
@@ -43,7 +44,8 @@ public class UserApiController {
             @RequestParam(required = false) String role,
             @RequestParam(required = false) Integer status) {
 
-        Page<SysUser> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
+        Page<SysUser> page = PageUtils.safePage(current, size);
         LambdaQueryWrapper<SysUser> queryWrapper = new LambdaQueryWrapper<>();
 
         if (StringUtils.hasText(username)) {

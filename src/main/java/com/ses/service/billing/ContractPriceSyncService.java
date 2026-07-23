@@ -42,6 +42,7 @@ public class ContractPriceSyncService {
                 .collect(Collectors.groupingBy(ContractPriceHistory::getContractId));
 
         YearMonth currentMonth = YearMonth.now();
+        int processCount = 0;
         int updateCount = 0;
 
         for (Map.Entry<Long, List<ContractPriceHistory>> entry : historyByContract.entrySet()) {
@@ -67,12 +68,13 @@ public class ContractPriceSyncService {
                                 contract.getCostPrice(), resolvedCost);
                         // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
                         contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
+                        updateCount++;
                     }
                 }
             });
-            updateCount++; // Technically, we increment regardless of whether it updated, but this matches original logic sort of. Let's just keep it simple.
+            processCount++;
         }
         
-        log.info("Contract price sync completed. Updated {} contracts.", updateCount);
+        log.info("契約単価同期完了。処理{}件（単価変更あり: {}件）", processCount, updateCount);
     }
 }

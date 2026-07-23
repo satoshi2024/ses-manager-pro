@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.Engineer;
 import com.ses.service.EngineerService;
 import jakarta.validation.Valid;
@@ -33,8 +34,8 @@ public class EngineerApiController {
             @RequestParam(required = false) java.util.List<Long> skillIds,
             @RequestParam(required = false) Long salesUserId) {
         
-        if (size <= 0) size = 1000;
-        Page<Engineer> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
+        Page<com.ses.dto.engineer.EngineerListDto> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当要員のみ。空集合なら空ページを即返す。
         if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();

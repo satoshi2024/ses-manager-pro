@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.customer.CustomerSummaryDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
@@ -49,8 +50,8 @@ public class CustomerApiController {
             @RequestParam(required = false) String commercialFlow,
             @RequestParam(required = false) String trustLevel) {
 
-        if (size <= 0) size = 10;
-        Page<Customer> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
+        Page<Customer> page = PageUtils.safePage(current, size);
         // データスコープ: 営業ロール制限時は担当顧客のみ。
         if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();

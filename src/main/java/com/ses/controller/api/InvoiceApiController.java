@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.InvoiceDetailDto;
 import com.ses.dto.invoice.BpPaymentListDto;
 import com.ses.dto.invoice.InvoiceGenerateRequest;
@@ -59,7 +60,8 @@ public class InvoiceApiController {
                           @RequestParam(required = false) Long customerId,
                           @RequestParam(required = false) String status,
                           @RequestParam(required = false) Boolean overdue) {
-        Page<Invoice> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
+        Page<Invoice> page = PageUtils.safePage(current, size);
         QueryWrapper<Invoice> query = new QueryWrapper<>();
         if (month != null && !month.isEmpty()) {
             query.eq("billing_month", month);
@@ -72,9 +74,7 @@ public class InvoiceApiController {
         }
         // 支払期限超過(未入金かつ期限日 < 今日)のみに絞り込む
         if (Boolean.TRUE.equals(overdue)) {
-            query.ne("status", "入金済")
-                 .isNotNull("due_date")
-                 .lt("due_date", java.time.LocalDate.now());
+            com.ses.service.InvoiceService.applyOverdueFilter(query);
         }
         query.orderByDesc("id");
         return ApiResult.success(invoiceService.page(page, query));

@@ -37,12 +37,13 @@ function loadTemplates() {
             let options = '<option value="">選択してください</option>';
             let trs = '';
             allTemplates.forEach(t => {
-                options += `<option value="${t.id}">${t.name} (Ver ${t.version})</option>`;
+                options += `<option value="${t.id}">${SES.escapeHtml(t.name)} (Ver ${SES.escapeHtml(String(t.version))})</option>`;
+                // XSS対策: サーバー側値を innerHTML へ挿入する際は escapeHtml 必須（A7-10）
                 trs += `<tr>
                     <td>${t.id}</td>
-                    <td>${t.name}</td>
-                    <td>${t.contractType}</td>
-                    <td>${t.version}</td>
+                    <td>${SES.escapeHtml(t.name)}</td>
+                    <td>${SES.escapeHtml(t.contractType)}</td>
+                    <td>${SES.escapeHtml(String(t.version))}</td>
                 </tr>`;
             });
             $('#newDocTemplateId').html(options);
@@ -66,11 +67,12 @@ function loadDocuments() {
             let html = '';
             res.data.forEach(d => {
                 const sentAt = d.sentAt ? d.sentAt.replace('T', ' ').substring(0,16) : '-';
+                // XSS対策: 受信者名・メール・ステータスはサーバー値のため escapeHtml 必須（A7-10）
                 html += `<tr>
                     <td class="px-4">${d.id}</td>
-                    <td>${d.recipientName}</td>
-                    <td>${d.recipientEmail}</td>
-                    <td><span class="badge bg-secondary">${d.status}</span></td>
+                    <td>${SES.escapeHtml(d.recipientName)}</td>
+                    <td>${SES.escapeHtml(d.recipientEmail)}</td>
+                    <td><span class="badge bg-secondary">${SES.escapeHtml(d.status)}</span></td>
                     <td>${sentAt}</td>
                     <td class="px-4 text-end">
                         <button class="btn btn-sm btn-outline-info me-1" onclick="syncDoc(${d.id})"><i class="bi bi-arrow-repeat"></i> 同期</button>
@@ -102,14 +104,15 @@ function createDocument() {
     const remail = $('#newDocRecipientEmail').val();
     
     if(!cid || !tid || !rname || !remail) {
-        SES.toast('warning', 'すべての項目を入力してください');
+        // A7-02: SES.toast はオブジェクト。SES.toast('warning', ...) の関数呼び出しは誤り
+        SES.toast.warning('すべての項目を入力してください');
         return;
     }
     
     $.post(`/api/contract-documents?contractId=${cid}&templateId=${tid}&recipientName=${encodeURIComponent(rname)}&recipientEmail=${encodeURIComponent(remail)}`, function(res) {
         if (res.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('createDocModal')).hide();
-            SES.toast('success', '契約書を作成しました');
+            SES.toast.success('契約書を作成しました');
             $('#contractIdSelect').val(cid);
             loadDocuments();
         }
@@ -126,7 +129,7 @@ function sendDoc(id) {
         if (res.isConfirmed) {
             $.post(`/api/contract-documents/${id}/send`, function(r) {
                 if (r.code === 200) {
-                    SES.toast('success', '送信しました');
+                    SES.toast.success('送信しました');
                     loadDocuments();
                 }
             });
@@ -137,7 +140,7 @@ function sendDoc(id) {
 function syncDoc(id) {
     $.post(`/api/contract-documents/${id}/sync`, function(r) {
         if (r.code === 200) {
-            SES.toast('success', '同期しました');
+            SES.toast.success('同期しました');
             loadDocuments();
         }
     });
@@ -166,7 +169,7 @@ function createTemplate() {
     };
     
     if (!data.name || !data.contractType || !data.htmlContent) {
-        SES.toast('warning', 'すべての項目を入力してください');
+        SES.toast.warning('すべての項目を入力してください');
         return;
     }
     
@@ -177,7 +180,7 @@ function createTemplate() {
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                SES.toast('success', 'テンプレートを作成しました');
+                SES.toast.success('テンプレートを作成しました');
                 hideCreateTemplateForm();
                 loadTemplates();
             }

@@ -108,7 +108,12 @@ public class SecurityConfig {
                 ).hasRole("管理者")
                 // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
                 .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
-                // 通知APIは要員を含めて全ロールがアクセス可能（/api/notifications/generate は管理者限定で処理済み）
+                // ===== 要員を含む全認証ユーザーが利用できる共通経路 =====
+                // 新たに認証ユーザー全体向け機能を追加する場合は必ずここへ追記すること。
+                //   /                    ← ロール別振り分けルーター（LoginSuccessHandler が全ロールを / へ送る）
+                //   /api/profile/**      ← パスワード変更（ヘッダーに表示・要員も利用）
+                //   /api/notifications   ← 通知ベル
+                .requestMatchers("/", "/api/profile/**").authenticated()
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
                 // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する
                 .anyRequest().hasAnyRole("管理者", "営業", "HR", "マネージャー")
@@ -130,7 +135,9 @@ public class SecurityConfig {
             )
             // ログアウトの設定
             .logout(logout -> logout
-                .logoutRequestMatcher(new AntPathRequestMatcher("/logout"))
+                // POST 限定: GET /logout による外部サイトからの強制ログアウト（A7-27）を防ぐ。
+                // ヘッダーのログアウトリンクは form POST で呼ぶこと（layout/header.html 参照）。
+                .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "POST"))
                 .logoutSuccessUrl("/login?logout")
                 .invalidateHttpSession(true)
                 .deleteCookies("JSESSIONID")

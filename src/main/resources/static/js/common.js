@@ -501,13 +501,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// モックアップ用グローバル関数（実装前の画面デモ用）
-window.matchAI = function(engineerId) {
-    SES.toast.info('AIマッチング処理を実行しています...');
-    setTimeout(() => {
-        SES.toast.success('マッチングが完了しました。最適な案件が見つかりました。');
-    }, 2000);
-};
+
 
 // ================== CSRF (Cookie → ヘッダー) ==================
 // CookieCsrfTokenRepository が発行する XSRF-TOKEN Cookie を読み、

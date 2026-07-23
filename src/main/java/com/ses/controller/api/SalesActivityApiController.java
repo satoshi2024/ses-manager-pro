@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.SalesActivity;
 import com.ses.dto.salesactivity.SalesActivityCreateRequest;
 import com.ses.dto.salesactivity.SalesActivityUpdateRequest;
@@ -37,7 +38,8 @@ public class SalesActivityApiController {
             @RequestParam(required = false) String type) {
         dataScopeService.assertAllowedCustomer(id);
         salesActivityService.assertCustomerExists(id);
-        Page<SalesActivity> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
+        Page<SalesActivity> page = PageUtils.safePage(current, size);
         LambdaQueryWrapper<SalesActivity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalesActivity::getCustomerId, id);
         

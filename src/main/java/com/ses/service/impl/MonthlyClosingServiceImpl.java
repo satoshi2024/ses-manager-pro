@@ -125,7 +125,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         LocalDate today = LocalDate.now();
         List<InvoiceBalanceDto> overdue = new ArrayList<>();
         for (InvoiceBalanceDto b : invoiceMapper.selectOutstandingBalances()) {
-            if (b.getDueDate() != null && b.getDueDate().isBefore(today)) {
+            if (com.ses.service.InvoiceService.isOverdue(b.getStatus(), b.getDueDate(), today)) {
                 overdue.add(b);
             }
         }

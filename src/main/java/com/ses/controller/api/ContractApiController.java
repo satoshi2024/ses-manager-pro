@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.Contract;
 import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
@@ -48,8 +49,8 @@ public class ContractApiController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
             @RequestParam(required = false) Long salesUserId,
             @RequestParam(required = false) Boolean salesUnassigned) {
-        if (size <= 0) size = 1000;
-        Page<ContractListDto> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
+        Page<ContractListDto> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
         // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
         java.util.List<Long> allowedIds = null;

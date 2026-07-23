@@ -171,29 +171,10 @@
                                 </tr>
                             </thead>
                             <tbody class="border-top-0" id="retiring-table-body">
-                                <!-- JS will populate this. Mock data for UI preview: -->
-                                <tr>
-                                    <td class="px-4 py-3">
-                                        <div class="d-flex align-items-center">
-                                            <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-3" style="width: 32px; height: 32px; font-size: 0.8rem;">T.S</div>
-                                            <div>
-                                                <div class="fw-bold text-white mb-0">田中 太郎</div>
-                                                <div class="small text-muted">Java / Spring Boot</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="py-3 text-white">大手金融基盤刷新プロジェクト</td>
-                                    <td class="py-3">
-                                        <span class="text-accent-yellow fw-bold"><i class="bi bi-clock me-1"></i>2026/07/31</span>
-                                        <div class="small text-muted">残り 21 日</div>
-                                    </td>
-                                    <td class="py-3">
-                                        <span class="badge status-badge status-proposal"><i class="bi bi-file-earmark-person me-1"></i>書類選考中 (2件)</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-end">
-                                        <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="matchAI(1)">
-                                            <i class="bi bi-robot me-1"></i>AI案件探索
-                                        </button>
+                                <!-- JS (dashboard.js) が動的にデータを挿入する。モックデータは削除済み（A7-20）。 -->
+                                <tr id="retiring-loading-row">
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        <i class="bi bi-arrow-repeat me-1"></i><span th:text="#{common.loading}">読み込み中...</span>
                                     </td>
                                 </tr>
                             </tbody>

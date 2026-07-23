@@ -25,6 +25,9 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT MAX(contract_no) FROM t_contract WHERE contract_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxContractNoIncludingDeleted(@org.apache.ibatis.annotations.Param("prefix") String prefix);
 
+    @Select("SELECT COUNT(*) FROM t_contract WHERE renewed_from_contract_id = #{originalId}")
+    int countRenewedDraftsIncludingDeleted(@org.apache.ibatis.annotations.Param("originalId") Long originalId);
+
     /** 契約行を FOR UPDATE でロックして取得する（通常更新と単価同期/改定を直列化する / R3R-29）。 */
     @Select("SELECT * FROM t_contract WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Contract selectByIdForUpdate(@org.apache.ibatis.annotations.Param("id") Long id);

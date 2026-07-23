@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.entity.Contract;
 import com.ses.entity.Quotation;
 import com.ses.service.QuotationPdfService;
@@ -41,7 +42,8 @@ public class QuotationApiController {
                              @RequestParam(required = false) String status,
                              @RequestParam(required = false) Long customerId,
                              @RequestParam(required = false) String keyword) {
-        Page<Quotation> page = new Page<>(current, size);
+        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防する
+        Page<Quotation> page = PageUtils.safePage(current, size);
         QueryWrapper<Quotation> query = new QueryWrapper<>();
         // データスコープ: 営業ロール制限時は担当顧客∪担当要員由来の見積のみ。
         if (dataScopeService.isScoped()) {
