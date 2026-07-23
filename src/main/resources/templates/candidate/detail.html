@@ -16,6 +16,9 @@
             <button id="btn-convert-engineer" class="btn btn-success shadow-sm d-none" onclick="convertToEngineer()">
                 <i class="bi bi-person-check me-1"></i><th:block th:text="#{candidate.convertToEngineer}">エンジニアとして登録</th:block>
             </button>
+            <button id="btn-ingest-resume" class="btn btn-outline-info shadow-sm ms-2 d-none" onclick="startResumeIngestion()">
+                <i class="bi bi-file-earmark-arrow-up me-1"></i><th:block th:text="#{candidate.ingestFromSkillSheet}">スキルシートから要員化</th:block>
+            </button>
             <button class="btn btn-primary shadow-sm ms-2" data-bs-toggle="modal" data-bs-target="#stageModal">
                 <i class="bi bi-arrow-repeat me-1"></i><th:block th:text="#{candidate.activity.changeStage}">ステージ変更</th:block>
             </button>

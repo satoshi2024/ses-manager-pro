@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.config.UploadProperties;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.service.FileReferenceProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,7 +43,14 @@ class FileCleanupServiceImplTest {
 
         engineerMapper = Mockito.mock(EngineerMapper.class);
         proposalMapper = Mockito.mock(ProposalMapper.class);
-        service = new FileCleanupServiceImpl(props, engineerMapper, proposalMapper);
+        
+        FileReferenceProvider p1 = Mockito.mock(FileReferenceProvider.class);
+        FileReferenceProvider p2 = Mockito.mock(FileReferenceProvider.class);
+        service = new FileCleanupServiceImpl(props, List.of(p1, p2));
+        
+        // Mock behaviors used in tests
+        when(p1.referencedFileNames()).thenAnswer(inv -> engineerMapper.selectAllPhotoUrls() == null ? java.util.Collections.emptySet() : new java.util.HashSet<>(engineerMapper.selectAllPhotoUrls()));
+        when(p2.referencedFileNames()).thenAnswer(inv -> proposalMapper.selectAllSkillSheetPaths() == null ? java.util.Collections.emptySet() : new java.util.HashSet<>(proposalMapper.selectAllSkillSheetPaths()));
     }
 
     private Path createFile(String name, Instant lastModified) throws IOException {
@@ -108,7 +116,7 @@ class FileCleanupServiceImplTest {
     void cleanupOrphanFiles_ディレクトリが存在しない場合は何もしない() {
         UploadProperties props = new UploadProperties();
         props.setBasePath(baseDir.resolve("does-not-exist").toString());
-        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props, engineerMapper, proposalMapper);
+        FileCleanupServiceImpl svc = new FileCleanupServiceImpl(props, List.of());
 
         assertEquals(0, svc.cleanupOrphanFiles());
     }

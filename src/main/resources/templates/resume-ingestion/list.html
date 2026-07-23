@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{resumeIngestion.title} + ' - ' + #{app.name}">スキルシート取込 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0 text-light"><i class="bi bi-file-earmark-person me-2 text-primary"></i><span th:text="#{resumeIngestion.title}">スキルシート取込</span></h1>
+        <button class="btn btn-primary shadow-sm" id="btn-upload">
+            <i class="bi bi-upload me-1"></i><th:block th:text="#{resumeIngestion.upload}">アップロード</th:block>
+        </button>
+    </div>
+
+    <!-- フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="filterStatus" class="form-label text-muted small" th:text="#{resumeIngestion.status}"></label>
+                    <select id="filterStatus" class="form-select bg-dark border-secondary text-light">
+                        <option value="" th:text="#{common.all}"></option>
+                        <option value="\u53d6\u8fbc\u5f85\u3061" th:text="#{resumeIngestion.status.pending}"></option>
+                        <option value="\u62bd\u51fa\u4e2d" th:text="#{resumeIngestion.status.parsing}"></option>
+                        <option value="\u8981\u78ba\u8a8d" th:text="#{resumeIngestion.status.review}"></option>
+                        <option value="\u78ba\u5b9a\u6e08" th:text="#{resumeIngestion.status.done}"></option>
+                        <option value="\u5374\u4e0b" th:text="#{resumeIngestion.status.rejected}"></option>
+                        <option value="\u5931\u6557" th:text="#{resumeIngestion.status.failed}"></option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-outline-primary w-100" onclick="loadList(1)">
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}"></th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一覧 -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4" th:text="#{resumeIngestion.originalFileName}"></th>
+                            <th scope="col" th:text="#{resumeIngestion.status}"></th>
+                            <th scope="col" th:text="#{resumeIngestion.createdAt}"></th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ri-table-body">
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center" id="ri-pagination"></div>
+        </div>
+    </div>
+
+    <!-- アップロードモーダル -->
+    <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card text-white border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title" th:text="#{resumeIngestion.upload}">スキルシートアップロード</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="resumeFile" class="form-label text-muted small" th:text="#{resumeIngestion.file}"></label>
+                        <input type="file" id="resumeFile" class="form-control bg-dark border-secondary text-light" accept=".pdf,.xlsx,.docx">
+                        <div class="form-text text-muted small" th:text="#{resumeIngestion.fileHint}">PDF / Excel / Word 形式、最大10MB</div>
+                    </div>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}"></button>
+                    <button type="button" class="btn btn-primary" id="btn-do-upload" th:text="#{resumeIngestion.upload}"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/resume-ingestion.js}" defer></script>
+</th:block>
+</body>
+</html>

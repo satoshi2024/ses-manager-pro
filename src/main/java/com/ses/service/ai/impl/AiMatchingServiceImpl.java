@@ -2,7 +2,7 @@ package com.ses.service.ai.impl;
 
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.service.ai.AiMatchingService;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -12,7 +12,7 @@ import java.util.List;
  * AIマッチングサービス実装
  */
 @Service
-@ConditionalOnProperty(name = "ai.provider", havingValue = "mock", matchIfMissing = true)
+@ConditionalOnExpression("!'gemini'.equals('${ai.provider:mock}') && !'rule'.equals('${ai.provider:mock}')")
 public class AiMatchingServiceImpl implements AiMatchingService {
 
     @Override

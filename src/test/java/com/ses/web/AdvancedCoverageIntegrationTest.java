@@ -4,7 +4,7 @@ import com.ses.BaseIntegrationTest;
 import com.ses.controller.api.*;
 import com.ses.entity.*;
 import com.ses.service.*;
-import com.ses.service.ai.impl.RuleMatchingServiceImpl;
+
 import com.ses.service.impl.DashboardServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,13 +21,16 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.springframework.test.context.TestPropertySource;
+
 @Sql(scripts = {"/sql/engineer-schema-h2.sql", "/sql/api-coverage-data.sql"})
+@TestPropertySource(properties = "ai.provider=rule")
 class AdvancedCoverageIntegrationTest extends BaseIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private NotificationGenerateService notificationGenerateService;
     @Autowired private DashboardServiceImpl dashboardService;
-    @Autowired private RuleMatchingServiceImpl ruleMatchingService;
+    @Autowired private com.ses.service.ai.AiMatchingService ruleMatchingService;
     @Autowired private ProjectSkillService projectSkillService;
     @Autowired private ProposalService proposalService;
     @Autowired private InvoiceService invoiceService;

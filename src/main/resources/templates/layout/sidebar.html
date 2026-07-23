@@ -59,6 +59,12 @@
                         <span th:text="#{menu.candidate}">候補者管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('resume-ingestion')}">
+                    <a th:href="@{/resume-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/resume-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-earmark-person me-2"></i>
+                        <span th:text="#{menu.resumeIngestion}">スキルシート取込</span>
+                    </a>
+                </li>
 
                 <li class="nav-item mt-3 mb-1 px-3">
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.sales}">営業・契約</span>

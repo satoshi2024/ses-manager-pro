@@ -61,7 +61,8 @@ class QuotationPdfServiceImplTest {
         e.setInitialName("Y.T");
         when(em.selectById(2L)).thenReturn(e);
 
-        return new QuotationPdfServiceImpl(new PdfProperties(), cfg, qm, cm, em);
+        PdfProperties pdfProps = new PdfProperties();
+        return new QuotationPdfServiceImpl(pdfProps, cfg, qm, cm, em, new com.ses.common.util.PdfFontUtils(pdfProps));
     }
 
     @Test

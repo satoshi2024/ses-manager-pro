@@ -6,18 +6,22 @@ import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
-import com.ses.service.GeminiService;
+import com.ses.service.ai.AiTextService;
 import com.ses.service.security.DataScopeService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * AI対話系APIコントローラー。
+ * エンジニア・案件コンテキストを付加してAIと対話するエンドポイント。
+ */
 @RestController
 @RequestMapping("/api/ai")
 @RequiredArgsConstructor
 public class AiRestController {
 
-    private final GeminiService geminiService;
+    private final AiTextService aiTextService;
     private final EngineerService engineerService;
     private final ProjectService projectService;
     private final DataScopeService dataScopeService;
@@ -25,12 +29,15 @@ public class AiRestController {
 
     @Data
     public static class AiChatRequest {
-        private String apiKey;
         private String prompt;
         private Long engineerId;
         private Long projectId;
     }
 
+    /**
+     * AIとの対話エンドポイント。
+     * エンジニアID・案件IDが指定された場合はコンテキストを付加する。
+     */
     @PostMapping("/chat")
     public ApiResult<String> chat(@RequestBody AiChatRequest request) {
         if (!aiConfig.isEnabled()) {
@@ -39,7 +46,6 @@ public class AiRestController {
         try {
             StringBuilder finalPrompt = new StringBuilder();
 
-            // コンテキストの追加
             if (request.getEngineerId() != null) {
                 dataScopeService.assertAllowedEngineer(request.getEngineerId());
                 Engineer eng = engineerService.getById(request.getEngineerId());
@@ -66,14 +72,13 @@ public class AiRestController {
 
             finalPrompt.append("【ユーザーからの指示】\n").append(request.getPrompt());
 
-            String answer = geminiService.generateContent(request.getApiKey(), finalPrompt.toString());
+            String answer = aiTextService.generate(finalPrompt.toString());
             return ApiResult.success(answer);
-            
-        } catch (IllegalArgumentException e) {
-            return ApiResult.error(400, e.getMessage());
+
+        } catch (com.ses.common.exception.BusinessException e) {
+            return ApiResult.error(e.getCode(), e.getMessage());
         } catch (Exception e) {
-            return ApiResult.error(500, e.getMessage());
+            return ApiResult.error(500, "AI呼び出し中にエラーが発生しました。");
         }
     }
 }
-

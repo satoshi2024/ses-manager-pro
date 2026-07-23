@@ -4,18 +4,16 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.config.AiConfig;
 import com.ses.dto.ai.MatchResultDto;
-import com.ses.dto.ai.SkillSheetDto;
 import com.ses.service.ai.AiMatchingService;
-import com.ses.service.ai.AiSkillSheetService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
- * AI機能APIコントローラー
+ * AI機能APIコントローラー（マッチング系）。
+ * 対話系は AiRestController、取込解析系は ResumeIngestionApiController が担当する。
  */
 @RestController
 @RequestMapping("/api/ai")
@@ -23,13 +21,12 @@ import java.util.Map;
 public class AiApiController {
 
     private final AiMatchingService aiMatchingService;
-    private final AiSkillSheetService aiSkillSheetService;
     private final DataScopeService dataScopeService;
     private final AiConfig aiConfig;
 
     private void checkAiEnabled() {
         if (!aiConfig.isEnabled()) {
-            throw new BusinessException("AI機能は現在無効化されています。");
+            throw BusinessException.of("error.ai.disabled");
         }
     }
 
@@ -37,7 +34,7 @@ public class AiApiController {
      * エンジニアと案件のマッチングを行う
      */
     @PostMapping("/match/engineer-to-projects")
-    public ApiResult<List<MatchResultDto>> matchEngineerToProjects(@RequestBody Map<String, Long> payload) {
+    public ApiResult<List<MatchResultDto>> matchEngineerToProjects(@RequestBody java.util.Map<String, Long> payload) {
         Long engineerId = payload.get("engineerId");
         if (engineerId != null) {
             dataScopeService.assertAllowedEngineer(engineerId);
@@ -55,18 +52,4 @@ public class AiApiController {
         }
         return ApiResult.success(aiMatchingService.findMatchingEngineers(projectId));
     }
-
-    /**
-     * スキルシートを生成する
-     */
-    @PostMapping("/skill-sheet/generate")
-    public ApiResult<SkillSheetDto> generateSkillSheet(@RequestBody Map<String, Long> payload) {
-        checkAiEnabled();
-        Long engineerId = payload.get("engineerId");
-        if (engineerId != null) {
-            dataScopeService.assertAllowedEngineer(engineerId);
-        }
-        return ApiResult.success(aiSkillSheetService.generateSkillSheet(engineerId));
-    }
 }
-

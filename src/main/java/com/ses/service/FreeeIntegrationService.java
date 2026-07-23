@@ -11,4 +11,5 @@ public interface FreeeIntegrationService {
     void link(Long engineerId, String employeeId, Long userId);
     void unlink(Long engineerId);
     List<PayrollStatementDto> statements(int year, int month, String type);
+    void refresh();
 }

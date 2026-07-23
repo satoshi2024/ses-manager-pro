@@ -1,9 +1,8 @@
 package com.ses.service.impl;
 
 import com.ses.config.UploadProperties;
-import com.ses.mapper.EngineerMapper;
-import com.ses.mapper.ProposalMapper;
 import com.ses.service.FileCleanupService;
+import com.ses.service.FileReferenceProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,7 +20,9 @@ import java.util.stream.Stream;
 
 /**
  * アップロード済みファイルの孤児清理サービス実装。
- * 参照元は現時点で t_engineer.photo_url / t_proposal.skill_sheet_path の2列のみ。
+ * FileReferenceProvider の全実装を集約して参照集合を構築する。
+ * 新機能がファイルを追加する際は FileReferenceProvider を1つ実装することで
+ * 清理対象から自動的に除外される（足し忘れ防止）。
  */
 @Slf4j
 @Service
@@ -29,8 +30,7 @@ import java.util.stream.Stream;
 public class FileCleanupServiceImpl implements FileCleanupService {
 
     private final UploadProperties uploadProperties;
-    private final EngineerMapper engineerMapper;
-    private final ProposalMapper proposalMapper;
+    private final List<FileReferenceProvider> fileReferenceProviders;
 
     @Override
     public int cleanupOrphanFiles() {
@@ -69,17 +69,13 @@ public class FileCleanupServiceImpl implements FileCleanupService {
         return deleted;
     }
 
+    /**
+     * 全 FileReferenceProvider から参照ファイル名を集約する。
+     */
     private Set<String> collectReferencedFileNames() {
         Set<String> referenced = new HashSet<>();
-        for (String photoUrl : engineerMapper.selectAllPhotoUrls()) {
-            if (photoUrl != null && !photoUrl.isBlank()) {
-                referenced.add(photoUrl);
-            }
-        }
-        for (String skillSheetPath : proposalMapper.selectAllSkillSheetPaths()) {
-            if (skillSheetPath != null && !skillSheetPath.isBlank()) {
-                referenced.add(skillSheetPath);
-            }
+        for (FileReferenceProvider provider : fileReferenceProviders) {
+            referenced.addAll(provider.referencedFileNames());
         }
         return referenced;
     }

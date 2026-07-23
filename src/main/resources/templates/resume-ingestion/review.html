@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{resumeIngestion.review} + ' - ' + #{app.name}">レビュー - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex align-items-center mb-4">
+        <a href="/resume-ingestion" class="btn btn-outline-secondary btn-sm me-3">
+            <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}"></th:block>
+        </a>
+        <h1 class="h3 mb-0 text-light"><i class="bi bi-file-earmark-check me-2 text-primary"></i><span th:text="#{resumeIngestion.review}"></span></h1>
+    </div>
+
+    <!-- アラート -->
+    <div id="ri-warnings" class="alert alert-warning d-none"></div>
+
+    <div class="row g-4">
+        <!-- 左列: 要員基本情報 -->
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-header border-dark text-light fw-bold">
+                    <i class="bi bi-person me-2"></i><span th:text="#{resumeIngestion.engineerInfo}"></span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{engineer.name}"></label>
+                        <input type="text" id="rv-fullName" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{engineer.nameKana}"></label>
+                        <input type="text" id="rv-fullNameKana" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small" th:text="#{engineer.gender}"></label>
+                            <select id="rv-gender" class="form-select bg-dark border-secondary text-light">
+                                <option value=""></option>
+                                <option value="\u7537\u6027" th:text="#{enum.gender.male}"></option>
+                                <option value="\u5973\u6027" th:text="#{enum.gender.female}"></option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small" th:text="#{engineer.japaneseLevel}"></label>
+                            <select id="rv-japaneseLevel" class="form-select bg-dark border-secondary text-light">
+                                <option value=""></option>
+                                <option value="\u30cd\u30a4\u30c6\u30a3\u30d6">ネイティブ</option>
+                                <option value="\u30d3\u30b8\u30cd\u30b9\u30ec\u30d9\u30eb">ビジネスレベル</option>
+                                <option value="\u65e5\u5e38\u4f1a\u8a71\u30ec\u30d9\u30eb">日常会話レベル</option>
+                                <option value="\u57fa\u790e\u30ec\u30d9\u30eb">基礎レベル</option>
+                                <option value="\u4e0d\u554f">不問</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small" th:text="#{engineer.employmentType}"></label>
+                            <select id="rv-employmentType" class="form-select bg-dark border-secondary text-light">
+                                <option value="\u6b63\u793e\u54e1">正社員</option>
+                                <option value="\u5951\u7d04\u793e\u54e1">契約社員</option>
+                                <option value="BP" selected>BP</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small" th:text="#{engineer.experience}"></label>
+                            <input type="number" id="rv-experienceYears" class="form-control bg-dark border-secondary text-light" min="0">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{engineer.expectedPrice}"></label>
+                        <input type="number" id="rv-expectedUnitPrice" class="form-control bg-dark border-secondary text-light" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{engineer.resumeSummary}"></label>
+                        <textarea id="rv-resumeSummary" class="form-control bg-dark border-secondary text-light" rows="3"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右列: スキル + 経歴 -->
+        <div class="col-lg-6">
+            <!-- スキル -->
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-header border-dark text-light fw-bold">
+                    <i class="bi bi-stars me-2"></i><span th:text="#{resumeIngestion.skills}"></span>
+                </div>
+                <div class="card-body">
+                    <div id="rv-skills-container"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-skill">
+                        <i class="bi bi-plus-lg me-1"></i>スキル追加
+                    </button>
+                </div>
+            </div>
+            <!-- 経歴 -->
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-header border-dark text-light fw-bold">
+                    <i class="bi bi-journal-text me-2"></i><span th:text="#{resumeIngestion.careers}"></span>
+                </div>
+                <div class="card-body">
+                    <div id="rv-careers-container"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-career">
+                        <i class="bi bi-plus-lg me-1"></i>経歴追加
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- レビューメモ + アクション -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body d-flex flex-wrap gap-3 align-items-end">
+            <div class="flex-grow-1">
+                <label class="form-label text-muted small" th:text="#{resumeIngestion.reviewNote}"></label>
+                <input type="text" id="rv-reviewNote" class="form-control bg-dark border-secondary text-light" maxlength="500">
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary" id="btn-save-review">
+                    <i class="bi bi-save me-1"></i><span th:text="#{resumeIngestion.saveReview}"></span>
+                </button>
+                <button type="button" class="btn btn-outline-warning" id="btn-reparse">
+                    <i class="bi bi-arrow-repeat me-1"></i><span th:text="#{resumeIngestion.reparse}"></span>
+                </button>
+                <button type="button" class="btn btn-danger" id="btn-reject">
+                    <i class="bi bi-x-circle me-1"></i><span th:text="#{resumeIngestion.reject}"></span>
+                </button>
+                <button type="button" class="btn btn-success" id="btn-confirm">
+                    <i class="bi bi-check-circle me-1"></i><span th:text="#{resumeIngestion.confirm}"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/resume-ingestion.js}" defer></script>
+    <script th:inline="javascript">
+        const JOB_ID = /*[[${#request.getRequestURI().split('/')[3]}]]*/ null;
+    </script>
+</th:block>
+</body>
+</html>

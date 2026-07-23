@@ -4,6 +4,7 @@ import com.ses.common.enums.FileKind;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.file.StoredFile;
 import com.ses.service.FileStorageService;
+import com.ses.service.security.impl.FileScopeValidationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -25,6 +26,7 @@ import java.net.URLConnection;
 public class FileApiController {
 
     private final FileStorageService fileStorageService;
+    private final FileScopeValidationService fileScopeValidationService;
 
     /**
      * ファイルアップロード。
@@ -41,6 +43,9 @@ public class FileApiController {
      */
     @GetMapping("/{storedName}")
     public ResponseEntity<Resource> download(@PathVariable String storedName) {
+        // A8-04: ファイルダウンロードのスコープ検証
+        fileScopeValidationService.assertDownloadAllowed(storedName);
+
         Resource resource = fileStorageService.load(storedName);
         String contentType = URLConnection.guessContentTypeFromName(storedName);
         MediaType mediaType = contentType != null
@@ -49,6 +54,7 @@ public class FileApiController {
         return ResponseEntity.ok()
                 .contentType(mediaType)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + storedName + "\"")
+                .header("X-Content-Type-Options", "nosniff")
                 .body(resource);
     }
 }

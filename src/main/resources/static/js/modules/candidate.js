@@ -272,12 +272,14 @@ function renderCandidateDetail(c) {
     $('#info-skillSummary').text(c.skillSummary || '-');
     $('#info-remarks').text(c.remarks || '-');
 
-    // 「入社」ステージの場合のみ「エンジニアとして登録」ボタンを表示
+    // 「入社」または「内定」ステージの場合のみ「エンジニアとして登録」と「スキルシートから要員化」を表示
     // (design.md 2.2/3章: converted済みなら再度の変換は行わない)
-    if (c.currentStage === '入社' && !c.convertedEngineerId) {
+    if ((c.currentStage === '入社' || c.currentStage === '内定') && !c.convertedEngineerId) {
         $('#btn-convert-engineer').removeClass('d-none');
+        $('#btn-ingest-resume').removeClass('d-none');
     } else {
         $('#btn-convert-engineer').addClass('d-none');
+        $('#btn-ingest-resume').addClass('d-none');
     }
 }
 
@@ -416,4 +418,9 @@ function convertToEngineer() {
             }
         });
     });
+}
+
+function startResumeIngestion() {
+    // スキルシート取込画面へ candidateId を渡して遷移する
+    window.location.href = '/resume-ingestion?candidateId=' + candidateId;
 }

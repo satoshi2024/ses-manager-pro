@@ -134,11 +134,14 @@ app:
     # 未指定時は主要Linuxディストリビューションの標準パス（Noto Sans CJK等）を試行します。
     # Windowsローカル開発環境等の場合は "C:/Windows/Fonts/msgothic.ttc,0" 等を指定してください。
     font-path: ""
+  # ===== スキルシート取込設定 =====
+  resume:
+    retention-days: 30
 
 # ===== AI設定（将来のAPI接続用） =====
 ai:
-  enabled: false
-  provider: rule
+  enabled: true
+  provider: mock
   # 以下は将来のAPI接続時に有効化
   # api-key: ${AI_API_KEY:}
   # api-url: https://your-resource.openai.azure.com/

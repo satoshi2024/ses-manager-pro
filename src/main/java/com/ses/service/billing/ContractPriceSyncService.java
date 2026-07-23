@@ -42,8 +42,8 @@ public class ContractPriceSyncService {
                 .collect(Collectors.groupingBy(ContractPriceHistory::getContractId));
 
         YearMonth currentMonth = YearMonth.now();
-        int processCount = 0;
-        int updateCount = 0;
+        int[] processCount = {0};
+        int[] updateCount = {0};
 
         for (Map.Entry<Long, List<ContractPriceHistory>> entry : historyByContract.entrySet()) {
             Long contractId = entry.getKey();
@@ -56,25 +56,25 @@ public class ContractPriceSyncService {
                         contract, currentMonth, entry.getValue());
     
                 if (resolved.isFromHistory()) {
-                    BigDecimal resolvedSelling = resolved.getSellingPrice();
-                    BigDecimal resolvedCost = resolved.getCostPrice();
-    
-                    boolean sellingDiff = contract.getSellingPrice() == null || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
-                    boolean costDiff = contract.getCostPrice() == null || contract.getCostPrice().compareTo(resolvedCost) != 0;
-    
-                    if (sellingDiff || costDiff) {
-                        log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
-                                contractId, contract.getSellingPrice(), resolvedSelling,
-                                contract.getCostPrice(), resolvedCost);
-                        // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
-                        contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
-                        updateCount++;
-                    }
+                BigDecimal resolvedSelling = resolved.getSellingPrice();
+                BigDecimal resolvedCost = resolved.getCostPrice();
+
+                boolean sellingDiff = contract.getSellingPrice() == null || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
+                boolean costDiff = contract.getCostPrice() == null || contract.getCostPrice().compareTo(resolvedCost) != 0;
+
+                if (sellingDiff || costDiff) {
+                    log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
+                            contractId, contract.getSellingPrice(), resolvedSelling,
+                            contract.getCostPrice(), resolvedCost);
+                    // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
+                    contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
+                    updateCount[0]++;
                 }
-            });
-            processCount++;
-        }
-        
-        log.info("契約単価同期完了。処理{}件（単価変更あり: {}件）", processCount, updateCount);
+            }
+        });
+        processCount[0]++;
+    }
+    
+    log.info("契約単価同期完了。処理{}件（単価変更あり: {}件）", processCount[0], updateCount[0]);
     }
 }

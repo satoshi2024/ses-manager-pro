@@ -45,4 +45,16 @@ public class AppConfig {
                 .setReadTimeout(Duration.ofSeconds(15))
                 .build();
     }
+
+    /**
+     * AI API（Gemini等）用のRestTemplate。
+     * 生成モデルの応答は遅い場合があるため、読取タイムアウトを長めに設定する。
+     */
+    @Bean("aiRestTemplate")
+    public RestTemplate aiRestTemplate(RestTemplateBuilder builder) {
+        return builder
+                .setConnectTimeout(Duration.ofSeconds(5))
+                .setReadTimeout(Duration.ofSeconds(60))
+                .build();
+    }
 }
