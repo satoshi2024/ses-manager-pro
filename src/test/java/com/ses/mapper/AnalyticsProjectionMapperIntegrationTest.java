@@ -109,7 +109,7 @@ class AnalyticsProjectionMapperIntegrationTest {
         contractMapper.insert(contract);
 
         Page<ContractListDto> page = contractMapper.selectPageWithNames(
-                new Page<>(1, 10), null, null, null, null, null, null, null, null, null, null);
+                new Page<>(1, 10), null, null, null, null, null, null, null, null, null, null, null, null);
 
         assertTrue(page.getRecords().stream().anyMatch(r -> r.getId().equals(contract.getId())));
         ContractListDto row = page.getRecords().stream()
@@ -119,7 +119,7 @@ class AnalyticsProjectionMapperIntegrationTest {
 
         // salesUserId 絞り込みが機能すること
         Page<ContractListDto> filtered = contractMapper.selectPageWithNames(
-                new Page<>(1, 10), null, null, null, null, null, null, null, 1L, null, null);
+                new Page<>(1, 10), null, null, null, null, null, null, null, 1L, null, null, null, null);
         assertTrue(filtered.getRecords().stream().allMatch(r -> Long.valueOf(1L).equals(r.getSalesUserId())));
     }
 

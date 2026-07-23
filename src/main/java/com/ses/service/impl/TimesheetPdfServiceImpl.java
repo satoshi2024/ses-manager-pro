@@ -54,6 +54,7 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
     private final EngineerMapper engineerMapper;
     private final ProjectMapper projectMapper;
     private final CustomerMapper customerMapper;
+    private final com.ses.common.util.PdfFontUtils pdfFontUtils;
 
     @Override
     public byte[] generate(Long workRecordId) {
@@ -72,8 +73,8 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<WorkRecordDaily>()
                         .eq("work_record_id", workRecordId).orderByAsc("work_date"));
 
-        BaseFont baseFont = resolveCjkFont();
-        Font titleFont = new Font(baseFont, 18, Font.BOLD);
+        BaseFont baseFont = pdfFontUtils.resolveCjkFont();
+        Font titleFont = new Font(baseFont, 16, Font.BOLD);
         Font normalFont = new Font(baseFont, 10, Font.NORMAL);
         Font boldFont = new Font(baseFont, 12, Font.BOLD);
         Font headerFont = new Font(baseFont, 10, Font.BOLD, Color.WHITE);
@@ -169,35 +170,5 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
         return s == null ? "" : s;
     }
 
-    private BaseFont resolveCjkFont() {
-        try {
-            // First try the bundled font
-            byte[] fontBytes = org.springframework.util.StreamUtils.copyToByteArray(
-                getClass().getClassLoader().getResourceAsStream("fonts/ipaexg.ttf")
-            );
-            return BaseFont.createFont("ipaexg.ttf", BaseFont.IDENTITY_H, BaseFont.EMBEDDED, true, fontBytes, null);
-        } catch (Exception ex) {
-            log.warn("Bundled font load failed, falling back to system fonts", ex);
-        }
 
-        List<String> candidates = new ArrayList<>();
-        if (StringUtils.hasText(pdfProperties.getFontPath())) {
-            candidates.add(pdfProperties.getFontPath());
-        }
-        candidates.addAll(pdfProperties.getDefaultFontCandidates());
-
-        for (String candidate : candidates) {
-            String filePath = candidate.contains(",") ? candidate.substring(0, candidate.indexOf(',')) : candidate;
-            if (!Files.exists(Paths.get(filePath))) {
-                continue;
-            }
-            try {
-                return BaseFont.createFont(candidate, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
-            } catch (Exception e) {
-                log.warn("CJKフォントの読み込みに失敗しました: {}", candidate, e);
-            }
-        }
-        throw new BusinessException(
-                "PDF生成用の日本語フォントが見つかりません。app.pdf.font-path でフォントファイルのパスを指定してください。");
-    }
 }

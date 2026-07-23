@@ -73,8 +73,10 @@ class MonthlyClosingServiceImplTest {
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(5));
         overdue.setBalance(new BigDecimal("1000"));
+        overdue.setStatus("送付済");
         InvoiceBalanceDto notDue = new InvoiceBalanceDto();
         notDue.setDueDate(LocalDate.now().plusDays(5));
+        notDue.setStatus("送付済");
         lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue, notDue));
         lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
 
@@ -94,6 +96,7 @@ class MonthlyClosingServiceImplTest {
         stubEmptyAll();
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(1));
+        overdue.setStatus("送付済");
         lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue));
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");

@@ -15,6 +15,7 @@ public interface ContractRenewalService {
     /**
      * 1件の契約について更新ドラフトを生成する（個別トランザクション用）。
      * @param original 元契約
+     * @return 生成された場合は true
      */
-    void processSingleRenewal(com.ses.entity.Contract original);
+    boolean processSingleRenewal(com.ses.entity.Contract original);
 }

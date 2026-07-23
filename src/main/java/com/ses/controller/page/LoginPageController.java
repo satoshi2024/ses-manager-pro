@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class LoginPageController {
 
-    private final com.ses.service.RoleMenuService roleMenuService;
+    private final com.ses.service.MenuCacheService menuCacheService;
 
     /**
      * ログインページを表示する
@@ -44,18 +44,58 @@ public class LoginPageController {
                 .filter(a -> a.getAuthority().startsWith("ROLE_"))
                 .map(a -> a.getAuthority().substring(5))
                 .findFirst().orElse("");
-        if (!"管理者".equals(role)) {
-            java.util.List<String> allowedMenus = roleMenuService.getMenuKeysByRole(role);
-            if (!allowedMenus.contains("dashboard")) {
-                if (allowedMenus.contains("engineer")) return "redirect:/engineer/list";
-                if (allowedMenus.contains("project")) return "redirect:/project/list";
-                if (allowedMenus.contains("customer")) return "redirect:/customer/list";
-                if (allowedMenus.contains("proposal")) return "redirect:/proposal/kanban";
-                if (allowedMenus.contains("contract")) return "redirect:/contract/list";
-                if (allowedMenus.contains("user")) return "redirect:/user/list";
+        if ("管理者".equals(role)) {
+            return "redirect:/dashboard";
+        }
+
+        java.util.List<String> allowedMenus = menuCacheService.getMenuKeysByRole(role);
+        if (allowedMenus.isEmpty()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "アクセス可能なメニューがありません");
+        }
+
+        // ダッシュボード権限があれば最優先 (R7-05)
+        if (allowedMenus.contains("dashboard")) {
+            return "redirect:/dashboard";
+        }
+
+        for (com.ses.entity.Menu menu : menuCacheService.getAllMenus()) {
+            if (allowedMenus.contains(menu.getMenuKey())) {
+                String path = menu.getPathPrefix();
+                if (path != null && !path.isEmpty()) {
+                    // bare prefix を実際の一覧画面等へ変換する（R7-05）
+                    switch (path) {
+                        case "/ai": return "redirect:/ai/matching";
+                        case "/candidate": return "redirect:/candidate/list";
+                        case "/contract": return "redirect:/contract/list";
+                        case "/customer": return "redirect:/customer/list";
+                        case "/email/template": return "redirect:/email/template/list";
+                        case "/engineer": return "redirect:/engineer/list";
+                        case "/project": return "redirect:/project/list";
+                        case "/proposal": return "redirect:/proposal/kanban";
+                        case "/user": return "redirect:/user/list";
+                        // 以下は prefix と 着地URL が同一（GetMapping が空または /）
+                        case "/analytics":
+                        case "/audit-log":
+                        case "/contract-document":
+                        case "/invoice":
+                        case "/monthly-closing":
+                        case "/payroll":
+                        case "/quotation":
+                        case "/sales-performance":
+                        case "/system-config":
+                        case "/todo":
+                        case "/work-record":
+                            return "redirect:" + path;
+                        default: 
+                            return "redirect:" + path;
+                    }
+                }
             }
         }
-        return "redirect:/dashboard";
+
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.FORBIDDEN, "アクセス可能なメニューがありません");
     }
 
     /**

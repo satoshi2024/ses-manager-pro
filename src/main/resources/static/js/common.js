@@ -211,6 +211,42 @@ const SES = {
     },
     
     /**
+     * ページネーション (A7-22 / R7-04)
+     */
+    pagination: {
+        render: function(elementId, current, pages, onClick) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            if (pages <= 1) {
+                el.innerHTML = '';
+                return;
+            }
+            let html = '<ul class="pagination pagination-sm m-0">';
+            html += `<li class="page-item ${current <= 1 ? 'disabled' : ''}"><a class="page-link bg-dark text-secondary border-secondary hover-bg-secondary" href="#" data-page="${current - 1}"><i class="bi bi-chevron-left"></i></a></li>`;
+            
+            const start = Math.max(1, current - 2);
+            const end = Math.min(pages, start + 4);
+            
+            for (let i = start; i <= end; i++) {
+                html += `<li class="page-item ${i === current ? 'active' : ''}"><a class="page-link ${i === current ? 'bg-primary border-primary text-white' : 'bg-dark text-secondary border-secondary hover-bg-secondary'}" href="#" data-page="${i}">${i}</a></li>`;
+            }
+            
+            html += `<li class="page-item ${current >= pages ? 'disabled' : ''}"><a class="page-link bg-dark text-secondary border-secondary hover-bg-secondary" href="#" data-page="${current + 1}"><i class="bi bi-chevron-right"></i></a></li>`;
+            html += '</ul>';
+            el.innerHTML = html;
+            
+            el.querySelectorAll('a.page-link').forEach(a => {
+                a.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (this.parentElement.classList.contains('disabled')) return;
+                    const page = parseInt(this.getAttribute('data-page'));
+                    if (typeof onClick === 'function') onClick(page);
+                });
+            });
+        }
+    },
+    
+    /**
      * サイドバー制御
      */
     sidebar: {

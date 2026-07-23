@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.ses.common.util.PdfFontUtils;
+import com.lowagie.text.pdf.BaseFont;
 
 import java.time.LocalDate;
 import java.util.Collections;
@@ -34,6 +36,9 @@ class SkillSheetGeneratorTest {
     @Mock
     private EngineerCareerService engineerCareerService;
 
+    @Mock
+    private PdfFontUtils pdfFontUtils;
+
     @InjectMocks
     private SkillSheetGenerator skillSheetGenerator;
 
@@ -53,6 +58,9 @@ class SkillSheetGeneratorTest {
     @Test
     void testGeneratePdf_WithZeroCareers_ShouldGeneratePdfBytes() {
         // Arrange (経歴0件、スキル0件)
+        try {
+            when(pdfFontUtils.resolveCjkFont()).thenReturn(BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED));
+        } catch (Exception e) {}
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
         when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
 
@@ -71,6 +79,9 @@ class SkillSheetGeneratorTest {
     @Test
     void testGeneratePdf_WithData_ShouldGeneratePdfBytes() {
         // Arrange
+        try {
+            when(pdfFontUtils.resolveCjkFont()).thenReturn(BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED));
+        } catch (Exception e) {}
         EngineerSkillDetailDto skill = new EngineerSkillDetailDto();
         skill.setSkillName("Java");
         skill.setProficiency("上級");

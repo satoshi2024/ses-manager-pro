@@ -48,7 +48,9 @@ public class ContractApiController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
             @RequestParam(required = false) Long salesUserId,
-            @RequestParam(required = false) Boolean salesUnassigned) {
+            @RequestParam(required = false) Boolean salesUnassigned,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodTo) {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<ContractListDto> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
@@ -61,7 +63,7 @@ public class ContractApiController {
             }
             allowedIds = new java.util.ArrayList<>(allowed);
         }
-        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, allowedIds);
+        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds);
         return ApiResult.success(result);
     }
 

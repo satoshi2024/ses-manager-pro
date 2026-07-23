@@ -5,6 +5,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = document.getElementById('billingMonth');
         if (el) el.value = month;
     }
+    
+    // Pagination state
+    window.invoiceCurrentPage = 1;
+    window.invoicePageSize = 20;
+    
     loadInvoices();
     
     document.getElementById('btnGenerateInvoice').addEventListener('click', () => {
@@ -42,10 +47,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('bpWorkMonth').addEventListener('change', loadBpPayments);
 });
 
-function loadInvoices() {
+function loadInvoices(page = window.invoiceCurrentPage) {
+    window.invoiceCurrentPage = page;
     const month = document.getElementById('billingMonth').value;
     const overdueEl = document.getElementById('filterOverdue');
-    let url = '/api/invoices?current=1&size=100';
+    let url = `/api/invoices?current=${page}&size=${window.invoicePageSize}`;
     if (month) url += `&month=${month}`;
     if (overdueEl && overdueEl.checked) url += '&overdue=true';
 
@@ -53,6 +59,18 @@ function loadInvoices() {
         if (data.code === 200) {
             const tbody = document.querySelector('#invoiceTable tbody');
             tbody.innerHTML = '';
+            
+            if (SES.pagination) {
+                SES.pagination.render(
+                    'pagination',
+                    data.data.current,
+                    data.data.pages,
+                    (p) => loadInvoices(p)
+                );
+                const info = document.getElementById('pagination-info');
+                if (info) info.textContent = `全 ${data.data.total} 件中 ${data.data.records.length} 件を表示`;
+            }
+            
             const todayStr = getLocalDateString();
             data.data.records.forEach(inv => {
                 const tr = document.createElement('tr');

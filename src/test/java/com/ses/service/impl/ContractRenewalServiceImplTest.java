@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationContext;
+import com.ses.service.ContractRenewalService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,6 +32,8 @@ class ContractRenewalServiceImplTest {
     private SystemConfigService systemConfigService;
     @SuppressWarnings("unchecked")
     private final ObjectProvider<NotificationService> notificationServiceProvider = mock(ObjectProvider.class);
+    private com.ses.service.EngineerSalesService engineerSalesService;
+    private ApplicationContext applicationContext;
     private ContractRenewalServiceImpl service;
 
     @BeforeEach
@@ -37,7 +41,10 @@ class ContractRenewalServiceImplTest {
         contractMapper = mock(ContractMapper.class);
         contractService = mock(ContractService.class);
         systemConfigService = mock(SystemConfigService.class);
-        service = new ContractRenewalServiceImpl(contractMapper, contractService, systemConfigService, notificationServiceProvider);
+        engineerSalesService = mock(com.ses.service.EngineerSalesService.class);
+        applicationContext = mock(ApplicationContext.class);
+        service = new ContractRenewalServiceImpl(contractMapper, contractService, systemConfigService, notificationServiceProvider, engineerSalesService, applicationContext);
+        when(applicationContext.getBean(ContractRenewalService.class)).thenReturn(service);
     }
 
     private Contract sourceContract(Long id, LocalDate endDate) {
@@ -82,7 +89,7 @@ class ContractRenewalServiceImplTest {
         when(systemConfigService.getInt("notice.contract-end-days", 30)).thenReturn(30);
         Contract original = sourceContract(1L, LocalDate.now().plusDays(10));
         when(contractMapper.selectList(any())).thenReturn(List.of(original));
-        when(contractMapper.selectCount(any())).thenReturn(1L); // 既にドラフト有り
+        when(contractMapper.countRenewedDraftsIncludingDeleted(1L)).thenReturn(1); // 既にドラフト有り
 
         int created = service.generateRenewalDrafts();
 

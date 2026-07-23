@@ -63,6 +63,10 @@ app:
 ai:
   enabled: false
 
+menu:
+  cache:
+    ttl-ms: 0
+
 logging:
   level:
     com.ses: DEBUG

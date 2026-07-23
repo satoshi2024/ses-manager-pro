@@ -62,7 +62,8 @@ class InvoicePdfServiceImplTest {
 
     @Test
     void generate_有効なPDFバイト列を返し日本語テキストが抽出できること() throws Exception {
-        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(new PdfProperties(), systemConfigService());
+        com.ses.common.util.PdfFontUtils pdfFontUtils = new com.ses.common.util.PdfFontUtils(new PdfProperties());
+        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(new PdfProperties(), systemConfigService(), pdfFontUtils);
 
         byte[] bytes = service.generate(sampleDetail());
 

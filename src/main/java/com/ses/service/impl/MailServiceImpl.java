@@ -37,6 +37,10 @@ public class MailServiceImpl implements MailService {
     private final String from;
 
     @Autowired
+    @org.springframework.context.annotation.Lazy
+    private MailServiceImpl self;
+
+    @Autowired
     public MailServiceImpl(EmailTemplateService emailTemplateService,
                            ObjectProvider<JavaMailSender> mailSenderProvider,
                            ObjectProvider<NotificationService> notificationServiceProvider,
@@ -62,12 +66,12 @@ public class MailServiceImpl implements MailService {
     @Override
     public MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to, Long invoiceId) {
         if (!StringUtils.hasText(to) || !to.contains("@")) {
-            throw new IllegalArgumentException("メール宛先が不正です");
+            throw com.ses.common.exception.BusinessException.of(400, "メール宛先が不正です");
         }
         EmailTemplate template = emailTemplateService.getById(templateId);
         if (template == null) {
             log.warn("メールテンプレートが見つかりません: id={}", templateId);
-            throw new IllegalArgumentException("メールテンプレートが見つかりません: " + templateId);
+            throw com.ses.common.exception.BusinessException.of(400, "メールテンプレートが見つかりません: " + templateId);
         }
         String subject = TemplateRenderer.render(template.getSubjectTemplate(), params);
         String body = TemplateRenderer.render(template.getBodyTemplate(), params);
@@ -87,12 +91,17 @@ public class MailServiceImpl implements MailService {
         if (mailDeliveryMapper != null) {
             mailDeliveryMapper.insert(delivery);
         }
-        executeSend(delivery);
+        if (self != null) {
+            self.executeSend(delivery);
+        } else {
+            executeSend(delivery); // fallback for tests
+        }
         return new MailDispatchResult(delivery.getId(), delivery.getStatus());
     }
 
     /** 実際の SMTP 呼び出し。send() が作成した履歴を必ず結果で更新する。 */
-    private void executeSend(MailDelivery delivery) {
+    @Async
+    public void executeSend(MailDelivery delivery) {
         JavaMailSender sender = mailSenderProvider.getIfAvailable();
         // SMTP未設定（host空 or JavaMailSender未生成）はドライラン
         if (!StringUtils.hasText(host) || sender == null) {

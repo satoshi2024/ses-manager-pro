@@ -34,7 +34,7 @@ App listens on `http://localhost:8080`. Login page is at `/login`; default seede
 
 ### Local database
 
-`application.yml` points at `jdbc:mysql://localhost:3306/ses_manager_db` (env vars `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` override; defaults are for local dev only). Schema/data are managed by **Flyway** (`src/main/resources/db/migration/V1__...` through `V14__...`) and applied automatically on startup — no manual SQL execution needed. Before running the app locally:
+`application.yml` points at `jdbc:mysql://localhost:3306/ses_manager_db` (env vars `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` override; defaults are for local dev only). Schema/data are managed by **Flyway** (`src/main/resources/db/migration/V1__...` through `V42__...`) and applied automatically on startup — no manual SQL execution needed. Before running the app locally:
 1. Start MySQL and create an empty `ses_manager_db` database.
 2. Run the app (`mvn spring-boot:run`) — Flyway applies all migrations on startup.
 
@@ -78,7 +78,7 @@ Standard Spring MVC/MyBatis-Plus layering under `com.ses`:
 
 ### Security
 
-`config/SecurityConfig.java`: form login at `/login`, session-based auth, CSRF disabled specifically for `/api/**` (`csrf().ignoringRequestMatchers("/api/**")`) since those are called via same-origin AJAX. `CustomUserDetailsService` loads users via `SysUserMapper` and maps `sys_user.role` to a single `ROLE_<role>` authority (roles are the fixed ENUM `管理者/営業/HR/マネージャー`).
+`config/SecurityConfig.java`: form login at `/login`, session-based auth. CSRF is enabled for all paths including `/api/**`. `CustomUserDetailsService` loads users via `SysUserMapper` and maps `sys_user.role` to a single `ROLE_<role>` authority (roles are `管理者/営業/HR/マネージャー/要員`).
 
 **Password encoder is profile-switched** (two `@Bean`s in `SecurityConfig`): `@Profile("!prod")` → `NoOpPasswordEncoder` (plaintext, matches the plaintext `admin/admin123` seed and the H2 test data), `@Profile("prod")` → `BCryptPasswordEncoder`. `UserApiController` always calls `passwordEncoder.encode(...)` before saving, so switching profiles requires no code change. Tests run under the `test` profile (i.e. `!prod`), so they keep the plaintext encoder.
 

@@ -54,8 +54,9 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
         ContractRenewalService self = applicationContext.getBean(ContractRenewalService.class);
         for (Contract original : candidates) {
             try {
-                self.processSingleRenewal(original);
-                created++;
+                if (self.processSingleRenewal(original)) {
+                    created++;
+                }
             } catch (Exception e) {
                 log.warn("契約更新ドラフト作成失敗: {}", original.getContractNo(), e);
                 notificationServiceProvider.ifAvailable(ns -> ns.publish(
@@ -74,9 +75,9 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
 
     @Override
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void processSingleRenewal(Contract original) {
+    public boolean processSingleRenewal(Contract original) {
         if (hasExistingDraft(original.getId())) {
-            return;
+            return false;
         }
         Contract draft = buildDraft(original);
         contractService.saveWithBusinessRules(draft);
@@ -88,6 +89,8 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
                         + draft.getStartDate() + "）",
                 com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
                 "CONTRACT_RENEWAL_DRAFT:" + original.getId()));
+        
+        return true;
     }
 
     private boolean hasExistingDraft(Long originalContractId) {

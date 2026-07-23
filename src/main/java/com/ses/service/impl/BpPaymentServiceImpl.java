@@ -5,8 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
+import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpPaymentService;
+import com.ses.service.MonthlyClosingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -25,6 +28,8 @@ import java.util.stream.Collectors;
 public class BpPaymentServiceImpl implements BpPaymentService {
 
     private final BpPaymentMapper bpPaymentMapper;
+    private final WorkRecordMapper workRecordMapper;
+    private final MonthlyClosingService monthlyClosingService;
 
     @Override
     public List<BpPaymentTreeDto> getTreeByWorkRecordId(Long workRecordId) {
@@ -83,6 +88,13 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     @Override
     @Transactional
     public BpPayment addLayer(BpPayment bpPayment) {
+        if (bpPayment.getWorkRecordId() != null) {
+            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            if (wr != null) {
+                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
+            }
+        }
+
         Long count = bpPaymentMapper.selectCount(new LambdaQueryWrapper<BpPayment>()
                 .eq(BpPayment::getWorkRecordId, bpPayment.getWorkRecordId())
                 .eq(BpPayment::getLayerOrder, bpPayment.getLayerOrder()));
@@ -118,6 +130,12 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         if (existing == null) {
             throw BusinessException.of("error.bpPayment.notFound");
         }
+        if (existing.getWorkRecordId() != null) {
+            WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
+            if (wr != null) {
+                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
+            }
+        }
         if ((bpPayment.getStatus() != null && !Objects.equals(existing.getStatus(), bpPayment.getStatus()))
                 || (bpPayment.getPaidDate() != null && !Objects.equals(existing.getPaidDate(), bpPayment.getPaidDate()))) {
             throw BusinessException.of("error.bpPayment.statusDedicatedApi");
@@ -135,9 +153,13 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         existing.setRemarks(bpPayment.getRemarks());
         UpdateWrapper<BpPayment> update = new UpdateWrapper<BpPayment>()
                 .eq("id", id)
+                .eq("status", existing.getStatus())
                 .set(bpPayment.getAmount() != null, "amount", bpPayment.getAmount())
                 .set(bpPayment.getRemarks() != null, "remarks", bpPayment.getRemarks());
-        bpPaymentMapper.update(null, update);
+        int updated = bpPaymentMapper.update(null, update);
+        if (updated == 0) {
+            throw BusinessException.of("error.common.optimisticLock");
+        }
         return existing;
     }
 
@@ -147,6 +169,12 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         BpPayment existing = bpPaymentMapper.selectById(id);
         if (existing == null) {
             throw BusinessException.of("error.bpPayment.notFound");
+        }
+        if (existing.getWorkRecordId() != null) {
+            WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
+            if (wr != null) {
+                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
+            }
         }
         if ("支払済".equals(existing.getStatus())) {
             throw BusinessException.of("error.bpPayment.paidDelete");

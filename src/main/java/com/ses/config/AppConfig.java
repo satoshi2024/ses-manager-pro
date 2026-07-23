@@ -33,4 +33,16 @@ public class AppConfig {
                 .setReadTimeout(Duration.ofSeconds(3))
                 .build();
     }
+
+    /**
+     * 外部SaaS（freee, CloudSign等）用のRestTemplate。
+     * 連携処理用に長めのタイムアウトを設定する。
+     */
+    @Bean("saasRestTemplate")
+    public RestTemplate saasRestTemplate(RestTemplateBuilder builder) {
+        return builder
+                .setConnectTimeout(Duration.ofSeconds(5))
+                .setReadTimeout(Duration.ofSeconds(15))
+                .build();
+    }
 }

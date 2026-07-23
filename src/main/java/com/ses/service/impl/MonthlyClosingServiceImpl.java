@@ -69,6 +69,23 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         }
     }
 
+    private SystemConfig lockConfig() {
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        if (config == null) {
+            SystemConfig newConfig = new SystemConfig();
+            newConfig.setConfigKey(CONFIG_KEY);
+            newConfig.setConfigValue("[]");
+            newConfig.setDescription("月次締め済み月の記録(JSON)");
+            try {
+                systemConfigMapper.insert(newConfig);
+            } catch (Exception e) {
+                // Ignore unique constraint if inserted concurrently
+            }
+            config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        }
+        return config;
+    }
+
     private void validateMonth(String month) {
         // Use common DateUtils to share same 400 error logic.
         com.ses.common.util.DateUtils.parseYearMonth(month);
@@ -166,8 +183,8 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         validateMonth(month);
         requireCloserRole(role);
         // 先に締め設定行をロックし、confirm と保護対象更新（工数保存・請求取消）を直列化する（R3R-05）。
-        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
-        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
+        SystemConfig config = lockConfig();
+        List<ClosingRecord> records = loadRecordsFromJson(config.getConfigValue(), true);
         // 冪等: 既に締め済みなら実行者・締め日時を保持したまま no-op（R3R-07）。
         if (records.stream().anyMatch(r -> month.equals(r.month))) {
             return;
@@ -186,8 +203,8 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     public void reopenClosing(String month, Long userId, String role) {
         validateMonth(month);
         requireCloserRole(role);
-        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
-        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
+        SystemConfig config = lockConfig();
+        List<ClosingRecord> records = loadRecordsFromJson(config.getConfigValue(), true);
         boolean removed = records.removeIf(r -> month.equals(r.month));
         if (!removed) {
             throw BusinessException.of(400, "error.closing.notClosed");
@@ -205,9 +222,9 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     public void assertOpenForUpdate(String month) {
         validateMonth(month);
         // 締め設定行を FOR UPDATE でロックし、confirm と直列化する。
-        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        SystemConfig config = lockConfig();
         // 締めJSON破損時は throwOnError=true で fail-closed（更新拒否）とする（R3R-06）。
-        List<ClosingRecord> records = loadRecordsFromJson(config == null ? "" : config.getConfigValue(), true);
+        List<ClosingRecord> records = loadRecordsFromJson(config.getConfigValue(), true);
         if (records.stream().anyMatch(r -> month.equals(r.month))) {
             throw BusinessException.of(400, "error.closing.hardLocked");
         }

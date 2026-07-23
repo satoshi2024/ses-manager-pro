@@ -35,6 +35,7 @@ public class SkillSheetGenerator {
     private final EngineerService engineerService;
     private final EngineerSkillService engineerSkillService;
     private final EngineerCareerService engineerCareerService;
+    private final com.ses.common.util.PdfFontUtils pdfFontUtils;
 
     public byte[] generatePdf(Long engineerId) {
         SkillSheetDto dto = fetchSkillSheetDto(engineerId);
@@ -46,11 +47,7 @@ public class SkillSheetGenerator {
             document.open();
 
             // 日本語フォントの設定
-            byte[] fontBytes;
-            try (InputStream is = new ClassPathResource("fonts/ipaexg.ttf").getInputStream()) {
-                fontBytes = is.readAllBytes();
-            }
-            BaseFont baseFont = BaseFont.createFont("ipaexg.ttf", BaseFont.IDENTITY_H, BaseFont.EMBEDDED, true, fontBytes, null);
+            BaseFont baseFont = pdfFontUtils.resolveCjkFont();
             
             Font titleFont = new Font(baseFont, 16, Font.BOLD);
             Font headerFont = new Font(baseFont, 12, Font.BOLD);

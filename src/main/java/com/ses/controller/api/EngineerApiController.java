@@ -35,7 +35,7 @@ public class EngineerApiController {
             @RequestParam(required = false) Long salesUserId) {
         
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
-        Page<com.ses.dto.engineer.EngineerListDto> page = PageUtils.safePage(current, size, 1000L);
+        Page<Engineer> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当要員のみ。空集合なら空ページを即返す。
         if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();

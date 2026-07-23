@@ -4,9 +4,11 @@ import com.ses.entity.SysUser;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import org.springframework.security.core.CredentialsContainer;
+
 import java.util.Collection;
 
-public class LoginUser implements UserDetails {
+public class LoginUser implements UserDetails, CredentialsContainer {
 
     private final SysUser sysUser;
     private final Collection<? extends GrantedAuthority> authorities;
@@ -14,6 +16,13 @@ public class LoginUser implements UserDetails {
     public LoginUser(SysUser sysUser, Collection<? extends GrantedAuthority> authorities) {
         this.sysUser = sysUser;
         this.authorities = authorities;
+    }
+
+    @Override
+    public void eraseCredentials() {
+        if (sysUser != null) {
+            sysUser.setPassword(null);
+        }
     }
 
     public SysUser getSysUser() {

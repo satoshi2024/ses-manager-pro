@@ -72,6 +72,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private MonthlyClosingService monthlyClosingService;
 
+    @Autowired
+    private com.ses.service.security.DataScopeService dataScopeService;
+
+    @Autowired
+    private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
     private void checkClosing(String month) {
         // 締め設定行をロックし confirm と直列化する（締め成立後の請求差分commit防止 / R3R-05）。
         monthlyClosingService.assertOpenForUpdate(month);
@@ -80,6 +86,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Invoice generate(Long customerId, String billingMonth) {
+        dataScopeService.assertAllowedCustomer(customerId);
         checkClosing(billingMonth);
         List<UnbilledWorkRecordDto> unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
         if (unbilledList == null || unbilledList.isEmpty()) {
@@ -181,6 +188,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         // 完済（入金済）からの手動状態変更は拒否する（入金行由来の最終状態を保護）。
         if ("入金済".equals(invoice.getStatus())) {
@@ -209,6 +217,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
         }
@@ -249,6 +258,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
         }
@@ -343,6 +353,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public AgingReportDto aging(LocalDate asOf) {
         LocalDate base = asOf != null ? asOf : LocalDate.now();
         List<InvoiceBalanceDto> balances = baseMapper.selectOutstandingBalances();
+        
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            balances = balances.stream()
+                .filter(b -> allowed.contains(b.getCustomerId()))
+                .collect(Collectors.toList());
+        }
 
         Map<Long, AgingReportDto.Row> byCustomer = new LinkedHashMap<>();
         AgingReportDto.Row total = new AgingReportDto.Row();
@@ -429,6 +446,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), LocalDate.now())) {
             throw BusinessException.of("error.invoice.reminderNotAllowed");
         }
@@ -454,22 +472,41 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void changeBpPaymentStatus(Long id, String status, LocalDate paidDate) {
         BpPayment bpPayment = bpPaymentMapper.selectById(id);
         if (bpPayment == null) {
             throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }
-        // TODO(A7-05): workRecordId 経由で workMonth を解決し assertOpenForUpdate を呼ぶことで
-        //              締め済み月の BP 支払変更を拒否する（月次締め保護の統一化）。
+        
+        com.ses.entity.WorkRecord workRecord = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+        if (workRecord != null) {
+            monthlyClosingService.assertOpenForUpdate(workRecord.getWorkMonth());
+        }
+        
+        String oldStatus = bpPayment.getStatus();
+        if (status.equals(oldStatus)) {
+            return;
+        }
+
         if ("支払済".equals(status)) {
-            bpPayment.setStatus(status);
-            bpPayment.setPaidDate(paidDate != null ? paidDate : LocalDate.now());
-            bpPaymentMapper.updateById(bpPayment);
-        } else if ("未払".equals(status)) {
-            bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
+            int updated = bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
                     .eq("id", id)
+                    .eq("status", oldStatus)
+                    .set("status", status)
+                    .set("paid_date", paidDate != null ? paidDate : LocalDate.now()));
+            if (updated == 0) {
+                throw BusinessException.of("error.common.optimisticLock");
+            }
+        } else if ("未払".equals(status)) {
+            int updated = bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
+                    .eq("id", id)
+                    .eq("status", oldStatus)
                     .set("status", status)
                     .set("paid_date", null));
+            if (updated == 0) {
+                throw BusinessException.of("error.common.optimisticLock");
+            }
         } else {
             throw BusinessException.of("error.invoice.statusInvalid", status);
         }
@@ -483,6 +520,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         List<InvoicePaymentResponse> payments = listPayments(id);
         // 入金行あり、または status=入金済（入金行0件のlegacy完済含む）のどちらでも取消を拒否する。
@@ -499,6 +537,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
         
@@ -568,7 +607,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     continue;
                 }
                 if ("入金済".equals(invoice.getStatus())) {
-            results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
+                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
                     continue;
                 }
                 if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), targetDate)) {

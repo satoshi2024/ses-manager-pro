@@ -63,6 +63,15 @@ public class InvoiceApiController {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
         Page<Invoice> page = PageUtils.safePage(current, size);
         QueryWrapper<Invoice> query = new QueryWrapper<>();
+        
+        if (dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed.isEmpty()) {
+                return ApiResult.success(new Page<>());
+            }
+            query.in("customer_id", allowed);
+        }
+        
         if (month != null && !month.isEmpty()) {
             query.eq("billing_month", month);
         }
@@ -120,6 +129,10 @@ public class InvoiceApiController {
 
     @GetMapping("/{id}/payments")
     public ApiResult<?> listPayments(@PathVariable Long id) {
+        Invoice invoice = invoiceService.getById(id);
+        if (invoice != null) {
+            dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        }
         return ApiResult.success(invoiceService.listPayments(id));
     }
 
@@ -148,7 +161,7 @@ public class InvoiceApiController {
                                     @RequestParam(required = false)
                                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         // 顧客スコープ検証（担当外顧客の明細を返さない）。
-        // dataScopeService.assertAllowedCustomer(customerId);
+        dataScopeService.assertAllowedCustomer(customerId);
         return ApiResult.success(invoiceService.agingDetail(customerId, bucket, asOf));
     }
 
@@ -182,6 +195,10 @@ public class InvoiceApiController {
     /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
     @GetMapping("/{id}/reminders")
     public ApiResult<?> reminders(@PathVariable Long id) {
+        Invoice invoice = invoiceService.getById(id);
+        if (invoice != null) {
+            dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        }
         return ApiResult.success(invoiceService.listReminders(id));
     }
 

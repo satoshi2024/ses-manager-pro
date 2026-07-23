@@ -37,8 +37,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
     /** 全メニューにアクセス可能な特権ロール（メニュー権限設定によらず遮断しない） */
     private static final String ADMIN_ROLE = "管理者";
 
-    private final ObjectProvider<MenuMapper> menuMapperProvider;
-    private final ObjectProvider<RoleMenuService> roleMenuServiceProvider;
+    private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -47,11 +46,10 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String uri = request.getRequestURI();
 
-        MenuMapper menuMapper = menuMapperProvider.getIfAvailable();
-        RoleMenuService roleMenuService = roleMenuServiceProvider.getIfAvailable();
+        com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
 
         if (authentication == null || !authentication.isAuthenticated() || !isMenuControlledPath(uri)
-                || menuMapper == null || roleMenuService == null) {
+                || menuCacheService == null) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -69,7 +67,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         try {
             // 画面プレフィックス・APIプレフィックスのどちらかに前方一致するメニューのうち、
             // 一致した長さが最長のもの（最も具体的なもの）を対象メニューとする
-            matchedMenu = menuMapper.selectList(null).stream()
+            matchedMenu = menuCacheService.getAllMenus().stream()
                     .filter(menu -> matchedPrefixLength(menu, uri) > 0)
                     .max((a, b) -> Integer.compare(matchedPrefixLength(a, uri), matchedPrefixLength(b, uri)));
 
@@ -78,9 +76,11 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
                 return;
             }
 
-            allowedMenuKeys = role == null ? List.of() : roleMenuService.getMenuKeysByRole(role);
+            allowedMenuKeys = role == null ? List.of() : menuCacheService.getMenuKeysByRole(role);
         } catch (Exception e) {
-            log.warn("メニュー権限の判定に失敗しました。アクセスを許可します: uri={}", uri, e);
+            // A7-15: 可用性優先で fail-open とし、DB障害中もシステム全体が停止しないようにする設計判断。
+            // 権限制御の空白期間が生じるため、このwarnログを監視しアラートを上げる前提とする。
+            log.warn("メニュー権限の判定に失敗しました。可用性優先のためアクセスを一時的に許可します: uri={}", uri, e);
             filterChain.doFilter(request, response);
             return;
         }

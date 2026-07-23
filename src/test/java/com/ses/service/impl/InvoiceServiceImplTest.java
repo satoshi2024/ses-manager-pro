@@ -55,6 +55,12 @@ public class InvoiceServiceImplTest {
     @Mock
     private com.ses.service.MailService mailService;
 
+    @Mock
+    private com.ses.service.security.DataScopeService dataScopeService;
+
+    @Mock
+    private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
 
@@ -275,11 +281,11 @@ public class InvoiceServiceImplTest {
     @Test
     void testResolvePaymentStatus_Boundaries() {
         BigDecimal total = new BigDecimal("110000");
-        assertEquals("送付済", InvoiceServiceImpl.resolvePaymentStatus(BigDecimal.ZERO, total));
-        assertEquals("一部入金", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("50000"), total));
-        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110000"), total));
+        assertEquals("送付済", InvoiceServiceImpl.resolvePaymentStatus(BigDecimal.ZERO, total, "送付済"));
+        assertEquals("一部入金", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("50000"), total, "送付済"));
+        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110000"), total, "一部入金"));
         // 手数料込みで到達するケースも paidTotal>=total で入金済
-        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110500"), total));
+        assertEquals("入金済", InvoiceServiceImpl.resolvePaymentStatus(new BigDecimal("110500"), total, "一部入金"));
     }
 
     @Test
@@ -464,7 +470,7 @@ public class InvoiceServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> invoiceService.sendReminder(invoiceId, 1L));
-        assertTrue(ex.getMessage().contains("error.invoice.reminderNotOverdue"));
+        assertTrue(ex.getMessage().contains("error.invoice.reminderNotAllowed"));
     }
 
     @Test

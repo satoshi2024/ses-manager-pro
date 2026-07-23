@@ -604,6 +604,7 @@ class WorkRecordServiceImplTest {
         r.setPaymentAmount(new BigDecimal("600000"));
         r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.selectByIdForUpdate(5L)).thenReturn(r);
         Contract c = new Contract();
         c.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
@@ -627,6 +628,7 @@ class WorkRecordServiceImplTest {
         r.setStatus("入力中");
         r.setContractId(1L);
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.selectByIdForUpdate(5L)).thenReturn(r);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
@@ -647,6 +649,7 @@ class WorkRecordServiceImplTest {
         r.setContractId(7L);
         r.setRemarks("既存の備考");
         when(workRecordMapper.selectById(5L)).thenReturn(r);
+        when(workRecordMapper.selectByIdForUpdate(5L)).thenReturn(r);
         // R3R-10/12: CASでコメント保存。R3R-11: 対象要員本人へ配信。
         when(workRecordMapper.update(isNull(), any())).thenReturn(1);
         Contract c = new Contract();

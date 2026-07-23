@@ -23,6 +23,7 @@ public class RoleMenuApiController {
 
     private final RoleMenuService roleMenuService;
     private final MenuMapper menuMapper;
+    private final com.ses.service.MenuCacheService menuCacheService;
 
     /**
      * 全メニュー一覧（並び順）
@@ -93,6 +94,7 @@ public class RoleMenuApiController {
                     .toList();
             roleMenuService.saveBatch(roleMenus);
         }
+        menuCacheService.invalidate();
         return ApiResult.success(true);
     }
 }

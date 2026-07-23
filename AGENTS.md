@@ -69,7 +69,7 @@ Standard Spring MVC/MyBatis-Plus layering under `com.ses`:
 
 ### Security
 
-`config/SecurityConfig.java`: form login at `/login`, session-based auth. CSRF: `CookieCsrfTokenRepository.withHttpOnlyFalse()` が `XSRF-TOKEN` Cookie を発行し、`common.js` の `SES.csrf.setup()` が更新系リクエスト（POST/PUT/DELETE/PATCH）の `X-XSRF-TOKEN` ヘッダーへ複製する。`/api/**` も CSRF 保護の対象 — 「API は CSRF 不要」という古い記述は誤りなのでコードを書く際に注意。`CustomUserDetailsService` は `SysUserMapper` でユーザーをロードし、`sys_user.role` を `ROLE_<role>` 権限にマッピングする。ロールは5種類: **管理者 / 営業 / HR / マネージャー / 要員**（V32 で要員を追加）。**要員ロールの動線**: `LoginSuccessHandler` が全ロールを `/` にリダイレクト → `LoginPageController.index` が要員を `/my/timesheet` へ転送。要員は `/my/**`, `/api/my/**`, `/`, `/api/profile/**`, `/api/notifications/**` のみアクセス可能で、それ以外は 403 になる（SecurityConfig の `anyRequest` が 4 管理ロール限定のため）。
+`config/SecurityConfig.java`: form login at `/login`, session-based auth. CSRF: `CookieCsrfTokenRepository.withHttpOnlyFalse()` が `XSRF-TOKEN` Cookie を発行し、`common.js` の `SES.csrf.token()`/`header()` が更新系リクエスト（POST/PUT/DELETE/PATCH）の `X-XSRF-TOKEN` ヘッダーへ複製する。`/api/**` も CSRF 保護の対象 — 「API は CSRF 不要」という古い記述は誤りなのでコードを書く際に注意。`CustomUserDetailsService` は `SysUserMapper` でユーザーをロードし、`sys_user.role` を `ROLE_<role>` 権限にマッピングする。ロールは5種類: **管理者 / 営業 / HR / マネージャー / 要員**（V32 で要員を追加）。**要員ロールの動線**: `LoginSuccessHandler` が全ロールを `/` にリダイレクト → `LoginPageController.index` が要員を `/my/timesheet` へ転送。要員は `/my/**`, `/api/my/**`, `/`, `/api/profile/**`, `/api/notifications/**` のみアクセス可能で、それ以外は 403 になる（SecurityConfig の `anyRequest` が 4 管理ロール限定のため）。
 
 **Password encoder is profile-switched** (two `@Bean`s in `SecurityConfig`): `@Profile("!prod")` → `NoOpPasswordEncoder` (plaintext, matches the plaintext `admin/admin123` seed and the H2 test data), `@Profile("prod")` → `BCryptPasswordEncoder`. `UserApiController` always calls `passwordEncoder.encode(...)` before saving, so switching profiles requires no code change. Tests run under the `test` profile (i.e. `!prod`), so they keep the plaintext encoder.
 
@@ -108,11 +108,11 @@ Conventions used across every module JS file (`engineer.js`, `customer.js`, `pro
 
 | モジュール | 主要ファイル | 説明 |
 |---|---|---|
-| データスコープ | `service/DataScopeService`, `config/DataScopeConfig` | `scope.sales-own-data-only=true` 時、営業ロールは担当顧客/エンジニア分のみ参照可。`dataScopeService.assertAllowedCustomer(id)` を detail/update/delete で呼ぶのが規約。請求書 API（A7-07）は未適用。 |
-| 月次締め | `service/impl/MonthlyClosingServiceImpl` | `assertOpenForUpdate(workMonth)` で締め済み月への更新を拒否。勤怠・請求は対応済、BP支払（A7-05）は未対応。 |
-| 電子契約 | `service/impl/ContractDocumentServiceImpl`, `service/impl/CloudSignClientImpl` | CloudSign 連携（モック）。PDF生成に日本語フォント未埋め込み（A7-03）、署名済み PDF 保存は未実装（A7-04）。 |
+| データスコープ | `service/DataScopeService` | `scope.sales-own-data-only=true` 時、営業ロールは担当顧客/エンジニア分のみ参照可。`dataScopeService.assertAllowedCustomer(id)` を detail/update/delete で呼ぶのが規約。請求書や各機能に適用済。 |
+| 月次締め | `service/impl/MonthlyClosingServiceImpl` | `assertOpenForUpdate(workMonth)` で締め済み月への更新を拒否。勤怠・請求・BP支払に対応済。 |
+| 電子契約 | `service/impl/ContractDocumentServiceImpl`, `service/impl/CloudSignClientImpl` | CloudSign 連携（モック）。PDF生成に日本語フォント埋め込み済、署名済み PDF 保存も実装済。 |
 | 監査ログ | `config/ApiAuditFilter`, `controller/api/AuditLogApiController` | 更新系 API の全操作を `t_audit_log` に記録。管理者専用 `/audit-log/**`。 |
-| freee連携 | `service/impl/FreeeIntegrationServiceImpl`, `controller/api/FreeePayrollApiController` | OAuth2 + 給与明細取得。refresh の並行競合ガード未実装（A7-18）。 |
+| freee連携 | `service/impl/FreeeIntegrationServiceImpl`, `controller/api/FreeePayrollApiController` | OAuth2 + 給与明細取得。refresh の並行競合ガード実装済。 |
 | AI機能 | `controller/api/AiApiController`, `controller/api/AiRestController` | `ai.provider=mock` で実 API 呼び出し無効。金額単位の扱いに注意: DB値は「円」単位、AIプロンプトへ渡す際は円表記で統一すること（A7-24）。 |
 | 候補者管理 | `controller/api/CandidateApiController` | 採用候補者 CRUD + ステージ管理 + エンジニア変換。 |
 | 請求書・AR | `service/impl/InvoiceServiceImpl`, `controller/api/InvoiceApiController` | 請求書生成・入金管理・督促・売掛金管理。 |

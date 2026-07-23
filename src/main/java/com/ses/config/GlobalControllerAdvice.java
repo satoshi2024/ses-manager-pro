@@ -23,7 +23,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class GlobalControllerAdvice {
 
-    private final ObjectProvider<RoleMenuService> roleMenuServiceProvider;
+    private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
 
     @ModelAttribute("currentUri")
     public String currentUri(HttpServletRequest request) {
@@ -66,8 +66,8 @@ public class GlobalControllerAdvice {
      */
     @ModelAttribute("allowedMenus")
     public List<String> allowedMenus(Authentication authentication) {
-        RoleMenuService roleMenuService = roleMenuServiceProvider.getIfAvailable();
-        if (authentication == null || roleMenuService == null) {
+        com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
+        if (authentication == null || menuCacheService == null) {
             return Collections.emptyList();
         }
         String role = authentication.getAuthorities().stream()
@@ -81,9 +81,9 @@ public class GlobalControllerAdvice {
         }
         try {
             if ("管理者".equals(role)) {
-                return roleMenuService.getAllMenuKeys();
+                return menuCacheService.getAllMenuKeys();
             }
-            return roleMenuService.getMenuKeysByRole(role);
+            return menuCacheService.getMenuKeysByRole(role);
         } catch (Exception e) {
             log.warn("メニュー権限の取得に失敗しました（role={}）", role, e);
             return Collections.emptyList();

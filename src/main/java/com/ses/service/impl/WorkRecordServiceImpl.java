@@ -296,9 +296,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 continue;
             }
             if ("未払".equals(root.getStatus())) {
-                bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
+                int updated = bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
                         .eq("id", root.getId())
+                        .eq("status", "未払")
                         .set("amount", record.getPaymentAmount()));
+                if (updated == 0) {
+                    throw BusinessException.of("error.common.optimisticLock");
+                }
             } else {
                 log.warn("支払済BP支払(id={})の金額 {} が最新の支払額 {} と不一致ですが、確定済みのため更新しません",
                         root.getId(), root.getAmount(), record.getPaymentAmount());
@@ -580,7 +584,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        record = this.getById(workRecordId); // 再取得して最新の単価・状態を反映
+        // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
+        record = baseMapper.selectByIdForUpdate(workRecordId);
 
         requireTransition(record, "確定");
         // 条件付きUPDATE（CAS）。提出済のときのみ確定へ遷移させ、後続BP生成を行う（R3R-10）。
@@ -614,7 +619,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        record = this.getById(workRecordId); // 再取得して最新状態を反映
+        // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
+        record = baseMapper.selectByIdForUpdate(workRecordId);
         
         // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
         String trimmed = comment == null ? "" : comment.trim();
