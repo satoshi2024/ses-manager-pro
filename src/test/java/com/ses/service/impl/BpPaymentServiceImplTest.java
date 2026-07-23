@@ -27,6 +27,12 @@ class BpPaymentServiceImplTest {
     @Mock
     private BpPaymentMapper bpPaymentMapper;
 
+    @Mock
+    private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
+    @Mock
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
+
     @InjectMocks
     private BpPaymentServiceImpl bpPaymentService;
 
