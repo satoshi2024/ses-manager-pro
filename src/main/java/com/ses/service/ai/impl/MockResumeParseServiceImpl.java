@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 /**
  * スキルシート解析のモック実装。
- * ai.provider が未設定または mock のときに使用（matchIfMissing=true）。
+ * ai.provider が未設定または mock のときに使用（@ConditionalOnExpression）。
  * AI無効時でも「要確認」状態まで導ける。
  */
 @Slf4j

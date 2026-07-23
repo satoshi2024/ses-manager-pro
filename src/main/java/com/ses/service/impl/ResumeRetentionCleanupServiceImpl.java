@@ -24,8 +24,8 @@ public class ResumeRetentionCleanupServiceImpl {
 
     private final ResumeIngestionMapper resumeIngestionMapper;
 
-    /** 最小保持日数 (デフォルト: 90日) */
-    @Value("${app.resume.retention-days:90}")
+    /** 最小保持日数 (デフォルト: 30日) */
+    @Value("${app.resume.retention-days:30}")
     private int retentionDays;
 
     /**

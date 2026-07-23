@@ -34,7 +34,6 @@ class AdvancedCoverageIntegrationTest extends BaseIntegrationTest {
     @Autowired private ProjectSkillService projectSkillService;
     @Autowired private ProposalService proposalService;
     @Autowired private InvoiceService invoiceService;
-    @Autowired private GeminiService geminiService;
 
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
@@ -76,6 +75,5 @@ class AdvancedCoverageIntegrationTest extends BaseIntegrationTest {
         // Services (Only the ones that compile)
         try { ruleMatchingService.findMatchingProjects(1L); } catch(Exception e) {}
         try { ruleMatchingService.findMatchingEngineers(1L); } catch(Exception e) {}
-        try { geminiService.generateContent("test", "test"); } catch(Exception e) {}
     }
 }

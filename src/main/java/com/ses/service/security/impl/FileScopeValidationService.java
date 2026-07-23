@@ -37,10 +37,9 @@ public class FileScopeValidationService {
             return;
         }
 
-        // 2. t_engineer のスキルシートまたは写真
+        // 2. t_engineer の写真
         Engineer engineer = engineerMapper.selectOne(
-                new QueryWrapper<Engineer>().eq("skill_sheet_file_name", storedName)
-                .or().eq("photo_url", storedName).last("LIMIT 1"));
+                new QueryWrapper<Engineer>().eq("photo_url", storedName).last("LIMIT 1"));
         if (engineer != null) {
             dataScopeService.assertAllowedEngineer(engineer.getId());
             return;

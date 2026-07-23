@@ -87,17 +87,13 @@ public class ResumeTextExtractorImpl implements ResumeTextExtractor {
         try (InputStream is = Files.newInputStream(filePath);
              XSSFWorkbook workbook = new XSSFWorkbook(is)) {
             StringBuilder sb = new StringBuilder();
+            org.apache.poi.ss.usermodel.DataFormatter dataFormatter = new org.apache.poi.ss.usermodel.DataFormatter();
             for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
                 var sheet = workbook.getSheetAt(i);
                 for (var row : sheet) {
                     for (var cell : row) {
-                        String cellValue = switch (cell.getCellType()) {
-                            case STRING -> cell.getStringCellValue();
-                            case NUMERIC -> String.valueOf((long) cell.getNumericCellValue());
-                            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
-                            default -> "";
-                        };
-                        if (!cellValue.isBlank()) {
+                        String cellValue = dataFormatter.formatCellValue(cell);
+                        if (cellValue != null && !cellValue.isBlank()) {
                             sb.append(cellValue).append(" ");
                         }
                     }

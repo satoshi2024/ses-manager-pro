@@ -120,11 +120,13 @@ Conventions used across every module JS file (`engineer.js`, `customer.js`, `pro
 
 ### AI features
 
-`ai.enabled`/`ai.provider` in `application.yml` currently disable real AI calls (`provider: mock`) — `GeminiService` and the AI matching/skill-sheet endpoints (`AiApiController`, `AiRestController`) are placeholders pending real API wiring via `config/AiConfig.java` (`ai.api-key`, `ai.api-url`, `ai.model`).
+`ai.enabled`/`ai.provider` in `application.yml` currently disable real AI calls (`provider: mock`) — `AiTextService` and the AI matching/skill-sheet endpoints (`AiApiController`, `AiRestController`) use mock implementations pending real API wiring via `config/AiConfig.java` (`ai.api-key`, `ai.api-url`, `ai.model`).
+
+The system uses `AiTextService` as the main abstraction, with `GeminiTextServiceImpl` for actual AI calls and `MockAiTextServiceImpl` as a fallback.
 
 **AI機能開発時の注意事項（A8-01/A8-02関連）**:
 1. **PII（個人を特定できる情報）の保護**: LLMへ送信するプロンプトには、原本ファイルから抽出された氏名や連絡先等の機微情報が含まれないようフィルタ処理を行うか、あるいは明確な運用ルール・同意プロセスを設けること。データの保存期間（`app.resume.retention-days`）超過時の論理削除・パージも確実に行うこと。
-2. **`AiTextService` のBean競合回避**: AIプロバイダー（`mock`、`gemini`等）の実装クラスは、テスト環境（`@SpringBootTest`）やプロファイル切替時にBean定義の重複エラー（`NoSuchBeanDefinitionException` または `NoUniqueBeanDefinitionException`）を引き起こしやすい。実装クラスには必ず `@ConditionalOnProperty(name = "ai.provider", havingValue = "...")` を付与し、フォールバック（例: mock）には `matchIfMissing = true` を指定するなどのベストプラクティスを遵守すること。
+2. **`AiTextService` のBean競合回避**: AIプロバイダー（`mock`、`gemini`等）の実装クラスは、テスト環境（`@SpringBootTest`）やプロファイル切替時にBean定義の重複エラーを引き起こしやすい。実装クラスには必ず `@ConditionalOnExpression("!'gemini'.equals('${ai.provider:mock}')")` のような条件式を用いてフォールバック（例: mock）を設定し、プロバイダ切替時の不変条件（どの provider でも全AI系Beanが一意に解決）を担保すること。
 
 
 ## Spec-driven task workflow (`.kiro/specs/`)

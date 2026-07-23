@@ -26,6 +26,7 @@ import com.ses.service.ResumeTextExtractor;
 import com.ses.service.SkillTagResolver;
 import com.ses.service.ai.ResumeParseService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,7 @@ public class ResumeIngestionServiceImpl
     private final CandidateService candidateService;
     private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<ResumeIngestionService> selfProvider;
 
     @Override
     public ResumeIngestion createJob(MultipartFile file, Long candidateId) {
@@ -84,7 +86,7 @@ public class ResumeIngestionServiceImpl
         log.info("スキルシート取込ジョブを作成しました: jobId={}, fileName={}", job.getId(), stored.getOriginalName());
 
         // 非同期解析を起動
-        parseAsync(job.getId());
+        selfProvider.getIfAvailable().parseAsync(job.getId());
         return job;
     }
 
@@ -153,7 +155,7 @@ public class ResumeIngestionServiceImpl
         if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
             throw BusinessException.of("error.resume.invalidStatus");
         }
-        parseAsync(id);
+        selfProvider.getIfAvailable().parseAsync(id);
     }
 
     @Override
@@ -170,7 +172,8 @@ public class ResumeIngestionServiceImpl
                    .set(ResumeIngestion::getReviewNote, dto.getReviewNote());
             this.update(wrapper);
         } catch (Exception e) {
-            throw BusinessException.of("error.resume.invalidStatus");
+            log.error("レビュー保存に失敗しました: jobId={}", id, e);
+            throw BusinessException.of("error.systemError");
         }
     }
 
@@ -286,11 +289,14 @@ public class ResumeIngestionServiceImpl
     @Override
     public void reject(Long id, String reason) {
         getJobOrThrow(id);
-        LambdaUpdateWrapper<ResumeIngestion> wrapper = new LambdaUpdateWrapper<>();
-        wrapper.eq(ResumeIngestion::getId, id)
-               .set(ResumeIngestion::getStatus, STATUS_REJECTED)
-               .set(ResumeIngestion::getErrorMessage, reason);
-        this.update(wrapper);
+        int updated = baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
+                .eq(ResumeIngestion::getId, id)
+                .in(ResumeIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
+                .set(ResumeIngestion::getStatus, STATUS_REJECTED)
+                .set(ResumeIngestion::getErrorMessage, reason));
+        if (updated == 0) {
+            throw BusinessException.of(409, "error.resume.invalidStatus");
+        }
         log.info("スキルシート取込を却下しました: id={}", id);
     }
 

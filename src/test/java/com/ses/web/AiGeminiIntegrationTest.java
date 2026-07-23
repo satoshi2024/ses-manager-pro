@@ -2,7 +2,7 @@ package com.ses.web;
 
 import com.ses.BaseIntegrationTest;
 import com.ses.SesManagerApplication;
-import com.ses.service.GeminiService;
+import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.AiMatchingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,15 +21,15 @@ public class AiGeminiIntegrationTest extends BaseIntegrationTest {
     private AiMatchingService aiMatchingService;
 
     @Autowired
-    private GeminiService geminiService;
+    private AiTextService aiTextService;
 
     @Test
     public void testGeminiProviderPaths() {
         assertNotNull(aiMatchingService);
-        assertNotNull(geminiService);
+        assertNotNull(aiTextService);
 
         try {
-            geminiService.generateContent("dummy-api-key", "dummy prompt");
+            aiTextService.generate("dummy prompt");
         } catch (Exception e) {
             // Ignore runtime exception for test coverage
         }

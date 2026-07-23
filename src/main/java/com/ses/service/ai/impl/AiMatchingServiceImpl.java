@@ -12,7 +12,7 @@ import java.util.List;
  * AIマッチングサービス実装
  */
 @Service
-@ConditionalOnExpression("!'gemini'.equals('${ai.provider:mock}') && !'rule'.equals('${ai.provider:mock}')")
+@ConditionalOnExpression("!'rule'.equals('${ai.provider:mock}')")
 public class AiMatchingServiceImpl implements AiMatchingService {
 
     @Override
