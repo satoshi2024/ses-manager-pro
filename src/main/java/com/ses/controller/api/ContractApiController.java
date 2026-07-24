@@ -27,6 +27,7 @@ public class ContractApiController {
 
     private final ContractService contractService;
     private final ContractRenewalService contractRenewalService;
+    private final com.ses.service.RenewalCalendarService renewalCalendarService;
     private final ContractMapper contractMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final org.springframework.context.MessageSource messageSource;
@@ -87,6 +88,16 @@ public class ContractApiController {
                         (c.getContractNo() != null ? c.getContractNo() : "No Number") + " - " + c.getStatus()))
                 .collect(java.util.stream.Collectors.toList());
         return ApiResult.success(options);
+    }
+
+    /**
+     * 契約更新カレンダー（FR-06）: 期間内の更新期限（終了日-リード日数）を状態付きで返す。
+     */
+    @GetMapping("/renewal-calendar")
+    public ApiResult<com.ses.dto.contract.RenewalCalendarResponseDto> renewalCalendar(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResult.success(renewalCalendarService.getCalendar(from, to));
     }
 
     /**
@@ -185,6 +196,24 @@ public class ContractApiController {
         assertContractVisible(id);
         contractService.changeStatus(id, request.getStatus(), request.getCancelDate());
         return ApiResult.success(Boolean.TRUE);
+    }
+
+    /**
+     * 更新判断の設定・解除（FR-06 契約更新カレンダー）。
+     * decision: "CONTINUE"（継続確定）/"END"（更新不要）/null（未定に戻す）。
+     */
+    @PutMapping("/{id}/renewal-decision")
+    public ApiResult<Boolean> updateRenewalDecision(@PathVariable Long id,
+            @RequestBody RenewalDecisionRequest request) {
+        assertContractVisible(id);
+        contractService.updateRenewalDecision(id, request.getDecision());
+        return ApiResult.success(Boolean.TRUE);
+    }
+
+    public static class RenewalDecisionRequest {
+        private String decision;
+        public String getDecision() { return decision; }
+        public void setDecision(String v) { this.decision = v; }
     }
 
     /**

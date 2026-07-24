@@ -53,9 +53,16 @@ class DashboardServiceImplTest {
     @Mock
     private com.ses.service.SystemConfigService systemConfigService;
 
+    @Mock
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
     @org.mockito.Spy
     private MonthlyRevenueCalcServiceImpl monthlyRevenueCalcService = new MonthlyRevenueCalcServiceImpl();
+
+    // 稼働率の共通口径サービス(将来稼働率予測と同一実装)
+    @org.mockito.Spy
+    private UtilizationCalcServiceImpl utilizationCalcService = new UtilizationCalcServiceImpl();
 
     @InjectMocks
     private DashboardServiceImpl dashboardService;

@@ -40,6 +40,9 @@ import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 
+import com.ses.service.security.DataScopeService;
+import com.ses.service.UtilizationCalcService;
+
 @Service
 @RequiredArgsConstructor
 public class DashboardServiceImpl implements DashboardService {
@@ -52,6 +55,9 @@ public class DashboardServiceImpl implements DashboardService {
     private final ProposalMapper proposalMapper;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final SystemConfigService systemConfigService;
+    private final DataScopeService dataScopeService;
+    /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通口径サービスで算出する(Requirement 1.3)。 */
+    private final UtilizationCalcService utilizationCalcService;
 
     @Override
     public DashboardSummaryDto getSummary(Integer year) {
@@ -171,9 +177,14 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(Contract::getEngineerId)
                 .collect(Collectors.toSet());
 
-        // 2. Base counts and KPI
+        // 2. Base counts and KPI (Requirement 3.2: DataScopeService に従う)
         List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
-        long totalEngineers = allEngineers.size();
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
+            allEngineers = allEngineers.stream()
+                    .filter(e -> e.getId() != null && allowedEngineerIds.contains(e.getId()))
+                    .collect(Collectors.toList());
+        }
         Set<Long> existingEngineerIds = allEngineers.stream()
                 .map(Engineer::getId)
                 .filter(Objects::nonNull)
@@ -191,7 +202,23 @@ public class DashboardServiceImpl implements DashboardService {
                 .filter(e -> "提案中".equals(e.getStatus()) && !retiringEngineerIds.contains(e.getId()))
                 .count();
 
-        double utilization = totalEngineers > 0 ? (double) (activeCount + retiringCount) / totalEngineers * 100 : 0.0;
+        // 全社稼動率は契約ベースの共通口径サービスで算出する。将来稼働率予測(FR-07)の当月値と
+        // 必ず一致させるため、Engineer.status ベースの集計(下のステータス構成チャート)とは口径を分ける。
+        Map<Long, List<Contract>> utilizationContractsByEngineer = existingEngineerIds.isEmpty()
+                ? Collections.emptyMap()
+                : contractMapper.selectList(new QueryWrapper<Contract>()
+                        .in("status", UtilizationCalcService.targetContractStatuses())
+                        .in("engineer_id", existingEngineerIds))
+                    .stream()
+                    .filter(c -> c.getEngineerId() != null)
+                    .collect(Collectors.groupingBy(Contract::getEngineerId));
+
+        UtilizationCalcService.UtilizationSnapshot utilizationSnapshot = utilizationCalcService.calc(
+                currentMonth,
+                allEngineers,
+                utilizationContractsByEngineer,
+                UtilizationCalcService.resolveAssumeRenew(systemConfigService));
+        double utilization = utilizationSnapshot.getUtilizationRate();
 
         // KPI「当月予想売上」「粗利率」はチャート当月値と同一ソース(共通口径の当月 calc 結果)を使用する。
         long totalRevenue = currentAmount.getSales();

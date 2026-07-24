@@ -379,7 +379,8 @@ const SES = {
                 'RETIRING_ENGINEER': 'text-accent-yellow',
                 'AI_MATCHING': 'text-accent-blue',
                 'INVOICE_OVERDUE': 'text-accent-red',
-                'CONTRACT_DRAFT': 'text-accent-blue'
+                'CONTRACT_DRAFT': 'text-accent-blue',
+                'RENEWAL_ESCALATION': 'text-accent-red'
             };
             
             let html = `<div class="d-flex justify-content-end px-3 py-1 border-bottom border-dark"><a href="#" id="mark-all-read" class="small text-muted hover-text-white text-decoration-none">${SES.i18n.t('notification.markAllRead')}</a></div>`;

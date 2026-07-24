@@ -515,6 +515,24 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                         .eq("apply_from_month", applyFromMonth));
     }
 
+    @Override
+    public void updateRenewalDecision(Long contractId, String decision) {
+        if (decision != null
+                && !com.ses.common.constant.RenewalState.DECISION_CONTINUE.equals(decision)
+                && !com.ses.common.constant.RenewalState.DECISION_END.equals(decision)) {
+            throw BusinessException.of(400, "error.contract.invalidRenewalDecision");
+        }
+        if (this.getById(contractId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        // renewalDecision は @TableField(updateStrategy = ALWAYS) のため、他フィールドを null のまま
+        // 部分更新しても上書きされない（decision=null で「未定に戻す」を安全に反映できる）。
+        Contract patch = new Contract();
+        patch.setId(contractId);
+        patch.setRenewalDecision(decision);
+        this.updateById(patch);
+    }
+
     /**
      * ドラフト生成の入力値オブジェクト（提案・見積の両方から渡される）。
      */
@@ -530,17 +548,3 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             Long quotationId) {
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
