@@ -41,6 +41,9 @@ class EngineerApiControllerValidationTest {
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    @MockBean
+    private com.ses.service.RetentionRiskService retentionRiskService;
+
     /** 氏名・雇用形態が揃った正常な要員は登録成功（code=200） */
     @Test
     @WithMockUser

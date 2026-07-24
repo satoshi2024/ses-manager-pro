@@ -17,7 +17,9 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.EngineerSalesMapper;
+import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.entity.EngineerSales;
+import com.ses.entity.EngineerFollowup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +41,7 @@ public class NotificationGenerateService {
     private final CustomerMapper customerMapper;
     private final InvoiceMapper invoiceMapper;
     private final EngineerSalesMapper engineerSalesMapper;
+    private final EngineerFollowupMapper engineerFollowupMapper;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
 
@@ -49,6 +52,7 @@ public class NotificationGenerateService {
         projectUrgent();
         followUpDue();
         invoiceOverdue();
+        followupOverdue();
     }
 
     /**
@@ -183,6 +187,33 @@ public class NotificationGenerateService {
             String message = a.getTitle();
             String linkUrl = NotificationLinks.customer(a.getCustomerId());
             notificationService.publishToUser(a.getCreatedBy(), "FOLLOW_UP", title, message, linkUrl, dedupeKey);
+        }
+    }
+
+    /**
+     * FR-11: 次回フォロー予定日(next_date)を超過した要員フォローを担当営業へ通知する。
+     * 要員ごとに最新のフォロー記録（followup_date降順）のnext_dateのみを見る
+     * （その後に新しいフォローが登録されていれば期日超過とは扱わない）。
+     * 冪等性: dedupe_key = FOLLOWUP_OVERDUE:{engineerId}:{nextDate}
+     */
+    public void followupOverdue() {
+        LocalDate today = LocalDate.now();
+        QueryWrapper<EngineerFollowup> qw = new QueryWrapper<>();
+        qw.isNotNull("next_date").orderByDesc("followup_date", "id");
+        List<EngineerFollowup> all = engineerFollowupMapper.selectList(qw);
+        java.util.Map<Long, EngineerFollowup> latestByEngineer = new java.util.LinkedHashMap<>();
+        for (EngineerFollowup f : all) {
+            latestByEngineer.putIfAbsent(f.getEngineerId(), f);
+        }
+        for (EngineerFollowup f : latestByEngineer.values()) {
+            if (f.getNextDate() != null && f.getNextDate().isBefore(today)) {
+                String name = getEngineerName(f.getEngineerId());
+                String dedupeKey = "FOLLOWUP_OVERDUE:" + f.getEngineerId() + ":" + f.getNextDate();
+                String message = "[\"notification.msg.FOLLOWUP_OVERDUE\", \"" + name + "\"]";
+                Long primarySalesUserId = resolvePrimarySalesUserId(f.getEngineerId());
+                notificationService.publishToUser(primarySalesUserId, "FOLLOWUP_OVERDUE", "フォロー期日超過", message,
+                        NotificationLinks.engineerDetail(f.getEngineerId()), dedupeKey);
+            }
         }
     }
 

@@ -7,6 +7,8 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.EngineerSalesMapper;
+import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.entity.Invoice;
 import com.ses.entity.Customer;
 import org.junit.jupiter.api.Test;
@@ -51,6 +53,12 @@ class NotificationGenerateServiceTest {
     private InvoiceMapper invoiceMapper;
 
     @Mock
+    private EngineerSalesMapper engineerSalesMapper;
+
+    @Mock
+    private EngineerFollowupMapper engineerFollowupMapper;
+
+    @Mock
     private NotificationService notificationService;
 
     @Mock
@@ -90,6 +98,44 @@ class NotificationGenerateServiceTest {
                 contains("INVOICE_OVERDUE:7:"));
         verify(notificationService, times(1)).publishToUser(
                 any(), any(), any(), contains("5日"), any(), any());
+    }
+
+    // ===== FR-11: フォロー期日超過通知 =====
+
+    private com.ses.entity.EngineerFollowup followup(Long engineerId, LocalDate followupDate, LocalDate nextDate) {
+        com.ses.entity.EngineerFollowup f = com.ses.entity.EngineerFollowup.builder()
+                .engineerId(engineerId)
+                .followupType("1on1")
+                .followupDate(followupDate)
+                .nextDate(nextDate)
+                .build();
+        return f;
+    }
+
+    @Test
+    void testFollowupOverdue_publishesForOverdueNextDate() {
+        when(engineerFollowupMapper.selectList(any())).thenReturn(
+                List.of(followup(10L, LocalDate.now().minusDays(20), LocalDate.now().minusDays(5))));
+        when(engineerSalesMapper.selectOne(any())).thenReturn(null);
+        com.ses.entity.Engineer eng = com.ses.entity.Engineer.builder().fullName("要員テスト").build();
+        eng.setId(10L);
+        when(engineerMapper.selectById(10L)).thenReturn(eng);
+
+        notificationGenerateService.followupOverdue();
+
+        verify(notificationService, times(1)).publishToUser(
+                any(), eq("FOLLOWUP_OVERDUE"), any(), any(),
+                contains("/engineer/detail?id=10"), contains("FOLLOWUP_OVERDUE:10:"));
+    }
+
+    @Test
+    void testFollowupOverdue_nextDateNotOverdue_publishesNothing() {
+        when(engineerFollowupMapper.selectList(any())).thenReturn(
+                List.of(followup(10L, LocalDate.now(), LocalDate.now().plusDays(5))));
+
+        notificationGenerateService.followupOverdue();
+
+        verify(notificationService, never()).publishToUser(any(), eq("FOLLOWUP_OVERDUE"), any(), any(), any(), any());
     }
 
     @Test

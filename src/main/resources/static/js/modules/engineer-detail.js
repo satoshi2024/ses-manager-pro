@@ -80,6 +80,10 @@ function renderEngineerDetail(eng) {
     // Load Sales Reps
     loadSalesReps(eng.id);
 
+    // Load Followups (FR-11)
+    loadFollowups(eng.id);
+    loadRetentionRisk(eng.id);
+
     // Load Proposal History
     loadProposalHistory(eng.id);
 
@@ -670,5 +674,177 @@ function renderProposalHistory(historyList) {
             </tr>
         `;
         tbody.append(tr);
+    });
+}
+
+// ==========================================
+// Followups (FR-11 要員フォロー・定着リスク管理)
+// ==========================================
+function followupTypeLabel(type) {
+    if (type === '1on1') return SES.i18n.t('engineerFollowup.type.oneOnOne');
+    if (type === '面談') return SES.i18n.t('engineerFollowup.type.interview');
+    if (type === '連絡') return SES.i18n.t('engineerFollowup.type.contact');
+    return type || '-';
+}
+
+function loadFollowups(engineerId) {
+    $.ajax({
+        url: '/api/engineers/' + engineerId + '/followups',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                renderFollowups(res.data);
+            }
+        }
+    });
+}
+
+function loadRetentionRisk(engineerId) {
+    $.ajax({
+        url: '/api/engineers/' + engineerId + '/retention-risk',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const risk = res.data;
+                const badgeClass = risk.highRisk ? 'text-danger fw-bold' : 'text-white';
+                $('#followup-risk-score').html(`<span class="${badgeClass}">${risk.score}</span>` +
+                    (risk.highRisk ? ` <span class="badge bg-danger ms-1">${SES.i18n.t('engineerFollowup.riskLevel.high')}</span>` : ''));
+            }
+        }
+    });
+}
+
+function renderFollowups(followups) {
+    const list = $('#followup-list');
+    list.empty();
+
+    // 次回フォロー期日: 最新(followupDate降順の先頭)のnextDateを採用
+    const latest = followups && followups.length > 0 ? followups[0] : null;
+    if (latest && latest.nextDate) {
+        const overdue = new Date(latest.nextDate) < new Date(new Date().toDateString());
+        $('#followup-next-due').html(`<span class="${overdue ? 'text-danger' : 'text-white'}">${SES.escapeHtml(latest.nextDate)}</span>`);
+    } else {
+        $('#followup-next-due').html(`<span class="text-muted">${SES.i18n.t('engineerFollowup.noNextDue')}</span>`);
+    }
+
+    if (!followups || followups.length === 0) {
+        list.html('<li class="list-group-item bg-transparent border-dark text-muted small text-center py-3">' + SES.i18n.t('engineerFollowup.empty') + '</li>');
+        return;
+    }
+
+    followups.forEach(fu => {
+        const satisfactionStr = fu.satisfaction ? '★'.repeat(fu.satisfaction) + '☆'.repeat(5 - fu.satisfaction) : '-';
+        const item = `
+            <li class="list-group-item bg-transparent border-dark px-3 py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-secondary border border-dark text-light me-1">${SES.escapeHtml(followupTypeLabel(fu.followupType))}</span>
+                        <span class="text-white small">${SES.escapeHtml(fu.followupDate || '-')}</span>
+                        ${fu.topic ? `<div class="text-light small mt-1">${SES.escapeHtml(fu.topic)}</div>` : ''}
+                        <div class="text-muted small">${SES.i18n.t('engineerFollowup.satisfaction')}: ${satisfactionStr}</div>
+                        ${fu.nextDate ? `<div class="text-muted small">${SES.i18n.t('engineerFollowup.nextDate')}: ${SES.escapeHtml(fu.nextDate)}</div>` : ''}
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info border-info btn-sm" onclick="editFollowup(${fu.id})"><i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-outline-danger border-danger btn-sm" onclick="deleteFollowup(${fu.id})"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            </li>
+        `;
+        list.append(item);
+    });
+}
+
+function openFollowupModal() {
+    $('#followup-form')[0].reset();
+    $('#fu-id').val('');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('followupModal')).show();
+}
+
+function editFollowup(id) {
+    $.ajax({
+        url: '/api/engineers/' + currentEngineerId + '/followups/' + id,
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const fu = res.data;
+                $('#fu-id').val(fu.id);
+                $('#fu-followupType').val(fu.followupType);
+                $('#fu-followupDate').val(fu.followupDate);
+                $('#fu-satisfaction').val(fu.satisfaction || '');
+                $('#fu-nextDate').val(fu.nextDate || '');
+                $('#fu-topic').val(fu.topic || '');
+                $('#fu-content').val(fu.content || '');
+
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('followupModal')).show();
+            }
+        }
+    });
+}
+
+function saveFollowup() {
+    const id = $('#fu-id').val();
+    const data = {
+        engineerId: currentEngineerId,
+        followupType: $('#fu-followupType').val(),
+        followupDate: $('#fu-followupDate').val(),
+        satisfaction: $('#fu-satisfaction').val() ? parseInt($('#fu-satisfaction').val()) : null,
+        nextDate: $('#fu-nextDate').val() || null,
+        topic: $('#fu-topic').val() || null,
+        content: $('#fu-content').val() || null
+    };
+
+    if (id) {
+        data.id = parseInt(id);
+    }
+
+    if (!data.followupType || !data.followupDate) {
+        Toast.error(SES.i18n.t('error.requiredFields'));
+        return;
+    }
+
+    $.ajax({
+        url: '/api/engineers/' + currentEngineerId + '/followups' + (id ? '/' + id : ''),
+        method: id ? 'PUT' : 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(SES.i18n.t('success.saveFollowup'));
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('followupModal')).hide();
+                loadFollowups(currentEngineerId);
+                loadRetentionRisk(currentEngineerId);
+            } else {
+                Toast.error(res.message || SES.i18n.t('error.saveFailed'));
+            }
+        }
+    });
+}
+
+function deleteFollowup(id) {
+    Swal.fire({
+        title: SES.i18n.t('common.deleteConfirmTitle'),
+        text: SES.i18n.t('confirm.deleteFollowup'),
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        confirmButtonText: SES.i18n.t('common.delete'),
+        cancelButtonText: SES.i18n.t('common.cancel')
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: '/api/engineers/' + currentEngineerId + '/followups/' + id,
+                method: 'DELETE',
+                success: function(res) {
+                    if (res.code === 200) {
+                        Toast.success(SES.i18n.t('success.delete'));
+                        loadFollowups(currentEngineerId);
+                        loadRetentionRisk(currentEngineerId);
+                    } else {
+                        Toast.error(res.message || SES.i18n.t('error.deleteFailed'));
+                    }
+                }
+            });
+        }
     });
 }

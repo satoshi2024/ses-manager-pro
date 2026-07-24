@@ -161,6 +161,13 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.payroll-employer-burden-rate'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='skillsheet.templates'");
 
+            // 要員フォロー・定着リスク管理(V50, FR-11)
+            assertTableExists(st, "t_engineer_followup");
+            assertColumnExists(st, "t_engineer_followup", "next_date");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.bench-warn-days'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.followup-interval-days'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.threshold'");
+
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
                     "SELECT c.id, su.real_name AS salesUserName FROM t_contract c " +

@@ -94,6 +94,22 @@ CREATE TABLE t_engineer_sales (
   deleted_flag  TINYINT NOT NULL DEFAULT 0
 );
 
+DROP TABLE IF EXISTS t_engineer_followup CASCADE;
+CREATE TABLE t_engineer_followup (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id   BIGINT NOT NULL,
+  followup_type VARCHAR(20) NOT NULL,
+  followup_date DATE NOT NULL,
+  satisfaction  TINYINT,
+  topic         VARCHAR(200),
+  content       TEXT,
+  next_date     DATE,
+  created_by    BIGINT,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT NOT NULL DEFAULT 0
+);
+
 DROP TABLE IF EXISTS t_engineer_career CASCADE;
 CREATE TABLE t_engineer_career (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
