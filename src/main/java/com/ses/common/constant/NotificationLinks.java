@@ -17,6 +17,9 @@ public final class NotificationLinks {
     /** 契約一覧（/contract/list） */
     public static final String CONTRACT_LIST = "/contract/list";
 
+    /** 契約更新カレンダー（/contract/renewal-calendar） */
+    public static final String CONTRACT_RENEWAL_CALENDAR = "/contract/renewal-calendar";
+
     /** 請求書一覧（/invoice） */
     public static final String INVOICE = "/invoice";
 

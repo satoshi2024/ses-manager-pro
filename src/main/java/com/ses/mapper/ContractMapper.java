@@ -13,6 +13,8 @@ import java.util.List;
  */
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.contract.ContractListDto;
+import com.ses.dto.contract.ContractDraftStatusDto;
+import com.ses.dto.contract.RenewalCalendarItemDto;
 import java.time.LocalDate;
 
 @Mapper
@@ -80,4 +82,50 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("periodFrom") LocalDate periodFrom,
             @org.apache.ibatis.annotations.Param("periodTo") LocalDate periodTo,
             @org.apache.ibatis.annotations.Param("allowedIds") java.util.List<Long> allowedIds);
+
+    /**
+     * 契約更新カレンダー(FR-06)候補の取得。指定ステータス・終了日範囲の契約を要員/顧客/営業名付きで返す。
+     * 1000件上限は呼び出し側で担保する(A7-22: 黙って欠けないよう limit+1 で取得し切り詰めを検知)。
+     */
+    @Select("""
+        <script>
+        SELECT c.id AS contractId, c.contract_no AS contractNo, c.engineer_id AS engineerId,
+               c.customer_id AS customerId, c.end_date AS endDate, c.status,
+               c.renewal_decision AS renewalDecision,
+               c.sales_user_id AS salesUserId, su.real_name AS salesUserName,
+               e.full_name AS engineerName, cu.company_name AS customerName
+        FROM t_contract c
+        LEFT JOIN t_engineer e ON c.engineer_id = e.id AND e.deleted_flag = 0
+        LEFT JOIN m_customer cu ON c.customer_id = cu.id AND cu.deleted_flag = 0
+        LEFT JOIN sys_user su ON c.sales_user_id = su.id AND su.deleted_flag = 0
+        WHERE c.deleted_flag = 0
+          AND c.status = #{status}
+          AND c.end_date IS NOT NULL
+          AND c.end_date &gt;= #{endDateFrom}
+          AND c.end_date &lt;= #{endDateTo}
+          <if test="allowedIds != null">AND c.id IN <foreach collection="allowedIds" item="cid" open="(" separator="," close=")">#{cid}</foreach></if>
+        ORDER BY c.end_date ASC
+        <if test="limit != null">LIMIT #{limit}</if>
+        </script>
+        """)
+    java.util.List<RenewalCalendarItemDto> selectRenewalCalendarCandidates(
+            @org.apache.ibatis.annotations.Param("status") String status,
+            @org.apache.ibatis.annotations.Param("endDateFrom") LocalDate endDateFrom,
+            @org.apache.ibatis.annotations.Param("endDateTo") LocalDate endDateTo,
+            @org.apache.ibatis.annotations.Param("allowedIds") java.util.List<Long> allowedIds,
+            @org.apache.ibatis.annotations.Param("limit") Integer limit);
+
+    /**
+     * 指定した元契約群を親とする更新ドラフト(renewed_from_contract_id)の状態のみを返す。
+     * 状態導出(DRAFT有/確定判定)専用の軽量クエリ。
+     */
+    @Select("""
+        <script>
+        SELECT renewed_from_contract_id AS renewedFromContractId, status
+        FROM t_contract
+        WHERE deleted_flag = 0 AND renewed_from_contract_id IN
+        <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach>
+        </script>
+        """)
+    java.util.List<ContractDraftStatusDto> selectDraftStatusesByOriginalIds(@org.apache.ibatis.annotations.Param("ids") java.util.List<Long> ids);
 }

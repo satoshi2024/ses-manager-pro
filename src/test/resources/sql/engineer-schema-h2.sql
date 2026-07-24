@@ -186,6 +186,7 @@ CREATE TABLE t_contract (
   commission_rate         DECIMAL(5,2),
   renewed_from_contract_id BIGINT,
   quotation_id            BIGINT,
+  renewal_decision        VARCHAR(20),
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

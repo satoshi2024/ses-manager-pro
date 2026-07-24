@@ -77,4 +77,11 @@ public interface ContractService extends IService<Contract> {
 
     /** 将来予約（当月より後）の改定のみ削除する。 */
     void deleteFuturePriceRevision(Long contractId, String applyFromMonth);
+
+    /**
+     * 更新判断（継続確定/更新不要）を設定・解除する（FR-06 契約更新カレンダー）。
+     * @param contractId 契約ID
+     * @param decision "CONTINUE"（継続確定）/"END"（更新不要）/null（未定に戻す）
+     */
+    void updateRenewalDecision(Long contractId, String decision);
 }
