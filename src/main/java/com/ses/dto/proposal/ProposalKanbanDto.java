@@ -18,4 +18,5 @@ public class ProposalKanbanDto {
     private BigDecimal proposedUnitPrice;
     private String status;
     private BigDecimal aiMatchScore;
+    private java.time.LocalDateTime proposedAt;
 }

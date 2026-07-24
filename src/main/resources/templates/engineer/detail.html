@@ -20,15 +20,9 @@
             <a href="/engineer/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
                 <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}">戻る</th:block>
             </a>
-            <div class="dropdown">
-                <button class="btn btn-outline-secondary text-muted hover-text-white border-dark dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{ai.skillsheet.generate}">スキルシート自動生成</th:block>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-dark">
-                    <li><a class="dropdown-item" href="#" onclick="downloadSkillSheet(currentEngineerId, 'pdf'); return false;"><i class="bi bi-filetype-pdf me-2 text-danger"></i>PDF形式</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="downloadSkillSheet(currentEngineerId, 'excel'); return false;"><i class="bi bi-filetype-xlsx me-2 text-success"></i>Excel形式</a></li>
-                </ul>
-            </div>
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark" type="button" onclick="openSkillSheetModal()">
+                <i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{ai.skillsheet.generate}">スキルシート自動生成</th:block>
+            </button>
             <button class="btn btn-primary bg-gradient-purple border-0 shadow-sm" onclick="showAiMatchModal(currentEngineerId, currentEngineerName)">
                 <i class="bi bi-robot me-1"></i><th:block th:text="#{ai.matching.run}">AIマッチング実行</th:block>
             </button>
@@ -130,6 +124,9 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link text-muted border-transparent hover-text-white" id="career-tab" data-bs-toggle="tab" data-bs-target="#career-tab-pane" type="button" role="tab" aria-controls="career-tab-pane" aria-selected="false"><i class="bi bi-building me-2"></i><th:block th:text="#{engineer.career}">経歴詳細</th:block></button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link text-muted border-transparent hover-text-white" id="proposal-history-tab" data-bs-toggle="tab" data-bs-target="#proposal-history-tab-pane" type="button" role="tab" aria-controls="proposal-history-tab-pane" aria-selected="false"><i class="bi bi-file-earmark-check me-2"></i><th:block th:text="#{engineer.proposalHistory}">提案履歴</th:block></button>
+                        </li>
                     </ul>
                 </div>
                 <div class="card-body p-4">
@@ -155,6 +152,24 @@
                                         </tr>
                                     </thead>
                                     <tbody id="career-table-body">
+                                        <!-- Populated via JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="proposal-history-tab-pane" role="tabpanel" aria-labelledby="proposal-history-tab" tabindex="0">
+                            <div class="table-responsive">
+                                <table class="table table-dark table-hover align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th th:text="#{proposalHistory.date}">提案日</th>
+                                            <th th:text="#{proposalHistory.customer}">提案先客先</th>
+                                            <th th:text="#{proposalHistory.project}">案件名</th>
+                                            <th th:text="#{proposalHistory.status}">結果/状態</th>
+                                            <th th:text="#{proposalHistory.unitPrice}">単価</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="proposal-history-table-body">
                                         <!-- Populated via JS -->
                                     </tbody>
                                 </table>
@@ -354,6 +369,42 @@
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveSalesRep()" th:text="#{common.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Skill Sheet Export Modal -->
+    <div class="modal fade" id="skillSheetModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title text-light"><i class="bi bi-file-earmark-person me-2"></i><th:block th:text="#{kanban.proposal.skillsheet}">スキルシート出力</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="skillsheet-anonymize">
+                            <label class="form-check-label text-light" for="skillsheet-anonymize" th:text="#{kanban.proposal.skillsheet.anonymize}">匿名化する（氏名や連絡先を伏せる）</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.skillsheet.template}">様式</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="skillsheet-template">
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.skillsheet.format}">出力形式</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="skillsheet-format">
+                            <option value="PDF">PDF</option>
+                            <option value="EXCEL">Excel</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" onclick="exportSkillSheetDirect()"><i class="bi bi-download me-1"></i><th:block th:text="#{common.download}">出力</th:block></button>
                 </div>
             </div>
         </div>

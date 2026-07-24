@@ -1,5 +1,7 @@
 let revenueChartInstance = null;
 let statusChartInstance = null;
+let cashflowChartInstance = null;
+let cashflowLoaded = false;
 
 $(document).ready(function() {
     $('#btn-print-report').on('click', function() { window.print(); });
@@ -9,6 +11,7 @@ $(document).ready(function() {
     document.addEventListener('ses:theme-changed', function() {
         SES.theme.applyChartTheme(revenueChartInstance);
         SES.theme.applyChartTheme(statusChartInstance);
+        SES.theme.applyChartTheme(cashflowChartInstance);
     });
 
     // 退場予定者リストのAIマッチングボタン（行はAjaxで再描画されるため委譲で捕捉）
@@ -24,6 +27,24 @@ $(document).ready(function() {
 
     $('#fiscal-year-selector').on('change', function() {
         loadDashboardData($(this).val());
+    });
+
+    $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+        if (e.target.id === 'cashflow-tab') {
+            $('#btn-export-cashflow').removeClass('d-none');
+            $('#fiscal-year-selector').addClass('d-none');
+            if (!cashflowLoaded) {
+                loadCashflowData();
+            }
+        } else {
+            $('#btn-export-cashflow').addClass('d-none');
+            $('#fiscal-year-selector').removeClass('d-none');
+        }
+    });
+
+    $('#btn-export-cashflow').on('click', function() {
+        // Just triggers CSV download via API (add endpoint if needed, or JS export)
+        exportCashflowCsv();
     });
 });
 
@@ -52,6 +73,27 @@ function loadDashboardData(year) {
                 renderKPIs(res.data.kpi);
                 renderCharts(res.data.charts);
                 renderRetiringList(res.data.retiring);
+            } else {
+                Toast.error(res.message || SES.i18n.t('dashboard.error.fetch_failed'));
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            Toast.error(SES.i18n.t('dashboard.error.network'));
+        }
+    });
+}
+
+function loadCashflowData() {
+    $.ajax({
+        url: '/api/cashflow/forecast',
+        method: 'GET',
+        data: { months: 6 },
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                renderCashflowChart(res.data.months, res.data.alertThreshold);
+                renderCashflowReconcileNote(res.data.reconciliation);
+                cashflowLoaded = true;
             } else {
                 Toast.error(res.message || SES.i18n.t('dashboard.error.fetch_failed'));
             }
@@ -237,6 +279,129 @@ function renderCharts(chartsData) {
     });
 }
 
+// 起点月の売上口径を全社KPIと突合した結果を1行で表示する。
+// 差分が出るのは実績未確定・未請求の売上があるときで、その分は入金予定に現れていない。
+function renderCashflowReconcileNote(rec) {
+    const el = document.getElementById('cashflowReconcileNote');
+    if (!el) return;
+    if (!rec) {
+        el.textContent = '';
+        return;
+    }
+    const diff = Number(rec.difference);
+    el.textContent = SES.i18n.t('dashboard.cashflow.reconcile', [
+        rec.month,
+        Number(rec.kpiSales).toLocaleString(),
+        Number(rec.invoicedSubtotal).toLocaleString(),
+        diff.toLocaleString()
+    ]);
+    el.classList.toggle('text-warning', diff !== 0);
+    el.classList.toggle('text-muted', diff === 0);
+}
+
+function renderCashflowChart(monthsData, alertThreshold) {
+    const theme = SES.theme.chartColors();
+    if (cashflowChartInstance) {
+        cashflowChartInstance.destroy();
+    }
+
+    const labels = monthsData.map(m => m.month);
+    const inflowData = monthsData.map(m => m.inflow);
+    const outflowData = monthsData.map(m => m.outflow);
+    const balanceData = monthsData.map(m => m.balance);
+
+    const threshold = (alertThreshold !== undefined && alertThreshold !== null) ? alertThreshold : 0;
+    // Alert colors for balance line points if it drops below the threshold
+    const pointColors = balanceData.map(val => val < threshold ? '#dc3545' : '#17a2b8');
+
+    const ctx = document.getElementById('cashflowChart').getContext('2d');
+    
+    const balanceLabel = SES.i18n.t('dashboard.cashflow.balance', '残高見込み');
+    const inflowLabel = SES.i18n.t('dashboard.cashflow.inflow', '入金予定');
+    const outflowLabel = SES.i18n.t('dashboard.cashflow.outflow', '支払予定');
+    
+    cashflowChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    type: 'line',
+                    label: balanceLabel,
+                    data: balanceData,
+                    borderColor: '#17a2b8',
+                    backgroundColor: '#17a2b8',
+                    pointBackgroundColor: pointColors,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    fill: false,
+                    yAxisID: 'y'
+                },
+                {
+                    type: 'bar',
+                    label: inflowLabel,
+                    data: inflowData,
+                    backgroundColor: 'rgba(32, 201, 151, 0.7)',
+                    borderColor: '#20c997',
+                    borderWidth: 1,
+                    yAxisID: 'y'
+                },
+                {
+                    type: 'bar',
+                    label: outflowLabel,
+                    data: outflowData,
+                    backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    borderColor: '#dc3545',
+                    borderWidth: 1,
+                    yAxisID: 'y'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            color: theme.textColor,
+            plugins: {
+                legend: { 
+                    position: 'top',
+                    labels: { color: theme.textColor }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += '¥' + Number(context.parsed.y).toLocaleString();
+                            }
+                            
+                            // Add breakdown if available
+                            if (context.dataset.type === 'bar' && context.dataset.label === outflowLabel) {
+                                const dataObj = monthsData[context.dataIndex];
+                                const payrollLbl = SES.i18n.t('dashboard.cashflow.payroll', '給与');
+                                const fixedLbl = SES.i18n.t('dashboard.cashflow.fixed', '固定');
+                                label += ` (BP: ¥${Number(dataObj.bpPaymentTotal).toLocaleString()}, ${payrollLbl}: ¥${Number(dataObj.payrollTotal).toLocaleString()}, ${fixedLbl}: ¥${Number(dataObj.fixedCost).toLocaleString()})`;
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                }
+            }
+        }
+    });
+}
+
 function renderRetiringList(list) {
     const tbody = $('#retiring-table-body');
     tbody.empty();
@@ -295,6 +460,10 @@ function renderRetiringList(list) {
 function exportRevenue() {
     const fiscalYear = $('#fiscal-year-selector').val();
     window.location.href = '/api/dashboard/revenue-export?fiscalYear=' + encodeURIComponent(fiscalYear);
+}
+
+function exportCashflowCsv() {
+    window.location.href = '/api/cashflow/export?months=6';
 }
 
 // Reuse the modal from Phase 3 if available, or redirect

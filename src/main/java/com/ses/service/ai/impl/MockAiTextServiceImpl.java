@@ -52,6 +52,18 @@ public class MockAiTextServiceImpl implements AiTextService {
     @Override
     public String generate(String prompt) {
         log.debug("MockAiTextServiceImpl: モック応答を返します（promptLength={})", prompt.length());
+        
+        if (prompt.contains("提案メール") || prompt.contains("[TASK:PROPOSAL_DRAFT]")) {
+            return """
+                    {
+                      "emailText": "この度はお世話になります。株式会社SESの営業担当です。貴社の「Webシステム開発」案件につきまして、弊社の優秀なエンジニア（Y.T）をご提案させていただきます。",
+                      "matchReason": "JavaおよびSpring BootでのAPI開発経験が豊富であり、貴社案件の要件に合致しています。",
+                      "sellingPoints": "コミュニケーション能力が高く、チーム開発でのリーダー経験もあります。",
+                      "matchScore": 85
+                    }
+                    """;
+        }
+        
         return MOCK_RESPONSE;
     }
 }

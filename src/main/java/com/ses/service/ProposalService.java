@@ -25,4 +25,22 @@ public interface ProposalService extends IService<Proposal> {
      * @param newStatus 新ステータス
      */
     void changeStatus(Long id, String newStatus);
+
+    /**
+     * アクティブな重複提案を検索する
+     *
+     * @param engineerId 要員ID
+     * @param customerId 顧客ID
+     * @param excludeId 除外する提案ID
+     * @return アクティブな重複提案のリスト
+     */
+    List<ProposalKanbanDto> findActiveDuplicates(Long engineerId, Long customerId, Long excludeId);
+
+    /**
+     * 要員の提案履歴を取得する
+     *
+     * @param engineerId 要員ID
+     * @return 提案履歴のリスト
+     */
+    List<ProposalKanbanDto> getProposalHistory(Long engineerId);
 }

@@ -144,6 +144,28 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
                     "contract-draft:" + proposal.getId());
         }
     }
+
+    @Override
+    public List<ProposalKanbanDto> findActiveDuplicates(Long engineerId, Long customerId, Long excludeId) {
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
+        return this.baseMapper.selectActiveDuplicates(engineerId, customerId, excludeId, com.ses.common.constant.StatusConstants.PROPOSAL_ACTIVE_STATUSES);
+    }
+
+    @Override
+    public List<ProposalKanbanDto> getProposalHistory(Long engineerId) {
+        java.util.Collection<Long> allowedCustomerIds = null;
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+            allowedCustomerIds = dataScopeService.allowedCustomerIds();
+            if (allowedCustomerIds.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+        }
+        return this.baseMapper.selectProposalHistory(engineerId, allowedCustomerIds);
+    }
 }
 
 

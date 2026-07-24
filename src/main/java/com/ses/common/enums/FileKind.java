@@ -28,6 +28,12 @@ public enum FileKind {
     PROJECT_EMAIL(
             Set.of("eml", "txt"),
             10L * 1024 * 1024,
+            Set.of("message/rfc822", "text/plain", "application/octet-stream")),
+
+    /** 外部要員メール: eml / txt、最大10MB */
+    BP_EMAIL(
+            Set.of("eml", "txt"),
+            10L * 1024 * 1024,
             Set.of("message/rfc822", "text/plain", "application/octet-stream"));
 
     private final Set<String> allowedExtensions;

@@ -26,6 +26,22 @@ public class EntityProtectUtil {
         clearField(entity, "setUpdatedBy", Long.class);
     }
     
+    public static void protectForUpdate(Object entity) {
+        if (entity == null) {
+            return;
+        }
+        
+        if (entity instanceof BaseEntity) {
+            BaseEntity base = (BaseEntity) entity;
+            base.setDeletedFlag(null);
+            base.setCreatedAt(null);
+            base.setUpdatedAt(null);
+        }
+        
+        clearField(entity, "setCreatedBy", Long.class);
+        clearField(entity, "setUpdatedBy", Long.class);
+    }
+    
     private static void clearField(Object entity, String methodName, Class<?> paramType) {
         try {
             Method method = entity.getClass().getMethod(methodName, paramType);

@@ -18,6 +18,8 @@ import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProjectSkillMapper;
 import com.ses.mapper.SkillTagMapper;
+import com.ses.mapper.BpAvailabilityMapper;
+import com.ses.entity.BpAvailability;
 import com.ses.service.ai.AiMatchingService;
 import com.ses.service.ai.MatchScoreCalculator;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +43,7 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
     private final ProjectSkillMapper projectSkillMapper;
     private final SkillTagMapper skillTagMapper;
     private final AiLogMapper aiLogMapper;
+    private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
 
@@ -89,10 +92,10 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
             Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
             Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
-            BigDecimal pMin = p.getUnitPriceMin() != null ? p.getUnitPriceMin().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
-            BigDecimal pMax = p.getUnitPriceMax() != null ? p.getUnitPriceMax().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
+            BigDecimal pMin = p.getUnitPriceMin() != null ? p.getUnitPriceMin() : null;
+            BigDecimal pMax = p.getUnitPriceMax() != null ? p.getUnitPriceMax() : null;
 
-            BigDecimal ePrice = engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
+            BigDecimal ePrice = engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice() : null;
             MatchScore score = MatchScoreCalculator.calculate(
                     mustIds, niceIds, engSkillIds, pMin, pMax,
                     ePrice, p.getStartDate(), engineer.getAvailableDate()
@@ -161,10 +164,10 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         for (Engineer e : candidates) {
             Set<Long> eSkills = esMap.getOrDefault(e.getId(), Collections.emptySet());
 
-            BigDecimal pMin = project.getUnitPriceMin() != null ? project.getUnitPriceMin().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
-            BigDecimal pMax = project.getUnitPriceMax() != null ? project.getUnitPriceMax().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
+            BigDecimal pMin = project.getUnitPriceMin() != null ? project.getUnitPriceMin() : null;
+            BigDecimal pMax = project.getUnitPriceMax() != null ? project.getUnitPriceMax() : null;
 
-            BigDecimal ePrice = e.getExpectedUnitPrice() != null ? e.getExpectedUnitPrice().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
+            BigDecimal ePrice = e.getExpectedUnitPrice() != null ? e.getExpectedUnitPrice() : null;
             MatchScore score = MatchScoreCalculator.calculate(
                     mustIds, niceIds, eSkills, pMin, pMax,
                     ePrice, project.getStartDate(), e.getAvailableDate()
@@ -179,6 +182,54 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
             dto.setScore(score.getTotalScore());
             dto.setReason(buildEngineerReason(score, mustIds, tagNameMap));
             dto.setSellingPoints(buildEngineerSellingPointsDirect(allEngSkills.stream().filter(s -> s.getEngineerId().equals(e.getId())).collect(Collectors.toList()), tagNameMap));
+            results.add(dto);
+        }
+
+        // --- BpAvailability の検索 (提案可能のみ) ---
+        LambdaQueryWrapper<BpAvailability> bpWrapper = new LambdaQueryWrapper<BpAvailability>()
+                .eq(BpAvailability::getStatus, "提案可能");
+        List<BpAvailability> externalBps = bpAvailabilityMapper.selectList(bpWrapper);
+        
+        Map<String, Long> tagNameReverseMap = new HashMap<>();
+        for (Map.Entry<Long, String> entry : tagNameMap.entrySet()) {
+            tagNameReverseMap.put(entry.getValue().toLowerCase(), entry.getKey());
+        }
+
+        for (BpAvailability bp : externalBps) {
+            Set<Long> bpSkills = new HashSet<>();
+            try {
+                if (bp.getSkillsJson() != null) {
+                    List<String> skillNames = objectMapper.readValue(bp.getSkillsJson(), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+                    for (String name : skillNames) {
+                        Long tagId = tagNameReverseMap.get(name.toLowerCase());
+                        if (tagId != null) {
+                            bpSkills.add(tagId);
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to parse skills for BpAvailability: " + bp.getId(), ex);
+            }
+
+            BigDecimal pMin = project.getUnitPriceMin() != null ? project.getUnitPriceMin() : null;
+            BigDecimal pMax = project.getUnitPriceMax() != null ? project.getUnitPriceMax() : null;
+
+            BigDecimal bpPrice = bp.getUnitPrice() != null ? new BigDecimal(bp.getUnitPrice()) : null;
+            MatchScore score = MatchScoreCalculator.calculate(
+                    mustIds, niceIds, bpSkills, pMin, pMax,
+                    bpPrice, project.getStartDate(), bp.getAvailableFrom()
+            );
+
+            if (score.isExcluded()) continue;
+
+            MatchResultDto dto = new MatchResultDto();
+            dto.setBpAvailabilityId(bp.getId());
+            dto.setIsExternalBp(true);
+            dto.setEngineerName("[BP] " + (bp.getInitialName() != null ? bp.getInitialName() : "不明"));
+            dto.setProposedPrice(bp.getUnitPrice() != null ? bp.getUnitPrice().intValue() : null);
+            dto.setScore(score.getTotalScore());
+            dto.setReason(buildEngineerReason(score, mustIds, tagNameMap));
+            dto.setSellingPoints(bp.getRemarks() != null ? bp.getRemarks() : "外部要員（BP）");
             results.add(dto);
         }
 

@@ -73,6 +73,36 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     @Override
+    public StoredFile store(byte[] data, String originalName, FileKind kind) {
+        if (data == null || data.length == 0) {
+            throw BusinessException.of("error.file.empty");
+        }
+        if (data.length > kind.getMaxBytes()) {
+            throw BusinessException.of("error.file.sizeOver", (kind.getMaxBytes() / 1024 / 1024));
+        }
+        originalName = StringUtils.cleanPath(originalName == null ? "" : originalName);
+        String ext = StringUtils.getFilenameExtension(originalName);
+        if (!kind.isExtensionAllowed(ext)) {
+            throw BusinessException.of("error.file.extensionInvalid", kind.allowedExtensionsLabel());
+        }
+
+        String storedName = UUID.randomUUID().toString().replace("-", "") + "." + ext.toLowerCase();
+        try {
+            Path base = baseDir();
+            Files.createDirectories(base);
+            Path target = base.resolve(storedName).normalize();
+            if (!target.startsWith(base)) {
+                throw BusinessException.of("error.file.invalidDestination");
+            }
+            Files.write(target, data);
+            return new StoredFile(storedName, originalName, data.length);
+        } catch (IOException e) {
+            log.error("ファイル保存に失敗しました: {}", storedName, e);
+            throw BusinessException.of("error.file.saveFailed");
+        }
+    }
+
+    @Override
     public Resource load(String storedName) {
         // ファイル名に区切り文字や親参照が含まれる場合は拒否
         if (storedName == null || storedName.isBlank()

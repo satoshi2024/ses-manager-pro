@@ -48,6 +48,10 @@ class ProposalApiControllerTest {
     private MailService mailService;
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
+    @MockBean
+    private com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
+    @MockBean
+    private com.ses.service.FileStorageService fileStorageService;
 
     @Test
     @WithMockUser
@@ -70,5 +74,34 @@ class ProposalApiControllerTest {
                         .content(objectMapper.writeValueAsString(p)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    @WithMockUser
+    void kanban_重複チェックは200() throws Exception {
+        when(proposalService.findActiveDuplicates(1L, 2L, null)).thenReturn(List.of());
+        mockMvc.perform(get("/api/proposals/duplicate-check")
+                        .param("engineerId", "1")
+                        .param("customerId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    @WithMockUser
+    void exportSkillSheet_権限なしの場合は404() throws Exception {
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(dataScopeService.allowedProposalIds()).thenReturn(java.util.Set.of(2L)); // ID 1 is not allowed
+        
+        ProposalApiController.SkillSheetExportRequest req = new ProposalApiController.SkillSheetExportRequest();
+        req.setFormat("PDF");
+        
+        mockMvc.perform(post("/api/proposals/1/skill-sheet/export").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                // GlobalExceptionHandler は BusinessException のコードを HTTP ステータスへ写像する
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
     }
 }

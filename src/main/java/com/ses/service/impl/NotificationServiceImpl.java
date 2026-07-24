@@ -108,6 +108,7 @@ public class NotificationServiceImpl implements NotificationService {
             case "PROPOSAL_STALE" -> "proposal";
             case "FOLLOW_UP" -> "customer";
             case "MAIL_FAILED" -> "user";
+            case "CASHFLOW_ALERT" -> "dashboard";
             default -> null;
         };
     }

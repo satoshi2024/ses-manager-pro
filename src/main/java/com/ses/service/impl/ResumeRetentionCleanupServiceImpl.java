@@ -23,6 +23,7 @@ import java.util.List;
 public class ResumeRetentionCleanupServiceImpl {
 
     private final ResumeIngestionMapper resumeIngestionMapper;
+    private final com.ses.mapper.BpAvailabilityIngestionMapper bpAvailabilityIngestionMapper;
 
     /** 最小保持日数 (デフォルト: 30日) */
     @Value("${app.resume.retention-days:30}")
@@ -45,23 +46,44 @@ public class ResumeRetentionCleanupServiceImpl {
                         .lt(ResumeIngestion::getUpdatedAt, threshold));
 
         if (targets.isEmpty()) {
-            log.info("PIIクリア対象なし");
-            return;
-        }
-
-        for (ResumeIngestion job : targets) {
-            if ("却下".equals(job.getStatus())) {
-                // 却下ジョブは論理削除（パージ）
-                resumeIngestionMapper.deleteById(job.getId());
-                log.info("却下ジョブをパージしました: jobId={}", job.getId());
-            } else {
-                // 確定済ジョブは抽出テキスト（PII）のみクリア
-                resumeIngestionMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
-                        .eq(ResumeIngestion::getId, job.getId())
-                        .set(ResumeIngestion::getExtractedText, null));
+            log.info("レジュメPIIクリア対象なし");
+        } else {
+            for (ResumeIngestion job : targets) {
+                if ("却下".equals(job.getStatus())) {
+                    // 却下ジョブは論理削除（パージ）
+                    resumeIngestionMapper.deleteById(job.getId());
+                    log.info("却下ジョブをパージしました: jobId={}", job.getId());
+                } else {
+                    // 確定済ジョブは抽出テキスト（PII）のみクリア
+                    resumeIngestionMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
+                            .eq(ResumeIngestion::getId, job.getId())
+                            .set(ResumeIngestion::getExtractedText, null));
+                }
             }
+            log.info("レジュメPII extracted_text を{}件クリアしました。", targets.size());
         }
 
-        log.info("PII extracted_text を{}件クリアしました。", targets.size());
+        // 外部要員空き状況のPIIクリア
+        List<com.ses.entity.BpAvailabilityIngestion> bpTargets = bpAvailabilityIngestionMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.BpAvailabilityIngestion>()
+                        .in(com.ses.entity.BpAvailabilityIngestion::getStatus, List.of("確定済", "却下"))
+                        .isNotNull(com.ses.entity.BpAvailabilityIngestion::getExtractedText)
+                        .lt(com.ses.entity.BpAvailabilityIngestion::getUpdatedAt, threshold));
+        
+        if (bpTargets.isEmpty()) {
+            log.info("外部要員空き状況PIIクリア対象なし");
+        } else {
+            for (com.ses.entity.BpAvailabilityIngestion job : bpTargets) {
+                if ("却下".equals(job.getStatus())) {
+                    bpAvailabilityIngestionMapper.deleteById(job.getId());
+                    log.info("外部要員却下ジョブをパージしました: jobId={}", job.getId());
+                } else {
+                    bpAvailabilityIngestionMapper.update(null, new LambdaUpdateWrapper<com.ses.entity.BpAvailabilityIngestion>()
+                            .eq(com.ses.entity.BpAvailabilityIngestion::getId, job.getId())
+                            .set(com.ses.entity.BpAvailabilityIngestion::getExtractedText, null));
+                }
+            }
+            log.info("外部要員PII extracted_text を{}件クリアしました。", bpTargets.size());
+        }
     }
 }

@@ -52,6 +52,9 @@ public class ProposalServiceImplTest {
     @MockBean
     private EngineerStatusService engineerStatusService;
 
+    @MockBean
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     /** createDraftFromProposal が案件を解決できるよう、指定IDの案件を用意する。 */
     private Long seedProject(Long customerId) {
         Project prj = new Project();
@@ -217,5 +220,55 @@ public class ProposalServiceImplTest {
         assertNotNull(updated.getClosedAt());
         
         verify(engineerStatusService, times(1)).releaseIfIdle(1L);
+    }
+
+    @Autowired
+    private com.ses.mapper.EngineerMapper engineerMapper;
+
+    @Autowired
+    private com.ses.mapper.CustomerMapper customerMapper;
+
+    @Test
+    public void testFindActiveDuplicates() {
+        com.ses.entity.Customer c = new com.ses.entity.Customer();
+        c.setCompanyName("Test Customer");
+        customerMapper.insert(c);
+        Long customerId = c.getId();
+
+        Long projectId = seedProject(customerId);
+        
+        com.ses.entity.Engineer e = new com.ses.entity.Engineer();
+        e.setFullName("Test Engineer");
+        engineerMapper.insert(e);
+        Long engineerId = e.getId();
+
+        Proposal p1 = new Proposal();
+        p1.setProjectId(projectId);
+        p1.setEngineerId(engineerId);
+        p1.setStatus("書類選考中");
+        proposalMapper.insert(p1);
+
+        // Same engineer and customer -> duplicate found
+        var duplicates = proposalService.findActiveDuplicates(engineerId, customerId, null);
+        assertEquals(1, duplicates.size());
+        assertEquals(p1.getId(), duplicates.get(0).getId());
+
+        // Same engineer and customer, but excluded -> no duplicate
+        duplicates = proposalService.findActiveDuplicates(engineerId, customerId, p1.getId());
+        assertEquals(0, duplicates.size());
+
+        // Different customer -> no duplicate
+        duplicates = proposalService.findActiveDuplicates(engineerId, customerId + 1, null);
+        assertEquals(0, duplicates.size());
+
+        // Non-active status -> no duplicate
+        proposalService.changeStatus(p1.getId(), "見送り");
+        duplicates = proposalService.findActiveDuplicates(engineerId, customerId, null);
+        assertEquals(0, duplicates.size());
+
+        // Scope exclusion
+        when(dataScopeService.isScoped()).thenReturn(true);
+        doThrow(com.ses.common.exception.BusinessException.of(404, "error.scope.notFound")).when(dataScopeService).assertAllowedCustomer(customerId);
+        assertThrows(com.ses.common.exception.BusinessException.class, () -> proposalService.findActiveDuplicates(engineerId, customerId, null));
     }
 }

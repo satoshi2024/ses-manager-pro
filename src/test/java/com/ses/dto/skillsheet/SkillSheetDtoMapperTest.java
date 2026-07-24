@@ -84,4 +84,39 @@ class SkillSheetDtoMapperTest {
             org.junit.jupiter.api.Assertions.fail("JSON mapping failed", e);
         }
     }
+
+    @Test
+    void testToDto_WithAnonymize_ShouldUseInitialName() {
+        Engineer engineer = new Engineer();
+        engineer.setId(1L);
+        engineer.setFullName("鈴木 一郎");
+        engineer.setInitialName("S.I");
+        engineer.setNearestStation("横浜");
+
+        SkillSheetOptions options = new SkillSheetOptions();
+        options.setAnonymize(true);
+
+        SkillSheetDto result = SkillSheetDtoMapper.toDto(engineer, List.of(), List.of(), options);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getFullName()).isEqualTo("S.I");
+        // 匿名化時は最寄駅（居住地の手がかり）も伏せる
+        assertThat(result.getNearestStation()).isNull();
+    }
+
+    @Test
+    void testToDto_WithAnonymizeButNoInitial_ShouldGenerateInitial() {
+        Engineer engineer = new Engineer();
+        engineer.setId(1L);
+        engineer.setFullName("高橋");
+        engineer.setFullNameKana("タカハシ");
+
+        SkillSheetOptions options = new SkillSheetOptions();
+        options.setAnonymize(true);
+
+        SkillSheetDto result = SkillSheetDtoMapper.toDto(engineer, List.of(), List.of(), options);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getFullName()).isEqualTo("タ.");
+    }
 }

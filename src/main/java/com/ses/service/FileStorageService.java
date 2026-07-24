@@ -16,6 +16,11 @@ public interface FileStorageService {
     StoredFile store(MultipartFile file, FileKind kind);
 
     /**
+     * バイト配列からファイルを検証して保存する。
+     */
+    StoredFile store(byte[] data, String originalName, FileKind kind);
+
+    /**
      * 保存済みファイルを読み込む。パストラバーサルは拒否する。
      */
     Resource load(String storedName);

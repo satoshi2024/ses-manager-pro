@@ -20,6 +20,7 @@ public class EngineerApiController {
     private final EngineerService engineerService;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.ProposalService proposalService;
 
     /**
      * エンジニア一覧（ページネーション）
@@ -131,6 +132,15 @@ public class EngineerApiController {
         var entity = engineerService.getById(id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(entity);
+    }
+
+    /**
+     * エンジニア提案履歴取得
+     */
+    @GetMapping("/{id}/proposal-history")
+    public ApiResult<java.util.List<com.ses.dto.proposal.ProposalKanbanDto>> getProposalHistory(@PathVariable Long id) {
+        // 認可チェックはProposalService内で行われる
+        return ApiResult.success(proposalService.getProposalHistory(id));
     }
 
     /**

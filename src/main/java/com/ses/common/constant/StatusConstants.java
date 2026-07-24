@@ -115,4 +115,14 @@ public interface StatusConstants {
 
     /** 候補者ステージ: 不採用 */
     String CANDIDATE_STAGE_REJECTED = "不採用";
+
+    /**
+     * 提案のアクティブ状態（提案が進行中であることを示すステータスの集合）
+     */
+    java.util.Set<String> PROPOSAL_ACTIVE_STATUSES = java.util.Set.of(
+            PROPOSAL_DOCUMENT_SCREENING,
+            PROPOSAL_FIRST_INTERVIEW,
+            PROPOSAL_SECOND_INTERVIEW,
+            PROPOSAL_WAITING_RESULT
+    );
 }

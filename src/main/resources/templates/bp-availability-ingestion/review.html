@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>外部要員在庫 レビュー - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex align-items-center mb-4">
+        <a href="/bp-availability-ingestion" class="btn btn-outline-secondary btn-sm me-3">
+            <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}"></th:block>
+        </a>
+        <h1 class="h3 mb-0 text-light"><i class="bi bi-envelope-check me-2 text-primary"></i>レビュー</h1>
+    </div>
+
+    <!-- アラート -->
+    <div id="bpi-warnings" class="alert alert-warning d-none"></div>
+
+    <div class="row g-4">
+        <!-- 左列: 要員基本情報 -->
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-header border-dark text-light fw-bold">
+                    <i class="bi bi-person me-2"></i>外部要員情報
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">イニシャル <span class="text-danger">*</span></label>
+                        <input type="text" id="rv-initialName" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">所属BP</label>
+                        <input type="text" id="rv-bpCompany" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small">単価(円)</label>
+                            <input type="number" id="rv-unitPrice" class="form-control bg-dark border-secondary text-light" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small">経験年数</label>
+                            <input type="number" id="rv-experienceYears" class="form-control bg-dark border-secondary text-light" min="0">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">稼働開始可能日</label>
+                        <input type="date" id="rv-availableFrom" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">備考</label>
+                        <textarea id="rv-remarks" class="form-control bg-dark border-secondary text-light" rows="4"></textarea>
+                    </div>
+
+                    <!-- スキル -->
+                    <hr class="border-secondary">
+                    <h6 class="text-light mb-3">スキル</h6>
+                    <div id="rv-skills-container"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="btn-add-skill">
+                        <i class="bi bi-plus-lg me-1"></i>スキル追加
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右列: 原本テキスト -->
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm mb-4 h-100">
+                <div class="card-header border-dark text-light fw-bold d-flex justify-content-between align-items-center">
+                    <div><i class="bi bi-file-text me-2"></i>原本テキスト</div>
+                    <span class="badge bg-secondary" id="rv-sourceType">PASTE</span>
+                </div>
+                <div class="card-body p-0">
+                    <textarea id="rv-rawText" class="form-control bg-dark border-0 text-light h-100 rounded-0 p-3" readonly style="font-family: monospace; resize: none; min-height: 600px;"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- レビューメモ + アクション -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body d-flex flex-wrap gap-3 align-items-end">
+            <div class="flex-grow-1">
+                <label class="form-label text-muted small">レビューメモ</label>
+                <input type="text" id="rv-reviewNote" class="form-control bg-dark border-secondary text-light" maxlength="500">
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary" id="btn-save-review">
+                    <i class="bi bi-save me-1"></i>一時保存
+                </button>
+                <button type="button" class="btn btn-outline-warning" id="btn-reparse">
+                    <i class="bi bi-arrow-repeat me-1"></i>再解析
+                </button>
+                <button type="button" class="btn btn-danger" id="btn-reject">
+                    <i class="bi bi-x-circle me-1"></i>却下
+                </button>
+                <button type="button" class="btn btn-success" id="btn-confirm">
+                    <i class="bi bi-check-circle me-1"></i>確定
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/bp-availability-ingestion.js}" defer></script>
+    <script th:inline="javascript">
+        const JOB_ID = /*[[${#request.getRequestURI().split('/')[3]}]]*/ null;
+    </script>
+</th:block>
+</body>
+</html>

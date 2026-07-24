@@ -149,6 +149,18 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_contract", "active_proposal_id");
             assertColumnExists(st, "t_contract", "active_renewed_from_contract_id");
 
+            // 外部要員空き状況管理(V45)
+            assertTableExists(st, "t_bp_availability");
+            assertTableExists(st, "t_bp_availability_ingestion");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability-ingestion'");
+
+            // 資金繰り予測(V46, V48, V49) と スキルシートテンプレート(V47)
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.opening-balance'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.bp-payment-site-months'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.payroll-employer-burden-rate'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='skillsheet.templates'");
+
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
                     "SELECT c.id, su.real_name AS salesUserName FROM t_contract c " +

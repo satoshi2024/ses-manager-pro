@@ -13,7 +13,7 @@
             <p class="text-muted small mb-0" th:text="#{kanban.pipeline.desc}">ドラッグ＆ドロップで提案ステータスを更新できます</p>
         </div>
         <div>
-            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#proposalModal">
+            <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm rounded-pill px-3" onclick="openNewProposalModal()">
                 <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{kanban.proposal.new}">新規提案</th:block>
             </button>
         </div>
@@ -130,6 +130,43 @@
         </div>
     </div>
 
+    <!-- Skill Sheet Export Modal -->
+    <div class="modal fade" id="skillSheetModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title text-light"><i class="bi bi-file-earmark-person me-2"></i><th:block th:text="#{kanban.proposal.skillsheet}">スキルシート出力</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="skillsheet-proposalId">
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="skillsheet-anonymize">
+                            <label class="form-check-label text-light" for="skillsheet-anonymize" th:text="#{kanban.proposal.skillsheet.anonymize}">匿名化する（氏名や連絡先を伏せる）</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.skillsheet.template}">様式</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="skillsheet-template">
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small" th:text="#{kanban.proposal.skillsheet.format}">出力形式</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="skillsheet-format">
+                            <option value="PDF">PDF</option>
+                            <option value="EXCEL">Excel</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" onclick="exportSkillSheet()"><i class="bi bi-download me-1"></i><th:block th:text="#{common.download}">出力</th:block></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Proposal Registration Modal -->
     <div class="modal fade" id="proposalModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -140,6 +177,7 @@
                 </div>
                 <div class="modal-body p-4">
                     <form id="proposal-form">
+                        <input type="hidden" id="prop-id">
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{proposal.engineer}">対象要員</th:block> <span class="text-danger">*</span></label>
                             <select id="prop-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark" required>
@@ -161,6 +199,23 @@
                                 <label class="form-label text-muted small" th:text="#{proposal.status}">選考ステータス</label>
                                 <input type="text" class="form-control form-control-dark bg-secondary text-white border-dark" th:value="#{proposal.status.documentScreening}" value="書類選考中" readonly>
                             </div>
+                        </div>
+                        <div class="mb-3 text-end">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="btn-ai-draft" onclick="generateAiDraft()">
+                                <i class="bi bi-robot me-1"></i><span class="spinner-border spinner-border-sm d-none me-1" id="spinner-ai-draft" role="status" aria-hidden="true"></span><th:block th:text="#{kanban.proposal.ai.generate}">AIで下書き生成</th:block>
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{proposal.emailText}">提案メール下書き</label>
+                            <textarea id="prop-proposalEmailText" class="form-control form-control-dark bg-secondary text-white border-dark" rows="4"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{proposal.matchReason}">マッチング理由</label>
+                            <textarea id="prop-matchReason" class="form-control form-control-dark bg-secondary text-white border-dark" rows="2"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{proposal.aiMatchScore}">AIマッチスコア</label>
+                            <input type="number" id="prop-aiMatchScore" class="form-control form-control-dark bg-secondary text-white border-dark" readonly>
                         </div>
                     </form>
                 </div>

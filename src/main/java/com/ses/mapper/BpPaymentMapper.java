@@ -24,7 +24,8 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             b.status AS status,
             b.paid_date AS paidDate,
             b.layer_order AS layerOrder,
-            b.payee_company_name AS payeeCompanyName
+            b.payee_company_name AS payeeCompanyName,
+            b.parent_payment_id AS parentPaymentId
         FROM t_bp_payment b
         INNER JOIN t_work_record w ON b.work_record_id = w.id
         INNER JOIN t_contract c ON w.contract_id = c.id

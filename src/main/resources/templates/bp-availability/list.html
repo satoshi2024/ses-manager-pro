@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>外部要員在庫 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0 text-light"><i class="bi bi-people me-2 text-primary"></i><span>外部要員在庫</span></h1>
+    </div>
+
+    <!-- フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="filterStatus" class="form-label text-muted small">ステータス</label>
+                    <select id="filterStatus" class="form-select bg-dark border-secondary text-light">
+                        <option value="" th:text="#{common.all}"></option>
+                        <option value="提案可能">提案可能</option>
+                        <option value="失効">失効</option>
+                        <option value="要員化済">要員化済</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-outline-primary w-100" onclick="loadList(1)">
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}"></th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一覧 -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4">イニシャル</th>
+                            <th scope="col">所属BP</th>
+                            <th scope="col">単価(円)</th>
+                            <th scope="col">開始可能日</th>
+                            <th scope="col">ステータス</th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bpa-table-body">
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center" id="bpa-pagination"></div>
+        </div>
+    </div>
+
+    <!-- 編集モーダル -->
+    <div class="modal fade" id="bpaModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-card text-white border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title">外部要員詳細</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="frm-id">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small">イニシャル <span class="text-danger">*</span></label>
+                            <input type="text" id="frm-initialName" class="form-control bg-dark border-secondary text-light">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-muted small">所属BP</label>
+                            <input type="text" id="frm-bpCompany" class="form-control bg-dark border-secondary text-light">
+                        </div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small">単価(円)</label>
+                            <input type="number" id="frm-unitPrice" class="form-control bg-dark border-secondary text-light">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small">経験年数</label>
+                            <input type="number" id="frm-experienceYears" class="form-control bg-dark border-secondary text-light">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small">開始可能日</label>
+                            <input type="date" id="frm-availableFrom" class="form-control bg-dark border-secondary text-light">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">ステータス</label>
+                        <select id="frm-status" class="form-select bg-dark border-secondary text-light">
+                            <option value="提案可能">提案可能</option>
+                            <option value="失効">失効</option>
+                            <option value="要員化済">要員化済</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">スキル</label>
+                        <textarea id="frm-skillsJson" class="form-control bg-dark border-secondary text-light" rows="2" placeholder="JSON配列形式 (例: [&quot;Java&quot;,&quot;Spring&quot;])"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">備考</label>
+                        <textarea id="frm-remarks" class="form-control bg-dark border-secondary text-light" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-dark d-flex justify-content-between">
+                    <div>
+                        <button type="button" class="btn btn-outline-danger" id="btn-delete">削除</button>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}"></button>
+                        <button type="button" class="btn btn-primary" id="btn-save">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/bp-availability.js}" defer></script>
+</th:block>
+</body>
+</html>

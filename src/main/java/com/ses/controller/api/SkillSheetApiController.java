@@ -26,9 +26,12 @@ public class SkillSheetApiController {
     }
 
     @GetMapping("/skill-sheet.pdf")
-    public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id) {
+    public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id,
+                                              @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean anonymize,
+                                              @org.springframework.web.bind.annotation.RequestParam(defaultValue = "STANDARD") String template) {
         assertEngineerVisible(id);
-        byte[] pdfBytes = skillSheetGenerator.generatePdf(id);
+        com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions(anonymize, template);
+        byte[] pdfBytes = skillSheetGenerator.generatePdf(id, options);
         
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);
@@ -40,9 +43,12 @@ public class SkillSheetApiController {
     }
 
     @GetMapping("/skill-sheet.xlsx")
-    public ResponseEntity<byte[]> downloadExcel(@PathVariable Long id) {
+    public ResponseEntity<byte[]> downloadExcel(@PathVariable Long id,
+                                                @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean anonymize,
+                                                @org.springframework.web.bind.annotation.RequestParam(defaultValue = "STANDARD") String template) {
         assertEngineerVisible(id);
-        byte[] excelBytes = skillSheetGenerator.generateExcel(id);
+        com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions(anonymize, template);
+        byte[] excelBytes = skillSheetGenerator.generateExcel(id, options);
         
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));

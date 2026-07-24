@@ -37,6 +37,15 @@ public class ProposalApiController {
     private final CustomerService customerService;
     private final MailService mailService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
+    private final com.ses.service.FileStorageService fileStorageService;
+
+    @lombok.Data
+    public static class SkillSheetExportRequest {
+        private boolean anonymize;
+        private String template;
+        private String format; // "PDF" or "EXCEL"
+    }
 
     /**
      * かんばんリスト取得
@@ -110,6 +119,105 @@ public class ProposalApiController {
     }
 
     /**
+     * 提案更新
+     */
+    @PutMapping("/{id}")
+    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody Proposal proposal) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (dataScopeService.isScoped()) {
+            if (proposal.getEngineerId() != null) dataScopeService.assertAllowedEngineer(proposal.getEngineerId());
+            if (proposal.getProjectId() != null) dataScopeService.assertAllowedProject(proposal.getProjectId());
+        }
+        com.ses.common.util.EntityProtectUtil.protectForUpdate(proposal);
+        proposal.setId(id);
+        return ApiResult.success(proposalService.updateById(proposal));
+    }
+
+    /**
+     * 提案詳細取得
+     */
+    @GetMapping("/{id}/detail")
+    public ApiResult<Proposal> getDetail(@PathVariable Long id) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        Proposal proposal = proposalService.getById(id);
+        if (proposal == null) {
+            throw BusinessException.of(404, "error.proposal.notFound");
+        }
+        return ApiResult.success(proposal);
+    }
+
+    /**
+     * スキルシート出力・保存
+     */
+    @org.springframework.transaction.annotation.Transactional
+    @PostMapping("/{id}/skill-sheet/export")
+    public ApiResult<String> exportSkillSheet(@PathVariable Long id, @RequestBody SkillSheetExportRequest req) {
+        if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        Proposal proposal = proposalService.getById(id);
+        if (proposal == null) {
+            throw BusinessException.of(404, "error.proposal.notFound");
+        }
+        if (proposal.getEngineerId() == null) {
+            throw BusinessException.of(400, "error.proposal.noEngineer");
+        }
+
+        com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions();
+        options.setAnonymize(req.isAnonymize());
+        if (req.getTemplate() != null) {
+            options.setTemplate(req.getTemplate());
+        }
+
+        byte[] data;
+        String ext;
+        if ("EXCEL".equalsIgnoreCase(req.getFormat())) {
+            data = skillSheetGenerator.generateExcel(proposal.getEngineerId(), options);
+            ext = "xlsx";
+        } else {
+            data = skillSheetGenerator.generatePdf(proposal.getEngineerId(), options);
+            ext = "pdf";
+        }
+
+        String originalName = "skillsheet-" + proposal.getEngineerId() + "." + ext;
+        com.ses.dto.file.StoredFile storedFile = fileStorageService.store(data, originalName, com.ses.common.enums.FileKind.SKILL_SHEET);
+        
+        proposal.setSkillSheetPath(storedFile.getStoredName());
+        proposalService.updateById(proposal);
+
+        return ApiResult.success(storedFile.getStoredName());
+    }
+
+    /**
+     * 重複提案チェック
+     */
+    @GetMapping("/duplicate-check")
+    public ApiResult<List<ProposalKanbanDto>> checkDuplicate(
+            @RequestParam Long engineerId,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long excludeId) {
+        
+        Long targetCustomerId = customerId;
+        if (targetCustomerId == null && projectId != null) {
+            Project project = projectService.getById(projectId);
+            if (project != null) {
+                targetCustomerId = project.getCustomerId();
+            }
+        }
+        
+        if (targetCustomerId == null) {
+            return ApiResult.success(java.util.Collections.emptyList());
+        }
+
+        return ApiResult.success(proposalService.findActiveDuplicates(engineerId, targetCustomerId, excludeId));
+    }
+
+    /**
      * 提案メール送信。
      * テンプレートIDと宛先を受け取り、提案から変数（要員名・案件名・顧客名・提案単価）を
      * 解決してメールを送信する。宛先未指定時は顧客担当者メールを使う。
@@ -136,13 +244,6 @@ public class ProposalApiController {
         Project project = projectService.getById(proposal.getProjectId());
         Customer customer = project != null ? customerService.getById(project.getCustomerId()) : null;
 
-        Map<String, String> params = new HashMap<>();
-        params.put("engineerName", engineer != null ? engineer.getFullName() : "");
-        params.put("projectName", project != null ? project.getProjectName() : "");
-        params.put("customerName", customer != null ? customer.getCompanyName() : "");
-        params.put("contactPerson", customer != null && customer.getContactPerson() != null ? customer.getContactPerson() : "");
-        params.put("unitPrice", proposal.getProposedUnitPrice() != null ? proposal.getProposedUnitPrice().toPlainString() : "");
-
         String to = req.get("to");
         if (!StringUtils.hasText(to)) {
             to = customer != null ? customer.getContactEmail() : null;
@@ -150,6 +251,23 @@ public class ProposalApiController {
         if (!StringUtils.hasText(to)) {
             throw BusinessException.of("error.proposal.emailNotSpecified");
         }
+
+        if (templateId == -1L) {
+            // AI提案文面を使用する
+            if (!StringUtils.hasText(proposal.getProposalEmailText())) {
+                throw BusinessException.of("error.proposal.noEmailText");
+            }
+            String subject = "【ご提案】" + (project != null ? project.getProjectName() : "案件") + "につきまして";
+            String body = proposal.getProposalEmailText();
+            return ApiResult.success(mailService.send(to, subject, body));
+        }
+
+        Map<String, String> params = new HashMap<>();
+        params.put("engineerName", engineer != null ? engineer.getFullName() : "");
+        params.put("projectName", project != null ? project.getProjectName() : "");
+        params.put("customerName", customer != null ? customer.getCompanyName() : "");
+        params.put("contactPerson", customer != null && customer.getContactPerson() != null ? customer.getContactPerson() : "");
+        params.put("unitPrice", proposal.getProposedUnitPrice() != null ? proposal.getProposedUnitPrice().toPlainString() : "");
 
         return ApiResult.success(mailService.sendWithTemplate(templateId, params, to));
     }

@@ -16,4 +16,5 @@ public class BpPaymentListDto {
     private LocalDate paidDate;
     private Integer layerOrder;
     private String payeeCompanyName;
+    private Long parentPaymentId;
 }

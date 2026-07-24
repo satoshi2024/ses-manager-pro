@@ -454,7 +454,12 @@ function findMatchingEngineers(projectId) {
                             <div class="card-body p-3">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <div>
-                                        <h6 class="text-white fw-bold mb-1"><a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${SES.escapeHtml(match.engineerName)}</a></h6>
+                                        <h6 class="text-white fw-bold mb-1">
+                                            ${match.isExternalBp ? 
+                                                `<span class="text-light">${SES.escapeHtml(match.engineerName)} (外部BP)</span>` : 
+                                                `<a href="/engineer/detail?id=${match.engineerId}" target="_blank" class="text-decoration-none text-light">${SES.escapeHtml(match.engineerName)}</a>`
+                                            }
+                                        </h6>
                                         <div class="small text-muted">${SES.i18n.t('js.project.match.expected_price')}: ${priceText}</div>
                                     </div>
                                     <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
@@ -462,9 +467,14 @@ function findMatchingEngineers(projectId) {
                                 <p class="small text-light mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">${SES.i18n.t('js.project.match.ai_eval')}</span>${SES.escapeHtml(match.reason)}</p>
                                 <p class="small text-muted mb-2"><i class="bi bi-star-fill text-warning me-1"></i>${SES.escapeHtml(match.sellingPoints || SES.i18n.t('js.project.match.no_remarks'))}</p>
                                 <div class="text-end">
-                                    <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
-                                        <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('js.project.match.propose_btn')}
-                                    </button>
+                                    ${match.isExternalBp ? 
+                                        `<button class="btn btn-sm btn-outline-info rounded-pill px-3 shadow-sm" onclick="promoteAndProposeBp(this, ${match.bpAvailabilityId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
+                                            <i class="bi bi-person-plus-fill me-1"></i>要員化して提案
+                                        </button>` :
+                                        `<button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
+                                            <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('js.project.match.propose_btn')}
+                                        </button>`
+                                    }
                                 </div>
                             </div>
                         </div>
@@ -506,6 +516,69 @@ function proposeEngineerToProject(engineerId, projectId, score, price) {
         },
         error: function() {
             Toast.error(SES.i18n.t('js.common.error_network'));
+        }
+    });
+}
+
+function promoteAndProposeBp(btnElement, bpAvailabilityId, projectId, score, price) {
+    if (!bpAvailabilityId) return;
+    
+    // Disable the button to prevent multiple clicks
+    const btn = $(btnElement);
+    const originalHtml = btn.html();
+    btn.html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 処理中...').prop('disabled', true);
+    
+    // First, promote the BP to an Engineer
+    $.ajax({
+        url: '/api/bp-availabilities/' + bpAvailabilityId + '/promote',
+        method: 'POST',
+        success: function(res) {
+            if (res.code === 200 && res.data && res.data.id) {
+                // Successfully promoted, now propose the new engineer
+                const newEngineerId = res.data.id;
+                
+                // Call the existing propose function manually (without closing modal first to keep context if it fails)
+                const data = {
+                    engineerId: newEngineerId,
+                    projectId: projectId,
+                    proposedUnitPrice: price,
+                    status: '書類選考中',
+                    aiMatchScore: score,
+                    matchReason: SES.i18n.t('proposal.matchReason')
+                };
+
+                $.ajax({
+                    url: '/api/proposals',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function(resProp) {
+                        if (resProp.code === 200) {
+                            $('#matchingResultModal').modal('hide');
+                            Toast.success(SES.i18n.t('js.project.propose.success'));
+                            setTimeout(() => window.location.href = '/proposal/kanban', 1500);
+                        } else {
+                            Toast.error('要員化は完了していますが、提案に失敗しました: ' + (resProp.message || ''));
+                            btn.html(originalHtml).prop('disabled', false);
+                        }
+                    },
+                    error: function() {
+                        Toast.error('要員化は完了していますが、提案に失敗しました');
+                        btn.html(originalHtml).prop('disabled', false);
+                    }
+                });
+            } else {
+                Toast.error('要員化に失敗しました: ' + (res.message || ''));
+                btn.html(originalHtml).prop('disabled', false);
+            }
+        },
+        error: function(xhr) {
+            let msg = '要員化処理でエラーが発生しました';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                msg = xhr.responseJSON.message;
+            }
+            Toast.error(msg);
+            btn.html(originalHtml).prop('disabled', false);
         }
     });
 }

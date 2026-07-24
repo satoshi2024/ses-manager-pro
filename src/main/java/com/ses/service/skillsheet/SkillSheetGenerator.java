@@ -6,16 +6,22 @@ import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
+import com.ses.common.constant.SkillSheetConstants;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 import com.ses.dto.skillsheet.SkillSheetCareerDto;
 import com.ses.dto.skillsheet.SkillSheetDto;
-import com.ses.dto.skillsheet.SkillSheetDtoMapper;
+import com.ses.dto.skillsheet.SkillSheetOptions;
 import com.ses.dto.skillsheet.SkillSheetSkillDto;
+import com.ses.dto.skillsheet.SkillSheetDtoMapper;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCareer;
 import com.ses.service.EngineerCareerService;
 import com.ses.service.EngineerService;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.SystemConfigService;
+import com.ses.common.exception.BusinessException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -36,9 +42,16 @@ public class SkillSheetGenerator {
     private final EngineerSkillService engineerSkillService;
     private final EngineerCareerService engineerCareerService;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final SystemConfigService systemConfigService;
+    private final ObjectMapper objectMapper;
 
     public byte[] generatePdf(Long engineerId) {
-        SkillSheetDto dto = fetchSkillSheetDto(engineerId);
+        return generatePdf(engineerId, new SkillSheetOptions());
+    }
+
+    public byte[] generatePdf(Long engineerId, SkillSheetOptions options) {
+        if (options == null) options = new SkillSheetOptions();
+        SkillSheetDto dto = fetchSkillSheetDto(engineerId, options);
 
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
              Document document = new Document(PageSize.A4, 36, 36, 36, 36)) {
@@ -67,10 +80,19 @@ public class SkillSheetGenerator {
 
             addCell(basicTable, "氏名", headerFont, true);
             addCell(basicTable, dto.getFullName() != null ? dto.getFullName() : "", normalFont, false);
-            addCell(basicTable, "最寄駅", headerFont, true);
-            addCell(basicTable, dto.getNearestStation() != null ? dto.getNearestStation() : "", normalFont, false);
+            
+            if (showsNearestStation(options) && dto.getNearestStation() != null) {
+                addCell(basicTable, "最寄駅", headerFont, true);
+                addCell(basicTable, dto.getNearestStation(), normalFont, false);
+            }
+
             addCell(basicTable, "稼働可能日", headerFont, true);
             addCell(basicTable, dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "", normalFont, false);
+
+            if (showsRemarks(options)) {
+                addCell(basicTable, "備考", headerFont, true);
+                addCell(basicTable, "客先A専用フォーマット", normalFont, false);
+            }
             document.add(basicTable);
 
             // スキル一覧
@@ -130,8 +152,10 @@ public class SkillSheetGenerator {
                     addCell(careerTable, "技術スタック", headerFont, true);
                     addCell(careerTable, career.getTechStack() != null ? career.getTechStack() : "", normalFont, false);
                     
-                    addCell(careerTable, "チーム規模", headerFont, true);
-                    addCell(careerTable, career.getTeamSize() != null ? career.getTeamSize() + "名" : "", normalFont, false);
+                    if (showsTeamSize(options)) {
+                        addCell(careerTable, "チーム規模", headerFont, true);
+                        addCell(careerTable, career.getTeamSize() != null ? career.getTeamSize() + "名" : "", normalFont, false);
+                    }
 
                     document.add(careerTable);
                 }
@@ -150,7 +174,12 @@ public class SkillSheetGenerator {
     }
 
     public byte[] generateExcel(Long engineerId) {
-        SkillSheetDto dto = fetchSkillSheetDto(engineerId);
+        return generateExcel(engineerId, new SkillSheetOptions());
+    }
+
+    public byte[] generateExcel(Long engineerId, SkillSheetOptions options) {
+        if (options == null) options = new SkillSheetOptions();
+        SkillSheetDto dto = fetchSkillSheetDto(engineerId, options);
 
         try (org.apache.poi.xssf.streaming.SXSSFWorkbook workbook = new org.apache.poi.xssf.streaming.SXSSFWorkbook()) {
             org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("スキルシート");
@@ -169,14 +198,31 @@ public class SkillSheetGenerator {
             
             org.apache.poi.ss.usermodel.Row basicHeaderRow = sheet.createRow(2);
             basicHeaderRow.createCell(0).setCellValue("氏名");
-            basicHeaderRow.createCell(1).setCellValue("最寄駅");
-            basicHeaderRow.createCell(2).setCellValue("稼働可能日");
-            for (int i = 0; i < 3; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
+            if (showsNearestStation(options) && dto.getNearestStation() != null) {
+                basicHeaderRow.createCell(1).setCellValue("最寄駅");
+                basicHeaderRow.createCell(2).setCellValue("稼働可能日");
+                if (showsRemarks(options)) {
+                    basicHeaderRow.createCell(3).setCellValue("備考");
+                    for (int i = 0; i < 4; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
+                } else {
+                    for (int i = 0; i < 3; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
+                }
+            } else {
+                basicHeaderRow.createCell(1).setCellValue("稼働可能日");
+                for (int i = 0; i < 2; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
+            }
             
             org.apache.poi.ss.usermodel.Row basicDataRow = sheet.createRow(3);
             basicDataRow.createCell(0).setCellValue(sanitize(dto.getFullName()));
-            basicDataRow.createCell(1).setCellValue(sanitize(dto.getNearestStation()));
-            basicDataRow.createCell(2).setCellValue(dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
+            if (showsNearestStation(options) && dto.getNearestStation() != null) {
+                basicDataRow.createCell(1).setCellValue(sanitize(dto.getNearestStation()));
+                basicDataRow.createCell(2).setCellValue(dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
+                if (showsRemarks(options)) {
+                    basicDataRow.createCell(3).setCellValue("客先A専用フォーマット");
+                }
+            } else {
+                basicDataRow.createCell(1).setCellValue(dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
+            }
             
             // スキル一覧
             org.apache.poi.ss.usermodel.Row skillTitleRow = sheet.createRow(5);
@@ -213,8 +259,12 @@ public class SkillSheetGenerator {
             careerHeaderRow.createCell(2).setCellValue("役割");
             careerHeaderRow.createCell(3).setCellValue("概要");
             careerHeaderRow.createCell(4).setCellValue("技術スタック");
-            careerHeaderRow.createCell(5).setCellValue("チーム規模");
-            for (int i = 0; i < 6; i++) careerHeaderRow.getCell(i).setCellStyle(headerStyle);
+            if (showsTeamSize(options)) {
+                careerHeaderRow.createCell(5).setCellValue("チーム規模");
+                for (int i = 0; i < 6; i++) careerHeaderRow.getCell(i).setCellStyle(headerStyle);
+            } else {
+                for (int i = 0; i < 5; i++) careerHeaderRow.getCell(i).setCellStyle(headerStyle);
+            }
             
             if (dto.getCareers() != null && !dto.getCareers().isEmpty()) {
                 for (SkillSheetCareerDto career : dto.getCareers()) {
@@ -227,7 +277,9 @@ public class SkillSheetGenerator {
                     row.createCell(2).setCellValue(sanitize(career.getRole()));
                     row.createCell(3).setCellValue(sanitize(career.getDescription()));
                     row.createCell(4).setCellValue(sanitize(career.getTechStack()));
-                    row.createCell(5).setCellValue(career.getTeamSize() != null ? career.getTeamSize() + "名" : "");
+                    if (showsTeamSize(options)) {
+                        row.createCell(5).setCellValue(career.getTeamSize() != null ? career.getTeamSize() + "名" : "");
+                    }
                 }
             } else {
                 sheet.createRow(rowIndex++).createCell(0).setCellValue("登録されている職務経歴はありません。");
@@ -272,7 +324,45 @@ public class SkillSheetGenerator {
         table.addCell(cell);
     }
 
-    private SkillSheetDto fetchSkillSheetDto(Long engineerId) {
+    /** 最寄駅を出力する様式か（簡易様式では省く） */
+    private boolean showsNearestStation(SkillSheetOptions options) {
+        return SkillSheetConstants.TEMPLATE_STANDARD.equals(options.getTemplate())
+                || SkillSheetConstants.TEMPLATE_CLIENT_A.equals(options.getTemplate());
+    }
+
+    /** チーム規模を出力する様式か（簡易様式では省く） */
+    private boolean showsTeamSize(SkillSheetOptions options) {
+        return SkillSheetConstants.TEMPLATE_STANDARD.equals(options.getTemplate())
+                || SkillSheetConstants.TEMPLATE_CLIENT_A.equals(options.getTemplate());
+    }
+
+    /** 備考欄を出力する様式か（客先A様式のみ） */
+    private boolean showsRemarks(SkillSheetOptions options) {
+        return SkillSheetConstants.TEMPLATE_CLIENT_A.equals(options.getTemplate());
+    }
+
+    private SkillSheetDto fetchSkillSheetDto(Long engineerId, SkillSheetOptions options) {
+        String templatesJson = systemConfigService.getString(
+                SkillSheetConstants.CONFIG_KEY_TEMPLATES, SkillSheetConstants.DEFAULT_TEMPLATES_JSON);
+        boolean validTemplate = false;
+        try {
+            List<java.util.Map<String, String>> templates = objectMapper.readValue(templatesJson, new TypeReference<>() {});
+            for (java.util.Map<String, String> t : templates) {
+                if (options.getTemplate() != null && options.getTemplate().equals(t.get("id"))) {
+                    validTemplate = true;
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse skillsheet.templates", e);
+            validTemplate = SkillSheetConstants.TEMPLATE_STANDARD.equals(options.getTemplate())
+                    || SkillSheetConstants.TEMPLATE_SIMPLE.equals(options.getTemplate())
+                    || SkillSheetConstants.TEMPLATE_CLIENT_A.equals(options.getTemplate());
+        }
+        if (!validTemplate) {
+            throw BusinessException.of(400, "error.skillsheet.invalidTemplate", options.getTemplate());
+        }
+
         Engineer engineer = engineerService.getById(engineerId);
         if (engineer == null) {
             throw new IllegalArgumentException("指定されたエンジニアが見つかりません。 ID: " + engineerId);
@@ -286,6 +376,6 @@ public class SkillSheetGenerator {
                         .orderByDesc(EngineerCareer::getPeriodFrom)
         );
 
-        return SkillSheetDtoMapper.toDto(engineer, skills, careers);
+        return SkillSheetDtoMapper.toDto(engineer, skills, careers, options);
     }
 }

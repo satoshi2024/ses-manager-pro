@@ -17,4 +17,8 @@ public class MatchResultDto {
     private Long engineerId;
     private String engineerName;
     private Integer proposedPrice;
+    
+    // 外部要員（BP）の場合
+    private Long bpAvailabilityId;
+    private Boolean isExternalBp;
 }

@@ -96,4 +96,16 @@ class EngineerApiControllerValidationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
     }
+
+    @MockBean
+    private com.ses.service.ProposalService proposalService;
+
+    @Test
+    @WithMockUser
+    void getProposalHistory_returns200() throws Exception {
+        when(proposalService.getProposalHistory(1L)).thenReturn(java.util.List.of());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/engineers/1/proposal-history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+    }
 }

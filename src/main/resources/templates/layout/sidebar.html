@@ -71,6 +71,18 @@
                         <span th:text="#{menu.resumeIngestion}">スキルシート取込</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('bp-availability')}">
+                    <a th:href="@{/bp-availability/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/bp-availability') and !#strings.startsWith(currentUri, '/bp-availability-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-person-lines-fill me-2"></i>
+                        <span th:text="#{menu.bpAvailability}">外部要員在庫</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('bp-availability-ingestion')}">
+                    <a th:href="@{/bp-availability-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/bp-availability-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-envelope-check me-2"></i>
+                        <span th:text="#{menu.bpAvailabilityIngestion}">要員空き状況取込</span>
+                    </a>
+                </li>
 
                 <li class="nav-item mt-3 mb-1 px-3">
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.sales}">営業・契約</span>

@@ -75,6 +75,12 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("forecast.win-rate.second-interview", ConfigSchema.integer(0, 100));
         SCHEMAS.put("forecast.win-rate.awaiting", ConfigSchema.integer(0, 100));
         SCHEMAS.put("closing.confirmed-months", ConfigSchema.string()); // Actually JSON but string is fine
+        SCHEMAS.put("cashflow.opening-balance", ConfigSchema.decimal(null, null));
+        SCHEMAS.put("cashflow.fixed-cost", ConfigSchema.decimal(null, null));
+        SCHEMAS.put("cashflow.alert-threshold", ConfigSchema.decimal(null, null));
+        SCHEMAS.put("cashflow.bp-payment-site-months", ConfigSchema.integer(0, 12));
+        SCHEMAS.put("cashflow.payroll-estimate", ConfigSchema.decimal(null, null));
+        SCHEMAS.put("cashflow.payroll-employer-burden-rate", ConfigSchema.decimal("0", "100"));
     }
 
     private void ensureLoaded() {

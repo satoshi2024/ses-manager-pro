@@ -114,23 +114,48 @@
 
     </div>
 
-    <!-- Charts Row -->
+    <!-- Charts Row with Tabs -->
     <div class="row g-4 mb-4">
-        <!-- Monthly Revenue Trend Chart -->
         <div class="col-12 col-xl-8">
             <div class="card bg-card border-dark shadow-sm h-100">
-                <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i><span th:text="#{dashboard.chart.revenue_trend}">月次売上・粗利推移</span></h6>
-                    <select id="fiscal-year-selector" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto">
-                        <option>2026年度</option>
-                        <option>2025年度</option>
-                    </select>
-                </div>
-                <div class="card-body p-4">
-                    <div class="chart-container" style="position: relative; height:300px; width:100%">
-                        <canvas id="revenueChart"></canvas>
+                <div class="card-header bg-transparent border-dark px-4 py-3 pb-0 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0 text-white fw-bold"><i class="bi bi-bar-chart-fill me-2 text-muted"></i><span th:text="#{dashboard.chart.revenue_trend}">月次推移</span></h6>
+                        <div>
+                            <button id="btn-export-cashflow" class="btn btn-outline-secondary btn-sm border-dark d-none me-2">
+                                <i class="bi bi-file-earmark-excel me-1"></i><span th:text="#{dashboard.btn.export_cashflow}">資金繰りExcel出力</span>
+                            </button>
+                            <select id="fiscal-year-selector" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto d-inline-block">
+                                <option>2026年度</option>
+                                <option>2025年度</option>
+                            </select>
+                        </div>
                     </div>
-                    <small id="forecastNote" class="text-muted d-block mt-2"></small>
+                    <!-- Tabs -->
+                    <ul class="nav nav-tabs border-dark" id="dashboardChartTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active bg-transparent text-muted" id="revenue-tab" data-bs-toggle="tab" data-bs-target="#revenue-tab-pane" type="button" role="tab" aria-controls="revenue-tab-pane" aria-selected="true" th:text="#{dashboard.tab.revenue}">売上・粗利</button>
+                        </li>
+                        <li class="nav-item" role="presentation" sec:authorize="hasAnyRole('管理者', 'マネージャー')">
+                            <button class="nav-link bg-transparent text-muted" id="cashflow-tab" data-bs-toggle="tab" data-bs-target="#cashflow-tab-pane" type="button" role="tab" aria-controls="cashflow-tab-pane" aria-selected="false" th:text="#{dashboard.tab.cashflow}">資金繰り (CF)</button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body p-4 tab-content" id="dashboardChartTabsContent">
+                    <!-- Revenue Tab Pane -->
+                    <div class="tab-pane fade show active" id="revenue-tab-pane" role="tabpanel" aria-labelledby="revenue-tab" tabindex="0">
+                        <div class="chart-container" style="position: relative; height:300px; width:100%">
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                        <small id="forecastNote" class="text-muted d-block mt-2"></small>
+                    </div>
+                    <!-- Cashflow Tab Pane -->
+                    <div class="tab-pane fade" id="cashflow-tab-pane" role="tabpanel" aria-labelledby="cashflow-tab" tabindex="0">
+                        <div class="chart-container" style="position: relative; height:300px; width:100%">
+                            <canvas id="cashflowChart"></canvas>
+                        </div>
+                        <small id="cashflowReconcileNote" class="text-muted d-block mt-2"></small>
+                    </div>
                 </div>
             </div>
         </div>

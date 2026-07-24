@@ -10,6 +10,7 @@ import com.ses.service.ai.AiTextService;
 import com.ses.service.security.DataScopeService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import com.ses.common.util.PriceFormatter;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -53,7 +54,7 @@ public class AiRestController {
                     finalPrompt.append("【要員情報】\n")
                                .append("- 氏名(ｲﾆｼｬﾙ): ").append(eng.getInitialName() != null ? eng.getInitialName() : eng.getFullName()).append("\n")
                                .append("- 経験年数: ").append(eng.getExperienceYears()).append("年\n")
-                               .append("- 希望単価: ").append(eng.getExpectedUnitPrice() != null ? eng.getExpectedUnitPrice() + "円" : "未設定").append("\n")
+                               .append("- 希望単価: ").append(PriceFormatter.format(eng.getExpectedUnitPrice())).append("\n")
                                .append("- スキル概要: ").append(eng.getResumeSummary() != null ? eng.getResumeSummary() : "なし").append("\n\n");
                 }
             }
@@ -64,7 +65,7 @@ public class AiRestController {
                 if (proj != null) {
                     finalPrompt.append("【案件情報】\n")
                                .append("- 案件名: ").append(proj.getProjectName()).append("\n")
-                               .append("- 単価幅: ").append(proj.getUnitPriceMin() != null ? proj.getUnitPriceMin() + "円" : "未設定").append("〜").append(proj.getUnitPriceMax() != null ? proj.getUnitPriceMax() + "円" : "未設定").append("\n")
+                               .append("- 単価幅: ").append(PriceFormatter.format(proj.getUnitPriceMin())).append("〜").append(PriceFormatter.format(proj.getUnitPriceMax())).append("\n")
                                .append("- リモート: ").append(proj.getRemoteType()).append("\n")
                                .append("- 案件詳細: ").append(proj.getDescription() != null ? proj.getDescription() : "なし").append("\n\n");
                 }

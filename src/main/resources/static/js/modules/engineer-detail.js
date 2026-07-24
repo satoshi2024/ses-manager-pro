@@ -80,6 +80,9 @@ function renderEngineerDetail(eng) {
     // Load Sales Reps
     loadSalesReps(eng.id);
 
+    // Load Proposal History
+    loadProposalHistory(eng.id);
+
     // Resume Summary Timeline
     if (eng.resumeSummary) {
         // Just show it as one block for now
@@ -621,5 +624,51 @@ function releaseSalesRep(assignmentId) {
                 }
             });
         }
+    });
+}
+
+// ==========================================
+// Proposal History
+// ==========================================
+function loadProposalHistory(engineerId) {
+    $.ajax({
+        url: '/api/engineers/' + engineerId + '/proposal-history',
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                renderProposalHistory(res.data);
+            }
+        }
+    });
+}
+
+function renderProposalHistory(historyList) {
+    const tbody = $('#proposal-history-table-body');
+    tbody.empty();
+    
+    if (!historyList || historyList.length === 0) {
+        tbody.html('<tr><td colspan="5" class="text-center text-muted">' + SES.i18n.t('proposal.history.empty', '提案履歴がありません') + '</td></tr>');
+        return;
+    }
+    
+    historyList.forEach(p => {
+        let statusBadge = 'bg-secondary';
+        if (p.status === '書類選考中' || p.status === '一次面接' || p.status === '二次面接' || p.status === '結果待ち') statusBadge = 'bg-primary';
+        if (p.status === '成約') statusBadge = 'bg-success';
+        if (p.status === '見送り') statusBadge = 'bg-danger';
+
+        const proposedAtStr = p.proposedAt ? p.proposedAt.replace('T', ' ').substring(0, 10) : '-';
+        const priceStr = p.proposedUnitPrice ? '¥' + p.proposedUnitPrice.toLocaleString() : '-';
+
+        const tr = `
+            <tr>
+                <td>${proposedAtStr}</td>
+                <td><div class="fw-bold">${SES.escapeHtml(p.customerName || '-')}</div></td>
+                <td><div>${SES.escapeHtml(p.projectName || '-')}</div></td>
+                <td><span class="badge ${statusBadge}">${SES.escapeHtml(SES.i18n.e('proposalStatus', p.status) || p.status)}</span></td>
+                <td>${priceStr}</td>
+            </tr>
+        `;
+        tbody.append(tr);
     });
 }
