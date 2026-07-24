@@ -1,6 +1,7 @@
 let revenueChartInstance = null;
 let statusChartInstance = null;
 let cashflowChartInstance = null;
+let utilizationForecastChartInstance = null;
 let cashflowLoaded = false;
 
 $(document).ready(function() {
@@ -12,6 +13,7 @@ $(document).ready(function() {
         SES.theme.applyChartTheme(revenueChartInstance);
         SES.theme.applyChartTheme(statusChartInstance);
         SES.theme.applyChartTheme(cashflowChartInstance);
+        SES.theme.applyChartTheme(utilizationForecastChartInstance);
     });
 
     // 退場予定者リストのAIマッチングボタン（行はAjaxで再描画されるため委譲で捕捉）
@@ -24,9 +26,14 @@ $(document).ready(function() {
     $('#fiscal-year-selector').val(currentFiscalYear);
 
     loadDashboardData(currentFiscalYear);
+    loadUtilizationForecast(3);
 
     $('#fiscal-year-selector').on('change', function() {
         loadDashboardData($(this).val());
+    });
+
+    $('#forecast-months-selector').on('change', function() {
+        loadUtilizationForecast(Number($(this).val()));
     });
 
     $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
@@ -473,4 +480,175 @@ function matchAI(engineerId, name) {
     } else {
         window.location.href = `/engineer/detail?id=${engineerId}&action=ai-match`;
     }
+}
+
+function loadUtilizationForecast(months) {
+    $.ajax({
+        url: '/api/dashboard/utilization-forecast',
+        method: 'GET',
+        data: { months: months || 3 },
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                renderUtilizationForecastChart(res.data.monthlyForecasts);
+                renderRolloffList(res.data.rolloffEngineers);
+            } else {
+                Toast.error(res.message || SES.i18n.t('dashboard.error.fetch_failed'));
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            Toast.error(SES.i18n.t('dashboard.error.network'));
+        }
+    });
+}
+
+function renderUtilizationForecastChart(monthlyData) {
+    const theme = SES.theme.chartColors();
+    if (utilizationForecastChartInstance) {
+        utilizationForecastChartInstance.destroy();
+    }
+    const canvas = document.getElementById('utilizationForecastChart');
+    if (!canvas) return;
+
+    const labels = monthlyData.map(m => m.month);
+    const rates = monthlyData.map(m => m.utilizationRate);
+    const workingCounts = monthlyData.map(m => m.workingCount);
+    const benchCounts = monthlyData.map(m => m.benchCount);
+
+    const personUnit = SES.i18n.t('dashboard.kpi.person_unit', '名');
+
+    utilizationForecastChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    type: 'line',
+                    label: SES.i18n.t('dashboard.utilizationForecast.rateLabel', '稼働率見込み (%)'),
+                    data: rates,
+                    borderColor: '#3b82f6',
+                    backgroundColor: '#3b82f6',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    fill: false,
+                    yAxisID: 'yRate'
+                },
+                {
+                    type: 'bar',
+                    label: SES.i18n.t('dashboard.utilizationForecast.workingLabel', '稼働見込み (名)'),
+                    data: workingCounts,
+                    backgroundColor: 'rgba(32, 201, 151, 0.7)',
+                    borderColor: '#20c997',
+                    borderWidth: 1,
+                    yAxisID: 'yCount'
+                },
+                {
+                    type: 'bar',
+                    label: SES.i18n.t('dashboard.utilizationForecast.benchLabel', 'Bench見込み (名)'),
+                    data: benchCounts,
+                    backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    borderColor: '#dc3545',
+                    borderWidth: 1,
+                    yAxisID: 'yCount'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            color: theme.textColor,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: theme.textColor }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += context.dataset.yAxisID === 'yRate' ? context.parsed.y + '%' : context.parsed.y + personUnit;
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: theme.textColor },
+                    grid: { color: theme.gridColor }
+                },
+                yRate: {
+                    type: 'linear',
+                    position: 'left',
+                    min: 0,
+                    max: 100,
+                    ticks: {
+                        color: theme.textColor,
+                        callback: function(value) { return value + '%'; }
+                    },
+                    grid: { color: theme.gridColor }
+                },
+                yCount: {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    ticks: {
+                        color: theme.textColor,
+                        precision: 0,
+                        callback: function(value) { return value + personUnit; }
+                    },
+                    grid: { drawOnChartArea: false }
+                }
+            }
+        }
+    });
+}
+
+function renderRolloffList(list) {
+    const tbody = $('#rolloff-table-body');
+    tbody.empty();
+
+    if (!list || list.length === 0) {
+        tbody.append(`<tr><td colspan="4" class="text-center text-muted py-4">${SES.i18n.t('dashboard.utilizationForecast.noRolloff', 'ロールオフ予定の要員はいません')}</td></tr>`);
+        return;
+    }
+
+    list.forEach(item => {
+        const engineerName = SES.escapeHtml(item.engineerName || '');
+        const initial = SES.escapeHtml(item.initialName || '?');
+        const projectName = SES.escapeHtml(item.projectName || '-');
+        const salesUserName = SES.escapeHtml(item.salesUserName || '-');
+        const endDate = SES.escapeHtml(item.endDate || '-');
+
+        const tr = `
+            <tr>
+                <td class="px-3 py-2">
+                    <div class="d-flex align-items-center">
+                        <div class="avatar bg-gradient-purple text-white rounded-circle d-flex justify-content-center align-items-center me-2" style="width: 28px; height: 28px; font-size: 0.75rem;">
+                            ${initial}
+                        </div>
+                        <div>
+                            <a href="/engineer/detail?id=${Number(item.engineerId)}" class="fw-bold text-white text-decoration-none hover-text-blue small">${engineerName}</a>
+                        </div>
+                    </div>
+                </td>
+                <td class="py-2">
+                    <div class="small fw-bold text-white">${projectName}</div>
+                    <div class="small text-accent-yellow"><i class="bi bi-clock me-1"></i>${endDate}</div>
+                </td>
+                <td class="py-2">
+                    <span class="small text-muted">${salesUserName}</span>
+                </td>
+                <td class="px-3 py-2 text-end">
+                    <a href="/contract/renewal-calendar" class="btn btn-sm btn-outline-info border-0 rounded-pill px-2 py-0" title="${SES.i18n.t('dashboard.utilizationForecast.renewalCalendar', '更新カレンダー')}">
+                        <i class="bi bi-calendar-check me-1"></i><span class="small">${SES.i18n.t('contract.renewalCalendar.btn', '更新')}</span>
+                    </a>
+                </td>
+            </tr>
+        `;
+        tbody.append(tr);
+    });
 }
