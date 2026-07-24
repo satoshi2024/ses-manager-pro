@@ -114,7 +114,7 @@ class RenewalEscalationServiceImplTest {
         when(contractMapper.selectList(any())).thenReturn(List.of(c));
         ContractDraftStatusDto confirmedDraft = new ContractDraftStatusDto();
         confirmedDraft.setRenewedFromContractId(1L);
-        confirmedDraft.setStatus("稼動中"); // 準備中以外 = 確定
+        confirmedDraft.setStatus("稼動中"); // 確定 = 稼動中/終了のみ
         when(contractMapper.selectDraftStatusesByOriginalIds(any())).thenReturn(List.of(confirmedDraft));
 
         int notified = service.escalateUnhandled();
@@ -135,6 +135,38 @@ class RenewalEscalationServiceImplTest {
         int notified = service.escalateUnhandled();
 
         assertEquals(1, notified);
+    }
+
+    @Test
+    void escalateUnhandled_解約済みドラフトは確定扱いせずエスカレーションを継続する() {
+        // 一度自動生成されたドラフトが解約された場合、後続契約は実質存在しないため
+        // 「確定(対応済み)」とみなしてエスカレーションを止めてはならない。
+        Contract c = contract(1L, LocalDate.now().plusDays(30), 7L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c));
+        ContractDraftStatusDto cancelledDraft = new ContractDraftStatusDto();
+        cancelledDraft.setRenewedFromContractId(1L);
+        cancelledDraft.setStatus("解約");
+        when(contractMapper.selectDraftStatusesByOriginalIds(any())).thenReturn(List.of(cancelledDraft));
+
+        int notified = service.escalateUnhandled();
+
+        assertEquals(1, notified);
+        verify(notificationService).publishToUser(eq(7L), eq("RENEWAL_ESCALATION"), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void escalateUnhandled_複数契約が上長ステージに該当しても上長一覧は1回だけ問い合わせる() {
+        Contract c1 = contract(1L, LocalDate.now().plusDays(14), 7L);
+        Contract c2 = contract(2L, LocalDate.now().plusDays(14), 8L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        SysUser manager = new SysUser();
+        manager.setId(99L);
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(manager));
+
+        int notified = service.escalateUnhandled();
+
+        assertEquals(4, notified); // (営業1+上長1) x 2契約
+        verify(sysUserMapper, times(1)).selectList(any());
     }
 
     @Test

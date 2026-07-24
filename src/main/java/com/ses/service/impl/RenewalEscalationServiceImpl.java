@@ -68,6 +68,9 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
         Set<Long> confirmedOriginalIds = resolveConfirmedOriginalIds(candidates);
         LocalDate today = LocalDate.now();
         String monthKey = YearMonth.now().toString();
+        // 上長(管理者/マネージャー)は組織階層が無く契約に依らず固定なので、対象契約×ステージの数だけ
+        // 都度問い合わせず実行1回につき1度だけ解決する。
+        List<SysUser> superiors = null;
         int notified = 0;
 
         for (Contract c : candidates) {
@@ -79,13 +82,22 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
                 if (today.isBefore(escalationDate)) {
                     continue;
                 }
-                notified += notifyStage(c, stage, monthKey);
+                if (ROLE_SUPERIOR.equals(stage.role()) && superiors == null) {
+                    superiors = resolveSuperiors();
+                }
+                notified += notifyStage(c, stage, monthKey, superiors);
             }
         }
         return notified;
     }
 
-    private int notifyStage(Contract c, Stage stage, String monthKey) {
+    private List<SysUser> resolveSuperiors() {
+        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
+                .eq(SysUser::getStatus, 1));
+    }
+
+    private int notifyStage(Contract c, Stage stage, String monthKey, List<SysUser> superiors) {
         String dedupeKey = "RENEWAL_ESCALATION:" + c.getId() + ":" + stage.days() + ":" + monthKey;
         String message = "[\"notification.msg.RENEWAL_ESCALATION\", \"" + emptyToDash(c.getContractNo()) + "\", \""
                 + stage.days() + "\", \"" + c.getEndDate() + "\"]";
@@ -98,9 +110,6 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
             return 1;
         }
         if (ROLE_SUPERIOR.equals(stage.role())) {
-            List<SysUser> superiors = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                    .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
-                    .eq(SysUser::getStatus, 1));
             for (SysUser u : superiors) {
                 notificationService.publishToUser(u.getId(), "RENEWAL_ESCALATION", title, message,
                         NotificationLinks.CONTRACT_RENEWAL_CALENDAR, dedupeKey);
@@ -111,13 +120,16 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
         return 0;
     }
 
-    /** 更新ドラフトが確定済み(準備中以外)である元契約IDの集合。 */
+    /** 更新ドラフトが確定済み(稼動中/終了)である元契約IDの集合。 */
     private Set<Long> resolveConfirmedOriginalIds(List<Contract> candidates) {
         List<Long> ids = candidates.stream().map(Contract::getId).collect(Collectors.toList());
         List<ContractDraftStatusDto> drafts = contractMapper.selectDraftStatusesByOriginalIds(ids);
         Map<Long, Boolean> confirmedByOriginalId = new HashMap<>();
         for (ContractDraftStatusDto d : drafts) {
-            boolean confirmed = !StatusConstants.CONTRACT_PREPARING.equals(d.getStatus());
+            // 解約(=更新が取り消された)は確定扱いにしない。ここで対応済みと誤判定すると、
+            // 実際には後続契約が無いままエスカレーションが恒久的に止まってしまう。
+            boolean confirmed = StatusConstants.CONTRACT_ACTIVE.equals(d.getStatus())
+                    || StatusConstants.CONTRACT_ENDED.equals(d.getStatus());
             confirmedByOriginalId.merge(d.getRenewedFromContractId(), confirmed, (a, b) -> a || b);
         }
         return confirmedByOriginalId.entrySet().stream()

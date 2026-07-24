@@ -93,7 +93,10 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
         List<ContractDraftStatusDto> drafts = contractMapper.selectDraftStatusesByOriginalIds(ids);
         Map<Long, Boolean> hasConfirmedByOriginalId = new HashMap<>();
         for (ContractDraftStatusDto draft : drafts) {
-            boolean confirmed = !StatusConstants.CONTRACT_PREPARING.equals(draft.getStatus());
+            // 解約(=更新が取り消された)は「確定」ではない。準備中以外なら全て確定扱いにすると、
+            // 中止されたドラフトが誤って「対応済み(緑)」表示になりエスカレーションも止まってしまう。
+            boolean confirmed = StatusConstants.CONTRACT_ACTIVE.equals(draft.getStatus())
+                    || StatusConstants.CONTRACT_ENDED.equals(draft.getStatus());
             hasConfirmedByOriginalId.merge(draft.getRenewedFromContractId(), confirmed, (a, b) -> a || b);
         }
         return hasConfirmedByOriginalId;

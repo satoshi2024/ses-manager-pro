@@ -114,6 +114,23 @@ class RenewalCalendarServiceImplTest {
     }
 
     @Test
+    void getCalendar_解約されたドラフトはCONFIRMEDにしない() {
+        // ドラフトが解約された場合、後続契約は実質存在しない。準備中以外を一律「確定」扱いすると
+        // 中止された更新が緑(対応済み)表示になり、エスカレーションも誤って停止してしまう。
+        LocalDate from = LocalDate.of(2026, 7, 1);
+        LocalDate to = LocalDate.of(2026, 7, 31);
+        RenewalCalendarItemDto original = item(1L, LocalDate.of(2026, 7, 21), null);
+        when(contractMapper.selectRenewalCalendarCandidates(any(), any(), any(), any(), any()))
+                .thenReturn(new ArrayList<>(List.of(original)));
+        when(contractMapper.selectDraftStatusesByOriginalIds(any()))
+                .thenReturn(List.of(draft(1L, "解約")));
+
+        RenewalCalendarResponseDto res = service.getCalendar(from, to);
+
+        assertNotEquals(RenewalState.CONFIRMED, res.getItems().get(0).getRenewalState());
+    }
+
+    @Test
     void getCalendar_明示フラグはドラフト有無より優先される() {
         LocalDate from = LocalDate.of(2026, 7, 1);
         LocalDate to = LocalDate.of(2026, 7, 31);
