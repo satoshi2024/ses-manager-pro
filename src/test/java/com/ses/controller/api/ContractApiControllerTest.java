@@ -48,6 +48,8 @@ class ContractApiControllerTest {
     @MockBean
     private ContractRenewalService contractRenewalService;
     @MockBean
+    private com.ses.service.RenewalCalendarService renewalCalendarService;
+    @MockBean
     private ContractMapper contractMapper;
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
