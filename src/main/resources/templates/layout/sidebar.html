@@ -123,6 +123,12 @@
                         <span th:text="#{menu.invoice}">請求・支払</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('reconciliation')}">
+                    <a th:href="@{/reconciliation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/reconciliation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-cash-coin me-2"></i>
+                        <span th:text="#{menu.reconciliation}">入金消込</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('payroll')}">
                     <a th:href="@{/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/payroll') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cash-stack me-2"></i>

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollStatementDto;
+import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.FreeeConnection;
 import com.ses.entity.FreeeEmployeeLink;
@@ -255,6 +256,37 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     private BigDecimal decimal(JsonNode n, String k) {
         return n.has(k) ? n.path(k).decimalValue() : BigDecimal.ZERO;
+    }
+
+    @Override
+    public List<BankDepositDto> bankDeposits(java.time.LocalDate from, java.time.LocalDate to) {
+        if (from == null || to == null || from.isAfter(to)) {
+            throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
+        }
+
+        FreeeConnection c = connectionMapper.selectOne(new LambdaQueryWrapper<FreeeConnection>()
+                .orderByDesc(FreeeConnection::getId).last("LIMIT 1"));
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.reconciliation.notConnected");
+        }
+
+        // freee会計API: 入金取引(deals, type=income)を取得する。振込名義は明細記載(description)を用いる。
+        String path = "/api/1/deals?company_id=" + c.getCompanyId()
+                + "&type=income&start_issue_date=" + from + "&end_issue_date=" + to;
+        JsonNode arr = get(path);
+        List<BankDepositDto> out = new ArrayList<>();
+
+        if (arr != null) {
+            for (JsonNode n : arr.path("deals")) {
+                BankDepositDto d = new BankDepositDto();
+                d.setFreeeDepositId(n.path("id").asText());
+                d.setDepositDate(java.time.LocalDate.parse(n.path("issue_date").asText()));
+                d.setAmount(decimal(n, "amount"));
+                d.setPayerName(n.path("description").asText(""));
+                out.add(d);
+            }
+        }
+        return out;
     }
 
     private JsonNode get(String path) {
