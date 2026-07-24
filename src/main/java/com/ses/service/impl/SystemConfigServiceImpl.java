@@ -82,6 +82,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("cashflow.bp-payment-site-months", ConfigSchema.integer(0, 12));
         SCHEMAS.put("cashflow.payroll-estimate", ConfigSchema.decimal(null, null));
         SCHEMAS.put("cashflow.payroll-employer-burden-rate", ConfigSchema.decimal("0", "100"));
+        SCHEMAS.put("retention.risk.bench-warn-days", ConfigSchema.integer(0, null));
+        SCHEMAS.put("retention.risk.followup-interval-days", ConfigSchema.integer(0, null));
+        SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
     }
 
     private void ensureLoaded() {

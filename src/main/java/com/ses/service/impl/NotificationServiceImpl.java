@@ -103,7 +103,7 @@ public class NotificationServiceImpl implements NotificationService {
             case "TIMESHEET_REJECTED" -> "my-timesheet";
             case "INVOICE_OVERDUE", "BP_AMOUNT_MISMATCH" -> "invoice";
             case "CONTRACT_END", "CONTRACT_DRAFT", "CONTRACT_RENEWAL_DRAFT", "RENEWAL_ESCALATION" -> "contract";
-            case "BENCH_LONG" -> "engineer";
+            case "BENCH_LONG", "FOLLOWUP_OVERDUE" -> "engineer";
             case "PROJECT_URGENT" -> "project";
             case "PROPOSAL_STALE" -> "proposal";
             case "FOLLOW_UP" -> "customer";

@@ -209,6 +209,7 @@ function loadEngineers(page = 1) {
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
         salesUserId: $('#searchSalesUser').val(),
+        riskLevel: $('#searchRiskLevel').val(),
         skillIds: selectedSkills // jQuery ajax will format this as skillIds[]=1&skillIds[]=2 or we can set traditional: true
     };
 
@@ -288,7 +289,7 @@ function renderEngineers(records) {
     tbody.empty();
     
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
+        tbody.append('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.noData') + '</td></tr>');
         return;
     }
     
@@ -323,6 +324,7 @@ function renderEngineers(records) {
                 <td>${expStr}</td>
                 <td>${priceStr}</td>
                 <td class="text-light">${SES.escapeHtml(eng.primarySalesUserName || '-')}</td>
+                <td>${eng.retentionHighRisk ? '<span class="badge bg-danger">' + SES.i18n.t('engineerFollowup.riskLevel.high') + ' (' + eng.retentionRiskScore + ')</span>' : '<span class="text-muted small">' + (eng.retentionRiskScore != null ? eng.retentionRiskScore : '-') + '</span>'}</td>
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
                         <a href="/engineer/detail?id=${eng.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>

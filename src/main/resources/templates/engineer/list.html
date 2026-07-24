@@ -70,6 +70,13 @@
                     </select>
                 </div>
                 <div class="col-md-2">
+                    <label for="searchRiskLevel" class="form-label text-muted small" th:text="#{engineerFollowup.filterRiskLevel}">定着リスク</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchRiskLevel" name="riskLevel">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="high" th:text="#{engineerFollowup.filterRiskLevel.high}">高リスクのみ</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100">
                         <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
                     </button>
@@ -91,6 +98,7 @@
                             <th scope="col" th:text="#{engineer.experience}">経験年数</th>
                             <th scope="col" th:text="#{engineer.expectedPrice}">単価</th>
                             <th scope="col" th:text="#{engineerSales.salesUser}">担当営業</th>
+                            <th scope="col" th:text="#{engineerFollowup.filterRiskLevel}">定着リスク</th>
                             <th scope="col" class="text-end pe-4" th:text="#{common.actions}">アクション</th>
                         </tr>
                     </thead>

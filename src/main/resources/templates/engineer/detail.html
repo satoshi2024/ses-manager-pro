@@ -97,6 +97,29 @@
                 </div>
             </div>
 
+            <!-- フォロー履歴 Card（FR-11 定着リスク管理） -->
+            <div class="card bg-card border-dark shadow-sm mt-4">
+                <div class="card-header border-dark bg-transparent d-flex justify-content-between align-items-center py-3">
+                    <h6 class="mb-0 text-white fw-bold"><i class="bi bi-clipboard2-heart me-2 text-accent-green"></i><th:block th:text="#{engineerFollowup.cardTitle}">フォロー履歴</th:block></h6>
+                    <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="openFollowupModal()" th:title="#{engineerFollowup.add}"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2 small">
+                        <span class="text-muted"><th:block th:text="#{engineerFollowup.nextDueDate}">次回フォロー期日</th:block></span>
+                        <span id="followup-next-due" class="text-white fw-bold">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-0 small">
+                        <span class="text-muted"><th:block th:text="#{engineerFollowup.riskScore}">定着リスクスコア</th:block></span>
+                        <span id="followup-risk-score">-</span>
+                    </div>
+                </div>
+                <div class="card-body p-0 border-top border-dark">
+                    <ul class="list-group list-group-flush" id="followup-list" style="max-height: 320px; overflow-y: auto;">
+                        <!-- JS populated -->
+                    </ul>
+                </div>
+            </div>
+
             <!-- ログインアカウント Card（要員セルフサービス勤怠） -->
             <div class="card bg-card border-dark shadow-sm mt-4" sec:authorize="hasAnyRole('管理者','HR')">
                 <div class="card-header border-dark bg-transparent py-3">
@@ -374,6 +397,66 @@
         </div>
     </div>
     
+    <!-- Followup CRUD Modal (FR-11) -->
+    <div class="modal fade" id="followupModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-clipboard2-heart me-2 text-accent-green"></i><th:block th:text="#{engineerFollowup.modalTitle}">フォロー記録</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="followup-form">
+                        <input type="hidden" id="fu-id">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small"><th:block th:text="#{engineerFollowup.type}">種別</th:block> <span class="text-danger">*</span></label>
+                                <select id="fu-followupType" class="form-select form-select-dark bg-secondary text-white border-dark" required>
+                                    <option value="1on1" th:text="#{engineerFollowup.type.oneOnOne}">1on1</option>
+                                    <option value="面談" th:text="#{engineerFollowup.type.interview}">面談</option>
+                                    <option value="連絡" th:text="#{engineerFollowup.type.contact}">連絡</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small"><th:block th:text="#{engineerFollowup.date}">実施日</th:block> <span class="text-danger">*</span></label>
+                                <input type="date" id="fu-followupDate" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{engineerFollowup.satisfaction}">満足度</label>
+                                <select id="fu-satisfaction" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="">-</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{engineerFollowup.nextDate}">次回フォロー予定日</label>
+                                <input type="date" id="fu-nextDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{engineerFollowup.topic}">トピック</label>
+                            <input type="text" id="fu-topic" class="form-control form-control-dark bg-secondary text-white border-dark">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{engineerFollowup.content}">内容</label>
+                            <textarea id="fu-content" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveFollowup()" th:text="#{common.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Skill Sheet Export Modal -->
     <div class="modal fade" id="skillSheetModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">

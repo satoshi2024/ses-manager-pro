@@ -34,6 +34,7 @@ spring:
         - classpath:sql/schema-bp-availability-h2.sql
         - classpath:sql/schema-contract-renewal-h2.sql
         - classpath:sql/schema-labor-compliance-h2.sql
+        - classpath:sql/schema-engineer-followup-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
