@@ -217,6 +217,7 @@ function getStatusBadge(status) {
 function openNewContract() {
     $('#contract-form')[0].reset();
     $('#cont-id').val('');
+    $('#complianceWarning').addClass('d-none').text('');
     $('#contractModalTitle').text(SES.i18n.t('contract.new'));
     $('#contractSaveBtnLabel').text(SES.i18n.t('common.register'));
     bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).show();
@@ -233,7 +234,9 @@ function openEditContract(id) {
         }
         const c = res.data;
         $('#contract-form')[0].reset();
+        $('#complianceWarning').addClass('d-none').text('');
         $('#cont-id').val(c.id);
+        $('#cont-directCommandFlag').prop('checked', !!c.directCommandFlag);
         $('#cont-engineerId').val(c.engineerId != null ? String(c.engineerId) : '');
         $('#cont-projectId').val(c.projectId != null ? String(c.projectId) : '');
         $('#cont-customerId').val(c.customerId != null ? String(c.customerId) : '');
@@ -286,6 +289,7 @@ function buildContractPayload() {
         settlementHoursMin: val('#cont-settlementHoursMin') ? parseFloat(val('#cont-settlementHoursMin')) : null,
         settlementHoursMax: val('#cont-settlementHoursMax') ? parseFloat(val('#cont-settlementHoursMax')) : null,
         fractionRule: val('#cont-fractionRule'),
+        directCommandFlag: $('#cont-directCommandFlag').is(':checked'),
         autoRenew: val('#cont-autoRenew') != null ? parseInt(val('#cont-autoRenew')) : 0,
         commissionBaseType: val('#cont-commissionBaseType'),
         commissionRate: val('#cont-commissionRate') ? parseFloat(val('#cont-commissionRate')) : null
@@ -316,10 +320,18 @@ function saveContract() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(id ? SES.i18n.t('js.contract.success.update') : SES.i18n.t('js.contract.success.register'));
-                bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).hide();
-                $('#contract-form')[0].reset();
-                $('#cont-id').val('');
                 loadContracts();
+                const findings = (res.data && res.data.complianceFindings) || [];
+                const hasWarning = (res.data && res.data.negativeProfit) || findings.length > 0;
+                if (hasWarning) {
+                    // 警告(粗利逆転・労務コンプライアンスリスク)はブロックしない。保存済みだが
+                    // モーダルは閉じずバナー表示し、利用者に内容を確認させる(labor-compliance-check)。
+                    $('#complianceWarning').removeClass('d-none').text(res.message);
+                } else {
+                    bootstrap.Modal.getOrCreateInstance(document.getElementById('contractModal')).hide();
+                    $('#contract-form')[0].reset();
+                    $('#cont-id').val('');
+                }
             } else {
                 Toast.error(res.message || SES.i18n.t('js.contract.error.register'));
             }

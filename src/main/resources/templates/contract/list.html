@@ -142,6 +142,11 @@
                                 <option value="派遣" th:text="#{contract.contractType.dispatch}">派遣</option>
                             </select>
                         </div>
+                        <div class="form-check mb-3">
+                            <input type="checkbox" id="cont-directCommandFlag" class="form-check-input">
+                            <label class="form-check-label text-muted small" for="cont-directCommandFlag" th:text="#{contract.directCommandFlag}">指揮命令の実態がある（発注者から直接の指揮命令を受けている）</label>
+                        </div>
+                        <div id="complianceWarning" class="alert alert-warning d-none"></div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small" th:text="#{contract.startDate}">開始日</label>

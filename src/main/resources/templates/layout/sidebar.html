@@ -161,6 +161,13 @@
                     </a>
                 </li>
 
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('compliance')}">
+                    <a th:href="@{/compliance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/compliance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-shield-exclamation me-2"></i>
+                        <span th:text="#{menu.compliance}">コンプライアンス</span>
+                    </a>
+                </li>
+
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('todo')}">
                     <a th:href="@{/todo}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/todo') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bell me-2"></i>

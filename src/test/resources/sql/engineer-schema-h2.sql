@@ -181,6 +181,7 @@ CREATE TABLE t_contract (
   auto_renew              TINYINT DEFAULT 0,
   status                  VARCHAR(20) DEFAULT '稼動中',
   remarks                 TEXT,
+  direct_command_flag     TINYINT NOT NULL DEFAULT 0,
   sales_user_id           BIGINT,
   commission_base_type    VARCHAR(10),
   commission_rate         DECIMAL(5,2),

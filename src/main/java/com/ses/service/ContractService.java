@@ -19,16 +19,18 @@ public interface ContractService extends IService<Contract> {
     String generateContractNo(LocalDate baseDate);
 
     /**
-     * 業務ルール付き保存（採番＋検証＋要員連動）
+     * 業務ルール付き保存（採番＋検証＋要員連動＋労務コンプライアンスチェック）
      * @param contract 契約情報
+     * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）
      */
-    void saveWithBusinessRules(Contract contract);
+    java.util.List<com.ses.dto.compliance.ComplianceFinding> saveWithBusinessRules(Contract contract);
 
     /**
-     * 業務ルール付き更新（検証＋要員連動）
+     * 業務ルール付き更新（検証＋要員連動＋労務コンプライアンスチェック）
      * @param contract 契約情報
+     * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）
      */
-    void updateWithBusinessRules(Contract contract);
+    java.util.List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract);
 
     /**
      * 契約状態を許可された遷移だけ変更する。
