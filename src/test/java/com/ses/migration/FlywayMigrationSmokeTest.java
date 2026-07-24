@@ -161,7 +161,7 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.payroll-employer-burden-rate'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='skillsheet.templates'");
 
-            // 要員フォロー・定着リスク管理(V50, FR-11)
+            // 要員フォロー・定着リスク管理(V54, FR-11)
             assertTableExists(st, "t_engineer_followup");
             assertColumnExists(st, "t_engineer_followup", "next_date");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.bench-warn-days'");
