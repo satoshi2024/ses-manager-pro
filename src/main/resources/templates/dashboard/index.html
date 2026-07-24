@@ -175,6 +175,67 @@
         </div>
     </div>
 
+    <!-- Utilization & Bench Forecast Row (FR-07) -->
+    <div class="row g-4 mb-4">
+        <!-- Forecast Chart -->
+        <div class="col-12 col-xl-7">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 text-white fw-bold">
+                        <i class="bi bi-graph-up-arrow me-2 text-accent-blue"></i><span th:text="#{dashboard.utilizationForecast.title}">将来稼働率・Bench予測</span>
+                    </h6>
+                    <div class="d-flex align-items-center gap-2">
+                        <select id="forecast-months-selector" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark w-auto">
+                            <option value="3" selected th:text="#{dashboard.utilizationForecast.months.3}">3ヶ月予測</option>
+                            <option value="6" th:text="#{dashboard.utilizationForecast.months.6}">6ヶ月予測</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-4">
+                    <div class="chart-container" style="position: relative; height:280px; width:100%">
+                        <canvas id="utilizationForecastChart"></canvas>
+                    </div>
+                    <small class="text-muted d-block mt-2" th:text="#{dashboard.utilizationForecast.note}">※契約終了日および自動更新設定に基づく稼働率・Bench数の予測値です。</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Roll-off Candidates List -->
+        <div class="col-12 col-xl-5">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 text-white fw-bold">
+                        <i class="bi bi-person-dash-fill me-2 text-accent-yellow"></i><span th:text="#{dashboard.utilizationForecast.rolloffTitle}">ロールオフ予定要員</span>
+                    </h6>
+                    <a href="/contract/renewal-calendar" class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark">
+                        <i class="bi bi-calendar-check me-1"></i><span th:text="#{dashboard.utilizationForecast.renewalCalendar}">更新カレンダー</span>
+                    </a>
+                </div>
+                <div class="card-body p-0" style="max-height: 330px; overflow-y: auto;">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark sticky-top">
+                                <tr>
+                                    <th class="px-3 py-2 text-muted small text-uppercase" th:text="#{dashboard.list.col.engineer}">要員</th>
+                                    <th class="py-2 text-muted small text-uppercase" th:text="#{dashboard.list.col.project}">案件 / 終了日</th>
+                                    <th class="py-2 text-muted small text-uppercase" th:text="#{contract.salesUser}">担当営業</th>
+                                    <th class="px-3 py-2 text-end text-muted small text-uppercase" th:text="#{dashboard.list.col.action}">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="border-top-0" id="rolloff-table-body">
+                                <tr id="rolloff-loading-row">
+                                    <td colspan="4" class="text-center text-muted py-4">
+                                        <i class="bi bi-arrow-repeat me-1"></i><span th:text="#{common.loading}">読み込み中...</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Data Table Row (Upcoming Departures) -->
     <div class="row">
         <div class="col-12">

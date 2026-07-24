@@ -6,7 +6,7 @@
   - **Objective**: 銀行入金の取得と保存。
   - **実装ガイダンス**: design 1章。`FreeeIntegrationService` 拡張、タイムアウト/allowlist（A7-18）。テストDB二重維持。
   - **Demo**: freeeモックから入金が保存される。
-  - **完了メモ**: `V50__payment_reconciliation.sql`で`t_bank_deposit`追加（`freee_deposit_id`一意制約で冪等）。`FreeeIntegrationService#bankDeposits(from,to)`をfreee会計API(`/api/1/deals?type=income`)向けに追加（既存の`get()`ヘルパー/RestTemplate/リフレッシュ機構を再利用）。H2側は`sql/engineer-schema-h2.sql`に追加（`AllMappersSchemaSweepTest`で担保）。
+  - **完了メモ**: `V52__payment_reconciliation.sql`で`t_bank_deposit`追加（main合流でV50/V51が先着のためV52に採番）（`freee_deposit_id`一意制約で冪等）。`FreeeIntegrationService#bankDeposits(from,to)`をfreee会計API(`/api/1/deals?type=income`)向けに追加（既存の`get()`ヘルパー/RestTemplate/リフレッシュ機構を再利用）。H2側は`sql/engineer-schema-h2.sql`に追加（`AllMappersSchemaSweepTest`で担保）。
 
 - [x] A. 突合ロジック
   - **Objective**: `PaymentReconciliationService`（自動/候補/保留）。

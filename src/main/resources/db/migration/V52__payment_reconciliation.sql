@@ -1,6 +1,6 @@
 -- ============================================================
 -- SES Manager Pro - 入金消込の半自動化（FR-09）
--- ファイル: V50__payment_reconciliation.sql
+-- ファイル: V52__payment_reconciliation.sql
 -- 説明: freee経由で取得した銀行入金明細を保持する t_bank_deposit を追加する。
 --       突合候補（金額・名義・時期スコア）は永続化せず、GET /api/reconciliation/pending
 --       で都度算出する（請求書残高の変動による突合結果の陳腐化を避けるため）。

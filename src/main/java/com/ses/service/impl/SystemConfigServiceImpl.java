@@ -70,6 +70,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("notification.webhook-url", ConfigSchema.string());
         SCHEMAS.put("notification.webhook-types", ConfigSchema.string());
         SCHEMAS.put("forecast.enabled", ConfigSchema.bool());
+        SCHEMAS.put("forecast.assume-renew", ConfigSchema.bool());
         SCHEMAS.put("forecast.win-rate.screening", ConfigSchema.integer(0, 100));
         SCHEMAS.put("forecast.win-rate.first-interview", ConfigSchema.integer(0, 100));
         SCHEMAS.put("forecast.win-rate.second-interview", ConfigSchema.integer(0, 100));
