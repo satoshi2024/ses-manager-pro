@@ -38,12 +38,15 @@ public class MonthlyClosingSummaryDto {
     private List<BpPaymentListDto> unpaidBp;
     /** (e) 期限超過請求（残高付き）。 */
     private List<InvoiceBalanceDto> overdueInvoices;
+    /** (f) 労務コンプライアンスリスク該当契約（labor-compliance-check / FR-10）。締めを妨げない。 */
+    private List<com.ses.dto.compliance.ContractComplianceDto> complianceFindings;
 
     private int unenteredCount;
     private int unconfirmedCount;
     private int unbilledCount;
     private int unpaidBpCount;
     private int overdueCount;
+    private int complianceCount;
 
     /** (a)-(d) が全て0で締め可能か。 */
     private boolean readyToClose;

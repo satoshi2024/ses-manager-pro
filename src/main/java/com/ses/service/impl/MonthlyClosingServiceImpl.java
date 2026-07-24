@@ -53,6 +53,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     private final SystemConfigService systemConfigService;
     private final SystemConfigMapper systemConfigMapper;
     private final SysUserMapper sysUserMapper;
+    private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
 
     /** 締め記録1件。 */
     public static class ClosingRecord {
@@ -148,11 +149,15 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         }
         dto.setOverdueInvoices(overdue);
 
+        // (f) 労務コンプライアンスリスク（現在の状態を都度導出。月に紐づく記録ではないため月非依存）。
+        dto.setComplianceFindings(laborComplianceService.findCurrentRisks());
+
         dto.setUnenteredCount(dto.getUnenteredWork().size());
         dto.setUnconfirmedCount(dto.getUnconfirmedRecords().size());
         dto.setUnbilledCount(items.size());
         dto.setUnpaidBpCount(dto.getUnpaidBp().size());
         dto.setOverdueCount(overdue.size());
+        dto.setComplianceCount(dto.getComplianceFindings().size());
 
         // (a)-(d) が全て0なら締め可能（(e)期限超過は締めを妨げない）
         dto.setReadyToClose(dto.getUnenteredCount() == 0 && dto.getUnconfirmedCount() == 0

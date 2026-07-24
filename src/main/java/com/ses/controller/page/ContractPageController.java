@@ -30,4 +30,14 @@ public class ContractPageController {
     public String gantt() {
         return "contract/gantt";
     }
+
+    /**
+     * 契約更新カレンダー画面表示（FR-06）
+     *
+     * @return 画面パス
+     */
+    @GetMapping("/renewal-calendar")
+    public String renewalCalendar() {
+        return "contract/renewal-calendar";
+    }
 }

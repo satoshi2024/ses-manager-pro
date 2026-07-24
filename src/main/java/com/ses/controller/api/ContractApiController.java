@@ -27,6 +27,7 @@ public class ContractApiController {
 
     private final ContractService contractService;
     private final ContractRenewalService contractRenewalService;
+    private final com.ses.service.RenewalCalendarService renewalCalendarService;
     private final ContractMapper contractMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final org.springframework.context.MessageSource messageSource;
@@ -90,6 +91,16 @@ public class ContractApiController {
     }
 
     /**
+     * 契約更新カレンダー（FR-06）: 期間内の更新期限（終了日-リード日数）を状態付きで返す。
+     */
+    @GetMapping("/renewal-calendar")
+    public ApiResult<com.ses.dto.contract.RenewalCalendarResponseDto> renewalCalendar(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResult.success(renewalCalendarService.getCalendar(from, to));
+    }
+
+    /**
      * 契約詳細取得
      *
      * @param id 契約ID
@@ -124,27 +135,23 @@ public class ContractApiController {
     }
 
     @PostMapping
-    public ApiResult<Boolean> create(@Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+    public ApiResult<com.ses.dto.contract.ContractSaveResultDto> create(@Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
         assertReferencedAllowed(dto);
         Contract contract = new Contract();
         org.springframework.beans.BeanUtils.copyProperties(dto, contract);
-        contractService.saveWithBusinessRules(contract);
-        if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
-                && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
-            return ApiResult.<Boolean>success(messageSource.getMessage("error.contract.negativeProfit", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()), Boolean.TRUE);
-        }
-        return ApiResult.success(Boolean.TRUE);
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.saveWithBusinessRules(contract);
+        return buildSaveResult(contract, findings);
     }
 
     /**
      * 契約更新
      *
      * @param id 契約ID
-     * @param contract 契約情報
+     * @param dto 契約情報
      * @return 結果
      */
     @PutMapping("/{id}")
-    public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+    public ApiResult<com.ses.dto.contract.ContractSaveResultDto> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
         assertContractVisible(id);
         assertReferencedAllowed(dto);
         Contract contract = new Contract();
@@ -153,12 +160,34 @@ public class ContractApiController {
         // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
         // 準備中→稼動中などの遷移検証を迂回できないようにする。
         contract.setStatus(null);
-        contractService.updateWithBusinessRules(contract);
-        if (contract.getSellingPrice() != null && contract.getCostPrice() != null 
-                && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0) {
-            return ApiResult.<Boolean>success(messageSource.getMessage("error.contract.negativeProfit", null, org.springframework.context.i18n.LocaleContextHolder.getLocale()), Boolean.TRUE);
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.updateWithBusinessRules(contract);
+        return buildSaveResult(contract, findings);
+    }
+
+    /**
+     * 契約登録/更新の共通レスポンス組み立て。粗利逆転・労務コンプライアンスリスク（labor-compliance-check）の
+     * 警告はどちらもブロックせず、message に結合したうえで data にも構造化して返す（画面の警告バナー用）。
+     */
+    private ApiResult<com.ses.dto.contract.ContractSaveResultDto> buildSaveResult(
+            Contract contract, java.util.List<com.ses.dto.compliance.ComplianceFinding> findings) {
+        boolean negativeProfit = contract.getSellingPrice() != null && contract.getCostPrice() != null
+                && contract.getSellingPrice().compareTo(contract.getCostPrice()) < 0;
+
+        com.ses.dto.contract.ContractSaveResultDto result = new com.ses.dto.contract.ContractSaveResultDto();
+        result.setId(contract.getId());
+        result.setNegativeProfit(negativeProfit);
+        result.setComplianceFindings(findings);
+
+        if (!negativeProfit && findings.isEmpty()) {
+            return ApiResult.success(result);
         }
-        return ApiResult.success(Boolean.TRUE);
+        java.util.List<String> messages = new java.util.ArrayList<>();
+        if (negativeProfit) {
+            messages.add(messageSource.getMessage("error.contract.negativeProfit", null,
+                    org.springframework.context.i18n.LocaleContextHolder.getLocale()));
+        }
+        findings.forEach(f -> messages.add(f.getMessage()));
+        return ApiResult.success(String.join(" / ", messages), result);
     }
 
     /** 契約状態変更（状態機械を通す専用 API）。 */
@@ -167,6 +196,24 @@ public class ContractApiController {
         assertContractVisible(id);
         contractService.changeStatus(id, request.getStatus(), request.getCancelDate());
         return ApiResult.success(Boolean.TRUE);
+    }
+
+    /**
+     * 更新判断の設定・解除（FR-06 契約更新カレンダー）。
+     * decision: "CONTINUE"（継続確定）/"END"（更新不要）/null（未定に戻す）。
+     */
+    @PutMapping("/{id}/renewal-decision")
+    public ApiResult<Boolean> updateRenewalDecision(@PathVariable Long id,
+            @RequestBody RenewalDecisionRequest request) {
+        assertContractVisible(id);
+        contractService.updateRenewalDecision(id, request.getDecision());
+        return ApiResult.success(Boolean.TRUE);
+    }
+
+    public static class RenewalDecisionRequest {
+        private String decision;
+        public String getDecision() { return decision; }
+        public void setDecision(String v) { this.decision = v; }
     }
 
     /**

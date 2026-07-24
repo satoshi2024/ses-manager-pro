@@ -19,16 +19,18 @@ public interface ContractService extends IService<Contract> {
     String generateContractNo(LocalDate baseDate);
 
     /**
-     * 業務ルール付き保存（採番＋検証＋要員連動）
+     * 業務ルール付き保存（採番＋検証＋要員連動＋労務コンプライアンスチェック）
      * @param contract 契約情報
+     * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）
      */
-    void saveWithBusinessRules(Contract contract);
+    java.util.List<com.ses.dto.compliance.ComplianceFinding> saveWithBusinessRules(Contract contract);
 
     /**
-     * 業務ルール付き更新（検証＋要員連動）
+     * 業務ルール付き更新（検証＋要員連動＋労務コンプライアンスチェック）
      * @param contract 契約情報
+     * @return 労務コンプライアンスリスクfindings（該当なしは空リスト。ブロックはしない）
      */
-    void updateWithBusinessRules(Contract contract);
+    java.util.List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract);
 
     /**
      * 契約状態を許可された遷移だけ変更する。
@@ -77,4 +79,11 @@ public interface ContractService extends IService<Contract> {
 
     /** 将来予約（当月より後）の改定のみ削除する。 */
     void deleteFuturePriceRevision(Long contractId, String applyFromMonth);
+
+    /**
+     * 更新判断（継続確定/更新不要）を設定・解除する（FR-06 契約更新カレンダー）。
+     * @param contractId 契約ID
+     * @param decision "CONTINUE"（継続確定）/"END"（更新不要）/null（未定に戻す）
+     */
+    void updateRenewalDecision(Long contractId, String decision);
 }

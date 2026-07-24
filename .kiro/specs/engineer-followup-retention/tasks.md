@@ -3,7 +3,7 @@
 - [x] F1. 基盤層（V4x・entity・mapper・IF・i18n・H2）
   - **Objective**: `t_engineer_followup` ＋ エンティティ/Mapper/Service、テストDB二重維持、i18n。
   - **Demo**: 空DBから適用、要員詳細にフォローカードの器が出る。
-  - `db/migration/V50__engineer_followup.sql`、`entity/EngineerFollowup`、`mapper/EngineerFollowupMapper`、`service/EngineerFollowupService(Impl)` を追加。`engineer-schema-h2.sql`／`schema-engineer-followup-h2.sql`／`application-test.yml`／`FlywayMigrationSmokeTest` を更新。
+  - `db/migration/V54__engineer_followup.sql`（main側でV50〜V53が先行使用されたためmain統合時にV54へ採番変更）、`entity/EngineerFollowup`、`mapper/EngineerFollowupMapper`、`service/EngineerFollowupService(Impl)` を追加。`engineer-schema-h2.sql`／`schema-engineer-followup-h2.sql`／`application-test.yml`／`FlywayMigrationSmokeTest` を更新。
 
 - [x] A. フォローCRUD＋API
   - **Objective**: `/api/engineers/{id}/followups` CRUD。

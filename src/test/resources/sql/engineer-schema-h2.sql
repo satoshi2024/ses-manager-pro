@@ -197,11 +197,13 @@ CREATE TABLE t_contract (
   auto_renew              TINYINT DEFAULT 0,
   status                  VARCHAR(20) DEFAULT '稼動中',
   remarks                 TEXT,
+  direct_command_flag     TINYINT NOT NULL DEFAULT 0,
   sales_user_id           BIGINT,
   commission_base_type    VARCHAR(10),
   commission_rate         DECIMAL(5,2),
   renewed_from_contract_id BIGINT,
   quotation_id            BIGINT,
+  renewal_decision        VARCHAR(20),
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -610,4 +612,21 @@ CREATE TABLE t_bp_availability_ingestion (
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT
+);
+
+-- 銀行入金明細（入金消込の半自動化 / FR-09 / V50）
+DROP TABLE IF EXISTS t_bank_deposit;
+CREATE TABLE t_bank_deposit (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  freee_deposit_id    VARCHAR(64) NOT NULL,
+  deposit_date        DATE NOT NULL,
+  amount              DECIMAL(12,0) NOT NULL,
+  payer_name          VARCHAR(200),
+  status              VARCHAR(10) NOT NULL DEFAULT '未消込',
+  matched_invoice_id  BIGINT,
+  matched_payment_id  BIGINT,
+  remarks             VARCHAR(300),
+  created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (freee_deposit_id)
 );

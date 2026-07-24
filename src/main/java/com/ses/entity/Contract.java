@@ -101,6 +101,9 @@ public class Contract extends BaseEntity {
     /** 備考 */
     private String remarks;
 
+    /** 指揮命令の実態フラグ（偽装請負判定用。準委任/請負契約なのに指揮命令の実態がある場合はtrue） */
+    private Boolean directCommandFlag;
+
     /**
      * 成約担当営業ID（成約時の主担当を既定値とし変更可）
      * updateStrategy=ALWAYS: グローバルの not_null 戦略を上書きし、
@@ -129,6 +132,14 @@ public class Contract extends BaseEntity {
 
     /** 生成元見積ID（見積受注からのドラフトのみ設定） */
     private Long quotationId;
+
+    /**
+     * 更新判断（'CONTINUE':継続確定/'END':更新不要、NULL:未定）。
+     * 契約更新カレンダーのエスカレーション停止条件として参照される。
+     * updateStrategy=ALWAYS: 「未定に戻す」= NULL 更新を反映させるため。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String renewalDecision;
 
     /** 作成者ID */
     @TableField(fill = FieldFill.INSERT)

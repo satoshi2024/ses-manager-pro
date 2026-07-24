@@ -16,6 +16,9 @@
             <a href="/contract/gantt" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2">
                 <i class="bi bi-bar-chart-steps me-1"></i><th:block th:text="#{contract.gantt.btn}">ガントチャート</th:block>
             </a>
+            <a href="/contract/renewal-calendar" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2">
+                <i class="bi bi-calendar-check me-1"></i><th:block th:text="#{contract.renewalCalendar.btn}">更新カレンダー</th:block>
+            </a>
             <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportContracts()">
                 <i class="bi bi-file-earmark-excel me-1"></i><th:block th:text="#{contract.excel.btn}">Excel出力</th:block>
             </button>
@@ -139,6 +142,11 @@
                                 <option value="派遣" th:text="#{contract.contractType.dispatch}">派遣</option>
                             </select>
                         </div>
+                        <div class="form-check mb-3">
+                            <input type="checkbox" id="cont-directCommandFlag" class="form-check-input">
+                            <label class="form-check-label text-muted small" for="cont-directCommandFlag" th:text="#{contract.directCommandFlag}">指揮命令の実態がある（発注者から直接の指揮命令を受けている）</label>
+                        </div>
+                        <div id="complianceWarning" class="alert alert-warning d-none"></div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
                                 <label class="form-label text-muted small" th:text="#{contract.startDate}">開始日</label>
