@@ -43,6 +43,7 @@ public class ContractSaveDto {
     private Integer autoRenew;
     private String status;
     private String remarks;
+    private Boolean directCommandFlag;
     private Long salesUserId;
     private String commissionBaseType;
     

@@ -54,6 +54,7 @@ function renderCards() {
     cards.appendChild(card('closing.item.unbilled', s.unbilledCount));
     cards.appendChild(card('closing.item.unpaidBp', s.unpaidBpCount));
     cards.appendChild(card('closing.item.overdue', s.overdueCount, null, null, true));
+    cards.appendChild(card('closing.item.compliance', s.complianceCount, null, null, true));
 
     const confirmBtn = document.getElementById('btnConfirmClosing');
     if (confirmBtn) confirmBtn.disabled = !s.readyToClose || s.closed;
@@ -113,6 +114,13 @@ function showClosingDetail(key) {
     } else if (key === 'closing.item.overdue') {
         headers = ['請求書番号', '顧客', '残高', '期限', '操作'];
         rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, r.balance, r.dueDate, `<a href="/invoice?invoiceId=${encodeURIComponent(r.invoiceId)}" class="btn btn-sm btn-outline-primary">督促</a>`]);
+    } else if (key === 'closing.item.compliance') {
+        // 該当リスク列は最終列(操作)より前のため showClosingDetail の共通ループでエスケープされる。
+        // 生HTML(<br>等)は差し込まずプレーンテキストで連結する。
+        headers = ['契約番号', '要員', '案件', '該当リスク', '操作'];
+        rows = s.complianceFindings.map(r => [r.contractNo, r.engineerName, r.projectName,
+            (r.findings || []).map(f => f.message).join(' / '),
+            `<a href="/compliance" class="btn btn-sm btn-outline-primary">詳細</a>`]);
     }
     let html = `<h5>${SES.escapeHtml(SES.i18n.t(key))}</h5><table class="table table-sm table-bordered"><thead><tr>`;
     headers.forEach(h => html += `<th>${h}</th>`);

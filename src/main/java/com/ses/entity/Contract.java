@@ -101,6 +101,9 @@ public class Contract extends BaseEntity {
     /** 備考 */
     private String remarks;
 
+    /** 指揮命令の実態フラグ（偽装請負判定用。準委任/請負契約なのに指揮命令の実態がある場合はtrue） */
+    private Boolean directCommandFlag;
+
     /**
      * 成約担当営業ID（成約時の主担当を既定値とし変更可）
      * updateStrategy=ALWAYS: グローバルの not_null 戦略を上書きし、

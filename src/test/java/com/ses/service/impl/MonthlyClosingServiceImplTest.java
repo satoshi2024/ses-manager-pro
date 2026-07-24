@@ -39,6 +39,7 @@ class MonthlyClosingServiceImplTest {
     @Mock private SystemConfigService systemConfigService;
     @Mock private SystemConfigMapper systemConfigMapper;
     @Mock private SysUserMapper sysUserMapper;
+    @Mock private com.ses.service.compliance.LaborComplianceService laborComplianceService;
 
     @InjectMocks
     private MonthlyClosingServiceImpl service;
@@ -173,5 +174,20 @@ class MonthlyClosingServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.reopenClosing("2026-06", 7L, "管理者"));
         assertTrue(ex.getMessage().contains("error.closing.notClosed"));
+    }
+
+    @Test
+    void summary_コンプライアンスfindingsを提示し締めを妨げない() {
+        stubEmptyAll();
+        com.ses.dto.compliance.ContractComplianceDto risk = new com.ses.dto.compliance.ContractComplianceDto();
+        risk.setContractId(1L);
+        risk.setFindings(List.of(new com.ses.dto.compliance.ComplianceFinding(
+                "TIER_EXCEEDED", "warning", "段数超過", 1L)));
+        lenient().when(laborComplianceService.findCurrentRisks()).thenReturn(List.of(risk));
+
+        MonthlyClosingSummaryDto s = service.summary("2026-06");
+
+        assertEquals(1, s.getComplianceCount());
+        assertTrue(s.isReadyToClose(), "コンプライアンスリスクは締めを妨げない");
     }
 }

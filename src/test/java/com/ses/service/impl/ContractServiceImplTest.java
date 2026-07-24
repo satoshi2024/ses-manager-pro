@@ -48,6 +48,12 @@ class ContractServiceImplTest {
     @Mock
     private com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
 
+    @Mock
+    private com.ses.service.compliance.LaborComplianceService laborComplianceService;
+
+    @Mock
+    private com.ses.service.AuditLogService auditLogService;
+
     @InjectMocks
     private ContractServiceImpl contractService;
 
@@ -683,5 +689,57 @@ class ContractServiceImplTest {
         when(priceHistoryMapper.delete(any())).thenReturn(1);
         contractService.deleteFuturePriceRevision(1L, "2999-12");
         verify(priceHistoryMapper).delete(any());
+    }
+
+    // ===== labor-compliance-check (FR-10) 呼び出し・記録連携 =====
+
+    @Test
+    void saveWithBusinessRules_findingが無ければ監査ログに記録しない() {
+        Contract contract = new Contract();
+        contract.setStartDate(LocalDate.of(2026, 7, 1));
+        when(contractMapper.insert(contract)).thenReturn(1);
+        when(laborComplianceService.check(contract)).thenReturn(java.util.List.of());
+
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.saveWithBusinessRules(contract);
+
+        assertTrue(findings.isEmpty());
+        verify(auditLogService, never()).record(any(), any(), any(), anyInt(), any(), anyBoolean());
+    }
+
+    @Test
+    void saveWithBusinessRules_findingがあれば監査ログに記録し返り値に含む() {
+        Contract contract = new Contract();
+        contract.setStartDate(LocalDate.of(2026, 7, 1));
+        when(contractMapper.insert(contract)).thenAnswer(inv -> { contract.setId(99L); return 1; });
+        com.ses.dto.compliance.ComplianceFinding finding =
+                new com.ses.dto.compliance.ComplianceFinding("TIER_EXCEEDED", "warning", "段数超過", 99L);
+        when(laborComplianceService.check(contract)).thenReturn(java.util.List.of(finding));
+
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.saveWithBusinessRules(contract);
+
+        assertEquals(1, findings.size());
+        verify(auditLogService).record(any(), eq("POST"), eq("/api/contracts/99"), eq(200),
+                eq("compliance:TIER_EXCEEDED"), eq(false));
+    }
+
+    @Test
+    void updateWithBusinessRules_findingがあれば監査ログに記録する() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+
+        Contract update = new Contract();
+        update.setId(1L);
+        com.ses.dto.compliance.ComplianceFinding finding =
+                new com.ses.dto.compliance.ComplianceFinding("DOUBLE_DISPATCH", "warning", "二重派遣兆候", 1L);
+        when(laborComplianceService.check(update)).thenReturn(java.util.List.of(finding));
+
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.updateWithBusinessRules(update);
+
+        assertEquals(1, findings.size());
+        verify(auditLogService).record(any(), eq("PUT"), eq("/api/contracts/1"), eq(200),
+                eq("compliance:DOUBLE_DISPATCH"), eq(false));
     }
 }

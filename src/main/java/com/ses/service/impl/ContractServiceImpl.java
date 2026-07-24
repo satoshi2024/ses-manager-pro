@@ -48,6 +48,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final ProjectMapper projectMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
+    private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
+    private final com.ses.service.AuditLogService auditLogService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -128,16 +130,16 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void saveWithBusinessRules(Contract contract) {
+    public List<com.ses.dto.compliance.ComplianceFinding> saveWithBusinessRules(Contract contract) {
         validate(contract);
         if (!StringUtils.hasText(contract.getContractType())) {
             contract.setContractType("準委任");
         }
         contract.setStatus("準備中");
-        
+
         if (contract.getContractNo() == null || contract.getContractNo().isEmpty()) {
             LocalDate baseDate = contract.getStartDate() != null ? contract.getStartDate() : LocalDate.now();
-            
+
             boolean success = false;
             for (int i = 0; i < 3; i++) {
                 String no = generateContractNo(baseDate);
@@ -160,11 +162,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if ("稼動中".equals(contract.getStatus())) {
             engineerStatusService.onContractActive(contract.getEngineerId());
         }
+
+        return checkComplianceAndRecord(contract, "POST");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateWithBusinessRules(Contract contract) {
+    public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract) {
         // 行ロックで単価同期/改定と直列化する（R3R-29）。
         Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());
         if (old == null) {
@@ -198,6 +202,29 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         } else if (!engineerChanged && "稼動中".equals(old.getStatus()) && newEngineerId != null) {
             engineerStatusService.releaseIfIdle(newEngineerId);
         }
+
+        return checkComplianceAndRecord(contract, "PUT");
+    }
+
+    /**
+     * 労務コンプライアンスリスクチェック（LaborComplianceService）を実行し、該当があれば
+     * 既存の t_audit_log に記録する（新規テーブル不要。design.md 2章）。ブロックはしない。
+     */
+    private List<com.ses.dto.compliance.ComplianceFinding> checkComplianceAndRecord(Contract contract, String httpMethod) {
+        List<com.ses.dto.compliance.ComplianceFinding> findings = laborComplianceService.check(contract);
+        if (!findings.isEmpty()) {
+            String codes = findings.stream()
+                    .map(com.ses.dto.compliance.ComplianceFinding::getCode)
+                    .distinct()
+                    .collect(java.util.stream.Collectors.joining(","));
+            String applicationCode = "compliance:" + codes;
+            if (applicationCode.length() > 64) {
+                applicationCode = applicationCode.substring(0, 64);
+            }
+            auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), httpMethod,
+                    "/api/contracts/" + contract.getId(), 200, applicationCode, false);
+        }
+        return findings;
     }
 
     @Override

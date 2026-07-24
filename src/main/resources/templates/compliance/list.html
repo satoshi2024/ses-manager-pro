@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{compliance.title} + ' - ' + #{app.name}">コンプライアンス - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light">
+            <i class="bi bi-shield-exclamation me-2 text-warning"></i><th:block th:text="#{compliance.title}">コンプライアンス（リスク項目）</th:block>
+        </h2>
+    </div>
+
+    <div class="alert alert-secondary" th:text="#{compliance.note}">
+        偽装請負・多重派遣等の兆候を機械的に検知して警告するものであり、契約を自動的にブロックするものではありません。法的な最終判断は行いません。ルールの有効/無効・閾値は「システム設定」から変更できます。
+    </div>
+
+    <div class="card bg-secondary border-dark shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 align-middle">
+                <thead class="table-dark">
+                <tr>
+                    <th th:text="#{compliance.contractNo}">契約番号</th>
+                    <th th:text="#{compliance.engineer}">要員</th>
+                    <th th:text="#{compliance.project}">案件</th>
+                    <th th:text="#{compliance.contractType}">契約形態</th>
+                    <th th:text="#{compliance.findings}">該当リスク</th>
+                </tr>
+                </thead>
+                <tbody id="complianceTableBody">
+                    <tr><td colspan="5" class="text-center text-muted py-4" th:text="#{js.common.loading}">読み込み中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/compliance.js}"></script>
+</th:block>
+</body>
+</html>

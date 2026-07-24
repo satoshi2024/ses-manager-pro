@@ -32,6 +32,7 @@ spring:
         - classpath:sql/schema-resume-ingestion-h2.sql
         - classpath:sql/schema-project-ingestion-h2.sql
         - classpath:sql/schema-bp-availability-h2.sql
+        - classpath:sql/schema-labor-compliance-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
