@@ -40,6 +40,8 @@ class MonthlyClosingServiceImplTest {
     @Mock private SystemConfigMapper systemConfigMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private com.ses.service.compliance.LaborComplianceService laborComplianceService;
+    @Mock private com.ses.service.MenuCacheService menuCacheService;
+    @Mock private org.springframework.beans.factory.ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
 
     @InjectMocks
     private MonthlyClosingServiceImpl service;
@@ -176,18 +178,67 @@ class MonthlyClosingServiceImplTest {
         assertTrue(ex.getMessage().contains("error.closing.notClosed"));
     }
 
-    @Test
-    void summary_コンプライアンスfindingsを提示し締めを妨げない() {
-        stubEmptyAll();
+    @org.junit.jupiter.api.AfterEach
+    void clearAuth() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    /** 指定ロールでログイン中の状態にする。 */
+    private void loginAs(String role) {
+        lenient().when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        "tester", "n/a",
+                        List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role))));
+    }
+
+    private com.ses.dto.compliance.ContractComplianceDto sampleRisk() {
         com.ses.dto.compliance.ContractComplianceDto risk = new com.ses.dto.compliance.ContractComplianceDto();
         risk.setContractId(1L);
         risk.setFindings(List.of(new com.ses.dto.compliance.ComplianceFinding(
                 "TIER_EXCEEDED", "warning", "段数超過", 1L)));
-        lenient().when(laborComplianceService.findCurrentRisks()).thenReturn(List.of(risk));
+        return risk;
+    }
+
+    @Test
+    void summary_コンプライアンスfindingsを提示し締めを妨げない() {
+        stubEmptyAll();
+        loginAs("管理者");
+        lenient().when(laborComplianceService.findCurrentRisks()).thenReturn(List.of(sampleRisk()));
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
 
         assertEquals(1, s.getComplianceCount());
         assertTrue(s.isReadyToClose(), "コンプライアンスリスクは締めを妨げない");
+    }
+
+    /**
+     * 月次締めメニューはHRにも開放されているが compliance メニューは管理者/マネージャー限定。
+     * 締め画面経由でHRがリスク一覧を閲覧できてしまわないことを保証する。
+     */
+    @Test
+    void summary_compliance権限が無いロールにはfindingsを返さない() {
+        stubEmptyAll();
+        loginAs("HR");
+        when(menuCacheService.getMenuKeysByRole("HR")).thenReturn(List.of("monthly-closing"));
+        lenient().when(laborComplianceService.findCurrentRisks()).thenReturn(List.of(sampleRisk()));
+
+        MonthlyClosingSummaryDto s = service.summary("2026-06");
+
+        assertEquals(0, s.getComplianceCount());
+        assertTrue(s.getComplianceFindings().isEmpty());
+        verify(laborComplianceService, never()).findCurrentRisks();
+    }
+
+    @Test
+    void summary_compliance権限を持つマネージャーにはfindingsを返す() {
+        stubEmptyAll();
+        loginAs("マネージャー");
+        when(menuCacheService.getMenuKeysByRole("マネージャー")).thenReturn(List.of("monthly-closing", "compliance"));
+        lenient().when(laborComplianceService.findCurrentRisks()).thenReturn(List.of(sampleRisk()));
+
+        MonthlyClosingSummaryDto s = service.summary("2026-06");
+
+        assertEquals(1, s.getComplianceCount());
     }
 }

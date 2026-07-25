@@ -91,7 +91,7 @@ public class SkillSheetGenerator {
 
             if (showsRemarks(options)) {
                 addCell(basicTable, "備考", headerFont, true);
-                addCell(basicTable, "客先A専用フォーマット", normalFont, false);
+                addCell(basicTable, SkillSheetConstants.CLIENT_A_REMARKS, normalFont, false);
             }
             document.add(basicTable);
 
@@ -196,34 +196,33 @@ public class SkillSheetGenerator {
             titleRow.createCell(0).setCellValue("スキルシート");
             titleRow.getCell(0).setCellStyle(headerStyle);
             
+            // 基本情報の列は様式・匿名化により増減するため、見出しと値を同じ順で組み立ててから書き出す。
+            // 列ごとに分岐すると、匿名化で最寄駅が落ちた際に客先A様式の「備考」まで一緒に消える
+            // （PDFには出るのにExcelには出ない）といったズレが生じる。
+            java.util.List<String> basicHeaders = new java.util.ArrayList<>();
+            java.util.List<String> basicValues = new java.util.ArrayList<>();
+            basicHeaders.add("氏名");
+            basicValues.add(sanitize(dto.getFullName()));
+            if (showsNearestStation(options) && dto.getNearestStation() != null) {
+                basicHeaders.add("最寄駅");
+                basicValues.add(sanitize(dto.getNearestStation()));
+            }
+            basicHeaders.add("稼働可能日");
+            basicValues.add(dto.getAvailableDate() != null
+                    ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
+            if (showsRemarks(options)) {
+                basicHeaders.add("備考");
+                basicValues.add(SkillSheetConstants.CLIENT_A_REMARKS);
+            }
+
             org.apache.poi.ss.usermodel.Row basicHeaderRow = sheet.createRow(2);
-            basicHeaderRow.createCell(0).setCellValue("氏名");
-            if (showsNearestStation(options) && dto.getNearestStation() != null) {
-                basicHeaderRow.createCell(1).setCellValue("最寄駅");
-                basicHeaderRow.createCell(2).setCellValue("稼働可能日");
-                if (showsRemarks(options)) {
-                    basicHeaderRow.createCell(3).setCellValue("備考");
-                    for (int i = 0; i < 4; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
-                } else {
-                    for (int i = 0; i < 3; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
-                }
-            } else {
-                basicHeaderRow.createCell(1).setCellValue("稼働可能日");
-                for (int i = 0; i < 2; i++) basicHeaderRow.getCell(i).setCellStyle(headerStyle);
-            }
-            
             org.apache.poi.ss.usermodel.Row basicDataRow = sheet.createRow(3);
-            basicDataRow.createCell(0).setCellValue(sanitize(dto.getFullName()));
-            if (showsNearestStation(options) && dto.getNearestStation() != null) {
-                basicDataRow.createCell(1).setCellValue(sanitize(dto.getNearestStation()));
-                basicDataRow.createCell(2).setCellValue(dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
-                if (showsRemarks(options)) {
-                    basicDataRow.createCell(3).setCellValue("客先A専用フォーマット");
-                }
-            } else {
-                basicDataRow.createCell(1).setCellValue(dto.getAvailableDate() != null ? dto.getAvailableDate().format(DateTimeFormatter.ofPattern("yyyy/MM/dd")) : "");
+            for (int i = 0; i < basicHeaders.size(); i++) {
+                basicHeaderRow.createCell(i).setCellValue(basicHeaders.get(i));
+                basicHeaderRow.getCell(i).setCellStyle(headerStyle);
+                basicDataRow.createCell(i).setCellValue(basicValues.get(i));
             }
-            
+
             // スキル一覧
             org.apache.poi.ss.usermodel.Row skillTitleRow = sheet.createRow(5);
             skillTitleRow.createCell(0).setCellValue("■ 保有スキル");

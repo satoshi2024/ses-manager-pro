@@ -6,7 +6,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 SES Manager Pro (`sql/`,`README.md`) is a management system for a Japanese SES (システムエンジニアリングサービス) company: engineer/skill management, customer & project management, a Kanban-style proposal pipeline, contract/assignment tracking, a KPI dashboard (utilization rate, bench count, projected revenue, gross profit), engineer↔sales-rep assignment with a per-sales-rep performance/commission rollup, and an admin-only user/permission module (account CRUD + role-based menu access). Backend: Spring Boot 3.3 + MyBatis-Plus + MySQL. Frontend: Thymeleaf server-rendered pages with jQuery/vanilla JS + Bootstrap 5 (no build step, no bundler — static JS/CSS served directly).
 
-The UI, comments, log messages, commit conventions, `.kiro` documents, and SQL migration comments in this repo are in Japanese. Match that when editing templates, JS, Java comments/log strings, specs, and migration files. Do not add Chinese prose to repository files unless the file is explicitly a Chinese localization resource such as `messages_zh.properties`.
+The UI, comments, log messages, commit conventions, `.kiro` documents, and SQL migration comments in this repo are in Japanese. Match that when editing templates, JS, Java comments/log strings, specs, and migration files. Do not add Chinese prose to repository files unless the file is explicitly a Chinese localization resource such as `messages_zh_CN.properties`.
 
 ## Commands
 

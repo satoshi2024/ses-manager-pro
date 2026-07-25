@@ -42,6 +42,9 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
 
     private static final String CONFIG_KEY = "renewal.escalation-days";
     private static final String DEFAULT_STAGES = "30:営業,14:上長";
+    /** 終了日超過からこの日数を過ぎた契約はエスカレーションを打ち切る（0以下で無期限）。 */
+    private static final String CONFIG_KEY_MAX_OVERDUE = "renewal.escalation-max-overdue-days";
+    private static final int DEFAULT_MAX_OVERDUE_DAYS = 90;
     private static final String ROLE_SALES = "営業";
     private static final String ROLE_SUPERIOR = "上長";
 
@@ -67,6 +70,11 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
 
         Set<Long> confirmedOriginalIds = resolveConfirmedOriginalIds(candidates);
         LocalDate today = LocalDate.now();
+        // 終了日を大きく過ぎたまま「稼動中」で放置された契約は、更新交渉としては既に手遅れであり、
+        // 何もしなければ毎月エスカレーションが飛び続けて通知が実質ノイズ化する。
+        // 打ち切り日数を過ぎたものは対象外にする（0以下で無効化＝従来どおり無期限）。
+        int maxOverdueDays = systemConfigService.getInt(CONFIG_KEY_MAX_OVERDUE, DEFAULT_MAX_OVERDUE_DAYS);
+        LocalDate oldestEndDate = maxOverdueDays > 0 ? today.minusDays(maxOverdueDays) : null;
         String monthKey = YearMonth.now().toString();
         // 上長(管理者/マネージャー)は組織階層が無く契約に依らず固定なので、対象契約×ステージの数だけ
         // 都度問い合わせず実行1回につき1度だけ解決する。
@@ -76,6 +84,9 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
         for (Contract c : candidates) {
             if (confirmedOriginalIds.contains(c.getId())) {
                 continue; // 対応済み(更新ドラフト確定)はエスカレーション対象外
+            }
+            if (oldestEndDate != null && c.getEndDate().isBefore(oldestEndDate)) {
+                continue; // 終了日を大幅に超過。恒久的な通知ループを避けるため打ち切る
             }
             for (Stage stage : stages) {
                 LocalDate escalationDate = c.getEndDate().minusDays(stage.days());

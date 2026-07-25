@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.support.PropertiesLoaderUtils;
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -12,6 +13,46 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class MessageBundleConsistencyTest {
+
+    /**
+     * Thymeleafテンプレートが参照している {@code #{...}} のキーが、実際に messages.properties に
+     * 存在することを検証する。
+     *
+     * <p>{@code spring.messages.use-code-as-default-message: true} のため、キーが欠落しても例外にはならず
+     * 画面にキー文字列（例: {@code menu.bpAvailability}）がそのまま表示されるだけで、テストも通ってしまう。
+     * 「欠落はテストで検出」という application.yml のコメントどおりの検査を、ここで担保する。
+     */
+    @Test
+    public void testTemplateMessageKeysExist() throws Exception {
+        Properties ja = PropertiesLoaderUtils.loadProperties(new ClassPathResource("messages.properties"));
+        Set<String> definedKeys = ja.stringPropertyNames();
+
+        // 連結（#{a} + ${b}）や式内の動的キーは静的解析できないため、単純キーのみを対象にする
+        Pattern keyPattern = Pattern.compile("#\\{([a-zA-Z0-9_.\\-]+)\\}");
+        Map<String, Set<String>> missingByTemplate = new TreeMap<>();
+
+        for (org.springframework.core.io.Resource resource : new org.springframework.core.io.support
+                .PathMatchingResourcePatternResolver().getResources("classpath:templates/**/*.html")) {
+            String content;
+            try (InputStream in = resource.getInputStream()) {
+                content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            Matcher m = keyPattern.matcher(content);
+            Set<String> missing = new TreeSet<>();
+            while (m.find()) {
+                if (!definedKeys.contains(m.group(1))) {
+                    missing.add(m.group(1));
+                }
+            }
+            if (!missing.isEmpty()) {
+                missingByTemplate.put(String.valueOf(resource.getFilename()), missing);
+            }
+        }
+
+        assertTrue(missingByTemplate.isEmpty(),
+                "テンプレートが参照しているメッセージキーが messages.properties にありません"
+                        + "（画面にキー名がそのまま表示されます）: " + missingByTemplate);
+    }
 
     /**
      * 各プロパティファイルにキーの重複が無いことを検証する。

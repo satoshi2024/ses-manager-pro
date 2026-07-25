@@ -155,7 +155,7 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability'");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability-ingestion'");
 
-            // 資金繰り予測(V46, V48, V49) と スキルシートテンプレート(V47)
+            // 資金繰り予測(V46, V48, V49) と スキルシートテンプレート(V55)
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.opening-balance'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.bp-payment-site-months'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.payroll-employer-burden-rate'");

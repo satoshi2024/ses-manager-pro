@@ -119,4 +119,36 @@ class RetentionRiskServiceImplTest {
                 com.ses.common.exception.BusinessException.class,
                 () -> retentionRiskService.score(999999L)).getMessage() != null);
     }
+
+    /**
+     * 要員一覧はページ内全要員のスコアを必要とするため一括算出を使う。
+     * 1件ずつの {@code score()} と同じ結果になることを保証する（口径が分かれると一覧と詳細で値がずれる）。
+     */
+    @Test
+    void scoreBatchは個別算出と同じスコアを返す() {
+        int benchWarnDays = systemConfigService.getInt("retention.risk.bench-warn-days", 30);
+        Long highRiskId = insertEngineer("Bench", LocalDate.now().minusDays(200));
+        insertContract(highRiskId, LocalDate.now().minusDays((long) benchWarnDays * 3));
+        insertFollowup(highRiskId, LocalDate.now().minusDays(5), 1);
+
+        Long lowRiskId = insertEngineer("稼動中", LocalDate.now());
+        insertFollowup(lowRiskId, LocalDate.now(), 5);
+
+        java.util.Map<Long, RetentionRiskDto> batch =
+                retentionRiskService.scoreBatch(java.util.List.of(highRiskId, lowRiskId));
+
+        assertEquals(2, batch.size());
+        assertEquals(retentionRiskService.score(highRiskId).getScore(), batch.get(highRiskId).getScore());
+        assertEquals(retentionRiskService.score(lowRiskId).getScore(), batch.get(lowRiskId).getScore());
+        assertTrue(batch.get(highRiskId).isHighRisk());
+        assertFalse(batch.get(lowRiskId).isHighRisk());
+        assertEquals(retentionRiskService.score(highRiskId).getBenchDays(), batch.get(highRiskId).getBenchDays());
+    }
+
+    @Test
+    void scoreBatchは空入力と存在しないIDを安全に扱う() {
+        assertTrue(retentionRiskService.scoreBatch(java.util.List.of()).isEmpty());
+        assertTrue(retentionRiskService.scoreBatch(null).isEmpty());
+        assertTrue(retentionRiskService.scoreBatch(java.util.List.of(999999L)).isEmpty());
+    }
 }

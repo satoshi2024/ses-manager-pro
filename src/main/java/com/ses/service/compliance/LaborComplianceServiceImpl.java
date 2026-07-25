@@ -34,6 +34,10 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
 
     private static final String SEVERITY_WARNING = "warning";
     private static final List<String> DIRECT_COMMAND_CONTRACT_TYPES = List.of("準委任", "請負");
+    /** 「現在」該当しうる契約のステータス。終了・解約は過去の契約なのでリスク一覧に載せない。 */
+    private static final List<String> ACTIVE_CONTRACT_STATUSES = List.of(
+            com.ses.common.constant.StatusConstants.CONTRACT_ACTIVE,
+            com.ses.common.constant.StatusConstants.CONTRACT_PREPARING);
 
     private final ContractMapper contractMapper;
     private final BpPaymentMapper bpPaymentMapper;
@@ -53,7 +57,11 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
 
     @Override
     public List<ContractComplianceDto> findCurrentRisks() {
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<>());
+        // 「現在の」リスク一覧（design 2章）なので、終了・解約済みの契約は対象外。
+        // 全契約を読むと、何年も前に終了した契約の指摘が恒久的に一覧と月次締めに残り続けるうえ、
+        // 契約テーブル全件をメモリに載せることになる。
+        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES));
         if (contracts.isEmpty()) {
             return List.of();
         }

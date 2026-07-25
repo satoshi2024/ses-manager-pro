@@ -525,12 +525,14 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (this.getById(contractId) == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        // renewalDecision は @TableField(updateStrategy = ALWAYS) のため、他フィールドを null のまま
-        // 部分更新しても上書きされない（decision=null で「未定に戻す」を安全に反映できる）。
-        Contract patch = new Contract();
-        patch.setId(contractId);
-        patch.setRenewalDecision(decision);
-        this.updateById(patch);
+        // updateById(エンティティ) は使えない。Contract には renewalDecision の他にも
+        // salesUserId / commissionBaseType / commissionRate が @TableField(updateStrategy = ALWAYS)
+        // で定義されており、空の patch エンティティを渡すとそれらも SET 句に含まれて NULL 上書き
+        // されてしまう（担当営業とインセンティブ個別設定が消える）。ALWAYS は「全項目を送る単一経路」
+        // 前提の指定のため、部分更新はカラムを明示する UpdateWrapper で行う。
+        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Contract>()
+                .eq("id", contractId)
+                .set("renewal_decision", decision));
     }
 
     /**

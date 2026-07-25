@@ -9,6 +9,10 @@ import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.EngineerFollowupMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.dto.billing.CashFlowForecastDto;
+import com.ses.entity.SysUser;
+import com.ses.service.billing.CashFlowForecastService;
 import com.ses.entity.Invoice;
 import com.ses.entity.Customer;
 import org.junit.jupiter.api.Test;
@@ -59,6 +63,12 @@ class NotificationGenerateServiceTest {
     private EngineerFollowupMapper engineerFollowupMapper;
 
     @Mock
+    private SysUserMapper sysUserMapper;
+
+    @Mock
+    private CashFlowForecastService cashFlowForecastService;
+
+    @Mock
     private NotificationService notificationService;
 
     @Mock
@@ -71,6 +81,55 @@ class NotificationGenerateServiceTest {
     void testGenerateAll() {
         notificationGenerateService.generateAll();
         // Just verify it doesn't crash for now or mock the DB calls if implemented.
+    }
+
+    /** FR-05: 残高が警戒ラインを割る月を管理者・マネージャーへ通知する（旧: forecast内で発行）。 */
+    @Test
+    void cashflowAlert_残高が閾値を割る月を通知する() {
+        when(systemConfigService.getInt("cashflow.alert-months", 6)).thenReturn(2);
+        when(systemConfigService.getDecimal(eq("cashflow.alert-threshold"), any())).thenReturn(java.math.BigDecimal.ZERO);
+
+        CashFlowForecastDto.CashFlowMonthDto ok = new CashFlowForecastDto.CashFlowMonthDto();
+        ok.setMonth("2026-08");
+        ok.setBalance(new java.math.BigDecimal("100000"));
+        CashFlowForecastDto.CashFlowMonthDto shortfall = new CashFlowForecastDto.CashFlowMonthDto();
+        shortfall.setMonth("2026-09");
+        shortfall.setBalance(new java.math.BigDecimal("-400000"));
+
+        CashFlowForecastDto forecast = new CashFlowForecastDto();
+        forecast.setMonths(List.of(ok, shortfall));
+        when(cashFlowForecastService.forecast(any(), eq(2), eq(null))).thenReturn(forecast);
+
+        SysUser admin = new SysUser();
+        admin.setId(99L);
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(admin));
+
+        notificationGenerateService.cashflowAlert();
+
+        // 残高がプラスの月は通知しない。ショート月のみ1件。
+        verify(notificationService, times(1)).publishToUser(
+                eq(99L), eq("CASHFLOW_ALERT"), any(), contains("2026-09"), any(),
+                eq("CASHFLOW_ALERT:2026-09"));
+        verify(notificationService, never()).publishToUser(
+                any(), any(), any(), any(), any(), eq("CASHFLOW_ALERT:2026-08"));
+    }
+
+    @Test
+    void cashflowAlert_全月が閾値以上なら受信者を引かない() {
+        when(systemConfigService.getInt("cashflow.alert-months", 6)).thenReturn(1);
+        when(systemConfigService.getDecimal(eq("cashflow.alert-threshold"), any())).thenReturn(java.math.BigDecimal.ZERO);
+
+        CashFlowForecastDto.CashFlowMonthDto ok = new CashFlowForecastDto.CashFlowMonthDto();
+        ok.setMonth("2026-08");
+        ok.setBalance(new java.math.BigDecimal("1"));
+        CashFlowForecastDto forecast = new CashFlowForecastDto();
+        forecast.setMonths(List.of(ok));
+        when(cashFlowForecastService.forecast(any(), eq(1), eq(null))).thenReturn(forecast);
+
+        notificationGenerateService.cashflowAlert();
+
+        verify(sysUserMapper, never()).selectList(any());
+        verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
     }
 
     @Test

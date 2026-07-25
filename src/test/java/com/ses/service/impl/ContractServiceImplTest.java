@@ -742,4 +742,42 @@ class ContractServiceImplTest {
         verify(auditLogService).record(any(), eq("PUT"), eq("/api/contracts/1"), eq(200),
                 eq("compliance:DOUBLE_DISPATCH"), eq(false));
     }
+
+    // ===== contract-renewal-calendar (FR-06) 更新判断の部分更新 =====
+
+    /**
+     * 更新判断の設定は renewal_decision だけを更新しなければならない。
+     * Contract は salesUserId / commissionBaseType / commissionRate を
+     * {@code @TableField(updateStrategy = ALWAYS)} で定義しているため、空のエンティティを
+     * updateById に渡すとそれらまで SET 句に載って NULL 上書きされ、担当営業とインセンティブ
+     * 個別設定が消える（＝インセンティブ集計から契約が欠落する）。
+     */
+    @Test
+    void updateRenewalDecision_renewalDecision以外のカラムを更新しない() {
+        Contract existing = new Contract();
+        existing.setId(1L);
+        when(contractMapper.selectById(1L)).thenReturn(existing);
+        when(contractMapper.update(isNull(), any())).thenReturn(1);
+
+        contractService.updateRenewalDecision(1L, "CONTINUE");
+
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<Contract>> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(contractMapper).update(isNull(), captor.capture());
+
+        String setSql = captor.getValue().getSqlSet();
+        assertNotNull(setSql, "SET句が生成されていること");
+        assertTrue(setSql.contains("renewal_decision"), "renewal_decision を更新すること: " + setSql);
+        assertFalse(setSql.contains("sales_user_id"), "担当営業を巻き込んで更新しないこと: " + setSql);
+        assertFalse(setSql.contains("commission_base_type"), "インセンティブ基準を巻き込まないこと: " + setSql);
+        assertFalse(setSql.contains("commission_rate"), "インセンティブ率を巻き込まないこと: " + setSql);
+    }
+
+    @Test
+    void updateRenewalDecision_不正な値は400() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.updateRenewalDecision(1L, "UNKNOWN"));
+        assertEquals(400, ex.getCode());
+        verify(contractMapper, never()).update(any(), any());
+    }
 }

@@ -109,6 +109,9 @@ public class EngineerApiController {
         }
         java.util.List<Long> engineerIds = engineers.stream().map(Engineer::getId).collect(java.util.stream.Collectors.toList());
         java.util.Map<Long, com.ses.dto.engineersales.EngineerPrimarySalesDto> primarySalesMap = engineerSalesService.mapPrimaryByEngineerIds(engineerIds);
+        // 定着リスクは要員ごとに3クエリ必要なため、必ず一括算出する（1件ずつ呼ぶと一覧表示のたびにN+1）
+        java.util.Map<Long, com.ses.dto.engineerfollowup.RetentionRiskDto> riskMap =
+                retentionRiskService.scoreBatch(engineerIds);
 
         for (Engineer eng : engineers) {
             com.ses.dto.engineer.EngineerListDto dto = new com.ses.dto.engineer.EngineerListDto();
@@ -120,9 +123,11 @@ public class EngineerApiController {
                 dto.setPrimarySalesUserName(primarySales.getSalesUserName());
             }
 
-            com.ses.dto.engineerfollowup.RetentionRiskDto risk = retentionRiskService.score(eng.getId());
-            dto.setRetentionRiskScore(risk.getScore());
-            dto.setRetentionHighRisk(risk.isHighRisk());
+            com.ses.dto.engineerfollowup.RetentionRiskDto risk = riskMap.get(eng.getId());
+            if (risk != null) {
+                dto.setRetentionRiskScore(risk.getScore());
+                dto.setRetentionHighRisk(risk.isHighRisk());
+            }
 
             dtoList.add(dto);
         }

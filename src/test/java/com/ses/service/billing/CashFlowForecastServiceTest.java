@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class CashFlowForecastServiceTest {
@@ -158,40 +159,33 @@ class CashFlowForecastServiceTest {
         // Balance: 1149500 - 0 = 1149500
         assertEquals(new BigDecimal("1149500"), m2.getBalance());
         
-        verify(notificationService, times(0)).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString());
+        verifyNoInteractions(notificationService);
     }
 
+    /**
+     * 残高が警戒ラインを割っても forecast は通知を発行しない（参照は副作用を持たない）。
+     * 資金ショート警告の発行は NotificationGenerateService.cashflowAlert() の日次バッチが担う。
+     */
     @Test
-    void testAlertThreshold() {
+    void 残高が閾値を割ってもforecastは通知しない() {
         when(systemConfigService.getDecimal("cashflow.opening-balance", BigDecimal.ZERO)).thenReturn(new BigDecimal("100000"));
         when(systemConfigService.getDecimal("cashflow.fixed-cost", BigDecimal.ZERO)).thenReturn(new BigDecimal("500000"));
         when(systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO)).thenReturn(new BigDecimal("0"));
         when(systemConfigService.getInt("cashflow.bp-payment-site-months", 1)).thenReturn(1);
         when(systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO)).thenReturn(BigDecimal.ZERO);
-        
+
         when(freeeIntegrationService.connected()).thenReturn(false);
         when(invoiceMapper.selectList(any())).thenReturn(List.of());
         when(bpPaymentMapper.selectListWithDetails(any(), any())).thenReturn(List.of());
-
-        SysUser admin = new SysUser();
-        admin.setId(99L);
-        admin.setRole("管理者");
-        when(sysUserMapper.selectList(any())).thenReturn(List.of(admin));
 
         YearMonth from = YearMonth.of(2026, 8);
         CashFlowForecastDto result = service.forecast(from, 1, null);
 
         // Balance will be 100000 - 500000 = -400000 < 0
         assertEquals(new BigDecimal("-400000"), result.getMonths().get(0).getBalance());
-        
-        verify(notificationService, times(1)).publishToUser(
-                eq(99L),
-                eq("CASHFLOW_ALERT"),
-                anyString(),
-                anyString(),
-                eq("/#cashflow"),
-                eq("CASHFLOW_ALERT_2026-08")
-        );
+
+        verifyNoInteractions(notificationService);
+        verifyNoInteractions(sysUserMapper);
     }
     
     @Test
