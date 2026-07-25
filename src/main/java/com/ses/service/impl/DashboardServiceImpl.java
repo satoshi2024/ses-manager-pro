@@ -60,6 +60,13 @@ public class DashboardServiceImpl implements DashboardService {
     private final UtilizationCalcService utilizationCalcService;
 
     @Override
+    @org.springframework.cache.annotation.Cacheable(
+            cacheNames = com.ses.config.CacheConfig.CACHE_DASHBOARD_SUMMARY,
+            keyGenerator = "dashboardScopeKeyGenerator",
+            // sync=true: 未キャッシュ時に算出するのは1スレッドだけにし、残りは結果を待つ。
+            // これが無いと、起動直後やTTL切れの瞬間に同時アクセス分だけ重い集計が並走し
+            // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
+            sync = true)
     public DashboardSummaryDto getSummary(Integer year) {
         // 1. Calculate Charts (Dynamic) and prepare for KPIs
         List<YearMonth> targetMonths = (year != null)

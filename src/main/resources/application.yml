@@ -139,6 +139,13 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  # ===== ダッシュボード集計のキャッシュ =====
+  # ダッシュボードは1リクエストで十数本のクエリを撃つ最重量画面。中身はKPIの集計値で
+  # 秒単位の鮮度は不要なため短時間キャッシュする。0以下でキャッシュ無効。
+  # キャッシュキーにはデータスコープ(閲覧者ごとの母集団)を含めている(CacheConfig参照)。
+  cache:
+    dashboard-ttl-seconds: ${DASHBOARD_CACHE_TTL:60}
+    dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
