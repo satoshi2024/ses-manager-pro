@@ -130,23 +130,44 @@ function sendChatMessage() {
 
 function requestAiMatch() {
     appendUserMessage(SES.i18n.t('ai.msg.requestMatch'));
-    const loadingId = appendAiLoading();
-    
+    fetchAndRenderMatches(appendAiLoading());
+}
+
+/**
+ * マッチング結果はAPIの実データのみを表示する。
+ * 以前は失敗時・非200時にハードコードされたダミー案件(projectId 101/105/112)へ
+ * 無言でフォールバックしており、実在しない案件がAIの判定結果として表示されたうえ、
+ * そのカードの「提案」ボタンから実データとして提案が登録できてしまっていた。
+ */
+function fetchAndRenderMatches(loadingId) {
     $.ajax({
         url: '/api/ai/match/engineer-to-projects',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify({ engineerId: currentEngineerId }),
         success: function(res) {
-            setTimeout(() => {
-                const results = res.code === 200 ? res.data : getMockMatchData();
-                renderMatchResultsHTML(loadingId, results);
-            }, 1500);
+            if (res.code !== 200) {
+                showMatchError(loadingId, res.message);
+                return;
+            }
+            const results = Array.isArray(res.data) ? res.data : [];
+            if (results.length === 0) {
+                replaceAiLoadingWithMessage(loadingId,
+                    '<p class="mb-0">' + SES.escapeHtml(SES.i18n.t('ai.msg.matchEmpty')) + '</p>');
+                return;
+            }
+            renderMatchResultsHTML(loadingId, results);
         },
         error: function() {
-            setTimeout(() => renderMatchResultsHTML(loadingId, getMockMatchData()), 1500);
+            showMatchError(loadingId, null);
         }
     });
+}
+
+function showMatchError(loadingId, message) {
+    const text = message || SES.i18n.t('ai.msg.matchFailed');
+    replaceAiLoadingWithMessage(loadingId,
+        '<p class="mb-0 text-danger">' + SES.escapeHtml(text) + '</p>');
 }
 
 function requestSkillSummary() {
@@ -198,12 +219,12 @@ function generateEmailDraft() {
 }
 
 function renderMatchResultsInChat(loadingId) {
-    const results = getMockMatchData();
-    renderMatchResultsHTML(loadingId, results);
+    fetchAndRenderMatches(loadingId);
 }
 
 function renderMatchResultsHTML(loadingId, results) {
-    let html = `<p class="mb-3">${SES.i18n.t('ai.msg.matchResult')}</p>`;
+    // 件数は実データの数を出す（以前はダミー3件前提の固定文だった）
+    let html = `<p class="mb-3">${SES.escapeHtml(SES.i18n.t('ai.msg.matchResult', [results.length]))}</p>`;
     
     results.forEach(match => {
         const scoreColor = match.score >= 90 ? 'text-success' : (match.score >= 70 ? 'text-warning' : 'text-danger');
@@ -263,10 +284,4 @@ function proposeToProject(projectId, score) {
     });
 }
 
-function getMockMatchData() {
-    return [
-        { projectId: 101, projectName: '金融系バックエンドAPI開発', score: 95, reason: '必須要件のJava/Spring Boot経験を満たしています。' },
-        { projectId: 105, projectName: '大手ECサイトリプレイス', score: 82, reason: '技術要件は合致していますが、リモート希望に対し週3出社のためスコアを少し下げています。' },
-        { projectId: 112, projectName: '社内DX推進システム構築', score: 75, reason: '単価要件がギリギリですが、フロントエンドの知見もあるため活躍が見込めます。' }
-    ];
-}
+
