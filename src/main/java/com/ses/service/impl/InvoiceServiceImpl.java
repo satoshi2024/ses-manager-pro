@@ -66,6 +66,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private InvoicePaymentMapper invoicePaymentMapper;
 
+    /**
+     * 入金消込(FR-09)の解除に使う。PaymentReconciliationService ではなく Mapper を直接持つのは、
+     * 同サービスが InvoiceService に依存しており循環参照になるため。
+     */
+    @Autowired
+    private com.ses.mapper.BankDepositMapper bankDepositMapper;
+
     @Autowired
     private MailService mailService;
 
@@ -266,8 +273,27 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (payment == null || !invoiceId.equals(payment.getInvoiceId())) {
             throw BusinessException.of("error.invoice.paymentNotFound");
         }
+        releaseBankDeposit(paymentId);
         invoicePaymentMapper.deleteById(paymentId);
         recalcPaymentStatus(invoice);
+    }
+
+    /**
+     * 入金消込(FR-09)で作られた入金を削除する際、対応する銀行入金明細の消込を取り消して
+     * 未消込キューへ戻す。
+     *
+     * <p>t_invoice_payment は物理行で、t_bank_deposit.matched_payment_id が
+     * {@code ON DELETE RESTRICT} で参照している。先に解除しないと入金の削除自体が
+     * FK違反で落ち（画面には500が返る）、誤って自動消込された入金を取り消す手段が
+     * 一切無くなる（消込を戻すAPIも無いため入金が固定されてしまう）。
+     * 解除して未消込に戻せば、正しい請求書へ消込し直せる。
+     */
+    private void releaseBankDeposit(Long paymentId) {
+        bankDepositMapper.update(null, new UpdateWrapper<com.ses.entity.BankDeposit>()
+                .eq("matched_payment_id", paymentId)
+                .set("status", "未消込")
+                .set("matched_invoice_id", null)
+                .set("matched_payment_id", null));
     }
 
     @Override

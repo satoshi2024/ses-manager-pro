@@ -77,13 +77,12 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
                 .map(ProjectSkill::getSkillId)
                 .collect(Collectors.toSet());
 
-        BigDecimal pMin = project.getUnitPriceMin() != null ? project.getUnitPriceMin().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
-        BigDecimal pMax = project.getUnitPriceMax() != null ? project.getUnitPriceMax().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
-        BigDecimal ePrice = engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice().divide(new BigDecimal("10000"), 0, java.math.RoundingMode.HALF_UP) : null;
-
+        // 単価は円のまま渡す（MatchScoreCalculator は円で採点する）。万円へ丸めて渡すと
+        // 他のマッチング経路と採点が食い違い、同じ要員×案件で別のスコアが出てしまう。
         MatchScore score = MatchScoreCalculator.calculate(
-                mustIds, niceIds, engSkillIds, pMin, pMax,
-                ePrice, project.getStartDate(), engineer.getAvailableDate()
+                mustIds, niceIds, engSkillIds,
+                project.getUnitPriceMin(), project.getUnitPriceMax(),
+                engineer.getExpectedUnitPrice(), project.getStartDate(), engineer.getAvailableDate()
         );
 
         String prompt = buildPrompt(engineer, project, engSkills, score);

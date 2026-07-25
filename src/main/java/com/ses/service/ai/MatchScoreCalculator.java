@@ -20,9 +20,9 @@ public final class MatchScoreCalculator {
      * @param mustSkillIds     案件の必須スキルID
      * @param niceSkillIds     案件の尚可スキルID
      * @param engineerSkillIds 要員の保有スキルID
-     * @param priceMin         案件単価下限(万円)
-     * @param priceMax         案件単価上限(万円)
-     * @param expectedPrice    要員希望単価(万円)
+     * @param priceMin         案件単価下限(円, null=下限なし)
+     * @param priceMax         案件単価上限(円, null=上限なし)
+     * @param expectedPrice    要員希望単価(円)
      * @param projectStart     案件開始予定日
      * @param availableDate    要員稼動可能日
      * @return 採点結果
@@ -74,24 +74,18 @@ public final class MatchScoreCalculator {
         }
 
         // 3. 単価 (20点)
-        int priceScore = 0;
+        // 単価は全て「円」で受け取る（t_project.unit_price_min/max・t_engineer.expected_unit_price の
+        // 実際の格納単位。画面も円で入出力する）。減点は「1万円の乖離につき2点」で、乖離10万円で0点。
+        int priceScore;
         if (expectedPrice == null || (priceMin == null && priceMax == null)) {
             priceScore = 10;
+        } else if (priceMin != null && expectedPrice.compareTo(priceMin) < 0) {
+            priceScore = scoreFromGap(priceMin.subtract(expectedPrice));
+        } else if (priceMax != null && expectedPrice.compareTo(priceMax) > 0) {
+            priceScore = scoreFromGap(expectedPrice.subtract(priceMax));
         } else {
-            BigDecimal min = priceMin != null ? priceMin : BigDecimal.ZERO;
-            BigDecimal max = priceMax != null ? priceMax : new BigDecimal("99999");
-
-            if (expectedPrice.compareTo(min) >= 0 && expectedPrice.compareTo(max) <= 0) {
-                priceScore = 20;
-            } else if (expectedPrice.compareTo(min) < 0) {
-                BigDecimal diff = min.subtract(expectedPrice);
-                int penalty = diff.intValue() * 2;
-                priceScore = Math.max(0, 20 - penalty);
-            } else {
-                BigDecimal diff = expectedPrice.subtract(max);
-                int penalty = diff.intValue() * 2;
-                priceScore = Math.max(0, 20 - penalty);
-            }
+            // 範囲内。上限/下限の片側しか設定されていない場合、未設定側は制約なしとして扱う。
+            priceScore = 20;
         }
         result.setPriceScore(priceScore);
 
@@ -117,4 +111,16 @@ public final class MatchScoreCalculator {
 
         return result;
     }
+
+    /** 希望単価が案件レンジから外れた額(円)を20点満点の単価スコアへ変換する（1万円につき2点減点）。 */
+    private static int scoreFromGap(BigDecimal gapYen) {
+        int penalty = gapYen.divide(TEN_THOUSAND, 0, java.math.RoundingMode.DOWN)
+                .multiply(BigDecimal.valueOf(2))
+                .min(BigDecimal.valueOf(20))
+                .intValue();
+        return Math.max(0, 20 - penalty);
+    }
+
+    /** 単価スコアの減点単位（1万円）。 */
+    private static final BigDecimal TEN_THOUSAND = new BigDecimal("10000");
 }

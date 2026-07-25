@@ -1,5 +1,7 @@
 ﻿let currentEngineerId = null;
 let currentEngineerName = null;
+// 要員の希望単価(円・生値)。表示文字列を解析せずに提案単価へ渡すため engineer-detail.js が設定する。
+let currentEngineerExpectedPrice = null;
 let aiMatchModal = null;
 
 $(document).ready(function() {
@@ -226,8 +228,10 @@ function renderMatchResultsHTML(loadingId, results) {
 }
 
 function proposeToProject(projectId, score) {
-    const priceText = $('#det-price').text().replace('万', '').trim();
-    const proposedPrice = isNaN(priceText) || priceText === '-' ? null : parseInt(priceText) * 10000;
+    // 希望単価は表示文字列からではなく、要員詳細が保持している生値(円)から取る。
+    // 表示は "¥600,000 / 月" のように整形されるため、文字列を parseInt しても必ず NaN になり、
+    // 提案単価が黙って未設定のまま登録されていた。
+    const proposedPrice = currentEngineerExpectedPrice != null ? currentEngineerExpectedPrice : null;
 
     const data = {
         engineerId: currentEngineerId,

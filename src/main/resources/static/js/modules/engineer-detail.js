@@ -39,6 +39,9 @@ function renderEngineerDetail(eng) {
         currentEngineerId = eng.id;
         currentEngineerName = eng.fullName;
     }
+    if (typeof currentEngineerExpectedPrice !== 'undefined') {
+        currentEngineerExpectedPrice = eng.expectedUnitPrice != null ? eng.expectedUnitPrice : null;
+    }
 
     // Update Header
     $('#eng-name').text(eng.fullName);
