@@ -4,6 +4,16 @@
 server:
   port: 8080
   forward-headers-strategy: framework
+  # ===== 同時接続の受け口 =====
+  # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
+  # ただし実際の上限は DB コネクションプール(spring.datasource.hikari.maximum-pool-size)であり、
+  # スレッドだけ増やしても待ち行列が伸びるだけなので、両者は必ずセットで見直すこと。
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:200}
+      min-spare: ${TOMCAT_MIN_SPARE_THREADS:10}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:100}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
   servlet:
     encoding:
       charset: UTF-8
@@ -37,9 +47,18 @@ spring:
     password: ${DB_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 5
-      connection-timeout: 30000
+      # 接続プールは「大きいほど速い」ものではない。MySQL側のCPU/ディスク並列度を超えると
+      # コンテキストスイッチで逆に遅くなるため、目安は (DBのコア数 * 2) 程度。
+      # 環境ごとにDBのスペックが違うので env で上書きできるようにしてある。
+      # ここが同時実行数の実質的な上限になる: 1リクエストが複数クエリを打つ間は接続を保持するため、
+      # 「同時アクセス数 >> pool-size」の状況では待ちが connection-timeout まで積み上がり
+      # SQLTransientConnectionException で 500 になる。高負荷対策は pool を上げることではなく
+      # 1リクエストあたりのクエリ数を減らす/キャッシュすること。
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT:10000}
+      # 接続が返却されずに滞留している箇所を検知する(0=無効)。既定60秒。
+      leak-detection-threshold: ${DB_LEAK_DETECTION_MS:60000}
 
   # H2 Console (Disabled since we use MySQL now)
   h2:

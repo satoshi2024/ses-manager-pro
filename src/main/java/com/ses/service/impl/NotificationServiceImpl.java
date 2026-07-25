@@ -41,6 +41,12 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public Page<NotificationDto> pageForUser(Long userId, long current, long size, String type, Boolean unreadOnly) {
+        // LIMIT/OFFSET を自前で組み立てるため PaginationInnerInterceptor の maxLimit が効かない。
+        // 正規化しないと ?size=999999999 で通知テーブル全件をメモリに載せられてしまう
+        // （/api/notifications は要員を含む全ロールが到達できる）。int キャストの桁溢れも防ぐ。
+        Page<NotificationDto> safe = com.ses.common.util.PageUtils.safePage(current, size);
+        current = safe.getCurrent();
+        size = safe.getSize();
         Page<NotificationDto> page = new Page<>(current, size);
         int offset = (int) ((current - 1) * size);
         List<NotificationDto> records = notificationMapper.selectPageForUser(userId, type, unreadOnly, (int) size, offset);

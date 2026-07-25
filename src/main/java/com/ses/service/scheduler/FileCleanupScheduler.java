@@ -4,6 +4,7 @@ import com.ses.service.FileCleanupService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,6 +18,7 @@ public class FileCleanupScheduler {
     private final FileCleanupService fileCleanupService;
 
     @Scheduled(cron = "0 0 3 * * SUN")
+    @SchedulerLock(name = "fileCleanupWeekly", lockAtLeastFor = "PT1M", lockAtMostFor = "PT1H")
     public void cleanupWeekly() {
         int deleted = fileCleanupService.cleanupOrphanFiles();
         if (deleted > 0) {

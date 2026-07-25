@@ -2,6 +2,10 @@
 let currentEngineerName = null;
 // 要員の希望単価(円・生値)。表示文字列を解析せずに提案単価へ渡すため engineer-detail.js が設定する。
 let currentEngineerExpectedPrice = null;
+// 要員の保有スキル(実データ)。engineer-detail.js が設定する。
+let currentEngineerSkills = [];
+// メールテンプレート実体(本文を含む)。ドラフトは必ずこの実データから組み立てる。
+let loadedTemplates = [];
 let aiMatchModal = null;
 
 $(document).ready(function() {
@@ -52,6 +56,7 @@ function loadTemplatesToSelect() {
         method: 'GET',
         success: function(res) {
             if (res.code === 200 && res.data) {
+                loadedTemplates = res.data;
                 const select = $('#chat-template-select');
                 select.empty().append('<option value="">' + SES.i18n.t('ai.select.template') + '</option>');
                 res.data.forEach(t => {
@@ -115,17 +120,15 @@ function sendChatMessage() {
     appendUserMessage(text);
     
     const loadingId = appendAiLoading();
-    
-    // Simulate AI response based on keyword
-    setTimeout(() => {
-        if (text.includes('マッチ') || text.includes('案件')) {
-            renderMatchResultsInChat(loadingId);
-        } else if (text.includes('要約') || text.includes('スキル')) {
-            replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${SES.escapeHtml(currentEngineerName)}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
-        } else {
-            replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">すみません、その指示はよくわかりません。「案件をマッチング」や「スキル要約」と入力するか、下のテンプレートからメールを作成してみてください。</p>`);
-        }
-    }, 1500);
+
+    if (text.includes('マッチ') || text.includes('案件')) {
+        fetchAndRenderMatches(loadingId);
+    } else if (text.includes('要約') || text.includes('スキル')) {
+        renderSkillSummary(loadingId);
+    } else {
+        replaceAiLoadingWithMessage(loadingId,
+            '<p class="mb-0">' + SES.escapeHtml(SES.i18n.t('ai.msg.unknownCommand')) + '</p>');
+    }
 }
 
 function requestAiMatch() {
@@ -170,56 +173,99 @@ function showMatchError(loadingId, message) {
         '<p class="mb-0 text-danger">' + SES.escapeHtml(text) + '</p>');
 }
 
+/**
+ * スキル要約は登録済みの実データ（保有スキル・経歴サマリ）だけで組み立てる。
+ * 以前はどの要員に対しても同一のハードコード文（"10年以上のJava/Spring Boot開発経験"等）を
+ * 返しており、実在しない経歴があたかもAIの分析結果として表示されていた。
+ */
 function requestSkillSummary() {
     appendUserMessage(SES.i18n.t('ai.msg.requestSummary'));
-    const loadingId = appendAiLoading();
-    setTimeout(() => {
-        replaceAiLoadingWithMessage(loadingId, `<p class="mb-0">承知いたしました。${SES.escapeHtml(currentEngineerName)}さんの経歴を要約します。<br><br><b>【強み】</b><br>・10年以上のJava/Spring Boot開発経験<br>・大規模金融システムでのAWSマイグレーション主導<br>・堅牢なシステム設計能力</p>`);
-    }, 1200);
+    renderSkillSummary(appendAiLoading());
 }
 
+function renderSkillSummary(loadingId) {
+    const skills = (currentEngineerSkills || []).slice().sort(
+        (a, b) => (b.experienceYears || 0) - (a.experienceYears || 0));
+    const resume = (typeof detailEngineer !== 'undefined' && detailEngineer)
+        ? detailEngineer.resumeSummary : null;
+
+    if (skills.length === 0 && !resume) {
+        replaceAiLoadingWithMessage(loadingId,
+            '<p class="mb-0">' + SES.escapeHtml(SES.i18n.t('ai.msg.summaryNoData')) + '</p>');
+        return;
+    }
+
+    let html = '<p class="mb-2">' + SES.escapeHtml(
+        SES.i18n.t('ai.msg.summaryTitle', [currentEngineerName || ''])) + '</p>';
+    if (skills.length > 0) {
+        html += '<ul class="mb-2 ps-3">';
+        skills.slice(0, 5).forEach(s => {
+            const years = s.experienceYears
+                ? ' / ' + s.experienceYears + SES.i18n.t('engineer.experience.unit') : '';
+            const prof = s.proficiency ? ' (' + SES.escapeHtml(s.proficiency) + ')' : '';
+            html += '<li>' + SES.escapeHtml(s.skillName) + prof + SES.escapeHtml(years) + '</li>';
+        });
+        html += '</ul>';
+    }
+    if (resume) {
+        html += '<p class="mb-0 small text-muted" style="white-space: pre-wrap;">'
+             + SES.escapeHtml(resume) + '</p>';
+    }
+    replaceAiLoadingWithMessage(loadingId, html);
+}
+
+/**
+ * 提案文ドラフトは選択した実テンプレート({@code m_email_template})の本文を差し込む。
+ * 以前は要員によらず固定の「強み」箇条書きを出力しており、実在しない経歴が
+ * 提案メール文面としてそのままコピーされうる状態だった。
+ */
 function generateEmailDraft() {
     const templateId = $('#chat-template-select').val();
     const templateName = $('#chat-template-select option:selected').text();
-    
+
     if (!templateId) {
         Toast.error(SES.i18n.t('ai.msg.selectTemplate'));
         return;
     }
-    
-    appendUserMessage(`「${templateName}」を使って提案文を作成して。`);
+
+    appendUserMessage(SES.i18n.t('ai.msg.requestDraft', { template: templateName }));
     const loadingId = appendAiLoading();
-    
-    setTimeout(() => {
-        const safeEngineerName = SES.escapeHtml(currentEngineerName);
-        const draft = `
-            <div class="mb-2 fw-bold text-accent-blue"><i class="bi bi-magic me-2"></i>${SES.i18n.t('ai.msg.draftTitle')}</div>
-            <div class="bg-secondary p-3 rounded font-monospace small mb-3 border border-dark text-white" style="white-space: pre-wrap;">件名: 【ご提案】エンジニアのご紹介（${safeEngineerName}）
 
-◯◯株式会社
-ご担当者様
+    const template = (loadedTemplates || []).find(t => String(t.id) === String(templateId));
+    if (!template || !template.bodyTemplate) {
+        replaceAiLoadingWithMessage(loadingId,
+            '<p class="mb-0 text-danger">' + SES.escapeHtml(SES.i18n.t('ai.msg.draftFailed')) + '</p>');
+        return;
+    }
 
-お世話になっております。SES Manager Proの営業担当です。
+    // テンプレート内の {engineerName} 等は実データで置換する（未知のプレースホルダーは残す）
+    const filled = fillTemplate(template.bodyTemplate);
+    const subject = template.subjectTemplate ? fillTemplate(template.subjectTemplate) : '';
 
-貴社のプロジェクトにつきまして、弊社の${safeEngineerName}をご提案させていただきます。
-
-【アピールポイント】
-・10年以上のJava/Spring Boot開発経験
-・大規模金融システムでのAWSマイグレーション主導
-・堅牢なシステム設計能力
-
-スキルシートを添付いたしますので、ご査収のほどよろしくお願いいたします。</div>
-            <div class="d-flex justify-content-end gap-2">
-                <button class="btn btn-sm btn-outline-secondary text-light border-dark"><i class="bi bi-clipboard"></i> ${SES.i18n.t('common.btn.copy')}</button>
-                <button class="btn btn-sm btn-primary bg-gradient-purple border-0" onclick="alert(SES.i18n.t('ai.msg.openMailer'))"><i class="bi bi-envelope"></i> ${SES.i18n.t('ai.btn.openMailer')}</button>
-            </div>
-        `;
-        replaceAiLoadingWithMessage(loadingId, draft);
-    }, 2000);
+    const draft = `
+        <div class="mb-2 fw-bold text-accent-blue"><i class="bi bi-magic me-2"></i>${SES.escapeHtml(SES.i18n.t('ai.msg.draftTitle'))}</div>
+        <div class="bg-secondary p-3 rounded font-monospace small mb-3 border border-dark text-white" style="white-space: pre-wrap;">${SES.escapeHtml((subject ? subject + '\n\n' : '') + filled)}</div>
+        <div class="d-flex justify-content-end gap-2">
+            <button class="btn btn-sm btn-outline-secondary text-light border-dark" onclick="copyDraftToClipboard(this)"><i class="bi bi-clipboard"></i> ${SES.escapeHtml(SES.i18n.t('common.btn.copy'))}</button>
+        </div>
+    `;
+    replaceAiLoadingWithMessage(loadingId, draft);
 }
 
-function renderMatchResultsInChat(loadingId) {
-    fetchAndRenderMatches(loadingId);
+function fillTemplate(text) {
+    const engineerName = currentEngineerName || '';
+    return String(text)
+        .replace(/\{engineerName\}/g, engineerName)
+        .replace(/\{要員名\}/g, engineerName);
+}
+
+function copyDraftToClipboard(btn) {
+    const body = $(btn).closest('div').prev('div').text();
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(body).then(
+            () => Toast.success(SES.i18n.t('common.btn.copy')),
+            () => Toast.error(SES.i18n.t('js.common.error_network')));
+    }
 }
 
 function renderMatchResultsHTML(loadingId, results) {

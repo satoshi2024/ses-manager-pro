@@ -139,6 +139,18 @@ The 2026H2 roadmap features. Each has a spec under `.kiro/specs/<name>/`; the ro
 - **Retention risk must be scored in batch** — `RetentionRiskService.score(id)` costs several queries, and the engineer list needs a score for every row. Always call `scoreBatch(ids)` from list/collection paths; `score(id)` is for single-record screens only.
 - **Compliance findings are permission-gated at the source** — `/api/compliance` is 管理者/マネージャー only via `m_menu`, but the same findings are embedded in the monthly-closing summary, which HR can also reach. `MonthlyClosingServiceImpl.canViewCompliance()` re-checks the `compliance` menu before filling that section. If you surface compliance data on another screen, gate it the same way rather than assuming the screen's own menu is enough.
 
+### Capacity and concurrency
+
+The app is a single-process Spring Boot server with **no cache layer, no session store, and no read replica**. Before promising a concurrency number, know where the ceiling actually is — in order:
+
+1. **DB connection pool** (`spring.datasource.hikari.maximum-pool-size`, default 20, env `DB_POOL_SIZE`). This is the real limit, not Tomcat's thread count. A request holds its connection for the whole transaction, and read-heavy screens issue many queries each — `DashboardService.getSummary` alone runs ~17, several of which load whole tables (all engineers, all contracts). Concurrency far above the pool size just queues until `connection-timeout` and then 500s. **Raising the pool is not the fix** — past roughly `DB cores × 2` it gets slower, not faster. The fix is fewer queries per request and caching.
+2. **Tomcat threads** (`server.tomcat.threads.max`, default 200, env `TOMCAT_MAX_THREADS`), then `accept-count` (100). Beyond that, connections are refused at the socket.
+3. **Sessions are in-memory.** There is no Spring Session/Redis dependency, so scaling out needs sticky sessions and a restart logs everyone out.
+4. **Unbounded exports.** `/api/engineers/export` and `/api/contracts/export` build the whole result set in memory with no paging; concurrent exports on a large tenant are an OOM risk.
+5. **Page sizes must be clamped.** Use `PageUtils.safePage` in every list endpoint. `PaginationInnerInterceptor.setMaxLimit(1000)` only protects queries that go through MyBatis-Plus paging — hand-written `LIMIT/OFFSET` (e.g. `NotificationMapper.selectPageForUser`) bypasses it entirely and must normalize the size itself.
+
+Scaling meaningfully past a few dozen concurrent active users needs work this codebase has not done yet: caching the dashboard aggregates, externalizing sessions, and read replicas or narrower queries. Treat those as design changes, not config tuning.
+
 ### Internationalization
 
 Four bundles are shipped and the language switcher offers exactly these: `messages.properties` (ja, the base/default), `messages_en`, `messages_zh_CN`, `messages_ko`. There is **no `messages_zh`** — `zh_CN` already carries every key, so a `zh` bundle would never be consulted; don't add one. `spring.messages.fallback-to-system-locale: false` keeps unknown locales on the Japanese base.

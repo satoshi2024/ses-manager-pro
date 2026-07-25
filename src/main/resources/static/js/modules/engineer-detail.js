@@ -183,6 +183,10 @@ function loadSkills(engineerId) {
 }
 
 function renderSkills(skills) {
+    // AIパネルの要約は実データのみで組み立てるため、取得済みスキルを共有する
+    if (typeof currentEngineerSkills !== 'undefined') {
+        currentEngineerSkills = Array.isArray(skills) ? skills : [];
+    }
     if (!skills || skills.length === 0) {
         $('#det-skills').html('<span class="badge bg-secondary border border-dark text-light">' + SES.i18n.t('common.notRegistered') + '</span>');
         return;
