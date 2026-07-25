@@ -153,18 +153,21 @@
                         <span id="paymentBalance"></span>
                         <span class="text-success ms-2" id="paymentRemaining"></span>
                     </div>
-                    <table class="table table-sm table-bordered" id="paymentHistoryTable">
-                        <thead>
-                            <tr>
-                                <th th:text="#{invoice.payment.paidDate}">入金日</th>
-                                <th th:text="#{invoice.payment.amount}">入金額</th>
-                                <th th:text="#{invoice.payment.fee}">振込手数料</th>
-                                <th th:text="#{invoice.payment.remarks}">備考</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+                    <!-- 小画面では表がモーダル幅を超えるため内部で横スクロールさせる -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered" id="paymentHistoryTable">
+                            <thead>
+                                <tr>
+                                    <th th:text="#{invoice.payment.paidDate}">入金日</th>
+                                    <th th:text="#{invoice.payment.amount}">入金額</th>
+                                    <th th:text="#{invoice.payment.fee}">振込手数料</th>
+                                    <th th:text="#{invoice.payment.remarks}">備考</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                     <hr>
                     <form id="paymentForm" class="row g-2">
                         <div class="col-md-3">
@@ -223,18 +226,21 @@
                             </div>
                         </div>
                         <div class="tab-pane fade" id="history-reminder" role="tabpanel" aria-labelledby="history-reminder-tab">
-                            <table class="table table-sm table-bordered" id="reminderHistoryTable">
-                                <thead>
-                                    <tr>
-                                        <th th:text="#{invoice.reminder.sentAt}">送信日時</th>
-                                        <th th:text="#{invoice.reminder.recipient}">宛先</th>
-                                        <th th:text="#{invoice.reminder.subject}">件名</th>
-                                        <th th:text="#{invoice.table.status}">ステータス</th>
-                                        <th th:text="#{invoice.reminder.reason}">理由</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <!-- 小画面では表がモーダル幅を超えるため内部で横スクロールさせる -->
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="reminderHistoryTable">
+                                    <thead>
+                                        <tr>
+                                            <th th:text="#{invoice.reminder.sentAt}">送信日時</th>
+                                            <th th:text="#{invoice.reminder.recipient}">宛先</th>
+                                            <th th:text="#{invoice.reminder.subject}">件名</th>
+                                            <th th:text="#{invoice.table.status}">ステータス</th>
+                                            <th th:text="#{invoice.reminder.reason}">理由</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

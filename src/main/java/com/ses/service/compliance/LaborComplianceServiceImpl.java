@@ -109,8 +109,11 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
             }
         }
 
+        // contract_type は NULL 可（ENUM だが NOT NULL ではない）。List.of(...) は不変リストのため
+        // contains(null) が false ではなく NullPointerException を投げる。契約形態が未設定の契約が
+        // 1件でもあると、月次締めサマリ・リスク一覧・契約保存がまとめて500になる。
         if (ruleEnabled("compliance.rule.direct-command.enabled")
-                && DIRECT_COMMAND_CONTRACT_TYPES.contains(contractType)
+                && contractType != null && DIRECT_COMMAND_CONTRACT_TYPES.contains(contractType)
                 && Boolean.TRUE.equals(contract.getDirectCommandFlag())) {
             findings.add(finding("DIRECT_COMMAND", contract.getId(), locale, contractType));
         }

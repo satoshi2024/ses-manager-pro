@@ -198,4 +198,51 @@ class LaborComplianceServiceImplTest {
         assertThat(dto.getProjectName()).isEqualTo("案件A");
         assertThat(dto.getFindings()).extracting(ComplianceFinding::getCode).contains("DOUBLE_DISPATCH");
     }
+
+    /**
+     * contract_type は NOT NULL ではないため、契約形態が未設定の契約が実在しうる。
+     * List.of(...) は不変リストで contains(null) が NPE になるため、1件でも該当があると
+     * 月次締めサマリ・リスク一覧・契約保存がまとめて500になっていた。
+     */
+    @Test
+    void check_契約形態がnullでも例外にならない() {
+        Contract c = contract(1L, null);
+        c.setDirectCommandFlag(true);
+        when(bpPaymentMapper.selectMaxLayerOrderByContractId(1L)).thenReturn(1);
+
+        List<ComplianceFinding> findings = service.check(c);
+
+        assertThat(findings).extracting(ComplianceFinding::getCode).doesNotContain("DIRECT_COMMAND");
+    }
+
+    @Test
+    void findCurrentRisks_契約形態がnullの契約が混ざっても例外にならない() {
+        // engineer_id / project_id は NOT NULL なので実データに合わせて必ず設定する
+        Contract typed = contract(1L, "派遣");
+        typed.setEngineerId(10L);
+        typed.setProjectId(20L);
+        Contract untyped = contract(2L, null);
+        untyped.setEngineerId(11L);
+        untyped.setProjectId(21L);
+        untyped.setDirectCommandFlag(true);
+        when(contractMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(untyped, typed));
+        ContractTierDto tier = new ContractTierDto();
+        tier.setContractId(1L);
+        tier.setMaxLayer(2);
+        when(bpPaymentMapper.selectMaxLayerOrderGroupedByContract()).thenReturn(List.of(tier));
+        Engineer e = new Engineer();
+        e.setId(10L);
+        e.setFullName("山田太郎");
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e));
+        Project p = new Project();
+        p.setId(20L);
+        p.setProjectName("案件A");
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p));
+
+        List<ContractComplianceDto> risks = service.findCurrentRisks();
+
+        // 契約形態nullの契約で落ちず、該当する派遣契約だけが返る
+        assertThat(risks).hasSize(1);
+        assertThat(risks.get(0).getContractId()).isEqualTo(1L);
+    }
 }

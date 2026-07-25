@@ -244,16 +244,19 @@
                 </div>
                 <div class="modal-body p-4">
                     <div id="priceRevWarning" class="alert alert-warning d-none" th:text="#{contract.priceRevision.pastWarning}"></div>
-                    <table class="table table-sm table-dark table-bordered" id="priceRevTable">
-                        <thead><tr>
-                            <th th:text="#{contract.priceRevision.applyFrom}">適用開始月</th>
-                            <th th:text="#{contract.priceRevision.selling}">売上単価</th>
-                            <th th:text="#{contract.priceRevision.cost}">原価</th>
-                            <th th:text="#{contract.priceRevision.reason}">改定理由</th>
-                            <th></th>
-                        </tr></thead>
-                        <tbody></tbody>
-                    </table>
+                    <!-- 小画面では表がモーダル幅を超えるため内部で横スクロールさせる -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-dark table-bordered" id="priceRevTable">
+                            <thead><tr>
+                                <th th:text="#{contract.priceRevision.applyFrom}">適用開始月</th>
+                                <th th:text="#{contract.priceRevision.selling}">売上単価</th>
+                                <th th:text="#{contract.priceRevision.cost}">原価</th>
+                                <th th:text="#{contract.priceRevision.reason}">改定理由</th>
+                                <th></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                     <hr class="border-dark">
                     <form id="priceRevForm" class="row g-2">
                         <div class="col-md-3">
