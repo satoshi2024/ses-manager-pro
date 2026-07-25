@@ -308,6 +308,32 @@ class SkillSheetGeneratorTest {
         }
     }
 
+    /**
+     * 匿名化すると最寄駅が落ちるが、客先A様式の「備考」列は残らなければならない
+     * （列ごとに分岐していた頃は最寄駅と一緒に備考まで消え、PDFとExcelで内容が食い違っていた）。
+     */
+    @Test
+    void testGenerateExcel_ClientA匿名化でも備考列が残る() throws Exception {
+        when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+
+        SkillSheetOptions options = new SkillSheetOptions();
+        options.setTemplate("CLIENT_A");
+        options.setAnonymize(true);
+        byte[] bytes = skillSheetGenerator.generateExcel(1L, options);
+
+        try (java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(bytes);
+             org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(bis)) {
+            org.apache.poi.ss.usermodel.Row header = wb.getSheet("スキルシート").getRow(2);
+
+            // 氏名・稼働可能日・備考の3列（最寄駅は匿名化で出力しない）
+            assertThat(header.getLastCellNum()).isEqualTo((short) 3);
+            assertThat(header.getCell(0).getStringCellValue()).isEqualTo("氏名");
+            assertThat(header.getCell(1).getStringCellValue()).isEqualTo("稼働可能日");
+            assertThat(header.getCell(2).getStringCellValue()).isEqualTo("備考");
+        }
+    }
+
     @Test
     void testGenerateExcel_UnknownTemplate_ShouldThrowBusinessException() {
         SkillSheetOptions options = new SkillSheetOptions();

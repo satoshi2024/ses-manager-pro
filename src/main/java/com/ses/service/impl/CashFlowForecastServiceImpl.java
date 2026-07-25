@@ -6,16 +6,13 @@ import com.ses.dto.invoice.BpPaymentListDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoicePayment;
-import com.ses.entity.SysUser;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.InvoicePaymentMapper;
-import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.FreeeIntegrationService;
-import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
@@ -41,19 +38,18 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
     private final InvoicePaymentMapper invoicePaymentMapper;
     private final BpPaymentMapper bpPaymentMapper;
     private final FreeeIntegrationService freeeIntegrationService;
-    private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
-    private final SysUserMapper sysUserMapper;
     private final ContractMapper contractMapper;
     private final WorkRecordMapper workRecordMapper;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
 
     @Override
     public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance) {
-        boolean isSimulation = openingBalance != null;
-        if (!isSimulation) {
+        if (openingBalance == null) {
             openingBalance = systemConfigService.getDecimal("cashflow.opening-balance", BigDecimal.ZERO);
         }
+        // 参照(GET)は副作用を持たない。資金ショート警告の発行は
+        // NotificationGenerateService.cashflowAlert() の日次バッチが担う。
         BigDecimal fixedCost = systemConfigService.getDecimal("cashflow.fixed-cost", BigDecimal.ZERO);
         BigDecimal alertThreshold = systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO);
         int bpSiteMonths = systemConfigService.getInt("cashflow.bp-payment-site-months", 1);
@@ -68,10 +64,18 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
                 .ne(Invoice::getStatus, "入金済"));
         
         List<Long> unpaidInvoiceIds = unpaidInvoices.stream().map(Invoice::getId).toList();
-        List<InvoicePayment> allPayments = new ArrayList<>();
+        // 請求書ごとの入金合計を先に畳んでおく。月ループの内側で毎回 allPayments を走査すると
+        // 「月数×請求書数×入金数」になり、件数が増えるほど参照が重くなる。
+        Map<Long, BigDecimal> paidByInvoiceId = Map.of();
         if (!unpaidInvoiceIds.isEmpty()) {
-            allPayments = invoicePaymentMapper.selectList(new LambdaQueryWrapper<InvoicePayment>()
-                    .in(InvoicePayment::getInvoiceId, unpaidInvoiceIds));
+            paidByInvoiceId = invoicePaymentMapper.selectList(new LambdaQueryWrapper<InvoicePayment>()
+                            .in(InvoicePayment::getInvoiceId, unpaidInvoiceIds))
+                    .stream()
+                    .collect(Collectors.toMap(
+                            InvoicePayment::getInvoiceId,
+                            p -> (p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
+                                    .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO),
+                            BigDecimal::add));
         }
 
         // Fetch all unpaid BP payments upfront
@@ -93,14 +97,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
                     boolean shouldInclude = invYm.equals(ym) || (i == 0 && invYm.isBefore(ym));
                     
                     if (shouldInclude) {
-                        BigDecimal paid = allPayments.stream()
-                                .filter(p -> p.getInvoiceId().equals(inv.getId()))
-                                .map(p -> {
-                                    BigDecimal amt = p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO;
-                                    BigDecimal fee = p.getFee() != null ? p.getFee() : BigDecimal.ZERO;
-                                    return amt.add(fee);
-                                })
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        BigDecimal paid = paidByInvoiceId.getOrDefault(inv.getId(), BigDecimal.ZERO);
                         BigDecimal remaining = inv.getTotal() != null ? inv.getTotal().subtract(paid) : BigDecimal.ZERO;
                         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
                             unpaidInvoiceTotal = unpaidInvoiceTotal.add(remaining);
@@ -142,20 +139,6 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
 
             currentBalance = currentBalance.add(net);
             dto.setBalance(currentBalance);
-
-            // Alert Notification (Simulation時は通知しない)
-            if (!isSimulation && currentBalance.compareTo(alertThreshold) < 0) {
-                String dedupeKey = "CASHFLOW_ALERT_" + ym.toString();
-                String message = "[\"dashboard.msg.cashflowAlert\", \"" + ym.toString() + "\", \"" + currentBalance.toPlainString() + "\"]";
-                
-                List<SysUser> targetUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .in(SysUser::getRole, "管理者", "マネージャー")
-                        .eq(SysUser::getStatus, 1));
-                
-                for (SysUser user : targetUsers) {
-                    notificationService.publishToUser(user.getId(), "CASHFLOW_ALERT", "資金ショート警告", message, "/#cashflow", dedupeKey);
-                }
-            }
 
             monthDtos.add(dto);
         }

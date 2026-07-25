@@ -1,13 +1,16 @@
 package com.ses.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.constant.NotificationLinks;
+import com.ses.common.constant.StatusConstants;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.Proposal;
 import com.ses.entity.SalesActivity;
+import com.ses.entity.SysUser;
 import com.ses.entity.Invoice;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
@@ -18,12 +21,14 @@ import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.EngineerFollowupMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.entity.EngineerSales;
 import com.ses.entity.EngineerFollowup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
@@ -42,6 +47,8 @@ public class NotificationGenerateService {
     private final InvoiceMapper invoiceMapper;
     private final EngineerSalesMapper engineerSalesMapper;
     private final EngineerFollowupMapper engineerFollowupMapper;
+    private final SysUserMapper sysUserMapper;
+    private final com.ses.service.billing.CashFlowForecastService cashFlowForecastService;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
 
@@ -53,6 +60,45 @@ public class NotificationGenerateService {
         followUpDue();
         invoiceOverdue();
         followupOverdue();
+        cashflowAlert();
+    }
+
+    /**
+     * FR-05: 資金繰り予測で残高が警戒ラインを割り込む月を管理者・マネージャーへ通知する。
+     *
+     * <p>以前は {@code CashFlowForecastService.forecast()} の内部（＝ダッシュボード参照時）で
+     * 発行していたが、GETが通知を書き込む副作用を持つのは望ましくなく、誰も画面を開かない日は
+     * 警告が出ないという抜けもあった。他の通知と同じく日次バッチで発行する。
+     * 冪等性: dedupe_key = CASHFLOW_ALERT:{yyyy-MM}
+     */
+    public void cashflowAlert() {
+        int months = systemConfigService.getInt("cashflow.alert-months", 6);
+        java.math.BigDecimal threshold = systemConfigService.getDecimal("cashflow.alert-threshold", java.math.BigDecimal.ZERO);
+
+        com.ses.dto.billing.CashFlowForecastDto forecast =
+                cashFlowForecastService.forecast(YearMonth.now(), Math.max(1, months), null);
+        if (forecast == null || forecast.getMonths() == null) {
+            return;
+        }
+
+        List<SysUser> recipients = null;
+        for (com.ses.dto.billing.CashFlowForecastDto.CashFlowMonthDto m : forecast.getMonths()) {
+            if (m.getBalance() == null || m.getBalance().compareTo(threshold) >= 0) {
+                continue;
+            }
+            if (recipients == null) {
+                recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
+                        .eq(SysUser::getStatus, 1));
+            }
+            String dedupeKey = "CASHFLOW_ALERT:" + m.getMonth();
+            String message = "[\"dashboard.msg.cashflowAlert\", \"" + m.getMonth() + "\", \""
+                    + m.getBalance().toPlainString() + "\"]";
+            for (SysUser user : recipients) {
+                notificationService.publishToUser(user.getId(), "CASHFLOW_ALERT", "資金ショート警告",
+                        message, NotificationLinks.DASHBOARD, dedupeKey);
+            }
+        }
     }
 
     /**

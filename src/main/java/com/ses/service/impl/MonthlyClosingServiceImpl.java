@@ -54,6 +54,32 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     private final SystemConfigMapper systemConfigMapper;
     private final SysUserMapper sysUserMapper;
     private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
+    /**
+     * ObjectProvider 経由。MenuCacheService が無いテストスライスでも締め処理本体を壊さないため
+     * （その場合はコンプライアンス欄のみ非表示＝fail-closed になる）。
+     */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
+
+    /** compliance メニューを閲覧できるロールか（管理者は常に可。MenuPermissionFilter と同じ判定）。 */
+    private boolean canViewCompliance() {
+        org.springframework.security.core.Authentication auth =
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+        String role = auth.getAuthorities().stream()
+                .map(org.springframework.security.core.GrantedAuthority::getAuthority)
+                .filter(a -> a.startsWith("ROLE_"))
+                .map(a -> a.substring("ROLE_".length()))
+                .findFirst()
+                .orElse(null);
+        if ("管理者".equals(role)) {
+            return true;
+        }
+        com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
+        return menuCacheService != null && role != null
+                && menuCacheService.getMenuKeysByRole(role).contains("compliance");
+    }
 
     /** 締め記録1件。 */
     public static class ClosingRecord {
@@ -150,7 +176,11 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         dto.setOverdueInvoices(overdue);
 
         // (f) 労務コンプライアンスリスク（現在の状態を都度導出。月に紐づく記録ではないため月非依存）。
-        dto.setComplianceFindings(laborComplianceService.findCurrentRisks());
+        // 月次締めメニューは HR にも開放されているが compliance メニューは管理者/マネージャー限定のため、
+        // ここで権限を確認しないと HR が締め画面経由でリスク一覧を閲覧できてしまう。
+        dto.setComplianceFindings(canViewCompliance()
+                ? laborComplianceService.findCurrentRisks()
+                : java.util.List.of());
 
         dto.setUnenteredCount(dto.getUnenteredWork().size());
         dto.setUnconfirmedCount(dto.getUnconfirmedRecords().size());

@@ -38,6 +38,9 @@ public final class NotificationLinks {
     /** 要員のマイ勤怠（/my/timesheet）— 差戻し通知の要員向けリンク。 */
     public static final String MY_TIMESHEET = "/my/timesheet";
 
+    /** ダッシュボード（/）— 資金繰り(CF)タブを含む経営KPI画面。 */
+    public static final String DASHBOARD = "/";
+
     private NotificationLinks() {
     }
 

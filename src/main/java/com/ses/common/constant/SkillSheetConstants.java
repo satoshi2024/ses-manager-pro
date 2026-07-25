@@ -22,9 +22,12 @@ public interface SkillSheetConstants {
     /** 様式: 客先A（自社標準＋備考欄） */
     String TEMPLATE_CLIENT_A = "CLIENT_A";
 
+    /** 客先A様式の備考欄に出力する固定文言（PDF/Excel で共通）。 */
+    String CLIENT_A_REMARKS = "客先A専用フォーマット";
+
     /**
      * m_system_config に様式定義が無い場合の既定値。
-     * V49__add_skillsheet_templates_config.sql の初期値と同じ内容を保つこと。
+     * V55__add_skillsheet_templates_config.sql の初期値と同じ内容を保つこと。
      */
     String DEFAULT_TEMPLATES_JSON =
             "[{\"id\":\"STANDARD\",\"name\":\"自社標準\"},"
