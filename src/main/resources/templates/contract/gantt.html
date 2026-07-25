@@ -3,7 +3,7 @@
 <head>
     <title th:text="#{contract.gantt.btn} + ' - ' + #{app.name}">ガントチャート - 稼動状況</title>
     <!-- Frappe Gantt CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/0.6.1/frappe-gantt.css">
+    <link rel="stylesheet" href="/lib/frappe-gantt/frappe-gantt.css">
     <link rel="stylesheet" th:href="@{/css/gantt.css}">
 </head>
 <body>
@@ -46,7 +46,7 @@
 
 <th:block layout:fragment="page-js">
     <!-- Frappe Gantt JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/0.6.1/frappe-gantt.min.js"></script>
+    <script src="/lib/frappe-gantt/frappe-gantt.min.js"></script>
     <script th:src="@{/js/modules/contract-gantt.js}"></script>
 </th:block>
 
