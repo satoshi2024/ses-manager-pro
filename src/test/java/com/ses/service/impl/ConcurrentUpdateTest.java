@@ -95,6 +95,9 @@ class ConcurrentUpdateTest {
         WorkRecord record = new WorkRecord();
         record.setContractId(contract.getId());
         record.setWorkMonth("2026-07");
+        // t_work_record.actual_hours は NOT NULL かつデフォルト値なしのため、
+        // MySQL の strict モードでは未設定だと INSERT が失敗する。
+        record.setActualHours(new BigDecimal("160.0"));
         record.setStatus("提出済");
         workRecordMapper.insert(record);
 

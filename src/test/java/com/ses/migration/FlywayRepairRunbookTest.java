@@ -37,9 +37,16 @@ class FlywayRepairRunbookTest {
             st.execute("INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) " +
                     "VALUES (10, '10', 'update admin password bcrypt', 'SQL', 'V10__update_admin_password_bcrypt.sql', 123456789, 'ses', 10, 1)");
             
-            // Baseline 9の状態で t_bp_payment から追加されたカラム・インデックスを削除して、完全なレガシー状態を再現
+            // Baseline 9 相当のレガシー状態を再現するため、V5 の CREATE TABLE に折り込まれた
+            // 多段階BP用のカラムと自己参照FKを削除する。
+            //
+            // uk_work_record_layer はここでは削除しない。この索引は V10 で
+            // idx_bp_payment_work_record に置き換えられるものであり、V10 未適用の
+            // レガシースキーマにはまだ残っている状態が正しい（削除するのは
+            // LegacyDatabaseFlywayCallback の役目）。加えて work_record_id への外部キーが
+            // この索引に依存しているため、代替索引を先に作らずに DROP INDEX すると
+            // MySQL が "Cannot drop index ... needed in a foreign key constraint" で失敗する。
             st.execute("ALTER TABLE t_bp_payment DROP FOREIGN KEY fk_bp_payment_parent");
-            st.execute("ALTER TABLE t_bp_payment DROP INDEX uk_work_record_layer");
             st.execute("ALTER TABLE t_bp_payment DROP COLUMN layer_order");
             st.execute("ALTER TABLE t_bp_payment DROP COLUMN payee_company_name");
             st.execute("ALTER TABLE t_bp_payment DROP COLUMN parent_payment_id");
