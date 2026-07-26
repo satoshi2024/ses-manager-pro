@@ -12,6 +12,7 @@ import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -66,6 +67,24 @@ class EngineerCsvServiceImplTest {
 
         assertEquals(1, result.getSuccessCount());
         assertTrue(result.getErrors().isEmpty(), "完全な空行はエラーにしない");
+    }
+
+    @Test
+    void writeCsvHeaderAndRows_はWriterへ直接書き込む() throws Exception {
+        Engineer first = new Engineer();
+        first.setFullName("=危険値");
+        Engineer second = new Engineer();
+        second.setFullName("通常値");
+        StringWriter writer = new StringWriter();
+
+        service.writeCsvHeader(writer);
+        service.writeCsvRows(List.of(first), writer);
+        service.writeCsvRows(List.of(second), writer);
+
+        String output = writer.toString();
+        assertTrue(output.startsWith("\uFEFF氏名,"));
+        assertTrue(output.contains("'=危険値"));
+        assertEquals(3, output.split("\\r\\n").length);
     }
 
     private CsvImportResultDto importCsv(String csv) {

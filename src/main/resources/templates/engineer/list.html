@@ -9,18 +9,43 @@
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i><th:block th:text="#{engineer.title}">要員管理</th:block></h2>
-        <div>
-            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineers()">
-                <i class="bi bi-file-earmark-excel me-1"></i><th:block th:text="#{common.export.excel}">Excel出力</th:block>
-            </button>
-            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineersCsv()">
-                <i class="bi bi-filetype-csv me-1"></i><th:block th:text="#{common.export.csv}">CSV出力</th:block>
-            </button>
+        <div class="engineer-list-actions">
+            <div class="engineer-list-desktop-actions">
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineers()">
+                    <i class="bi bi-file-earmark-excel me-1"></i><th:block th:text="#{common.export.excel}">Excel出力</th:block>
+                </button>
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="exportEngineersCsv()">
+                    <i class="bi bi-filetype-csv me-1"></i><th:block th:text="#{common.export.csv}">CSV出力</th:block>
+                </button>
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="document.getElementById('csvImportInput').click()">
+                    <i class="bi bi-upload me-1"></i><th:block th:text="#{common.import.csv}">CSVインポート</th:block>
+                </button>
+            </div>
+            <div class="dropdown engineer-list-mobile-actions">
+                <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark dropdown-toggle" id="engineerMobileActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false" th:attr="aria-label=#{common.actions},title=#{common.actions}">
+                    <i class="bi bi-three-dots"></i>
+                    <span class="visually-hidden" th:text="#{common.actions}">操作</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark bg-secondary border-dark shadow-lg" aria-labelledby="engineerMobileActionsDropdown">
+                    <li>
+                        <button type="button" class="dropdown-item py-2" onclick="exportEngineers()">
+                            <i class="bi bi-file-earmark-excel me-2"></i><span th:text="#{common.export.excel}">Excel出力</span>
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item py-2" onclick="exportEngineersCsv()">
+                            <i class="bi bi-filetype-csv me-2"></i><span th:text="#{common.export.csv}">CSV出力</span>
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item py-2" onclick="document.getElementById('csvImportInput').click()">
+                            <i class="bi bi-upload me-2"></i><span th:text="#{common.import.csv}">CSVインポート</span>
+                        </button>
+                    </li>
+                </ul>
+            </div>
             <input type="file" id="csvImportInput" accept=".csv" class="d-none" onchange="importEngineersCsv(this)">
-            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark me-2" onclick="document.getElementById('csvImportInput').click()">
-                <i class="bi bi-upload me-1"></i><th:block th:text="#{common.import.csv}">CSVインポート</th:block>
-            </button>
-            <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
+            <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#engineerModal">
                 <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{engineer.new}">新規登録</th:block>
             </button>
         </div>

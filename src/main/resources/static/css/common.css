@@ -853,6 +853,56 @@ a:hover {
     }
 }
 
+/* 要員一覧ヘッダーの操作は576px以下でドロップダウンにまとめる */
+.engineer-list-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+.engineer-list-desktop-actions {
+    display: flex;
+    align-items: center;
+}
+
+.engineer-list-mobile-actions {
+    display: none;
+}
+
+@media (min-width: 577px) {
+    .content-area .engineer-list-actions {
+        width: auto;
+        flex-direction: row;
+        flex-wrap: nowrap;
+    }
+
+    .content-area .engineer-list-desktop-actions {
+        display: flex;
+    }
+}
+
+@media (max-width: 576px) {
+    .content-area .engineer-list-actions {
+        width: auto !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        align-items: center;
+    }
+
+    .content-area .engineer-list-actions > .btn {
+        width: auto !important;
+        flex: 0 0 auto !important;
+    }
+
+    .content-area .engineer-list-desktop-actions {
+        display: none;
+    }
+
+    .content-area .engineer-list-mobile-actions {
+        display: block;
+    }
+}
+
 /* ================== PRINT STYLES ================== */
 @media print {
     body {

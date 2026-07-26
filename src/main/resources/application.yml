@@ -139,6 +139,13 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  # ===== 一覧エクスポート =====
+  # 大量データはキーセットページング＋レスポンス直書きで処理し、同時実行数も制限する。
+  export:
+    batch-size: ${EXPORT_BATCH_SIZE:500}
+    max-rows: ${EXPORT_MAX_ROWS:50000}
+    max-scan-rows: ${EXPORT_MAX_SCAN_ROWS:100000}
+    max-concurrent: ${EXPORT_MAX_CONCURRENT:2}
   # ===== ダッシュボード集計のキャッシュ =====
   # ダッシュボードは1リクエストで十数本のクエリを撃つ最重量画面。中身はKPIの集計値で
   # 秒単位の鮮度は不要なため短時間キャッシュする。0以下でキャッシュ無効。

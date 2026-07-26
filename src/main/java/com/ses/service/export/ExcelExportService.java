@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -91,6 +92,36 @@ public class ExcelExportService {
         }
     }
 
+    /** 要員一覧を指定された出力先へ直接書き込む（大量出力用）。 */
+    public void streamEngineers(List<Engineer> rows, OutputStream output) {
+        streamEngineers(List.of(rows), output);
+    }
+
+    /** 要員一覧を複数バッチから1つのExcelへ直接書き込む。 */
+    public void streamEngineers(Iterable<List<Engineer>> batches, OutputStream output) {
+        SXSSFWorkbook workbook = new SXSSFWorkbook();
+        try {
+            Sheet sheet = createEngineerSheet(workbook);
+            CellStyle dateStyle = createDateStyle(workbook);
+            CellStyle numberStyle = createNumberStyle(workbook);
+            int[] rowIndex = {1};
+            for (List<Engineer> rows : batches) {
+                writeEngineerRows(sheet, rows, dateStyle, numberStyle, rowIndex);
+            }
+            workbook.write(output);
+            output.flush();
+        } catch (IOException ex) {
+            throw new UncheckedIOException("要員一覧Excel生成に失敗しました", ex);
+        } finally {
+            workbook.dispose();
+            try {
+                workbook.close();
+            } catch (IOException ex) {
+                // dispose() を優先し、close時の後続例外は既に発生した出力エラーを隠さない。
+            }
+        }
+    }
+
     /**
      * 契約一覧をExcel化する。
      */
@@ -132,6 +163,36 @@ public class ExcelExportService {
             return writeToBytes(workbook);
         } catch (IOException ex) {
             throw new UncheckedIOException("契約一覧Excel生成に失敗しました", ex);
+        }
+    }
+
+    /** 契約一覧を指定された出力先へ直接書き込む（大量出力用）。 */
+    public void streamContracts(List<ContractExportDto> rows, OutputStream output) {
+        streamContracts(List.of(rows), output);
+    }
+
+    /** 契約一覧を複数バッチから1つのExcelへ直接書き込む。 */
+    public void streamContracts(Iterable<List<ContractExportDto>> batches, OutputStream output) {
+        SXSSFWorkbook workbook = new SXSSFWorkbook();
+        try {
+            Sheet sheet = createContractSheet(workbook);
+            CellStyle dateStyle = createDateStyle(workbook);
+            CellStyle numberStyle = createNumberStyle(workbook);
+            int[] rowIndex = {1};
+            for (List<ContractExportDto> rows : batches) {
+                writeContractRows(sheet, rows, dateStyle, numberStyle, rowIndex);
+            }
+            workbook.write(output);
+            output.flush();
+        } catch (IOException ex) {
+            throw new UncheckedIOException("契約一覧Excel生成に失敗しました", ex);
+        } finally {
+            workbook.dispose();
+            try {
+                workbook.close();
+            } catch (IOException ex) {
+                // dispose() を優先し、close時の後続例外は既に発生した出力エラーを隠さない。
+            }
         }
     }
 
@@ -238,6 +299,77 @@ public class ExcelExportService {
             cell.setCellValue(headers[i]);
             cell.setCellStyle(headerStyle);
         }
+    }
+
+    private Sheet createEngineerSheet(SXSSFWorkbook workbook) {
+        Sheet sheet = workbook.createSheet("要員一覧");
+        createHeaderRow(workbook, sheet, ENGINEER_HEADERS);
+        setEngineerColumnWidths(sheet);
+        return sheet;
+    }
+
+    private void writeEngineerRows(Sheet sheet, List<Engineer> rows, CellStyle dateStyle,
+                                   CellStyle numberStyle, int[] rowIndex) {
+        for (Engineer e : rows) {
+            Row row = sheet.createRow(rowIndex[0]++);
+            row.createCell(0).setCellValue(sanitize(e.getFullName()));
+            row.createCell(1).setCellValue(sanitize(e.getFullNameKana()));
+            row.createCell(2).setCellValue(sanitize(e.getStatus()));
+            row.createCell(3).setCellValue(sanitize(e.getEmploymentType()));
+            Cell expCell = row.createCell(4);
+            if (e.getExperienceYears() != null) {
+                expCell.setCellValue(e.getExperienceYears());
+            }
+            setBigDecimalCell(row.createCell(5), e.getExpectedUnitPrice(), numberStyle);
+            setDateCell(row.createCell(6), e.getAvailableDate(), dateStyle);
+        }
+    }
+
+    private Sheet createContractSheet(SXSSFWorkbook workbook) {
+        Sheet sheet = workbook.createSheet("契約一覧");
+        createHeaderRow(workbook, sheet, CONTRACT_HEADERS);
+        setContractColumnWidths(sheet);
+        return sheet;
+    }
+
+    private void writeContractRows(Sheet sheet, List<ContractExportDto> rows, CellStyle dateStyle,
+                                   CellStyle numberStyle, int[] rowIndex) {
+        for (ContractExportDto dto : rows) {
+            Row row = sheet.createRow(rowIndex[0]++);
+            row.createCell(0).setCellValue(sanitize(dto.getContractNo()));
+            row.createCell(1).setCellValue(sanitize(dto.getEngineerName()));
+            row.createCell(2).setCellValue(sanitize(dto.getProjectName()));
+            row.createCell(3).setCellValue(sanitize(dto.getCustomerName()));
+            row.createCell(4).setCellValue(sanitize(dto.getContractType()));
+            setDateCell(row.createCell(5), dto.getStartDate(), dateStyle);
+            setDateCell(row.createCell(6), dto.getEndDate(), dateStyle);
+            setBigDecimalCell(row.createCell(7), dto.getSellingPrice(), numberStyle);
+            setBigDecimalCell(row.createCell(8), dto.getCostPrice(), numberStyle);
+            row.createCell(9).setCellValue(sanitize(dto.getStatus()));
+        }
+    }
+
+    private void setEngineerColumnWidths(Sheet sheet) {
+        sheet.setColumnWidth(0, 20 * 256);
+        sheet.setColumnWidth(1, 20 * 256);
+        sheet.setColumnWidth(2, 14 * 256);
+        sheet.setColumnWidth(3, 14 * 256);
+        sheet.setColumnWidth(4, 12 * 256);
+        sheet.setColumnWidth(5, 14 * 256);
+        sheet.setColumnWidth(6, 16 * 256);
+    }
+
+    private void setContractColumnWidths(Sheet sheet) {
+        sheet.setColumnWidth(0, 16 * 256);
+        sheet.setColumnWidth(1, 16 * 256);
+        sheet.setColumnWidth(2, 24 * 256);
+        sheet.setColumnWidth(3, 20 * 256);
+        sheet.setColumnWidth(4, 12 * 256);
+        sheet.setColumnWidth(5, 14 * 256);
+        sheet.setColumnWidth(6, 14 * 256);
+        sheet.setColumnWidth(7, 14 * 256);
+        sheet.setColumnWidth(8, 14 * 256);
+        sheet.setColumnWidth(9, 12 * 256);
     }
 
     private CellStyle createDateStyle(SXSSFWorkbook workbook) {

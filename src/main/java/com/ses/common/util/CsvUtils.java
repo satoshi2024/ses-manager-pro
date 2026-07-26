@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,17 @@ public final class CsvUtils {
             sb.append(escape(sanitizeForSpreadsheet(fields[i])));
         }
         sb.append("\r\n");
+    }
+
+    /** 1行分のCSVを指定されたWriterへ直接書き込む。 */
+    public static void appendLine(Writer writer, String... fields) throws IOException {
+        for (int i = 0; i < fields.length; i++) {
+            if (i > 0) {
+                writer.write(',');
+            }
+            writer.write(escape(sanitizeForSpreadsheet(fields[i])));
+        }
+        writer.write("\r\n");
     }
 
     /**

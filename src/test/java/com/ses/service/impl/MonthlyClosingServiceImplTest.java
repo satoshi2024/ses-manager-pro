@@ -13,6 +13,7 @@ import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -42,9 +43,16 @@ class MonthlyClosingServiceImplTest {
     @Mock private com.ses.service.compliance.LaborComplianceService laborComplianceService;
     @Mock private com.ses.service.MenuCacheService menuCacheService;
     @Mock private org.springframework.beans.factory.ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
+    @Mock private com.ses.service.MonthlyAccountingSnapshotService monthlyAccountingSnapshotService;
 
     @InjectMocks
     private MonthlyClosingServiceImpl service;
+
+    @BeforeEach
+    void wireSnapshotService() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "monthlyAccountingSnapshotService", monthlyAccountingSnapshotService);
+    }
 
     private void stubEmptyAll() {
         lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
@@ -116,6 +124,7 @@ class MonthlyClosingServiceImplTest {
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(systemConfigService).put(eq("closing.confirmed-months"), json.capture(), anyString());
+        verify(monthlyAccountingSnapshotService).snapshotMonth("2026-06");
         assertTrue(json.getValue().contains("2026-06"));
         assertTrue(json.getValue().contains("7"));
     }

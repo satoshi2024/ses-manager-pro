@@ -1,0 +1,56 @@
+あなたはSES Manager Proの `accounting-payment-integration` を最後まで管理する主実装AIです。
+このspec専用の長期対話として、担当原子taskをtasks.mdの順序と本指示の依存に従って処理してください。
+
+【担当原子task】
+- T094: 0. G4/API spike/canonical mapping
+- T095: F1. connection/mapping/job DDLと既存connection移行
+- T096: F2. AccountingProvider/freee/CSV
+- T097: A1. mapping/preview/job管理UI
+- T098: B1. 売上/取消連携
+- T099: B2. BP/経費/支払連携
+- T100: B3. 月次照合/closing
+- T101: M. 回帰/障害訓練
+
+【開始条件】
+- Wave: Wave 3
+- Migration: V73
+- 先行条件: portal系、order、BP、archive完了・merge済み。
+- Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
+未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
+
+【最初に完全に読むもの】
+- AGENTS.md
+- .kiro/specs/README.md
+- .kiro/specs/customer-product-expansion-2026/README.md
+- .kiro/specs/customer-product-expansion-2026/decision-log.md
+- .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
+- .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
+- .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
+- .kiro/specs/accounting-payment-integration/requirements.md
+- .kiro/specs/accounting-payment-integration/design.md
+- .kiro/specs/accounting-payment-integration/tasks.md
+
+【spec内の実行順】
+- 0→F1→F2→(A1 || B1 || B2)→B3→M
+- 並行ルール: provider/job coreは主担当。F2後、UI、売上、BP/経費を3レーン可。B3はB1+B2後。
+- task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
+- 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
+- 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
+- migration、SecurityConfig、共通entity/service、message bundle、sidebar、tasks.md、M taskは主担当が所有する。
+- Mは全featureレーンmerge後に主担当が単独実行する。
+
+【実装共通ルール】
+- 担当spec外のrefactor、別specの先取り、予約外migration、既存変更の上書きを禁止する。
+- DDLはV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke assert、entityを同じtaskで同期する。
+- CSRF、監査、状態機械、楽観ロック、4言語i18n、tenant/data/organization/file scopeを同一境界で確認する。
+- list/detail/count/export/download/notification/schedulerの認可母集団を一致させる。
+- 外部APIはtransaction外で呼び、idempotency、correlation ID、timeout、retry/backoff、障害復旧を実装する。
+- 内部entityをportal/AIへ直接公開しない。未知file/scan障害はfail-closed。
+
+【記録と完了報告】
+- `.kiro/specs/accounting-payment-integration/review-ledger.md` を作成または更新し、task、requirements、変更file、test、Demo、commit、riskを1行ずつ記録する。
+- 完了時はtask別対応表、実行test、Demo、未検証事項、rollback、base/head commit、Review開始条件を報告する。
+- Review合格前に次specを開始済みと記録しない。

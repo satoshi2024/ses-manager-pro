@@ -3,6 +3,7 @@ package com.ses.config;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.ses.common.util.SecurityUtils;
 import org.apache.ibatis.reflection.MetaObject;
@@ -32,6 +33,8 @@ public class MyBatisPlusConfig {
         // MI-21: ページネーションの最大件数制限を1000件に設定（大表保護のため）
         paginationInterceptor.setMaxLimit(1000L);
         interceptor.addInnerInterceptor(paginationInterceptor);
+        // 組織・原価部門・予算など、version列を持つ更新対象の競合を検出する。
+        interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         return interceptor;
     }
 

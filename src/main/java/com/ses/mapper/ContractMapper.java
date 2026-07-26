@@ -15,10 +15,46 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.contract.ContractListDto;
 import com.ses.dto.contract.ContractDraftStatusDto;
 import com.ses.dto.contract.RenewalCalendarItemDto;
+import com.ses.dto.accounting.ManagementAccountingContractRow;
 import java.time.LocalDate;
 
 @Mapper
 public interface ContractMapper extends BaseMapper<Contract> {
+
+    /** 管理会計用。契約を所属組織の有効期間・primary所属でSQL絞り込みする。 */
+    @Select("""
+        <script>
+        SELECT c.id, c.engineer_id AS engineerId, c.sales_user_id AS salesUserId,
+               c.start_date AS startDate, c.end_date AS endDate,
+               c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
+               uo.organization_id AS organizationId
+        FROM t_contract c
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{monthStart}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        WHERE c.deleted_flag = 0
+          AND c.status != '準備中'
+          AND c.start_date &lt;= #{monthEnd}
+          AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
+          <if test="fullAccess == false">
+            <choose>
+              <when test="allowedIds != null and allowedIds.size() > 0">
+                AND uo.organization_id IN
+                <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <otherwise>AND 1 = 0</otherwise>
+            </choose>
+          </if>
+        ORDER BY c.id
+        </script>
+        """)
+    List<ManagementAccountingContractRow> selectAccountingContracts(
+            @org.apache.ibatis.annotations.Param("monthStart") LocalDate monthStart,
+            @org.apache.ibatis.annotations.Param("monthEnd") LocalDate monthEnd,
+            @org.apache.ibatis.annotations.Param("fullAccess") boolean fullAccess,
+            @org.apache.ibatis.annotations.Param("allowedIds") List<Long> allowedIds);
 
     @Select("SELECT engineer_id, start_date, end_date FROM t_contract " +
             "WHERE deleted_flag = 0 AND status IN ('稼動中','終了') AND engineer_id IS NOT NULL AND start_date IS NOT NULL")

@@ -194,6 +194,18 @@
                 <li class="nav-item mt-3 mb-1 px-3" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.system}">システム管理</span>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('organization')}">
+                    <a th:href="@{/organization}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/organization') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-diagram-3 me-2"></i>
+                        <span th:text="#{menu.organization}">組織管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('management-accounting')}">
+                    <a th:href="@{/management-accounting}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/management-accounting') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-bar-chart-line me-2"></i>
+                        <span th:text="#{menu.management.accounting}">管理会計</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
                     <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/user') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-gear me-2"></i>

@@ -421,9 +421,7 @@ function postStatusChange(id, newStatus, cancelDate) {
 }
 
 // 現在の検索条件(#search-form)を反映してExcel出力する。
-// バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる
-// (common.js の ajaxSetup complete ハンドラが非JSONレスポンスをセッション切れと誤検知するのを避けるため)
-function exportContracts() {
+async function exportContracts() {
     const params = {
         status: $('#search-form [name="status"]').val(),
         customerId: $('#search-customerId').val(),
@@ -432,7 +430,7 @@ function exportContracts() {
         endDateFrom: $('#search-form [name="endDateFrom"]').val(),
         endDateTo: $('#search-form [name="endDateTo"]').val()
     };
-    window.location.href = '/api/contracts/export?' + $.param(params, true);
+    await SES.download('/api/contracts/export?' + $.param(params, true), '契約一覧.xlsx');
 }
 
 function deleteContract(id) {

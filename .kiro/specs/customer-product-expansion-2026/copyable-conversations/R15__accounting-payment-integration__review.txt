@@ -1,0 +1,57 @@
+これは `accounting-payment-integration` 専用の独立Review対話です。実装対話の説明を信用せず、spec、review ledger、実diffから検証してください。
+Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
+
+【Review対象】
+- T094: 0. G4/API spike/canonical mapping
+- T095: F1. connection/mapping/job DDLと既存connection移行
+- T096: F2. AccountingProvider/freee/CSV
+- T097: A1. mapping/preview/job管理UI
+- T098: B1. 売上/取消連携
+- T099: B2. BP/経費/支払連携
+- T100: B3. 月次照合/closing
+- T101: M. 回帰/障害訓練
+- Base commit: <BASE_COMMIT>
+- Head commit: <HEAD_COMMIT>
+commitが未指定ならreview-ledger.md、git status、git logから対象範囲を特定し、分離不能ならReviewを止めて必要情報を報告してください。
+
+【前提】
+- Wave: Wave 3
+- Migration: V73
+- 先行条件: portal系、order、BP、archive完了・merge済み。
+- Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
+- 期待するtask順: 0→F1→F2→(A1 || B1 || B2)→B3→M
+
+【最初に完全に読むもの】
+- AGENTS.md
+- .kiro/specs/customer-product-expansion-2026/README.md
+- .kiro/specs/customer-product-expansion-2026/decision-log.md
+- .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
+- .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
+- .kiro/specs/accounting-payment-integration/requirements.md
+- .kiro/specs/accounting-payment-integration/design.md
+- .kiro/specs/accounting-payment-integration/tasks.md
+- .kiro/specs/accounting-payment-integration/review-ledger.md
+
+【Review観点】
+- 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
+- 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
+- CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。
+- list/detail/count/export/download/notification/schedulerの母集団が同じか検証する。
+- DDL taskはV1/Flyway/H2/entity/MySQL smokeが同期し、既存データreconciliationとrollbackがあるか確認する。
+- 外部APIはidempotency、timeout、retry/backoff、rate limit、相関ID、重複webhook、障害復旧を確認する。
+- 金額単位、期間境界、timezone、法定項目、PII、file fail-closed、外部DTO allow-listを確認する。
+- 自動test名だけで合格にせず、失敗条件と受入条件を実際にassertしているか読む。
+- MのDemoが顧客効果と既存回帰を証明し、未実行環境が明記されているか確認する。
+
+【出力】
+1. P0/P1/P2問題。各問題にfile:line、再現条件、影響、最小修正範囲を記載。
+2. task別 Requirements→実装→test→Demo→判定表。
+3. migration/scope/security/外部障害/性能の横断判定。
+4. 未検証環境と本番前条件。
+5. spec総合判定: PASS / CONDITIONAL PASS / FAIL。
+6. 次specまたは次Waveを開始してよいか。
+7. review-ledgerと中央ledgerへ転記する短い結論。
+問題がない場合は根拠を示してPASSとし、不要なrefactorを提案しないでください。

@@ -14,6 +14,10 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -146,6 +150,53 @@ class MobileResponsiveLayoutTest {
         assertThat(html)
                 .as("ページヘッダーが折り返し対象のクラス組み合わせを持つこと")
                 .contains("d-flex justify-content-between align-items-center mb-4");
+    }
+
+    @Test
+    void 要員一覧の操作は390pxと1440pxで切り替わりIDが重複しない() throws Exception {
+        String html = render("/engineer/list");
+        String commonCss = readCss("static/css/common.css");
+
+        assertThat(commonCss)
+                .as("390pxではデスクトップ操作を隠すこと")
+                .containsPattern("(?s)@media \\(max-width: 576px\\).*?\\.engineer-list-desktop-actions\\s*\\{[^}]*display:\\s*none");
+        assertThat(commonCss)
+                .as("390pxではモバイル操作を表示すること")
+                .containsPattern("(?s)@media \\(max-width: 576px\\).*?\\.engineer-list-mobile-actions\\s*\\{[^}]*display:\\s*block");
+        assertThat(commonCss)
+                .as("1440pxではデスクトップ操作を表示すること")
+                .containsPattern("(?s)@media \\(min-width: 577px\\).*?\\.engineer-list-desktop-actions\\s*\\{[^}]*display:\\s*flex");
+        assertThat(commonCss)
+                .as("1440pxではモバイル操作を非表示にすること")
+                .contains(".engineer-list-mobile-actions {\n    display: none;");
+        assertThat(html)
+                .as("デスクトップとモバイルが同じ既存処理を呼び出すこと")
+                .contains("onclick=\"exportEngineers()\"")
+                .contains("onclick=\"exportEngineersCsv()\"")
+                .contains("onclick=\"document.getElementById('csvImportInput').click()\"")
+                .contains("aria-label=\"操作\"")
+                .contains("title=\"操作\"");
+        assertThat(countOccurrences(html, "id=\"csvImportInput\""))
+                .as("CSV入力要素は1つだけであること")
+                .isEqualTo(1);
+
+        Matcher idMatcher = Pattern.compile("id=\"([^\"]+)\"").matcher(html);
+        Set<String> ids = new HashSet<>();
+        while (idMatcher.find()) {
+            assertThat(ids.add(idMatcher.group(1)))
+                    .as("IDが重複していないこと: %s", idMatcher.group(1))
+                    .isTrue();
+        }
+    }
+
+    private int countOccurrences(String text, String target) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(target, index)) >= 0) {
+            count++;
+            index += target.length();
+        }
+        return count;
     }
 
     @Test

@@ -60,6 +60,10 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
      */
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
 
+    /** 月次snapshotは本番Beanが存在する場合だけ締め処理へ接続する（既存テストslice互換）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.MonthlyAccountingSnapshotService monthlyAccountingSnapshotService;
+
     /** compliance メニューを閲覧できるロールか（管理者は常に可。MenuPermissionFilter と同じ判定）。 */
     private boolean canViewCompliance() {
         org.springframework.security.core.Authentication auth =
@@ -228,6 +232,9 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         MonthlyClosingSummaryDto s = summary(month);
         if (!s.isReadyToClose()) {
             throw BusinessException.of(400, "error.closing.notReady");
+        }
+        if (monthlyAccountingSnapshotService != null) {
+            monthlyAccountingSnapshotService.snapshotMonth(month);
         }
         records.add(new ClosingRecord(month, userId, LocalDateTime.now()));
         saveRecordsToJson(records, config);

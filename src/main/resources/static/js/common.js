@@ -128,6 +128,49 @@ const SES = {
             }
         }
     },
+
+    /** バイナリダウンロード。APIエラーはページ遷移せずトーストで通知する。 */
+    download: async function(url, fallbackName) {
+        try {
+            const response = await fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/octet-stream, application/json' } });
+            const contentType = response.headers.get('content-type') || '';
+            if (response.redirected && response.url.indexOf('/login') !== -1) {
+                window.location.href = '/login?error=timeout';
+                return false;
+            }
+            if (!response.ok) {
+                let message = SES.i18n.t('error.networkError');
+                if (contentType.indexOf('application/json') !== -1) {
+                    try {
+                        const result = await response.json();
+                        message = result.message || message;
+                    } catch (e) {
+                        // JSONでないエラーレスポンスは共通メッセージへフォールバックする。
+                    }
+                }
+                SES.toast.error(message);
+                return false;
+            }
+
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+            const plainName = disposition.match(/filename="?([^";]+)"?/i);
+            const filename = encodedName ? decodeURIComponent(encodedName[1]) : (plainName ? plainName[1] : fallbackName);
+            const blobUrl = URL.createObjectURL(await response.blob());
+            const anchor = document.createElement('a');
+            anchor.href = blobUrl;
+            anchor.download = filename;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(blobUrl);
+            return true;
+        } catch (error) {
+            console.error('Download error:', error);
+            SES.toast.error(SES.i18n.t('error.networkError'));
+            return false;
+        }
+    },
     
     /**
      * トースト通知 (Bootstrap 5 Toast利用)

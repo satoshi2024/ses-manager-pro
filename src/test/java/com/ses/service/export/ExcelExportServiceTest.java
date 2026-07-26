@@ -10,10 +10,12 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,6 +73,34 @@ class ExcelExportServiceTest {
             assertEquals("鈴木 花子", row2.getCell(0).getStringCellValue());
             assertEquals("Bench", row2.getCell(2).getStringCellValue());
         }
+    }
+
+    @Test
+    void streamEngineers_writesMultipleBatchesToOneWorkbook() throws IOException {
+        List<Engineer> first = engineers(1, 500);
+        List<Engineer> second = engineers(501, 500);
+        List<Engineer> last = engineers(1001, 201);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        service.streamEngineers(List.of(first, second, last), output);
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(output.toByteArray()))) {
+            Sheet sheet = workbook.getSheetAt(0);
+            assertEquals(1202, sheet.getPhysicalNumberOfRows());
+            assertEquals("E-1", sheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("E-500", sheet.getRow(500).getCell(0).getStringCellValue());
+            assertEquals("E-501", sheet.getRow(501).getCell(0).getStringCellValue());
+            assertEquals("E-1201", sheet.getRow(1201).getCell(0).getStringCellValue());
+        }
+    }
+
+    private List<Engineer> engineers(int start, int count) {
+        return IntStream.range(start, start + count).mapToObj(i -> {
+            Engineer engineer = new Engineer();
+            engineer.setId((long) i);
+            engineer.setFullName("E-" + i);
+            return engineer;
+        }).toList();
     }
 
     @Test

@@ -639,3 +639,86 @@ CREATE TABLE shedlock (
   locked_by  VARCHAR(255) NOT NULL,
   PRIMARY KEY (name)
 );
+
+-- 組織・管理会計基盤（V60 / F1）
+DROP TABLE IF EXISTS t_monthly_accounting_dimension CASCADE;
+DROP TABLE IF EXISTS t_management_budget CASCADE;
+DROP TABLE IF EXISTS t_user_organization CASCADE;
+DROP TABLE IF EXISTS m_cost_center CASCADE;
+DROP TABLE IF EXISTS m_organization_unit CASCADE;
+
+CREATE TABLE m_organization_unit (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT,
+  legal_entity_id BIGINT,
+  code VARCHAR(50) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  type VARCHAR(20) NOT NULL,
+  parent_id BIGINT,
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  status VARCHAR(20) NOT NULL DEFAULT '有効',
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE t_user_organization (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  organization_id BIGINT NOT NULL,
+  position_name VARCHAR(100),
+  manager_user_id BIGINT,
+  primary_flag TINYINT NOT NULL DEFAULT 0,
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE m_cost_center (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id BIGINT,
+  code VARCHAR(50) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  organization_id BIGINT,
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  status VARCHAR(20) NOT NULL DEFAULT '有効',
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE t_management_budget (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  organization_id BIGINT NOT NULL,
+  cost_center_id BIGINT,
+  budget_month DATE NOT NULL,
+  revenue DECIMAL(15,0) NOT NULL DEFAULT 0,
+  gross_profit DECIMAL(15,0) NOT NULL DEFAULT 0,
+  utilization_count INT NOT NULL DEFAULT 0,
+  hire_count INT NOT NULL DEFAULT 0,
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE t_monthly_accounting_dimension (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  work_month DATE NOT NULL,
+  source_type VARCHAR(50) NOT NULL,
+  source_id BIGINT NOT NULL,
+  organization_id BIGINT,
+  cost_center_id BIGINT,
+  sales_user_id BIGINT,
+  revenue DECIMAL(15,0) NOT NULL DEFAULT 0,
+  cost DECIMAL(15,0) NOT NULL DEFAULT 0,
+  snapshot_at DATETIME NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

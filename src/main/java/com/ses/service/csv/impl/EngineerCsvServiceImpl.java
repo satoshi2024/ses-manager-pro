@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Writer;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -40,9 +41,30 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
     @Override
     public byte[] exportCsv(List<Engineer> engineers) {
         StringBuilder sb = new StringBuilder(CsvUtils.UTF8_BOM);
-        CsvUtils.appendLine(sb, HEADER);
+        try {
+            writeCsv(engineers, new StringBuilderWriter(sb));
+        } catch (IOException ex) {
+            throw new IllegalStateException("CSV生成に失敗しました", ex);
+        }
+        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public void writeCsv(List<Engineer> engineers, Writer writer) throws IOException {
+        writeCsvHeader(writer);
+        writeCsvRows(engineers, writer);
+    }
+
+    @Override
+    public void writeCsvHeader(Writer writer) throws IOException {
+        writer.write(CsvUtils.UTF8_BOM);
+        CsvUtils.appendLine(writer, HEADER);
+    }
+
+    @Override
+    public void writeCsvRows(List<Engineer> engineers, Writer writer) throws IOException {
         for (Engineer e : engineers) {
-            CsvUtils.appendLine(sb,
+            CsvUtils.appendLine(writer,
                     nz(e.getFullName()),
                     nz(e.getFullNameKana()),
                     nz(e.getInitialName()),
@@ -55,7 +77,28 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
                     nz(e.getJapaneseLevel()),
                     nz(e.getRemarks()));
         }
-        return sb.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** StringBuilderへ既存のbyte[] APIと同じ内容を書き出すための最小Writer。 */
+    private static final class StringBuilderWriter extends Writer {
+        private final StringBuilder target;
+
+        private StringBuilderWriter(StringBuilder target) {
+            this.target = target;
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) {
+            target.append(cbuf, off, len);
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
     @Override

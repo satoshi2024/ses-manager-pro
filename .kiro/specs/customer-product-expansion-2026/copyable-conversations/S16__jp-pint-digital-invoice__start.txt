@@ -1,0 +1,55 @@
+あなたはSES Manager Proの `jp-pint-digital-invoice` を最後まで管理する主実装AIです。
+このspec専用の長期対話として、担当原子taskをtasks.mdの順序と本指示の依存に従って処理してください。
+
+【担当原子task】
+- T102: 0. G5/provider/spec version spike
+- T103: F1. participant/digital invoice/event DDL
+- T104: F2. CanonicalInvoice/renderer/validator
+- T105: B1. provider送信/status/webhook
+- T106: A1. 設定/送信/状態UI
+- T107: B2. 受信review
+- T108: M. provider受入/回帰
+
+【開始条件】
+- Wave: Wave 3
+- Migration: V74
+- 先行条件: accounting-payment-integration完了・merge済み。
+- Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
+未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
+
+【最初に完全に読むもの】
+- AGENTS.md
+- .kiro/specs/README.md
+- .kiro/specs/customer-product-expansion-2026/README.md
+- .kiro/specs/customer-product-expansion-2026/decision-log.md
+- .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
+- .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
+- .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
+- .kiro/specs/jp-pint-digital-invoice/requirements.md
+- .kiro/specs/jp-pint-digital-invoice/design.md
+- .kiro/specs/jp-pint-digital-invoice/tasks.md
+
+【spec内の実行順】
+- 0→F1→F2→(B1 || A1)→B2→M
+- 並行ルール: canonical model/rendererは主担当。F2後、provider送信とUIを2レーン可。受信はprovider契約固定後。
+- task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
+- 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
+- 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
+- migration、SecurityConfig、共通entity/service、message bundle、sidebar、tasks.md、M taskは主担当が所有する。
+- Mは全featureレーンmerge後に主担当が単独実行する。
+
+【実装共通ルール】
+- 担当spec外のrefactor、別specの先取り、予約外migration、既存変更の上書きを禁止する。
+- DDLはV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke assert、entityを同じtaskで同期する。
+- CSRF、監査、状態機械、楽観ロック、4言語i18n、tenant/data/organization/file scopeを同一境界で確認する。
+- list/detail/count/export/download/notification/schedulerの認可母集団を一致させる。
+- 外部APIはtransaction外で呼び、idempotency、correlation ID、timeout、retry/backoff、障害復旧を実装する。
+- 内部entityをportal/AIへ直接公開しない。未知file/scan障害はfail-closed。
+
+【記録と完了報告】
+- `.kiro/specs/jp-pint-digital-invoice/review-ledger.md` を作成または更新し、task、requirements、変更file、test、Demo、commit、riskを1行ずつ記録する。
+- 完了時はtask別対応表、実行test、Demo、未検証事項、rollback、base/head commit、Review開始条件を報告する。
+- Review合格前に次specを開始済みと記録しない。

@@ -484,30 +484,30 @@ function saveEngineer() {
 
 
 
-// 現在の検索条件を反映してExcel出力する。
-// バイナリレスポンスのため $.ajax ではなく window.location.href で直接ダウンロードさせる
-// (common.js の ajaxSetup complete ハンドラが非JSONレスポンスをセッション切れと誤検知するのを避けるため)
-function exportEngineers() {
+// 現在の検索条件を反映してExcel/CSV出力する。
+async function exportEngineers() {
     const selectedSkills = $('#searchSkill').val();
     const params = {
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
         salesUserId: $('#searchSalesUser').val(),
+        riskLevel: $('#searchRiskLevel').val(),
         skillIds: selectedSkills
     };
-    window.location.href = '/api/engineers/export?' + $.param(params, true);
+    await SES.download('/api/engineers/export?' + $.param(params, true), '要員一覧.xlsx');
 }
 
-function exportEngineersCsv() {
+async function exportEngineersCsv() {
     const params = {
         fullName: $('#searchName').val(),
         status: $('#searchStatus').val(),
         employmentType: $('#searchEmpType').val(),
         salesUserId: $('#searchSalesUser').val(),
+        riskLevel: $('#searchRiskLevel').val(),
         skillIds: $('#searchSkill').val()
     };
-    window.location.href = '/api/engineers/export-csv?' + $.param(params, true);
+    await SES.download('/api/engineers/export-csv?' + $.param(params, true), '要員一覧.csv');
 }
 
 function importEngineersCsv(input) {

@@ -168,6 +168,20 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.followup-interval-days'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='retention.risk.threshold'");
 
+            // 組織・管理会計基盤(V60)
+            assertTableExists(st, "m_organization_unit");
+            assertTableExists(st, "t_user_organization");
+            assertTableExists(st, "m_cost_center");
+            assertTableExists(st, "t_management_budget");
+            assertTableExists(st, "t_monthly_accounting_dimension");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='organization'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='management-accounting'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='マネージャー' AND m.menu_key='organization'");
+            assertTableExists(st, "t_monthly_accounting_dimension");
+            assertColumnExists(st, "m_organization_unit", "version");
+            assertColumnExists(st, "t_management_budget", "gross_profit");
+
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
                     "SELECT c.id, su.real_name AS salesUserName FROM t_contract c " +

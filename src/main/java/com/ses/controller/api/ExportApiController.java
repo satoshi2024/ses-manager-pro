@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.export.ContractExportDto;
 import com.ses.dto.export.MonthlyRevenueDto;
 import com.ses.entity.Contract;
@@ -14,6 +15,7 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.EngineerService;
+import com.ses.service.RetentionRiskService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.export.ExcelExportService;
 import lombok.RequiredArgsConstructor;
@@ -25,8 +27,12 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.net.URLEncoder;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -37,6 +43,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -61,16 +70,53 @@ public class ExportApiController {
     private final ExcelExportService excelExportService;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final RetentionRiskService retentionRiskService;
+
+    @Value("${app.export.batch-size:500}")
+    private int configuredBatchSize;
+
+    @Value("${app.export.max-rows:50000}")
+    private int configuredMaxRows;
+
+    @Value("${app.export.max-scan-rows:100000}")
+    private int configuredMaxScanRows;
+
+    @Value("${app.export.max-concurrent:2}")
+    private int configuredMaxConcurrent;
+
+    @PostConstruct
+    void initializeExportLimits() {
+        configuredBatchSize = clamp(configuredBatchSize, 100, 2000, 500);
+        configuredMaxRows = configuredMaxRows > 0 ? configuredMaxRows : 50000;
+        configuredMaxScanRows = configuredMaxScanRows > 0 ? configuredMaxScanRows : 100000;
+        configuredMaxConcurrent = configuredMaxConcurrent > 0 ? configuredMaxConcurrent : 2;
+        com.ses.service.export.ExportConcurrencyLimiter.configure(configuredMaxConcurrent);
+    }
 
     /**
      * 要員一覧Excel出力。EngineerApiController.page と同じ検索条件を受け付ける(ページングなし)。
      */
     @GetMapping("/api/engineers/export")
-    public ResponseEntity<byte[]> exportEngineers(
+    public void exportEngineers(
             @RequestParam(required = false) String fullName,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String employmentType,
-            @RequestParam(required = false) List<Long> skillIds) {
+            @RequestParam(required = false) List<Long> skillIds,
+            @RequestParam(required = false) Long salesUserId,
+            @RequestParam(required = false) String riskLevel,
+            HttpServletResponse response) throws IOException {
+
+        com.ses.service.export.ExportConcurrencyLimiter.acquire();
+        try {
+            exportEngineersInternal(fullName, status, employmentType, skillIds, salesUserId, riskLevel, response);
+        } finally {
+            com.ses.service.export.ExportConcurrencyLimiter.release();
+        }
+    }
+
+    private void exportEngineersInternal(String fullName, String status, String employmentType,
+                                         List<Long> skillIds, Long salesUserId, String riskLevel,
+                                         HttpServletResponse response) throws IOException {
 
         LambdaQueryWrapper<Engineer> queryWrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(fullName)) {
@@ -87,23 +133,45 @@ public class ExportApiController {
                 if (skillId == null) {
                     continue;
                 }
-                queryWrapper.inSql(Engineer::getId,
-                        "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
+                queryWrapper.apply("EXISTS (SELECT 1 FROM t_engineer_skill es "
+                                + "WHERE es.engineer_id = t_engineer.id AND es.skill_id = {0})",
+                        skillId);
             }
+        }
+        if (salesUserId != null) {
+            queryWrapper.apply("EXISTS (SELECT 1 FROM t_engineer_sales es "
+                    + "WHERE es.engineer_id = t_engineer.id AND es.sales_user_id = {0} "
+                    + "AND es.released_at IS NULL AND es.deleted_flag = 0)", salesUserId);
         }
         // データスコープ: 画面と同じ担当集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
         if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
             if (allowed.isEmpty()) {
-                return buildFileResponse(excelExportService.exportEngineers(List.of()), "要員一覧");
+                prepareFileResponse(response, "要員一覧", "xlsx");
+                excelExportService.streamEngineers(List.<Engineer>of(), response.getOutputStream());
+                return;
             }
             queryWrapper.in(Engineer::getId, allowed);
         }
         queryWrapper.orderByDesc(Engineer::getId);
 
-        List<Engineer> rows = engineerService.list(queryWrapper);
-        byte[] bytes = excelExportService.exportEngineers(rows);
-        return buildFileResponse(bytes, "要員一覧");
+        boolean highRiskOnly = "high".equalsIgnoreCase(riskLevel);
+        if (highRiskOnly) {
+            assertWithinMaxRows(countHighRiskEngineers(queryWrapper));
+            prepareFileResponse(response, "要員一覧", "xlsx");
+            excelExportService.streamEngineers(highRiskBatches(queryWrapper), response.getOutputStream());
+            return;
+        }
+        assertWithinMaxRows(engineerService.count(queryWrapper));
+        prepareFileResponse(response, "要員一覧", "xlsx");
+        excelExportService.streamEngineers(new BatchIterable<>(lastId -> {
+            LambdaQueryWrapper<Engineer> batchQuery = queryWrapper.clone();
+            if (lastId != null) {
+                batchQuery.lt(Engineer::getId, lastId);
+            }
+            batchQuery.orderByDesc(Engineer::getId).last("LIMIT " + configuredBatchSize);
+            return engineerService.list(batchQuery);
+        }, rows -> highRiskOnly ? filterHighRisk(rows) : rows, Engineer::getId, configuredBatchSize), response.getOutputStream());
     }
 
     /**
@@ -111,7 +179,7 @@ public class ExportApiController {
      * 旧パラメータ(customerName/keyword)も互換のため継続して受け付ける。
      */
     @GetMapping("/api/contracts/export")
-    public ResponseEntity<byte[]> exportContracts(
+    public void exportContracts(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) Long salesUserId,
@@ -119,7 +187,21 @@ public class ExportApiController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDateTo,
             @RequestParam(required = false) String customerName,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            HttpServletResponse response) throws IOException {
+
+        com.ses.service.export.ExportConcurrencyLimiter.acquire();
+        try {
+            exportContractsInternal(status, customerId, salesUserId, contractNo, endDateFrom, endDateTo,
+                    customerName, keyword, response);
+        } finally {
+            com.ses.service.export.ExportConcurrencyLimiter.release();
+        }
+    }
+
+    private void exportContractsInternal(String status, Long customerId, Long salesUserId, String contractNo,
+                                         LocalDate endDateFrom, LocalDate endDateTo, String customerName,
+                                         String keyword, HttpServletResponse response) throws IOException {
 
         QueryWrapper<Contract> queryWrapper = new QueryWrapper<>();
         if (StringUtils.hasText(status)) {
@@ -141,58 +223,40 @@ public class ExportApiController {
             queryWrapper.le("end_date", endDateTo);
         }
         if (StringUtils.hasText(customerName)) {
-            List<Customer> matchedCustomers = customerMapper.selectList(
-                    new QueryWrapper<Customer>().like("company_name", customerName));
-            List<Long> customerIds = matchedCustomers.stream().map(Customer::getId).collect(Collectors.toList());
-            if (customerIds.isEmpty()) {
-                // No matching customer: return empty workbook early
-                byte[] emptyBytes = excelExportService.exportContracts(List.of());
-                return buildFileResponse(emptyBytes, "契約一覧");
-            }
-            queryWrapper.in("customer_id", customerIds);
+            queryWrapper.apply("EXISTS (SELECT 1 FROM m_customer cu "
+                    + "WHERE cu.id = customer_id AND cu.deleted_flag = 0 AND cu.company_name LIKE {0})",
+                    "%" + customerName + "%");
         }
         if (StringUtils.hasText(keyword)) {
-            List<Engineer> matchedEngineers = engineerService.list(
-                    new LambdaQueryWrapper<Engineer>().like(Engineer::getFullName, keyword));
-            List<Project> matchedProjects = projectMapper.selectList(
-                    new QueryWrapper<Project>().like("project_name", keyword));
-
-            Set<Long> engineerIds = matchedEngineers.stream().map(Engineer::getId).collect(Collectors.toSet());
-            Set<Long> projectIds = matchedProjects.stream().map(Project::getId).collect(Collectors.toSet());
-
-            if (engineerIds.isEmpty() && projectIds.isEmpty()) {
-                byte[] emptyBytes = excelExportService.exportContracts(List.of());
-                return buildFileResponse(emptyBytes, "契約一覧");
-            }
-            queryWrapper.and(w -> {
-                boolean first = true;
-                if (!engineerIds.isEmpty()) {
-                    w.in("engineer_id", engineerIds);
-                    first = false;
-                }
-                if (!projectIds.isEmpty()) {
-                    if (!first) {
-                        w.or();
-                    }
-                    w.in("project_id", projectIds);
-                }
-            });
+            String keywordPattern = "%" + keyword + "%";
+            queryWrapper.and(w -> w.apply("EXISTS (SELECT 1 FROM t_engineer e "
+                            + "WHERE e.id = engineer_id AND e.deleted_flag = 0 AND e.full_name LIKE {0})", keywordPattern)
+                    .or()
+                    .apply("EXISTS (SELECT 1 FROM t_project p "
+                            + "WHERE p.id = project_id AND p.deleted_flag = 0 AND p.project_name LIKE {0})", keywordPattern));
         }
         // データスコープ: 画面と同じ担当契約集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
         if (dataScopeService.isScoped()) {
             java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
             if (allowed.isEmpty()) {
-                return buildFileResponse(excelExportService.exportContracts(List.of()), "契約一覧");
+                prepareFileResponse(response, "契約一覧", "xlsx");
+                excelExportService.streamContracts(List.<ContractExportDto>of(), response.getOutputStream());
+                return;
             }
             queryWrapper.in("id", allowed);
         }
         queryWrapper.orderByDesc("id");
 
-        List<Contract> contracts = contractMapper.selectList(queryWrapper);
-        List<ContractExportDto> rows = toContractExportDtos(contracts);
-
-        byte[] bytes = excelExportService.exportContracts(rows);
-        return buildFileResponse(bytes, "契約一覧");
+        assertWithinMaxRows(contractMapper.selectCount(queryWrapper));
+        prepareFileResponse(response, "契約一覧", "xlsx");
+        excelExportService.streamContracts(new BatchIterable<>(lastId -> {
+            QueryWrapper<Contract> batchQuery = queryWrapper.clone();
+            if (lastId != null) {
+                batchQuery.lt("id", lastId);
+            }
+            batchQuery.orderByDesc("id").last("LIMIT " + configuredBatchSize);
+            return contractMapper.selectList(batchQuery);
+        }, this::toContractExportDtos, Contract::getId, configuredBatchSize), response.getOutputStream());
     }
 
     /**
@@ -246,6 +310,46 @@ public class ExportApiController {
         return result;
     }
 
+    private long countHighRiskEngineers(LambdaQueryWrapper<Engineer> queryWrapper) {
+        long candidateCount = engineerService.count(queryWrapper);
+        if (candidateCount > configuredMaxScanRows) {
+            throw BusinessException.of("error.export.maxScanRows", configuredMaxScanRows);
+        }
+
+        long count = 0;
+        for (List<Engineer> rows : highRiskBatches(queryWrapper)) {
+            count += rows.size();
+            if (count > configuredMaxRows) return count;
+        }
+        return count;
+    }
+
+    private Iterable<List<Engineer>> highRiskBatches(LambdaQueryWrapper<Engineer> queryWrapper) {
+        long[] scannedRows = {0L};
+        return new BatchIterable<>(lastId -> {
+            long remaining = configuredMaxScanRows - scannedRows[0];
+            if (remaining <= 0) return List.of();
+            LambdaQueryWrapper<Engineer> batchQuery = queryWrapper.clone();
+            if (lastId != null) batchQuery.lt(Engineer::getId, lastId);
+            int limit = (int) Math.min(configuredBatchSize, remaining);
+            batchQuery.orderByDesc(Engineer::getId).last("LIMIT " + limit);
+            List<Engineer> fetched = engineerService.list(batchQuery);
+            if (fetched.size() > remaining) {
+                fetched = fetched.subList(0, (int) remaining);
+            }
+            scannedRows[0] += fetched.size();
+            return fetched;
+        }, this::filterHighRisk, Engineer::getId, configuredBatchSize);
+    }
+
+    private List<Engineer> filterHighRisk(List<Engineer> rows) {
+        Set<Long> highRiskIds = retentionRiskService.scoreBatchFor(rows).entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue().isHighRisk())
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+        return rows.stream().filter(engineer -> highRiskIds.contains(engineer.getId())).toList();
+    }
+
     /**
      * 指定年度(4月始まり12ヶ月)の月次売上・粗利・実績/見込み区分を集計する。
      * 集計ロジックは共通口径サービス({@link MonthlyRevenueCalcService})へ委譲し、Dashboard と数値を一致させる。
@@ -293,5 +397,73 @@ public class ExportApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename*=UTF-8''" + URLEncoder.encode(filename, StandardCharsets.UTF_8))
                 .body(bytes);
+    }
+
+    private void prepareFileResponse(HttpServletResponse response, String prefix, String extension) {
+        String filename = prefix + "_" + LocalDate.now().format(FILENAME_DATE_FORMAT) + "." + extension;
+        response.setContentType(XLSX_MEDIA_TYPE.toString());
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename*=UTF-8''" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+    }
+
+    private void assertWithinMaxRows(long count) {
+        if (count > configuredMaxRows) {
+            throw BusinessException.of("error.export.maxRows", configuredMaxRows);
+        }
+    }
+
+    private static int clamp(int value, int min, int max, int fallback) {
+        return value <= 0 ? fallback : Math.min(max, Math.max(min, value));
+    }
+
+    /** キーセットページングを1バッチずつ遅延取得するIterable。全件を保持しない。 */
+    private static final class BatchIterable<S, T> implements Iterable<List<T>> {
+        private final Function<Long, List<S>> fetcher;
+        private final Function<List<S>, List<T>> mapper;
+        private final Function<S, Long> idExtractor;
+        private final int batchSize;
+
+        private BatchIterable(Function<Long, List<S>> fetcher, Function<List<S>, List<T>> mapper,
+                              Function<S, Long> idExtractor, int batchSize) {
+            this.fetcher = fetcher;
+            this.mapper = mapper;
+            this.idExtractor = idExtractor;
+            this.batchSize = batchSize;
+        }
+
+        @Override
+        public Iterator<List<T>> iterator() {
+            return new Iterator<>() {
+                private Long lastId;
+                private List<S> pending;
+                private boolean finished;
+
+                @Override
+                public boolean hasNext() {
+                    if (pending == null && !finished) {
+                        pending = fetcher.apply(lastId);
+                        if (pending == null || pending.isEmpty()) {
+                            finished = true;
+                        }
+                    }
+                    return pending != null && !pending.isEmpty();
+                }
+
+                @Override
+                public List<T> next() {
+                    if (!hasNext()) {
+                        throw new NoSuchElementException();
+                    }
+                    List<S> current = pending;
+                    pending = null;
+                    Long nextId = idExtractor.apply(current.get(current.size() - 1));
+                    if (nextId == null || nextId.equals(lastId) || current.size() < batchSize) {
+                        finished = true;
+                    }
+                    lastId = nextId;
+                    return mapper.apply(current);
+                }
+            };
+        }
     }
 }

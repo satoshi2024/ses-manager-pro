@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{organization.title} + ' - ' + #{app.name}">組織管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-diagram-3 me-2 text-info"></i><span th:text="#{organization.title}">組織管理</span></h2>
+        <button id="newOrganizationButton" class="btn btn-info text-white shadow-sm" type="button" onclick="openOrganizationModal()">
+            <i class="bi bi-plus-lg me-1"></i><span th:text="#{organization.new}">組織登録</span>
+        </button>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body">
+            <div class="row g-3 align-items-end mb-3">
+                <div class="col-md-3">
+                    <label for="organizationAsOf" class="form-label text-muted small" th:text="#{organization.validFrom}">基準日</label>
+                    <input id="organizationAsOf" type="date" class="form-control bg-dark border-secondary text-light">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-outline-info w-100" onclick="loadOrganizations()"><i class="bi bi-search me-1"></i><span th:text="#{common.search}">検索</span></button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead><tr>
+                        <th th:text="#{organization.code}">コード</th>
+                        <th th:text="#{organization.name}">名称</th>
+                        <th th:text="#{organization.type}">種別</th>
+                        <th th:text="#{organization.parent}">親組織</th>
+                        <th th:text="#{organization.status}">状態</th>
+                        <th class="text-end" th:text="#{organization.actions}">操作</th>
+                    </tr></thead>
+                    <tbody id="organizationTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div>
+    <div class="modal fade" id="organizationModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg"><div class="modal-content bg-card text-light border-secondary">
+            <div class="modal-header border-secondary"><h5 class="modal-title" id="organizationModalTitle">組織登録</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="organizationId"><input type="hidden" id="organizationVersion">
+                <div class="row g-3">
+                    <div class="col-md-4"><label class="form-label" for="organizationCode" th:text="#{organization.code}">コード</label><input id="organizationCode" class="form-control bg-dark border-secondary text-light" required></div>
+                    <div class="col-md-8"><label class="form-label" for="organizationName" th:text="#{organization.name}">名称</label><input id="organizationName" class="form-control bg-dark border-secondary text-light" required></div>
+                    <div class="col-md-4"><label class="form-label" for="organizationType" th:text="#{organization.type}">種別</label><select id="organizationType" class="form-select bg-dark border-secondary text-light"><option value="法人">法人</option><option value="事業部">事業部</option><option value="部門">部門</option><option value="課">課</option></select></div>
+                    <div class="col-md-8"><label class="form-label" for="organizationParent" th:text="#{organization.parent}">親組織</label><select id="organizationParent" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select></div>
+                    <div class="col-md-6"><label class="form-label" for="organizationValidFrom" th:text="#{organization.validFrom}">開始日</label><input id="organizationValidFrom" type="date" class="form-control bg-dark border-secondary text-light" required></div>
+                    <div class="col-md-6"><label class="form-label" for="organizationValidTo" th:text="#{organization.validTo}">終了日</label><input id="organizationValidTo" type="date" class="form-control bg-dark border-secondary text-light"></div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button type="button" class="btn btn-info" onclick="saveOrganization()" th:text="#{common.save}">保存</button></div>
+        </div></div>
+    </div>
+</div>
+</div>
+<th:block layout:fragment="page-js"><script th:src="@{/js/modules/organization.js}"></script></th:block>
+</body>
+</html>

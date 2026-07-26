@@ -4,6 +4,40 @@
 
 **並行実行の原則**: 別々のspecディレクトリを別々のAIセッションに割り当てれば、担当ファイルが交差しないよう設計済みのため安全に同時実行できる。同一spec内でレーン(A/B/C/D等)が分かれているものは、レーン単位で別AIに割り振ることも可能（「一言で着手」列に個別レーンの例文も記載）。
 
+## 2026-07-26 顧客視点プロダクト拡張（全17件採用・仕様整理済み）
+
+実装順、依存、共有ファイル、Flyway採番方針（V59は永久欠番、将来は当時のlatest + 1）、共通テスト規約、外部調査資料、未決定ゲートは
+`customer-product-expansion-2026/README.md` を唯一の正とする。G0〜G6は2026-07-26に決定済みであり、
+詳細は`decision-log.md`と`gate-decisions-g1-g6.md`を参照する。本番gateを開発完了と誤認しないこと。
+本17specには本ファイル冒頭の「別specなら安全に並行できる」という一般則を適用せず、
+`customer-product-expansion-2026/parallel-execution-plan.md` のWaveと共有ファイル所有権を優先する。
+
+```text
+最初に読む順序:
+1. customer-product-expansion-2026/README.md
+2. customer-product-expansion-2026/decision-log.md
+3. customer-product-expansion-2026/gate-decisions-g1-g6.md
+4. customer-product-expansion-2026/shared-standards.md
+5. customer-product-expansion-2026/dependency-matrix.md
+6. customer-product-expansion-2026/parallel-execution-plan.md
+7. customer-product-expansion-2026/spec-execution-ledger.md
+8. customer-product-expansion-2026/spec-start-conversations.md の担当S番号
+9. 担当specの requirements.md → design.md → tasks.md
+10. customer-product-expansion-2026/subagent-delegation-summary.md（子Agentを使う場合）
+11. 実装後はcustomer-product-expansion-2026/spec-review-conversations.md の担当R番号
+```
+
+`task-start-conversations.md` は通常の派工には使わず、spec内の1taskだけを別AIへ再派工する場合のfallbackとする。
+T001は完了済みであり、再実行・再Reviewしない。
+
+対象spec: `multi-company-tenant-isolation`, `organization-management-accounting`,
+`enterprise-identity-security`, `legal-document-ledger-archive`, `productivity-search-saved-view`,
+`bp-company-master-procurement-compliance`, `approval-workflow-internal-control`,
+`crm-contact-opportunity`, `order-acceptance-workflow`, `dispatch-outsourcing-compliance-ledger`,
+`attendance-leave-overtime-compliance`, `staffing-capacity-planning`,
+`external-customer-bp-portal`, `engineer-self-service-portal-v2`,
+`accounting-payment-integration`, `jp-pint-digital-invoice`, `ai-feedback-learning`。
+
 ## 0. 前提の訂正（既に実装済み・spec化済みの機能）
 
 以前の分析で「未実装」と誤って挙げていたが、調査の結果**実装済み**と判明したもの。新規spec作成は不要。今後この領域を触るAIへは、下記の注意点を申し送りとして渡すこと。

@@ -1,0 +1,55 @@
+あなたはSES Manager Proの `legal-document-ledger-archive` を最後まで管理する主実装AIです。
+このspec専用の長期対話として、担当原子taskをtasks.mdの順序と本指示の依存に従って処理してください。
+
+【担当原子task】
+- T021: 0. G2法務確認と既存file inventory
+- T022: F1. 文書DDLとDocumentService
+- T023: F2. Storage adapterとstream download
+- T024: A1. 台帳検索/詳細/version UI
+- T025: B1. 既存帳票/CloudSign統合
+- T026: B2. 税務export/retention/disposal
+- T027: M. 移行/回帰/復元
+
+【開始条件】
+- Wave: Wave 0
+- Migration: V62
+- 先行条件: enterprise-identity-security完了・merge済み。
+- Decision gate: G2の法務監修者、保存期間、訂正削除方針が正式決定済み。
+未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
+
+【最初に完全に読むもの】
+- AGENTS.md
+- .kiro/specs/README.md
+- .kiro/specs/customer-product-expansion-2026/README.md
+- .kiro/specs/customer-product-expansion-2026/decision-log.md
+- .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
+- .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
+- .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
+- .kiro/specs/legal-document-ledger-archive/requirements.md
+- .kiro/specs/legal-document-ledger-archive/design.md
+- .kiro/specs/legal-document-ledger-archive/tasks.md
+
+【spec内の実行順】
+- 0→F1→F2→(A1 || B1 || B2)→M
+- 並行ルール: F2 merge後、台帳UI、既存帳票統合、export/retentionを3レーン可。
+- task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
+- 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
+- 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
+- migration、SecurityConfig、共通entity/service、message bundle、sidebar、tasks.md、M taskは主担当が所有する。
+- Mは全featureレーンmerge後に主担当が単独実行する。
+
+【実装共通ルール】
+- 担当spec外のrefactor、別specの先取り、予約外migration、既存変更の上書きを禁止する。
+- DDLはV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke assert、entityを同じtaskで同期する。
+- CSRF、監査、状態機械、楽観ロック、4言語i18n、tenant/data/organization/file scopeを同一境界で確認する。
+- list/detail/count/export/download/notification/schedulerの認可母集団を一致させる。
+- 外部APIはtransaction外で呼び、idempotency、correlation ID、timeout、retry/backoff、障害復旧を実装する。
+- 内部entityをportal/AIへ直接公開しない。未知file/scan障害はfail-closed。
+
+【記録と完了報告】
+- `.kiro/specs/legal-document-ledger-archive/review-ledger.md` を作成または更新し、task、requirements、変更file、test、Demo、commit、riskを1行ずつ記録する。
+- 完了時はtask別対応表、実行test、Demo、未検証事項、rollback、base/head commit、Review開始条件を報告する。
+- Review合格前に次specを開始済みと記録しない。

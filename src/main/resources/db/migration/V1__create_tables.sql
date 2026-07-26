@@ -11,6 +11,11 @@
 -- ============================================================
 DROP TABLE IF EXISTS t_notification_read;
 DROP TABLE IF EXISTS t_notification;
+DROP TABLE IF EXISTS t_monthly_accounting_dimension;
+DROP TABLE IF EXISTS t_management_budget;
+DROP TABLE IF EXISTS t_user_organization;
+DROP TABLE IF EXISTS m_cost_center;
+DROP TABLE IF EXISTS m_organization_unit;
 DROP TABLE IF EXISTS t_sales_activity;
 DROP TABLE IF EXISTS t_role_menu;
 DROP TABLE IF EXISTS m_menu;
@@ -417,6 +422,140 @@ CREATE TABLE t_role_menu (
   FOREIGN KEY (menu_id) REFERENCES m_menu(id)
   ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ロール別メニュー権限';
+
+
+-- ============================================================
+-- 17. m_organization_unit (組織マスタ)
+-- ============================================================
+CREATE TABLE m_organization_unit (
+  id             BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id      BIGINT                                  COMMENT '将来のテナントID（現行は独立DB）',
+  legal_entity_id BIGINT                                 COMMENT '法人ID（法人マスタ実装前は外部参照値）',
+  code           VARCHAR(50)  NOT NULL                    COMMENT '組織コード',
+  name           VARCHAR(200) NOT NULL                    COMMENT '組織名',
+  type           VARCHAR(20)  NOT NULL                    COMMENT '組織種別(事業部/部/課/チーム)',
+  parent_id      BIGINT                                  COMMENT '親組織ID',
+  valid_from     DATE         NOT NULL                    COMMENT '有効開始日',
+  valid_to       DATE                                     COMMENT '有効終了日',
+  status         VARCHAR(20)  NOT NULL DEFAULT '有効'      COMMENT '状態(有効/無効)',
+  version        INT          NOT NULL DEFAULT 0           COMMENT '楽観ロック版',
+  created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag   TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
+
+  INDEX idx_org_parent (parent_id),
+  INDEX idx_org_legal_entity_period (legal_entity_id, valid_from, valid_to),
+  INDEX idx_org_status (status),
+  CONSTRAINT fk_org_parent FOREIGN KEY (parent_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='組織マスタ';
+
+
+-- ============================================================
+-- 18. t_user_organization (ユーザー所属履歴)
+-- ============================================================
+CREATE TABLE t_user_organization (
+  id              BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  user_id         BIGINT       NOT NULL                    COMMENT 'ユーザーID',
+  organization_id BIGINT       NOT NULL                    COMMENT '組織ID',
+  position_name   VARCHAR(100)                            COMMENT '役職',
+  manager_user_id BIGINT                                  COMMENT '上長ユーザーID',
+  primary_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '主所属フラグ',
+  valid_from      DATE         NOT NULL                    COMMENT '所属開始日',
+  valid_to        DATE                                     COMMENT '所属終了日',
+  created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
+
+  INDEX idx_user_org_user_period (user_id, valid_from, valid_to),
+  INDEX idx_user_org_organization (organization_id),
+  INDEX idx_user_org_manager (manager_user_id),
+  CONSTRAINT fk_user_org_user FOREIGN KEY (user_id) REFERENCES sys_user(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_user_org_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_user_org_manager FOREIGN KEY (manager_user_id) REFERENCES sys_user(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ユーザー所属履歴';
+
+
+-- ============================================================
+-- 19. m_cost_center (原価部門マスタ)
+-- ============================================================
+CREATE TABLE m_cost_center (
+  id              BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id BIGINT                                  COMMENT '法人ID（法人マスタ実装前は外部参照値）',
+  code            VARCHAR(50)  NOT NULL                    COMMENT '原価部門コード',
+  name            VARCHAR(200) NOT NULL                    COMMENT '原価部門名',
+  organization_id BIGINT                                  COMMENT '既定組織ID',
+  valid_from      DATE         NOT NULL                    COMMENT '有効開始日',
+  valid_to        DATE                                     COMMENT '有効終了日',
+  status          VARCHAR(20)  NOT NULL DEFAULT '有効'      COMMENT '状態(有効/無効)',
+  version         INT          NOT NULL DEFAULT 0           COMMENT '楽観ロック版',
+  created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
+
+  INDEX idx_cost_center_org (organization_id),
+  INDEX idx_cost_center_legal_period (legal_entity_id, valid_from, valid_to),
+  CONSTRAINT fk_cost_center_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='原価部門マスタ';
+
+
+-- ============================================================
+-- 20. t_management_budget (管理会計予算)
+-- ============================================================
+CREATE TABLE t_management_budget (
+  id                BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  organization_id   BIGINT       NOT NULL                    COMMENT '組織ID',
+  cost_center_id    BIGINT                                  COMMENT '原価部門ID',
+  budget_month      DATE         NOT NULL                    COMMENT '予算月(月初)',
+  revenue           DECIMAL(15,0) NOT NULL DEFAULT 0         COMMENT '売上予算(円)',
+  gross_profit      DECIMAL(15,0) NOT NULL DEFAULT 0         COMMENT '粗利予算(円)',
+  utilization_count INT          NOT NULL DEFAULT 0           COMMENT '稼働人数予算',
+  hire_count        INT          NOT NULL DEFAULT 0           COMMENT '採用人数予算',
+  version           INT          NOT NULL DEFAULT 0           COMMENT '楽観ロック版',
+  created_at        DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at        DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag      TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
+
+  UNIQUE KEY uk_management_budget (organization_id, cost_center_id, budget_month),
+  INDEX idx_management_budget_month (budget_month),
+  CONSTRAINT fk_management_budget_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_management_budget_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='管理会計予算';
+
+
+-- ============================================================
+-- 21. t_monthly_accounting_dimension (月次帰属snapshot)
+-- ============================================================
+CREATE TABLE t_monthly_accounting_dimension (
+  id              BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  work_month      DATE         NOT NULL                    COMMENT '対象月(月初)',
+  source_type     VARCHAR(50)  NOT NULL                    COMMENT '金額ソース種別',
+  source_id       BIGINT       NOT NULL                    COMMENT '金額ソースID',
+  organization_id BIGINT                                  COMMENT 'snapshot組織ID',
+  cost_center_id  BIGINT                                  COMMENT 'snapshot原価部門ID',
+  sales_user_id   BIGINT                                  COMMENT '営業ユーザーID',
+  revenue         DECIMAL(15,0) NOT NULL DEFAULT 0         COMMENT '売上(円)',
+  cost            DECIMAL(15,0) NOT NULL DEFAULT 0         COMMENT '原価(円)',
+  snapshot_at     DATETIME     NOT NULL                    COMMENT 'snapshot確定日時',
+  created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
+  updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+
+  UNIQUE KEY uk_monthly_accounting_source (work_month, source_type, source_id),
+  INDEX idx_monthly_accounting_org (work_month, organization_id),
+  INDEX idx_monthly_accounting_cost_center (work_month, cost_center_id),
+  CONSTRAINT fk_monthly_accounting_org FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_monthly_accounting_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_monthly_accounting_sales_user FOREIGN KEY (sales_user_id) REFERENCES sys_user(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月次管理会計帰属snapshot';
 
 
 -- ============================================================

@@ -1,0 +1,54 @@
+あなたはSES Manager Proの `crm-contact-opportunity` を最後まで管理する主実装AIです。
+このspec専用の長期対話として、担当原子taskをtasks.mdの順序と本指示の依存に従って処理してください。
+
+【担当原子task】
+- T048: F1. contact/lead/opportunity DDLと移行
+- T049: F2. opportunity状態/変換/forecast排他
+- T050: A1. 顧客contacts/timeline
+- T051: A2. lead/opportunity UI
+- T052: B1. CRM KPI
+- T053: M. 回帰
+
+【開始条件】
+- Wave: Wave 1
+- Migration: V65
+- 先行条件: Wave 0完了。BPと並行開始できるがV64 merge後にV65をmerge。
+- Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
+未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
+
+【最初に完全に読むもの】
+- AGENTS.md
+- .kiro/specs/README.md
+- .kiro/specs/customer-product-expansion-2026/README.md
+- .kiro/specs/customer-product-expansion-2026/decision-log.md
+- .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
+- .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
+- .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
+- .kiro/specs/crm-contact-opportunity/requirements.md
+- .kiro/specs/crm-contact-opportunity/design.md
+- .kiro/specs/crm-contact-opportunity/tasks.md
+
+【spec内の実行順】
+- F1→F2→(A1 || A2 || B1)→M
+- 並行ルール: F2 merge後、contact/timeline、lead/opportunity、KPIを3レーン可。BPとspec間並行可。
+- task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
+- 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
+- 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
+- migration、SecurityConfig、共通entity/service、message bundle、sidebar、tasks.md、M taskは主担当が所有する。
+- Mは全featureレーンmerge後に主担当が単独実行する。
+
+【実装共通ルール】
+- 担当spec外のrefactor、別specの先取り、予約外migration、既存変更の上書きを禁止する。
+- DDLはV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke assert、entityを同じtaskで同期する。
+- CSRF、監査、状態機械、楽観ロック、4言語i18n、tenant/data/organization/file scopeを同一境界で確認する。
+- list/detail/count/export/download/notification/schedulerの認可母集団を一致させる。
+- 外部APIはtransaction外で呼び、idempotency、correlation ID、timeout、retry/backoff、障害復旧を実装する。
+- 内部entityをportal/AIへ直接公開しない。未知file/scan障害はfail-closed。
+
+【記録と完了報告】
+- `.kiro/specs/crm-contact-opportunity/review-ledger.md` を作成または更新し、task、requirements、変更file、test、Demo、commit、riskを1行ずつ記録する。
+- 完了時はtask別対応表、実行test、Demo、未検証事項、rollback、base/head commit、Review開始条件を報告する。
+- Review合格前に次specを開始済みと記録しない。
