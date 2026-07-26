@@ -434,6 +434,93 @@ const SES = {
         }
     },
     
+    /**
+     * 一覧画面の絞り込みパネルをスマホでは折りたたむ。
+     *
+     * 一覧画面の検索フォームは項目が最大7つあり、スマホでは全て縦積みになるため
+     * データ本体が2画面近く下に押し出されていた。狭い画面のときだけカード見出しを
+     * 差し込んで開閉できるようにする。
+     *
+     * 実装上の要点:
+     * - 表示制御はCSS(common.cssの max-width:768px)に一本化し、JSは開閉状態を
+     *   data-filter-collapsed 属性で示すだけにする。こうすると画面回転やリサイズで
+     *   ブレークポイントを跨いでもJS側の再計算が要らず、広い画面では属性値に関わらず
+     *   常に展開表示になる。
+     * - 折りたたむと何で絞り込み中か見えなくなるため、適用中の条件数をバッジで出す。
+     * - 全一覧画面が同じマークアップ(card > card-body > form#searchForm)なので、
+     *   テンプレートは変更せずここで一括して組み立てる。
+     */
+    filterPanel: {
+        init: function() {
+            const form = document.getElementById('searchForm');
+            if (!form) return;
+            const body = form.closest('.card-body');
+            const card = body ? body.closest('.card') : null;
+            if (!card || card.classList.contains('filter-card')) return;
+
+            card.classList.add('filter-card');
+            // 初期状態は折りたたみ。広い画面ではCSS側でこの属性が無視される。
+            card.setAttribute('data-filter-collapsed', 'true');
+            if (!body.id) body.id = 'filterPanelBody';
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'filter-toggle';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-controls', body.id);
+            toggle.innerHTML =
+                '<span class="filter-toggle-label">'
+                + '<i class="bi bi-funnel me-2"></i>'
+                + '<span></span>'
+                + '<span class="filter-toggle-count badge rounded-pill ms-2 d-none"></span>'
+                + '</span>'
+                + '<i class="bi bi-chevron-down filter-toggle-chevron"></i>';
+            // ラベルはテキストとして入れる（翻訳文の取り違えでHTMLが混ざっても壊れないように）
+            toggle.querySelector('.filter-toggle-label > span').textContent =
+                SES.i18n.t('common.filter.panel');
+
+            toggle.addEventListener('click', function() {
+                const collapsed = card.getAttribute('data-filter-collapsed') === 'true';
+                card.setAttribute('data-filter-collapsed', collapsed ? 'false' : 'true');
+                toggle.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
+            });
+
+            card.insertBefore(toggle, body);
+
+            const self = this;
+            const refresh = function() { self.updateCount(form, toggle); };
+            form.addEventListener('change', refresh);
+            form.addEventListener('submit', function() {
+                refresh();
+                // 検索したら結果を見たいので、狭い画面では自動でたたむ
+                if (window.matchMedia('(max-width: 768px)').matches) {
+                    card.setAttribute('data-filter-collapsed', 'true');
+                    toggle.setAttribute('aria-expanded', 'false');
+                }
+            });
+            refresh();
+        },
+
+        /** 値が入っている絞り込み項目の数をバッジに反映する */
+        updateCount: function(form, toggle) {
+            let count = 0;
+            form.querySelectorAll('input, select').forEach(function(el) {
+                if (el.disabled || !el.name) return;
+                if (['submit', 'button', 'reset', 'file', 'hidden'].indexOf(el.type) !== -1) return;
+                if (el.type === 'checkbox' || el.type === 'radio') {
+                    if (el.checked) count++;
+                    return;
+                }
+                if (el.value && el.value.trim() !== '') count++;
+            });
+
+            const badge = toggle.querySelector('.filter-toggle-count');
+            badge.textContent = count;
+            badge.title = SES.i18n.t('common.filter.activeCount', count);
+            badge.classList.toggle('d-none', count === 0);
+        }
+    },
+
     theme: {
         init: function() {
             const savedTheme = localStorage.getItem('ses_theme') || 'light';
@@ -523,6 +610,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 4. サジェストの初期化
     SES.autocomplete.init();
+
+    // 5. 絞り込みパネルの折りたたみ（スマホのみ有効。CSS側で制御）
+    SES.filterPanel.init();
     
     // 5. ツールチップの初期化 (Bootstrap)
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');

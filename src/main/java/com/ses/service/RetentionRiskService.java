@@ -22,4 +22,12 @@ public interface RetentionRiskService {
      * クエリで算出する。存在しない要員IDは結果に含まれない（例外は投げない）。
      */
     Map<Long, RetentionRiskDto> scoreBatch(Collection<Long> engineerIds);
+
+    /**
+     * すでに読み込み済みの要員エンティティからスコアを算出する（要員ID -> スコア）。
+     *
+     * <p>一覧APIは対象要員を手元に持っているため、{@link #scoreBatch(Collection)} を使うと
+     * 同じ行をDBから読み直すことになる。呼び出し元がエンティティを持っている場合は必ずこちらを使う。
+     */
+    Map<Long, RetentionRiskDto> scoreBatchFor(Collection<com.ses.entity.Engineer> engineers);
 }

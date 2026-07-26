@@ -3,6 +3,7 @@ package com.ses.service.scheduler;
 import com.ses.service.ContractRenewalService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,6 +17,7 @@ public class ContractRenewalScheduler {
     private final ContractRenewalService contractRenewalService;
 
     @Scheduled(cron = "0 30 7 * * *")
+    @SchedulerLock(name = "contractRenewalDraftDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void generateDaily() {
         contractRenewalService.generateRenewalDrafts();
     }

@@ -52,12 +52,12 @@ public class Project extends BaseEntity {
     private Integer requiredCount;
 
     /**
-     * 単価(下限)
+     * 単価(下限・円/月)。画面・API・DBとも円で扱う（例: 60万円 = 600000）。
      */
     private BigDecimal unitPriceMin;
 
     /**
-     * 単価(上限)
+     * 単価(上限・円/月)。画面・API・DBとも円で扱う（例: 80万円 = 800000）。
      */
     private BigDecimal unitPriceMax;
 

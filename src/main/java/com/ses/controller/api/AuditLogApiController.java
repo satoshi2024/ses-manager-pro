@@ -23,6 +23,8 @@ public class AuditLogApiController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String method) {
-        return ApiResult.success(auditLogService.page(current, size, username, method));
+        // size<=0 でページング無効化(全件取得)になるのを防ぐ。監査ログは全テーブル中で最も行数が伸びる。
+        Page<AuditLog> safe = com.ses.common.util.PageUtils.safePage(current, size);
+        return ApiResult.success(auditLogService.page(safe.getCurrent(), safe.getSize(), username, method));
     }
 }

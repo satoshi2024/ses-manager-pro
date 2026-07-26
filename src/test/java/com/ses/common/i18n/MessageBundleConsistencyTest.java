@@ -14,6 +14,49 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class MessageBundleConsistencyTest {
 
+    /** 出荷する唯一のバンドル構成。messages.properties 自体が日本語（基底）である。 */
+    private static final Set<String> EXPECTED_BUNDLES = new TreeSet<>(List.of(
+            "messages.properties", "messages_en.properties",
+            "messages_zh_CN.properties", "messages_ko.properties"));
+
+    /**
+     * 想定外のバンドルファイルが存在しないことを検証する。
+     *
+     * <p>他のテストは対象ファイルをハードコードしていたため、リストに無いバンドルは
+     * 完全に検査の外に居た。実際 {@code messages_ja.properties} と
+     * {@code messages_vi.properties} がそこに紛れ込み、次の不具合を起こしていた。
+     *
+     * <p><b>messages_ja が基底を上書きしていた問題</b>: Spring の MessageSource は
+     * 日本語ロケールに対し {@code messages_ja} → {@code messages} の順で解決するため、
+     * {@code messages_ja} に書かれたキーは基底より優先される。一方
+     * {@link I18nMessagesLoader} は {@code lang.equals("ja")} のとき locale 別ファイルを
+     * 読まない実装なので、JS 側（{@code SES.i18n.t}）には基底の値が渡る。
+     * 結果、同じキーがサーバレンダリング（Thymeleaf の {@code #{...}}）と
+     * クライアントレンダリングで別の文字列になっていた——案件一覧では
+     * 絞り込みの選択肢が「終了」、同じ画面の状態バッジが「クローズ」と表示されていた。
+     * 基底が日本語である以上 {@code messages_ja} は存在してはならない。
+     *
+     * <p>言語を追加するときは、4バンドル全てにキーを揃えた上でこの定数を更新すること。
+     */
+    @Test
+    public void testNoUnexpectedBundleFiles() throws Exception {
+        Set<String> found = new TreeSet<>();
+        for (org.springframework.core.io.Resource r : new org.springframework.core.io.support
+                .PathMatchingResourcePatternResolver().getResources("classpath*:messages*.properties")) {
+            found.add(String.valueOf(r.getFilename()));
+        }
+
+        Set<String> unexpected = new TreeSet<>(found);
+        unexpected.removeAll(EXPECTED_BUNDLES);
+        assertTrue(unexpected.isEmpty(),
+                "想定外のメッセージバンドルがあります。ロケール別ファイルは基底(messages.properties)より"
+                        + "優先されるため、Thymeleaf と JS で表示文言が食い違う原因になります: " + unexpected);
+
+        Set<String> absent = new TreeSet<>(EXPECTED_BUNDLES);
+        absent.removeAll(found);
+        assertTrue(absent.isEmpty(), "必要なメッセージバンドルが見つかりません: " + absent);
+    }
+
     /**
      * Thymeleafテンプレートが参照している {@code #{...}} のキーが、実際に messages.properties に
      * 存在することを検証する。

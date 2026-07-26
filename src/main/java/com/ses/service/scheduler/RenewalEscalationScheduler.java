@@ -3,6 +3,7 @@ package com.ses.service.scheduler;
 import com.ses.service.RenewalEscalationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,6 +18,7 @@ public class RenewalEscalationScheduler {
     private final RenewalEscalationService renewalEscalationService;
 
     @Scheduled(cron = "0 15 8 * * *")
+    @SchedulerLock(name = "renewalEscalationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void escalateDaily() {
         renewalEscalationService.escalateUnhandled();
     }

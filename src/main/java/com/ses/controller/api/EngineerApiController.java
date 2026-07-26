@@ -109,9 +109,11 @@ public class EngineerApiController {
         }
         java.util.List<Long> engineerIds = engineers.stream().map(Engineer::getId).collect(java.util.stream.Collectors.toList());
         java.util.Map<Long, com.ses.dto.engineersales.EngineerPrimarySalesDto> primarySalesMap = engineerSalesService.mapPrimaryByEngineerIds(engineerIds);
-        // 定着リスクは要員ごとに3クエリ必要なため、必ず一括算出する（1件ずつ呼ぶと一覧表示のたびにN+1）
+        // 定着リスクは一括算出する（1件ずつ呼ぶと一覧表示のたびにN+1）。
+        // ここでは要員エンティティを既に持っているので、ID版ではなく実体版を渡して
+        // 同じ行の読み直し(selectBatchIds)を1クエリ分省く。
         java.util.Map<Long, com.ses.dto.engineerfollowup.RetentionRiskDto> riskMap =
-                retentionRiskService.scoreBatch(engineerIds);
+                retentionRiskService.scoreBatchFor(engineers);
 
         for (Engineer eng : engineers) {
             com.ses.dto.engineer.EngineerListDto dto = new com.ses.dto.engineer.EngineerListDto();

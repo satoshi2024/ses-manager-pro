@@ -26,6 +26,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -60,6 +61,9 @@ public class InvoiceServiceImplTest {
 
     @Mock
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
+    @Mock
+    private com.ses.mapper.BankDepositMapper bankDepositMapper;
 
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
@@ -654,5 +658,48 @@ public class InvoiceServiceImplTest {
         var detail = invoiceService.detail(invoiceId);
 
         assertEquals("10", detail.getTaxRatePercent());
+    }
+
+    // ===== payment-reconciliation (FR-09) との整合 =====
+
+    /**
+     * 入金消込で作られた入金を削除したら、銀行入金明細の消込も取り消して未消込へ戻す。
+     *
+     * <p>t_bank_deposit.matched_payment_id は t_invoice_payment を ON DELETE RESTRICT で
+     * 参照しており、t_invoice_payment は物理削除。解除せずに削除するとFK違反で500になり、
+     * 誤った自動消込を取り消す手段が無くなる（消込解除APIも存在しない）。
+     */
+    @Test
+    void deletePayment_消込済みの銀行入金を未消込へ戻してから削除する() {
+        Long invoiceId = 1L;
+        Long paymentId = 55L;
+
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setCustomerId(9L);
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setStatus("送付済");
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+
+        com.ses.entity.InvoicePayment payment = new com.ses.entity.InvoicePayment();
+        payment.setId(paymentId);
+        payment.setInvoiceId(invoiceId);
+        payment.setAmount(new BigDecimal("110000"));
+        when(invoicePaymentMapper.selectById(paymentId)).thenReturn(payment);
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.List.of());
+
+        invoiceService.deletePayment(invoiceId, paymentId);
+
+        // 消込解除が「入金の物理削除より先に」行われること（順序が逆だとFK違反になる）
+        org.mockito.InOrder inOrder = inOrder(bankDepositMapper, invoicePaymentMapper);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        inOrder.verify(bankDepositMapper).update(isNull(), captor.capture());
+        inOrder.verify(invoicePaymentMapper).deleteById(paymentId);
+
+        String setSql = captor.getValue().getSqlSet();
+        assertTrue(setSql.contains("status"), setSql);
+        assertTrue(setSql.contains("matched_invoice_id"), setSql);
+        assertTrue(setSql.contains("matched_payment_id"), setSql);
     }
 }

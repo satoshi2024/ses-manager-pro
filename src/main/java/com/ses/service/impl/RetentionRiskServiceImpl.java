@@ -64,6 +64,14 @@ public class RetentionRiskServiceImpl implements RetentionRiskService {
         return computeAll(engineerMapper.selectBatchIds(ids));
     }
 
+    @Override
+    public Map<Long, RetentionRiskDto> scoreBatchFor(Collection<Engineer> engineers) {
+        if (engineers == null || engineers.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return computeAll(new java.util.ArrayList<>(engineers));
+    }
+
     /**
      * 与えられた要員群のスコアをまとめて算出する。
      * 追加クエリは「契約の一括取得」「フォロー記録の一括取得」の2回のみ。

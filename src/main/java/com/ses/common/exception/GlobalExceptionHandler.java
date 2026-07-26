@@ -91,6 +91,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
     }
 
+    /**
+     * リクエストボディが壊れている・型が合わない・そもそも無い場合。
+     * これはクライアント側の誤りなので 400 を返す。
+     * ハンドラが無いと汎用 Exception ハンドラに落ちて 500「システムエラー」となり、
+     * 利用者には原因不明のエラーが出るうえ、監視上も本物の障害と区別できなくなる。
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResult<Void>> handleUnreadableBody(
+            org.springframework.http.converter.HttpMessageNotReadableException e) {
+        log.warn("リクエストボディを解釈できませんでした: {}", e.getMostSpecificCause().getMessage());
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエスト内容が不正です"));
+    }
+
     private HttpStatus toHttpStatus(int code) {
         return switch (code) {
             case 400 -> HttpStatus.BAD_REQUEST;

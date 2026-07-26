@@ -60,6 +60,13 @@ public class DashboardServiceImpl implements DashboardService {
     private final UtilizationCalcService utilizationCalcService;
 
     @Override
+    @org.springframework.cache.annotation.Cacheable(
+            cacheNames = com.ses.config.CacheConfig.CACHE_DASHBOARD_SUMMARY,
+            keyGenerator = "dashboardScopeKeyGenerator",
+            // sync=true: 未キャッシュ時に算出するのは1スレッドだけにし、残りは結果を待つ。
+            // これが無いと、起動直後やTTL切れの瞬間に同時アクセス分だけ重い集計が並走し
+            // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
+            sync = true)
     public DashboardSummaryDto getSummary(Integer year) {
         // 1. Calculate Charts (Dynamic) and prepare for KPIs
         List<YearMonth> targetMonths = (year != null)
@@ -81,10 +88,13 @@ public class DashboardServiceImpl implements DashboardService {
                 Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
         LocalDate limitDate = currentMonth.atEndOfMonth().plusMonths(1);
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<Contract>()
+        // 売上・粗利もデータスコープに従う。稼働率や要員数だけを絞り込み、金額は全社値を返すと
+        // 「自分の担当分の稼働率」と「全社の売上」が同じ画面に並び、担当範囲を限定されたロールに
+        // 全社の財務数値が見えてしまう。同一画面の指標は同じ母集団で揃える。
+        QueryWrapper<Contract> contractQuery = new QueryWrapper<Contract>()
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
-                .le("start_date", limitDate)
-        );
+                .le("start_date", limitDate);
+        List<Contract> allContracts = scopedContracts(contractQuery);
 
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();
@@ -362,9 +372,24 @@ public class DashboardServiceImpl implements DashboardService {
         return months;
     }
 
+    /**
+     * データスコープ適用済みの契約一覧を返す。スコープ対象ロールで許可契約が空なら空リスト。
+     * KPI・チャート・粗利分析が同じ母集団を見るための共通経路。
+     */
+    private List<Contract> scopedContracts(QueryWrapper<Contract> query) {
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            Set<Long> allowed = dataScopeService.allowedContractIds();
+            if (allowed.isEmpty()) {
+                return Collections.emptyList();
+            }
+            query.in("id", allowed);
+        }
+        return contractMapper.selectList(query);
+    }
+
     @Override
     public List<ContractProfitDto> getProfitAnalysis() {
-        List<Contract> contracts = contractMapper.selectList(new QueryWrapper<Contract>()
+        List<Contract> contracts = scopedContracts(new QueryWrapper<Contract>()
                 .in("status", "稼動中", "終了"));
         List<ContractProfitDto> result = new ArrayList<>();
 

@@ -224,7 +224,10 @@
                 <div class="user-info flex-grow-1 overflow-hidden">
                     <div class="fw-bold text-white text-truncate" sec:authentication="name">User Name</div>
                     <div class="small text-muted text-truncate">
-                        <span class="badge bg-tertiary text-secondary border border-dark rounded-pill px-2" sec:authentication="principal.authorities">Role</span>
+                        <!-- principal.authorities をそのまま出すと内部表現(接頭辞つきの配列)が
+                             画面に見えるため、GlobalControllerAdvice が用意した表示用ロール名を使う -->
+                        <span class="badge bg-tertiary text-secondary border border-dark rounded-pill px-2"
+                              th:text="${currentRoleName}">Role</span>
                     </div>
                 </div>
             </div>

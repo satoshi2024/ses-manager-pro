@@ -55,19 +55,54 @@ class MatchScoreCalculatorTest {
         assertEquals(25, Math.round(score.getMustCoverage() * 50));
     }
 
+    /**
+     * 単価は「円」で渡す（t_project.unit_price_min/max・t_engineer.expected_unit_price の実際の格納単位）。
+     * 減点は1万円の乖離につき2点。
+     */
     @Test
     void testPricePenalty() {
-        // Price outside range, 10k off -> -2 points
-        BigDecimal min = new BigDecimal("50");
-        BigDecimal max = new BigDecimal("70");
-        
+        BigDecimal min = new BigDecimal("500000");
+        BigDecimal max = new BigDecimal("700000");
+
         MatchScore scoreOver = MatchScoreCalculator.calculate(
-                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("75"), null, null);
-        assertEquals(10, scoreOver.getPriceScore()); // penalty = 5 * 2 = 10, score = 20 - 10 = 10
-        
+                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("750000"), null, null);
+        assertEquals(10, scoreOver.getPriceScore()); // 5万円超過 -> penalty 10 -> 20-10=10
+
         MatchScore scoreUnder = MatchScoreCalculator.calculate(
-                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("48"), null, null);
-        assertEquals(16, scoreUnder.getPriceScore()); // penalty = 2 * 2 = 4, score = 20 - 4 = 16
+                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("480000"), null, null);
+        assertEquals(16, scoreUnder.getPriceScore()); // 2万円下回り -> penalty 4 -> 20-4=16
+
+        MatchScore scoreInRange = MatchScoreCalculator.calculate(
+                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("600000"), null, null);
+        assertEquals(20, scoreInRange.getPriceScore());
+
+        // 乖離が大きくても0点止まり（負値にならない）
+        MatchScore scoreFarOff = MatchScoreCalculator.calculate(
+                Set.of(), Set.of(), Set.of(), min, max, new BigDecimal("3000000"), null, null);
+        assertEquals(0, scoreFarOff.getPriceScore());
+    }
+
+    /**
+     * 上限・下限が未設定の側は「制約なし」として減点しない。
+     * 以前は上限未設定時に 99999 という万円前提の番兵と円の希望単価を比べており、
+     * 上限を設けていない案件の候補が軒並み単価0点になっていた。
+     */
+    @Test
+    void testPriceNoBoundIsNotPenalized() {
+        MatchScore noMax = MatchScoreCalculator.calculate(
+                Set.of(), Set.of(), Set.of(), new BigDecimal("500000"), null,
+                new BigDecimal("900000"), null, null);
+        assertEquals(20, noMax.getPriceScore(), "上限未設定なら高単価でも減点しない");
+
+        MatchScore noMin = MatchScoreCalculator.calculate(
+                Set.of(), Set.of(), Set.of(), null, new BigDecimal("700000"),
+                new BigDecimal("100000"), null, null);
+        assertEquals(20, noMin.getPriceScore(), "下限未設定なら低単価でも減点しない");
+
+        // 両方未設定 or 希望単価なし は従来どおり中立の10点
+        MatchScore unknown = MatchScoreCalculator.calculate(
+                Set.of(), Set.of(), Set.of(), null, null, new BigDecimal("600000"), null, null);
+        assertEquals(10, unknown.getPriceScore());
     }
 
     @Test

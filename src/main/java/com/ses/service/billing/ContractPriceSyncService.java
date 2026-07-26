@@ -7,6 +7,7 @@ import com.ses.mapper.ContractPriceHistoryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -29,6 +30,7 @@ public class ContractPriceSyncService {
     private final TransactionTemplate transactionTemplate;
 
     @Scheduled(cron = "0 0 0 * * ?")
+    @SchedulerLock(name = "contractPriceSyncDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void syncCurrentPrices() {
         log.info("Starting contract price sync...");
         

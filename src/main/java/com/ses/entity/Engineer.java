@@ -49,7 +49,7 @@ public class Engineer extends BaseEntity {
     private String status;
     
     /**
-     * 希望単価(万円/月)
+     * 希望単価(円/月)。画面・API・DBとも円で扱う（例: 70万円 = 700000）。
      */
     @PositiveOrZero(message = "希望単価は0以上で入力してください")
     private BigDecimal expectedUnitPrice;

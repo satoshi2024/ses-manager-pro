@@ -89,4 +89,25 @@ public class GlobalControllerAdvice {
             return Collections.emptyList();
         }
     }
+
+    /**
+     * サイドバーに表示するロール名。
+     *
+     * <p>テンプレートから {@code principal.authorities} を直接出すと "[ROLE_管理者]" のような
+     * 内部表現がそのまま画面に出てしまう。かといって principal の具象型(LoginUser)に依存すると、
+     * principal が素の UserDetails であるテストスライス等で テンプレート評価が落ちる。
+     * ここで権限名から接頭辞を外した表示用の文字列を用意し、テンプレートは型に依存しないようにする。
+     */
+    @ModelAttribute("currentRoleName")
+    public String currentRoleName(Authentication authentication) {
+        if (authentication == null) {
+            return "";
+        }
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(a -> a.startsWith("ROLE_"))
+                .map(a -> a.substring("ROLE_".length()))
+                .findFirst()
+                .orElse("");
+    }
 }

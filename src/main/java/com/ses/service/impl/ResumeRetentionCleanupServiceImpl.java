@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -34,6 +35,7 @@ public class ResumeRetentionCleanupServiceImpl {
      * 保持期限を超えた確定済・却下ジョブの extracted_text をNULLにする。
      */
     @Scheduled(cron = "0 0 2 * * ?")
+    @SchedulerLock(name = "resumeRetentionCleanupDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void cleanupExpiredExtractedText() {
         LocalDateTime threshold = LocalDateTime.now().minusDays(retentionDays);
         log.info("PIIクリアバッチ開始: retentionDays={}, threshold={}", retentionDays, threshold);
