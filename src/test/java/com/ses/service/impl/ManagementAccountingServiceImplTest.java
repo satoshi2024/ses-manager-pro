@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.dto.accounting.AccountingWaitCostRow;
 import com.ses.dto.accounting.ManagementAccountingContractRow;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
+import com.ses.entity.Contract;
 import com.ses.entity.ManagementBudget;
 import com.ses.entity.MonthlyAccountingDimension;
 import com.ses.entity.WorkRecord;
@@ -32,9 +33,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,13 +63,18 @@ class ManagementAccountingServiceImplTest {
         record.setContractId(10L);
         record.setBillingAmount(new BigDecimal("120"));
         record.setPaymentAmount(new BigDecimal("70"));
+        record.setStatus("確定");
         MonthlyAccountingDimension snapshot = MonthlyAccountingDimension.builder()
                 .workMonth(LocalDate.of(2026, 6, 1)).sourceType("work-record").sourceId(30L)
                 .organizationId(100L).build();
 
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
-        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList())).thenReturn(List.of(contract));
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList())).thenReturn(List.of(contract));
+        Contract actualContract = new Contract();
+        actualContract.setId(10L);
+        actualContract.setCustomerId(500L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(actualContract));
         when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of(snapshot));
         when(budgetMapper.selectList(any())).thenReturn(List.of(budget(100L, new BigDecimal("110"), new BigDecimal("40"))));
@@ -83,7 +91,74 @@ class ManagementAccountingServiceImplTest {
         assertEquals(new BigDecimal("10"), result.getRevenueVariance());
         assertEquals(new BigDecimal("10"), result.getGrossProfitVariance());
         assertEquals("営業本部", result.getRows().get(0).getOrganizationName());
-        verify(contractMapper).selectAccountingContracts(any(), any(), eq(false), eq(List.of(100L)));
+        verify(contractMapper).selectAccountingContracts(any(), any(), eq(false), eq(List.of(100L)), eq(List.of()));
+    }
+
+    @Test
+    void 待機原価は月次snapshotがあれば現在要員SQLへfallbackしない() {
+        MonthlyAccountingDimension waitSnapshot = MonthlyAccountingDimension.builder()
+                .workMonth(LocalDate.of(2026, 6, 1)).sourceType("bench-engineer").sourceId(701L)
+                .organizationId(100L).costCenterId(200L).cost(new BigDecimal("700"))
+                .build();
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(organizationScopeService.allowedOrganizationIds(any())).thenReturn(Set.of());
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(true), isNull(), isNull())).thenReturn(List.of());
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of(waitSnapshot));
+        when(dimensionMapper.selectCount(any())).thenReturn(1L);
+        when(budgetMapper.selectList(any())).thenReturn(List.of());
+        when(organizationService.namesByIds(any())).thenReturn(Map.of(100L, "営業本部"));
+
+        ManagementAccountingSummaryDto result = service.summary("2026-06");
+
+        assertEquals(new BigDecimal("700"), result.getRows().get(0).getWaitCost());
+        verify(engineerMapper, never()).selectAccountingWaitCost(any(), any(), anyBoolean(), any(), any(), any(), any());
+    }
+
+    @Test
+    void scope外にだけ待機snapshotがある月は現在要員SQLへfallbackしない() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList())).thenReturn(List.of());
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of());
+        when(dimensionMapper.selectCount(any())).thenReturn(1L);
+        when(budgetMapper.selectList(any())).thenReturn(List.of());
+        when(organizationService.namesByIds(any())).thenReturn(Map.of());
+
+        ManagementAccountingSummaryDto result = service.summary("2026-06");
+
+        assertTrue(result.getRows().isEmpty());
+        verify(engineerMapper, never()).selectAccountingWaitCost(any(), any(), anyBoolean(), any(), any(), any(), any());
+    }
+
+    @Test
+    void scope外の確定snapshot契約は現在所属のforecastへ再出現しない() {
+        ManagementAccountingContractRow contract = contractRow(10L, 100L, 500L);
+        WorkRecord record = new WorkRecord();
+        record.setId(30L);
+        record.setContractId(10L);
+        record.setStatus("確定");
+        MonthlyAccountingDimension outsideSnapshot = MonthlyAccountingDimension.builder()
+                .workMonth(LocalDate.of(2026, 6, 1)).sourceType("work-record").sourceId(30L)
+                .organizationId(200L).build();
+
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList()))
+                .thenReturn(List.of(contract));
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        // 旧所属(200)のsnapshotはscope queryで不可視となり、現在所属100のforecastへ戻してはいけない。
+        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of());
+        when(budgetMapper.selectList(any())).thenReturn(List.of());
+        when(organizationService.namesByIds(any())).thenReturn(Map.of());
+
+        ManagementAccountingSummaryDto result = service.summary("2026-06");
+
+        assertTrue(result.getRows().isEmpty());
+        assertTrue(result.getDetails().isEmpty());
+        assertEquals(200L, outsideSnapshot.getOrganizationId());
+        verify(monthlyRevenueCalcService, never()).resolveContractAmount(any(), any(), any());
     }
 
     /**
@@ -95,7 +170,7 @@ class ManagementAccountingServiceImplTest {
     void 顧客付き実績でも行レベルの予算差が正しく突き合わされる() {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of());
-        when(contractMapper.selectAccountingContracts(any(), any(), eq(true), isNull()))
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(true), isNull(), isNull()))
                 .thenReturn(List.of(contractRow(10L, 100L, 500L), contractRow(11L, 100L, 501L)));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(budgetMapper.selectList(any())).thenReturn(List.of(budget(100L, new BigDecimal("150"), new BigDecimal("60"))));
@@ -136,7 +211,7 @@ class ManagementAccountingServiceImplTest {
     void 待機原価はscopeと対象月をSQL条件として受け取る() {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
-        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList())).thenReturn(List.of());
+        when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList())).thenReturn(List.of());
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(budgetMapper.selectList(any())).thenReturn(List.of());
         when(organizationService.namesByIds(any())).thenReturn(Map.of(100L, "自組織"));
@@ -155,6 +230,32 @@ class ManagementAccountingServiceImplTest {
         assertEquals(0, new BigDecimal("700000").compareTo(result.getRows().get(0).getWaitCost()));
         assertFalse(result.getRows().isEmpty());
         assertTrue(result.getRows().stream().allMatch(row -> Long.valueOf(100L).equals(row.getOrganizationId())));
+    }
+
+    @Test
+    void 法人指定時は予算SQLにも法人所属組織の境界を適用する() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        com.ses.entity.OrganizationUnit legalOrg = com.ses.entity.OrganizationUnit.builder()
+                .legalEntityId(99L).code("LE-99").name("法人99組織")
+                .type("部").validFrom(LocalDate.of(2026, 1, 1)).status("有効").build();
+        legalOrg.setId(100L);
+        when(organizationScopeService.listVisibleOrganizations(99L, LocalDate.of(2026, 6, 1)))
+                .thenReturn(List.of(legalOrg));
+        when(contractMapper.selectAccountingContractsFiltered(any(), any(), eq(true), isNull(), isNull(), isNull(),
+                eq(99L), isNull(), isNull(), isNull(), isNull(), isNull())).thenReturn(List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of());
+        when(budgetMapper.selectList(any())).thenReturn(List.of());
+        when(organizationService.namesByIds(any())).thenReturn(Map.of());
+        when(engineerMapper.selectAccountingWaitCost(any(), any(), eq(true), isNull(), eq(99L), isNull(), isNull()))
+                .thenReturn(List.of());
+
+        service.summary("2026-06", 99L, null, null, null, null, null);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ManagementBudget>> captor =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(budgetMapper).selectList(captor.capture());
+        verify(organizationScopeService, org.mockito.Mockito.atLeastOnce())
+                .listVisibleOrganizations(99L, LocalDate.of(2026, 6, 1));
     }
 
     private ManagementAccountingContractRow contractRow(Long id, Long organizationId, Long customerId) {

@@ -5,13 +5,16 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -155,6 +158,37 @@ class MigrationScriptIntegrityTest {
             assertTrue(v1.contains(expected),
                     "V1統合baselineに " + expected + " が反映されていません（V60適用済みDBと分岐します）");
         }
+    }
+
+    @Test
+    void 公開済みV5は不変で会計帰属列を含まないこと() throws Exception {
+        Resource resource = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V5__create_work_record_billing.sql");
+        byte[] bytes = resource.getInputStream().readAllBytes();
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        assertEquals("7741f7154d770c49d810cb248889d77973bfe9deee8402365a85eb79b52586e6", checksum,
+                "適用済みV5を編集すると既存DBのFlyway checksumが壊れます");
+        String sql = new String(bytes, StandardCharsets.UTF_8).toLowerCase(java.util.Locale.ROOT);
+        assertTrue(!sql.contains("organization_id") && !sql.contains("cost_center_id")
+                        && !sql.contains("accounting_dimension_frozen"),
+                "V5へ会計帰属列を追加せず、V60の未公開DDLで追加してください");
+    }
+
+    @Test
+    void V60のlegacy補列は対象列ごとに独立しBP外部キーより先に追加されること() throws Exception {
+        String sql = v60();
+        int bpColumn = sql.indexOf("ALTER TABLE t_bp_payment ADD COLUMN cost_center_id");
+        int bpForeignKey = sql.indexOf("fk_bp_payment_cost_center");
+        int workOrganization = sql.indexOf("ALTER TABLE t_work_record ADD COLUMN organization_id");
+        int workCostCenter = sql.indexOf("ALTER TABLE t_work_record ADD COLUMN cost_center_id");
+        int frozen = sql.indexOf("ALTER TABLE t_work_record ADD COLUMN accounting_dimension_frozen");
+
+        assertTrue(bpColumn >= 0 && bpForeignKey >= 0 && bpColumn < bpForeignKey,
+                "BP支払のcost_center_idを追加してから外部キーを作成してください");
+        assertTrue(workOrganization >= 0 && workCostCenter >= 0 && frozen >= 0,
+                "WorkRecordの組織・原価部門・凍結フラグはV60に個別追加してください");
+        assertTrue(workOrganization != workCostCenter && workCostCenter != frozen,
+                "WorkRecordの各列は同一の存在判定に束ねないでください");
     }
 
     private String v60() throws Exception {

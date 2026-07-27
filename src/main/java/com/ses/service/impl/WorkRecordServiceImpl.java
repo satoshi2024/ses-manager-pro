@@ -13,6 +13,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordDailyMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.CostCenterMapper;
 import com.ses.common.constant.NotificationLinks;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationService;
@@ -59,6 +60,15 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final WorkRecordDailyMapper workRecordDailyMapper;
     private final MonthlyClosingService monthlyClosingService;
     private final com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    /** 確定時点の組織・原価部門を勤怠へ凍結するための任意依存。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.EngineerMapper engineerMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CostCenterMapper costCenterMapper;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -246,6 +256,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         record.setBillingAmount(billingAmount);
         record.setPaymentAmount(paymentAmount);
         record.setRemarks(remarks);
+        // 入力レコード作成時点で帰属を固定する。後日の異動後に過去月を遅延承認しても
+        // 当時の帰属を維持し、明示的にNULLだった帰属もfallbackで再解決しない。
+        freezeAccountingDimension(record, contract);
 
         try {
             this.saveOrUpdate(record);
@@ -279,8 +292,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         // ロック順序の統一: Contract -> WorkRecord。デッドロック防止のため contractId 順でロック
         List<Long> contractIds = records.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
+        Map<Long, Contract> lockedContracts = new java.util.HashMap<>();
         for (Long cid : contractIds) {
-            contractMapper.selectByIdForUpdate(cid);
+            Contract lockedContract = contractMapper.selectByIdForUpdate(cid);
+            if (lockedContract != null) {
+                lockedContracts.put(cid, lockedContract);
+            }
         }
 
         // ロック後に再取得し、並行する revisePrice や saveHours の最新単価・状態を反映する。
@@ -293,11 +310,19 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .collect(Collectors.toList());
 
         for (WorkRecord record : records) {
-            // updateById ではなく、ステータスのみを条件付き(CAS)で安全に更新する
-            int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
+            // 勤怠を確定した瞬間に組織・原価部門を凍結する。月次締めが翌月に行われても、
+            // その間の異動・契約単価/原価部門変更で過去月の帰属が変わらないようにする。
+            freezeAccountingDimension(record, lockedContracts.get(record.getContractId()));
+            // updateById ではなく、ステータスのみを条件付き(CAS)で安全に更新する。
+            // 組織・原価部門は明示的にSETし、NULLも「未配賦」として凍結する。
+            UpdateWrapper<WorkRecord> statusUpdate = new UpdateWrapper<WorkRecord>()
                     .eq("id", record.getId())
                     .in("status", "入力中", "提出済")
-                    .set("status", "確定"));
+                    .set("status", "確定")
+                    .set("organization_id", record.getOrganizationId())
+                    .set("cost_center_id", record.getCostCenterId())
+                    .set("accounting_dimension_frozen", 1);
+            int updated = baseMapper.update(null, statusUpdate);
             if (updated == 1) {
                 record.setStatus("確定");
             }
@@ -312,6 +337,44 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 }
             }
         }
+    }
+
+    /** 確定時点の帰属を勤怠レコードへ保存する。旧データはsnapshot側のfallbackを許容する。 */
+    private void freezeAccountingDimension(WorkRecord record, Contract contract) {
+        if (record == null || contract == null || Integer.valueOf(1).equals(record.getAccountingDimensionFrozen())) {
+            return;
+        }
+        com.ses.entity.Engineer engineer = engineerMapper == null || contract.getEngineerId() == null
+                ? null : engineerMapper.selectById(contract.getEngineerId());
+        LocalDate asOf = record.getWorkMonth() == null || record.getWorkMonth().isBlank()
+                ? LocalDate.now().withDayOfMonth(1)
+                : com.ses.common.util.DateUtils.parseYearMonth(record.getWorkMonth()).atDay(1);
+        // 履歴所属を先に解決する。要員マスタのorganization_idは現在値なので、
+        // 過去月の遅延確認で先に読むと異動後の組織へ過去実績を移してしまう。
+        Long organizationId = null;
+        if (engineerAccountLinkMapper != null && userOrganizationMapper != null
+                && contract.getEngineerId() != null) {
+            com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper
+                    .selectByEngineerId(contract.getEngineerId());
+            if (link != null && link.getSysUserId() != null) {
+                organizationId = userOrganizationMapper.selectPrimaryOrganizationId(link.getSysUserId(), asOf);
+            }
+        }
+        // 直接所属しか持たない要員は当月分だけ現在マスタを使う。過去月に履歴が
+        // 無い場合は誤った現組織へ付け替えず「未配賦」のまま凍結する。
+        if (organizationId == null && engineer != null
+                && !YearMonth.from(asOf).isBefore(YearMonth.now())) {
+            organizationId = engineer.getOrganizationId();
+        }
+        Long costCenterId = !YearMonth.from(asOf).isBefore(YearMonth.now())
+                ? contract.getCostCenterId() : null;
+        if (costCenterId == null && engineer != null
+                && !YearMonth.from(asOf).isBefore(YearMonth.now())) {
+            costCenterId = engineer.getCostCenterId();
+        }
+        record.setOrganizationId(organizationId);
+        record.setCostCenterId(costCenterId);
+        record.setAccountingDimensionFrozen(1);
     }
 
     /**
@@ -647,11 +710,15 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         record = baseMapper.selectByIdForUpdate(workRecordId);
 
         requireTransition(record, "確定");
-        // 条件付きUPDATE（CAS）。提出済のときのみ確定へ遷移させ、後続BP生成を行う（R3R-10）。
+        // 単件承認も月次一括確定と同じ帰属凍結を行い、NULLを含む次元を明示的に保存する。
+        freezeAccountingDimension(record, contract);
         int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
                 .eq("id", workRecordId)
                 .eq("status", "提出済")
-                .set("status", "確定"));
+                .set("status", "確定")
+                .set("organization_id", record.getOrganizationId())
+                .set("cost_center_id", record.getCostCenterId())
+                .set("accounting_dimension_frozen", 1));
         if (updated != 1) {
             // 再試行。状態が変わったか、他のトランザクションが確定した
             throw BusinessException.of(409, "error.workRecord.concurrentModified");

@@ -7,6 +7,7 @@ import com.ses.entity.CostCenter;
 import com.ses.entity.ManagementBudget;
 import com.ses.entity.MonthlyAccountingDimension;
 import com.ses.entity.OrganizationUnit;
+import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.CostCenterMapper;
 import com.ses.mapper.ManagementBudgetMapper;
@@ -38,6 +39,9 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     private final ManagementBudgetMapper managementBudgetMapper;
     private final MonthlyAccountingDimensionMapper monthlyAccountingDimensionMapper;
     private final SysUserMapper sysUserMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     /** 要員の所属組織を扱う。既存テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -87,6 +91,9 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (current == null || target == null) {
             throw BusinessException.of(404, "error.organization.scope.notFound");
         }
+        if (!Objects.equals(current.getLegalEntityId(), target.getLegalEntityId())) {
+            throw BusinessException.of("error.organization.legalEntityMismatch");
+        }
         if (expectedVersion == null || !Objects.equals(expectedVersion, current.getVersion())) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
@@ -105,11 +112,46 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                 throw BusinessException.of(409, "error.organization.versionConflict");
             }
         }
-        // 有効な所属だけ付け替える。終了済みの所属は過去の事実なので動かさない(R1.3)。
+        // 有効な所属は統合日で旧行を閉じ、統合先の新しい履歴行を作る。
+        // 旧行のorganization_idを直接書き換えると、統合日前のas-of照会まで改変される。
         for (UserOrganization assignment : userOrganizationMapper.selectByUserOrganizationForUpdate(organizationId)) {
-            assignment.setOrganizationId(targetOrganizationId);
-            if (userOrganizationMapper.updateById(assignment) != 1) {
-                throw BusinessException.of(409, "error.organization.versionConflict");
+            if (assignment.getValidFrom() != null && assignment.getValidFrom().isBefore(today)) {
+                assignment.setValidTo(today.minusDays(1));
+                if (userOrganizationMapper.updateById(assignment) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+                UserOrganization targetExisting = userOrganizationMapper.selectByUserForUpdate(assignment.getUserId()).stream()
+                        .filter(existing -> Objects.equals(existing.getOrganizationId(), targetOrganizationId)
+                                && overlaps(existing.getValidFrom(), existing.getValidTo(), today, null))
+                        .findFirst().orElse(null);
+                if (targetExisting != null) {
+                    // 既存の統合先所属がある場合は同日重複行を作らず、主所属だけ必要なら昇格する。
+                    if (isPrimary(assignment) && !isPrimary(targetExisting)) {
+                        targetExisting.setPrimaryFlag(1);
+                        if (userOrganizationMapper.updateById(targetExisting) != 1) {
+                            throw BusinessException.of(409, "error.organization.versionConflict");
+                        }
+                    }
+                    continue;
+                }
+                UserOrganization successor = new UserOrganization();
+                successor.setUserId(assignment.getUserId());
+                successor.setOrganizationId(targetOrganizationId);
+                successor.setPositionName(assignment.getPositionName());
+                successor.setManagerUserId(assignment.getManagerUserId());
+                successor.setPrimaryFlag(assignment.getPrimaryFlag());
+                successor.setValidFrom(today);
+                successor.setValidTo(null);
+                successor.setVersion(0);
+                if (userOrganizationMapper.insert(successor) != 1) {
+                    throw BusinessException.of("error.organization.assignment.saveFailed");
+                }
+            } else {
+                // まだ開始していない未来行は歴史を持たないため統合先へ移す。
+                assignment.setOrganizationId(targetOrganizationId);
+                if (userOrganizationMapper.updateById(assignment) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
             }
         }
         // 要員の所属組織も付け替える。
@@ -194,23 +236,43 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     @Transactional
     public boolean deactivate(Long organizationId) {
         OrganizationUnit unit = getById(organizationId);
-        if (unit == null) {
+        return unit != null && updateStatus(organizationId, "無効", unit.getVersion());
+    }
+
+    @Override
+    @Transactional
+    public boolean updateStatus(Long organizationId, String status, Integer expectedVersion) {
+        if (organizationId == null || expectedVersion == null
+                || (!"有効".equals(status) && !"無効".equals(status))) {
+            throw BusinessException.of(400, "error.organization.invalid");
+        }
+        OrganizationUnit current = baseMapper.selectByIdForUpdate(organizationId);
+        if (current == null) {
+            current = getById(organizationId);
+        }
+        if (current == null) {
             return false;
         }
-        // 人が残ったまま無効化すると、その所属者は「存在しない組織に所属している」状態になり
-        // 組織scopeからも組織一覧からも消える。先に異動/解除させる。
-        if (count(new LambdaQueryWrapper<OrganizationUnit>()
-                .eq(OrganizationUnit::getParentId, organizationId)
-                .eq(OrganizationUnit::getStatus, "有効")) > 0) {
-            throw BusinessException.of("error.organization.deactivate.hasChildren");
+        if ("無効".equals(status)) {
+            if (count(new LambdaQueryWrapper<OrganizationUnit>()
+                    .eq(OrganizationUnit::getParentId, organizationId)
+                    .eq(OrganizationUnit::getStatus, "有効")) > 0) {
+                throw BusinessException.of("error.organization.deactivate.hasChildren");
+            }
+            if (userOrganizationMapper.selectCount(new LambdaQueryWrapper<UserOrganization>()
+                    .eq(UserOrganization::getOrganizationId, organizationId)
+                    .isNull(UserOrganization::getValidTo)) > 0) {
+                throw BusinessException.of("error.organization.deactivate.hasMembers");
+            }
         }
-        if (userOrganizationMapper.selectCount(new LambdaQueryWrapper<UserOrganization>()
-                .eq(UserOrganization::getOrganizationId, organizationId)
-                .isNull(UserOrganization::getValidTo)) > 0) {
-            throw BusinessException.of("error.organization.deactivate.hasMembers");
+        OrganizationUnit patch = new OrganizationUnit();
+        patch.setId(organizationId);
+        patch.setStatus(status);
+        patch.setVersion(expectedVersion);
+        if (baseMapper.updateById(patch) != 1) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
         }
-        unit.setStatus("無効");
-        return updateById(unit);
+        return true;
     }
 
     @Override
@@ -251,6 +313,10 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             throw BusinessException.of("error.organization.assignment.userNotFound");
         }
         List<UserOrganization> locked = userOrganizationMapper.selectByUserForUpdate(assignment.getUserId());
+        OrganizationUnit lockedOrganization = baseMapper.selectByIdForUpdate(assignment.getOrganizationId());
+        if (lockedOrganization == null) {
+            throw BusinessException.of("error.organization.assignment.organizationNotFound");
+        }
         validateAssignment(assignment, null);
         // validateAssignment は通常の一覧を使うが、先に同一ユーザーの行をロックして
         // primary/期間の二重登録を同時実行で通さない。
@@ -301,6 +367,10 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         UserOrganization currentPrimary = locked.stream()
                 .filter(item -> isPrimary(item) && item.getValidTo() == null)
                 .findFirst().orElse(null);
+        if (currentPrimary != null
+                && !transferDate.isAfter(currentPrimary.getValidFrom())) {
+            throw BusinessException.of("error.organization.assignment.periodOverlap");
+        }
         if (currentPrimary != null
                 && (expectedVersion == null || !Objects.equals(expectedVersion, currentPrimary.getVersion()))) {
             throw BusinessException.of(409, "error.organization.versionConflict");
@@ -410,14 +480,29 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             throw BusinessException.of("error.organization.invalid");
         }
         validateDateRange(candidate.getValidFrom(), candidate.getValidTo());
+        OrganizationUnit current = excludedId == null ? null : getById(excludedId);
+        if (current != null && isReferenced(excludedId)
+                && (!Objects.equals(current.getValidFrom(), candidate.getValidFrom())
+                || !Objects.equals(current.getValidTo(), candidate.getValidTo())
+                || !Objects.equals(current.getParentId(), candidate.getParentId()))) {
+            throw BusinessException.of("error.organization.referencedPeriodImmutable");
+        }
+        if (current != null && !Objects.equals(current.getLegalEntityId(), candidate.getLegalEntityId())
+                && isReferenced(excludedId)) {
+            throw BusinessException.of("error.organization.legalEntityChangeReferenced");
+        }
         if (candidate.getParentId() != null) {
+            OrganizationUnit parent = getById(candidate.getParentId());
+            if (parent == null) {
+                throw BusinessException.of("error.organization.parentNotFound");
+            }
+            if (!Objects.equals(parent.getLegalEntityId(), candidate.getLegalEntityId())) {
+                throw BusinessException.of("error.organization.legalEntityMismatch");
+            }
             if (Objects.equals(candidate.getId(), candidate.getParentId())
                     || Objects.equals(excludedId, candidate.getParentId())
                     || createsCycle(candidate.getParentId(), candidate.getId(), new HashSet<>())) {
                 throw BusinessException.of("error.organization.cycle");
-            }
-            if (getById(candidate.getParentId()) == null) {
-                throw BusinessException.of("error.organization.parentNotFound");
             }
         }
         List<OrganizationUnit> sameCode = list(new LambdaQueryWrapper<OrganizationUnit>()
@@ -467,8 +552,30 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (Objects.equals(candidate.getUserId(), candidate.getManagerUserId())) {
             throw BusinessException.of("error.organization.assignment.managerSelf");
         }
-        if (getById(candidate.getOrganizationId()) == null) {
+        OrganizationUnit organization = baseMapper.selectByIdForUpdate(candidate.getOrganizationId());
+        if (organization == null) {
+            organization = getById(candidate.getOrganizationId());
+        }
+        if (organization == null) {
             throw BusinessException.of("error.organization.assignment.organizationNotFound");
+        }
+        if (!"有効".equals(organization.getStatus())
+                || organization.getValidFrom().isAfter(candidate.getValidFrom())
+                || (organization.getValidTo() != null && organization.getValidTo().isBefore(candidate.getValidFrom()))) {
+            throw BusinessException.of("error.organization.assignment.organizationInactive");
+        }
+        if (candidate.getManagerUserId() != null) {
+            SysUser manager = sysUserMapper.selectById(candidate.getManagerUserId());
+            if (manager == null || !Integer.valueOf(1).equals(manager.getStatus())
+                    || manager.getRole() == null || manager.getRole().isBlank()
+                    || "要員".equals(manager.getRole())) {
+                throw BusinessException.of("error.organization.assignment.managerNotQualified");
+            }
+            LocalDate asOf = candidate.getValidFrom();
+            if (organizationScopeService != null && !organizationScopeService.hasFullAccess()
+                    && !organizationScopeService.isAllowedUser(manager.getId(), asOf)) {
+                throw BusinessException.of("error.organization.assignment.managerOutOfScope");
+            }
         }
     }
 

@@ -132,7 +132,11 @@
     }
 
     function toggleOrganizationStatus(id, status) {
-        $.ajax({url: '/api/organizations/' + id + '/status?status=' + encodeURIComponent(status), method: 'PUT'})
+        var item = organizations.find(function (entry) { return String(entry.id) === String(id); });
+        if (!item) { showError(message('organization.saveFailed', '組織の保存に失敗しました')); return; }
+        var version = item.version == null ? 0 : item.version;
+        $.ajax({url: '/api/organizations/' + id + '/status?status=' + encodeURIComponent(status)
+                + '&version=' + encodeURIComponent(version), method: 'PUT'})
             .done(function (res) { if (res.code === 200) { loadOrganizations(); } else { showError(res.message); } })
             .fail(function (xhr) { showError(errorText(xhr, 'organization.saveFailed', '組織の保存に失敗しました')); });
     }

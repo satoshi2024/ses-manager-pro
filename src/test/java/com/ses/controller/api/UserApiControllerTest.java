@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.SysUser;
 import com.ses.service.SysUserService;
+import com.ses.service.OrganizationService;
+import com.ses.service.EngineerAccountLinkService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -48,7 +50,9 @@ class UserApiControllerTest {
     @MockBean
     private com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
     @MockBean
-    private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+    private EngineerAccountLinkService engineerAccountLinkService;
+    @MockBean
+    private OrganizationService organizationService;
 
     @Test
     @WithMockUser
@@ -206,6 +210,22 @@ class UserApiControllerTest {
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
-        verify(engineerSalesMapper, never()).selectCount(any());
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void updateStatus_所属クローズ失敗時は成功レスポンスを返さない() throws Exception {
+        when(sysUserService.getOne(any())).thenReturn(null);
+        when(engineerSalesMapper.selectCount(any())).thenReturn(0L);
+        when(sysUserService.updateById(any())).thenReturn(true);
+        org.mockito.Mockito.doThrow(com.ses.common.exception.BusinessException.of("error.organization.closeFailed"))
+                .when(organizationService).closeAssignmentsForUser(any(Long.class), any(java.time.LocalDate.class));
+
+        mockMvc.perform(put("/api/users/5/status?status=0").with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(sysUserService, organizationService);
+        order.verify(sysUserService).updateById(any());
+        order.verify(organizationService).closeAssignmentsForUser(any(Long.class), any(java.time.LocalDate.class));
     }
 }

@@ -77,7 +77,7 @@ public class ManagementAccountingApiController {
         for (ManagementAccountingSummaryDto.Row row : summary.getRows()) {
             csv.append("summary").append(',')
                     .append(csvValue(row.getOrganizationId())).append(',').append(csvValue(row.getOrganizationName())).append(',')
-                    .append(csvValue(row.getCostCenterId())).append(',').append(",,")
+                    .append(csvValue(row.getCostCenterId())).append(',').append(",,,")
                     .append(csvValue(row.getRevenue())).append(',').append(csvValue(row.getCost())).append(',')
                     .append(csvValue(row.getGrossProfit())).append(',').append(csvValue(row.getBudgetRevenue())).append(',')
                     .append(csvValue(row.getBudgetGrossProfit())).append(',').append(csvValue(row.getRevenueVariance())).append(',')
@@ -89,7 +89,7 @@ public class ManagementAccountingApiController {
                     .append(csvValue(detail.getCostCenterId())).append(',').append(csvValue(detail.getCustomerId())).append(',')
                     .append(csvValue(detail.getProjectId())).append(',').append(csvValue(detail.getSalesUserId())).append(',')
                     .append(csvValue(detail.getRevenue())).append(',').append(csvValue(detail.getCost())).append(',')
-                    .append(csvValue(detail.getGrossProfit())).append(",,,,\n");
+                    .append(csvValue(detail.getGrossProfit())).append(",,,,,\n");
         }
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=management-accounting-" + month + ".csv")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
@@ -195,10 +195,14 @@ public class ManagementAccountingApiController {
     private String csvValue(Object value) {
         if (value == null) return "";
         String text = String.valueOf(value);
-        if (text.startsWith("=") || text.startsWith("+") || text.startsWith("-") || text.startsWith("@")) {
-            text = "'" + text;
+        if (!text.isEmpty()) {
+            char first = text.charAt(0);
+            if (first == '=' || first == '+' || first == '-' || first == '@'
+                    || first == '\t' || first == '\r' || first == '\n') {
+                text = "'" + text;
+            }
         }
-        return text.contains(",") || text.contains("\"") || text.contains("\n")
+        return text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")
                 ? "\"" + text.replace("\"", "\"\"") + "\"" : text;
     }
 }

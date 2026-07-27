@@ -62,6 +62,12 @@ class WorkRecordServiceImplTest {
     private com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     @Mock
+    private com.ses.mapper.EngineerMapper engineerMapper;
+
+    @Mock
+    private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
+    @Mock
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @InjectMocks
@@ -71,6 +77,69 @@ class WorkRecordServiceImplTest {
     void setUp() {
         // ServiceImpl の baseMapper フィールドを手動で注入
         ReflectionTestUtils.setField(workRecordService, "baseMapper", workRecordMapper);
+    }
+
+    @Test
+    void approve_組織と原価部門がNULLでも凍結フラグを保存する() {
+        WorkRecord record = new WorkRecord();
+        record.setId(77L);
+        record.setContractId(88L);
+        record.setWorkMonth("2026-06");
+        record.setStatus("提出済");
+        Contract contract = new Contract();
+        contract.setId(88L);
+        contract.setEngineerId(99L);
+
+        ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
+        when(workRecordMapper.selectById(77L)).thenReturn(record);
+        when(workRecordMapper.selectByIdForUpdate(77L)).thenReturn(record);
+        when(contractMapper.selectByIdForUpdate(88L)).thenReturn(contract);
+        when(engineerMapper.selectById(99L)).thenReturn(null);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(workRecordMapper.selectEmploymentTypeByContractId(88L)).thenReturn(null);
+
+        workRecordService.approve(77L);
+
+        assertThat(record.getAccountingDimensionFrozen()).isEqualTo(1);
+        assertThat(record.getOrganizationId()).isNull();
+        assertThat(record.getCostCenterId()).isNull();
+        assertThat(record.getStatus()).isEqualTo("確定");
+        verify(workRecordMapper).update(isNull(), argThat(wrapper -> wrapper.getSqlSet().contains("accounting_dimension_frozen")));
+    }
+
+    @Test
+    void 過去月の遅延承認は要員異動後も履歴所属を凍結する() {
+        WorkRecord record = new WorkRecord();
+        record.setId(78L);
+        record.setContractId(89L);
+        record.setWorkMonth(java.time.YearMonth.now().minusMonths(1).toString());
+        record.setStatus("提出済");
+        Contract contract = new Contract();
+        contract.setId(89L);
+        contract.setEngineerId(99L);
+        com.ses.entity.Engineer movedEngineer = new com.ses.entity.Engineer();
+        movedEngineer.setId(99L);
+        movedEngineer.setOrganizationId(2002L);
+        com.ses.entity.EngineerAccountLink link = new com.ses.entity.EngineerAccountLink();
+        link.setEngineerId(99L);
+        link.setSysUserId(199L);
+
+        ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
+        ReflectionTestUtils.setField(workRecordService, "userOrganizationMapper", userOrganizationMapper);
+        when(workRecordMapper.selectById(78L)).thenReturn(record);
+        when(workRecordMapper.selectByIdForUpdate(78L)).thenReturn(record);
+        when(contractMapper.selectByIdForUpdate(89L)).thenReturn(contract);
+        when(engineerMapper.selectById(99L)).thenReturn(movedEngineer);
+        when(engineerAccountLinkMapper.selectByEngineerId(99L)).thenReturn(link);
+        when(userOrganizationMapper.selectPrimaryOrganizationId(eq(199L), any(LocalDate.class))).thenReturn(1001L);
+        when(workRecordMapper.update(isNull(), any())).thenReturn(1);
+        when(workRecordMapper.selectEmploymentTypeByContractId(89L)).thenReturn(null);
+
+        workRecordService.approve(78L);
+
+        assertThat(record.getOrganizationId()).isEqualTo(1001L);
+        assertThat(record.getOrganizationId()).isNotEqualTo(2002L);
+        assertThat(record.getAccountingDimensionFrozen()).isEqualTo(1);
     }
 
     /**

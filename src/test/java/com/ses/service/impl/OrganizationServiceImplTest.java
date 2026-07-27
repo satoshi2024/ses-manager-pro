@@ -7,6 +7,7 @@ import com.ses.entity.UserOrganization;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.ManagementBudgetService;
+import com.ses.service.CostCenterService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +35,9 @@ class OrganizationServiceImplTest {
 
     @Autowired
     private ManagementBudgetService managementBudgetService;
+
+    @Autowired
+    private CostCenterService costCenterService;
 
     @Autowired
     private SysUserMapper sysUserMapper;
@@ -150,8 +154,11 @@ class OrganizationServiceImplTest {
         assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
 
         assertEquals(target.getId(), organizationService.getById(child.getId()).getParentId());
-        assertEquals(target.getId(), organizationService.listUserOrganizations(userId,
+        // 統合日前は旧所属を維持し、統合日以後だけ統合先へ遷移する。
+        assertEquals(source.getId(), organizationService.listUserOrganizations(userId,
                 LocalDate.of(2026, 7, 1)).get(0).getOrganizationId());
+        assertEquals(target.getId(), organizationService.listUserOrganizations(userId,
+                LocalDate.now()).get(0).getOrganizationId());
         assertEquals("無効", organizationService.getById(source.getId()).getStatus());
         assertEquals(target.getId(), organizationService.getById(source.getId()).getMergedInto());
         // 統合済み組織の名前は引けること。過去snapshotの組織別合計を突合するのに必要(R4)。
@@ -214,6 +221,136 @@ class OrganizationServiceImplTest {
         assertEquals(1, budget.getVersion());
 
         assertThrows(BusinessException.class, () -> managementBudgetService.upsert(budget, 0));
+    }
+
+    @Test
+    void 同日異動は旧所属と新所属の重複を作らず拒否する() {
+        OrganizationUnit source = organization("TRANSFER-SAME-DAY-SRC", "異動元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("TRANSFER-SAME-DAY-DST", "異動先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate start = LocalDate.now().minusDays(1);
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(1).validFrom(start).build());
+        UserOrganization current = organizationService.listUserOrganizations(userId, LocalDate.now()).get(0);
+
+        assertThrows(BusinessException.class, () -> organizationService.transferUser(
+                UserOrganization.builder().userId(userId).organizationId(target.getId()).primaryFlag(1)
+                        .validFrom(start).build(), current.getVersion()));
+    }
+
+    @Test
+    void 所属とsnapshotで参照中の組織期間変更を拒否する() {
+        OrganizationUnit unit = organization("ORG-PERIOD-REF", "期間固定部", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(unit);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        OrganizationUnit patch = organization("ORG-PERIOD-REF", "期間固定部", null,
+                LocalDate.of(2026, 2, 1), null);
+        patch.setId(unit.getId());
+        assertThrows(BusinessException.class, () -> organizationService.updateOrganization(patch, 0));
+    }
+
+    @Test
+    void 法人不一致的父子组织与統合を拒否する() {
+        OrganizationUnit parent = organization("LEGAL-1-PARENT", "法人一の親", null,
+                LocalDate.of(2026, 1, 1), null);
+        parent.setLegalEntityId(1L);
+        organizationService.save(parent);
+
+        OrganizationUnit crossLegalChild = organization("LEGAL-2-CHILD", "法人二の子", parent.getId(),
+                LocalDate.of(2026, 1, 1), null);
+        crossLegalChild.setLegalEntityId(2L);
+        assertThrows(BusinessException.class, () -> organizationService.save(crossLegalChild));
+
+        OrganizationUnit source = organization("LEGAL-1-SOURCE", "法人一の統合元", null,
+                LocalDate.of(2026, 1, 1), null);
+        source.setLegalEntityId(1L);
+        organizationService.save(source);
+        OrganizationUnit target = organization("LEGAL-2-TARGET", "法人二の統合先", null,
+                LocalDate.of(2026, 1, 1), null);
+        target.setLegalEntityId(2L);
+        organizationService.save(target);
+        assertThrows(BusinessException.class, () -> organizationService.merge(source.getId(), target.getId(), 0));
+    }
+
+    @Test
+    void 参照中組織の法人変更を拒否する() {
+        OrganizationUnit unit = organization("LEGAL-CHANGE", "法人変更対象", null,
+                LocalDate.of(2026, 1, 1), null);
+        unit.setLegalEntityId(1L);
+        organizationService.save(unit);
+        Long adminId = sysUserMapper.selectByUsername("admin").getId();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(adminId).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        OrganizationUnit patch = organization("LEGAL-CHANGE", "法人変更対象", null,
+                LocalDate.of(2026, 1, 1), null);
+        patch.setId(unit.getId());
+        patch.setLegalEntityId(2L);
+        assertThrows(BusinessException.class, () -> organizationService.updateOrganization(patch, 0));
+    }
+
+    @Test
+    void 予算の組織と原価部門が不一致なら保存を拒否する() {
+        OrganizationUnit first = organization("BUDGET-ORG-A", "予算法人一", null,
+                LocalDate.of(2026, 1, 1), null);
+        first.setLegalEntityId(1L);
+        organizationService.save(first);
+        OrganizationUnit second = organization("BUDGET-ORG-B", "原価部門所属", null,
+                LocalDate.of(2026, 1, 1), null);
+        second.setLegalEntityId(1L);
+        organizationService.save(second);
+        var center = com.ses.entity.CostCenter.builder()
+                .legalEntityId(1L).organizationId(second.getId()).code("CC-B")
+                .name("法人一別部門").validFrom(LocalDate.of(2026, 1, 1)).status("有効").version(0).build();
+        costCenterService.save(center);
+
+        var budget = com.ses.entity.ManagementBudget.builder()
+                .organizationId(first.getId()).costCenterId(center.getId())
+                .budgetMonth(LocalDate.of(2026, 7, 1)).revenue(BigDecimal.valueOf(1000000))
+                .grossProfit(BigDecimal.valueOf(300000)).utilizationCount(5).hireCount(1).build();
+        assertThrows(BusinessException.class, () -> managementBudgetService.upsert(budget, null));
+    }
+
+    @Test
+    void 無効化済みまたは存在しない上長を所属へ設定できない() {
+        OrganizationUnit unit = organization("ORG-MANAGER-GUARD", "上長検証部", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(unit);
+
+        SysUser disabled = new SysUser();
+        disabled.setUsername("disabled-manager");
+        disabled.setPassword("pass");
+        disabled.setRealName("無効上長");
+        disabled.setRole("HR");
+        disabled.setStatus(0);
+        sysUserMapper.insert(disabled);
+        SysUser member = new SysUser();
+        member.setUsername("manager-guard-member");
+        member.setPassword("pass");
+        member.setRealName("所属対象");
+        member.setRole("HR");
+        member.setStatus(1);
+        sysUserMapper.insert(member);
+
+        UserOrganization disabledManagerAssignment = UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).managerUserId(disabled.getId())
+                .validFrom(LocalDate.of(2026, 1, 1)).build();
+        assertThrows(BusinessException.class, () -> organizationService.assignUser(disabledManagerAssignment));
+
+        UserOrganization missingManagerAssignment = UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).managerUserId(999999L)
+                .validFrom(LocalDate.of(2026, 1, 1)).build();
+        assertThrows(BusinessException.class, () -> organizationService.assignUser(missingManagerAssignment));
     }
 
     private OrganizationUnit organization(String code, String name, Long parentId,

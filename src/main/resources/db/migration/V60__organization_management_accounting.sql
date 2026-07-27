@@ -203,6 +203,18 @@ SET @sql = (SELECT IF(COUNT(*) = 0,
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_bp_payment' AND column_name = 'cost_center_id');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_work_record ADD COLUMN organization_id BIGINT NULL',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_work_record' AND column_name = 'organization_id');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_work_record ADD COLUMN cost_center_id BIGINT NULL',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_work_record' AND column_name = 'cost_center_id');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_work_record ADD COLUMN accounting_dimension_frozen TINYINT NOT NULL DEFAULT 0',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_work_record' AND column_name = 'accounting_dimension_frozen');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_management_budget ADD COLUMN cost_center_key BIGINT GENERATED ALWAYS AS (COALESCE(cost_center_id, 0)) STORED',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_management_budget' AND column_name = 'cost_center_key');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

@@ -27,6 +27,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,6 +56,9 @@ class DashboardServiceImplTest {
 
     @Mock
     private com.ses.service.security.DataScopeService dataScopeService;
+
+    @Mock
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
     @org.mockito.Spy
@@ -189,6 +193,37 @@ class DashboardServiceImplTest {
         assertEquals(100000L, revenue.getForecastPipelineAmount());
         // 2027年度は全月が翌月以降のため、売上0に対し予測は各月100000が乗る
         assertEquals(100000L, revenue.getForecast().get(11));
+    }
+
+    @Test
+    void testGetSummary_ForecastPipeline_usesEffectiveEngineerScope() {
+        org.mockito.Mockito.lenient().when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        org.mockito.Mockito.lenient().when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        org.mockito.Mockito.lenient().when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        org.mockito.Mockito.lenient().when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("true");
+        org.mockito.Mockito.lenient().when(systemConfigService.getDecimal(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        org.mockito.Mockito.lenient().when(dataScopeService.isScoped()).thenReturn(false);
+        org.mockito.Mockito.lenient().when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        org.mockito.Mockito.lenient().when(organizationScopeService.allowedOrganizationIds(any(LocalDate.class))).thenReturn(java.util.Set.of(1L));
+        org.mockito.Mockito.lenient().when(organizationScopeService.allowedEngineerIds(any(LocalDate.class))).thenReturn(java.util.Set.of(101L));
+        org.mockito.Mockito.lenient().when(organizationScopeService.intersectWithDataScope(any(), eq(null))).thenAnswer(inv -> inv.getArgument(0));
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                dashboardService, "organizationScopeService", organizationScopeService);
+
+        com.ses.entity.Proposal proposal = new com.ses.entity.Proposal();
+        proposal.setEngineerId(101L);
+        proposal.setStatus(com.ses.common.constant.StatusConstants.PROPOSAL_DOCUMENT_SCREENING);
+        proposal.setProposedUnitPrice(new java.math.BigDecimal("500000"));
+        when(proposalMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(proposal));
+
+        dashboardService.getSummary(2027);
+
+        org.mockito.ArgumentCaptor<QueryWrapper<com.ses.entity.Proposal>> captor =
+                org.mockito.ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(proposalMapper).selectList(captor.capture());
+        assertTrue(captor.getValue().getSqlSegment().contains("engineer_id"),
+                captor.getValue().getSqlSegment());
+        assertFalse(captor.getValue().getParamNameValuePairs().isEmpty());
     }
 
     @Test

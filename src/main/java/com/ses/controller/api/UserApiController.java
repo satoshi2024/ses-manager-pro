@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
+import org.springframework.transaction.annotation.Transactional;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import com.ses.common.util.PasswordPolicyValidator;
@@ -148,6 +149,7 @@ public class UserApiController {
     /**
      * ユーザー有効/無効切替
      */
+    @Transactional
     @PutMapping("/{id}/status")
     public ApiResult<Boolean> updateStatus(@PathVariable Long id, @RequestParam Integer status, Authentication authentication) {
         if (status == null || (status != 0 && status != 1)) {
@@ -172,6 +174,7 @@ public class UserApiController {
     /**
      * ユーザー削除
      */
+    @Transactional
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身は削除できません");

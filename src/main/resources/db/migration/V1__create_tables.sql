@@ -97,7 +97,7 @@ CREATE TABLE t_engineer (
   railway_company    VARCHAR(150)                            COMMENT '最寄り駅の鉄道会社・路線',
   employment_type    ENUM('正社員','契約社員','BP') NOT NULL    COMMENT '雇用形態',
   status             ENUM('稼動中','退場予定','Bench','提案中') NOT NULL DEFAULT 'Bench' COMMENT '稼動ステータス',
-  expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(万円)',
+  expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(円)',
   cost_center_id      BIGINT                                 COMMENT '既定原価部門ID',
   organization_id     BIGINT                                 COMMENT '所属組織ID（管理会計の帰属基準。未設定時のみアカウント連携で解決）',
   available_date     DATE                                    COMMENT '稼動可能日',

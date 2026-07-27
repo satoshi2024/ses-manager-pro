@@ -30,6 +30,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -116,6 +117,64 @@ class OrganizationApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
         verify(organizationScopeService).listVisibleOrganizations(null, LocalDate.of(2026, 7, 1));
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    void status_usesProtectedServiceWithRequiredVersion() throws Exception {
+        when(organizationService.updateStatus(10L, "無効", 3)).thenReturn(true);
+
+        mockMvc.perform(put("/api/organizations/10/status")
+                        .with(csrf()).param("status", "無効").param("version", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        verify(organizationService).updateStatus(10L, "無効", 3);
+        verify(organizationService, never()).updateById(any(OrganizationUnit.class));
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    void status_withoutVersion_returns400() throws Exception {
+        mockMvc.perform(put("/api/organizations/10/status")
+                        .with(csrf()).param("status", "無効"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        verify(organizationService, never()).updateStatus(any(), any(), any());
+    }
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    void updateCostCenter_withoutVersion_returns400() throws Exception {
+        CostCenter existing = CostCenter.builder().organizationId(11L)
+                .legalEntityId(1L).code("CC-7").name("原価部門").validFrom(LocalDate.of(2026, 1, 1))
+                .status("有効").version(2).build();
+        existing.setId(7L);
+        when(costCenterService.getById(7L)).thenReturn(existing);
+        String body = "{\"legalEntityId\":1,\"code\":\"CC-7\",\"name\":\"原価部門\","
+                + "\"organizationId\":11,\"validFrom\":\"2026-01-01\"}";
+
+        mockMvc.perform(put("/api/organizations/cost-centers/7").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        verify(costCenterService, never()).updateById(any(CostCenter.class));
+    }
+
+    @Test
+    @WithMockUser(username = "manager", roles = {"マネージャー"})
+    void deleteCostCenter_outsideScope_isRejectedBeforeService() throws Exception {
+        CostCenter existing = CostCenter.builder().organizationId(99L)
+                .legalEntityId(1L).code("CC-8").name("原価部門").validFrom(LocalDate.of(2026, 1, 1))
+                .status("有効").version(0).build();
+        existing.setId(8L);
+        when(costCenterService.getById(8L)).thenReturn(existing);
+        doThrow(BusinessException.of("error.organization.scope.notAllowed"))
+                .when(organizationScopeService).assertAllowedOrganization(99L);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/organizations/cost-centers/8").with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        verify(costCenterService, never()).removeById(any());
     }
 
     @Test

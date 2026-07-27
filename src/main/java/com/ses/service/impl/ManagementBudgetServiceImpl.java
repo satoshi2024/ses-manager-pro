@@ -4,7 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ManagementBudget;
+import com.ses.entity.CostCenter;
+import com.ses.entity.OrganizationUnit;
 import com.ses.mapper.ManagementBudgetMapper;
+import com.ses.mapper.CostCenterMapper;
+import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.service.ManagementBudgetService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,6 +23,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ManagementBudgetServiceImpl extends ServiceImpl<ManagementBudgetMapper, ManagementBudget>
         implements ManagementBudgetService {
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private OrganizationUnitMapper organizationUnitMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CostCenterMapper costCenterMapper;
 
     @Override
     @Transactional
@@ -71,5 +80,32 @@ public class ManagementBudgetServiceImpl extends ServiceImpl<ManagementBudgetMap
         if (!budget.getBudgetMonth().equals(budget.getBudgetMonth().withDayOfMonth(1))) {
             throw BusinessException.of("error.organization.budget.month");
         }
+        if (organizationUnitMapper != null && costCenterMapper != null) {
+            LocalDate month = budget.getBudgetMonth();
+            OrganizationUnit organization = organizationUnitMapper.selectById(budget.getOrganizationId());
+            if (!isActive(organization, month)) {
+                throw BusinessException.of("error.organization.budget.organizationInvalid");
+            }
+            if (budget.getCostCenterId() != null) {
+                CostCenter center = costCenterMapper.selectById(budget.getCostCenterId());
+                if (!isActive(center, month)
+                        || !budget.getOrganizationId().equals(center.getOrganizationId())
+                        || !java.util.Objects.equals(organization.getLegalEntityId(), center.getLegalEntityId())) {
+                    throw BusinessException.of("error.organization.budget.costCenterMismatch");
+                }
+            }
+        }
+    }
+
+    private boolean isActive(OrganizationUnit organization, LocalDate date) {
+        return organization != null && "有効".equals(organization.getStatus())
+                && !organization.getValidFrom().isAfter(date)
+                && (organization.getValidTo() == null || !organization.getValidTo().isBefore(date));
+    }
+
+    private boolean isActive(CostCenter center, LocalDate date) {
+        return center != null && "有効".equals(center.getStatus())
+                && !center.getValidFrom().isAfter(date)
+                && (center.getValidTo() == null || !center.getValidTo().isBefore(date));
     }
 }

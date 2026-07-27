@@ -18,6 +18,9 @@ public interface OrganizationService extends IService<OrganizationUnit> {
 
     boolean deactivate(Long organizationId);
 
+    /** 状態変更を要求版番号付きCASで行う。無効化時は子組織・在籍者を検査する。 */
+    boolean updateStatus(Long organizationId, String status, Integer expectedVersion);
+
     boolean isReferenced(Long organizationId);
 
     UserOrganization assignUser(UserOrganization assignment);

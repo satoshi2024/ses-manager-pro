@@ -127,12 +127,21 @@ public class DashboardServiceImpl implements DashboardService {
         // 売上着地予測（パイプライン加重）: 確定契約ベース(既存 sales)に、オープン提案の
         // 提示単価×ステージ確率を翌月以降の各月へ加算した別系列を重ねる（実績口径は汚さない）。
         if ("true".equalsIgnoreCase(systemConfigService.getString("forecast.enabled", "true"))) {
-            List<Proposal> openProposals = proposalMapper.selectList(new QueryWrapper<Proposal>()
+            QueryWrapper<Proposal> proposalQuery = new QueryWrapper<Proposal>()
                     .in("status", Arrays.asList(
                             StatusConstants.PROPOSAL_DOCUMENT_SCREENING,
                             StatusConstants.PROPOSAL_FIRST_INTERVIEW,
                             StatusConstants.PROPOSAL_SECOND_INTERVIEW,
-                            StatusConstants.PROPOSAL_WAITING_RESULT)));
+                            StatusConstants.PROPOSAL_WAITING_RESULT));
+            Set<Long> allowedPipelineEngineerIds = effectiveEngineerIds();
+            if (allowedPipelineEngineerIds != null) {
+                if (allowedPipelineEngineerIds.isEmpty()) {
+                    proposalQuery.apply("1 = 0");
+                } else {
+                    proposalQuery.in("engineer_id", allowedPipelineEngineerIds);
+                }
+            }
+            List<Proposal> openProposals = proposalMapper.selectList(proposalQuery);
             Map<String, BigDecimal> rates = loadWinRates();
             long pipelinePerMonth = computePipelinePerMonth(openProposals, rates);
             if (!openProposals.isEmpty() && pipelinePerMonth > 0) {

@@ -41,11 +41,12 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
      * 数字が後から変わってしまう。月次実績は対象月時点で確定していなければならない（R2.2）。
      *
      * <p>組織scopeは呼び出し側でフィルタせず、必ずこのSQLの条件として渡す。
-     * 帰属は {@code t_engineer.organization_id} を正とし、未設定時のみアカウント連携ユーザーの主所属を使う。
+     * 帰属は対象月の有効なアカウント連携ユーザー主所属を優先し、未設定時のみ
+     * {@code t_engineer.organization_id} を使う。
      */
     @Select("""
         <script>
-        SELECT COALESCE(e.organization_id, uo.organization_id) AS organizationId,
+        SELECT COALESCE(uo.organization_id, e.organization_id) AS organizationId,
                e.cost_center_id AS costCenterId,
                COALESCE(SUM(e.expected_unit_price), 0) AS waitCost
         FROM t_engineer e
@@ -53,7 +54,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id AND uo.primary_flag = 1
              AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
-        LEFT JOIN m_organization_unit ou ON ou.id = COALESCE(e.organization_id, uo.organization_id)
+        LEFT JOIN m_organization_unit ou ON ou.id = COALESCE(uo.organization_id, e.organization_id)
              AND ou.deleted_flag = 0
         WHERE e.deleted_flag = 0
           AND NOT EXISTS (
@@ -65,17 +66,17 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
           )
           <if test="costCenterId != null">AND e.cost_center_id = #{costCenterId}</if>
           <if test="legalEntityId != null">AND ou.legal_entity_id = #{legalEntityId}</if>
-          <if test="organizationId != null">AND COALESCE(e.organization_id, uo.organization_id) = #{organizationId}</if>
+          <if test="organizationId != null">AND COALESCE(uo.organization_id, e.organization_id) = #{organizationId}</if>
           <if test="fullAccess == false">
             <choose>
               <when test="allowedIds != null and allowedIds.size() > 0">
-                AND COALESCE(e.organization_id, uo.organization_id) IN
+                AND COALESCE(uo.organization_id, e.organization_id) IN
                 <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach>
               </when>
               <otherwise>AND 1 = 0</otherwise>
             </choose>
           </if>
-        GROUP BY COALESCE(e.organization_id, uo.organization_id), e.cost_center_id
+        GROUP BY COALESCE(uo.organization_id, e.organization_id), e.cost_center_id
         </script>
         """)
     List<com.ses.dto.accounting.AccountingWaitCostRow> selectAccountingWaitCost(
@@ -86,4 +87,30 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
             @org.apache.ibatis.annotations.Param("legalEntityId") Long legalEntityId,
             @org.apache.ibatis.annotations.Param("organizationId") Long organizationId,
             @org.apache.ibatis.annotations.Param("costCenterId") Long costCenterId);
+
+    /** 月次snapshot用にBench待機原価を要員単位で取得する。 */
+    @Select("""
+        <script>
+        SELECT e.id AS engineerId,
+               COALESCE(uo.organization_id, e.organization_id) AS organizationId,
+               e.cost_center_id AS costCenterId,
+               COALESCE(e.expected_unit_price, 0) AS waitCost
+        FROM t_engineer e
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id AND uo.primary_flag = 1
+             AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{monthStart} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        WHERE e.deleted_flag = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM t_contract c
+            WHERE c.engineer_id = e.id AND c.deleted_flag = 0
+              AND c.status IN ('稼動中', '準備中', '終了')
+              AND c.start_date IS NOT NULL AND c.start_date &lt;= #{monthEnd}
+              AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
+          )
+        </script>
+        """)
+    List<com.ses.dto.accounting.AccountingWaitCostSnapshotRow> selectAccountingWaitCostByEngineer(
+            @org.apache.ibatis.annotations.Param("monthStart") java.time.LocalDate monthStart,
+            @org.apache.ibatis.annotations.Param("monthEnd") java.time.LocalDate monthEnd);
 }

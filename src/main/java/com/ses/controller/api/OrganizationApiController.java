@@ -100,18 +100,14 @@ public class OrganizationApiController {
     }
 
     @PutMapping("/{id}/status")
-    public ApiResult<Boolean> status(@PathVariable Long id, @RequestParam String status) {
+    public ApiResult<Boolean> status(@PathVariable Long id, @RequestParam String status,
+                                     @RequestParam Integer version) {
         organizationScopeService.assertAllowedOrganization(id);
         if (!"有効".equals(status) && !"無効".equals(status)) {
             throw BusinessException.of("error.organization.invalid");
         }
-        OrganizationUnit unit = organizationService.getById(id);
-        if (unit == null) {
+        if (!organizationService.updateStatus(id, status, version)) {
             throw BusinessException.of(404, "error.scope.notFound");
-        }
-        unit.setStatus(status);
-        if (!organizationService.updateById(unit)) {
-            throw BusinessException.of(409, "error.organization.versionConflict");
         }
         return ApiResult.success(true);
     }
@@ -223,6 +219,9 @@ public class OrganizationApiController {
         }
         assertOrganizationScope(existing.getOrganizationId());
         assertOrganizationScope(request.organizationId());
+        if (request.version() == null) {
+            throw BusinessException.of(400, "error.organization.versionRequired");
+        }
         CostCenter center = toCostCenter(request);
         center.setId(id);
         EntityProtectUtil.protectForUpdate(center);

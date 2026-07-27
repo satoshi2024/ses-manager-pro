@@ -22,6 +22,11 @@ public class WorkRecord {
     private BigDecimal paymentAmount;
     private String status;
     private String remarks;
+    /** 勤怠確定時点の組織・原価部門。月次snapshotが後日の異動に汚染されないよう凍結する。 */
+    private Long organizationId;
+    private Long costCenterId;
+    /** 組織・原価部門を解決済みとして固定したか。値がNULLでも1ならfallbackしない。 */
+    private Integer accountingDimensionFrozen;
     /** 差戻しコメント（差戻し時に必須保存、再提出でクリア）。業務備考 remarks とは別項目。 */
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String rejectComment;

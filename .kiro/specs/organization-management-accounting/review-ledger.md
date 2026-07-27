@@ -250,3 +250,49 @@ R02第八次Review（Base `601177a` / Head `030a016`、判定 FAIL、P0=1 / P1=1
 
 V60未適用環境ではMigration適用を止める。適用後は組織・所属・snapshotを削除せず、
 `ORGANIZATION_SCOPE_ENABLED=false` でscopeだけ無効化し、必要ならバックアップから復元する。V59は作成しない。
+
+## 第九次Review指摘対応 — enterprise開始条件前のP0/P1追補（2026-07-27）
+
+- 判定: `FIX`。P0/P1の実装・回帰テストを追補中であり、独立Review、Docker MySQL smoke、実ブラウザDemoは未実施。`enterprise-identity-security`は`NOT READY`を維持する。
+- 対象修正: Dashboardキャッシュキーの組織/DataScope分離、forecast pipelineのSQL境界、確定勤怠への組織・原価部門snapshot、組織statusの保護付きversion CAS、法人境界（親子・統合・法人変更）、予算の組織/原価部門の法人・状態・有効期間整合性、管理会計法人予算境界、CSV 15列、上長の有効性・role・scope検査、ユーザー無効化/削除と所属クローズの同一トランザクション、原価部門versionおよび全業務参照元の削除保護。
+- 回帰テスト: `OrganizationServiceImplTest` 11件、`OrganizationServiceManagerScopeTest` 1件、`ManagementAccountingServiceImplTest` 4件、`ManagementAccountingApiControllerTest` 3件、`OrganizationApiControllerTest` 10件、`UserApiControllerTest` 11件、`CostCenterServiceImplTest` 4件、`ContractMapperProjectionTest` 1件を確認済み。既存のDashboard/snapshot関連定向テストも前段で成功している。
+- Schema: V1の`expected_unit_price`コメントを円単位へ修正。V5/V60、`engineer-schema-h2.sql`、`schema-organization-accounting-h2.sql`は勤怠確定時の組織・原価部門列を同期した状態を維持する。
+- 未検証: `mvn test`全量の最終終了コード、Docker MySQL 8によるV1→V60およびlegacy V60 smoke、Node/browser実Demo、独立Review。従って本記録をPASS根拠にしない。
+- Base/Head: Base `601177a14689b6fc12cf79482224e0467a7e00ba`、Head `62a1f8a25b2a0638398cbb477bb10a58dba5afae`。修正は未コミットの作業ツリー差分に含まれる。
+
+## 第十次Review指摘対応 — P0/P1修正後の現行記録（2026-07-27）
+
+- 現行判定: `FIX`。P0/P1のコード修正と回帰テストは完了したが、独立再Review、Docker MySQL smoke、desktop/390px実ブラウザDemoが未完了のため、`PASS`へ変更しない。`enterprise-identity-security`は`NOT READY`を維持する。
+- P0-1: 公開済みV5を復元し、SHA-256内容ロックと会計帰属列不在を`MigrationScriptIntegrityTest`で固定。organization/cost center/frozen列はV60の独立条件DDLのみで追加。
+- P0-2/P0-3: V60に`t_bp_payment.cost_center_id`、`t_work_record.organization_id`、`cost_center_id`、`accounting_dimension_frozen`を列ごとの存在判定で追加し、BP外部キーより前に列を作成。H2 schemaも同期。
+- P0-4: 非数値principalのDashboard cache keyを安定username、解決不能principalを再利用不能UUIDへ変更し、異なるprincipalの隔離テストを追加。
+- P1-1〜P1-3: `approve()`を含む勤怠確定経路で組織・原価部門・凍結フラグを同一更新へ保存。対象月の有効所属を現在要員マスタより優先し、明示的に凍結されたNULLは後日fallbackしない。遅延承認、NULL凍結、Bench待機snapshotの回帰テストを追加。
+- P1-4: Cost Center削除参照に`t_work_record`を追加し、WorkRecord参照拒否を維持。
+- P1-5/P1-6: 組織統合は旧所属を統合日前日で閉じ、統合日付の後続所属を作成。既存統合先との同日重複を避け、status/assignmentの行ロック、同日異動拒否、参照中期間変更拒否を回帰テストで固定。
+- P1-7/P1-8: scope外snapshotを見えない契約はforecastへ再出現させず、Bench待機原価を`bench-engineer`月次snapshotから集計。snapshotが存在する月は現在要員SQLへfallbackしない。
+- P2/テスト追補: 管理会計契約Mapperの両scope SQL、CSVのtab/CR制御文字、V5/V60 DDL順序・列独立性をテスト。
+- 自動検証: 定向79 tests成功。全量`mvn test`: **830 tests / 0 failures / 0 errors / 6 skipped / BUILD SUCCESS**。`git diff --check`はexit 0（LF→CRLF warningのみ）。
+- 未検証: `docker ps`はDocker Linux engine pipe不在で失敗、`node --version`はコマンド未導入で失敗。従ってMySQL空庫/legacy smoke、Node JS syntax smoke、desktop/390px実ブラウザ一気通貫Demoは未実施。独立semantic reviewもこれから実施する。
+- Git: 修正は未コミット作業ツリーにあり、commitは作成していない。
+
+## 第十一次Review前追補 — P0/P1回帰修正（2026-07-27）
+
+- 現行判定: `FIX`。今回の独立再Reviewは未実施のため、P0/P1およびSpec全体をPASSへ変更しない。`enterprise-identity-security`は`NOT READY`を維持する。
+- 修正: `schema-organization-accounting-h2.sql`へ`t_work_record.accounting_dimension_frozen`と`t_bp_payment.cost_center_id`を追加。`ManagementAccountingServiceImpl`は対象月に`bench-engineer` snapshotが1件でも存在すれば、scope外で可視行が0件でも現在要員SQLへfallbackしない。通常の待機原価SQLは対象月の有効な主所属を要員所属より優先する。CSV exportは埋め込みCRを含むセルを引用し、Cost CenterのWorkRecord参照削除を回帰テストで固定した。
+- 回帰テスト: scope外待機snapshotのfallback禁止、scope外確定snapshot契約のforecast再出現禁止、WorkRecord参照中のCost Center削除拒否、CSV埋め込みCRを追加。定向24件成功。全量`mvn test`は**833 tests、Failures 0、Errors 0、Skipped 6、BUILD SUCCESS**。
+- 未検証: `docker ps`は`dockerDesktopLinuxEngine`のnamed pipe不在で失敗し、MySQL空庫V1→V60/legacy V58→V60 smokeは未実行。`node --version`はコマンド未導入で失敗し、Node JS syntax smokeは未実行。desktop/390px実ブラウザDemoも未実行。独立semantic reviewもこの追補時点では未実施。
+- Git: commitは作成していない。修正は未コミット作業ツリー差分にある。
+
+## 第十一次独立再Review（2026-07-27）
+
+- **全体判定: FAIL**。独立Reviewは完了したが、Docker MySQL smoke、Node.js syntax smoke、desktop/390px実ブラウザDemoが未検証のためPASSへ進めない。`enterprise-identity-security`は`NOT READY`・開始不可を維持する。
+- P0-1 V5不変性: **PASS**。V5 checksum固定、V60集約、ただし実MySQL適用は未検証。
+- P0-2/P0-3 V60/H2列同期・DDL順序: **PASS**。`accounting_dimension_frozen`、WorkRecord/BP paymentのcost center列とFK前置を静的テストで確認、実MySQLは未検証。
+- P0-4 Dashboard cache key: **PASS**。非数値principalの実環境検証は未実施。
+- P1-1〜P1-2 確定WorkRecord/snapshot凍結とscope外実績のforecast再出現防止: **PASS**。Mockito回帰は成功、実Mapper/DB結合は未検証。
+- P1-3 Bench snapshot fallback禁止: **PASS**。対象月にsnapshotが存在すればscope外で可視0件でもEngineer SQLへfallbackしない回帰を確認。実MySQLは未検証。
+- P1-4 対象月有効所属の優先: **PASS**。両待機SQLが`COALESCE(uo.organization_id, e.organization_id)`を使用。期間境界を実DBでは未検証。
+- P1-5 Cost CenterのWorkRecord参照削除保護: **PASS**。専用回帰テスト成功。任意注入Mapper欠落時のfail-openは残存リスクとして記録する。
+- P1-6 CSV embedded CR quoting: **PASS**。CRの引用と先頭制御文字保護、15列テストを確認。CSVパーサによる実レスポンス再読は未実施。
+- P1-7/P1-8 回帰・外部検証: 自動検証は**PASS**（全量`mvn test`: **833 tests / 0 failures / 0 errors / 6 skipped / BUILD SUCCESS**、`git diff --check` exit 0）。Dockerは`//./pipe/dockerDesktopLinuxEngine`不在、Nodeはコマンド未導入、実ブラウザDemoは未実施。
+- 結論: 今回の独立Reviewで直ちに必要と断定されたruntimeコード修正はないが、外部ゲート未達のためSpecは`FIX`、T013は未完了。Docker MySQL空庫/legacy smoke、Node syntax、desktop/390px Demoを完了してから再判定する。

@@ -86,7 +86,7 @@ class MonthlyAccountingSnapshotServiceImplTest {
      * 大半の実績が組織NULL＝未配賦になり、部門損益が成立しない。要員自身の所属組織を正とする。
      */
     @Test
-    void アカウント連携が無くても要員の所属組織で帰属する() {
+    void 過去月で直接所属履歴が無い要員は現在組織へ推測付替しない() {
         WorkRecord record = new WorkRecord();
         record.setId(502L);
         record.setContractId(602L);
@@ -113,9 +113,113 @@ class MonthlyAccountingSnapshotServiceImplTest {
         org.mockito.ArgumentCaptor<MonthlyAccountingDimension> captor =
                 org.mockito.ArgumentCaptor.forClass(MonthlyAccountingDimension.class);
         verify(dimensionMapper).insert(captor.capture());
-        assertEquals(2002L, captor.getValue().getOrganizationId());
+        assertEquals(null, captor.getValue().getOrganizationId());
         // 連携ユーザーの所属を引きに行かない（連携が無いので参照しても意味がない）。
         verify(userOrganizationMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void snapshotMonth_usesFrozenWorkRecordAtConfirmationInsteadOfCurrentEngineerMaster() {
+        WorkRecord record = new WorkRecord();
+        record.setId(503L);
+        record.setContractId(603L);
+        record.setWorkMonth("2026-06");
+        record.setStatus("確定");
+        record.setOrganizationId(3003L);
+        record.setCostCenterId(4004L);
+        record.setBillingAmount(new BigDecimal("100000"));
+        record.setPaymentAmount(new BigDecimal("70000"));
+
+        Contract contract = new Contract();
+        contract.setId(603L);
+        contract.setEngineerId(703L);
+        contract.setCostCenterId(9999L); // 7月の契約変更後の値
+        com.ses.entity.Engineer movedEngineer = new com.ses.entity.Engineer();
+        movedEngineer.setId(703L);
+        movedEngineer.setOrganizationId(9009L); // 7月異動後の組織
+        movedEngineer.setCostCenterId(9999L);
+        com.ses.entity.CostCenter frozenCenter = new com.ses.entity.CostCenter();
+        frozenCenter.setId(4004L);
+        frozenCenter.setOrganizationId(3003L);
+
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(dimensionMapper.selectList(any())).thenReturn(List.of());
+        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
+        when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
+        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(List.of());
+        when(costCenterMapper.selectById(4004L)).thenReturn(frozenCenter);
+        when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
+
+        assertEquals(1, service.snapshotMonth("2026-06"));
+
+        org.mockito.ArgumentCaptor<MonthlyAccountingDimension> captor =
+                org.mockito.ArgumentCaptor.forClass(MonthlyAccountingDimension.class);
+        verify(dimensionMapper).insert(captor.capture());
+        assertEquals(3003L, captor.getValue().getOrganizationId());
+        assertEquals(4004L, captor.getValue().getCostCenterId());
+        verify(userOrganizationMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void snapshotMonth_待機要員も要員単位でsnapshotする() {
+        com.ses.dto.accounting.AccountingWaitCostSnapshotRow wait =
+                new com.ses.dto.accounting.AccountingWaitCostSnapshotRow();
+        wait.setEngineerId(901L);
+        wait.setOrganizationId(1001L);
+        wait.setCostCenterId(1002L);
+        wait.setWaitCost(new BigDecimal("350000"));
+
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(engineerMapper.selectAccountingWaitCostByEngineer(any(), any())).thenReturn(List.of(wait));
+        when(costCenterMapper.selectById(1002L)).thenReturn(null);
+        when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
+
+        assertEquals(1, service.snapshotMonth("2026-06"));
+
+        org.mockito.ArgumentCaptor<MonthlyAccountingDimension> captor =
+                org.mockito.ArgumentCaptor.forClass(MonthlyAccountingDimension.class);
+        verify(dimensionMapper).insert(captor.capture());
+        assertEquals("bench-engineer", captor.getValue().getSourceType());
+        assertEquals(901L, captor.getValue().getSourceId());
+        assertEquals(1001L, captor.getValue().getOrganizationId());
+        assertEquals(new BigDecimal("350000"), captor.getValue().getCost());
+    }
+
+    @Test
+    void 明示的に凍結したNULLは後日の要員マスタで補完しない() {
+        WorkRecord record = new WorkRecord();
+        record.setId(504L);
+        record.setContractId(604L);
+        record.setWorkMonth("2026-06");
+        record.setStatus("確定");
+        record.setAccountingDimensionFrozen(1);
+        record.setBillingAmount(new BigDecimal("100000"));
+        record.setPaymentAmount(new BigDecimal("70000"));
+
+        Contract contract = new Contract();
+        contract.setId(604L);
+        contract.setEngineerId(704L);
+        contract.setCostCenterId(4004L);
+        com.ses.entity.Engineer movedEngineer = new com.ses.entity.Engineer();
+        movedEngineer.setId(704L);
+        movedEngineer.setOrganizationId(9009L);
+        movedEngineer.setCostCenterId(9999L);
+
+        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(dimensionMapper.selectList(any())).thenReturn(List.of());
+        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
+        when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
+        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(List.of());
+        when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
+
+        assertEquals(1, service.snapshotMonth("2026-06"));
+
+        org.mockito.ArgumentCaptor<MonthlyAccountingDimension> captor =
+                org.mockito.ArgumentCaptor.forClass(MonthlyAccountingDimension.class);
+        verify(dimensionMapper).insert(captor.capture());
+        assertEquals("work-record", captor.getValue().getSourceType());
+        assertEquals(null, captor.getValue().getOrganizationId());
+        assertEquals(null, captor.getValue().getCostCenterId());
     }
 
     @Test

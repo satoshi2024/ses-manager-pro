@@ -3,6 +3,7 @@ package com.ses.config;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationScopeService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
@@ -51,23 +52,39 @@ public class CacheConfig {
     }
 
     /**
-     * データスコープを織り込んだキャッシュキーを作る。
+     * データスコープおよび組織スコープを織り込んだキャッシュキーを作る。
      *
      * <p><b>これがこのキャッシュの安全性の要。</b> ダッシュボードの集計は
-     * {@link DataScopeService} により閲覧者ごとに母集団が変わる（担当限定の営業は自分の担当分だけ）。
-     * メソッド引数だけをキーにすると、担当限定ユーザーの結果を別のユーザーへ配ってしまう。
-     * スコープ非適用のユーザー（管理者・マネージャー等）は全員が同一母集団なので "ALL" で共有し、
-     * スコープ適用中のユーザーだけ個別キーにする。
+     * {@link DataScopeService} および {@link OrganizationScopeService} により
+     * 閲覧者ごとに母集団が変わる。メソッド引数だけをキーにすると、スコープ適用中ユーザーの
+     * 結果を別のユーザーへ配ってしまう。
+     *
+     * <p>いずれかのスコープが適用中のユーザーはユーザーIDで個別キーにし、
+     * 両スコープ非適用のユーザー（管理者等）は全員が同一母集団なので "ALL" で共有する。
      */
     @Bean("dashboardScopeKeyGenerator")
-    public KeyGenerator dashboardScopeKeyGenerator(ObjectProvider<DataScopeService> dataScopeProvider) {
+    public KeyGenerator dashboardScopeKeyGenerator(
+            ObjectProvider<DataScopeService> dataScopeProvider,
+            ObjectProvider<OrganizationScopeService> orgScopeProvider) {
         return (target, method, params) -> {
-            DataScopeService scope = dataScopeProvider.getIfAvailable();
+            DataScopeService dataScope = dataScopeProvider.getIfAvailable();
+            OrganizationScopeService orgScope = orgScopeProvider.getIfAvailable();
+            boolean dataScopeActive = dataScope != null && dataScope.isScoped();
+            boolean orgScopeActive = orgScope != null && !orgScope.hasFullAccess();
             String scopeKey;
-            if (scope != null && scope.isScoped()) {
+            if (dataScopeActive || orgScopeActive) {
                 Long uid = SecurityUtils.currentUserId();
-                // ユーザーID が取れない場合は共有させない（安全側に倒す）
-                scopeKey = "U" + (uid != null ? uid : "unknown-" + System.identityHashCode(target));
+                if (uid != null) {
+                    scopeKey = "U" + uid;
+                } else {
+                    // 外部subjectをローカルIDへ解決できないprincipalは共有キャッシュへ入れない。
+                    // usernameはprincipalごとの安定した境界として使い、usernameも無い場合は
+                    // リクエストごとに一意化して必ずcache hitを防ぐ。
+                    String username = SecurityUtils.currentUsername();
+                    scopeKey = username == null || username.isBlank()
+                            ? "UNCACHEABLE-" + java.util.UUID.randomUUID()
+                            : "P" + username;
+                }
             } else {
                 scopeKey = "ALL";
             }

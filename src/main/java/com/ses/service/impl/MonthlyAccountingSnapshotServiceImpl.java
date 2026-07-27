@@ -66,7 +66,7 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
         List<WorkRecord> records = workRecordMapper.selectList(new QueryWrapper<WorkRecord>()
                 .eq("work_month", workMonth).eq("status", "確定").orderByAsc("id"));
         if (records.isEmpty()) {
-            return 0;
+            return snapshotBenchCosts(asOf);
         }
         List<Long> recordIds = records.stream().map(WorkRecord::getId).filter(java.util.Objects::nonNull).toList();
         List<MonthlyAccountingDimension> existing = dimensionMapper.selectList(new LambdaQueryWrapper<MonthlyAccountingDimension>()
@@ -155,34 +155,43 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
                 continue;
             }
             Contract contract = contractById.get(record.getContractId());
-            Long organizationId = null;
-            Long costCenterId = null;
+            Long organizationId = record.getOrganizationId();
+            Long costCenterId = record.getCostCenterId();
             Long salesUserId = contract == null ? null : contract.getSalesUserId();
+            // 確定時に凍結済みなら現在の要員/契約を参照しない。旧レコードだけ従来の
+            // 対象月所属を優先し、過去月に履歴が無い現在マスタは推測に使わない。
             Engineer engineer = contract == null ? null : engineerById.get(contract.getEngineerId());
-            // 帰属は要員自身の所属組織が正。アカウント連携は要員セルフサービスを使う要員にしか
-            // 存在しないため、連携を必須にすると大半の実績が「未配賦」になる。
-            if (engineer != null && engineer.getOrganizationId() != null) {
-                organizationId = engineer.getOrganizationId();
-            } else if (contract != null && contract.getEngineerId() != null) {
-                EngineerAccountLink link = linkByEngineer.get(contract.getEngineerId());
-                if (link != null && link.getSysUserId() != null) {
-                    UserOrganization assignment = assignmentByUser.get(link.getSysUserId());
-                    if (assignment != null) {
-                        organizationId = assignment.getOrganizationId();
+            boolean frozen = Integer.valueOf(1).equals(record.getAccountingDimensionFrozen());
+            if (!frozen && organizationId == null) {
+                if (contract != null && contract.getEngineerId() != null) {
+                    EngineerAccountLink link = linkByEngineer.get(contract.getEngineerId());
+                    if (link != null && link.getSysUserId() != null) {
+                        UserOrganization assignment = assignmentByUser.get(link.getSysUserId());
+                        if (assignment != null) {
+                            organizationId = assignment.getOrganizationId();
+                        }
+                    }
+                }
+                if (organizationId == null && engineer != null
+                        && !asOf.isBefore(LocalDate.now().withDayOfMonth(1))) {
+                    organizationId = engineer.getOrganizationId();
+                }
+            }
+            if (!frozen && costCenterId == null) {
+                if (!asOf.isBefore(LocalDate.now().withDayOfMonth(1)) && contract != null
+                        && contract.getCostCenterId() != null) {
+                    costCenterId = contract.getCostCenterId();
+                } else if (!asOf.isBefore(LocalDate.now().withDayOfMonth(1)) && engineer != null
+                        && engineer.getCostCenterId() != null) {
+                    costCenterId = engineer.getCostCenterId();
+                } else {
+                    costCenterId = invoiceCostByRecord.get(record.getId());
+                    if (costCenterId == null) {
+                        costCenterId = bpCostByRecord.get(record.getId());
                     }
                 }
             }
-            if (contract != null && contract.getCostCenterId() != null) {
-                costCenterId = contract.getCostCenterId();
-            } else if (engineer != null && engineer.getCostCenterId() != null) {
-                costCenterId = engineer.getCostCenterId();
-            } else {
-                costCenterId = invoiceCostByRecord.get(record.getId());
-                if (costCenterId == null) {
-                    costCenterId = bpCostByRecord.get(record.getId());
-                }
-            }
-            if (costCenterId != null) {
+            if (!frozen && costCenterId != null) {
                 CostCenter center = costCenterMapper.selectById(costCenterId);
                 if (center == null || (organizationId != null && !organizationId.equals(center.getOrganizationId()))) {
                     costCenterId = null;
@@ -203,6 +212,49 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
                 inserted += dimensionMapper.insert(snapshot);
             } catch (DuplicateKeyException ignored) {
                 // 同一月次締めの並行実行は一意キーで一度だけ確定する。
+            }
+        }
+        inserted += snapshotBenchCosts(asOf);
+        return inserted;
+    }
+
+    /**
+     * 確定実績が無い月でもBenchの帰属を月次snapshotへ保存する。
+     * 後日の要員異動・原価部門変更で過去月の待機原価が移動しないよう、要員単位で一意に保存する。
+     */
+    private int snapshotBenchCosts(LocalDate asOf) {
+        List<com.ses.dto.accounting.AccountingWaitCostSnapshotRow> rows =
+                engineerMapper.selectAccountingWaitCostByEngineer(asOf, asOf.withDayOfMonth(asOf.lengthOfMonth()));
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+        int inserted = 0;
+        for (com.ses.dto.accounting.AccountingWaitCostSnapshotRow row : rows) {
+            if (row.getEngineerId() == null) {
+                continue;
+            }
+            Long costCenterId = row.getCostCenterId();
+            if (costCenterId != null) {
+                CostCenter center = costCenterMapper.selectById(costCenterId);
+                if (center == null || (row.getOrganizationId() != null
+                        && !row.getOrganizationId().equals(center.getOrganizationId()))) {
+                    costCenterId = null;
+                }
+            }
+            MonthlyAccountingDimension snapshot = MonthlyAccountingDimension.builder()
+                    .workMonth(asOf)
+                    .sourceType("bench-engineer")
+                    .sourceId(row.getEngineerId())
+                    .organizationId(row.getOrganizationId())
+                    .costCenterId(costCenterId)
+                    .revenue(BigDecimal.ZERO)
+                    .cost(zeroIfNull(row.getWaitCost()))
+                    .snapshotAt(LocalDateTime.now())
+                    .build();
+            try {
+                inserted += dimensionMapper.insert(snapshot);
+            } catch (DuplicateKeyException ignored) {
+                // 同一月次の再実行では既存snapshotを上書きしない。
             }
         }
         return inserted;
