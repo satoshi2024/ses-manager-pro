@@ -41,6 +41,9 @@ public class EngineerSaveDto {
     /** 要員の既定原価部門。月次snapshotの原価帰属に利用する。 */
     private Long costCenterId;
 
+    /** 要員の所属組織。部門損益の帰属と組織スコープの基準になる。 */
+    private Long organizationId;
+
     private LocalDate availableDate;
 
     @Min(value = 0, message = "経験年数は0以上で入力してください")

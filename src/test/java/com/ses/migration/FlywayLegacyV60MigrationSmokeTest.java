@@ -41,6 +41,9 @@ class FlywayLegacyV60MigrationSmokeTest {
             assertColumnAbsent(statement, "t_notification", "organization_id");
             assertColumnAbsent(statement, "t_invoice", "cost_center_id");
             assertColumnAbsent(statement, "t_bp_payment", "cost_center_id");
+            assertColumnAbsent(statement, "t_engineer", "organization_id");
+            assertColumnAbsent(statement, "t_user_organization", "active_primary_user_id");
+            assertColumnAbsent(statement, "m_organization_unit", "legal_entity_key");
         }
 
         flyway = Flyway.configure()
@@ -60,14 +63,50 @@ class FlywayLegacyV60MigrationSmokeTest {
             assertConstraintExists(statement, "t_invoice", "fk_invoice_cost_center");
             assertConstraintExists(statement, "t_bp_payment", "fk_bp_payment_cost_center");
             assertColumnExists(statement, "t_management_budget", "cost_center_key");
+            assertColumnExists(statement, "t_engineer", "organization_id");
+            assertConstraintExists(statement, "t_engineer", "fk_engineer_organization");
+            // 業務一意制約は生成列を含めて復元される（アプリ側検査だけに委ねない）。
+            assertColumnExists(statement, "m_organization_unit", "legal_entity_key");
+            assertIndexExists(statement, "m_organization_unit", "uk_organization_code");
+            assertColumnExists(statement, "t_user_organization", "active_primary_user_id");
+            assertIndexExists(statement, "t_user_organization", "uk_user_org_active_primary");
+            assertIndexExists(statement, "t_user_organization", "uk_user_org_period");
+            // LEGACY移行組織と既存要員の帰属backfillが効いていること。
+            assertLegacyBackfill(statement);
             assertFalse(hasVersion(statement, "59"), "V59は作成しない");
+        }
+    }
+
+    private void assertIndexExists(Statement statement, String table, String index) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
+            assertTrue(resultSet.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertLegacyBackfill(Statement statement) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT COUNT(*) FROM m_organization_unit WHERE code='LEGACY' AND deleted_flag=0")) {
+            assertTrue(resultSet.next() && resultSet.getInt(1) == 1, "LEGACY移行組織が1件だけ作られるはず");
+        }
+        // 既存要員がいる場合、組織未設定のまま残さない（残すと部門損益が全件未配賦になる）。
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT COUNT(*) FROM t_engineer WHERE deleted_flag=0 AND organization_id IS NULL")) {
+            assertTrue(resultSet.next() && resultSet.getInt(1) == 0, "既存要員の所属組織がbackfillされるはず");
         }
     }
 
     private void dropFeatureColumns(Statement statement) throws Exception {
         statement.execute("ALTER TABLE t_engineer DROP FOREIGN KEY fk_engineer_cost_center, DROP COLUMN cost_center_id");
+        statement.execute("ALTER TABLE t_engineer DROP FOREIGN KEY fk_engineer_organization, DROP COLUMN organization_id");
         statement.execute("ALTER TABLE t_contract DROP FOREIGN KEY fk_contract_cost_center, DROP COLUMN cost_center_id");
         statement.execute("ALTER TABLE m_organization_unit DROP INDEX idx_org_merged_into, DROP COLUMN merged_into");
+        // 生成列を落とす前に、その生成列を張っているUNIQUEを外す。
+        statement.execute("ALTER TABLE m_organization_unit DROP INDEX uk_organization_code, DROP COLUMN legal_entity_key");
+        statement.execute("ALTER TABLE t_user_organization DROP INDEX uk_user_org_active_primary,"
+                + " DROP COLUMN active_primary_user_id");
+        statement.execute("ALTER TABLE t_user_organization DROP INDEX uk_user_org_period");
         statement.execute("ALTER TABLE t_user_organization DROP COLUMN version");
         statement.execute("ALTER TABLE t_management_budget DROP INDEX uk_management_budget, DROP COLUMN cost_center_key");
     }

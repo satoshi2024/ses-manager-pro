@@ -5,15 +5,88 @@
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h3 text-light mb-0"><i class="bi bi-bar-chart-line me-2 text-info"></i><span th:text="#{managementAccounting.title}">管理会計</span></h2>
-        <div class="d-flex gap-2 flex-wrap"><input id="accountingMonth" type="month" class="form-control bg-dark border-secondary text-light"><input id="accountingOrganizationId" type="number" class="form-control bg-dark border-secondary text-light" th:placeholder="#{managementAccounting.organizationId}"><input id="accountingCostCenterId" type="number" class="form-control bg-dark border-secondary text-light" th:placeholder="#{managementAccounting.costCenterId}"><input id="accountingCustomerId" type="number" class="form-control bg-dark border-secondary text-light" th:placeholder="#{managementAccounting.customerId}"><input id="accountingProjectId" type="number" class="form-control bg-dark border-secondary text-light" th:placeholder="#{managementAccounting.projectId}"><input id="accountingSalesUserId" type="number" class="form-control bg-dark border-secondary text-light" th:placeholder="#{managementAccounting.salesUserId}"><button class="btn btn-info" type="button" onclick="loadManagementAccounting()" th:text="#{common.search}">検索</button><button class="btn btn-outline-secondary" type="button" onclick="exportManagementAccounting()" th:text="#{common.export}">出力</button></div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button" onclick="exportManagementAccounting()" th:text="#{common.export}">出力</button>
+        </div>
     </div>
+
+    <!-- 他の一覧画面と同じ .card > .card-body > form#searchForm 構造にして、
+         SES.filterPanel のモバイル折りたたみを共通で効かせる。 -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" onsubmit="return false;">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label text-muted small" for="accountingMonth" th:text="#{common.month}">対象月</label>
+                        <input id="accountingMonth" type="month" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small" for="accountingOrganizationId" th:text="#{managementAccounting.organization}">組織</label>
+                        <select id="accountingOrganizationId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small" for="accountingCostCenterId" th:text="#{organization.costCenter}">原価部門</label>
+                        <select id="accountingCostCenterId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label text-muted small" for="accountingCustomerId" th:text="#{managementAccounting.customerId}">顧客ID</label>
+                        <input id="accountingCustomerId" type="number" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-info w-100" type="button" onclick="loadManagementAccounting()" th:text="#{common.search}">検索</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="row g-3 mb-4">
         <div class="col-md-3"><div class="card bg-card border-dark"><div class="card-body"><div class="text-muted small" th:text="#{managementAccounting.revenue}">売上</div><div id="accountingRevenue" class="h4 text-light mb-0">¥0</div></div></div></div>
         <div class="col-md-3"><div class="card bg-card border-dark"><div class="card-body"><div class="text-muted small" th:text="#{managementAccounting.grossProfit}">粗利</div><div id="accountingGrossProfit" class="h4 text-light mb-0">¥0</div></div></div></div>
         <div class="col-md-3"><div class="card bg-card border-dark"><div class="card-body"><div class="text-muted small" th:text="#{managementAccounting.budgetVariance}">売上予算差</div><div id="accountingRevenueVariance" class="h4 text-light mb-0">¥0</div></div></div></div>
         <div class="col-md-3"><div class="card bg-card border-dark"><div class="card-body"><div class="text-muted small" th:text="#{managementAccounting.grossProfitVariance}">粗利予算差</div><div id="accountingGrossProfitVariance" class="h4 text-light mb-0">¥0</div></div></div></div>
     </div>
-    <div class="card bg-card border-dark"><div class="card-body"><div class="table-responsive"><table class="table table-dark table-hover align-middle mb-0"><thead><tr><th th:text="#{managementAccounting.organization}">組織</th><th th:text="#{managementAccounting.costCenterId}">原価部門ID</th><th th:text="#{managementAccounting.customerId}">顧客ID</th><th class="text-end" th:text="#{managementAccounting.revenue}">売上</th><th class="text-end" th:text="#{managementAccounting.cost}">原価</th><th class="text-end" th:text="#{managementAccounting.grossProfit}">粗利</th><th class="text-end" th:text="#{managementAccounting.waitCost}">待機原価</th><th class="text-end" th:text="#{managementAccounting.budget}">予算</th><th class="text-end" th:text="#{managementAccounting.budgetVariance}">予算差</th></tr></thead><tbody id="accountingRows"></tbody></table></div></div></div>
+
+    <div class="card bg-card border-dark mb-4">
+        <div class="card-header bg-transparent border-dark text-light" th:text="#{managementAccounting.summaryLevel}">組織別予実</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead><tr>
+                        <th th:text="#{managementAccounting.organization}">組織</th>
+                        <th th:text="#{organization.costCenter}">原価部門</th>
+                        <th class="text-end" th:text="#{managementAccounting.revenue}">売上</th>
+                        <th class="text-end" th:text="#{managementAccounting.cost}">原価</th>
+                        <th class="text-end" th:text="#{managementAccounting.grossProfit}">粗利</th>
+                        <th class="text-end" th:text="#{managementAccounting.waitCost}">待機原価</th>
+                        <th class="text-end" th:text="#{managementAccounting.budget}">予算</th>
+                        <th class="text-end" th:text="#{managementAccounting.budgetVariance}">予算差</th>
+                    </tr></thead>
+                    <tbody id="accountingRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark">
+        <div class="card-header bg-transparent border-dark text-light" th:text="#{managementAccounting.detail}">内訳</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead><tr>
+                        <th th:text="#{managementAccounting.organization}">組織</th>
+                        <th th:text="#{managementAccounting.customerId}">顧客ID</th>
+                        <th th:text="#{managementAccounting.projectId}">案件ID</th>
+                        <th th:text="#{managementAccounting.salesUserId}">営業ID</th>
+                        <th class="text-end" th:text="#{managementAccounting.revenue}">売上</th>
+                        <th class="text-end" th:text="#{managementAccounting.cost}">原価</th>
+                        <th class="text-end" th:text="#{managementAccounting.grossProfit}">粗利</th>
+                    </tr></thead>
+                    <tbody id="accountingDetailRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 <th:block layout:fragment="page-js"><script th:src="@{/js/modules/management-accounting.js}"></script></th:block>
 </body></html>

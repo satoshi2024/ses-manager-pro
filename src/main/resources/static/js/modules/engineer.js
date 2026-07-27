@@ -5,7 +5,27 @@ window.stationIndex = {};
 // (保存完了後にPUT /api/candidates/{id}/converted-engineerで紐付けるために保持する)
 let prefillCandidateId = null;
 
+/**
+ * 所属組織・原価部門の選択肢を読み込む。要員の所属組織は部門損益の帰属基準になるため、
+ * ID直打ちではなくマスタから選ばせる。組織スコープはAPI側で適用済み。
+ */
+function loadOrganizationOptions() {
+    $.get('/api/autocomplete/organizations').done(function(res) {
+        if (res.code !== 200) return;
+        $('#eng-organizationId').html('<option value="">—</option>' + (res.data || []).map(function(item) {
+            return '<option value="' + item.id + '">' + $('<div>').text(item.code + ' ' + item.name).html() + '</option>';
+        }).join(''));
+    });
+    $.get('/api/autocomplete/cost-centers').done(function(res) {
+        if (res.code !== 200) return;
+        $('#eng-costCenterId').html('<option value="">—</option>' + (res.data || []).map(function(item) {
+            return '<option value="' + item.id + '">' + $('<div>').text(item.code + ' ' + item.name).html() + '</option>';
+        }).join(''));
+    });
+}
+
 $(document).ready(function() {
+    loadOrganizationOptions();
     // Load engineers on page load
     loadEngineers();
 
@@ -352,6 +372,8 @@ function editEngineer(id) {
                 $('#eng-status').val(eng.status);
                 $('#eng-experienceYears').val(eng.experienceYears);
                 $('#eng-expectedUnitPrice').val(eng.expectedUnitPrice);
+                $('#eng-organizationId').val(eng.organizationId || '');
+                $('#eng-costCenterId').val(eng.costCenterId || '');
                 $('#eng-resumeSummary').val(eng.resumeSummary || '');
                 
                 // 最寄り駅・都道府県・鉄道会社を復元
@@ -436,6 +458,8 @@ function saveEngineer() {
         status: $('#eng-status').val(),
         experienceYears: $('#eng-experienceYears').val() ? parseInt($('#eng-experienceYears').val()) : null,
         expectedUnitPrice: $('#eng-expectedUnitPrice').val() ? parseInt($('#eng-expectedUnitPrice').val()) : null,
+        organizationId: $('#eng-organizationId').val() ? parseInt($('#eng-organizationId').val()) : null,
+        costCenterId: $('#eng-costCenterId').val() ? parseInt($('#eng-costCenterId').val()) : null,
         nearestStation: nearestStation,
         prefecture: $('#eng-prefecture').val() || null,
         railwayCompany: $('#eng-railwayCompany').val() || null,

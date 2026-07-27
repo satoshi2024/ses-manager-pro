@@ -21,22 +21,29 @@ import java.time.LocalDate;
 @Mapper
 public interface ContractMapper extends BaseMapper<Contract> {
 
+    /**
+     * 組織スコープに入る契約ID。契約の帰属は要員の所属組織を基準にする。
+     * 帰属解決は {@code t_engineer.organization_id} を正とし、未設定時のみアカウント連携ユーザーの
+     * 主所属へフォールバックする（{@code EngineerAccountLinkMapper} と同じ順序）。
+     */
     @Select("""
         <script>
         SELECT DISTINCT c.id
         FROM t_contract c
-        JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
-        JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-        WHERE c.deleted_flag = 0 AND uo.deleted_flag = 0
-          AND uo.valid_from &lt;= #{asOf}
-          AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE c.deleted_flag = 0
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              uo.organization_id IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
-              uo.user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
           )
@@ -47,7 +54,19 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("directUserIds") List<Long> directUserIds,
             @org.apache.ibatis.annotations.Param("asOf") LocalDate asOf);
 
-    @Select("<script>SELECT DISTINCT uo.organization_id FROM t_contract c JOIN t_engineer_account_link l ON l.engineer_id=c.engineer_id JOIN t_user_organization uo ON uo.user_id=l.sys_user_id AND uo.primary_flag=1 WHERE c.deleted_flag=0 AND c.id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    @Select("""
+        <script>
+        SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id) AS organization_id
+        FROM t_contract c
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0 AND uo.valid_to IS NULL
+        WHERE c.deleted_flag = 0
+          AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
+          AND c.id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>
+        </script>
+        """)
     List<Long> selectOrganizationIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
 
     @Select("<script>SELECT DISTINCT customer_id FROM t_contract WHERE deleted_flag = 0 AND customer_id IS NOT NULL AND id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
@@ -60,10 +79,12 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("""
         <script>
         SELECT c.id, c.engineer_id AS engineerId, c.sales_user_id AS salesUserId,
+               c.cost_center_id AS costCenterId,
                c.start_date AS startDate, c.end_date AS endDate,
                c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
-               uo.organization_id AS organizationId
+               COALESCE(e.organization_id, uo.organization_id) AS organizationId
         FROM t_contract c
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
@@ -76,7 +97,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
           <if test="fullAccess == false">
             <choose>
               <when test="allowedIds != null and allowedIds.size() > 0">
-                AND uo.organization_id IN
+                AND COALESCE(e.organization_id, uo.organization_id) IN
                 <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach>
               </when>
               <otherwise>AND 1 = 0</otherwise>
@@ -97,14 +118,15 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.sales_user_id AS salesUserId, c.cost_center_id AS costCenterId,
                c.start_date AS startDate, c.end_date AS endDate,
                c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
-               uo.organization_id AS organizationId
+               COALESCE(e.organization_id, uo.organization_id) AS organizationId
         FROM t_contract c
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart}
              AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
-        LEFT JOIN m_organization_unit ou ON ou.id = uo.organization_id AND ou.deleted_flag = 0
+        LEFT JOIN m_organization_unit ou ON ou.id = COALESCE(e.organization_id, uo.organization_id) AND ou.deleted_flag = 0
         WHERE c.deleted_flag = 0 AND c.status != '準備中'
           AND c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
@@ -112,14 +134,19 @@ public interface ContractMapper extends BaseMapper<Contract> {
           <if test="projectId != null">AND c.project_id = #{projectId}</if>
           <if test="salesUserId != null">AND c.sales_user_id = #{salesUserId}</if>
           <if test="allowedContractIds != null">
-            AND c.id IN <foreach collection="allowedContractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            <choose>
+              <when test="allowedContractIds.size() > 0">
+                AND c.id IN <foreach collection="allowedContractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <otherwise>AND 1 = 0</otherwise>
+            </choose>
           </if>
           <if test="costCenterId != null">AND c.cost_center_id = #{costCenterId}</if>
           <if test="legalEntityId != null">AND ou.legal_entity_id = #{legalEntityId}</if>
-          <if test="organizationId != null">AND uo.organization_id = #{organizationId}</if>
+          <if test="organizationId != null">AND COALESCE(e.organization_id, uo.organization_id) = #{organizationId}</if>
           <if test="fullAccess == false">
             <choose>
-              <when test="allowedIds != null and allowedIds.size() > 0">AND uo.organization_id IN <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
+              <when test="allowedIds != null and allowedIds.size() > 0">AND COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
               <otherwise>AND 1 = 0</otherwise>
             </choose>
           </if>

@@ -13,10 +13,33 @@
 
 ## 2. Service
 
-- `OrganizationService`: tree、期間重複、循環防止、異動。
+- `OrganizationService`: tree、期間重複、循環防止、異動。属性更新は同一IDのversion CAS
+  （行を分岐させると所属・cost center・予算・snapshotが旧IDへ取り残される）。統合は
+  子組織・在籍所属・要員の所属組織・cost center・当月以降の予算を統合先へ付け替え、
+  過去月の予算と月次snapshotは動かさない。退職・停止時は有効な所属を締め、上長参照を外す。
 - `OrganizationScopeService`: current userのdescendant IDsと既存DataScopeの結合。
 - `ManagementAccountingService`: 既存`MonthlyRevenueCalcService`の金額口径を再利用し、独自再計算禁止。
 - `BudgetService`: upsert、CSV、楽観ロック。
+
+### 帰属の解決順（管理会計・組織scope共通）
+
+1. `t_engineer.organization_id`（要員自身の所属組織）
+2. `t_engineer_account_link` → 対象日時点の主所属
+
+アカウント連携は要員セルフサービスを使う要員にしか存在しないため、連携を必須にすると
+大半の実績が「未配賦」になり R2.2/R2.3/R4 が成立しない。1 を正とし 2 はフォールバックに限る。
+
+### 組織scopeとDataScopeの結合規則（R3.2の明文化）
+
+| ロール | 業務データ（要員/契約/請求/顧客/案件/勤怠/通知/dashboard/export） | 組織マスタ・cost center・予算・snapshot |
+|---|---|---|
+| 管理者 | 全件 | 全件 |
+| マネージャー（部門責任者） | 主所属組織＋子孫 ∩ DataScope。`manager_user_id` の直属ユーザーは個人単位で追加許可 | 主所属組織＋子孫 |
+| 営業 / HR / 要員 | **既存のrole・DataScopeの範囲のまま**。組織で追加的に絞らない | 全件（menu権限で到達可否を制御） |
+
+営業部の営業が技術部所属の要員の契約を担当するのは通常運用であり、そこへ組織を重ねて積集合を
+取ると自分の担当データが0件になる。R3.1が求めるのは「一般ユーザーは既存role/data scope範囲」
+であって追加制限ではない。メニュー権限は独立した認可ゲートとして常に併用する。
 
 ## 3. UI/API
 

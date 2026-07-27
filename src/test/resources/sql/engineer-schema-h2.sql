@@ -52,6 +52,7 @@ CREATE TABLE t_engineer (
   status              VARCHAR(20),
   expected_unit_price DECIMAL(10,0),
   cost_center_id      BIGINT,
+  organization_id     BIGINT,
   available_date      DATE,
   experience_years    INT,
   japanese_level      VARCHAR(20),
@@ -667,7 +668,9 @@ CREATE TABLE m_organization_unit (
   version INT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  legal_entity_key BIGINT AS (COALESCE(legal_entity_id, 0)),
+  UNIQUE (legal_entity_key, code, valid_from)
 );
 
 CREATE TABLE t_user_organization (
@@ -682,7 +685,11 @@ CREATE TABLE t_user_organization (
   version INT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  active_primary_user_id BIGINT AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL AND deleted_flag = 0
+                                         THEN user_id ELSE NULL END),
+  UNIQUE (active_primary_user_id),
+  UNIQUE (user_id, organization_id, valid_from)
 );
 
 CREATE TABLE m_cost_center (

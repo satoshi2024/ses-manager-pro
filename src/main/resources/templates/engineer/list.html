@@ -224,6 +224,15 @@
                             <label class="form-label text-muted small" th:text="#{engineer.expectedPrice}">希望単価 (円)</label>
                             <input type="number" id="eng-expectedUnitPrice" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.price}" min="0">
                         </div>
+                        <!-- 部門損益の帰属基準。ここが未設定の要員は管理会計で「未配賦」になる。 -->
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" for="eng-organizationId" th:text="#{engineer.organization}">所属組織</label>
+                            <select id="eng-organizationId" class="form-select form-select-dark bg-secondary text-white border-dark"><option value="">—</option></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" for="eng-costCenterId" th:text="#{engineer.costCenter}">原価部門</label>
+                            <select id="eng-costCenterId" class="form-select form-select-dark bg-secondary text-white border-dark"><option value="">—</option></select>
+                        </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{engineer.nearestStation}">最寄り駅</label>
                             <div class="input-group input-group-sm">

@@ -56,6 +56,13 @@ public class DashboardServiceImpl implements DashboardService {
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
+
+    /**
+     * 組織スコープ。R3.3が dashboard へも同じ母集団を求めるため、KPI・チャート・粗利分析の
+     * 契約/要員取得はすべてこの実効母集団を通す。テストスライス互換のため任意注入。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
     /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通口径サービスで算出する(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
 
@@ -187,14 +194,17 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(Contract::getEngineerId)
                 .collect(Collectors.toSet());
 
-        // 2. Base counts and KPI (Requirement 3.2: DataScopeService に従う)
-        List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
-        if (dataScopeService != null && dataScopeService.isScoped()) {
-            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
-            allEngineers = allEngineers.stream()
-                    .filter(e -> e.getId() != null && allowedEngineerIds.contains(e.getId()))
-                    .collect(Collectors.toList());
+        // 2. Base counts and KPI (Requirement 3.2: DataScopeService / R3.3: 組織scopeに従う)
+        Set<Long> allowedEngineerIds = effectiveEngineerIds();
+        QueryWrapper<Engineer> engineerQuery = new QueryWrapper<>();
+        if (allowedEngineerIds != null) {
+            if (allowedEngineerIds.isEmpty()) {
+                engineerQuery.apply("1 = 0");
+            } else {
+                engineerQuery.in("id", allowedEngineerIds);
+            }
         }
+        List<Engineer> allEngineers = engineerMapper.selectList(engineerQuery);
         Set<Long> existingEngineerIds = allEngineers.stream()
                 .map(Engineer::getId)
                 .filter(Objects::nonNull)
@@ -373,18 +383,46 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     /**
-     * データスコープ適用済みの契約一覧を返す。スコープ対象ロールで許可契約が空なら空リスト。
+     * データスコープ・組織スコープ適用済みの契約一覧を返す。許可契約が空なら空リスト。
      * KPI・チャート・粗利分析が同じ母集団を見るための共通経路。
+     *
+     * <p>R3.3 は export/notification と並んで dashboard にも同じ組織scopeを求める。
+     * 部門責任者のKPIが全社値のままだと、R4「上長が配下のKPIだけを閲覧できる」が成立しない。
      */
     private List<Contract> scopedContracts(QueryWrapper<Contract> query) {
-        if (dataScopeService != null && dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedContractIds();
+        Set<Long> allowed = effectiveContractIds();
+        if (allowed != null) {
             if (allowed.isEmpty()) {
                 return Collections.emptyList();
             }
             query.in("id", allowed);
         }
         return contractMapper.selectList(query);
+    }
+
+    /**
+     * 契約の実効母集団。nullは「制限なし」。組織scopeとDataScopeは同一ID母集団同士の積集合にする
+     * （{@code OrganizationScopeService} の結合規則）。
+     */
+    private Set<Long> effectiveContractIds() {
+        Set<Long> dataIds = dataScopeService != null && dataScopeService.isScoped()
+                ? dataScopeService.allowedContractIds() : null;
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return dataIds;
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedContractIds(LocalDate.now()), dataIds);
+    }
+
+    /** 要員の実効母集団。nullは「制限なし」。 */
+    private Set<Long> effectiveEngineerIds() {
+        Set<Long> dataIds = dataScopeService != null && dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return dataIds;
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedEngineerIds(LocalDate.now()), dataIds);
     }
 
     @Override

@@ -102,6 +102,14 @@ function loadSelectOptions() {
                 });
             }
         });
+        // 原価部門の選択肢。組織スコープはAPI側で適用済み。
+        $.get('/api/autocomplete/cost-centers').done(res => {
+            if (res.code !== 200) return;
+            const current = $('#cont-costCenterId').val();
+            $('#cont-costCenterId').html('<option value="">—</option>' + (res.data || []).map(item =>
+                `<option value="${item.id}">${SES.escapeHtml(item.code + ' ' + item.name)}</option>`).join(''));
+            if (current) { $('#cont-costCenterId').val(current); }
+        });
         const p4 = $.get('/api/engineers/sales-user-options').then(res => {
             if(res.code === 200 && res.data) {
                 const select = $('#cont-salesUserId');
@@ -246,6 +254,7 @@ function openEditContract(id) {
             $('#cont-salesUserId').append(`<option value="${c.salesUserId}">${SES.escapeHtml(displayName)}</option>`);
         }
         $('#cont-salesUserId').val(c.salesUserId != null ? String(c.salesUserId) : '');
+        $('#cont-costCenterId').val(c.costCenterId != null ? String(c.costCenterId) : '');
         $('#cont-contractType').val(c.contractType || '準委任');
         $('#cont-startDate').val(c.startDate || '');
         $('#cont-endDate').val(c.endDate || '');
@@ -281,6 +290,7 @@ function buildContractPayload() {
         projectId: val('#cont-projectId') ? parseInt(val('#cont-projectId')) : null,
         customerId: val('#cont-customerId') ? parseInt(val('#cont-customerId')) : null,
         salesUserId: val('#cont-salesUserId') ? parseInt(val('#cont-salesUserId')) : null,
+        costCenterId: val('#cont-costCenterId') ? parseInt(val('#cont-costCenterId')) : null,
         contractType: val('#cont-contractType'),
         startDate: val('#cont-startDate'),
         endDate: val('#cont-endDate'),

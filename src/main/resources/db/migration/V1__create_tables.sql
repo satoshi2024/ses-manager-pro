@@ -99,6 +99,7 @@ CREATE TABLE t_engineer (
   status             ENUM('稼動中','退場予定','Bench','提案中') NOT NULL DEFAULT 'Bench' COMMENT '稼動ステータス',
   expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(万円)',
   cost_center_id      BIGINT                                 COMMENT '既定原価部門ID',
+  organization_id     BIGINT                                 COMMENT '所属組織ID（管理会計の帰属基準。未設定時のみアカウント連携で解決）',
   available_date     DATE                                    COMMENT '稼動可能日',
   experience_years   INT                                     COMMENT '経験年数',
   japanese_level     VARCHAR(20)                             COMMENT '日本語レベル',
@@ -446,6 +447,11 @@ CREATE TABLE m_organization_unit (
   updated_at     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag   TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
 
+  -- 法人IDはNULL可のため、そのままUNIQUEに含めるとNULL同士が重複扱いにならない。
+  -- 既存の cost_center_key と同じ生成列パターンでNULLを0へ畳んでから一意化する。
+  -- H2(テスト)は STORED/VIRTUAL キーワードを解釈しないため、ここでは既定(VIRTUAL)のまま定義する。
+  legal_entity_key BIGINT AS (COALESCE(legal_entity_id, 0)),
+  UNIQUE KEY uk_organization_code (legal_entity_key, code, valid_from),
   INDEX idx_org_parent (parent_id),
   INDEX idx_org_legal_entity_period (legal_entity_id, valid_from, valid_to),
   INDEX idx_org_status (status),
@@ -472,6 +478,12 @@ CREATE TABLE t_user_organization (
   updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
 
+  -- 「有効な主所属はユーザーごとに1件」をDBでも保証する。終了済み・論理削除済みはNULLへ畳んで
+  -- UNIQUEの対象外にし、履歴は何件でも保持できるようにする。
+  active_primary_user_id BIGINT AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL AND deleted_flag = 0
+                                         THEN user_id ELSE NULL END),
+  UNIQUE KEY uk_user_org_active_primary (active_primary_user_id),
+  UNIQUE KEY uk_user_org_period (user_id, organization_id, valid_from),
   INDEX idx_user_org_user_period (user_id, valid_from, valid_to),
   INDEX idx_user_org_organization (organization_id),
   INDEX idx_user_org_manager (manager_user_id),
@@ -568,6 +580,8 @@ CREATE TABLE t_monthly_accounting_dimension (
 -- DDL完了
 -- ============================================================
 ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+  ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
   ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE t_contract ADD CONSTRAINT fk_contract_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
   ON UPDATE CASCADE ON DELETE SET NULL;

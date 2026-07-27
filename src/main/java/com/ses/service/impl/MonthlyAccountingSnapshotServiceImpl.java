@@ -43,8 +43,11 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
     private final WorkRecordMapper workRecordMapper;
     private final ContractMapper contractMapper;
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private EngineerMapper engineerMapper;
+    /**
+     * 要員の所属組織・原価部門を引く。帰属解決の一次情報なので必須依存にする
+     * （任意注入だとコンストラクタ注入経路でnullのまま残り、帰属が常にnullになる）。
+     */
+    private final EngineerMapper engineerMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final CostCenterMapper costCenterMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -91,7 +94,7 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
                 : contracts.stream().collect(java.util.stream.Collectors.toMap(Contract::getId, c -> c, (a, b) -> a));
         List<Long> engineerIds = contracts == null ? List.of() : contracts.stream().map(Contract::getEngineerId)
                 .filter(java.util.Objects::nonNull).distinct().toList();
-        List<Engineer> engineers = engineerIds.isEmpty() || engineerMapper == null ? List.of() : engineerMapper.selectBatchIds(engineerIds);
+        List<Engineer> engineers = engineerIds.isEmpty() ? List.of() : engineerMapper.selectBatchIds(engineerIds);
         java.util.Map<Long, Engineer> engineerById = engineers == null ? java.util.Map.of()
                 : engineers.stream().collect(java.util.stream.Collectors.toMap(Engineer::getId, e -> e, (a, b) -> a));
         List<EngineerAccountLink> links = engineerIds.isEmpty() ? List.of()
@@ -155,7 +158,12 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
             Long organizationId = null;
             Long costCenterId = null;
             Long salesUserId = contract == null ? null : contract.getSalesUserId();
-            if (contract != null && contract.getEngineerId() != null) {
+            Engineer engineer = contract == null ? null : engineerById.get(contract.getEngineerId());
+            // 帰属は要員自身の所属組織が正。アカウント連携は要員セルフサービスを使う要員にしか
+            // 存在しないため、連携を必須にすると大半の実績が「未配賦」になる。
+            if (engineer != null && engineer.getOrganizationId() != null) {
+                organizationId = engineer.getOrganizationId();
+            } else if (contract != null && contract.getEngineerId() != null) {
                 EngineerAccountLink link = linkByEngineer.get(contract.getEngineerId());
                 if (link != null && link.getSysUserId() != null) {
                     UserOrganization assignment = assignmentByUser.get(link.getSysUserId());
@@ -164,7 +172,6 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
                     }
                 }
             }
-            Engineer engineer = contract == null ? null : engineerById.get(contract.getEngineerId());
             if (contract != null && contract.getCostCenterId() != null) {
                 costCenterId = contract.getCostCenterId();
             } else if (engineer != null && engineer.getCostCenterId() != null) {

@@ -63,6 +63,11 @@ public class OrganizationApiController {
     @PostMapping
     public ApiResult<OrganizationUnit> create(@Valid @RequestBody OrganizationSaveRequest request) {
         OrganizationUnit unit = toEntity(request);
+        // 親なし(=ルート)組織は誰のscopeにも属さないため、scope制限を受けるロールには作らせない。
+        // 作れてしまうと、作成者本人にも見えない孤立組織が無制限に増える。
+        if (unit.getParentId() == null && !organizationScopeService.hasFullAccess()) {
+            throw BusinessException.of("error.organization.rootNotAllowed");
+        }
         assertParentScope(unit.getParentId());
         EntityProtectUtil.protectForCreate(unit);
         if (!organizationService.save(unit)) {
@@ -82,7 +87,7 @@ public class OrganizationApiController {
         if (request.version() == null) {
             throw BusinessException.of(400, "error.organization.versionRequired");
         }
-        organizationService.reorganize(id, unit, request.version());
+        organizationService.updateOrganization(unit, request.version());
         return ApiResult.success(true);
     }
 
@@ -165,7 +170,22 @@ public class OrganizationApiController {
                 .managerUserId(request.managerUserId()).primaryFlag(request.primaryFlag() == null ? 0 : request.primaryFlag())
                 .validFrom(request.validFrom()).validTo(request.validTo()).version(0).build();
         EntityProtectUtil.protectForCreate(assignment);
-        return ApiResult.success(organizationService.transferUser(assignment, null));
+        // 異動元の主所属の版番号を必須にする。画面が古い所属を見たまま異動させるのを防ぐ。
+        return ApiResult.success(organizationService.transferUser(assignment, request.version()));
+    }
+
+    /** 所属の解除。論理削除ではなく終了日を入れて履歴として残す（R1.3）。 */
+    @DeleteMapping("/{userId}/assignments/{assignmentId}")
+    public ApiResult<Boolean> releaseAssignment(@PathVariable Long userId, @PathVariable Long assignmentId,
+                                                @RequestParam(required = false)
+                                                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate releaseDate,
+                                                @RequestParam Integer version) {
+        UserOrganization assignment = userOrganizationMapper.selectById(assignmentId);
+        if (assignment == null || !java.util.Objects.equals(assignment.getUserId(), userId)) {
+            throw BusinessException.of(404, "error.organization.scope.notFound");
+        }
+        organizationScopeService.assertAllowedOrganization(assignment.getOrganizationId());
+        return ApiResult.success(organizationService.releaseAssignment(assignmentId, releaseDate, version));
     }
 
     @GetMapping("/cost-centers")

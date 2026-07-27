@@ -134,6 +134,13 @@
                                 <option value="" th:text="#{contract.salesRep.select}">営業を選択...</option>
                             </select>
                         </div>
+                        <!-- 契約の原価部門。未指定なら要員の既定原価部門、次に請求明細・BP支払の順で解決する。 -->
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" for="cont-costCenterId" th:text="#{contract.costCenter}">原価部門</label>
+                            <select id="cont-costCenterId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="">—</option>
+                            </select>
+                        </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{contract.contractType}">契約形態</label>
                             <select id="cont-contractType" class="form-select form-select-dark bg-secondary text-white border-dark">

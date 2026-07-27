@@ -55,19 +55,39 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     private ScopeCacheKey cachedKey;
     private Set<Long> cachedIds;
 
+    /**
+     * 組織階層によるscopeを受けないか。
+     *
+     * <p>R3.1の三分岐をここで表現する。管理者は全件。部門責任者(マネージャー)だけが
+     * 「自組織と子組織」へ絞られる。営業/HR/要員などの一般ユーザーは<b>既存のrole・DataScopeの範囲</b>が
+     * 唯一の母集団であり、組織scopeで<b>さらに狭めない</b>。
+     *
+     * <p>組織で追加的に絞ると、営業部に所属する営業が技術部所属の要員の契約を担当している
+     * 通常の運用で積集合が空になり、自分の担当データすら見えなくなる。
+     * これはR3.1が意図した挙動ではないため、業務データへの組織scopeは部門責任者に限定する。
+     */
     @Override
     public boolean hasFullAccess() {
-        return !organizationScopeEnabled || ROLE_ADMIN.equals(SecurityUtils.currentRole());
+        if (!organizationScopeEnabled) {
+            return true;
+        }
+        String role = SecurityUtils.currentRole();
+        if (ROLE_ADMIN.equals(role)) {
+            return true;
+        }
+        return !ROLE_MANAGER.equals(role);
     }
 
     @Override
     public Set<Long> allowedOrganizationIds(LocalDate asOf) {
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
-        Long userId = resolveCurrentUserId();
-        String role = SecurityUtils.currentRole();
-        if (ROLE_ADMIN.equals(role)) {
+        if (hasFullAccess()) {
+            // 空集合は「制限なし」ではなく「組織条件を付けない」を意味する。
+            // 呼び出し側は必ず hasFullAccess() を先に見ること。
             return Collections.emptySet();
         }
+        Long userId = resolveCurrentUserId();
+        String role = SecurityUtils.currentRole();
         if (userId == null || role == null) {
             return Collections.emptySet();
         }
@@ -93,11 +113,9 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
             if (assignment.getOrganizationId() == null) {
                 continue;
             }
-            if (ROLE_MANAGER.equals(role) && Integer.valueOf(1).equals(assignment.getPrimaryFlag())) {
+            // ここへ来るのは部門責任者(マネージャー)だけ。主所属の組織とその子孫が閲覧範囲になる。
+            if (Integer.valueOf(1).equals(assignment.getPrimaryFlag())) {
                 result.addAll(organizationService.descendantIds(assignment.getOrganizationId(), date));
-            } else if (!ROLE_MANAGER.equals(role)) {
-                // 営業/HR/一般ユーザーは所属組織だけ。子組織への拡張はしない。
-                result.add(assignment.getOrganizationId());
             }
         }
         cachedKey = key;
