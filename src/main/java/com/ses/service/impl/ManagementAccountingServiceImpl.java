@@ -43,10 +43,18 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     private final ManagementBudgetMapper budgetMapper;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final OrganizationScopeService organizationScopeService;
+    private final com.ses.service.OrganizationService organizationService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private DataScopeService dataScopeService;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private EngineerMapper engineerMapper;
+
+    /**
+     * 待機原価の集計に使う。
+     *
+     * <p>任意注入(field)にすると、コンストラクタ注入を行う{@code @InjectMocks}のような経路で
+     * nullのまま残り、待機原価のscope条件がテストで一度も評価されない。
+     * 必須の依存として明示する。
+     */
+    private final EngineerMapper engineerMapper;
 
     @Override
     public ManagementAccountingSummaryDto summary(String month) {
@@ -122,7 +130,10 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         confirmed.values().forEach(record -> {
             if (record.getContractId() != null) confirmedByContract.put(record.getContractId(), record);
         });
-        Map<DimensionKey, MutableRow> rows = new LinkedHashMap<>();
+        // 予実行(組織×原価部門)と内訳行(顧客/案件/営業まで)を同じ実績から同時に積む。
+        // 予算・待機原価は組織×原価部門でしか存在しないため、行の粒度をそこへ揃える。
+        Map<OrganizationKey, MutableRow> rows = new LinkedHashMap<>();
+        Map<DimensionKey, MutableDetail> details = new LinkedHashMap<>();
         for (ContractContext context : contexts.values()) {
             WorkRecord actual = confirmedByContract.get(context.contract.getId());
             MonthlyRevenueCalcService.ContractAmount amount = monthlyRevenueCalcService.resolveContractAmount(
@@ -132,11 +143,16 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             if (snapshot != null) {
                 orgId = snapshot.getOrganizationId();
             }
-            DimensionKey key = new DimensionKey(orgId, snapshot == null ? context.costCenterId : snapshot.getCostCenterId(),
-                    context.customerId, context.projectId, context.salesUserId);
-            MutableRow row = rows.computeIfAbsent(key, MutableRow::new);
+            Long rowCostCenterId = snapshot == null ? context.costCenterId : snapshot.getCostCenterId();
+            MutableRow row = rows.computeIfAbsent(new OrganizationKey(orgId, rowCostCenterId), MutableRow::new);
             row.revenue = row.revenue.add(amount.getSales());
             row.cost = row.cost.add(amount.getCost());
+
+            DimensionKey detailKey = new DimensionKey(orgId, rowCostCenterId,
+                    context.customerId, context.projectId, context.salesUserId);
+            MutableDetail detail = details.computeIfAbsent(detailKey, MutableDetail::new);
+            detail.revenue = detail.revenue.add(amount.getSales());
+            detail.cost = detail.cost.add(amount.getCost());
         }
 
         LambdaQueryWrapper<ManagementBudget> budgetQuery = new LambdaQueryWrapper<ManagementBudget>()
@@ -145,35 +161,41 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 .eq(organizationId != null, ManagementBudget::getOrganizationId, organizationId);
         organizationScopeService.applyOrganizationScope(budgetQuery, ManagementBudget::getOrganizationId, monthStart);
         budgetMapper.selectList(budgetQuery).forEach(budget -> {
-            DimensionKey key = new DimensionKey(budget.getOrganizationId(), budget.getCostCenterId(), null, null, null);
-            MutableRow row = rows.computeIfAbsent(key, MutableRow::new);
+            MutableRow row = rows.computeIfAbsent(
+                    new OrganizationKey(budget.getOrganizationId(), budget.getCostCenterId()), MutableRow::new);
             row.budgetRevenue = row.budgetRevenue.add(budget.getRevenue());
             row.budgetGrossProfit = row.budgetGrossProfit.add(budget.getGrossProfit());
             row.utilizationCount += budget.getUtilizationCount();
             row.hireCount += budget.getHireCount();
         });
 
-        Map<Long, String> names = new HashMap<>();
-        for (OrganizationUnit unit : organizationScopeService.listVisibleOrganizations(legalEntityId, monthStart)) {
-            names.put(unit.getId(), unit.getName());
-        }
-        if (engineerMapper != null) {
-            List<AccountingWaitCostRow> waitCosts = engineerMapper.selectAccountingWaitCost(monthStart);
-            if (waitCosts != null) {
-                for (AccountingWaitCostRow wait : waitCosts) {
-                    DimensionKey key = new DimensionKey(wait.getOrganizationId(), wait.getCostCenterId(), null, null, null);
-                    MutableRow row = rows.computeIfAbsent(key, MutableRow::new);
-                    row.waitCost = row.waitCost.add(wait.getWaitCost() == null ? BigDecimal.ZERO : wait.getWaitCost());
-                }
+        // 待機原価も他の集計と同じscope・同じフィルターをSQLへ渡す。取得後に絞り込まない。
+        List<AccountingWaitCostRow> waitCosts = engineerMapper.selectAccountingWaitCost(
+                monthStart, monthEnd, fullAccess, queryAllowed, legalEntityId, organizationId, costCenterId);
+        if (waitCosts != null) {
+            for (AccountingWaitCostRow wait : waitCosts) {
+                MutableRow row = rows.computeIfAbsent(
+                        new OrganizationKey(wait.getOrganizationId(), wait.getCostCenterId()), MutableRow::new);
+                row.waitCost = row.waitCost.add(wait.getWaitCost() == null ? BigDecimal.ZERO : wait.getWaitCost());
             }
         }
-        List<ManagementAccountingSummaryDto.Row> resultRows = rows.values().stream().map(row -> row.toDto(names.get(row.key.organizationId))).toList();
+        // 組織名は有効期間・状態で絞らずIDから直接引く。統合済み・無効化・期間外の組織にも
+        // 過去実績がぶら下がっており、名前が引けないと組織別合計の突合(R4)ができなくなる。
+        Set<Long> nameIds = new java.util.HashSet<>();
+        rows.keySet().forEach(key -> nameIds.add(key.organizationId()));
+        details.keySet().forEach(key -> nameIds.add(key.organizationId()));
+        Map<Long, String> names = new HashMap<>(organizationService.namesByIds(nameIds));
+
+        List<ManagementAccountingSummaryDto.Row> resultRows = rows.values().stream()
+                .map(row -> row.toDto(names.get(row.key.organizationId()))).toList();
+        List<ManagementAccountingSummaryDto.Detail> resultDetails = details.values().stream()
+                .map(detail -> detail.toDto(names.get(detail.key.organizationId()))).toList();
         BigDecimal revenue = sum(resultRows, ManagementAccountingSummaryDto.Row::getRevenue);
         BigDecimal cost = sum(resultRows, ManagementAccountingSummaryDto.Row::getCost);
         BigDecimal budgetRevenue = sum(resultRows, ManagementAccountingSummaryDto.Row::getBudgetRevenue);
         BigDecimal budgetGrossProfit = sum(resultRows, ManagementAccountingSummaryDto.Row::getBudgetGrossProfit);
         BigDecimal grossProfit = revenue.subtract(cost);
-        return ManagementAccountingSummaryDto.builder().month(month).rows(resultRows)
+        return ManagementAccountingSummaryDto.builder().month(month).rows(resultRows).details(resultDetails)
                 .totalRevenue(revenue).totalCost(cost).totalGrossProfit(grossProfit)
                 .totalBudgetRevenue(budgetRevenue).totalBudgetGrossProfit(budgetGrossProfit)
                 .revenueVariance(revenue.subtract(budgetRevenue)).grossProfitVariance(grossProfit.subtract(budgetGrossProfit)).build();
@@ -189,7 +211,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     }
 
     private ManagementAccountingSummaryDto emptySummary(String month) {
-        return ManagementAccountingSummaryDto.builder().month(month).rows(List.of())
+        return ManagementAccountingSummaryDto.builder().month(month).rows(List.of()).details(List.of())
                 .totalRevenue(BigDecimal.ZERO).totalCost(BigDecimal.ZERO).totalGrossProfit(BigDecimal.ZERO)
                 .totalBudgetRevenue(BigDecimal.ZERO).totalBudgetGrossProfit(BigDecimal.ZERO)
                 .revenueVariance(BigDecimal.ZERO).grossProfitVariance(BigDecimal.ZERO).build();
@@ -239,22 +261,38 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         return rows.stream().map(getter).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** 予実行のキー。予算・待機原価が存在する粒度と一致させる。 */
+    private record OrganizationKey(Long organizationId, Long costCenterId) {}
     private record DimensionKey(Long organizationId, Long costCenterId, Long customerId, Long projectId, Long salesUserId) {}
     private record ContractContext(Contract contract, Long organizationId, Long costCenterId, Long customerId, Long projectId, Long salesUserId) {}
 
     private static class MutableRow {
-        private final DimensionKey key;
+        private final OrganizationKey key;
         private BigDecimal revenue = BigDecimal.ZERO, cost = BigDecimal.ZERO, budgetRevenue = BigDecimal.ZERO, budgetGrossProfit = BigDecimal.ZERO;
         private BigDecimal waitCost = BigDecimal.ZERO;
         private int utilizationCount, hireCount;
-        private MutableRow(DimensionKey key) { this.key = key; }
+        private MutableRow(OrganizationKey key) { this.key = key; }
         private ManagementAccountingSummaryDto.Row toDto(String name) {
             BigDecimal profit = revenue.subtract(cost);
-            return ManagementAccountingSummaryDto.Row.builder().organizationId(key.organizationId).organizationName(name == null ? "未配賦" : name)
-                    .costCenterId(key.costCenterId).customerId(key.customerId).projectId(key.projectId).salesUserId(key.salesUserId)
+            return ManagementAccountingSummaryDto.Row.builder()
+                    .organizationId(key.organizationId()).organizationName(name == null ? "未配賦" : name)
+                    .costCenterId(key.costCenterId())
                     .revenue(revenue).cost(cost).grossProfit(profit).budgetRevenue(budgetRevenue).budgetGrossProfit(budgetGrossProfit)
                     .revenueVariance(revenue.subtract(budgetRevenue)).grossProfitVariance(profit.subtract(budgetGrossProfit))
                     .utilizationCount(utilizationCount).hireCount(hireCount).waitCost(waitCost).build();
+        }
+    }
+
+    private static class MutableDetail {
+        private final DimensionKey key;
+        private BigDecimal revenue = BigDecimal.ZERO, cost = BigDecimal.ZERO;
+        private MutableDetail(DimensionKey key) { this.key = key; }
+        private ManagementAccountingSummaryDto.Detail toDto(String name) {
+            return ManagementAccountingSummaryDto.Detail.builder()
+                    .organizationId(key.organizationId()).organizationName(name == null ? "未配賦" : name)
+                    .costCenterId(key.costCenterId()).customerId(key.customerId())
+                    .projectId(key.projectId()).salesUserId(key.salesUserId())
+                    .revenue(revenue).cost(cost).grossProfit(revenue.subtract(cost)).build();
         }
     }
 }

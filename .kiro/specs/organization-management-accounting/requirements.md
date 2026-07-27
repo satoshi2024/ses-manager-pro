@@ -17,8 +17,13 @@
 ## R3. 組織スコープ
 
 1. THE 管理者 SHALL 全件、部門責任者 SHALL 自組織と子組織、一般ユーザー SHALL 既存role/data scope範囲だけを閲覧する。
+   一般ユーザーへ組織による追加制限をかけない（営業部の営業が技術部所属の要員の契約を担当する
+   通常運用で母集団が0件になるため）。
 2. THE 組織scope SHALL menu roleや営業担当scopeを置換せず、両方の積集合/和集合規則を明文化する。
+   → `design.md`「組織scopeとDataScopeの結合規則」を唯一の正とする。
 3. THE export/notification/dashboard SHALL 同じ組織scopeを適用する。
+   通知のうち宛先指定通知({@code recipient_user_id}あり)は本人限定が既に効いているため組織条件を重ねない
+   （重ねると異動した本人が自分宛の通知を見られなくなる）。
 
 ## R4. 効果・受入
 

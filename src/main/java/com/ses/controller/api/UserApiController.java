@@ -33,6 +33,10 @@ public class UserApiController {
     private final EngineerSalesMapper engineerSalesMapper;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
 
+    /** 組織所属のクローズ用。組織機能を配線しないテストスライスでも壊れないよう任意解決にする。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.OrganizationService>
+            organizationServiceProvider;
+
     /**
      * ユーザー一覧（ページネーション）
      */
@@ -159,6 +163,9 @@ public class UserApiController {
         sysUser.setStatus(status);
         boolean success = sysUserService.updateById(sysUser);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        if (status != 1) {
+            closeOrganizationAssignments(id);
+        }
         return ApiResult.success(true);
     }
 
@@ -175,7 +182,22 @@ public class UserApiController {
         }
         boolean success = sysUserService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        closeOrganizationAssignments(id);
         return ApiResult.success(true);
+    }
+
+    /**
+     * 退職・停止時に有効な組織所属を閉じる。
+     *
+     * <p>閉じないと {@code valid_to IS NULL} のまま残り、退職者が組織スコープの母集団・
+     * 部門損益の帰属・上長候補に居座り続ける。所属行は履歴として残すため論理削除はしない。
+     * 組織機能を配線していないテストスライスでは何もしない。
+     */
+    private void closeOrganizationAssignments(Long userId) {
+        com.ses.service.OrganizationService organizationService = organizationServiceProvider.getIfAvailable();
+        if (organizationService != null) {
+            organizationService.closeAssignmentsForUser(userId, java.time.LocalDate.now());
+        }
     }
 
     /**

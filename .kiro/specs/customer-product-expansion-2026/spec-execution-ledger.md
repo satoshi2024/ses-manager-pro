@@ -18,7 +18,7 @@
 | # | Wave | spec | カタログtask | 現在状態 | 開始条件/次のaction | 実装対話 | Base/Head | Review | 次へ進む条件 |
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
-| 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX` | R02 FAILのT008/F1を条件付き修正、T009/F2を核心業務scope修正中。同じS02でT009完了後にT010〜T013を順次修正し、再Review | S02 organization-management-accounting 実装 | Base `601177a14689b6fc12cf79482224e0467a7e00ba` / Head `4a062bc664ec4d18a5511726f9fa9a5699a99762`（未commit差分あり） | R02 FAIL → FIX（T008条件付き、T009修正中） | T009〜T013のObjective/テスト/Demo完了、R02再Review PASS。enterpriseは開始しない |
+| 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX`（第八次指摘対応済み・再Review待ち） | 第八次ReviewのP0=1/P1=13/P2=11をすべて修正。`mvn clean test` 792件 Failures 0 / Errors 0 / Skipped 4 で BUILD SUCCESS。T008〜T013の`tasks.md`はチェック済み | S02 organization-management-accounting 実装 | Base `601177a14689b6fc12cf79482224e0467a7e00ba` / Head `030a016` + 第八次修正差分 | R02 第八次 FAIL → 指摘対応済み・再判定待ち | R02再Review PASS。残るのは Docker MySQL smoke と実ブラウザDemoの2点のみ。enterpriseはPASS後に開始 |
 | 3 | 0 | `enterprise-identity-security` | T014〜T020 | `NOT READY` | organization PASS、G1決定後S03 |  |  |  | R03 PASS |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |

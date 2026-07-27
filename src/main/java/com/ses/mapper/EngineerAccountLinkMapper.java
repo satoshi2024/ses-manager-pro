@@ -11,21 +11,30 @@ import java.util.List;
 @Mapper
 public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLink> {
 
+    /**
+     * 組織スコープに入る要員ID。
+     *
+     * <p>帰属は {@code t_engineer.organization_id} を正とし、未設定の要員だけ
+     * アカウント連携ユーザーの主所属へフォールバックする。アカウント連携は要員セルフサービスを
+     * 使う要員にしか存在しないため、連携を必須にすると大半の要員が誰からも見えなくなる。
+     */
     @Select("""
         <script>
-        SELECT DISTINCT l.engineer_id
-        FROM t_engineer_account_link l
-        JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-        WHERE uo.deleted_flag = 0
-          AND uo.valid_from &lt;= #{asOf}
-          AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        SELECT DISTINCT e.id
+        FROM t_engineer e
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE e.deleted_flag = 0
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              uo.organization_id IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
-              uo.user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
           )

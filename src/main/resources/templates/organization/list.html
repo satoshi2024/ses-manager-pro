@@ -14,42 +14,130 @@
         </button>
     </div>
 
-    <div class="card bg-card border-dark shadow-sm">
+    <!-- 絞り込みパネル。SES.filterPanel が .card > .card-body > form#searchForm を探して
+         モバイル用の折りたたみバーを注入するため、他の一覧画面と同じ構造を保つこと。 -->
+    <div class="card bg-card border-dark shadow-sm mb-3">
         <div class="card-body">
-            <div class="row g-3 align-items-end mb-3">
-                <div class="col-md-3">
-                    <label for="organizationAsOf" class="form-label text-muted small" th:text="#{organization.validFrom}">基準日</label>
-                    <input id="organizationAsOf" type="date" class="form-control bg-dark border-secondary text-light">
+            <form id="searchForm" onsubmit="return false;">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label for="organizationAsOf" class="form-label text-muted small" th:text="#{organization.validFrom}">基準日</label>
+                        <input id="organizationAsOf" type="date" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-info w-100" onclick="loadOrganizations()"><i class="bi bi-search me-1"></i><span th:text="#{common.search}">検索</span></button>
+                    </div>
                 </div>
-                <div class="col-md-2">
-                    <button type="button" class="btn btn-outline-info w-100" onclick="loadOrganizations()"><i class="bi bi-search me-1"></i><span th:text="#{common.search}">検索</span></button>
+            </form>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#organizationTreeTab" type="button" role="tab"
+                    th:text="#{organization.title}">組織管理</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#assignmentTab" type="button" role="tab"
+                    th:text="#{organization.assignments}">所属</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#costCenterTab" type="button" role="tab"
+                    th:text="#{organization.costCenter}">原価部門</button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <div class="tab-pane fade show active" id="organizationTreeTab" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead><tr>
+                                <th th:text="#{organization.name}">名称</th>
+                                <th th:text="#{organization.code}">コード</th>
+                                <th th:text="#{organization.type}">種別</th>
+                                <th th:text="#{organization.validFrom}">有効開始日</th>
+                                <th th:text="#{organization.status}">状態</th>
+                                <th class="text-end" th:text="#{organization.actions}">操作</th>
+                            </tr></thead>
+                            <tbody id="organizationTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            <div class="table-responsive">
-                <table class="table table-dark table-hover align-middle mb-0">
-                    <thead><tr>
-                        <th th:text="#{organization.code}">コード</th>
-                        <th th:text="#{organization.name}">名称</th>
-                        <th th:text="#{organization.type}">種別</th>
-                        <th th:text="#{organization.parent}">親組織</th>
-                        <th th:text="#{organization.status}">状態</th>
-                        <th class="text-end" th:text="#{organization.actions}">操作</th>
-                    </tr></thead>
-                    <tbody id="organizationTableBody"></tbody>
-                </table>
+        </div>
+
+        <div class="tab-pane fade" id="assignmentTab" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <div class="row g-3 align-items-end mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small" for="assignmentUser" th:text="#{organization.assignment.user}">ユーザー</label>
+                            <select id="assignmentUser" class="form-select bg-dark border-secondary text-light" onchange="loadAssignments()"></select>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-info text-white w-100" onclick="openAssignmentModal(false)">
+                                <i class="bi bi-plus-lg me-1"></i><span th:text="#{organization.assignment.new}">所属登録</span>
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="button" class="btn btn-outline-warning w-100" onclick="openAssignmentModal(true)">
+                                <i class="bi bi-arrow-left-right me-1"></i><span th:text="#{organization.assignment.transfer}">異動</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead><tr>
+                                <th th:text="#{organization.name}">組織</th>
+                                <th th:text="#{organization.assignment.position}">役職</th>
+                                <th th:text="#{organization.assignment.manager}">上長</th>
+                                <th th:text="#{organization.assignment.primary}">主所属</th>
+                                <th th:text="#{organization.assignment.period}">所属期間</th>
+                                <th class="text-end" th:text="#{organization.actions}">操作</th>
+                            </tr></thead>
+                            <tbody id="assignmentTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="costCenterTab" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-info text-white" onclick="openCostCenterModal()">
+                            <i class="bi bi-plus-lg me-1"></i><span th:text="#{organization.costCenter.new}">原価部門登録</span>
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead><tr>
+                                <th th:text="#{organization.code}">コード</th>
+                                <th th:text="#{organization.name}">名称</th>
+                                <th th:text="#{organization.parent}">組織</th>
+                                <th th:text="#{organization.status}">状態</th>
+                                <th class="text-end" th:text="#{organization.actions}">操作</th>
+                            </tr></thead>
+                            <tbody id="costCenterTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    <div>
+
     <div class="modal fade" id="organizationModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg"><div class="modal-content bg-card text-light border-secondary">
-            <div class="modal-header border-secondary"><h5 class="modal-title" id="organizationModalTitle">組織登録</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header border-secondary"><h5 class="modal-title" id="organizationModalTitle" th:text="#{organization.new}">組織登録</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:aria-label="#{common.cancel}"></button></div>
             <div class="modal-body">
                 <input type="hidden" id="organizationId"><input type="hidden" id="organizationVersion">
                 <div class="row g-3">
                     <div class="col-md-4"><label class="form-label" for="organizationCode" th:text="#{organization.code}">コード</label><input id="organizationCode" class="form-control bg-dark border-secondary text-light" required></div>
                     <div class="col-md-8"><label class="form-label" for="organizationName" th:text="#{organization.name}">名称</label><input id="organizationName" class="form-control bg-dark border-secondary text-light" required></div>
-                    <div class="col-md-4"><label class="form-label" for="organizationType" th:text="#{organization.type}">種別</label><select id="organizationType" class="form-select bg-dark border-secondary text-light"><option value="法人" th:text="#{organization.type.legal}">法人</option><option value="事業部" th:text="#{organization.type.division}">事業部</option><option value="部門" th:text="#{organization.type.department}">部門</option><option value="課" th:text="#{organization.type.section}">課</option><option value="チーム" th:text="#{organization.type.team}">チーム</option></select></div>
+                    <div class="col-md-4"><label class="form-label" for="organizationType" th:text="#{organization.type}">種別</label><select id="organizationType" class="form-select bg-dark border-secondary text-light"><option value="事業部" th:text="#{organization.type.division}">事業部</option><option value="部" th:text="#{organization.type.department}">部</option><option value="課" th:text="#{organization.type.section}">課</option><option value="チーム" th:text="#{organization.type.team}">チーム</option></select></div>
                     <div class="col-md-8"><label class="form-label" for="organizationParent" th:text="#{organization.parent}">親組織</label><select id="organizationParent" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select></div>
                     <div class="col-md-6"><label class="form-label" for="organizationValidFrom" th:text="#{organization.validFrom}">開始日</label><input id="organizationValidFrom" type="date" class="form-control bg-dark border-secondary text-light" required></div>
                     <div class="col-md-6"><label class="form-label" for="organizationValidTo" th:text="#{organization.validTo}">終了日</label><input id="organizationValidTo" type="date" class="form-control bg-dark border-secondary text-light"></div>
@@ -58,7 +146,52 @@
             <div class="modal-footer border-secondary"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button type="button" class="btn btn-info" onclick="saveOrganization()" th:text="#{common.save}">保存</button></div>
         </div></div>
     </div>
-</div>
+
+    <div class="modal fade" id="assignmentModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog"><div class="modal-content bg-card text-light border-secondary">
+            <div class="modal-header border-secondary"><h5 class="modal-title" id="assignmentModalTitle" th:text="#{organization.assignment.new}">所属登録</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:aria-label="#{common.cancel}"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="assignmentTransferMode"><input type="hidden" id="assignmentVersion">
+                <div class="row g-3">
+                    <div class="col-12"><label class="form-label" for="assignmentOrganization" th:text="#{organization.name}">組織</label><select id="assignmentOrganization" class="form-select bg-dark border-secondary text-light"></select></div>
+                    <div class="col-md-6"><label class="form-label" for="assignmentPosition" th:text="#{organization.assignment.position}">役職</label><input id="assignmentPosition" class="form-control bg-dark border-secondary text-light"></div>
+                    <div class="col-md-6"><label class="form-label" for="assignmentManager" th:text="#{organization.assignment.manager}">上長</label><select id="assignmentManager" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select></div>
+                    <div class="col-md-6"><label class="form-label" for="assignmentValidFrom" th:text="#{organization.validFrom}">開始日</label><input id="assignmentValidFrom" type="date" class="form-control bg-dark border-secondary text-light"></div>
+                    <div class="col-md-6 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" id="assignmentPrimary"><label class="form-check-label" for="assignmentPrimary" th:text="#{organization.assignment.primary}">主所属</label></div></div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button type="button" class="btn btn-info" onclick="saveAssignment()" th:text="#{common.save}">保存</button></div>
+        </div></div>
+    </div>
+
+    <div class="modal fade" id="costCenterModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog"><div class="modal-content bg-card text-light border-secondary">
+            <div class="modal-header border-secondary"><h5 class="modal-title" id="costCenterModalTitle" th:text="#{organization.costCenter.new}">原価部門登録</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:aria-label="#{common.cancel}"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="costCenterId"><input type="hidden" id="costCenterVersion">
+                <div class="row g-3">
+                    <div class="col-md-4"><label class="form-label" for="costCenterCode" th:text="#{organization.code}">コード</label><input id="costCenterCode" class="form-control bg-dark border-secondary text-light"></div>
+                    <div class="col-md-8"><label class="form-label" for="costCenterName" th:text="#{organization.name}">名称</label><input id="costCenterName" class="form-control bg-dark border-secondary text-light"></div>
+                    <div class="col-12"><label class="form-label" for="costCenterOrganization" th:text="#{organization.parent}">組織</label><select id="costCenterOrganization" class="form-select bg-dark border-secondary text-light"></select></div>
+                    <div class="col-md-6"><label class="form-label" for="costCenterValidFrom" th:text="#{organization.validFrom}">開始日</label><input id="costCenterValidFrom" type="date" class="form-control bg-dark border-secondary text-light"></div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button type="button" class="btn btn-info" onclick="saveCostCenter()" th:text="#{common.save}">保存</button></div>
+        </div></div>
+    </div>
+
+    <div class="modal fade" id="organizationMergeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog"><div class="modal-content bg-card text-light border-secondary">
+            <div class="modal-header border-secondary"><h5 class="modal-title" th:text="#{organization.merge}">統合</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" th:aria-label="#{common.cancel}"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="mergeSourceId"><input type="hidden" id="mergeSourceVersion">
+                <p class="text-warning small" th:text="#{organization.merge.confirm}">この組織を統合しますか？</p>
+                <label class="form-label" for="mergeTargetId" th:text="#{organization.merge.target}">統合先組織</label>
+                <select id="mergeTargetId" class="form-select bg-dark border-secondary text-light"></select>
+            </div>
+            <div class="modal-footer border-secondary"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button type="button" class="btn btn-warning" onclick="mergeOrganization()" th:text="#{organization.merge}">統合</button></div>
+        </div></div>
+    </div>
 </div>
 <th:block layout:fragment="page-js"><script th:src="@{/js/modules/organization.js}"></script></th:block>
 </body>

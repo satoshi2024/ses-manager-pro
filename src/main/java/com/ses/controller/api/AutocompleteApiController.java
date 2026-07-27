@@ -30,6 +30,7 @@ public class AutocompleteApiController {
     private final SysUserService sysUserService;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.CostCenterService costCenterService;
 
     @GetMapping("/engineers")
     public ApiResult<List<String>> getEngineers() {
@@ -105,6 +106,51 @@ public class AutocompleteApiController {
         }
         return organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedProjectIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    /**
+     * 組織の選択肢。要員・契約・管理会計の各フォームがID直打ちにならないように共有する。
+     * 返すのは id/code/name だけで、組織scopeを適用する（部門責任者は自組織と子孫のみ）。
+     */
+    @GetMapping("/organizations")
+    public ApiResult<List<com.ses.dto.organization.OrganizationOptionDto>> getOrganizations() {
+        return ApiResult.success(organizationScopeService.listVisibleOrganizations(null, java.time.LocalDate.now())
+                .stream()
+                .map(unit -> new com.ses.dto.organization.OrganizationOptionDto(
+                        unit.getId(), unit.getCode(), unit.getName(), unit.getParentId()))
+                .collect(Collectors.toList()));
+    }
+
+    /** 原価部門の選択肢。組織scopeを適用する。 */
+    @GetMapping("/cost-centers")
+    public ApiResult<List<com.ses.dto.organization.OrganizationOptionDto>> getCostCenters() {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.CostCenter> query =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.CostCenter>()
+                        .eq(com.ses.entity.CostCenter::getStatus, "有効")
+                        .orderByAsc(com.ses.entity.CostCenter::getCode);
+        organizationScopeService.applyOrganizationScope(query, com.ses.entity.CostCenter::getOrganizationId);
+        return ApiResult.success(costCenterService.list(query).stream()
+                .map(center -> new com.ses.dto.organization.OrganizationOptionDto(
+                        center.getId(), center.getCode(), center.getName(), center.getOrganizationId()))
+                .collect(Collectors.toList()));
+    }
+
+    /**
+     * 所属登録の宛先ユーザー候補。組織管理画面の所属タブから使う。
+     * {@code /api/users} は管理者専用のため、HR・部門責任者向けに公開項目を絞った専用DTOで返す。
+     */
+    @GetMapping("/assignable-users")
+    public ApiResult<List<com.ses.dto.organization.AssignableUserDto>> getAssignableUsers() {
+        List<SysUser> users = sysUserService.list(new QueryWrapper<SysUser>()
+                .select("id", "username", "real_name", "role")
+                .eq("status", 1)
+                .orderByAsc("id"));
+        return ApiResult.success(users.stream()
+                .filter(user -> organizationScopeService.hasFullAccess()
+                        || organizationScopeService.isAllowedUser(user.getId(), java.time.LocalDate.now()))
+                .map(user -> new com.ses.dto.organization.AssignableUserDto(
+                        user.getId(), user.getUsername(), user.getRealName(), user.getRole()))
+                .collect(Collectors.toList()));
     }
 
     /** ログインユーザー一覧オートコンプリート。管理者のみ利用可。 */

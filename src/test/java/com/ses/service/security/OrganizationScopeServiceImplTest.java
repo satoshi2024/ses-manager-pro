@@ -83,8 +83,13 @@ class OrganizationScopeServiceImplTest {
                 () -> scopeService.assertAllowedOrganization(other.getId()));
     }
 
+    /**
+     * R3.1「一般ユーザーは既存role/data scope範囲だけを閲覧する」。
+     * 営業部の営業が技術部所属の要員の契約を担当する運用は普通にあるので、
+     * ここで組織を重ねて絞ると自分の担当データが見えなくなる。組織で追加制限しないことを固定する。
+     */
     @Test
-    void 営業とHRは所属組織だけで子組織へ拡張しない() {
+    void 営業は組織で追加制限されず既存DataScopeの母集団を維持する() {
         OrganizationUnit root = organization("SCOPE-SALES", "営業", null);
         organizationService.save(root);
         OrganizationUnit child = organization("SCOPE-SALES-CHILD", "営業課", root.getId());
@@ -95,13 +100,16 @@ class OrganizationScopeServiceImplTest {
                 .validFrom(LocalDate.of(2026, 1, 1)).build());
         authenticate(sales);
 
-        assertEquals(List.of(root.getId()), scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1))
-                .stream().sorted().toList());
-        assertEquals(1, scopeService.listVisibleOrganizations(null, LocalDate.of(2026, 7, 1)).size());
+        assertTrue(scopeService.hasFullAccess());
+        assertTrue(scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)).isEmpty());
+        // 「制限なし」なので要員・契約・請求書のID集合も空集合(=条件を付けない)になる。
+        assertTrue(scopeService.allowedEngineerIds(LocalDate.of(2026, 7, 1)).isEmpty());
+        assertTrue(scopeService.allowedContractIds(LocalDate.of(2026, 7, 1)).isEmpty());
     }
 
+    /** HRは組織マスタの管理者役なので、一覧・件数・exportとも全組織を同じ母集団で見る。 */
     @Test
-    void HRも所属組織だけを一覧件数出力で参照する() {
+    void HRは組織マスタを一覧件数出力で同じ母集団として参照する() {
         OrganizationUnit root = organization("SCOPE-HR", "人事", null);
         organizationService.save(root);
         OrganizationUnit child = organization("SCOPE-HR-CHILD", "採用課", root.getId());
@@ -112,9 +120,10 @@ class OrganizationScopeServiceImplTest {
                 .validFrom(LocalDate.of(2026, 1, 1)).build());
         authenticate(hr);
 
-        assertEquals(1, scopeService.countVisibleOrganizations(null, LocalDate.of(2026, 7, 1)));
-        assertEquals(root.getId(), scopeService.exportVisibleOrganizations(null,
-                LocalDate.of(2026, 7, 1)).get(0).getId());
+        long count = scopeService.countVisibleOrganizations(null, LocalDate.of(2026, 7, 1));
+        assertEquals(count, scopeService.listVisibleOrganizations(null, LocalDate.of(2026, 7, 1)).size());
+        assertEquals(count, scopeService.exportVisibleOrganizations(null, LocalDate.of(2026, 7, 1)).size());
+        assertTrue(count >= 2);
     }
 
     @Test
@@ -204,14 +213,16 @@ class OrganizationScopeServiceImplTest {
     void 標準principalはusernameからローカルユーザーへ解決する() {
         OrganizationUnit own = organization("SCOPE-STANDARD-PRINCIPAL", "標準principal組織", null);
         organizationService.save(own);
-        SysUser sales = insertUser("standard-scope-sales", "標準営業", "営業");
+        SysUser sales = insertUser("standard-scope-sales", "標準部門長", "マネージャー");
         organizationService.assignUser(UserOrganization.builder()
                 .userId(sales.getId()).organizationId(own.getId()).primaryFlag(1)
                 .validFrom(LocalDate.of(2026, 1, 1)).build());
 
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
-                sales.getUsername(), null, List.of(new SimpleGrantedAuthority("ROLE_営業"))));
+                sales.getUsername(), null, List.of(new SimpleGrantedAuthority("ROLE_マネージャー"))));
 
+        // 標準のUserDetails principal(=usernameのみ)でもローカルユーザーIDを解決し、
+        // 部門責任者として自組織のscopeを組み立てられること。
         assertEquals(java.util.Set.of(own.getId()),
                 scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)));
     }

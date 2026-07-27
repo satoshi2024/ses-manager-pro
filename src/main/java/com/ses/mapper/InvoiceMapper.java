@@ -20,18 +20,20 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         JOIN t_invoice_item ii ON ii.invoice_id = i.id
         JOIN t_work_record w ON w.id = ii.work_record_id
         JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
-        JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
-        JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-        WHERE i.deleted_flag = 0 AND uo.deleted_flag = 0
-          AND uo.valid_from &lt;= #{asOf}
-          AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE i.deleted_flag = 0
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              uo.organization_id IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
-              uo.user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
           )

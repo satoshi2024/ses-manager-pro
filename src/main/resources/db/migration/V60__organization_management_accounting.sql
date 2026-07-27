@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS m_organization_unit (
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag    TINYINT NOT NULL DEFAULT 0,
+  legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) STORED,
+  UNIQUE KEY uk_organization_code (legal_entity_key, code, valid_from),
   INDEX idx_org_parent (parent_id),
   INDEX idx_org_legal_entity_period (legal_entity_id, valid_from, valid_to),
   INDEX idx_org_status (status),
@@ -41,6 +43,10 @@ CREATE TABLE IF NOT EXISTS t_user_organization (
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag    TINYINT NOT NULL DEFAULT 0,
+  active_primary_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL
+        AND deleted_flag = 0 THEN user_id ELSE NULL END) STORED,
+  UNIQUE KEY uk_user_org_active_primary (active_primary_user_id),
+  UNIQUE KEY uk_user_org_period (user_id, organization_id, valid_from),
   INDEX idx_user_org_user_period (user_id, valid_from, valid_to),
   INDEX idx_user_org_organization (organization_id),
   INDEX idx_user_org_manager (manager_user_id),
@@ -123,6 +129,14 @@ SET @sql = (SELECT IF(COUNT(*) = 0,
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_user_organization' AND column_name = 'version');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- 管理会計の帰属基準列。アカウント連携(t_engineer_account_link)は任意機能で全要員には存在しないため、
+-- 要員自身の所属組織を正とし、未設定のときだけ連携ユーザーの主所属で解決する。
+-- 帰属をbackfillする前に列を追加する（versionと同じ理由）。
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_engineer ADD COLUMN organization_id BIGINT NULL',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_engineer' AND column_name = 'organization_id');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- V60以前に組織所属を持たない既存ユーザーを無所属にしないための移行所属。
 -- 実組織が確定した後に個別の所属履歴へ置換する。管理者はscope対象外のため作成しない。
 INSERT INTO m_organization_unit
@@ -143,6 +157,13 @@ WHERE u.role <> '管理者'
     SELECT 1 FROM t_user_organization existing
     WHERE existing.user_id = u.id AND existing.deleted_flag = 0
   );
+
+-- 既存要員も同じ移行組織へ寄せ、V60適用直後に部門損益が全件「未配賦」になるのを避ける。
+-- 実組織が確定した後に要員一覧・詳細から個別に付け替える。
+UPDATE t_engineer e
+JOIN m_organization_unit o ON o.code = 'LEGACY' AND o.deleted_flag = 0
+SET e.organization_id = o.id
+WHERE e.organization_id IS NULL AND e.deleted_flag = 0;
 
 -- 組織管理メニュー。既存V58 DBにも同じV60で投入し、V59は作成しない。
 INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
@@ -214,4 +235,32 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_bp_payment ADD CONSTRAINT fk_bp_payment_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id) ON UPDATE CASCADE ON DELETE SET NULL',
   'SELECT 1') FROM information_schema.table_constraints WHERE constraint_schema = DATABASE() AND table_name = 't_bp_payment' AND constraint_name = 'fk_bp_payment_cost_center');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id) ON UPDATE CASCADE ON DELETE SET NULL',
+  'SELECT 1') FROM information_schema.table_constraints WHERE constraint_schema = DATABASE() AND table_name = 't_engineer' AND constraint_name = 'fk_engineer_organization');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 業務一意制約。所属backfillの後に追加し、生成列→UNIQUEの順で実行する。
+-- 「同一法人・同一コード・同一開始日の組織は1件」「有効な主所属はユーザーごとに1件」
+-- 「同一ユーザー・同一組織・同一開始日の所属は1件」をアプリ側検査だけに委ねない。
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE m_organization_unit ADD COLUMN legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) STORED',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_organization_unit' AND column_name = 'legal_entity_key');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE m_organization_unit ADD UNIQUE KEY uk_organization_code (legal_entity_key, code, valid_from)',
+  'SELECT 1') FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_organization_unit' AND index_name = 'uk_organization_code');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_user_organization ADD COLUMN active_primary_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL AND deleted_flag = 0 THEN user_id ELSE NULL END) STORED',
+  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_user_organization' AND column_name = 'active_primary_user_id');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_user_organization ADD UNIQUE KEY uk_user_org_active_primary (active_primary_user_id)',
+  'SELECT 1') FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_user_organization' AND index_name = 'uk_user_org_active_primary');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE t_user_organization ADD UNIQUE KEY uk_user_org_period (user_id, organization_id, valid_from)',
+  'SELECT 1') FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_user_organization' AND index_name = 'uk_user_org_period');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

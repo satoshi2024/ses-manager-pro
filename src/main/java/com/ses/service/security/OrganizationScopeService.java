@@ -11,10 +11,30 @@ import java.util.Set;
 
 /**
  * 組織スコープをDBクエリ境界で適用するサービス。
- * メニュー権限や既存DataScopeを置換せず、必要な場合は積集合として利用する。
+ *
+ * <h2>結合規則（R3.1／R3.2の明文化）</h2>
+ * <ol>
+ *   <li><b>メニュー権限</b>（{@code m_menu}/{@code t_role_menu}/{@code MenuPermissionFilter}）は
+ *       独立した認可ゲートであり、組織スコープはこれを置換も緩和もしない。</li>
+ *   <li><b>管理者</b>は全件。組織条件を一切付けない。</li>
+ *   <li><b>部門責任者（マネージャー）</b>は主所属組織とその子孫。加えて {@code manager_user_id} で
+ *       直接管理するユーザー個人を個別に許可する（そのユーザーの所属組織全体へは広げない）。</li>
+ *   <li><b>営業/HR/要員などの一般ユーザー</b>は<b>既存のrole・DataScopeの範囲がそのまま母集団</b>であり、
+ *       組織スコープでさらに狭めない。組織で追加的に絞ると、営業部の営業が技術部所属の要員の契約を
+ *       担当するという通常の運用で積集合が空になり、自分の担当データすら見えなくなるため。</li>
+ *   <li>マネージャーに対しては<b>組織スコープ ∩ DataScope</b>（同一ID母集団同士の積集合）を適用する。
+ *       スコープの<b>拡張には決して使わない</b>。</li>
+ * </ol>
+ * 適用箇所は一覧・詳細・件数・export・download・通知・ダッシュボードで同一母集団とし、
+ * 条件はすべてSQLへ渡す（画面取得後の絞り込みは行わない）。
  */
 public interface OrganizationScopeService {
 
+    /**
+     * 組織階層によるscopeを受けないか（管理者・一般ユーザー・機能無効時はtrue）。
+     * trueのとき {@link #allowedOrganizationIds(LocalDate)} は空集合を返すが、
+     * これは「該当0件」ではなく「組織条件を付けない」の意味なので、必ず本メソッドを先に評価すること。
+     */
     boolean hasFullAccess();
 
     Set<Long> allowedOrganizationIds(LocalDate asOf);

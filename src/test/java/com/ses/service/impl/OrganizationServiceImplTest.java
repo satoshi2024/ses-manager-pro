@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,8 +100,101 @@ class OrganizationServiceImplTest {
                 .validFrom(LocalDate.of(2026, 6, 1)).build()));
         assertThrows(BusinessException.class, () -> organizationService.removeById(first.getId()));
 
+        // 在籍者を残したまま無効化すると、その所属者は存在しない組織に所属したままになる。
+        assertThrows(BusinessException.class, () -> organizationService.deactivate(first.getId()));
+
+        UserOrganization active = organizationService.listUserOrganizations(userId, LocalDate.of(2026, 7, 1)).get(0);
+        assertTrue(organizationService.releaseAssignment(active.getId(), LocalDate.of(2026, 6, 30),
+                active.getVersion()));
         assertTrue(organizationService.deactivate(first.getId()));
         assertEquals("無効", organizationService.getById(first.getId()).getStatus());
+    }
+
+    /** 属性の編集で組織IDが変わると所属・原価部門・予算・snapshotが全部旧IDに取り残される。 */
+    @Test
+    void 組織の属性更新は同じIDのままversionCASで行う() {
+        OrganizationUnit unit = organization("ORG-RENAME", "旧名称", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(unit);
+        Long originalId = unit.getId();
+
+        OrganizationUnit patch = organization("ORG-RENAME", "新名称", null,
+                LocalDate.of(2026, 1, 1), null);
+        patch.setId(originalId);
+        assertTrue(organizationService.updateOrganization(patch, 0));
+
+        assertEquals("新名称", organizationService.getById(originalId).getName());
+        assertEquals(1, organizationService.getById(originalId).getVersion());
+        // 版番号が古いままの2回目は409相当で弾く。
+        assertThrows(BusinessException.class, () -> organizationService.updateOrganization(patch, 0));
+    }
+
+    /** 統合は「生きている参照」を統合先へ移し、過去実績(snapshot)は動かさない。 */
+    @Test
+    void 統合は子組織所属原価部門を統合先へ付け替える() {
+        OrganizationUnit source = organization("ORG-MERGE-SRC", "統合元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-DST", "統合先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        OrganizationUnit child = organization("ORG-MERGE-CHILD", "統合元の課", source.getId(),
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(child);
+
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        assertEquals(target.getId(), organizationService.getById(child.getId()).getParentId());
+        assertEquals(target.getId(), organizationService.listUserOrganizations(userId,
+                LocalDate.of(2026, 7, 1)).get(0).getOrganizationId());
+        assertEquals("無効", organizationService.getById(source.getId()).getStatus());
+        assertEquals(target.getId(), organizationService.getById(source.getId()).getMergedInto());
+        // 統合済み組織の名前は引けること。過去snapshotの組織別合計を突合するのに必要(R4)。
+        assertEquals("統合元", organizationService.namesByIds(java.util.List.of(source.getId())).get(source.getId()));
+    }
+
+    /** 退職・停止時に有効な所属が残ると、退職者が組織scopeと部門損益の帰属に居座り続ける。 */
+    @Test
+    void 退職時に有効な所属と上長参照を閉じる() {
+        OrganizationUnit unit = organization("ORG-RETIRE", "退職部", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(unit);
+
+        SysUser leaver = new SysUser();
+        leaver.setUsername("retiring-user");
+        leaver.setPassword("pass");
+        leaver.setRealName("退職者");
+        leaver.setRole("HR");
+        leaver.setStatus(1);
+        sysUserMapper.insert(leaver);
+
+        SysUser member = new SysUser();
+        member.setUsername("remaining-user");
+        member.setPassword("pass");
+        member.setRealName("残留者");
+        member.setRole("HR");
+        member.setStatus(1);
+        sysUserMapper.insert(member);
+
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(leaver.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .managerUserId(leaver.getId()).validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        assertEquals(1, organizationService.closeAssignmentsForUser(leaver.getId(), LocalDate.of(2026, 6, 30)));
+
+        assertTrue(organizationService.listUserOrganizations(leaver.getId(), LocalDate.of(2026, 7, 1)).isEmpty());
+        assertEquals(LocalDate.of(2026, 6, 30), organizationService
+                .listUserOrganizations(leaver.getId(), LocalDate.of(2026, 6, 1)).get(0).getValidTo());
+        assertNull(organizationService.listUserOrganizations(member.getId(), LocalDate.of(2026, 7, 1))
+                .get(0).getManagerUserId());
     }
 
     @Test

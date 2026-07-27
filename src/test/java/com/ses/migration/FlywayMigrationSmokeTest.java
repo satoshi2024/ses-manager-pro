@@ -178,9 +178,34 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='management-accounting'");
             assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
                     + "WHERE rm.role='マネージャー' AND m.menu_key='organization'");
-            assertTableExists(st, "t_monthly_accounting_dimension");
             assertColumnExists(st, "m_organization_unit", "version");
             assertColumnExists(st, "t_management_budget", "gross_profit");
+            // 帰属の一次情報。アカウント連携任せにすると大半の実績が未配賦になる。
+            assertColumnExists(st, "t_engineer", "organization_id");
+            assertColumnExists(st, "t_contract", "cost_center_id");
+            assertColumnExists(st, "t_invoice", "cost_center_id");
+            assertColumnExists(st, "t_bp_payment", "cost_center_id");
+            assertColumnExists(st, "t_notification", "organization_id");
+            // 業務一意制約（生成列を含む）がMySQL 8で実在すること。
+            assertIndexExists(st, "m_organization_unit", "uk_organization_code");
+            assertIndexExists(st, "t_user_organization", "uk_user_org_active_primary");
+            assertIndexExists(st, "t_user_organization", "uk_user_org_period");
+            assertIndexExists(st, "t_management_budget", "uk_management_budget");
+            // 「有効な主所属はユーザーごとに1件」がDBでも効くこと。
+            assertRowExists(st, "SELECT 1 FROM m_organization_unit WHERE code='LEGACY'");
+            st.execute("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from) "
+                    + "SELECT u.id, o.id, 1, '2026-01-01' FROM sys_user u, m_organization_unit o "
+                    + "WHERE u.role='管理者' AND o.code='LEGACY' LIMIT 1");
+            boolean duplicateRejected = false;
+            try {
+                st.execute("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from) "
+                        + "SELECT u.id, o.id, 1, '2026-02-01' FROM sys_user u, m_organization_unit o "
+                        + "WHERE u.role='管理者' AND o.code='LEGACY' LIMIT 1");
+            } catch (java.sql.SQLException expected) {
+                duplicateRejected = true;
+            }
+            org.junit.jupiter.api.Assertions.assertTrue(duplicateRejected,
+                    "有効な主所属の二重登録はDBのUNIQUEでも拒否されるはず");
 
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
@@ -200,6 +225,14 @@ class FlywayMigrationSmokeTest {
     private void assertTableExists(Statement st, String table) throws Exception {
         assertRowExists(st, "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
                 + " AND table_name='" + table + "'");
+    }
+
+    private void assertIndexExists(Statement st, String table, String index) throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
+            org.junit.jupiter.api.Assertions.assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
     }
 
     private void assertRowExists(Statement st, String sql) throws Exception {

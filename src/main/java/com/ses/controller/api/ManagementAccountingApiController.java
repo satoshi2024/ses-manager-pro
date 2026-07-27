@@ -49,6 +49,9 @@ public class ManagementAccountingApiController {
     private final MonthlyAccountingDimensionMapper dimensionMapper;
     private final OrganizationScopeService organizationScopeService;
 
+    /** CSV一括取込の最大行数（ヘッダー除く）。 */
+    private static final int MAX_CSV_ROWS = 200;
+
     @GetMapping("/summary")
     public ApiResult<ManagementAccountingSummaryDto> summary(@RequestParam String month,
             @RequestParam(required = false) Long legalEntityId, @RequestParam(required = false) Long organizationId,
@@ -66,14 +69,27 @@ public class ManagementAccountingApiController {
             @RequestParam(required = false) Long projectId, @RequestParam(required = false) Long salesUserId) {
         ManagementAccountingSummaryDto summary = managementAccountingService.summary(month, legalEntityId, organizationId,
                 costCenterId, customerId, projectId, salesUserId);
-        StringBuilder csv = new StringBuilder("organizationId,organizationName,costCenterId,customerId,projectId,salesUserId,revenue,cost,grossProfit,budgetRevenue,budgetGrossProfit,waitCost\n");
+        // 予実行と内訳行を1ファイルに出す。level列で粒度を明示し、予算列は予実行にだけ値を入れる
+        // （内訳粒度には予算が存在しないため、そこへ予算差を出すと必ず誤った数字になる）。
+        StringBuilder csv = new StringBuilder("level,organizationId,organizationName,costCenterId,customerId,projectId,"
+                + "salesUserId,revenue,cost,grossProfit,budgetRevenue,budgetGrossProfit,revenueVariance,"
+                + "grossProfitVariance,waitCost\n");
         for (ManagementAccountingSummaryDto.Row row : summary.getRows()) {
-            csv.append(csvValue(row.getOrganizationId())).append(',').append(csvValue(row.getOrganizationName())).append(',')
-                    .append(csvValue(row.getCostCenterId())).append(',').append(csvValue(row.getCustomerId())).append(',')
-                    .append(csvValue(row.getProjectId())).append(',').append(csvValue(row.getSalesUserId())).append(',')
+            csv.append("summary").append(',')
+                    .append(csvValue(row.getOrganizationId())).append(',').append(csvValue(row.getOrganizationName())).append(',')
+                    .append(csvValue(row.getCostCenterId())).append(',').append(",,")
                     .append(csvValue(row.getRevenue())).append(',').append(csvValue(row.getCost())).append(',')
                     .append(csvValue(row.getGrossProfit())).append(',').append(csvValue(row.getBudgetRevenue())).append(',')
-                    .append(csvValue(row.getBudgetGrossProfit())).append(',').append(csvValue(row.getWaitCost())).append('\n');
+                    .append(csvValue(row.getBudgetGrossProfit())).append(',').append(csvValue(row.getRevenueVariance())).append(',')
+                    .append(csvValue(row.getGrossProfitVariance())).append(',').append(csvValue(row.getWaitCost())).append('\n');
+        }
+        for (ManagementAccountingSummaryDto.Detail detail : summary.getDetails()) {
+            csv.append("detail").append(',')
+                    .append(csvValue(detail.getOrganizationId())).append(',').append(csvValue(detail.getOrganizationName())).append(',')
+                    .append(csvValue(detail.getCostCenterId())).append(',').append(csvValue(detail.getCustomerId())).append(',')
+                    .append(csvValue(detail.getProjectId())).append(',').append(csvValue(detail.getSalesUserId())).append(',')
+                    .append(csvValue(detail.getRevenue())).append(',').append(csvValue(detail.getCost())).append(',')
+                    .append(csvValue(detail.getGrossProfit())).append(",,,,\n");
         }
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=management-accounting-" + month + ".csv")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
@@ -122,6 +138,11 @@ public class ManagementAccountingApiController {
         try {
             String csv = new String(file.getBytes(), StandardCharsets.UTF_8).replace("\uFEFF", "");
             String[] lines = csv.split("\\R");
+            // \u4E00\u62EC\u64CD\u4F5C\u306E\u4E0A\u9650\u306F\u5168spec\u5171\u901A\u3067200\u4EF6\uFF08shared-standards \u00A73\uFF09\u3002
+            // 1\u884C\u3054\u3068\u306BSELECT+UPDATE\u304C\u8D70\u308B\u305F\u3081\u3001\u4E0A\u9650\u306A\u3057\u3060\u30681\u30C8\u30E9\u30F3\u30B6\u30AF\u30B7\u30E7\u30F3\u3067\u63A5\u7D9A\u3092\u5360\u6709\u3057\u7D9A\u3051\u308B\u3002
+            if (lines.length > MAX_CSV_ROWS + 1) {
+                throw BusinessException.of("error.organization.budget.csvTooManyRows");
+            }
             int imported = 0;
             for (int i = 0; i < lines.length; i++) {
                 String line = lines[i].trim();

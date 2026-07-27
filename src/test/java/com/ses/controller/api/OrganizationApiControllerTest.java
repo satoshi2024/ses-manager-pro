@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -69,14 +70,32 @@ class OrganizationApiControllerTest {
     @Test
     @WithMockUser(username = "admin", roles = {"管理者"})
     void create_validOrganization_withCsrf_returns200() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(organizationService.save(any(OrganizationUnit.class))).thenAnswer(invocation -> true);
-        String body = "{\"code\":\"D01\",\"name\":\"営業本部\",\"type\":\"部門\",\"validFrom\":\"2026-01-01\"}";
+        String body = "{\"code\":\"D01\",\"name\":\"営業本部\",\"type\":\"部\",\"validFrom\":\"2026-01-01\"}";
 
         mockMvc.perform(post("/api/organizations").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
         verify(organizationService).save(any(OrganizationUnit.class));
+    }
+
+    /**
+     * 親なしのルート組織は誰のscopeにも属さない。scope制限を受けるロールに作らせると、
+     * 作成者本人にも一覧に出ない孤立組織が無制限に増える。
+     */
+    @Test
+    @WithMockUser(username = "manager", roles = {"マネージャー"})
+    void create_rootOrganization_byScopedRole_isRejected() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        String body = "{\"code\":\"D99\",\"name\":\"勝手な本部\",\"type\":\"部\",\"validFrom\":\"2026-01-01\"}";
+
+        mockMvc.perform(post("/api/organizations").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        verify(organizationService, never()).save(any(OrganizationUnit.class));
     }
 
     @Test

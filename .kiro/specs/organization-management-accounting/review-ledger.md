@@ -167,3 +167,86 @@ V59は作成せず、既存DB更新用MigrationはV60を使用する。
 - 対応: legacy互換の`ADD COLUMN version`をbackfill直前へ移動し、列追加後にのみ`INSERT INTO t_user_organization`を実行する順序へ修正した。V59は作成していない。
 - 回帰防止: `MigrationScriptIntegrityTest`へV60内の列追加位置がbackfillより前であることを検証するテストを追加。3件成功、Failures 0 / Errors 0。`FlywayLegacyV60MigrationSmokeTest`は1件skip（Docker daemonなし）。
 - 判定: P1-1のコード上の実行順序は修正済み。ただしMySQL 8でのlegacy V58相当→V60実適用は未実証のため、T008はFAIL、全Task未チェック、中央台帳`FIX`、S03`NOT READY`を維持する。
+
+## 第八次Review指摘対応 — P0/P1全件（2026-07-27）
+
+R02第八次Review（Base `601177a` / Head `030a016`、判定 FAIL、P0=1 / P1=13 / P2=11）の指摘へ対応した。
+
+### P0
+
+- **待機原価のscope漏れ**: `EngineerMapper.selectAccountingWaitCost` は asOf のみを受け取り、
+  組織・原価部門・法人のいずれの条件も持たないまま全社集計していた。結果は
+  `ManagementAccountingServiceImpl` で無検査に行へ合流していたため、部門責任者の
+  `/api/management-accounting/summary` と `/export` に他組織の待機費と組織IDが載っていた。
+  → `fullAccess/allowedIds/legalEntityId/organizationId/costCenterId` をSQL条件として追加し、
+  空集合は `1 = 0` で0件にする。取得後フィルターは行わない。
+- 併せて Bench判定を `t_engineer.status`（現在値）から**対象月の契約有無**へ変更した
+  （`UtilizationCalcService` と同じ契約ベース口径）。現在値のままだと過去月の待機費が後から変わり、R2.2に反する。
+
+### P1
+
+- **行レベル予算差**: 実績キーが5軸(組織/原価部門/顧客/案件/営業)、予算キーが2軸だったため両者が永久に
+  噛み合わず、画面の「予算差」列が常に誤りだった（合計だけ辻褄が合うのでKPIカードでは気付けない）。
+  → 予実行を**組織×原価部門**に固定し、顧客/案件/営業の分解は予算列を持たない `details` へ分離。
+- **帰属のaccount link依存**: 帰属解決が `t_engineer_account_link` 必須で、要員セルフサービスを
+  使わない大半の要員が「未配賦」かつ非管理者から不可視だった。
+  → `t_engineer.organization_id` を追加し、解決順を「要員の所属組織 → 連携ユーザーの主所属」に統一
+  （scope派生SQL・管理会計SQL・月次snapshotの全経路）。V60で既存要員をLEGACYへbackfillする。
+- **組織更新でIDが変わる**: `PUT /api/organizations/{id}` が `reorganize`（新IDで行を作り旧行を無効化）
+  だったため、名称変更だけで所属・原価部門・予算・snapshotが旧IDに取り残されていた。
+  → 同一IDのversion CAS更新 `updateOrganization` に変更し、`reorganize` は廃止。
+- **統合が参照を移さない**: `merged_into` は書くだけで読み手が無く、子組織・所属・原価部門も残置。
+  → 子組織・在籍所属・要員の所属組織・原価部門・当月以降の予算を統合先へ付け替える。
+  過去月の予算と月次snapshotは実績の事実として動かさない。
+- **異動の楽観ロック不発**: `transferUser` が `expectedVersion` を未使用、Controllerも `null` を渡していた。
+  → 異動元の有効な主所属の版番号を検査。`updateUserOrganization` にもversionを必須化。
+- **退職境界**: ユーザー無効化・削除が所属を閉じず、退職者が組織scope・部門損益・上長に残り続けた。
+  解除APIも存在しなかった。
+  → `DELETE /api/organizations/{userId}/assignments/{id}`（履歴として終了日を入れる）と
+  `closeAssignmentsForUser` を追加し、`UserApiController` の無効化・削除から呼ぶ。上長参照も外す。
+  在籍者が残る組織の無効化はエラーにする。
+- **scope結合規則（R3.1違反）**: 営業/HRにも組織scopeを積集合していたため、営業部の営業が
+  技術部所属要員の契約を担当する通常運用で自分の担当データが0件になっていた。
+  → 業務データへの組織scopeは**部門責任者のみ**。規則は `design.md` の表を唯一の正とする。
+- **通知**: 宛先指定通知に発行時点の組織を重ねており、本人が異動すると自分宛の通知が消え既読にもできなかった。
+  → 組織条件は `recipient_user_id IS NULL` の全体通知にのみ適用。
+- **dashboard未適用（R3.3）**: `DashboardServiceImpl` が DataScope のみだった。
+  → 契約・要員の母集団を組織scope∩DataScopeへ統一。
+- **DB一意制約なし**: 組織コード・主所属・所属重複がアプリ検査のみだった。
+  → V1/V60へ生成列 + `uk_organization_code` / `uk_user_org_active_primary` / `uk_user_org_period` を追加。
+- **予算CSV**: 行数上限なし → shared-standards §3 に合わせ200行上限。
+- **rollout gate**: `organization.scope.enabled` はV60が既存ユーザー・既存要員をbackfillするため既定 `true`。
+  `ORGANIZATION_SCOPE_ENABLED=false` で段階導入できる。
+
+### P2
+
+生成列のH2/MySQL差異をコメントで明示、H2 replayへV60のmenu seedを追加（メニュー権限が自動テストで
+評価されるようになる）、組織/管理会計画面を `form#searchForm` 構造にしてモバイル折りたたみを共通化、
+管理会計フィルターをID直打ちから選択式へ、既定月を前月へ、組織種別を R1.1 の 事業部/部/課/チーム へ、
+ルート組織作成をscope制限ロールに禁止、スナップショットの死コード整理。
+
+### 自動検証
+
+- `mvn clean test`: **792 tests、Failures 0、Errors 0、Skipped 4、BUILD SUCCESS**（Maven終了コードで確認）。
+- 追加・改訂したテスト: `ManagementAccountingServiceImplTest` 3件（待機原価のscope引数、顧客付き実績の
+  行レベル予算差、全社=組織別合計）、`OrganizationServiceImplTest` 7件（同一ID更新CAS、統合の参照付替、
+  退職時の所属クローズと上長解除、在籍者ありの無効化拒否）、`NotificationOrganizationScopeTest` 2件
+  （異動後も宛先指定通知が見える／全体通知は組織で絞られる）、`OrganizationScopeServiceImplTest` 7件
+  （R3.1の三分岐）、`OrganizationApiControllerTest` 6件（ルート組織作成の拒否を追加）、
+  `MonthlyAccountingSnapshotServiceImplTest` 3件（連携なしでも要員の所属組織で帰属）、
+  `MigrationScriptIntegrityTest` 6件（V60の列追加順・生成列→UNIQUE順・V1との同期）。
+- `JsSyntaxCheckTest` は本環境にNode.js v22があるため**実行され成功**（前回までskip）。
+
+### 未検証（本番リリース前の必須条件）
+
+- **Docker MySQL smoke**: `FlywayMigrationSmokeTest` / `FlywayLegacyV60MigrationSmokeTest` は
+  Dockerデーモン未起動のためskipのまま（`docker ps` が socket 不在で失敗）。V1→V60および
+  旧V58形状→V60の実適用は未実証。両テストへ新しい列・一意制約・LEGACY backfillのassertは追加済みで、
+  Docker環境で実行すれば検証できる状態にしてある。
+- **実ブラウザDemo**: desktop/390px の一気通貫は未実施。
+- Skipされた4件: 上記smoke 2件、`FlywayRepairRunbookTest`、`ConcurrentUpdateTest`（いずれもDocker依存）。
+
+### ロールバック
+
+V60未適用環境ではMigration適用を止める。適用後は組織・所属・snapshotを削除せず、
+`ORGANIZATION_SCOPE_ENABLED=false` でscopeだけ無効化し、必要ならバックアップから復元する。V59は作成しない。

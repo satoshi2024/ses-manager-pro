@@ -56,6 +56,13 @@ public class Engineer extends BaseEntity {
 
     /** 要員の既定原価部門。契約に明示がある場合は契約を優先する。 */
     private Long costCenterId;
+
+    /**
+     * 所属組織。管理会計の帰属と組織スコープの一次情報。
+     * アカウント連携({@code t_engineer_account_link})は要員セルフサービスを使う要員にしか存在しないため、
+     * ここがNULLのときだけ連携ユーザーの主所属で解決する。
+     */
+    private Long organizationId;
     
     private LocalDate availableDate;
     @Min(value = 0, message = "経験年数は0以上で入力してください")
