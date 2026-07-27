@@ -9,6 +9,7 @@ import com.ses.dto.contract.RenewalCalendarResponseDto;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,7 @@ class RenewalCalendarServiceImplTest {
     private ContractMapper contractMapper;
     private SystemConfigService systemConfigService;
     private DataScopeService dataScopeService;
+    private OrganizationScopeService organizationScopeService;
     private RenewalCalendarServiceImpl service;
 
     @BeforeEach
@@ -37,9 +39,12 @@ class RenewalCalendarServiceImplTest {
         contractMapper = mock(ContractMapper.class);
         systemConfigService = mock(SystemConfigService.class);
         dataScopeService = mock(DataScopeService.class);
-        service = new RenewalCalendarServiceImpl(contractMapper, systemConfigService, dataScopeService);
+        organizationScopeService = mock(OrganizationScopeService.class);
+        service = new RenewalCalendarServiceImpl(contractMapper, systemConfigService, dataScopeService,
+                organizationScopeService);
         when(systemConfigService.getInt("notice.contract-end-days", 30)).thenReturn(30);
         when(dataScopeService.isScoped()).thenReturn(false);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
     }
 
     private RenewalCalendarItemDto item(Long id, LocalDate endDate, String decision) {

@@ -60,6 +60,9 @@ public class InvoiceServiceImplTest {
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @Mock
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @Mock
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
 
     @Mock
@@ -72,6 +75,7 @@ public class InvoiceServiceImplTest {
     void setUp() {
         // ServiceImpl の baseMapper フィールドを手動で注入
         ReflectionTestUtils.setField(invoiceService, "baseMapper", invoiceMapper);
+        lenient().when(organizationScopeService.hasFullAccess()).thenReturn(true);
     }
 
     @Test
@@ -330,6 +334,31 @@ public class InvoiceServiceImplTest {
         com.ses.dto.invoice.AgingReportDto report = invoiceService.aging(LocalDate.now());
         assertEquals(0, new BigDecimal("50000").compareTo(report.getTotal().getUnsent()));
         assertEquals(0, new BigDecimal("30000").compareTo(report.getTotal().getD31to60()));
+    }
+
+    @Test
+    void testAging_組織とDataScopeを残高SQLへ渡す() {
+        LocalDate asOf = LocalDate.of(2026, 7, 17);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(asOf)).thenReturn(java.util.Set.of(11L));
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(dataScopeService.allowedCustomerIds()).thenReturn(java.util.Set.of(7L));
+
+        com.ses.dto.invoice.InvoiceBalanceDto balance = new com.ses.dto.invoice.InvoiceBalanceDto();
+        balance.setInvoiceId(11L);
+        balance.setCustomerId(7L);
+        balance.setCustomerName("客A");
+        balance.setStatus("送付済");
+        balance.setBalance(new BigDecimal("30000"));
+        balance.setDueDate(asOf.minusDays(1));
+        when(invoiceMapper.selectOutstandingBalancesScoped(any(), any())).thenReturn(java.util.List.of(balance));
+
+        com.ses.dto.invoice.AgingReportDto report = invoiceService.aging(asOf);
+
+        assertEquals(0, new BigDecimal("30000").compareTo(report.getTotal().getD1to30()));
+        verify(invoiceMapper).selectOutstandingBalancesScoped(
+                eq(java.util.List.of(11L)), eq(java.util.List.of(7L)));
+        verify(invoiceMapper, never()).selectOutstandingBalances();
     }
 
     @Test

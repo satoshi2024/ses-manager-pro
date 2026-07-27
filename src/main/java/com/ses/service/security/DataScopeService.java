@@ -34,6 +34,9 @@ public interface DataScopeService {
     /** 担当案件のID集合。 */
     Set<Long> allowedProjectIds();
 
+    /** 担当契約から導出した組織ID。組織scopeとの積集合にのみ利用する。 */
+    default Set<Long> allowedOrganizationIds() { return Set.of(); }
+
     void assertAllowedCustomer(Long customerId);
     void assertAllowedEngineer(Long engineerId);
     void assertAllowedContract(Long contractId);

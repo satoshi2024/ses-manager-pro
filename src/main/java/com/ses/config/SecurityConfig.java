@@ -100,6 +100,7 @@ public class SecurityConfig {
                     "/api/notifications/generate",
                     "/system-config/**",
                     "/api/system-configs/**",
+                    "/api/work-records/confirm",
                     "/api/work-records/reopen",
                     "/audit-log/**",
                     "/api/audit-logs/**",

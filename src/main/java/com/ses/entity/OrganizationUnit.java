@@ -29,6 +29,8 @@ public class OrganizationUnit extends BaseEntity {
     private LocalDate validFrom;
     private LocalDate validTo;
     private String status;
+    /** 統合先組織。旧組織の履歴を残したまま参照先を明示する。 */
+    private Long mergedInto;
 
     @Version
     private Integer version;

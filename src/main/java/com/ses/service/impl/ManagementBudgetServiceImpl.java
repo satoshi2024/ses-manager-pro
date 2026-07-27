@@ -9,6 +9,7 @@ import com.ses.service.ManagementBudgetService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -33,7 +34,11 @@ public class ManagementBudgetServiceImpl extends ServiceImpl<ManagementBudgetMap
                 throw BusinessException.of("error.organization.budget.conflict");
             }
             budget.setVersion(0);
-            save(budget);
+            try {
+                save(budget);
+            } catch (DuplicateKeyException e) {
+                throw BusinessException.of("error.organization.budget.conflict");
+            }
             return budget;
         }
         if (expectedVersion == null || !expectedVersion.equals(existing.getVersion())) {

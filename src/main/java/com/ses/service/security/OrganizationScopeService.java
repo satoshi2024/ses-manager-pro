@@ -19,9 +19,36 @@ public interface OrganizationScopeService {
 
     Set<Long> allowedOrganizationIds(LocalDate asOf);
 
+    /** 管理者直属として個別に扱うユーザーID。組織全体へは拡張しない。 */
+    default Set<Long> allowedDirectUserIds(LocalDate asOf) { return Set.of(); }
+
+    /** 指定ユーザーの勤怠・承認対象が現在ユーザーの組織scope内か。 */
+    default boolean isAllowedUser(Long userId, LocalDate asOf) { return hasFullAccess(); }
+
+    default void assertAllowedUser(Long userId, LocalDate asOf) {
+        if (!isAllowedUser(userId, asOf)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.organization.scope.notFound");
+        }
+    }
+
     default Set<Long> allowedOrganizationIds() {
         return allowedOrganizationIds(LocalDate.now());
     }
+
+    /** 組織所属から導出した要員ID。非管理者では空集合を全件扱いしない。 */
+    Set<Long> allowedEngineerIds(LocalDate asOf);
+
+    /** 組織所属から導出した契約ID。契約の要員所属を基準にする。 */
+    Set<Long> allowedContractIds(LocalDate asOf);
+
+    /** 組織所属から導出した請求書ID。請求書に紐づく契約要員を基準にする。 */
+    Set<Long> allowedInvoiceIds(LocalDate asOf);
+
+    /** 組織所属契約から導出した顧客ID。顧客自体に組織列がないためSQLで関係を辿る。 */
+    Set<Long> allowedCustomerIds(LocalDate asOf);
+
+    /** 組織所属契約から導出した案件ID。顧客単位の後フィルターには依存しない。 */
+    Set<Long> allowedProjectIds(LocalDate asOf);
 
     List<OrganizationUnit> listVisibleOrganizations(Long legalEntityId, LocalDate asOf);
 

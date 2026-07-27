@@ -68,6 +68,9 @@ public class Contract extends BaseEntity {
     @PositiveOrZero(message = "原価は0以上で入力してください")
     private BigDecimal costPrice;
 
+    /** 契約で明示した原価部門。未設定時は要員→請求/BPの順で解決する。 */
+    private Long costCenterId;
+
     /**
      * 精算基準時間（下限）
      * updateStrategy=ALWAYS: 編集で精算幅の下限をクリア(NULL更新=固定額精算に戻す)できるようにする。

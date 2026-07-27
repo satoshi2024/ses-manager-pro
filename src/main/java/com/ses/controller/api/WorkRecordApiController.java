@@ -43,6 +43,7 @@ public class WorkRecordApiController {
     }
 
     @PostMapping("/confirm")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> confirmMonth(@RequestParam String month) {
         workRecordService.confirmMonth(month);
         return ApiResult.success(null);
@@ -80,6 +81,7 @@ public class WorkRecordApiController {
 
     @GetMapping("/{id}/report.pdf")
     public ResponseEntity<byte[]> report(@PathVariable Long id) {
+        workRecordService.assertAllowed(id);
         byte[] bytes = timesheetPdfService.generate(id);
         String fileName = "作業報告書_" + id + ".pdf";
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");

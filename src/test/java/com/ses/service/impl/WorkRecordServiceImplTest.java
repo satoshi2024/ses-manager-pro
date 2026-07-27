@@ -28,7 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,6 +60,9 @@ class WorkRecordServiceImplTest {
 
     @Mock
     private com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Mock
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
@@ -98,6 +103,20 @@ class WorkRecordServiceImplTest {
         assertThat(record.getBillingAmount()).isEqualByComparingTo("800000");
         assertThat(record.getPaymentAmount()).isEqualByComparingTo("600000");
         assertThat(record.getStatus()).isEqualTo("入力中");
+    }
+
+    @Test
+    void assertAllowed_組織scope外の勤怠IDは拒否する() {
+        when(workRecordMapper.selectWorkMonthById(99L)).thenReturn("2026-07");
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(any(LocalDate.class))).thenReturn(java.util.Set.of(20L));
+        when(organizationScopeService.allowedDirectUserIds(any(LocalDate.class))).thenReturn(java.util.Set.of());
+        when(workRecordMapper.selectByIdScoped(eq(99L), any(LocalDate.class), eq(false), anyList(), anyList(), isNull()))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> workRecordService.assertAllowed(99L))
+                .isInstanceOf(BusinessException.class);
     }
 
     /**

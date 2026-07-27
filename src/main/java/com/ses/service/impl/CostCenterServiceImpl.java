@@ -9,6 +9,7 @@ import com.ses.entity.MonthlyAccountingDimension;
 import com.ses.mapper.CostCenterMapper;
 import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
+import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.service.CostCenterService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class CostCenterServiceImpl extends ServiceImpl<CostCenterMapper, CostCen
 
     private final ManagementBudgetMapper managementBudgetMapper;
     private final MonthlyAccountingDimensionMapper monthlyAccountingDimensionMapper;
+    private final OrganizationUnitMapper organizationUnitMapper;
 
     @Override
     public boolean save(CostCenter entity) {
@@ -72,6 +74,14 @@ public class CostCenterServiceImpl extends ServiceImpl<CostCenterMapper, CostCen
         }
         if (entity.getValidTo() != null && entity.getValidTo().isBefore(entity.getValidFrom())) {
             throw BusinessException.of("error.organization.invalidPeriod");
+        }
+        if (entity.getOrganizationId() != null) {
+            com.ses.entity.OrganizationUnit organization = organizationUnitMapper.selectById(entity.getOrganizationId());
+            if (organization == null || (entity.getLegalEntityId() != null
+                    && organization.getLegalEntityId() != null
+                    && !entity.getLegalEntityId().equals(organization.getLegalEntityId()))) {
+                throw BusinessException.of("error.costCenter.organizationMismatch");
+            }
         }
         boolean overlap = list(new LambdaQueryWrapper<CostCenter>()
                 .eq(CostCenter::getCode, entity.getCode())

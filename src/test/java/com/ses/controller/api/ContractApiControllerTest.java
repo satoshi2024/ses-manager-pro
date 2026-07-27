@@ -5,6 +5,7 @@ import com.ses.entity.Contract;
 import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -53,6 +54,13 @@ class ContractApiControllerTest {
     private ContractMapper contractMapper;
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
+    @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @BeforeEach
+    void allowFullScopeForExistingControllerCases() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+    }
 
     @Test
     @WithMockUser
@@ -94,6 +102,29 @@ class ContractApiControllerTest {
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    @WithMockUser
+    void page_組織scopeを契約Mapperのページング条件へ渡す() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedContractIds(any(LocalDate.class))).thenReturn(java.util.Set.of(10L));
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                argThat(ids -> ids != null && ids.equals(List.of(10L))))).thenReturn(new Page<>(1, 10, 1));
+
+        mockMvc.perform(get("/api/contracts"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser
+    void detail_組織scope外の契約IDはサービス取得前に404() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedContractIds(any(LocalDate.class))).thenReturn(java.util.Set.of(10L));
+
+        mockMvc.perform(get("/api/contracts/99"))
+                .andExpect(status().isNotFound());
+        verify(contractService, org.mockito.Mockito.never()).getById(99L);
     }
 
     @Test

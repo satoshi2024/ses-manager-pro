@@ -12,6 +12,7 @@ import com.ses.service.EngineerService;
 import com.ses.service.export.ExportConcurrencyLimiter;
 import com.ses.service.export.ExcelExportService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -78,6 +79,14 @@ class ExportApiControllerTest {
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @BeforeEach
+    void allowFullScopeForExistingControllerCases() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+    }
+
+    @MockBean
     private com.ses.service.RetentionRiskService retentionRiskService;
 
     @Test
@@ -113,6 +122,24 @@ class ExportApiControllerTest {
                         result.getResponse().getContentType() != null
                                 && result.getResponse().getContentType().startsWith(XLSX_MEDIA_TYPE)))
                 .andExpect(header().exists("Content-Disposition"));
+    }
+
+    @Test
+    @WithMockUser
+    void exportContracts_組織scopeをcountと取得の共通条件へ渡す() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedContractIds(any(java.time.LocalDate.class)))
+                .thenReturn(java.util.Set.of(22L));
+        when(organizationScopeService.intersectWithDataScope(any(), any()))
+                .thenReturn(java.util.Set.of(22L));
+        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(contractMapper.selectCount(any())).thenReturn(0L);
+
+        mockMvc.perform(get("/api/contracts/export"))
+                .andExpect(status().isOk());
+
+        verify(contractMapper).selectCount(captor.capture());
+        org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getSqlSegment().contains("id"));
     }
 
     @Test

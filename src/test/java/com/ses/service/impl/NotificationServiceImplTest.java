@@ -6,6 +6,7 @@ import com.ses.entity.Notification;
 import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
+import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.notification.WebhookNotifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +33,9 @@ class NotificationServiceImplTest {
 
     @Mock
     private NotificationReadMapper notificationReadMapper;
+
+    @Mock
+    private UserOrganizationMapper userOrganizationMapper;
 
     @Mock
     private WebhookNotifier webhookNotifier;
@@ -86,6 +90,18 @@ class NotificationServiceImplTest {
         notificationService.publish("TYPE", "Title", "Msg", "Url", "Key");
         verify(notificationMapper, times(1)).insert(any(Notification.class));
         verify(webhookNotifier, times(1)).notify(any(Notification.class));
+    }
+
+    @Test
+    void testPublishToUser_setsRecipientOrganization() {
+        when(userOrganizationMapper.selectPrimaryOrganizationId(7L, java.time.LocalDate.now())).thenReturn(22L);
+
+        notificationService.publishToUser(7L, "TYPE", "Title", "Msg", "Url", "Key");
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper).insert(captor.capture());
+        assertEquals(22L, captor.getValue().getOrganizationId());
+        assertEquals(7L, captor.getValue().getRecipientUserId());
     }
 
     @Test

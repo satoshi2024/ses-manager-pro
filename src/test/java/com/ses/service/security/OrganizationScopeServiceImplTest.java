@@ -5,6 +5,10 @@ import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.service.OrganizationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +45,12 @@ class OrganizationScopeServiceImplTest {
     @Autowired
     private SysUserMapper sysUserMapper;
 
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
@@ -66,6 +76,9 @@ class OrganizationScopeServiceImplTest {
         assertEquals(2, scopeService.exportVisibleOrganizations(null, LocalDate.of(2026, 7, 1)).size());
         assertTrue(scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)).contains(child.getId()));
         assertFalse(scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)).contains(other.getId()));
+        assertTrue(scopeService.allowedEngineerIds(LocalDate.of(2026, 7, 1)).isEmpty());
+        assertTrue(scopeService.allowedContractIds(LocalDate.of(2026, 7, 1)).isEmpty());
+        assertTrue(scopeService.allowedInvoiceIds(LocalDate.of(2026, 7, 1)).isEmpty());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> scopeService.assertAllowedOrganization(other.getId()));
     }
@@ -117,6 +130,90 @@ class OrganizationScopeServiceImplTest {
         assertTrue(scopeService.hasFullAccess());
         assertTrue(scopeService.allowedOrganizationIds().isEmpty(), "全件は空集合ではなくSQL無条件で表現する");
         assertEquals(1, scopeService.listVisibleOrganizations(null, LocalDate.of(2026, 7, 1)).size());
+    }
+
+    @Test
+    void 直属管理の外部組織ユーザーは個人だけ許可し組織全体へ拡張しない() {
+        OrganizationUnit own = organization("SCOPE-MANAGER-OWN", "自組織", null);
+        organizationService.save(own);
+        OrganizationUnit external = organization("SCOPE-MANAGER-EXT", "外部組織", null);
+        organizationService.save(external);
+
+        SysUser manager = insertUser("scope-manager-direct", "部門長", "マネージャー");
+        SysUser subordinate = insertUser("scope-subordinate", "直属要員", "要員");
+        SysUser peer = insertUser("scope-peer", "外部同僚", "要員");
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(manager.getId()).organizationId(own.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(subordinate.getId()).organizationId(external.getId()).managerUserId(manager.getId())
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(peer.getId()).organizationId(external.getId())
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        authenticate(manager);
+
+        LocalDate asOf = LocalDate.of(2026, 7, 1);
+        assertFalse(scopeService.allowedOrganizationIds(asOf).contains(external.getId()));
+        assertTrue(scopeService.allowedDirectUserIds(asOf).contains(subordinate.getId()));
+        assertTrue(scopeService.isAllowedUser(subordinate.getId(), asOf));
+        assertFalse(scopeService.isAllowedUser(peer.getId(), asOf));
+    }
+
+    @Test
+    void 要員一覧の組織scopeは所属組織と直属ユーザーをSQLで交差する() {
+        OrganizationUnit own = organization("SCOPE-ENGINEER-OWN", "要員自組織", null);
+        organizationService.save(own);
+        OrganizationUnit other = organization("SCOPE-ENGINEER-OTHER", "要員他組織", null);
+        organizationService.save(other);
+
+        SysUser manager = insertUser("scope-engineer-manager", "要員部門長", "マネージャー");
+        SysUser ownUser = insertUser("scope-engineer-own", "自組織要員", "要員");
+        SysUser otherUser = insertUser("scope-engineer-other", "他組織要員", "要員");
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(manager.getId()).organizationId(own.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(ownUser.getId()).organizationId(own.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(otherUser.getId()).organizationId(other.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        Engineer ownEngineer = Engineer.builder().fullName("自組織要員").employmentType("正社員")
+                .status("Bench").build();
+        Engineer otherEngineer = Engineer.builder().fullName("他組織要員").employmentType("正社員")
+                .status("Bench").build();
+        engineerMapper.insert(ownEngineer);
+        engineerMapper.insert(otherEngineer);
+        EngineerAccountLink ownLink = new EngineerAccountLink();
+        ownLink.setEngineerId(ownEngineer.getId());
+        ownLink.setSysUserId(ownUser.getId());
+        engineerAccountLinkMapper.insert(ownLink);
+        EngineerAccountLink otherLink = new EngineerAccountLink();
+        otherLink.setEngineerId(otherEngineer.getId());
+        otherLink.setSysUserId(otherUser.getId());
+        engineerAccountLinkMapper.insert(otherLink);
+
+        authenticate(manager);
+        assertEquals(java.util.Set.of(ownEngineer.getId()),
+                scopeService.allowedEngineerIds(LocalDate.of(2026, 7, 1)));
+    }
+
+    @Test
+    void 標準principalはusernameからローカルユーザーへ解決する() {
+        OrganizationUnit own = organization("SCOPE-STANDARD-PRINCIPAL", "標準principal組織", null);
+        organizationService.save(own);
+        SysUser sales = insertUser("standard-scope-sales", "標準営業", "営業");
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(sales.getId()).organizationId(own.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                sales.getUsername(), null, List.of(new SimpleGrantedAuthority("ROLE_営業"))));
+
+        assertEquals(java.util.Set.of(own.getId()),
+                scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)));
     }
 
     private OrganizationUnit organization(String code, String name, Long parentId) {

@@ -29,13 +29,14 @@ public class AutocompleteApiController {
     private final ProjectService projectService;
     private final SysUserService sysUserService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @GetMapping("/engineers")
     public ApiResult<List<String>> getEngineers() {
         QueryWrapper<Engineer> qw = new QueryWrapper<Engineer>().select("full_name");
         // スコープONの営業には担当要員のみ返す（全件列挙IDOR防止 / R3R-31）。
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> ids = dataScopeService.allowedEngineerIds();
+        java.util.Set<Long> ids = effectiveEngineerIds();
+        if (ids != null) {
             if (ids.isEmpty()) return ApiResult.success(List.of());
             qw.in("id", ids);
         }
@@ -49,8 +50,8 @@ public class AutocompleteApiController {
     @GetMapping("/customers")
     public ApiResult<List<String>> getCustomers() {
         QueryWrapper<Customer> qw = new QueryWrapper<Customer>().select("company_name");
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> ids = dataScopeService.allowedCustomerIds();
+        java.util.Set<Long> ids = effectiveCustomerIds();
+        if (ids != null) {
             if (ids.isEmpty()) return ApiResult.success(List.of());
             qw.in("id", ids);
         }
@@ -64,8 +65,8 @@ public class AutocompleteApiController {
     @GetMapping("/projects")
     public ApiResult<List<String>> getProjects() {
         QueryWrapper<Project> qw = new QueryWrapper<Project>().select("project_name");
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> ids = dataScopeService.allowedProjectIds();
+        java.util.Set<Long> ids = effectiveProjectIds();
+        if (ids != null) {
             if (ids.isEmpty()) return ApiResult.success(List.of());
             qw.in("id", ids);
         }
@@ -74,6 +75,36 @@ public class AutocompleteApiController {
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
                 .collect(Collectors.toList()));
+    }
+
+    private java.util.Set<Long> effectiveEngineerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private java.util.Set<Long> effectiveCustomerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedCustomerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private java.util.Set<Long> effectiveProjectIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedProjectIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedProjectIds(java.time.LocalDate.now()), dataIds);
     }
 
     /** ログインユーザー一覧オートコンプリート。管理者のみ利用可。 */

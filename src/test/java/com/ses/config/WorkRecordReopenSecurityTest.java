@@ -43,4 +43,25 @@ class WorkRecordReopenSecurityTest {
         mockMvc.perform(post("/api/work-records/reopen").param("month", "2026-07").with(csrf()))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    @WithMockUser(roles = "営業")
+    void confirm_営業は組織を跨ぐ月次確定を実行できない() throws Exception {
+        mockMvc.perform(post("/api/work-records/confirm").param("month", "2026-07").with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void confirm_マネージャーは組織を跨ぐ月次確定を実行できない() throws Exception {
+        mockMvc.perform(post("/api/work-records/confirm").param("month", "2026-07").with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void confirm_管理者は実行できる() throws Exception {
+        mockMvc.perform(post("/api/work-records/confirm").param("month", "2026-07").with(csrf()))
+                .andExpect(status().isOk());
+    }
 }

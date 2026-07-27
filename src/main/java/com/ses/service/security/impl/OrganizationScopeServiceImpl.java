@@ -7,12 +7,17 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.OrganizationUnitMapper;
+import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.annotation.RequestScope;
 
@@ -35,22 +40,30 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     private static final String ROLE_MANAGER = "マネージャー";
 
     private final OrganizationUnitMapper organizationUnitMapper;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
+    private final ContractMapper contractMapper;
+    private final InvoiceMapper invoiceMapper;
     private final UserOrganizationMapper userOrganizationMapper;
+    private final SysUserMapper sysUserMapper;
     private final OrganizationService organizationService;
     private final ObjectProvider<DataScopeService> dataScopeServiceProvider;
+
+    /** 既存DBの所属backfill完了前はscopeを公開しないための明示的な rollout gate。 */
+    @Value("${organization.scope.enabled:false}")
+    private boolean organizationScopeEnabled;
 
     private ScopeCacheKey cachedKey;
     private Set<Long> cachedIds;
 
     @Override
     public boolean hasFullAccess() {
-        return ROLE_ADMIN.equals(SecurityUtils.currentRole());
+        return !organizationScopeEnabled || ROLE_ADMIN.equals(SecurityUtils.currentRole());
     }
 
     @Override
     public Set<Long> allowedOrganizationIds(LocalDate asOf) {
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
-        Long userId = SecurityUtils.currentUserId();
+        Long userId = resolveCurrentUserId();
         String role = SecurityUtils.currentRole();
         if (ROLE_ADMIN.equals(role)) {
             return Collections.emptySet();
@@ -60,7 +73,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         }
 
         List<UserOrganization> assignments = activeAssignments(userId, date);
-        LocalDateTime version = assignments.stream()
+        List<UserOrganization> managedAssignments = ROLE_MANAGER.equals(role)
+                ? userOrganizationMapper.selectActiveByManagerUserId(userId, date)
+                : List.of();
+        List<UserOrganization> cacheAssignments = new java.util.ArrayList<>(assignments);
+        cacheAssignments.addAll(managedAssignments);
+        LocalDateTime version = cacheAssignments.stream()
                 .map(UserOrganization::getUpdatedAt)
                 .filter(Objects::nonNull)
                 .max(LocalDateTime::compareTo)
@@ -85,6 +103,95 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         cachedKey = key;
         cachedIds = Collections.unmodifiableSet(result);
         return cachedIds;
+    }
+
+    @Override
+    public Set<Long> allowedDirectUserIds(LocalDate asOf) {
+        if (!ROLE_MANAGER.equals(SecurityUtils.currentRole()) || resolveCurrentUserId() == null) {
+            return Set.of();
+        }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        return userOrganizationMapper.selectActiveByManagerUserId(resolveCurrentUserId(), date)
+                .stream().map(UserOrganization::getUserId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    @Override
+    public Set<Long> allowedEngineerIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        return Set.copyOf(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
+                new java.util.ArrayList<>(allowedOrganizationIds(asOf)),
+                new java.util.ArrayList<>(allowedDirectUserIds(asOf)),
+                asOf == null ? LocalDate.now() : asOf));
+    }
+
+    @Override
+    public Set<Long> allowedContractIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        return Set.copyOf(contractMapper.selectContractIdsByOrganizationScope(
+                new java.util.ArrayList<>(allowedOrganizationIds(asOf)),
+                new java.util.ArrayList<>(allowedDirectUserIds(asOf)),
+                asOf == null ? LocalDate.now() : asOf));
+    }
+
+    @Override
+    public Set<Long> allowedInvoiceIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        return Set.copyOf(invoiceMapper.selectInvoiceIdsByOrganizationScope(
+                new java.util.ArrayList<>(allowedOrganizationIds(asOf)),
+                new java.util.ArrayList<>(allowedDirectUserIds(asOf)),
+                asOf == null ? LocalDate.now() : asOf));
+    }
+
+    @Override
+    public Set<Long> allowedCustomerIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        Set<Long> contractIds = allowedContractIds(asOf);
+        if (contractIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(contractMapper.selectCustomerIdsByContractIds(new java.util.ArrayList<>(contractIds)));
+    }
+
+    @Override
+    public Set<Long> allowedProjectIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        Set<Long> contractIds = allowedContractIds(asOf);
+        if (contractIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(contractMapper.selectProjectIdsByContractIds(new java.util.ArrayList<>(contractIds)));
+    }
+
+    @Override
+    public boolean isAllowedUser(Long targetUserId, LocalDate asOf) {
+        if (hasFullAccess()) {
+            return true;
+        }
+        if (targetUserId == null || resolveCurrentUserId() == null) {
+            return false;
+        }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        if (ROLE_MANAGER.equals(SecurityUtils.currentRole())
+                && allowedDirectUserIds(date).contains(targetUserId)) {
+            return true;
+        }
+        for (UserOrganization assignment : activeAssignments(targetUserId, date)) {
+            if (assignment.getOrganizationId() != null
+                    && allowedOrganizationIds(date).contains(assignment.getOrganizationId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -137,7 +244,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     public void assertAllowedOrganization(Long organizationId, LocalDate asOf) {
         if (organizationId == null || (!hasFullAccess()
                 && !allowedOrganizationIds(asOf).contains(organizationId))) {
-            throw BusinessException.of("error.organization.scope.notAllowed");
+            throw BusinessException.of(404, "error.organization.scope.notFound");
         }
     }
 
@@ -148,6 +255,19 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
                 .and(w -> w.isNull(UserOrganization::getValidTo)
                         .or().ge(UserOrganization::getValidTo, asOf))
                 .orderByAsc(UserOrganization::getId));
+    }
+
+    private Long resolveCurrentUserId() {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId != null || sysUserMapper == null) {
+            return userId;
+        }
+        String username = SecurityUtils.currentUsername();
+        if (username == null) {
+            return null;
+        }
+        com.ses.entity.SysUser user = sysUserMapper.selectByUsername(username);
+        return user == null ? null : user.getId();
     }
 
     private LambdaQueryWrapper<OrganizationUnit> visibleQuery(Long legalEntityId,

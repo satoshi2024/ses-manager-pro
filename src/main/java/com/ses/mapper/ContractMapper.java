@@ -21,6 +21,41 @@ import java.time.LocalDate;
 @Mapper
 public interface ContractMapper extends BaseMapper<Contract> {
 
+    @Select("""
+        <script>
+        SELECT DISTINCT c.id
+        FROM t_contract c
+        JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+        JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+        WHERE c.deleted_flag = 0 AND uo.deleted_flag = 0
+          AND uo.valid_from &lt;= #{asOf}
+          AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+          AND (
+            <if test="organizationIds != null and organizationIds.size() > 0">
+              uo.organization_id IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="directUserIds != null and directUserIds.size() > 0">
+              <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
+              uo.user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
+          )
+        </script>
+        """)
+    List<Long> selectContractIdsByOrganizationScope(
+            @org.apache.ibatis.annotations.Param("organizationIds") List<Long> organizationIds,
+            @org.apache.ibatis.annotations.Param("directUserIds") List<Long> directUserIds,
+            @org.apache.ibatis.annotations.Param("asOf") LocalDate asOf);
+
+    @Select("<script>SELECT DISTINCT uo.organization_id FROM t_contract c JOIN t_engineer_account_link l ON l.engineer_id=c.engineer_id JOIN t_user_organization uo ON uo.user_id=l.sys_user_id AND uo.primary_flag=1 WHERE c.deleted_flag=0 AND c.id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> selectOrganizationIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
+
+    @Select("<script>SELECT DISTINCT customer_id FROM t_contract WHERE deleted_flag = 0 AND customer_id IS NOT NULL AND id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> selectCustomerIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
+
+    @Select("<script>SELECT DISTINCT project_id FROM t_contract WHERE deleted_flag = 0 AND project_id IS NOT NULL AND id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> selectProjectIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
+
     /** 管理会計用。契約を所属組織の有効期間・primary所属でSQL絞り込みする。 */
     @Select("""
         <script>
@@ -55,6 +90,54 @@ public interface ContractMapper extends BaseMapper<Contract> {
             @org.apache.ibatis.annotations.Param("monthEnd") LocalDate monthEnd,
             @org.apache.ibatis.annotations.Param("fullAccess") boolean fullAccess,
             @org.apache.ibatis.annotations.Param("allowedIds") List<Long> allowedIds);
+
+    @Select("""
+        <script>
+        SELECT c.id, c.engineer_id AS engineerId, c.customer_id AS customerId, c.project_id AS projectId,
+               c.sales_user_id AS salesUserId, c.cost_center_id AS costCenterId,
+               c.start_date AS startDate, c.end_date AS endDate,
+               c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
+               uo.organization_id AS organizationId
+        FROM t_contract c
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{monthStart}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        LEFT JOIN m_organization_unit ou ON ou.id = uo.organization_id AND ou.deleted_flag = 0
+        WHERE c.deleted_flag = 0 AND c.status != '準備中'
+          AND c.start_date &lt;= #{monthEnd}
+          AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
+          <if test="customerId != null">AND c.customer_id = #{customerId}</if>
+          <if test="projectId != null">AND c.project_id = #{projectId}</if>
+          <if test="salesUserId != null">AND c.sales_user_id = #{salesUserId}</if>
+          <if test="allowedContractIds != null">
+            AND c.id IN <foreach collection="allowedContractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          </if>
+          <if test="costCenterId != null">AND c.cost_center_id = #{costCenterId}</if>
+          <if test="legalEntityId != null">AND ou.legal_entity_id = #{legalEntityId}</if>
+          <if test="organizationId != null">AND uo.organization_id = #{organizationId}</if>
+          <if test="fullAccess == false">
+            <choose>
+              <when test="allowedIds != null and allowedIds.size() > 0">AND uo.organization_id IN <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
+              <otherwise>AND 1 = 0</otherwise>
+            </choose>
+          </if>
+        ORDER BY c.id
+        </script>
+        """)
+    List<ManagementAccountingContractRow> selectAccountingContractsFiltered(
+            @org.apache.ibatis.annotations.Param("monthStart") LocalDate monthStart,
+            @org.apache.ibatis.annotations.Param("monthEnd") LocalDate monthEnd,
+            @org.apache.ibatis.annotations.Param("fullAccess") boolean fullAccess,
+            @org.apache.ibatis.annotations.Param("allowedIds") List<Long> allowedIds,
+            @org.apache.ibatis.annotations.Param("allowedContractIds") List<Long> allowedContractIds,
+            @org.apache.ibatis.annotations.Param("legalEntityId") Long legalEntityId,
+            @org.apache.ibatis.annotations.Param("organizationId") Long organizationId,
+            @org.apache.ibatis.annotations.Param("costCenterId") Long costCenterId,
+            @org.apache.ibatis.annotations.Param("customerId") Long customerId,
+            @org.apache.ibatis.annotations.Param("projectId") Long projectId,
+            @org.apache.ibatis.annotations.Param("salesUserId") Long salesUserId);
 
     @Select("SELECT engineer_id, start_date, end_date FROM t_contract " +
             "WHERE deleted_flag = 0 AND status IN ('稼動中','終了') AND engineer_id IS NOT NULL AND start_date IS NOT NULL")

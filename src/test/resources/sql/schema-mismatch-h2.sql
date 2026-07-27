@@ -79,6 +79,7 @@ CREATE TABLE t_notification (
   message     VARCHAR(500),
   link_url    VARCHAR(300),
   menu_key    VARCHAR(50),
+  organization_id BIGINT,
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );

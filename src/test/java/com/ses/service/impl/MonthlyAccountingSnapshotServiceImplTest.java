@@ -23,8 +23,10 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -63,17 +65,18 @@ class MonthlyAccountingSnapshotServiceImplTest {
                 .organizationId(1001L).build();
 
         when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
-        when(dimensionMapper.selectOne(any())).thenReturn(null, existing);
-        when(contractMapper.selectById(601L)).thenReturn(contract);
+        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of(existing));
+        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
+        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(null);
         when(engineerAccountLinkMapper.selectByEngineerId(701L)).thenReturn(link);
+        when(userOrganizationMapper.selectList(any())).thenReturn(null, null);
         when(userOrganizationMapper.selectOne(any())).thenReturn(beforeTransfer);
-        when(costCenterMapper.selectOne(any())).thenReturn(null);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
         assertEquals(1, service.snapshotMonth("2026-06"));
         assertEquals(0, service.snapshotMonth("2026-06"));
         verify(dimensionMapper).insert(any(MonthlyAccountingDimension.class));
-        verify(userOrganizationMapper).selectOne(any());
+        verify(userOrganizationMapper, times(2)).selectOne(any());
     }
 
     @Test

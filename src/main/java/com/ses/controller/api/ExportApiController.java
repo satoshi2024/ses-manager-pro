@@ -70,6 +70,7 @@ public class ExportApiController {
     private final ExcelExportService excelExportService;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final RetentionRiskService retentionRiskService;
 
     @Value("${app.export.batch-size:500}")
@@ -143,9 +144,9 @@ public class ExportApiController {
                     + "WHERE es.engineer_id = t_engineer.id AND es.sales_user_id = {0} "
                     + "AND es.released_at IS NULL AND es.deleted_flag = 0)", salesUserId);
         }
-        // データスコープ: 画面と同じ担当集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
+        // 画面と同じ組織scope∩DataScopeの母集団をSQLへ注入する。
+        java.util.Set<Long> allowed = effectiveEngineerIds();
+        if (allowed != null) {
             if (allowed.isEmpty()) {
                 prepareFileResponse(response, "要員一覧", "xlsx");
                 excelExportService.streamEngineers(List.<Engineer>of(), response.getOutputStream());
@@ -235,9 +236,9 @@ public class ExportApiController {
                     .apply("EXISTS (SELECT 1 FROM t_project p "
                             + "WHERE p.id = project_id AND p.deleted_flag = 0 AND p.project_name LIKE {0})", keywordPattern));
         }
-        // データスコープ: 画面と同じ担当契約集合を再利用（エクスポートで全件漏れを防ぐ・R3-3）。
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
+        // 画面と同じ組織scope∩DataScopeの母集団をSQLへ注入する。
+        java.util.Set<Long> allowed = effectiveContractIds();
+        if (allowed != null) {
             if (allowed.isEmpty()) {
                 prepareFileResponse(response, "契約一覧", "xlsx");
                 excelExportService.streamContracts(List.<ContractExportDto>of(), response.getOutputStream());
@@ -357,28 +358,50 @@ public class ExportApiController {
      */
     private List<MonthlyRevenueDto> buildMonthlyRevenueRows(int fiscalYear) {
         List<YearMonth> targetMonths = buildFiscalYearMonths(fiscalYear);
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
-
-        List<String> monthStrs = targetMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
-        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
-                new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
-        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
-                Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
-
         List<MonthlyRevenueDto> rows = new ArrayList<>();
-        for (YearMonth ym : targetMonths) {
-            String label = ym.getYear() + "年" + ym.getMonthValue() + "月";
-            MonthlyRevenueCalcService.MonthlyAmount amount = monthlyRevenueCalcService.calc(
-                    ym, allContracts, confirmedByMonth.getOrDefault(ym.toString(), java.util.Collections.emptyMap()));
+        // 管理者の全社経路は従来どおり一括取得し、組織scope経路だけ月初asOfごとにSQLを発行する。
+        if (organizationScopeService.hasFullAccess() && !dataScopeService.isScoped()) {
+            List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+            List<String> monthStrs = targetMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
+            Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
+                            new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定"))
+                    .stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
+                            Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
+            for (YearMonth ym : targetMonths) {
+                rows.add(toMonthlyRevenueRow(ym, allContracts,
+                        confirmedByMonth.getOrDefault(ym.toString(), java.util.Collections.emptyMap())));
+            }
+            return rows;
+        }
 
-            rows.add(MonthlyRevenueDto.builder()
-                    .label(label)
-                    .sales(amount.getSales())
-                    .profit(amount.getProfit())
-                    .isActual(amount.isHasActual())
-                    .build());
+        for (YearMonth ym : targetMonths) {
+            java.util.Set<Long> allowedContractIds = effectiveContractIds(ym.atDay(1));
+            if (allowedContractIds != null && allowedContractIds.isEmpty()) {
+                rows.add(toMonthlyRevenueRow(ym, List.of(), java.util.Collections.emptyMap()));
+                continue;
+            }
+            QueryWrapper<Contract> contractQuery = new QueryWrapper<>();
+            if (allowedContractIds != null) contractQuery.in("id", allowedContractIds);
+            List<Contract> monthContracts = contractMapper.selectList(contractQuery);
+            QueryWrapper<WorkRecord> workRecordQuery = new QueryWrapper<WorkRecord>()
+                    .eq("work_month", ym.toString()).eq("status", "確定");
+            if (allowedContractIds != null) workRecordQuery.in("contract_id", allowedContractIds);
+            Map<Long, WorkRecord> confirmed = workRecordMapper.selectList(workRecordQuery).stream()
+                    .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
+            rows.add(toMonthlyRevenueRow(ym, monthContracts, confirmed));
         }
         return rows;
+    }
+
+    private MonthlyRevenueDto toMonthlyRevenueRow(YearMonth ym, List<Contract> contracts,
+                                                   Map<Long, WorkRecord> confirmed) {
+        MonthlyRevenueCalcService.MonthlyAmount amount = monthlyRevenueCalcService.calc(ym, contracts, confirmed);
+        return MonthlyRevenueDto.builder()
+                .label(ym.getYear() + "年" + ym.getMonthValue() + "月")
+                .sales(amount.getSales())
+                .profit(amount.getProfit())
+                .isActual(amount.isHasActual())
+                .build();
     }
 
     private List<YearMonth> buildFiscalYearMonths(int fiscalYear) {
@@ -397,6 +420,30 @@ public class ExportApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename*=UTF-8''" + URLEncoder.encode(filename, StandardCharsets.UTF_8))
                 .body(bytes);
+    }
+
+    private java.util.Set<Long> effectiveEngineerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private java.util.Set<Long> effectiveContractIds() {
+        return effectiveContractIds(java.time.LocalDate.now());
+    }
+
+    private java.util.Set<Long> effectiveContractIds(java.time.LocalDate asOf) {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedContractIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedContractIds(asOf), dataIds);
     }
 
     private void prepareFileResponse(HttpServletResponse response, String prefix, String extension) {

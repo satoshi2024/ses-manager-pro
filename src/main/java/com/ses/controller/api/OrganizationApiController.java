@@ -6,6 +6,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.common.util.EntityProtectUtil;
 import com.ses.dto.organization.CostCenterSaveRequest;
 import com.ses.dto.organization.OrganizationSaveRequest;
+import com.ses.dto.organization.OrganizationMergeRequest;
 import com.ses.dto.organization.UserOrganizationSaveRequest;
 import com.ses.entity.CostCenter;
 import com.ses.entity.OrganizationUnit;
@@ -78,10 +79,19 @@ public class OrganizationApiController {
         unit.setId(id);
         assertParentScope(unit.getParentId());
         EntityProtectUtil.protectForUpdate(unit);
-        if (!organizationService.updateById(unit)) {
-            throw BusinessException.of(409, "error.organization.versionConflict");
+        if (request.version() == null) {
+            throw BusinessException.of(400, "error.organization.versionRequired");
         }
+        organizationService.reorganize(id, unit, request.version());
         return ApiResult.success(true);
+    }
+
+    @PostMapping("/{id}/merge")
+    public ApiResult<Boolean> merge(@PathVariable Long id,
+                                    @Valid @RequestBody OrganizationMergeRequest request) {
+        organizationScopeService.assertAllowedOrganization(id);
+        organizationScopeService.assertAllowedOrganization(request.targetOrganizationId());
+        return ApiResult.success(organizationService.merge(id, request.targetOrganizationId(), request.version()));
     }
 
     @PutMapping("/{id}/status")
@@ -126,6 +136,9 @@ public class OrganizationApiController {
     @PostMapping("/{userId}/assignments")
     public ApiResult<UserOrganization> assign(@PathVariable Long userId,
                                               @Valid @RequestBody UserOrganizationSaveRequest request) {
+        if (!organizationScopeService.hasFullAccess()) {
+            organizationScopeService.assertAllowedUser(userId, request.validFrom());
+        }
         organizationScopeService.assertAllowedOrganization(request.organizationId());
         UserOrganization assignment = UserOrganization.builder()
                 .userId(userId)
@@ -138,6 +151,21 @@ public class OrganizationApiController {
                 .build();
         EntityProtectUtil.protectForCreate(assignment);
         return ApiResult.success(organizationService.assignUser(assignment));
+    }
+
+    @PostMapping("/{userId}/transfer")
+    public ApiResult<UserOrganization> transfer(@PathVariable Long userId,
+                                                @Valid @RequestBody UserOrganizationSaveRequest request) {
+        if (!organizationScopeService.hasFullAccess()) {
+            organizationScopeService.assertAllowedUser(userId, request.validFrom());
+        }
+        organizationScopeService.assertAllowedOrganization(request.organizationId());
+        UserOrganization assignment = UserOrganization.builder()
+                .userId(userId).organizationId(request.organizationId()).positionName(request.positionName())
+                .managerUserId(request.managerUserId()).primaryFlag(request.primaryFlag() == null ? 0 : request.primaryFlag())
+                .validFrom(request.validFrom()).validTo(request.validTo()).version(0).build();
+        EntityProtectUtil.protectForCreate(assignment);
+        return ApiResult.success(organizationService.transferUser(assignment, null));
     }
 
     @GetMapping("/cost-centers")

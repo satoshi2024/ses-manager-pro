@@ -174,7 +174,7 @@ public class SalesActivityApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "test", roles = {"営業"})
+    @WithMockUser(username = "admin", roles = {"管理者"})
     void testCustomerSummaryWinRateZeroDenominator() throws Exception {
         mockMvc.perform(get("/api/customers/" + testCustomer.getId() + "/summary"))
                 .andExpect(status().isOk())

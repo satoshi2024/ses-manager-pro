@@ -83,6 +83,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @Autowired
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @Autowired
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
 
     private void checkClosing(String month) {
@@ -378,14 +381,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     public AgingReportDto aging(LocalDate asOf) {
         LocalDate base = asOf != null ? asOf : LocalDate.now();
-        List<InvoiceBalanceDto> balances = baseMapper.selectOutstandingBalances();
-        
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            balances = balances.stream()
-                .filter(b -> allowed.contains(b.getCustomerId()))
-                .collect(Collectors.toList());
-        }
+        List<InvoiceBalanceDto> balances = selectOutstandingBalances(base);
 
         Map<Long, AgingReportDto.Row> byCustomer = new LinkedHashMap<>();
         AgingReportDto.Row total = new AgingReportDto.Row();
@@ -420,7 +416,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public List<InvoiceBalanceDto> agingDetail(Long customerId, String bucket, LocalDate asOf) {
         LocalDate base = asOf != null ? asOf : LocalDate.now();
         List<InvoiceBalanceDto> out = new java.util.ArrayList<>();
-        for (InvoiceBalanceDto b : baseMapper.selectOutstandingBalances()) {
+        for (InvoiceBalanceDto b : selectOutstandingBalances(base)) {
             BigDecimal balance = b.getBalance() != null ? b.getBalance() : BigDecimal.ZERO;
             if (balance.signum() <= 0) {
                 continue;
@@ -436,6 +432,24 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             out.add(b);
         }
         return out;
+    }
+
+    /** エイジングのscopeは行取得後ではなく残高SQLのWHEREへ適用する。 */
+    private List<InvoiceBalanceDto> selectOutstandingBalances(LocalDate asOf) {
+        boolean organizationScoped = !organizationScopeService.hasFullAccess();
+        boolean dataScoped = dataScopeService.isScoped();
+        if (!organizationScoped && !dataScoped) {
+            return baseMapper.selectOutstandingBalances();
+        }
+
+        List<Long> invoiceIds = organizationScoped
+                ? new java.util.ArrayList<>(organizationScopeService.allowedInvoiceIds(asOf)) : null;
+        List<Long> customerIds = dataScoped
+                ? new java.util.ArrayList<>(dataScopeService.allowedCustomerIds()) : null;
+        if ((invoiceIds != null && invoiceIds.isEmpty()) || (customerIds != null && customerIds.isEmpty())) {
+            return java.util.Collections.emptyList();
+        }
+        return baseMapper.selectOutstandingBalancesScoped(invoiceIds, customerIds);
     }
 
     /**

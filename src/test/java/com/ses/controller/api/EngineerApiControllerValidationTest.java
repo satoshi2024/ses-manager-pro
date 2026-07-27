@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.Engineer;
 import com.ses.service.EngineerService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -42,7 +43,15 @@ class EngineerApiControllerValidationTest {
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @MockBean
     private com.ses.service.RetentionRiskService retentionRiskService;
+
+    @BeforeEach
+    void allowFullScopeForExistingControllerCases() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+    }
 
     /** 氏名・雇用形態が揃った正常な要員は登録成功（code=200） */
     @Test

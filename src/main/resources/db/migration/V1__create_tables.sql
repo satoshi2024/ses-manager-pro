@@ -14,8 +14,6 @@ DROP TABLE IF EXISTS t_notification;
 DROP TABLE IF EXISTS t_monthly_accounting_dimension;
 DROP TABLE IF EXISTS t_management_budget;
 DROP TABLE IF EXISTS t_user_organization;
-DROP TABLE IF EXISTS m_cost_center;
-DROP TABLE IF EXISTS m_organization_unit;
 DROP TABLE IF EXISTS t_sales_activity;
 DROP TABLE IF EXISTS t_role_menu;
 DROP TABLE IF EXISTS m_menu;
@@ -35,6 +33,8 @@ DROP TABLE IF EXISTS t_engineer_skill;
 DROP TABLE IF EXISTS m_skill_tag;
 DROP TABLE IF EXISTS t_engineer_career;
 DROP TABLE IF EXISTS t_engineer;
+DROP TABLE IF EXISTS m_cost_center;
+DROP TABLE IF EXISTS m_organization_unit;
 DROP TABLE IF EXISTS m_customer;
 DROP TABLE IF EXISTS sys_user;
 
@@ -98,6 +98,7 @@ CREATE TABLE t_engineer (
   employment_type    ENUM('正社員','契約社員','BP') NOT NULL    COMMENT '雇用形態',
   status             ENUM('稼動中','退場予定','Bench','提案中') NOT NULL DEFAULT 'Bench' COMMENT '稼動ステータス',
   expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(万円)',
+  cost_center_id      BIGINT                                 COMMENT '既定原価部門ID',
   available_date     DATE                                    COMMENT '稼動可能日',
   experience_years   INT                                     COMMENT '経験年数',
   japanese_level     VARCHAR(20)                             COMMENT '日本語レベル',
@@ -313,6 +314,7 @@ CREATE TABLE t_contract (
   end_date              DATE                                   COMMENT '契約終了日',
   selling_price         DECIMAL(10,0) NOT NULL                 COMMENT '売上単価(対上)',
   cost_price            DECIMAL(10,0) NOT NULL                 COMMENT '原価単価(対下)',
+  cost_center_id        BIGINT                                 COMMENT '契約原価部門ID',
   settlement_hours_min  DECIMAL(5,1)                           COMMENT '精算下限(h)',
   settlement_hours_max  DECIMAL(5,1)                           COMMENT '精算上限(h)',
   fraction_rule         VARCHAR(200)                           COMMENT '端数処理ルール',
@@ -438,6 +440,7 @@ CREATE TABLE m_organization_unit (
   valid_from     DATE         NOT NULL                    COMMENT '有効開始日',
   valid_to       DATE                                     COMMENT '有効終了日',
   status         VARCHAR(20)  NOT NULL DEFAULT '有効'      COMMENT '状態(有効/無効)',
+  merged_into    BIGINT                                  COMMENT '統合先組織ID',
   version        INT          NOT NULL DEFAULT 0           COMMENT '楽観ロック版',
   created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
   updated_at     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
@@ -446,6 +449,7 @@ CREATE TABLE m_organization_unit (
   INDEX idx_org_parent (parent_id),
   INDEX idx_org_legal_entity_period (legal_entity_id, valid_from, valid_to),
   INDEX idx_org_status (status),
+  INDEX idx_org_merged_into (merged_into),
   CONSTRAINT fk_org_parent FOREIGN KEY (parent_id) REFERENCES m_organization_unit(id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='組織マスタ';
@@ -463,6 +467,7 @@ CREATE TABLE t_user_organization (
   primary_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '主所属フラグ',
   valid_from      DATE         NOT NULL                    COMMENT '所属開始日',
   valid_to        DATE                                     COMMENT '所属終了日',
+  version         INT          NOT NULL DEFAULT 0           COMMENT '楽観ロック版',
   created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '作成日時',
   updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag    TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
@@ -520,7 +525,8 @@ CREATE TABLE t_management_budget (
   updated_at        DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag      TINYINT      NOT NULL DEFAULT 0           COMMENT '論理削除フラグ',
 
-  UNIQUE KEY uk_management_budget (organization_id, cost_center_id, budget_month),
+  cost_center_key BIGINT AS (COALESCE(cost_center_id, 0)),
+  UNIQUE KEY uk_management_budget (organization_id, cost_center_key, budget_month),
   INDEX idx_management_budget_month (budget_month),
   CONSTRAINT fk_management_budget_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
     ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -561,3 +567,7 @@ CREATE TABLE t_monthly_accounting_dimension (
 -- ============================================================
 -- DDL完了
 -- ============================================================
+ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+  ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE t_contract ADD CONSTRAINT fk_contract_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+  ON UPDATE CASCADE ON DELETE SET NULL;

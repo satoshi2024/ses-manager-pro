@@ -51,6 +51,7 @@ CREATE TABLE t_engineer (
   employment_type     VARCHAR(20),
   status              VARCHAR(20),
   expected_unit_price DECIMAL(10,0),
+  cost_center_id      BIGINT,
   available_date      DATE,
   experience_years    INT,
   japanese_level      VARCHAR(20),
@@ -141,6 +142,7 @@ CREATE TABLE t_notification (
   message     VARCHAR(500),
   link_url    VARCHAR(300),
   menu_key    VARCHAR(50),
+  organization_id BIGINT,
   recipient_user_id BIGINT,
   dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -191,6 +193,7 @@ CREATE TABLE t_contract (
   end_date                DATE,
   selling_price           DECIMAL(10,2),
   cost_price              DECIMAL(10,2),
+  cost_center_id          BIGINT,
   settlement_hours_min    DECIMAL(5,1),
   settlement_hours_max    DECIMAL(5,1),
   fraction_rule           VARCHAR(50),
@@ -290,6 +293,7 @@ CREATE TABLE t_invoice (
   subtotal      DECIMAL(12,0) NOT NULL,
   tax           DECIMAL(12,0) NOT NULL,
   total         DECIMAL(12,0) NOT NULL,
+  cost_center_id BIGINT,
   tax_rate      DECIMAL(4,3),
   status        VARCHAR(20) DEFAULT '未送付',
   issued_date   DATE,
@@ -332,6 +336,7 @@ CREATE TABLE t_bp_payment (
   payee_company_name VARCHAR(200),
   parent_payment_id  BIGINT,
   amount             DECIMAL(12,0) NOT NULL,
+  cost_center_id     BIGINT,
   status             VARCHAR(20) DEFAULT '未払',
   paid_date          DATE,
   remarks            VARCHAR(500),
@@ -658,6 +663,7 @@ CREATE TABLE m_organization_unit (
   valid_from DATE NOT NULL,
   valid_to DATE,
   status VARCHAR(20) NOT NULL DEFAULT '有効',
+  merged_into BIGINT,
   version INT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -673,6 +679,7 @@ CREATE TABLE t_user_organization (
   primary_flag TINYINT NOT NULL DEFAULT 0,
   valid_from DATE NOT NULL,
   valid_to DATE,
+  version INT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0
@@ -705,7 +712,9 @@ CREATE TABLE t_management_budget (
   version INT NOT NULL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  cost_center_key BIGINT AS (COALESCE(cost_center_id, 0)),
+  UNIQUE (organization_id, cost_center_key, budget_month)
 );
 
 CREATE TABLE t_monthly_accounting_dimension (

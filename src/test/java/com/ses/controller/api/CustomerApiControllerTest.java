@@ -15,6 +15,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Map;
 
@@ -49,6 +50,13 @@ class CustomerApiControllerTest {
     private SalesActivityService salesActivityService;
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
+    @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @BeforeEach
+    void allowFullOrganizationScope() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+    }
 
     @Test
     @WithMockUser

@@ -19,6 +19,7 @@ public class ContractDocumentApiController {
     private final ContractDocumentService service;
     private final ContractTemplateMapper templates;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     /** 書類IDから契約IDを解決し、親契約のスコープを検証する（R3R-31/32）。 */
     private void assertDocumentAllowed(Long documentId) {
@@ -26,7 +27,20 @@ public class ContractDocumentApiController {
         if (doc == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        dataScopeService.assertAllowedContract(doc.getContractId());
+        assertContractVisible(doc.getContractId());
+    }
+
+    private void assertContractVisible(Long contractId) {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedContractIds() : null;
+        java.util.Set<Long> allowed = organizationScopeService.hasFullAccess()
+                ? (dataIds == null ? null : new java.util.HashSet<>(dataIds))
+                : organizationScopeService.intersectWithDataScope(
+                        organizationScopeService.allowedContractIds(java.time.LocalDate.now()), dataIds);
+        if (allowed != null && !allowed.contains(contractId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+        dataScopeService.assertAllowedContract(contractId);
     }
 
     @GetMapping("/templates")
@@ -50,7 +64,7 @@ public class ContractDocumentApiController {
     @GetMapping("/contract/{contractId}")
     @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
     public ApiResult<List<ContractDocument>> list(@PathVariable Long contractId) {
-        dataScopeService.assertAllowedContract(contractId);
+        assertContractVisible(contractId);
         return ApiResult.success(service.lambdaQuery().eq(ContractDocument::getContractId, contractId).list());
     }
 
@@ -60,7 +74,7 @@ public class ContractDocumentApiController {
                                                @RequestParam Long templateId,
                                                @RequestParam String recipientName,
                                                @RequestParam String recipientEmail) {
-        dataScopeService.assertAllowedContract(contractId);
+        assertContractVisible(contractId);
         return ApiResult.success(service.create(contractId, templateId, recipientName, recipientEmail));
     }
 

@@ -16,6 +16,9 @@ import java.util.List;
  */
 public interface SysUserMapper extends BaseMapper<SysUser> {
 
+    @Select("SELECT * FROM sys_user WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    SysUser selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * ユーザー名でユーザーを検索する
      * ログイン認証時にユーザー情報を取得するために使用

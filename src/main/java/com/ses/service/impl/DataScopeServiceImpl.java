@@ -80,6 +80,15 @@ public class DataScopeServiceImpl implements DataScopeService {
     }
 
     @Override
+    public Set<Long> allowedOrganizationIds() {
+        if (!isScoped()) return Collections.emptySet();
+        Set<Long> contracts = allowedContractIds();
+        if (contracts.isEmpty()) return Collections.emptySet();
+        List<Long> ids = contractMapper.selectOrganizationIdsByContractIds(new java.util.ArrayList<>(contracts));
+        return ids == null ? Collections.emptySet() : new HashSet<>(ids);
+    }
+
+    @Override
     public void assertAllowedCustomer(Long customerId) {
         if (isScoped() && !allowedCustomerIds().contains(customerId)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");

@@ -13,6 +13,35 @@ import java.util.List;
 @Mapper
 public interface InvoiceMapper extends BaseMapper<Invoice> {
 
+    @Select("""
+        <script>
+        SELECT DISTINCT i.id
+        FROM t_invoice i
+        JOIN t_invoice_item ii ON ii.invoice_id = i.id
+        JOIN t_work_record w ON w.id = ii.work_record_id
+        JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+        JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+        WHERE i.deleted_flag = 0 AND uo.deleted_flag = 0
+          AND uo.valid_from &lt;= #{asOf}
+          AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+          AND (
+            <if test="organizationIds != null and organizationIds.size() > 0">
+              uo.organization_id IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="directUserIds != null and directUserIds.size() > 0">
+              <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
+              uo.user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
+          )
+        </script>
+        """)
+    List<Long> selectInvoiceIdsByOrganizationScope(
+            @Param("organizationIds") List<Long> organizationIds,
+            @Param("directUserIds") List<Long> directUserIds,
+            @Param("asOf") java.time.LocalDate asOf);
+
     @Select("SELECT MAX(invoice_no) FROM t_invoice WHERE invoice_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxInvoiceNoIncludingDeleted(@Param("prefix") String prefix);
 
@@ -46,6 +75,49 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         ORDER BY i.customer_id, i.due_date
     """)
     List<InvoiceBalanceDto> selectOutstandingBalances();
+
+    /** エイジング用の組織scope/DataScopeをDB側で適用した残高一覧。 */
+    @Select("""
+        <script>
+        SELECT
+            i.id            AS invoiceId,
+            i.invoice_no    AS invoiceNo,
+            i.customer_id   AS customerId,
+            c.company_name  AS customerName,
+            i.billing_month AS billingMonth,
+            i.status        AS status,
+            i.total         AS total,
+            COALESCE(p.paid_total, 0)                 AS paidTotal,
+            i.total - COALESCE(p.paid_total, 0)       AS balance,
+            i.due_date      AS dueDate
+        FROM t_invoice i
+        LEFT JOIN m_customer c ON i.customer_id = c.id
+        LEFT JOIN (
+            SELECT invoice_id, SUM(amount + fee) AS paid_total
+            FROM t_invoice_payment
+            GROUP BY invoice_id
+        ) p ON p.invoice_id = i.id
+        WHERE i.deleted_flag = 0
+          AND i.status &lt;&gt; '入金済'
+          AND i.total - COALESCE(p.paid_total, 0) &gt; 0
+          <if test="invoiceIds != null">
+            <choose>
+              <when test="invoiceIds.size() == 0">AND 1 = 0</when>
+              <otherwise>AND i.id IN <foreach collection="invoiceIds" item="id" open="(" separator="," close=")">#{id}</foreach></otherwise>
+            </choose>
+          </if>
+          <if test="customerIds != null">
+            <choose>
+              <when test="customerIds.size() == 0">AND 1 = 0</when>
+              <otherwise>AND i.customer_id IN <foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach></otherwise>
+            </choose>
+          </if>
+        ORDER BY i.customer_id, i.due_date
+        </script>
+    """)
+    List<InvoiceBalanceDto> selectOutstandingBalancesScoped(
+            @Param("invoiceIds") List<Long> invoiceIds,
+            @Param("customerIds") List<Long> customerIds);
 
     @Select("""
         SELECT

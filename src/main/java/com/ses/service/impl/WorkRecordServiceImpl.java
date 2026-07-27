@@ -60,6 +60,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private final MonthlyClosingService monthlyClosingService;
     private final com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     /**
      * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
      * 常に配線される。未配線は既存 {@code @InjectMocks} テストの全緑維持のための緩和であり、
@@ -90,7 +96,55 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     @Override
     public List<WorkRecordGridDto> monthlyGrid(String workMonth) {
-        return baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth));
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth));
+        }
+        LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
+        List<Long> dataScopeIds = dataScopeService != null && dataScopeService.isScoped()
+                ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
+        return baseMapper.selectMonthlyGridScoped(workMonth, monthEndOf(workMonth), asOf, false,
+                new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
+                new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds);
+    }
+
+    private void assertContractScope(Contract contract, String workMonth) {
+        if (contract == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedContract(contract.getId());
+        }
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return;
+        }
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
+        if (link == null || !organizationScopeService.isAllowedUser(link.getSysUserId(), asOf)) {
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
+    }
+
+    @Override
+    public void assertAllowed(Long workRecordId) {
+        if (organizationScopeService == null && (dataScopeService == null || !dataScopeService.isScoped())) {
+            return;
+        }
+        String workMonth = baseMapper.selectWorkMonthById(workRecordId);
+        if (workMonth == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
+        LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
+        boolean fullAccess = organizationScopeService == null || organizationScopeService.hasFullAccess();
+        List<Long> organizationIds = organizationScopeService == null ? List.of()
+                : new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf));
+        List<Long> directUserIds = organizationScopeService == null ? List.of()
+                : new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf));
+        List<Long> dataScopeIds = dataScopeService != null && dataScopeService.isScoped()
+                ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
+        if (baseMapper.selectByIdScoped(workRecordId, asOf, fullAccess, organizationIds,
+                directUserIds, dataScopeIds) == null) {
+            throw BusinessException.of("error.workRecord.notFound2");
+        }
     }
 
     @Override
@@ -110,6 +164,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
+        assertContractScope(contract, workMonth);
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
 
 
@@ -392,6 +447,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
+        assertContractScope(contract, workMonth);
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
 
 
@@ -477,6 +533,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     @Override
     public List<WorkRecordDaily> listDaily(Long workRecordId) {
+        assertAllowed(workRecordId);
         return workRecordDailyMapper.selectList(new QueryWrapper<WorkRecordDaily>()
                 .eq("work_record_id", workRecordId)
                 .orderByAsc("work_date"));
@@ -540,6 +597,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void submit(Long workRecordId) {
+        assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
@@ -574,6 +632,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void approve(Long workRecordId) {
+        assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
@@ -609,6 +668,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional
     public void reject(Long workRecordId, String comment) {
+        assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");

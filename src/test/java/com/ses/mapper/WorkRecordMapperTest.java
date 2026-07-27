@@ -28,4 +28,14 @@ class WorkRecordMapperTest extends BaseIntegrationTest {
         assertNotNull(result);
         // H2データベースでのクエリ実行構文(CONCAT等)が正しく解釈され、エラーが出ないことを確認するだけでも価値がある
     }
+
+    @Test
+    void testSelectMonthlyGridScoped_emptyScopeReturnsNoRowsAtQueryBoundary() {
+        List<WorkRecordGridDto> result = workRecordMapper.selectMonthlyGridScoped(
+                "2026-07", "2026-07-31", LocalDate.of(2026, 7, 1), false,
+                List.of(), List.of(), null);
+
+        assertNotNull(result);
+        assertFalse(result.stream().anyMatch(row -> row.getContractId() != null));
+    }
 }

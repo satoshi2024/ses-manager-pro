@@ -17,6 +17,8 @@ public class Notification {
     private String message;
     private String linkUrl;
     private String menuKey;
+    /** 組織固有通知。NULLは全組織共通通知。 */
+    private Long organizationId;
 
     /**
      * 宛先ユーザーID（NULLは該当ロール全体）

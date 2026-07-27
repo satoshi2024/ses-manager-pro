@@ -31,6 +31,10 @@ public class ManagementAccountingSummaryDto {
     public static class Row {
         private Long organizationId;
         private String organizationName;
+        private Long costCenterId;
+        private Long customerId;
+        private Long projectId;
+        private Long salesUserId;
         private BigDecimal revenue;
         private BigDecimal cost;
         private BigDecimal grossProfit;

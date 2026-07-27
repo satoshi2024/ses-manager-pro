@@ -35,6 +35,14 @@ class SkillSheetApiControllerTest {
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void allowFullOrganizationScope() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+    }
+
     @Test
     void downloadPdf_ShouldReturnPdfContentType() throws Exception {
         byte[] fakePdf = "%PDF-1.4...".getBytes();

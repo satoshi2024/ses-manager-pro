@@ -30,6 +30,7 @@ public class ContractApiController {
     private final com.ses.service.RenewalCalendarService renewalCalendarService;
     private final ContractMapper contractMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final org.springframework.context.MessageSource messageSource;
 
     /**
@@ -56,14 +57,11 @@ public class ContractApiController {
         Page<ContractListDto> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
         // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
-        java.util.List<Long> allowedIds = null;
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(new Page<>(current, size, 0));
-            }
-            allowedIds = new java.util.ArrayList<>(allowed);
+        java.util.Set<Long> effectiveIds = effectiveContractIds();
+        if (effectiveIds != null && effectiveIds.isEmpty()) {
+            return ApiResult.success(new Page<>(current, size, 0));
         }
+        java.util.List<Long> allowedIds = effectiveIds == null ? null : new java.util.ArrayList<>(effectiveIds);
         Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds);
         return ApiResult.success(result);
     }
@@ -74,11 +72,9 @@ public class ContractApiController {
     @GetMapping("/options")
     public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedContractIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(java.util.Collections.emptyList());
-            }
+        java.util.Set<Long> allowed = effectiveContractIds();
+        if (allowed != null) {
+            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
             queryWrapper.in(Contract::getId, allowed);
         }
         queryWrapper.select(Contract::getId, Contract::getContractNo, Contract::getStatus)
@@ -107,7 +103,8 @@ public class ContractApiController {
      * @return 契約情報
      */
     private void assertContractVisible(Long id) {
-        if (dataScopeService.isScoped() && !dataScopeService.allowedContractIds().contains(id)) {
+        java.util.Set<Long> allowed = effectiveContractIds();
+        if (allowed != null && !allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
     }
@@ -225,7 +222,10 @@ public class ContractApiController {
     @GetMapping("/check-active")
     public ApiResult<Boolean> checkActive(@RequestParam Long engineerId) {
         // 担当外要員の稼働有無を推測させない（R3R-31）。
-        dataScopeService.assertAllowedEngineer(engineerId);
+        java.util.Set<Long> allowedEngineers = effectiveEngineerIds();
+        if (allowedEngineers != null && !allowedEngineers.contains(engineerId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         return ApiResult.success(contractService.hasActiveContract(engineerId));
     }
 
@@ -279,6 +279,26 @@ public class ContractApiController {
         public void setCostPrice(java.math.BigDecimal v) { this.costPrice = v; }
         public String getReason() { return reason; }
         public void setReason(String v) { this.reason = v; }
+    }
+
+    private java.util.Set<Long> effectiveContractIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedContractIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedContractIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private java.util.Set<Long> effectiveEngineerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
     }
 
     /**

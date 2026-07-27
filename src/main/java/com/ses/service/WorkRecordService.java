@@ -22,6 +22,8 @@ public interface WorkRecordService extends IService<WorkRecord> {
     void deleteDaily(Long contractId, String workMonth, LocalDate workDate);
     /** 実績の日次明細を取得する。 */
     List<WorkRecordDaily> listDaily(Long workRecordId);
+    /** ID直指定の勤怠を現在ユーザーが参照可能か、DB取得前提で検証する。 */
+    void assertAllowed(Long workRecordId);
     /** 入力中/差戻し→提出済（承認者へ通知）。 */
     void submit(Long workRecordId);
     void submitByMonth(Long contractId, String workMonth);

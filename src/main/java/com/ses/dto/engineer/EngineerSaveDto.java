@@ -38,6 +38,8 @@ public class EngineerSaveDto {
 
     @PositiveOrZero(message = "希望単価は0以上で入力してください")
     private BigDecimal expectedUnitPrice;
+    /** 要員の既定原価部門。月次snapshotの原価帰属に利用する。 */
+    private Long costCenterId;
 
     private LocalDate availableDate;
 

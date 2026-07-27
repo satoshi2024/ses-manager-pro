@@ -24,6 +24,7 @@ public class ProjectApiController {
     private final ProjectService projectService;
     private final ProjectMapper projectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     /**
      * 案件一覧（ページネーション）
@@ -39,13 +40,9 @@ public class ProjectApiController {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<ProjectListDto> page = PageUtils.safePage(current, size, 1000L);
         
-        Collection<Long> allowedIds = null;
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(new Page<>(current, size, 0));
-            }
-            allowedIds = allowed;
+        Collection<Long> allowedIds = effectiveCustomerIds();
+        if (allowedIds != null && allowedIds.isEmpty()) {
+            return ApiResult.success(new Page<>(current, size, 0));
         }
 
         return ApiResult.success(projectMapper.selectPageWithNames(page, projectName, status, customerId, customerName, allowedIds));
@@ -60,11 +57,9 @@ public class ProjectApiController {
         if (customerId != null) {
             queryWrapper.eq(Project::getCustomerId, customerId);
         }
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(java.util.Collections.emptyList());
-            }
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null) {
+            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
             queryWrapper.in(Project::getCustomerId, allowed);
         }
         queryWrapper.select(Project::getId, Project::getProjectName)
@@ -80,6 +75,10 @@ public class ProjectApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Project> getById(@PathVariable Long id) {
+        java.util.Set<Long> allowedProjects = effectiveProjectIds();
+        if (allowedProjects != null && !allowedProjects.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         Project p = projectService.getById(id);
         if (p != null) {
             dataScopeService.assertAllowedCustomer(p.getCustomerId());
@@ -106,6 +105,10 @@ public class ProjectApiController {
     public ApiResult<Boolean> update(@Valid @RequestBody ProjectSaveDto project) {
         // 先にDB上の既存案件を認可する（担当外案件を自分の顧客へ付け替えるIDOR防止 / R3R-32）。
         if (project.getId() != null) {
+            java.util.Set<Long> allowedProjects = effectiveProjectIds();
+            if (allowedProjects != null && !allowedProjects.contains(project.getId())) {
+                throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+            }
             Project existing = projectService.getById(project.getId());
             if (existing == null) {
                 throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
@@ -124,6 +127,10 @@ public class ProjectApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        java.util.Set<Long> allowedProjects = effectiveProjectIds();
+        if (allowedProjects != null && !allowedProjects.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         Project p = projectService.getById(id);
         if (p != null) {
             dataScopeService.assertAllowedCustomer(p.getCustomerId());
@@ -131,5 +138,25 @@ public class ProjectApiController {
         boolean success = projectService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
+    }
+
+    private java.util.Set<Long> effectiveCustomerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedCustomerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private java.util.Set<Long> effectiveProjectIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedProjectIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedProjectIds(java.time.LocalDate.now()), dataIds);
     }
 }

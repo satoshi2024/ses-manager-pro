@@ -1,10 +1,12 @@
 package com.ses.controller.api;
 
 import com.ses.dto.InvoiceDetailDto;
+import com.ses.entity.Invoice;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -36,6 +38,17 @@ class InvoiceApiControllerTest {
 
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
+
+    @MockBean
+    private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    @BeforeEach
+    void allowFullScopeForExistingControllerCases() {
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        Invoice invoice = new Invoice();
+        invoice.setCustomerId(1L);
+        when(invoiceService.getById(anyLong())).thenReturn(invoice);
+    }
 
     @MockBean
     private BpPaymentMapper bpPaymentMapper;
@@ -92,6 +105,35 @@ class InvoiceApiControllerTest {
 
         org.junit.jupiter.api.Assertions.assertFalse(captor.getValue().getSqlSegment().contains("due_date"),
                 "overdue未指定では due_date 条件が付与されないこと");
+    }
+
+    @Test
+    @WithMockUser
+    void list_組織scopeを請求書IDのSQL条件へ渡す() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(any(java.time.LocalDate.class)))
+                .thenReturn(java.util.Set.of(7L));
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        when(invoiceService.page(any(), captor.capture()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
+
+        mockMvc.perform(get("/api/invoices"))
+                .andExpect(status().isOk());
+
+        org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getSqlSegment().contains("id"));
+    }
+
+    @Test
+    @WithMockUser
+    void pdf_組織scope外の請求書はPDF生成前に404() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(any(java.time.LocalDate.class)))
+                .thenReturn(java.util.Set.of(7L));
+
+        mockMvc.perform(get("/api/invoices/99/pdf"))
+                .andExpect(status().isNotFound());
+        org.mockito.Mockito.verify(invoicePdfService, org.mockito.Mockito.never()).generate(any());
     }
 
     @Test

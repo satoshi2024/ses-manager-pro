@@ -20,6 +20,7 @@ public class BpPayment {
     private String payeeCompanyName;
     private Long parentPaymentId;
     private BigDecimal amount;
+    private Long costCenterId;
     private String status;
     private LocalDate paidDate;
     private String remarks;

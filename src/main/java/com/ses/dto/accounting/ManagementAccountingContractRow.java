@@ -11,6 +11,9 @@ public class ManagementAccountingContractRow {
     private Long id;
     private Long engineerId;
     private Long organizationId;
+    private Long costCenterId;
+    private Long customerId;
+    private Long projectId;
     private Long salesUserId;
     private LocalDate startDate;
     private LocalDate endDate;

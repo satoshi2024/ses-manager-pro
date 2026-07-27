@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.EntityProtectUtil;
-import com.ses.common.util.SecurityUtils;
 import com.ses.dto.organization.BudgetSaveRequest;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
 import com.ses.entity.ManagementBudget;
@@ -13,7 +12,6 @@ import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.service.ManagementBudgetService;
 import com.ses.service.ManagementAccountingService;
-import com.ses.service.MonthlyAccountingSnapshotService;
 import com.ses.service.security.OrganizationScopeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +24,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,19 +46,46 @@ public class ManagementAccountingApiController {
     private final ManagementBudgetService budgetService;
     private final ManagementAccountingService managementAccountingService;
     private final ManagementBudgetMapper budgetMapper;
-    private final MonthlyAccountingSnapshotService snapshotService;
     private final MonthlyAccountingDimensionMapper dimensionMapper;
     private final OrganizationScopeService organizationScopeService;
 
     @GetMapping("/summary")
-    public ApiResult<ManagementAccountingSummaryDto> summary(@RequestParam String month) {
-        return ApiResult.success(managementAccountingService.summary(month));
+    public ApiResult<ManagementAccountingSummaryDto> summary(@RequestParam String month,
+            @RequestParam(required = false) Long legalEntityId, @RequestParam(required = false) Long organizationId,
+            @RequestParam(required = false) Long costCenterId, @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long projectId, @RequestParam(required = false) Long salesUserId) {
+        return ApiResult.success(managementAccountingService.summary(month, legalEntityId, organizationId,
+                costCenterId, customerId, projectId, salesUserId));
     }
 
-    /** exportも同じsummary service/query boundaryを使い、画面取得後にscopeを追加適用しない。 */
+    /** exportはsummaryと同じSQL母集団をCSV化する。画面取得後の再絞り込みは行わない。 */
     @GetMapping("/export")
-    public ApiResult<ManagementAccountingSummaryDto> export(@RequestParam String month) {
-        return ApiResult.success(managementAccountingService.summary(month));
+    public ResponseEntity<byte[]> export(@RequestParam String month,
+            @RequestParam(required = false) Long legalEntityId, @RequestParam(required = false) Long organizationId,
+            @RequestParam(required = false) Long costCenterId, @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long projectId, @RequestParam(required = false) Long salesUserId) {
+        ManagementAccountingSummaryDto summary = managementAccountingService.summary(month, legalEntityId, organizationId,
+                costCenterId, customerId, projectId, salesUserId);
+        StringBuilder csv = new StringBuilder("organizationId,organizationName,costCenterId,customerId,projectId,salesUserId,revenue,cost,grossProfit,budgetRevenue,budgetGrossProfit,waitCost\n");
+        for (ManagementAccountingSummaryDto.Row row : summary.getRows()) {
+            csv.append(csvValue(row.getOrganizationId())).append(',').append(csvValue(row.getOrganizationName())).append(',')
+                    .append(csvValue(row.getCostCenterId())).append(',').append(csvValue(row.getCustomerId())).append(',')
+                    .append(csvValue(row.getProjectId())).append(',').append(csvValue(row.getSalesUserId())).append(',')
+                    .append(csvValue(row.getRevenue())).append(',').append(csvValue(row.getCost())).append(',')
+                    .append(csvValue(row.getGrossProfit())).append(',').append(csvValue(row.getBudgetRevenue())).append(',')
+                    .append(csvValue(row.getBudgetGrossProfit())).append(',').append(csvValue(row.getWaitCost())).append('\n');
+        }
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=management-accounting-" + month + ".csv")
+                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+                .body(("\uFEFF" + csv).getBytes(StandardCharsets.UTF_8));
+    }
+
+    @GetMapping("/drilldown")
+    public ApiResult<ManagementAccountingSummaryDto> drilldown(@RequestParam String month,
+            @RequestParam(required = false) Long legalEntityId, @RequestParam(required = false) Long organizationId,
+            @RequestParam(required = false) Long costCenterId, @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long projectId, @RequestParam(required = false) Long salesUserId) {
+        return summary(month, legalEntityId, organizationId, costCenterId, customerId, projectId, salesUserId);
     }
 
     @GetMapping("/budgets")
@@ -135,20 +163,21 @@ public class ManagementAccountingApiController {
         return ApiResult.success(dimensionMapper.selectList(query));
     }
 
-    @PostMapping("/snapshots/{month}")
-    public ApiResult<Integer> snapshot(@PathVariable String month) {
-        String role = SecurityUtils.currentRole();
-        if (!"管理者".equals(role) && !"マネージャー".equals(role)) {
-            throw BusinessException.of(403, "error.closing.roleDenied");
-        }
-        return ApiResult.success(snapshotService.snapshotMonth(month));
-    }
-
     private Long nullableLong(String value) {
         return value == null || value.isBlank() ? null : Long.valueOf(value.trim());
     }
 
     private Integer nullableInteger(String value) {
         return value == null || value.isBlank() ? null : Integer.valueOf(value.trim());
+    }
+
+    private String csvValue(Object value) {
+        if (value == null) return "";
+        String text = String.valueOf(value);
+        if (text.startsWith("=") || text.startsWith("+") || text.startsWith("-") || text.startsWith("@")) {
+            text = "'" + text;
+        }
+        return text.contains(",") || text.contains("\"") || text.contains("\n")
+                ? "\"" + text.replace("\"", "\"\"") + "\"" : text;
     }
 }

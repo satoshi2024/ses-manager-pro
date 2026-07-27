@@ -6,4 +6,7 @@ import com.ses.dto.accounting.ManagementAccountingSummaryDto;
 public interface ManagementAccountingService {
 
     ManagementAccountingSummaryDto summary(String month);
+
+    ManagementAccountingSummaryDto summary(String month, Long legalEntityId, Long organizationId,
+                                           Long costCenterId, Long customerId, Long projectId, Long salesUserId);
 }

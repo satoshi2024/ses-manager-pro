@@ -1,6 +1,7 @@
 package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -26,4 +27,7 @@ public class UserOrganization extends BaseEntity {
     private Integer primaryFlag;
     private LocalDate validFrom;
     private LocalDate validTo;
+
+    @Version
+    private Integer version;
 }

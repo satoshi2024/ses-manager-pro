@@ -20,6 +20,7 @@ public class EngineerApiController {
     private final EngineerService engineerService;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.ProposalService proposalService;
     private final com.ses.service.RetentionRiskService retentionRiskService;
 
@@ -39,16 +40,13 @@ public class EngineerApiController {
 
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<Engineer> page = PageUtils.safePage(current, size, 1000L);
-        // データスコープ: 営業ロール制限時は担当要員のみ。空集合なら空ページを即返す。
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(new Page<>(current, size, 0));
-            }
+        java.util.Set<Long> allowedIds = effectiveEngineerIds();
+        if (allowedIds != null && allowedIds.isEmpty()) {
+            return ApiResult.success(new Page<>(current, size, 0));
         }
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (dataScopeService.isScoped()) {
-            queryWrapper.in(Engineer::getId, dataScopeService.allowedEngineerIds());
+        if (allowedIds != null) {
+            queryWrapper.in(Engineer::getId, allowedIds);
         }
 
         if (org.springframework.util.StringUtils.hasText(fullName)) {
@@ -142,11 +140,9 @@ public class EngineerApiController {
     @GetMapping("/options")
     public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedEngineerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(java.util.Collections.emptyList());
-            }
+        java.util.Set<Long> allowed = effectiveEngineerIds();
+        if (allowed != null) {
+            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
             queryWrapper.in(Engineer::getId, allowed);
         }
         queryWrapper.select(Engineer::getId, Engineer::getFullName)
@@ -162,9 +158,7 @@ public class EngineerApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Engineer> getById(@PathVariable Long id) {
-        if (dataScopeService.isScoped() && !dataScopeService.allowedEngineerIds().contains(id)) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
+        assertEngineerVisible(id);
         var entity = engineerService.getById(id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(entity);
@@ -175,7 +169,7 @@ public class EngineerApiController {
      */
     @GetMapping("/{id}/proposal-history")
     public ApiResult<java.util.List<com.ses.dto.proposal.ProposalKanbanDto>> getProposalHistory(@PathVariable Long id) {
-        // 認可チェックはProposalService内で行われる
+        assertEngineerVisible(id);
         return ApiResult.success(proposalService.getProposalHistory(id));
     }
 
@@ -196,7 +190,7 @@ public class EngineerApiController {
         Engineer engineer = new Engineer();
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         engineer.setId(id);
-        dataScopeService.assertAllowedEngineer(id);
+        assertEngineerVisible(id);
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 
@@ -205,9 +199,26 @@ public class EngineerApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
-        dataScopeService.assertAllowedEngineer(id);
+        assertEngineerVisible(id);
         boolean success = engineerService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
+    }
+
+    private java.util.Set<Long> effectiveEngineerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    private void assertEngineerVisible(Long id) {
+        java.util.Set<Long> allowed = effectiveEngineerIds();
+        if (allowed != null && !allowed.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
     }
 }

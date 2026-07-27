@@ -36,6 +36,8 @@ public class ContractSaveDto {
     @NotNull(message = "原価は必須です")
     @PositiveOrZero(message = "原価は0以上で入力してください")
     private BigDecimal costPrice;
+    /** 明示指定時のみ。NULLは要員既定原価部門へフォールバックする。 */
+    private Long costCenterId;
     
     private BigDecimal settlementHoursMin;
     private BigDecimal settlementHoursMax;

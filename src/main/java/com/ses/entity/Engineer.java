@@ -53,6 +53,9 @@ public class Engineer extends BaseEntity {
      */
     @PositiveOrZero(message = "希望単価は0以上で入力してください")
     private BigDecimal expectedUnitPrice;
+
+    /** 要員の既定原価部門。契約に明示がある場合は契約を優先する。 */
+    private Long costCenterId;
     
     private LocalDate availableDate;
     @Min(value = 0, message = "経験年数は0以上で入力してください")

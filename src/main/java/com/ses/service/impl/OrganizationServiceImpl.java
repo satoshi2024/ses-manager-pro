@@ -13,6 +13,7 @@ import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.OrganizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     private final CostCenterMapper costCenterMapper;
     private final ManagementBudgetMapper managementBudgetMapper;
     private final MonthlyAccountingDimensionMapper monthlyAccountingDimensionMapper;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     public boolean save(OrganizationUnit entity) {
@@ -47,6 +49,53 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     public boolean updateById(OrganizationUnit entity) {
         validateOrganization(entity, entity.getId());
         return super.updateById(entity);
+    }
+
+    @Override
+    @Transactional
+    public OrganizationUnit reorganize(Long organizationId, OrganizationUnit replacement, Integer expectedVersion) {
+        OrganizationUnit current = getById(organizationId);
+        if (current == null || expectedVersion == null || !Objects.equals(expectedVersion, current.getVersion())) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
+        }
+        replacement.setId(null);
+        replacement.setTenantId(current.getTenantId());
+        if (replacement.getLegalEntityId() == null) {
+            replacement.setLegalEntityId(current.getLegalEntityId());
+        }
+        validateOrganization(replacement, organizationId);
+        current.setValidTo(replacement.getValidFrom().isAfter(current.getValidFrom())
+                ? replacement.getValidFrom().minusDays(1) : current.getValidFrom());
+        current.setStatus("無効");
+        current.setVersion(expectedVersion);
+        if (baseMapper.updateById(current) != 1) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
+        }
+        replacement.setVersion(0);
+        if (!super.save(replacement)) {
+            throw BusinessException.of("error.organization.saveFailed");
+        }
+        return replacement;
+    }
+
+    @Override
+    @Transactional
+    public boolean merge(Long organizationId, Long targetOrganizationId, Integer expectedVersion) {
+        if (organizationId == null || targetOrganizationId == null || organizationId.equals(targetOrganizationId)) {
+            throw BusinessException.of("error.organization.invalid");
+        }
+        OrganizationUnit current = getById(organizationId);
+        OrganizationUnit target = getById(targetOrganizationId);
+        if (current == null || target == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (expectedVersion == null || !Objects.equals(expectedVersion, current.getVersion())) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
+        }
+        current.setMergedInto(targetOrganizationId);
+        current.setStatus("無効");
+        current.setVersion(expectedVersion);
+        return baseMapper.updateById(current) == 1;
     }
 
     @Override
@@ -130,7 +179,21 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     @Override
     @Transactional
     public UserOrganization assignUser(UserOrganization assignment) {
+        if (sysUserMapper.selectByIdForUpdate(assignment.getUserId()) == null) {
+            throw BusinessException.of("error.organization.assignment.userNotFound");
+        }
+        List<UserOrganization> locked = userOrganizationMapper.selectByUserForUpdate(assignment.getUserId());
         validateAssignment(assignment, null);
+        // validateAssignment は通常の一覧を使うが、先に同一ユーザーの行をロックして
+        // primary/期間の二重登録を同時実行で通さない。
+        if (locked.stream().anyMatch(item -> overlaps(item.getValidFrom(), item.getValidTo(),
+                assignment.getValidFrom(), assignment.getValidTo())
+                && (Objects.equals(item.getOrganizationId(), assignment.getOrganizationId())
+                || isPrimary(item) && isPrimary(assignment)))) {
+            throw BusinessException.of(isPrimary(assignment)
+                    ? "error.organization.assignment.primaryOverlap"
+                    : "error.organization.assignment.periodOverlap");
+        }
         if (userOrganizationMapper.insert(assignment) != 1) {
             throw BusinessException.of("error.organization.assignment.saveFailed");
         }
@@ -140,8 +203,41 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     @Override
     @Transactional
     public boolean updateUserOrganization(UserOrganization assignment) {
+        if (assignment == null || assignment.getVersion() == null) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
+        }
         validateAssignment(assignment, assignment.getId());
         return userOrganizationMapper.updateById(assignment) == 1;
+    }
+
+    @Override
+    @Transactional
+    public UserOrganization transferUser(UserOrganization assignment, Integer expectedVersion) {
+        if (sysUserMapper.selectByIdForUpdate(assignment.getUserId()) == null) {
+            throw BusinessException.of("error.organization.assignment.userNotFound");
+        }
+        List<UserOrganization> locked = userOrganizationMapper.selectByUserForUpdate(assignment.getUserId());
+        validateAssignmentBasics(assignment);
+        LocalDate transferDate = assignment.getValidFrom();
+        for (UserOrganization old : locked) {
+            if (!overlaps(old.getValidFrom(), old.getValidTo(), transferDate, transferDate)) {
+                continue;
+            }
+            if (Objects.equals(old.getOrganizationId(), assignment.getOrganizationId())) {
+                throw BusinessException.of("error.organization.assignment.periodOverlap");
+            }
+            old.setValidTo(transferDate.minusDays(1));
+            if (old.getValidTo().isBefore(old.getValidFrom())) {
+                old.setValidTo(old.getValidFrom());
+            }
+            if (userOrganizationMapper.updateById(old) != 1) {
+                throw BusinessException.of(409, "error.organization.versionConflict");
+            }
+        }
+        if (userOrganizationMapper.insert(assignment) != 1) {
+            throw BusinessException.of("error.organization.assignment.saveFailed");
+        }
+        return assignment;
     }
 
     @Override
@@ -166,6 +262,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         validateDateRange(candidate.getValidFrom(), candidate.getValidTo());
         if (candidate.getParentId() != null) {
             if (Objects.equals(candidate.getId(), candidate.getParentId())
+                    || Objects.equals(excludedId, candidate.getParentId())
                     || createsCycle(candidate.getParentId(), candidate.getId(), new HashSet<>())) {
                 throw BusinessException.of("error.organization.cycle");
             }
@@ -197,17 +294,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     private void validateAssignment(UserOrganization candidate, Long excludedId) {
-        if (candidate == null || candidate.getUserId() == null || candidate.getOrganizationId() == null
-                || candidate.getValidFrom() == null) {
-            throw BusinessException.of("error.organization.assignment.invalid");
-        }
-        validateDateRange(candidate.getValidFrom(), candidate.getValidTo());
-        if (Objects.equals(candidate.getUserId(), candidate.getManagerUserId())) {
-            throw BusinessException.of("error.organization.assignment.managerSelf");
-        }
-        if (getById(candidate.getOrganizationId()) == null) {
-            throw BusinessException.of("error.organization.assignment.organizationNotFound");
-        }
+        validateAssignmentBasics(candidate);
         List<UserOrganization> existing = userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>().eq(UserOrganization::getUserId, candidate.getUserId()));
         boolean overlap = existing.stream().anyMatch(item -> !Objects.equals(item.getId(), excludedId)
@@ -218,6 +305,20 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             throw BusinessException.of(isPrimary(candidate)
                     ? "error.organization.assignment.primaryOverlap"
                     : "error.organization.assignment.periodOverlap");
+        }
+    }
+
+    private void validateAssignmentBasics(UserOrganization candidate) {
+        if (candidate == null || candidate.getUserId() == null || candidate.getOrganizationId() == null
+                || candidate.getValidFrom() == null) {
+            throw BusinessException.of("error.organization.assignment.invalid");
+        }
+        validateDateRange(candidate.getValidFrom(), candidate.getValidTo());
+        if (Objects.equals(candidate.getUserId(), candidate.getManagerUserId())) {
+            throw BusinessException.of("error.organization.assignment.managerSelf");
+        }
+        if (getById(candidate.getOrganizationId()) == null) {
+            throw BusinessException.of("error.organization.assignment.organizationNotFound");
         }
     }
 

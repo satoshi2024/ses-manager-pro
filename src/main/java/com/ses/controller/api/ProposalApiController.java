@@ -37,6 +37,7 @@ public class ProposalApiController {
     private final CustomerService customerService;
     private final MailService mailService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
     private final com.ses.service.FileStorageService fileStorageService;
 
@@ -166,6 +167,7 @@ public class ProposalApiController {
         if (proposal.getEngineerId() == null) {
             throw BusinessException.of(400, "error.proposal.noEngineer");
         }
+        assertEngineerVisible(proposal.getEngineerId());
 
         com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions();
         options.setAnonymize(req.isAnonymize());
@@ -190,6 +192,18 @@ public class ProposalApiController {
         proposalService.updateById(proposal);
 
         return ApiResult.success(storedFile.getStoredName());
+    }
+
+    private void assertEngineerVisible(Long engineerId) {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        java.util.Set<Long> allowed = organizationScopeService.hasFullAccess()
+                ? (dataIds == null ? null : new java.util.HashSet<>(dataIds))
+                : organizationScopeService.intersectWithDataScope(
+                        organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+        if (allowed != null && !allowed.contains(engineerId)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
     }
 
     /**

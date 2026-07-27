@@ -37,7 +37,7 @@
     function openOrganizationModal(id) {
         $('#organizationId').val(''); $('#organizationVersion').val('0');
         $('#organizationCode').val(''); $('#organizationName').val(''); $('#organizationType').val('部門');
-        $('#organizationParent').val(''); $('#organizationValidFrom').val(new Date().toISOString().slice(0, 10)); $('#organizationValidTo').val('');
+        $('#organizationParent').val(''); $('#organizationValidFrom').val(localDateString()); $('#organizationValidTo').val('');
         $('#organizationModalTitle').text(message('organization.new', '組織登録'));
         modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('organizationModal')); modal.show();
     }
@@ -75,6 +75,7 @@
     }
 
     function escapeHtml(value) { return $('<div>').text(value == null ? '' : value).html(); }
+    function localDateString() { var now = new Date(); var pad = function (value) { return String(value).padStart(2, '0'); }; return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()); }
     function showError(text) { if (window.Toast && Toast.error) Toast.error(text || 'Error'); else if (window.Swal) Swal.fire({icon: 'error', text: text || 'Error'}); }
 
     window.loadOrganizations = loadOrganizations;
@@ -83,5 +84,5 @@
     window.saveOrganization = saveOrganization;
     window.toggleOrganizationStatus = toggleOrganizationStatus;
     window.deleteOrganization = deleteOrganization;
-    $(function () { $('#organizationAsOf').val(new Date().toISOString().slice(0, 10)); loadOrganizations(); });
+    $(function () { $('#organizationAsOf').val(localDateString()); loadOrganizations(); });
 }(window, jQuery));

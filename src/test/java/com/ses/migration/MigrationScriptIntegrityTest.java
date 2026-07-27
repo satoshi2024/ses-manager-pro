@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,5 +74,20 @@ class MigrationScriptIntegrityTest {
             }
         }
         assertTrue(empties.isEmpty(), "空のマイグレーションスクリプトがあります（no-opでも SELECT 1; が必要）: " + empties);
+    }
+
+    @Test
+    void V60のlegacy互換列は所属backfillより先に追加されること() throws Exception {
+        Resource resource = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V60__organization_management_accounting.sql");
+        String sql = resource.getContentAsString(StandardCharsets.UTF_8);
+
+        int addVersion = sql.indexOf("ALTER TABLE t_user_organization ADD COLUMN version");
+        int backfill = sql.indexOf("INSERT INTO t_user_organization");
+
+        assertTrue(addVersion >= 0, "V60にlegacy用version列追加がありません");
+        assertTrue(backfill >= 0, "V60に既存ユーザー所属backfillがありません");
+        assertTrue(addVersion < backfill,
+                "legacy DBではt_user_organization.versionを追加してから所属backfillを実行してください");
     }
 }

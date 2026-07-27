@@ -17,10 +17,17 @@ public class SkillSheetApiController {
 
     private final SkillSheetGenerator skillSheetGenerator;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     /** データスコープ発動中に担当外要員のスキルシートを秘匿する（詳細404パターン）。 */
     private void assertEngineerVisible(Long id) {
-        if (dataScopeService.isScoped() && !dataScopeService.allowedEngineerIds().contains(id)) {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedEngineerIds() : null;
+        java.util.Set<Long> allowed = organizationScopeService.hasFullAccess()
+                ? (dataIds == null ? null : new java.util.HashSet<>(dataIds))
+                : organizationScopeService.intersectWithDataScope(
+                        organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+        if (allowed != null && !allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
     }

@@ -38,6 +38,7 @@ public class CustomerApiController {
     private final ContractService contractService;
     private final SalesActivityService salesActivityService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     /**
      * 顧客一覧（ページネーション）
@@ -53,15 +54,11 @@ public class CustomerApiController {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
         Page<Customer> page = PageUtils.safePage(current, size);
         // データスコープ: 営業ロール制限時は担当顧客のみ。
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(new Page<>(current, size, 0));
-            }
-        }
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null && allowed.isEmpty()) return ApiResult.success(new Page<>(current, size, 0));
         LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
-        if (dataScopeService.isScoped()) {
-            queryWrapper.in(Customer::getId, dataScopeService.allowedCustomerIds());
+        if (allowed != null) {
+            queryWrapper.in(Customer::getId, allowed);
         }
 
         if (StringUtils.hasText(companyName)) {
@@ -84,11 +81,9 @@ public class CustomerApiController {
     @GetMapping("/options")
     public ApiResult<List<com.ses.dto.common.OptionDto>> getOptions() {
         LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
-        if (dataScopeService.isScoped()) {
-            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed.isEmpty()) {
-                return ApiResult.success(java.util.Collections.emptyList());
-            }
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null) {
+            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
             queryWrapper.in(Customer::getId, allowed);
         }
         queryWrapper.select(Customer::getId, Customer::getCompanyName)
@@ -104,7 +99,8 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Customer> getById(@PathVariable Long id) {
-        if (dataScopeService.isScoped() && !dataScopeService.allowedCustomerIds().contains(id)) {
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null && !allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
         var entity = customerService.getById(id);
@@ -131,6 +127,10 @@ public class CustomerApiController {
         Customer customer = new Customer();
         org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
         customer.setId(id);
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null && !allowed.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         dataScopeService.assertAllowedCustomer(id);
         boolean success = customerService.updateById(customer);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
@@ -142,6 +142,10 @@ public class CustomerApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null && !allowed.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         dataScopeService.assertAllowedCustomer(id);
         boolean success = customerService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
@@ -153,6 +157,10 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}/summary")
     public ApiResult<CustomerSummaryDto> getSummary(@PathVariable Long id) {
+        java.util.Set<Long> allowed = effectiveCustomerIds();
+        if (allowed != null && !allowed.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         dataScopeService.assertAllowedCustomer(id);
 
         CustomerSummaryDto dto = new CustomerSummaryDto();
@@ -208,5 +216,15 @@ public class CustomerApiController {
         }
 
         return ApiResult.success(dto);
+    }
+
+    private java.util.Set<Long> effectiveCustomerIds() {
+        java.util.Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedCustomerIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        }
+        return organizationScopeService.intersectWithDataScope(
+                organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
     }
 }

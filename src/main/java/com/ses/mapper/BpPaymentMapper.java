@@ -48,6 +48,9 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
     @Select("SELECT * FROM t_bp_payment WHERE work_record_id = #{workRecordId} AND deleted_flag = 0 ORDER BY layer_order ASC")
     List<BpPayment> selectByWorkRecordIdOrderByLayer(@Param("workRecordId") Long workRecordId);
 
+    @Select("<script>SELECT * FROM t_bp_payment WHERE work_record_id IN <foreach collection='workRecordIds' item='id' open='(' separator=',' close=')'>#{id}</foreach> AND deleted_flag = 0 ORDER BY work_record_id, layer_order</script>")
+    List<BpPayment> selectByWorkRecordIds(@Param("workRecordIds") List<Long> workRecordIds);
+
     /**
      * 契約に紐づく実績(work_record)配下のBP階層のうち最大階層番号を返す(該当なしは0)。
      * 多重下請け段数超過・二重派遣兆候の判定(labor-compliance-check / FR-10)に使用。

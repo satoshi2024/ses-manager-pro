@@ -29,6 +29,12 @@ server:
     include-stacktrace: never
     include-exception: false
 
+# V60既存DBのt_user_organization backfill完了後に環境変数でtrueへ切り替える。
+# 未整備の既存利用者を空scopeへ閉じ込めないため、既定は無効のままにする。
+organization:
+  scope:
+    enabled: ${ORGANIZATION_SCOPE_ENABLED:false}
+
 spring:
   profiles:
     active: dev

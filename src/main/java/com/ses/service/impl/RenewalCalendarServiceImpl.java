@@ -10,6 +10,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.service.RenewalCalendarService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,7 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
     private final ContractMapper contractMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
+    private final OrganizationScopeService organizationScopeService;
 
     @Override
     public RenewalCalendarResponseDto getCalendar(LocalDate from, LocalDate to) {
@@ -48,15 +50,11 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
         RenewalCalendarResponseDto response = new RenewalCalendarResponseDto();
         response.setLeadDays(leadDays);
 
-        List<Long> allowedIds = null;
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedContractIds();
-            if (allowed.isEmpty()) {
-                response.setItems(Collections.emptyList());
-                response.setTruncated(false);
-                return response;
-            }
-            allowedIds = new ArrayList<>(allowed);
+        List<Long> allowedIds = effectiveContractIds();
+        if (allowedIds != null && allowedIds.isEmpty()) {
+            response.setItems(Collections.emptyList());
+            response.setTruncated(false);
+            return response;
         }
 
         // renewalDueDate = endDate - leadDays が [from, to] に入る契約 = endDate が [from+leadDays, to+leadDays] に入る契約
@@ -81,6 +79,17 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
         response.setItems(candidates);
         response.setTruncated(truncated);
         return response;
+    }
+
+    /** renewal-calendarも契約一覧と同じ組織scope∩DataScopeを候補SQLへ渡す。 */
+    private List<Long> effectiveContractIds() {
+        Set<Long> dataIds = dataScopeService.isScoped()
+                ? dataScopeService.allowedContractIds() : null;
+        if (organizationScopeService.hasFullAccess()) {
+            return dataIds == null ? null : new ArrayList<>(dataIds);
+        }
+        Set<Long> organizationIds = organizationScopeService.allowedContractIds(LocalDate.now());
+        return new ArrayList<>(organizationScopeService.intersectWithDataScope(organizationIds, dataIds));
     }
 
     private Map<Long, Boolean> resolveDraftStates(List<RenewalCalendarItemDto> candidates) {
