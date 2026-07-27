@@ -22,6 +22,7 @@
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <shedlock.version>5.10.2</shedlock.version>
         <caffeine.version>3.1.8</caffeine.version>
+        <testcontainers.version>1.20.6</testcontainers.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -153,24 +154,54 @@
             <scope>test</scope>
         </dependency>
         <!-- Testcontainers: 実MySQL上でFlywayマイグレーションを検証するスモークテスト用。
-             バージョンは spring-boot-starter-parent の BOM 管理。Docker不在の環境では
-             @Testcontainers(disabledWithoutDocker=true) により自動スキップされる。 -->
+             Docker不在の環境では @Testcontainers(disabledWithoutDocker=true) により自動スキップされる。
+
+             バージョンは下の testcontainers-bom で一括管理する。モジュールだけを個別指定すると
+             spring-boot-starter-parent の BOM が持つ core(1.19.8) と混在するため。
+             なお同梱の docker-java は版によらず既定APIバージョン1.32で接続しにいくので、
+             MinAPIVersion 1.40 の新しいDocker Engine（29系）では 400 "client version 1.32 is too old"
+             となり、Dockerが動いていてもTestcontainersが「Dockerなし」と判断してsmokeが黙ってskipされる。
+             これを避けるため surefire で api.version を明示している（下記 maven-surefire-plugin）。 -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mysql</artifactId>
-            <version>1.20.6</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>1.20.6</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <build>
         <plugins>
+            <!-- docker-java が要求するDocker APIバージョンを明示する。
+                 既定は1.32固定で、Docker Engine 29系(MinAPIVersion 1.40)が接続を拒否するため、
+                 Dockerが起動していてもMySQL smoke(FlywayMigrationSmokeTest 等)が
+                 "Docker is not available" として黙ってskipされてしまう。
+                 1.40はDocker 19.03相当で、現役のどのEngineでも受け付けられる下限。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <api.version>1.40</api.version>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

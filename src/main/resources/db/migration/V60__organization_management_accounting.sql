@@ -2,6 +2,16 @@
 -- 組織・管理会計基盤（V60）
 -- V1統合baselineにも同じ最終形を定義し、V58以前から更新するDBには
 -- IF NOT EXISTSで追加する。V59は永久欠番であり、作成しない。
+--
+-- 【生成列は必ずVIRTUAL（STORED禁止）】
+-- 本Migrationの生成列(legal_entity_key / active_primary_user_id / cost_center_key)は
+-- いずれも外部キー列を元にしている。MySQL 8は「STORED生成列の元になっている列の外部キーに
+-- ON UPDATE CASCADE を使えない」という制約を持ち、しかもCREATE TABLE時は素通しでALTER時だけ
+-- 弾くため、STOREDにすると次の分岐が起きる:
+--   * 空DB(V1でCREATE)  → 通る
+--   * 既存DB(下のADD COLUMNで追加) → ERROR 1215 Cannot add foreign key constraint でMigration全体が中断
+-- VIRTUALならALTERでも追加でき、UNIQUE索引も張れて一意制約も実際に効く。
+-- V1統合baselineもVIRTUAL(=ASのみ)で定義してあるので、両者を必ず揃えること。
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS m_organization_unit (
@@ -20,7 +30,7 @@ CREATE TABLE IF NOT EXISTS m_organization_unit (
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag    TINYINT NOT NULL DEFAULT 0,
-  legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) STORED,
+  legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)),
   UNIQUE KEY uk_organization_code (legal_entity_key, code, valid_from),
   INDEX idx_org_parent (parent_id),
   INDEX idx_org_legal_entity_period (legal_entity_id, valid_from, valid_to),
@@ -44,7 +54,7 @@ CREATE TABLE IF NOT EXISTS t_user_organization (
   updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag    TINYINT NOT NULL DEFAULT 0,
   active_primary_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL
-        AND deleted_flag = 0 THEN user_id ELSE NULL END) STORED,
+        AND deleted_flag = 0 THEN user_id ELSE NULL END),
   UNIQUE KEY uk_user_org_active_primary (active_primary_user_id),
   UNIQUE KEY uk_user_org_period (user_id, organization_id, valid_from),
   INDEX idx_user_org_user_period (user_id, valid_from, valid_to),
@@ -90,7 +100,7 @@ CREATE TABLE IF NOT EXISTS t_management_budget (
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag      TINYINT NOT NULL DEFAULT 0,
-  cost_center_key BIGINT GENERATED ALWAYS AS (COALESCE(cost_center_id, 0)) STORED,
+  cost_center_key BIGINT GENERATED ALWAYS AS (COALESCE(cost_center_id, 0)),
   UNIQUE KEY uk_management_budget (organization_id, cost_center_key, budget_month),
   INDEX idx_management_budget_month (budget_month),
   CONSTRAINT fk_management_budget_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
@@ -215,7 +225,7 @@ SET @sql = (SELECT IF(COUNT(*) = 0,
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_work_record' AND column_name = 'accounting_dimension_frozen');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,
-  'ALTER TABLE t_management_budget ADD COLUMN cost_center_key BIGINT GENERATED ALWAYS AS (COALESCE(cost_center_id, 0)) STORED',
+  'ALTER TABLE t_management_budget ADD COLUMN cost_center_key BIGINT GENERATED ALWAYS AS (COALESCE(cost_center_id, 0))',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_management_budget' AND column_name = 'cost_center_key');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- 旧形状に同名Indexがない場合はDROPせず追加し、旧Indexが別キーなら置換する。
@@ -257,7 +267,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- 「同一法人・同一コード・同一開始日の組織は1件」「有効な主所属はユーザーごとに1件」
 -- 「同一ユーザー・同一組織・同一開始日の所属は1件」をアプリ側検査だけに委ねない。
 SET @sql = (SELECT IF(COUNT(*) = 0,
-  'ALTER TABLE m_organization_unit ADD COLUMN legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) STORED',
+  'ALTER TABLE m_organization_unit ADD COLUMN legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0))',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_organization_unit' AND column_name = 'legal_entity_key');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,
@@ -265,7 +275,7 @@ SET @sql = (SELECT IF(COUNT(*) = 0,
   'SELECT 1') FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_organization_unit' AND index_name = 'uk_organization_code');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,
-  'ALTER TABLE t_user_organization ADD COLUMN active_primary_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL AND deleted_flag = 0 THEN user_id ELSE NULL END) STORED',
+  'ALTER TABLE t_user_organization ADD COLUMN active_primary_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN primary_flag = 1 AND valid_to IS NULL AND deleted_flag = 0 THEN user_id ELSE NULL END)',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_user_organization' AND column_name = 'active_primary_user_id');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = (SELECT IF(COUNT(*) = 0,

@@ -15,7 +15,6 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.annotation.RequestScope;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -26,13 +25,21 @@ import java.util.stream.Collectors;
 /**
  * {@link DataScopeService} の実装。営業ロールの担当データのみ可視化するオプトイン。
  * 各集合はメソッド呼び出しごとに解決する（数百件規模想定）。
+ *
+ * <p><b>シングルトンである理由</b>: 本サービスは業務サービス（例:
+ * {@code WorkRecordService#approve}）から呼ばれ、業務サービスはHTTPリクエスト以外
+ * （バッチ、{@code @Async}、ワーカースレッド）からも実行される。{@code @RequestScope}のままだと
+ * そこで{@code ScopeNotActiveException}になり業務処理自体が失敗する。
+ * キャッシュはリクエスト属性へ退避し、リクエスト外ではキャッシュせず都度算出する。
  */
 @Service
-@RequestScope
 @RequiredArgsConstructor
 public class DataScopeServiceImpl implements DataScopeService {
 
     private static final String CONFIG_KEY = "scope.sales-own-data-only";
+
+    /** リクエスト属性へ退避するキャッシュの格納キー。 */
+    private static final String CACHE_ATTRIBUTE = DataScopeServiceImpl.class.getName() + ".CACHE";
 
     private final SystemConfigService systemConfigService;
     private final EngineerSalesMapper engineerSalesMapper;
@@ -41,10 +48,36 @@ public class DataScopeServiceImpl implements DataScopeService {
     private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
 
-    private Set<Long> engineerIdsCache;
-    private Set<Long> contractIdsCache;
-    private Set<Long> proposalIdsCache;
-    private Set<Long> customerIdsCache;
+    /**
+     * リクエスト単位のキャッシュ。リクエスト外では毎回新しい入れ物を返してキャッシュしない。
+     *
+     * <p>スレッドローカルにしてはならない。ワーカースレッドが使い回されるため、
+     * リクエスト境界で捨てないと別の営業担当者の可視ID集合をそのまま返してしまう。
+     */
+    private Caches cache() {
+        org.springframework.web.context.request.RequestAttributes attributes =
+                org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (attributes == null) {
+            return new Caches();
+        }
+        Object existing = attributes.getAttribute(CACHE_ATTRIBUTE,
+                org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        if (existing instanceof Caches caches) {
+            return caches;
+        }
+        Caches created = new Caches();
+        attributes.setAttribute(CACHE_ATTRIBUTE, created,
+                org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        return created;
+    }
+
+    private static final class Caches {
+        private Set<Long> engineerIds;
+        private Set<Long> contractIds;
+        private Set<Long> proposalIds;
+        private Set<Long> customerIds;
+        private Set<Long> projectIds;
+    }
 
     @Override
     public boolean isScoped() {
@@ -129,35 +162,38 @@ public class DataScopeServiceImpl implements DataScopeService {
         if (userId == null) {
             return Collections.emptySet();
         }
-        if (engineerIdsCache != null) return engineerIdsCache;
-        engineerIdsCache = engineerSalesMapper.selectList(new QueryWrapper<EngineerSales>()
+        Caches caches = cache();
+        if (caches.engineerIds != null) return caches.engineerIds;
+        caches.engineerIds = engineerSalesMapper.selectList(new QueryWrapper<EngineerSales>()
                         .eq("sales_user_id", userId)
                         .isNull("released_at"))
                 .stream().map(EngineerSales::getEngineerId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
-        return engineerIdsCache;
+        return caches.engineerIds;
     }
 
     Set<Long> computeContractIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
-        if (contractIdsCache != null) return contractIdsCache;
+        Caches caches = cache();
+        if (caches.contractIds != null) return caches.contractIds;
         // sales_user_id=自分 ∪ 未帰属(NULL) を可視とする。
-        contractIdsCache = contractMapper.selectList(new QueryWrapper<Contract>()
+        caches.contractIds = contractMapper.selectList(new QueryWrapper<Contract>()
                         .and(w -> w.eq("sales_user_id", userId).or().isNull("sales_user_id")))
                 .stream().map(Contract::getId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
-        return contractIdsCache;
+        return caches.contractIds;
     }
 
     Set<Long> computeProposalIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
-        if (proposalIdsCache != null) return proposalIdsCache;
+        Caches caches = cache();
+        if (caches.proposalIds != null) return caches.proposalIds;
         Set<Long> engineerIds = computeEngineerIds(userId);
-        proposalIdsCache = proposalMapper.selectList(new QueryWrapper<Proposal>()
+        caches.proposalIds = proposalMapper.selectList(new QueryWrapper<Proposal>()
                         .and(w -> {
                             w.eq("proposed_by", userId);
                             if (!engineerIds.isEmpty()) {
@@ -166,32 +202,32 @@ public class DataScopeServiceImpl implements DataScopeService {
                         }))
                 .stream().map(Proposal::getId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
-        return proposalIdsCache;
+        return caches.proposalIds;
     }
-
-    private Set<Long> projectIdsCache;
 
     Set<Long> computeProjectIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
-        if (projectIdsCache != null) return projectIdsCache;
+        Caches caches = cache();
+        if (caches.projectIds != null) return caches.projectIds;
         Set<Long> proposalIds = computeProposalIds(userId);
         if (proposalIds.isEmpty()) {
-            projectIdsCache = Collections.emptySet();
+            caches.projectIds = Collections.emptySet();
         } else {
-            projectIdsCache = proposalMapper.selectList(new QueryWrapper<Proposal>().in("id", proposalIds))
+            caches.projectIds = proposalMapper.selectList(new QueryWrapper<Proposal>().in("id", proposalIds))
                     .stream().map(Proposal::getProjectId).filter(java.util.Objects::nonNull)
                     .collect(Collectors.toSet());
         }
-        return projectIdsCache;
+        return caches.projectIds;
     }
 
     Set<Long> computeCustomerIds(Long userId) {
         if (userId == null) {
             return Collections.emptySet();
         }
-        if (customerIdsCache != null) return customerIdsCache;
+        Caches caches = cache();
+        if (caches.customerIds != null) return caches.customerIds;
         Set<Long> customerIds = new HashSet<>();
         // 担当契約の顧客。customer権限は「自分が担当」の契約由来のみとする（未帰属契約1件で顧客全体へ
         // 権限拡大するのを防ぐ / R3R-34）。未帰属契約は contract 一覧では見えるが顧客アクセス根拠にはしない。
@@ -215,7 +251,7 @@ public class DataScopeServiceImpl implements DataScopeService {
                         .eq("created_by", userId))
                 .forEach(sa -> { if (sa.getCustomerId() != null) customerIds.add(sa.getCustomerId()); });
                 
-        customerIdsCache = customerIds;
-        return customerIdsCache;
+        caches.customerIds = customerIds;
+        return caches.customerIds;
     }
 }

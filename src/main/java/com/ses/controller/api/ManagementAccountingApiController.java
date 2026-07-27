@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.CsvUtils;
 import com.ses.common.util.EntityProtectUtil;
 import com.ses.dto.organization.BudgetSaveRequest;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
@@ -71,25 +72,28 @@ public class ManagementAccountingApiController {
                 costCenterId, customerId, projectId, salesUserId);
         // 予実行と内訳行を1ファイルに出す。level列で粒度を明示し、予算列は予実行にだけ値を入れる
         // （内訳粒度には予算が存在しないため、そこへ予算差を出すと必ず誤った数字になる）。
-        StringBuilder csv = new StringBuilder("level,organizationId,organizationName,costCenterId,customerId,projectId,"
-                + "salesUserId,revenue,cost,grossProfit,budgetRevenue,budgetGrossProfit,revenueVariance,"
-                + "grossProfitVariance,waitCost\n");
+        // 出力は共通の CsvUtils を使う。独自実装にすると引用規則とCSVインジェクション対策が
+        // 他のexportと分岐する（本specの「既存資産再利用」規約）。
+        StringBuilder csv = new StringBuilder();
+        CsvUtils.appendLine(csv, "level", "organizationId", "organizationName", "costCenterId", "customerId",
+                "projectId", "salesUserId", "revenue", "cost", "grossProfit", "budgetRevenue", "budgetGrossProfit",
+                "revenueVariance", "grossProfitVariance", "waitCost");
         for (ManagementAccountingSummaryDto.Row row : summary.getRows()) {
-            csv.append("summary").append(',')
-                    .append(csvValue(row.getOrganizationId())).append(',').append(csvValue(row.getOrganizationName())).append(',')
-                    .append(csvValue(row.getCostCenterId())).append(',').append(",,,")
-                    .append(csvValue(row.getRevenue())).append(',').append(csvValue(row.getCost())).append(',')
-                    .append(csvValue(row.getGrossProfit())).append(',').append(csvValue(row.getBudgetRevenue())).append(',')
-                    .append(csvValue(row.getBudgetGrossProfit())).append(',').append(csvValue(row.getRevenueVariance())).append(',')
-                    .append(csvValue(row.getGrossProfitVariance())).append(',').append(csvValue(row.getWaitCost())).append('\n');
+            CsvUtils.appendLine(csv, "summary",
+                    csvValue(row.getOrganizationId()), csvValue(row.getOrganizationName()),
+                    csvValue(row.getCostCenterId()), "", "", "",
+                    csvValue(row.getRevenue()), csvValue(row.getCost()), csvValue(row.getGrossProfit()),
+                    csvValue(row.getBudgetRevenue()), csvValue(row.getBudgetGrossProfit()),
+                    csvValue(row.getRevenueVariance()), csvValue(row.getGrossProfitVariance()),
+                    csvValue(row.getWaitCost()));
         }
         for (ManagementAccountingSummaryDto.Detail detail : summary.getDetails()) {
-            csv.append("detail").append(',')
-                    .append(csvValue(detail.getOrganizationId())).append(',').append(csvValue(detail.getOrganizationName())).append(',')
-                    .append(csvValue(detail.getCostCenterId())).append(',').append(csvValue(detail.getCustomerId())).append(',')
-                    .append(csvValue(detail.getProjectId())).append(',').append(csvValue(detail.getSalesUserId())).append(',')
-                    .append(csvValue(detail.getRevenue())).append(',').append(csvValue(detail.getCost())).append(',')
-                    .append(csvValue(detail.getGrossProfit())).append(",,,,,\n");
+            CsvUtils.appendLine(csv, "detail",
+                    csvValue(detail.getOrganizationId()), csvValue(detail.getOrganizationName()),
+                    csvValue(detail.getCostCenterId()), csvValue(detail.getCustomerId()),
+                    csvValue(detail.getProjectId()), csvValue(detail.getSalesUserId()),
+                    csvValue(detail.getRevenue()), csvValue(detail.getCost()), csvValue(detail.getGrossProfit()),
+                    "", "", "", "", "");
         }
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=management-accounting-" + month + ".csv")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
@@ -138,8 +142,8 @@ public class ManagementAccountingApiController {
         try {
             String csv = new String(file.getBytes(), StandardCharsets.UTF_8).replace("\uFEFF", "");
             String[] lines = csv.split("\\R");
-            // \u4E00\u62EC\u64CD\u4F5C\u306E\u4E0A\u9650\u306F\u5168spec\u5171\u901A\u3067200\u4EF6\uFF08shared-standards \u00A73\uFF09\u3002
-            // 1\u884C\u3054\u3068\u306BSELECT+UPDATE\u304C\u8D70\u308B\u305F\u3081\u3001\u4E0A\u9650\u306A\u3057\u3060\u30681\u30C8\u30E9\u30F3\u30B6\u30AF\u30B7\u30E7\u30F3\u3067\u63A5\u7D9A\u3092\u5360\u6709\u3057\u7D9A\u3051\u308B\u3002
+            // 一括操作の上限は全spec共通で200件（shared-standards §3）。
+            // 1行ごとにSELECT+UPDATEが走るため、上限なしだと1トランザクションで接続を占有し続ける。
             if (lines.length > MAX_CSV_ROWS + 1) {
                 throw BusinessException.of("error.organization.budget.csvTooManyRows");
             }
@@ -192,17 +196,8 @@ public class ManagementAccountingApiController {
         return value == null || value.isBlank() ? null : Integer.valueOf(value.trim());
     }
 
+    /** null を空文字にするだけ。引用とCSVインジェクション対策は {@link CsvUtils} が行う。 */
     private String csvValue(Object value) {
-        if (value == null) return "";
-        String text = String.valueOf(value);
-        if (!text.isEmpty()) {
-            char first = text.charAt(0);
-            if (first == '=' || first == '+' || first == '-' || first == '@'
-                    || first == '\t' || first == '\r' || first == '\n') {
-                text = "'" + text;
-            }
-        }
-        return text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")
-                ? "\"" + text.replace("\"", "\"\"") + "\"" : text;
+        return value == null ? "" : String.valueOf(value);
     }
 }

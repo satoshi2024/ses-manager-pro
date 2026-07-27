@@ -296,3 +296,93 @@ V60未適用環境ではMigration適用を止める。適用後は組織・所�
 - P1-6 CSV embedded CR quoting: **PASS**。CRの引用と先頭制御文字保護、15列テストを確認。CSVパーサによる実レスポンス再読は未実施。
 - P1-7/P1-8 回帰・外部検証: 自動検証は**PASS**（全量`mvn test`: **833 tests / 0 failures / 0 errors / 6 skipped / BUILD SUCCESS**、`git diff --check` exit 0）。Dockerは`//./pipe/dockerDesktopLinuxEngine`不在、Nodeはコマンド未導入、実ブラウザDemoは未実施。
 - 結論: 今回の独立Reviewで直ちに必要と断定されたruntimeコード修正はないが、外部ゲート未達のためSpecは`FIX`、T013は未完了。Docker MySQL空庫/legacy smoke、Node syntax、desktop/390px Demoを完了してから再判定する。
+
+## 第十二次独立再Review（2026-07-27、T008〜T013）
+
+Base `601177a14689b6fc12cf79482224e0467a7e00ba` / Head `1c352dbdb888ad3aa018ee5de06a550caadb6cc4`。
+**本Reviewで初めてDocker MySQL 8上の全smokeとNode.js JS syntaxが実行され、11次までskipに隠れていた
+P0/P1が4件顕在化した。** いずれも修正・回帰テスト済み。
+
+### 外部ゲートの状況が変わった点
+
+- Docker: Linux engine 29.3.1 を起動。`mysql:8.0` はdocker.io本体のCDN(`production.cloudfront.docker.com`)が
+  egress policyで403のため、`mirror.gcr.io/library/mysql:8.0` から取得して同タグへ付け替えた。
+- Node.js v22.22.2 が存在するため `JsSyntaxCheckTest` も実行された。
+- 結果: **`mvn clean test` 836 tests / Failures 0 / Errors 0 / Skipped 0 / BUILD SUCCESS**。
+  Skipped 0 は本Specで初めて。従来「skipのまま」だった smoke 2件・repair runbook・並行更新も全て実行済み。
+
+### P0
+
+- **P0-1 組織scopeがリクエスト外スレッドで必ず例外になる（T009/F2の回帰）**
+  `OrganizationScopeServiceImpl` / `DataScopeServiceImpl` が `@RequestScope` のまま
+  `WorkRecordServiceImpl#assertAllowed`（本branchで新規追加）から呼ばれるため、HTTPリクエスト外
+  （バッチ・`@Async`・ワーカースレッド）では `ScopeNotActiveException: No thread-bound request found`
+  で業務処理そのものが落ちる。実MySQLの `ConcurrentUpdateTest` が
+  「1件成功するはず → 0件成功」で再現（承認・差戻しの両方が失敗）。
+  → 両サービスをシングトン化し、キャッシュをリクエスト属性へ退避。リクエスト外はキャッシュせず都度算出。
+  スレッドローカルにはしない（ワーカースレッド使い回しで別ユーザーへ可視ID集合が漏れるため）。
+  シングルトン化で表面化した `OrganizationScopeServiceImpl ⇄ OrganizationServiceImpl` の循環参照は
+  `ObjectProvider` の遅延解決で解消。回帰テスト
+  `OrganizationScopeServiceImplTest#リクエスト外のスレッドでもscope解決が例外にならない` を追加。
+- **P0-2 V60の生成列がSTOREDで、既存DBへのALTERが原理的に成功しない**
+  MySQL 8は「STORED生成列の元になっている列の外部キーに ON UPDATE CASCADE を使えない」制約を
+  **CREATE TABLE時は素通し・ALTER時のみ強制** する。V60の3生成列は全てFK列由来のため、
+  空DB(V1のCREATE)は通るのに、既存DBの `ADD COLUMN ... STORED` が
+  `ERROR 1215 Cannot add foreign key constraint` でMigration全体を中断させる。
+  最小再現で確定（`t_management_budget.cost_center_key` と `t_user_organization.active_primary_user_id` の2箇所）。
+  さらにV1統合baselineは元々VIRTUAL(`AS (...)`)で定義されており、**V1とV60で列の種別が分岐していた**。
+  → V60の`STORED`を全廃してV1と同じVIRTUALへ統一。VIRTUALでもUNIQUE索引は張れ、
+  主所属一意制約が実際に効くことを実DBで確認。Docker不要の静的検査
+  `MigrationScriptIntegrityTest#V60とV1の生成列はVIRTUALで揃っていること` を追加。
+
+### P1
+
+- **P1-1 V5不変チェックがLinux/CIでは必ず失敗する**
+  `MigrationScriptIntegrityTest` が固定していたSHA-256 `7741f71…` はV5の**CRLF**版のハッシュ。
+  リポジトリに`.gitattributes`は無く、LFでcheckoutするLinux/CIでは実ファイルが`f6d1194…`となり、
+  V5を一切変更していなくても落ちる。第10〜11次の「833 tests BUILD SUCCESS」はCRLFのWindows作業機
+  でのみ成立していた。
+  → 改行を正規化してからハッシュし、LF基準の`f6d1194…`を固定。内容変更の検知能力は維持。
+- **P1-2 管理会計exportで負の予算差が文字列化する**
+  `ManagementAccountingApiController` が `CsvUtils` を使わず独自のCSV無害化を持ち、
+  先頭`-`を一律で`'`前置していた。予算差(`revenueVariance`/`grossProfitVariance`)と粗利は
+  **予算未達の行で必ず負数**になるため、Excelで合計・並べ替え・グラフが効かない値として出力されていた。
+  → 共通`CsvUtils`へ集約し、`sanitizeForSpreadsheet`を「数値として解釈できる値は無害化しない」へ変更。
+  数式(`=`/`@`/`+HYPERLINK(...)`)の無害化は維持。実レスポンスをCSVとして読み直す回帰テストを追加。
+- **P1-3 退職・無効化時の所属クローズがCAS失敗を握り潰す**
+  `OrganizationServiceImpl#closeAssignmentsForUser` が `updateById` の戻り値を加算するだけで、
+  版番号競合(0件更新)を無視していた。ユーザー無効化・削除は「成功」で返るのに所属が開いたまま残り、
+  退職者が組織scope・部門損益に居座る。
+  → CAS失敗で`409`を投げ、無効化・削除トランザクションごとロールバックさせる。
+
+### P2
+
+- **P2-1 Testcontainersの版が混在し、smokeが「Dockerなし」で黙ってskipされる**
+  `mysql`/`junit-jupiter` だけ1.20.6を直指定し、core は spring-boot BOM の1.19.8のままだった
+  （pomのコメントは「BOM管理」と実態と逆の説明）。加えて docker-java は版によらず
+  既定APIバージョン1.32で接続するため、MinAPIVersion 1.40 の Docker Engine 29系では
+  Dockerが動いていてもTestcontainersが「Docker is not available」と判断しsmokeがskipされる。
+  → `testcontainers-bom` 1.20.6 で一括管理し、surefireで `api.version=1.40`（Docker 19.03相当の下限）
+  を明示。環境変数の小細工なしに `mvn test` だけでsmokeが実行されることを確認。
+- **P2-2** `ManagementAccountingApiController` のCSV行数上限コメントが `\uXXXX` エスケープのまま
+  （日本語コメント規約から逸脱）→ 可読な日本語へ修正。
+- **P2-3（未修正・仕様確認事項）** 管理会計画面のフィルターは 組織／原価部門／顧客 のみで、
+  APIが受け付ける `projectId` / `salesUserId` / `legalEntityId` を送っていない。
+  内訳表は案件・営業別の行を表示するが、原価部門・顧客・案件・営業は**IDの数値をそのまま表示**する。
+  R2.3の「表示」は満たすが、絞り込みと可読性は未完。
+- **P2-4（未修正・設計どおり）** 予実行キーは 組織×原価部門 固定のため、実績に原価部門が無く
+  予算に原価部門がある場合は行が合流せず、行単位の予算差が両建てで出る（合計は一致）。
+- **P2-5（未修正）** `OrganizationServiceImpl#descendantIds` はscope解決のたびに有効組織を全件ロードする。
+  現状の組織数では問題にならないが、階層を辿るクエリへ寄せる余地がある。
+
+### 判定
+
+- T008 F1: **PASS**（空庫V1→V60、旧V58形状→V60の両方を実MySQL 8で適用成功）
+- T009 F2: **PASS**（P0-1修正・回帰追加。リクエスト外経路を含めscope解決が成立）
+- T010 A1: **PASS**（scope・CSRF・version必須・監査の境界を確認）
+- T011 B1: **PASS**（一意キー＋既存skipで再締め・異動後の上書きなし）
+- T012 B2: **PASS**（P1-2修正。金額は円単位、既定月は前月、全社=組織別合計一致）
+- T013 M: **CONDITIONAL PASS** — `mvn clean test` が Skipped 0 で全緑。
+  残る唯一の未実施は **desktop/390px 実ブラウザ一気通貫Demo**（本環境はサーバ起動用MySQLが常設できない）。
+- **Spec全体: CONDITIONAL PASS。`enterprise-identity-security`(S03)は開始可**。
+  実ブラウザDemoはS03と並行して本番リリース前に消化する残課題として扱う。

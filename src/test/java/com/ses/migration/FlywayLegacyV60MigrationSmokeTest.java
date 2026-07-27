@@ -108,7 +108,15 @@ class FlywayLegacyV60MigrationSmokeTest {
                 + " DROP COLUMN active_primary_user_id");
         statement.execute("ALTER TABLE t_user_organization DROP INDEX uk_user_org_period");
         statement.execute("ALTER TABLE t_user_organization DROP COLUMN version");
-        statement.execute("ALTER TABLE t_management_budget DROP INDEX uk_management_budget, DROP COLUMN cost_center_key");
+        // 旧形状は生成列を持たず (organization_id, budget_month) の2列UNIQUEだった。
+        // uk_management_budget は fk_management_budget_organization が利用する唯一の
+        // organization_id 先頭Indexのため、単純にDROPすると
+        // "Cannot drop index: needed in a foreign key constraint" になる。
+        // 旧2列UNIQUEへ張り替えることで、V60のIndex置換分岐(別キー→DROP&再作成)も実際に通す。
+        statement.execute("ALTER TABLE t_management_budget"
+                + " DROP INDEX uk_management_budget,"
+                + " ADD UNIQUE KEY uk_management_budget (organization_id, budget_month),"
+                + " DROP COLUMN cost_center_key");
     }
 
     private boolean hasVersion(Statement statement, String version) throws Exception {

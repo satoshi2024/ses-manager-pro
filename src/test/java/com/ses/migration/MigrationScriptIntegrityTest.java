@@ -15,6 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -165,8 +166,13 @@ class MigrationScriptIntegrityTest {
         Resource resource = new PathMatchingResourcePatternResolver()
                 .getResource("classpath:db/migration/V5__create_work_record_billing.sql");
         byte[] bytes = resource.getInputStream().readAllBytes();
-        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        assertEquals("7741f7154d770c49d810cb248889d77973bfe9deee8402365a85eb79b52586e6", checksum,
+        // 改行コードを正規化してからハッシュする。CRLFのまま固定すると、
+        // Windows作業機では通るのにLFでcheckoutするCI/Linuxでだけ落ちる
+        // （＝V5の内容が変わっていなくても失敗する）プラットフォーム依存テストになる。
+        byte[] normalized = new String(bytes, StandardCharsets.UTF_8)
+                .replace("\r\n", "\n").getBytes(StandardCharsets.UTF_8);
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(normalized));
+        assertEquals("f6d1194cb1e3bfcf58890bb89289cd0eb91b860a66ac06b2be0edaa12ce9fdc7", checksum,
                 "適用済みV5を編集すると既存DBのFlyway checksumが壊れます");
         String sql = new String(bytes, StandardCharsets.UTF_8).toLowerCase(java.util.Locale.ROOT);
         assertTrue(!sql.contains("organization_id") && !sql.contains("cost_center_id")
@@ -189,6 +195,39 @@ class MigrationScriptIntegrityTest {
                 "WorkRecordの組織・原価部門・凍結フラグはV60に個別追加してください");
         assertTrue(workOrganization != workCostCenter && workCostCenter != frozen,
                 "WorkRecordの各列は同一の存在判定に束ねないでください");
+    }
+
+    /**
+     * 生成列をSTOREDにすると、空DB(CREATE TABLE)は通るのに既存DB(ALTER)だけが
+     * {@code ERROR 1215 Cannot add foreign key constraint} で落ちる。
+     *
+     * <p>MySQL 8は「STORED生成列の元になっている列の外部キーに ON UPDATE CASCADE を使えない」
+     * という制約をALTER時にだけ課すためで、V60の3つの生成列
+     * (legal_entity_key / active_primary_user_id / cost_center_key) は
+     * いずれも外部キー列(legal_entity_id以外)を元にしている。
+     * Dockerが無いCI環境でも落とせるよう、静的検査として固定する。
+     */
+    @Test
+    void V60とV1の生成列はVIRTUALで揃っていること() throws Exception {
+        assertFalse(withoutComments(v60()).contains("STORED"),
+                "V60の生成列をSTOREDにすると既存DBのALTERがERROR 1215で失敗します（VIRTUALのままにしてください）");
+
+        String v1 = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V1__create_tables.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertFalse(withoutComments(v1).contains("STORED"),
+                "V1統合baselineの生成列もVIRTUALに揃えてください（新規DBと既存DBでスキーマが分岐します）");
+    }
+
+    /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */
+    private String withoutComments(String sql) {
+        return sql.lines()
+                .map(line -> {
+                    int comment = line.indexOf("--");
+                    return comment < 0 ? line : line.substring(0, comment);
+                })
+                .collect(java.util.stream.Collectors.joining("\n"))
+                .toUpperCase(java.util.Locale.ROOT);
     }
 
     private String v60() throws Exception {

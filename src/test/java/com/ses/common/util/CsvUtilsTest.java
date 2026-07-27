@@ -69,8 +69,8 @@ class CsvUtilsTest {
     @Test
     void appendLine_数式インジェクション文字はクォート前置で無害化される() {
         StringBuilder sb = new StringBuilder();
-        CsvUtils.appendLine(sb, "=SUM(A1:A9)", "@cmd", "+1", "山田");
-        assertEquals("'=SUM(A1:A9),'@cmd,'+1,山田\r\n", sb.toString());
+        CsvUtils.appendLine(sb, "=SUM(A1:A9)", "@cmd", "+HYPERLINK(\"http://evil\")", "山田");
+        assertEquals("'=SUM(A1:A9),'@cmd,\"'+HYPERLINK(\"\"http://evil\"\")\",山田\r\n", sb.toString());
     }
 
     @Test
@@ -78,6 +78,20 @@ class CsvUtilsTest {
         assertEquals("山田太郎", CsvUtils.sanitizeForSpreadsheet("山田太郎"));
         assertEquals("", CsvUtils.sanitizeForSpreadsheet(""));
         assertEquals("'-備考", CsvUtils.sanitizeForSpreadsheet("-備考"));
+    }
+
+    /**
+     * 数値は数式になり得ないため無害化しない。
+     * 管理会計の予算差は予算未達の行で必ず負数になり、{@code '-50000} にすると
+     * Excel上で文字列化して合計・並べ替え・グラフが効かなくなる。
+     */
+    @Test
+    void sanitizeForSpreadsheet_負数や符号付き数値はそのまま数値として出力される() {
+        assertEquals("-50000", CsvUtils.sanitizeForSpreadsheet("-50000"));
+        assertEquals("-1234.56", CsvUtils.sanitizeForSpreadsheet("-1234.56"));
+        assertEquals("+1", CsvUtils.sanitizeForSpreadsheet("+1"));
+        // 数値として解釈できない「-」始まりは従来どおり無害化する。
+        assertEquals("'-1+cmd", CsvUtils.sanitizeForSpreadsheet("-1+cmd"));
     }
 
     private List<List<String>> parse(String content) throws IOException {
