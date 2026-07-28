@@ -32,6 +32,10 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
 
+    /** 会計属性の版を記録する。既存テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
@@ -83,7 +87,69 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
                 throw BusinessException.of("error.engineer.statusBenchHasContract");
             }
         }
-        return updateById(engineer);
+        boolean updated = updateById(engineer);
+        if (updated) {
+            recordAccountingHistory(engineer.getId());
+        }
+        return updated;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Engineer entity) {
+        boolean saved = super.save(entity);
+        if (saved) {
+            recordAccountingHistory(entity.getId());
+        }
+        return saved;
+    }
+
+    /**
+     * 原価部門・想定単価の版を記録する。
+     *
+     * <p>Bench待機原価の月次snapshotは対象月時点の版を読む。ここで記録しないと、
+     * 締めが遅れている間の異動・単価改定が過去月へ焼き付く（第十三次Review P1-5）。
+     * 更新後の値をDBから読み直すのは、部分更新（{@code update-strategy: not_null}）で
+     * 引数側がnullでも実際の現在値を版にするため。
+     */
+    private void recordAccountingHistory(Long engineerId) {
+        if (engineerAccountingHistoryMapper == null || engineerId == null) {
+            return;
+        }
+        Engineer saved = getById(engineerId);
+        if (saved == null) {
+            return;
+        }
+        com.ses.entity.EngineerAccountingHistory currentRow =
+                engineerAccountingHistoryMapper.selectCurrent(engineerId);
+        if (currentRow != null
+                && java.util.Objects.equals(currentRow.getCostCenterId(), saved.getCostCenterId())
+                && numericEquals(currentRow.getExpectedUnitPrice(), saved.getExpectedUnitPrice())) {
+            return;
+        }
+        java.time.LocalDate today = java.time.LocalDate.now();
+        if (currentRow != null) {
+            if (!currentRow.getValidFrom().isBefore(today)) {
+                // 同日中の複数回変更は版を増やさず最後の値で上書きする。
+                currentRow.setCostCenterId(saved.getCostCenterId());
+                currentRow.setExpectedUnitPrice(saved.getExpectedUnitPrice());
+                engineerAccountingHistoryMapper.updateById(currentRow);
+                return;
+            }
+            engineerAccountingHistoryMapper.closeCurrent(engineerId, today.minusDays(1));
+        }
+        engineerAccountingHistoryMapper.insert(com.ses.entity.EngineerAccountingHistory.builder()
+                .engineerId(engineerId)
+                .costCenterId(saved.getCostCenterId())
+                .expectedUnitPrice(saved.getExpectedUnitPrice())
+                .validFrom(today).validTo(null).build());
+    }
+
+    private boolean numericEquals(java.math.BigDecimal left, java.math.BigDecimal right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.compareTo(right) == 0;
     }
 }
 

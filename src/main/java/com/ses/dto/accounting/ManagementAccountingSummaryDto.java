@@ -41,6 +41,8 @@ public class ManagementAccountingSummaryDto {
         private Long organizationId;
         private String organizationName;
         private Long costCenterId;
+        /** 画面・CSVはIDではなく名称を表示する。未設定・削除済みは null。 */
+        private String costCenterName;
         private BigDecimal revenue;
         private BigDecimal cost;
         private BigDecimal grossProfit;
@@ -61,9 +63,13 @@ public class ManagementAccountingSummaryDto {
         private Long organizationId;
         private String organizationName;
         private Long costCenterId;
+        private String costCenterName;
         private Long customerId;
+        private String customerName;
         private Long projectId;
+        private String projectName;
         private Long salesUserId;
+        private String salesUserName;
         private BigDecimal revenue;
         private BigDecimal cost;
         private BigDecimal grossProfit;

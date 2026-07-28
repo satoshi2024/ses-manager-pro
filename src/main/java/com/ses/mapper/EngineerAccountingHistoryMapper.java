@@ -1,0 +1,25 @@
+package com.ses.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.ses.entity.EngineerAccountingHistory;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+
+import java.time.LocalDate;
+
+/** 要員の会計属性履歴Mapper。 */
+@Mapper
+public interface EngineerAccountingHistoryMapper extends BaseMapper<EngineerAccountingHistory> {
+
+    /** 現行版（valid_to IS NULL）を指定日の前日で締める。 */
+    @Update("UPDATE t_engineer_accounting_history SET valid_to = #{validTo} "
+            + "WHERE engineer_id = #{engineerId} AND valid_to IS NULL AND deleted_flag = 0")
+    int closeCurrent(@Param("engineerId") Long engineerId, @Param("validTo") LocalDate validTo);
+
+    /** 現行版を1件返す。無ければnull。 */
+    @Select("SELECT * FROM t_engineer_accounting_history WHERE engineer_id = #{engineerId} "
+            + "AND valid_to IS NULL AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
+    EngineerAccountingHistory selectCurrent(@Param("engineerId") Long engineerId);
+}

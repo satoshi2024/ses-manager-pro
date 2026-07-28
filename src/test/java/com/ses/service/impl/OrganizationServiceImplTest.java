@@ -353,6 +353,154 @@ class OrganizationServiceImplTest {
         assertThrows(BusinessException.class, () -> organizationService.assignUser(missingManagerAssignment));
     }
 
+    /**
+     * 統合は「統合日から」有効。統合前の日付で照会したツリーは統合前の親子・状態を返す。
+     *
+     * <p>現在の parent_id / status を読むと、今日の統合結果が昨日のツリーにも反映され、
+     * 統合元の部門責任者が統合前の自組織データを遡って見られなくなる（第十三次Review P1-1）。
+     */
+    @Test
+    void 統合前の日付では統合前の親子と状態が解決される() {
+        OrganizationUnit source = organization("HIST-SRC", "統合元", null,
+                LocalDate.now().minusYears(1), null);
+        organizationService.save(source);
+        OrganizationUnit child = organization("HIST-CHILD", "統合元の課", source.getId(),
+                LocalDate.now().minusYears(1), null);
+        organizationService.save(child);
+        OrganizationUnit target = organization("HIST-TGT", "統合先", null,
+                LocalDate.now().minusYears(1), null);
+        organizationService.save(target);
+
+        LocalDate yesterday = LocalDate.now().minusDays(1);
+        assertTrue(organizationService.descendantIds(source.getId(), yesterday).contains(child.getId()),
+                "統合前は子組織が統合元配下にある");
+
+        organizationService.merge(source.getId(), target.getId(),
+                organizationService.getById(source.getId()).getVersion());
+
+        // 統合日以降は統合先配下。
+        assertTrue(organizationService.descendantIds(target.getId(), LocalDate.now()).contains(child.getId()),
+                "統合後は子組織が統合先配下になる");
+        // 統合前の日付では過去のツリーが保たれる。
+        assertTrue(organizationService.descendantIds(source.getId(), yesterday).contains(child.getId()),
+                "統合前の日付では子組織は統合元配下のまま");
+        assertTrue(!organizationService.descendantIds(target.getId(), yesterday).contains(child.getId()),
+                "統合前の日付で子組織が統合先配下に現れてはいけない");
+        // 統合元は統合前の日付では「有効」として解決される。
+        assertTrue(organizationService.listTree(null, yesterday).stream()
+                        .anyMatch(unit -> unit.getId().equals(source.getId())),
+                "統合前の日付では統合元がツリーに残る");
+        assertTrue(organizationService.listTree(null, LocalDate.now()).stream()
+                        .noneMatch(unit -> unit.getId().equals(source.getId())),
+                "統合後の統合元は無効なのでツリーから消える");
+    }
+
+    /** 統合日に有効でない組織は統合元・統合先のどちらにも使えない（P1-2）。 */
+    @Test
+    void 統合日に有効でない組織は統合できない() {
+        OrganizationUnit source = organization("MRG-SRC", "統合元", null, LocalDate.now().minusYears(1), null);
+        organizationService.save(source);
+        OrganizationUnit future = organization("MRG-FUTURE", "未来組織", null,
+                LocalDate.now().plusMonths(1), null);
+        organizationService.save(future);
+        OrganizationUnit expired = organization("MRG-EXPIRED", "終了組織", null,
+                LocalDate.now().minusYears(2), LocalDate.now().minusDays(1));
+        organizationService.save(expired);
+
+        Integer version = organizationService.getById(source.getId()).getVersion();
+        assertThrows(BusinessException.class,
+                () -> organizationService.merge(source.getId(), future.getId(), version),
+                "未来にしか有効でない組織は統合先にできない");
+        assertThrows(BusinessException.class,
+                () -> organizationService.merge(source.getId(), expired.getId(), version),
+                "有効期間を過ぎた組織は統合先にできない");
+
+        // 統合済みの組織を再度統合元にはできない。
+        OrganizationUnit target = organization("MRG-TGT", "統合先", null, LocalDate.now().minusYears(1), null);
+        organizationService.save(target);
+        organizationService.merge(source.getId(), target.getId(),
+                organizationService.getById(source.getId()).getVersion());
+        Integer mergedVersion = organizationService.getById(source.getId()).getVersion();
+        assertThrows(BusinessException.class,
+                () -> organizationService.merge(source.getId(), target.getId(), mergedVersion),
+                "統合済みの組織は再統合できない");
+    }
+
+    /** 親組織の有効期間が子を包含していないと、親失効後に親のいない子が残る（P1-3）。 */
+    @Test
+    void 親組織の有効期間が子を包含しない場合は拒否する() {
+        OrganizationUnit parent = organization("PER-PARENT", "期間限定親", null,
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30));
+        organizationService.save(parent);
+
+        OrganizationUnit longerChild = organization("PER-CHILD", "親より長い子", parent.getId(),
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31));
+        assertThrows(BusinessException.class, () -> organizationService.save(longerChild));
+
+        OrganizationUnit openChild = organization("PER-CHILD-OPEN", "無期限の子", parent.getId(),
+                LocalDate.of(2026, 1, 1), null);
+        assertThrows(BusinessException.class, () -> organizationService.save(openChild));
+
+        OrganizationUnit ok = organization("PER-CHILD-OK", "包含される子", parent.getId(),
+                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 5, 31));
+        assertTrue(organizationService.save(ok));
+    }
+
+    /** 所属期間が組織の有効期間を超えると、組織失効後も所属だけが有効に残る（P1-3）。 */
+    @Test
+    void 所属期間が組織の有効期間を超える場合は拒否する() {
+        OrganizationUnit unit = organization("ASG-PERIOD", "期間限定組織", null,
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30));
+        organizationService.save(unit);
+        SysUser member = insertUser("assign-period-user", "所属者", "営業");
+
+        UserOrganization openEnded = UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 2, 1)).validTo(null).build();
+        assertThrows(BusinessException.class, () -> organizationService.assignUser(openEnded),
+                "有期限の組織へ無期限の所属は作れない");
+
+        UserOrganization tooLong = UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 2, 1)).validTo(LocalDate.of(2026, 12, 31)).build();
+        assertThrows(BusinessException.class, () -> organizationService.assignUser(tooLong));
+
+        UserOrganization ok = UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 2, 1)).validTo(LocalDate.of(2026, 5, 31)).build();
+        assertTrue(organizationService.assignUser(ok).getId() != null);
+    }
+
+    /** 終了日が未来の在籍者も「在籍中」。終了日の有無だけで判定してはいけない（P1-4）。 */
+    @Test
+    void 終了日が未来の在籍者がいる組織は無効化できない() {
+        OrganizationUnit unit = organization("DEACT-FUTURE", "在籍者あり組織", null,
+                LocalDate.now().minusYears(1), null);
+        organizationService.save(unit);
+        SysUser member = insertUser("deact-future-user", "未来終了の所属者", "営業");
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(member.getId()).organizationId(unit.getId()).primaryFlag(1)
+                .validFrom(LocalDate.now().minusMonths(1))
+                .validTo(LocalDate.now().plusMonths(1))
+                .build());
+
+        Integer version = organizationService.getById(unit.getId()).getVersion();
+        assertThrows(BusinessException.class,
+                () -> organizationService.updateStatus(unit.getId(), "無効", version),
+                "終了日が未来の在籍者が残っている組織は無効化できない");
+    }
+
+    private SysUser insertUser(String username, String realName, String role) {
+        SysUser user = new SysUser();
+        user.setUsername(username);
+        user.setPassword("pass");
+        user.setRealName(realName);
+        user.setRole(role);
+        user.setStatus(1);
+        sysUserMapper.insert(user);
+        return user;
+    }
+
     private OrganizationUnit organization(String code, String name, Long parentId,
                                           LocalDate validFrom, LocalDate validTo) {
         return OrganizationUnit.builder()

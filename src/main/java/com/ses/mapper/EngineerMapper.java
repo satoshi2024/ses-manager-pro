@@ -47,13 +47,16 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     @Select("""
         <script>
         SELECT COALESCE(uo.organization_id, e.organization_id) AS organizationId,
-               e.cost_center_id AS costCenterId,
-               COALESCE(SUM(e.expected_unit_price), 0) AS waitCost
+               COALESCE(eh.cost_center_id, e.cost_center_id) AS costCenterId,
+               COALESCE(SUM(COALESCE(eh.expected_unit_price, e.expected_unit_price)), 0) AS waitCost
         FROM t_engineer e
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id AND uo.primary_flag = 1
              AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        LEFT JOIN t_engineer_accounting_history eh ON eh.engineer_id = e.id
+             AND eh.deleted_flag = 0
+             AND eh.valid_from &lt;= #{monthStart} AND (eh.valid_to IS NULL OR eh.valid_to &gt;= #{monthStart})
         LEFT JOIN m_organization_unit ou ON ou.id = COALESCE(uo.organization_id, e.organization_id)
              AND ou.deleted_flag = 0
         WHERE e.deleted_flag = 0
@@ -64,7 +67,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
               AND c.start_date IS NOT NULL AND c.start_date &lt;= #{monthEnd}
               AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
           )
-          <if test="costCenterId != null">AND e.cost_center_id = #{costCenterId}</if>
+          <if test="costCenterId != null">AND COALESCE(eh.cost_center_id, e.cost_center_id) = #{costCenterId}</if>
           <if test="legalEntityId != null">AND ou.legal_entity_id = #{legalEntityId}</if>
           <if test="organizationId != null">AND COALESCE(uo.organization_id, e.organization_id) = #{organizationId}</if>
           <if test="fullAccess == false">
@@ -76,7 +79,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
               <otherwise>AND 1 = 0</otherwise>
             </choose>
           </if>
-        GROUP BY COALESCE(uo.organization_id, e.organization_id), e.cost_center_id
+        GROUP BY COALESCE(uo.organization_id, e.organization_id), COALESCE(eh.cost_center_id, e.cost_center_id)
         </script>
         """)
     List<com.ses.dto.accounting.AccountingWaitCostRow> selectAccountingWaitCost(
@@ -88,18 +91,27 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
             @org.apache.ibatis.annotations.Param("organizationId") Long organizationId,
             @org.apache.ibatis.annotations.Param("costCenterId") Long costCenterId);
 
-    /** 月次snapshot用にBench待機原価を要員単位で取得する。 */
+    /**
+     * 月次snapshot用にBench待機原価を要員単位で取得する。
+     *
+     * <p>原価部門・想定単価は<b>対象月時点の履歴</b>から解決する。要員マスタの現在値を読むと、
+     * 締めが遅れている間に異動・単価改定を行った場合、確定済み扱いの過去月へ新しい値が
+     * 焼き付いてしまう（snapshotは訂正しない運用のため誤りが永続化する）。
+     */
     @Select("""
         <script>
         SELECT e.id AS engineerId,
                COALESCE(uo.organization_id, e.organization_id) AS organizationId,
-               e.cost_center_id AS costCenterId,
-               COALESCE(e.expected_unit_price, 0) AS waitCost
+               COALESCE(eh.cost_center_id, e.cost_center_id) AS costCenterId,
+               COALESCE(eh.expected_unit_price, e.expected_unit_price, 0) AS waitCost
         FROM t_engineer e
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id AND uo.primary_flag = 1
              AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        LEFT JOIN t_engineer_accounting_history eh ON eh.engineer_id = e.id
+             AND eh.deleted_flag = 0
+             AND eh.valid_from &lt;= #{monthStart} AND (eh.valid_to IS NULL OR eh.valid_to &gt;= #{monthStart})
         WHERE e.deleted_flag = 0
           AND NOT EXISTS (
             SELECT 1 FROM t_contract c

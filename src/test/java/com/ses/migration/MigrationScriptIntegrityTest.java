@@ -219,6 +219,30 @@ class MigrationScriptIntegrityTest {
                 "V1統合baselineの生成列もVIRTUALに揃えてください（新規DBと既存DBでスキーマが分岐します）");
     }
 
+    /**
+     * V61の履歴テーブルは「現在値しか持たない列を過去日で参照しない」ための版元。
+     * backfillが無いとV61適用直後に過去月の部門損益と待機原価がまとめて欠落するため、
+     * テーブル作成とbackfillの両方が揃っていること、順序が逆でないことを固定する。
+     */
+    @Test
+    void V61は履歴テーブル作成の後にbackfillすること() throws Exception {
+        String sql = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V61__organization_and_engineer_accounting_history.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        int createRelation = sql.indexOf("CREATE TABLE IF NOT EXISTS t_organization_relation_history");
+        int createEngineer = sql.indexOf("CREATE TABLE IF NOT EXISTS t_engineer_accounting_history");
+        int backfillRelation = sql.indexOf("INSERT INTO t_organization_relation_history");
+        int backfillEngineer = sql.indexOf("INSERT INTO t_engineer_accounting_history");
+
+        assertTrue(createRelation >= 0 && createEngineer >= 0, "V61に履歴テーブルの作成がありません");
+        assertTrue(backfillRelation >= 0 && backfillEngineer >= 0, "V61に既存行のbackfillがありません");
+        assertTrue(createRelation < backfillRelation && createEngineer < backfillEngineer,
+                "履歴テーブルを作成してからbackfillしてください");
+        assertFalse(withoutComments(sql).contains("STORED"),
+                "V61でも生成列はVIRTUALに揃えてください");
+    }
+
     /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */
     private String withoutComments(String sql) {
         return sql.lines()

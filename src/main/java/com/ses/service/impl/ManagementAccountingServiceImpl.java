@@ -47,6 +47,16 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private DataScopeService dataScopeService;
 
+    /** 名称解決用。既存テストスライス互換のため任意注入（未注入時はIDのみ返す）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.CostCenterMapper costCenterMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.CustomerMapper customerMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.ProjectMapper projectMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.SysUserMapper sysUserMapper;
+
     /**
      * 待機原価の集計に使う。
      *
@@ -218,11 +228,27 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         rows.keySet().forEach(key -> nameIds.add(key.organizationId()));
         details.keySet().forEach(key -> nameIds.add(key.organizationId()));
         Map<Long, String> names = new HashMap<>(organizationService.namesByIds(nameIds));
+        // 原価部門・顧客・案件・営業はIDのままだと業務帳票として読めない。
+        // 行を組み立てる前に一括で名称解決する（行ごとの都度SELECTにしない）。
+        Map<Long, String> costCenterNames = costCenterNames(rows.keySet().stream()
+                .map(OrganizationKey::costCenterId).collect(java.util.stream.Collectors.toSet()),
+                details.keySet().stream().map(DimensionKey::costCenterId).toList());
+        Map<Long, String> customerNames = customerNames(details.keySet().stream()
+                .map(DimensionKey::customerId).toList());
+        Map<Long, String> projectNames = projectNames(details.keySet().stream()
+                .map(DimensionKey::projectId).toList());
+        Map<Long, String> salesUserNames = salesUserNames(details.keySet().stream()
+                .map(DimensionKey::salesUserId).toList());
 
         List<ManagementAccountingSummaryDto.Row> resultRows = rows.values().stream()
-                .map(row -> row.toDto(names.get(row.key.organizationId()))).toList();
+                .map(row -> row.toDto(nameOf(names, row.key.organizationId()),
+                        nameOf(costCenterNames, row.key.costCenterId()))).toList();
         List<ManagementAccountingSummaryDto.Detail> resultDetails = details.values().stream()
-                .map(detail -> detail.toDto(names.get(detail.key.organizationId()))).toList();
+                .map(detail -> detail.toDto(nameOf(names, detail.key.organizationId()),
+                        nameOf(costCenterNames, detail.key.costCenterId()),
+                        nameOf(customerNames, detail.key.customerId()),
+                        nameOf(projectNames, detail.key.projectId()),
+                        nameOf(salesUserNames, detail.key.salesUserId()))).toList();
         BigDecimal revenue = sum(resultRows, ManagementAccountingSummaryDto.Row::getRevenue);
         BigDecimal cost = sum(resultRows, ManagementAccountingSummaryDto.Row::getCost);
         BigDecimal budgetRevenue = sum(resultRows, ManagementAccountingSummaryDto.Row::getBudgetRevenue);
@@ -327,6 +353,66 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         return contract;
     }
 
+    /**
+     * 名称の引き当て。未設定の次元（costCenterIdがnull等）は素直にnullを返す。
+     * {@code Map.of()} は {@code get(null)} でNPEになるため、必ずここを通す。
+     */
+    private String nameOf(Map<Long, String> names, Long id) {
+        return id == null ? null : names.get(id);
+    }
+
+    /** 複数の集合から非nullのIDだけを1つのリストへまとめる。 */
+    @SafeVarargs
+    private List<Long> mergeIds(java.util.Collection<Long>... sources) {
+        Set<Long> ids = new java.util.HashSet<>();
+        for (java.util.Collection<Long> source : sources) {
+            source.stream().filter(java.util.Objects::nonNull).forEach(ids::add);
+        }
+        return new ArrayList<>(ids);
+    }
+
+    @SafeVarargs
+    private Map<Long, String> costCenterNames(java.util.Collection<Long>... sources) {
+        List<Long> ids = mergeIds(sources);
+        if (ids.isEmpty() || costCenterMapper == null) {
+            return Map.of();
+        }
+        Map<Long, String> result = new HashMap<>();
+        costCenterMapper.selectBatchIds(ids).forEach(center -> result.put(center.getId(), center.getName()));
+        return result;
+    }
+
+    private Map<Long, String> customerNames(java.util.Collection<Long> source) {
+        List<Long> ids = mergeIds(source);
+        if (ids.isEmpty() || customerMapper == null) {
+            return Map.of();
+        }
+        Map<Long, String> result = new HashMap<>();
+        customerMapper.selectBatchIds(ids).forEach(customer -> result.put(customer.getId(), customer.getCompanyName()));
+        return result;
+    }
+
+    private Map<Long, String> projectNames(java.util.Collection<Long> source) {
+        List<Long> ids = mergeIds(source);
+        if (ids.isEmpty() || projectMapper == null) {
+            return Map.of();
+        }
+        Map<Long, String> result = new HashMap<>();
+        projectMapper.selectBatchIds(ids).forEach(project -> result.put(project.getId(), project.getProjectName()));
+        return result;
+    }
+
+    private Map<Long, String> salesUserNames(java.util.Collection<Long> source) {
+        List<Long> ids = mergeIds(source);
+        if (ids.isEmpty() || sysUserMapper == null) {
+            return Map.of();
+        }
+        Map<Long, String> result = new HashMap<>();
+        // sys_user の氏名列は real_name（full_name ではない）。
+        sysUserMapper.selectBatchIds(ids).forEach(user -> result.put(user.getId(), user.getRealName()));
+        return result;
+    }
+
     private BigDecimal sum(List<ManagementAccountingSummaryDto.Row> rows,
                            java.util.function.Function<ManagementAccountingSummaryDto.Row, BigDecimal> getter) {
         return rows.stream().map(getter).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -343,11 +429,11 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         private BigDecimal waitCost = BigDecimal.ZERO;
         private int utilizationCount, hireCount;
         private MutableRow(OrganizationKey key) { this.key = key; }
-        private ManagementAccountingSummaryDto.Row toDto(String name) {
+        private ManagementAccountingSummaryDto.Row toDto(String name, String costCenterName) {
             BigDecimal profit = revenue.subtract(cost);
             return ManagementAccountingSummaryDto.Row.builder()
                     .organizationId(key.organizationId()).organizationName(name == null ? "未配賦" : name)
-                    .costCenterId(key.costCenterId())
+                    .costCenterId(key.costCenterId()).costCenterName(costCenterName)
                     .revenue(revenue).cost(cost).grossProfit(profit).budgetRevenue(budgetRevenue).budgetGrossProfit(budgetGrossProfit)
                     .revenueVariance(revenue.subtract(budgetRevenue)).grossProfitVariance(profit.subtract(budgetGrossProfit))
                     .utilizationCount(utilizationCount).hireCount(hireCount).waitCost(waitCost).build();
@@ -358,11 +444,15 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         private final DimensionKey key;
         private BigDecimal revenue = BigDecimal.ZERO, cost = BigDecimal.ZERO;
         private MutableDetail(DimensionKey key) { this.key = key; }
-        private ManagementAccountingSummaryDto.Detail toDto(String name) {
+        private ManagementAccountingSummaryDto.Detail toDto(String name, String costCenterName,
+                                                             String customerName, String projectName,
+                                                             String salesUserName) {
             return ManagementAccountingSummaryDto.Detail.builder()
                     .organizationId(key.organizationId()).organizationName(name == null ? "未配賦" : name)
-                    .costCenterId(key.costCenterId()).customerId(key.customerId())
-                    .projectId(key.projectId()).salesUserId(key.salesUserId())
+                    .costCenterId(key.costCenterId()).costCenterName(costCenterName)
+                    .customerId(key.customerId()).customerName(customerName)
+                    .projectId(key.projectId()).projectName(projectName)
+                    .salesUserId(key.salesUserId()).salesUserName(salesUserName)
                     .revenue(revenue).cost(cost).grossProfit(revenue.subtract(cost)).build();
         }
     }
