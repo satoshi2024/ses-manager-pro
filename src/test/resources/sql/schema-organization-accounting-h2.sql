@@ -26,3 +26,28 @@ SELECT r.role, m.id
 FROM (SELECT '管理者' AS role UNION SELECT 'マネージャー') r, m_menu m
 WHERE m.menu_key = 'management-accounting'
   AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+
+-- V61: 組織の親子・状態履歴と、要員の会計属性履歴。
+-- 現在値だけを持つ列を過去日で参照しないための版管理テーブル。
+CREATE TABLE IF NOT EXISTS t_organization_relation_history (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  organization_id BIGINT NOT NULL,
+  parent_id       BIGINT,
+  status          VARCHAR(20) NOT NULL,
+  valid_from      DATE NOT NULL,
+  valid_to        DATE,
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag    TINYINT NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS t_engineer_accounting_history (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id         BIGINT NOT NULL,
+  cost_center_id      BIGINT,
+  expected_unit_price DECIMAL(12,0),
+  valid_from          DATE NOT NULL,
+  valid_to            DATE,
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag        TINYINT NOT NULL DEFAULT 0
+);

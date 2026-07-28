@@ -186,6 +186,16 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_invoice", "cost_center_id");
             assertColumnExists(st, "t_bp_payment", "cost_center_id");
             assertColumnExists(st, "t_notification", "organization_id");
+            // 履歴テーブル(V61)。asOf解決の版元が無いと過去日の照会が現在値へ落ちる。
+            assertColumnExists(st, "t_organization_relation_history", "parent_id");
+            assertColumnExists(st, "t_organization_relation_history", "status");
+            assertColumnExists(st, "t_organization_relation_history", "valid_from");
+            assertColumnExists(st, "t_engineer_accounting_history", "cost_center_id");
+            assertColumnExists(st, "t_engineer_accounting_history", "expected_unit_price");
+            assertColumnExists(st, "t_engineer_accounting_history", "valid_from");
+            // LEGACY組織はV60で作られるので、V61のbackfillで履歴の初版も必ず生まれる。
+            assertRowExists(st, "SELECT 1 FROM t_organization_relation_history h "
+                    + "JOIN m_organization_unit o ON o.id = h.organization_id WHERE o.code='LEGACY'");
             // 業務一意制約（生成列を含む）がMySQL 8で実在すること。
             assertIndexExists(st, "m_organization_unit", "uk_organization_code");
             assertIndexExists(st, "t_user_organization", "uk_user_org_active_primary");

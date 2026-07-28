@@ -650,11 +650,39 @@ CREATE TABLE shedlock (
 );
 
 -- 組織・管理会計基盤（V60 / F1）
+DROP TABLE IF EXISTS t_engineer_accounting_history CASCADE;
+DROP TABLE IF EXISTS t_organization_relation_history CASCADE;
 DROP TABLE IF EXISTS t_monthly_accounting_dimension CASCADE;
 DROP TABLE IF EXISTS t_management_budget CASCADE;
 DROP TABLE IF EXISTS t_user_organization CASCADE;
 DROP TABLE IF EXISTS m_cost_center CASCADE;
 DROP TABLE IF EXISTS m_organization_unit CASCADE;
+
+-- V61: 組織の親子・状態履歴と要員の会計属性履歴。
+-- asOf解決の版元。無いと過去日のツリー・待機原価が現在値で解決されてしまう。
+CREATE TABLE t_organization_relation_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  organization_id BIGINT NOT NULL,
+  parent_id BIGINT,
+  status VARCHAR(20) NOT NULL,
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE t_engineer_accounting_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL,
+  cost_center_id BIGINT,
+  expected_unit_price DECIMAL(12,0),
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);
 
 CREATE TABLE m_organization_unit (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

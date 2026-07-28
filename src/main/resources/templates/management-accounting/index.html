@@ -29,8 +29,20 @@
                         <select id="accountingCostCenterId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label text-muted small" for="accountingCustomerId" th:text="#{managementAccounting.customerId}">顧客ID</label>
-                        <input id="accountingCustomerId" type="number" class="form-control bg-dark border-secondary text-light">
+                        <label class="form-label text-muted small" for="accountingLegalEntityId" th:text="#{managementAccounting.legalEntity}">法人</label>
+                        <input id="accountingLegalEntityId" type="number" class="form-control bg-dark border-secondary text-light">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small" for="accountingCustomerId" th:text="#{managementAccounting.customer}">顧客</label>
+                        <select id="accountingCustomerId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small" for="accountingProjectId" th:text="#{managementAccounting.project}">案件</label>
+                        <select id="accountingProjectId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small" for="accountingSalesUserId" th:text="#{managementAccounting.salesUser}">営業</label>
+                        <select id="accountingSalesUserId" class="form-select bg-dark border-secondary text-light"><option value="">—</option></select>
                     </div>
                     <div class="col-md-2">
                         <button class="btn btn-info w-100" type="button" onclick="loadManagementAccounting()" th:text="#{common.search}">検索</button>
@@ -75,9 +87,10 @@
                 <table class="table table-dark table-hover align-middle mb-0">
                     <thead><tr>
                         <th th:text="#{managementAccounting.organization}">組織</th>
-                        <th th:text="#{managementAccounting.customerId}">顧客ID</th>
-                        <th th:text="#{managementAccounting.projectId}">案件ID</th>
-                        <th th:text="#{managementAccounting.salesUserId}">営業ID</th>
+                        <th th:text="#{organization.costCenter}">原価部門</th>
+                        <th th:text="#{managementAccounting.customer}">顧客</th>
+                        <th th:text="#{managementAccounting.project}">案件</th>
+                        <th th:text="#{managementAccounting.salesUser}">営業</th>
                         <th class="text-end" th:text="#{managementAccounting.revenue}">売上</th>
                         <th class="text-end" th:text="#{managementAccounting.cost}">原価</th>
                         <th class="text-end" th:text="#{managementAccounting.grossProfit}">粗利</th>

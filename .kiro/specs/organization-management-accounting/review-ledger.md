@@ -386,3 +386,78 @@ P0/P1が4件顕在化した。** いずれも修正・回帰テスト済み。
   残る唯一の未実施は **desktop/390px 実ブラウザ一気通貫Demo**（本環境はサーバ起動用MySQLが常設できない）。
 - **Spec全体: CONDITIONAL PASS。`enterprise-identity-security`(S03)は開始可**。
   実ブラウザDemoはS03と並行して本番リリース前に消化する残課題として扱う。
+
+## 第十三次独立Review 指摘対応（2026-07-27）
+
+第十三次独立Review（Base `601177a` / Head `0785890`、判定 FAIL、P0=0 / P1=6 / P2=1）の全件へ対応した。
+指摘のとおり、前回のPASS判定は**時間軸（過去日の解決）と権限変更直後の一貫性**を検証できていなかった。
+自動テストが全緑でも、これらは「現在値しか持たない列を過去日で読む」ことが原因のため検出できない。
+
+### 根本原因（P1-1 / P1-5 共通）
+
+`m_organization_unit.parent_id` / `status` と `t_engineer.cost_center_id` / `expected_unit_price` は
+**現在値しか持たない**のに、`listTree(asOf)` / `descendantIds(asOf)` / Bench待機原価が
+過去日を指定して参照していた。そのため、
+
+- 組織統合を行うと「昨日の組織ツリー」まで今日の結果に変わり、統合元の部門責任者が
+  統合前の自組織データを遡って見られなくなる／統合先が統合前のデータを見られてしまう。
+- 月次締めが遅れている間に要員の原価部門・単価を変更すると、確定済み扱いの過去月へ
+  新しい値が焼き付く（snapshotは訂正しない運用なので誤りが永続化する）。
+
+→ **V61** で版管理テーブルを追加し、asOf解決をそこへ寄せた。組織・要員の行自体はIDを分岐させない
+（所属・原価部門・予算・snapshotの参照を壊さないため。design.md「同一IDのversion CAS」を維持）。
+
+- `t_organization_relation_history(organization_id, parent_id, status, valid_from, valid_to)`
+- `t_engineer_accounting_history(engineer_id, cost_center_id, expected_unit_price, valid_from, valid_to)`
+- 既存行はV61でbackfill（履歴ゼロだとasOf解決が「該当なし」になり過去月が丸ごと欠落するため）。
+- 履歴が無い行は現在値へフォールバックし、集計から落とさない。
+
+### 対応一覧
+
+- **P1-1 統合が履歴を遡って書き換える**: `listTree`/`descendantIds` を履歴からの版解決へ変更。
+  統合時は子の親付け替え・統合元の無効化を**統合日から**の版として記録し、統合前の日付では
+  統合前の親子・状態を返す。組織の作成・更新・状態変更でも版を記録する。
+- **P1-2 統合が無効・未来・期限切れの組織を受け入れる**: source/target を同一トランザクションで
+  行ロックしてから、統合日に `status=有効` かつ有効期間内であることを両方に要求。
+  `merged_into` が既に入っている組織の再統合も拒否。法人一致・循環・楽観ロック検査は維持。
+- **P1-3 親・所属の期間包含が未検証**: 親組織は「有効」かつ期間が子を完全包含すること、
+  所属期間は組織の有効期間を超えないことを検証。無期限の子・所属は無期限の上位にしか付けられない。
+- **P1-4 無効化が終了日未来の在籍者を取りこぼす**: 判定を `valid_to IS NULL` から
+  `valid_to IS NULL OR valid_to >= 当日` へ拡張。未開始の未来所属も同条件で拒否対象になる。
+- **P1-5 延滞月次締めが現在の原価部門・単価を使う**: 待機原価SQL2本（集計用・snapshot用）を
+  対象月時点の `t_engineer_accounting_history` から解決するよう変更。要員の登録・更新時に版を記録する。
+- **P1-6 同一ユーザーの権限変更後もDashboardキャッシュが残る**: `ScopeVersionRegistry`（世代番号）を
+  追加し、キャッシュキーへ含めた。所属変更・組織階層/統合/状態変更・所属クローズなど
+  可視範囲に影響する更新の**コミット後**に世代を進める。粒度は意図的に全体
+  （組織改編は低頻度であり、ユーザー単位で取りこぼすより広めの無効化のほうが安全）。
+- **P2-1 管理会計UIの次元不足とID直表示**: 法人・案件・営業のフィルターを追加し、
+  APIが受け付ける全次元（`legalEntityId`/`organizationId`/`costCenterId`/`customerId`/`projectId`/`salesUserId`）を送る。
+  顧客・案件は選択式、営業は新設の `/api/autocomplete/sales-users` から選択式にした。
+  DTOへ `costCenterName`/`customerName`/`projectName`/`salesUserName` を追加し、画面は名称を表示する
+  （名称が引けない場合のみ `#ID` を補助表示）。名称は行ごとのSELECTではなく一括解決する。
+  **CSV exportの列構成は変更していない**（15列の書式契約を維持。必要なら別途合意のうえ拡張する）。
+
+### 追加した回帰テスト
+
+- `OrganizationServiceImplTest`（+5件）: 統合前後の日付でのツリー解決、統合日に無効/未来/期限切れ/
+  統合済みの拒否、親の期間包含、所属の期間包含、終了日が未来の在籍者がいる組織の無効化拒否。
+- `DashboardScopeKeyGeneratorTest`（+2件）: 同一ユーザーで世代が進めばキーが変わること、
+  共有キー(`ALL`)側も同様であること。
+- `EngineerAccountingHistoryMapperTest`（新規2件）: 対象月時点の原価部門・単価で解決されること、
+  履歴が無い要員は現在値へフォールバックすること。
+- `MigrationScriptIntegrityTest`（+1件）: V61の作成→backfill順序と生成列VIRTUAL。
+- `FlywayMigrationSmokeTest`: 履歴テーブルの列とLEGACY組織のbackfill済み初版を実MySQLで確認。
+
+### 検証
+
+- Docker Engine を起動し、`FlywayMigrationSmokeTest`（空庫V1→V61）と
+  `FlywayLegacyV60MigrationSmokeTest`（旧V58形状→V61）を**実MySQL 8で実行して成功**。
+- `mvn clean test`: **848 tests / Failures 0 / Errors 0 / Skipped 0 / BUILD SUCCESS**
+  （環境変数の小細工なし。Docker/Node.jsの門禁も実行済み）。
+- 未実施: desktop/390px 実ブラウザ一気通貫Demo（本環境はアプリ常駐用MySQLを持てない）。
+
+### 判定（第十三次指摘に対する自己申告。独立再Reviewは未実施）
+
+- P1-1〜P1-6、P2-1: いずれも修正・回帰テスト追加済み。
+- Spec全体の最終判定と`enterprise-identity-security`の開始可否は、次の独立Reviewの結果による。
+  本記録は「指摘へ対応した」ことの記録であって、PASSの自己宣言ではない。

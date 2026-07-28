@@ -6,27 +6,52 @@
     /** DB・API・Javaとも金額は円。表示だけ桁区切りする（万円へ変換しない）。 */
     function yen(value) { return '¥' + Number(value || 0).toLocaleString('ja-JP'); }
 
+    // APIが受け付ける全次元を送る。UIで送らない次元があると、その軸では絞り込めない。
     function params() {
         return {
             month: $('#accountingMonth').val(),
+            legalEntityId: $('#accountingLegalEntityId').val() || null,
             organizationId: $('#accountingOrganizationId').val() || null,
             costCenterId: $('#accountingCostCenterId').val() || null,
-            customerId: $('#accountingCustomerId').val() || null
+            customerId: $('#accountingCustomerId').val() || null,
+            projectId: $('#accountingProjectId').val() || null,
+            salesUserId: $('#accountingSalesUserId').val() || null
         };
+    }
+
+    /** 選択肢を description 付きで描画する共通処理。 */
+    function fillOptions(selector, items, label) {
+        $(selector).html('<option value="">—</option>' + (items || []).map(function (item) {
+            return '<option value="' + item.id + '">' + escapeHtml(label(item)) + '</option>';
+        }).join(''));
+    }
+
+    /** IDしか無い行でも「—」で潰さず、名称が無いときだけIDを補助表示する。 */
+    function nameOrId(name, id) {
+        if (name) { return escapeHtml(name); }
+        return id == null || id === '' ? '—' : '#' + escapeHtml(id);
     }
 
     function loadOptions() {
         $.get('/api/autocomplete/organizations').done(function (res) {
             if (res.code !== 200) { return; }
-            $('#accountingOrganizationId').html('<option value="">—</option>' + (res.data || []).map(function (item) {
-                return '<option value="' + item.id + '">' + escapeHtml(item.code + ' ' + item.name) + '</option>';
-            }).join(''));
+            fillOptions('#accountingOrganizationId', res.data, function (i) { return i.code + ' ' + i.name; });
         });
         $.get('/api/autocomplete/cost-centers').done(function (res) {
             if (res.code !== 200) { return; }
-            $('#accountingCostCenterId').html('<option value="">—</option>' + (res.data || []).map(function (item) {
-                return '<option value="' + item.id + '">' + escapeHtml(item.code + ' ' + item.name) + '</option>';
-            }).join(''));
+            fillOptions('#accountingCostCenterId', res.data, function (i) { return i.code + ' ' + i.name; });
+        });
+        $.get('/api/autocomplete/customers').done(function (res) {
+            if (res.code !== 200) { return; }
+            fillOptions('#accountingCustomerId', res.data, function (i) { return i.name || i.companyName; });
+        });
+        $.get('/api/autocomplete/projects').done(function (res) {
+            if (res.code !== 200) { return; }
+            fillOptions('#accountingProjectId', res.data, function (i) { return i.name || i.projectName; });
+        });
+        $.get('/api/autocomplete/sales-users').done(function (res) {
+            if (res.code !== 200) { return; }
+            fillOptions('#accountingSalesUserId', res.data, function (i) { return i.name || i.realName; });
         });
     }
 
@@ -42,7 +67,7 @@
             // 予実行は「組織 × 原価部門」粒度。予算はこの粒度でしか存在しないため、
             // ここより細かい行に予算差を出してはいけない（内訳表には予算列を置かない）。
             $('#accountingRows').html((data.rows || []).map(function (row) {
-                return '<tr><td>' + escapeHtml(row.organizationName) + '</td><td>' + escapeHtml(row.costCenterId || '—')
+                return '<tr><td>' + escapeHtml(row.organizationName) + '</td><td>' + nameOrId(row.costCenterName, row.costCenterId)
                     + '</td><td class="text-end">' + yen(row.revenue) + '</td><td class="text-end">' + yen(row.cost)
                     + '</td><td class="text-end">' + yen(row.grossProfit) + '</td><td class="text-end">' + yen(row.waitCost)
                     + '</td><td class="text-end">' + yen(row.budgetRevenue) + '</td><td class="text-end">' + variance(row.revenueVariance)
@@ -50,11 +75,13 @@
             }).join('') || '<tr><td colspan="8" class="text-center text-muted">—</td></tr>');
 
             $('#accountingDetailRows').html((data.details || []).map(function (row) {
-                return '<tr><td>' + escapeHtml(row.organizationName) + '</td><td>' + escapeHtml(row.customerId || '—')
-                    + '</td><td>' + escapeHtml(row.projectId || '—') + '</td><td>' + escapeHtml(row.salesUserId || '—')
+                return '<tr><td>' + escapeHtml(row.organizationName) + '</td><td>' + nameOrId(row.costCenterName, row.costCenterId)
+                    + '</td><td>' + nameOrId(row.customerName, row.customerId)
+                    + '</td><td>' + nameOrId(row.projectName, row.projectId)
+                    + '</td><td>' + nameOrId(row.salesUserName, row.salesUserId)
                     + '</td><td class="text-end">' + yen(row.revenue) + '</td><td class="text-end">' + yen(row.cost)
                     + '</td><td class="text-end">' + yen(row.grossProfit) + '</td></tr>';
-            }).join('') || '<tr><td colspan="7" class="text-center text-muted">—</td></tr>');
+            }).join('') || '<tr><td colspan="8" class="text-center text-muted">—</td></tr>');
         }).fail(function (xhr) {
             showError((xhr.responseJSON && xhr.responseJSON.message)
                 || t('managementAccounting.loadFailed', '管理会計データの取得に失敗しました'));

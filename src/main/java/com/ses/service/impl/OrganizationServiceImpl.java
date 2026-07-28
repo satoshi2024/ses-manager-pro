@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.CostCenter;
 import com.ses.entity.ManagementBudget;
 import com.ses.entity.MonthlyAccountingDimension;
+import com.ses.entity.OrganizationRelationHistory;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
@@ -25,6 +26,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -47,10 +49,48 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.EngineerMapper engineerMapper;
 
+    /** 親子・状態のasOf解決元。既存テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.OrganizationRelationHistoryMapper relationHistoryMapper;
+
+    /** 可視範囲の世代番号。既存テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.ScopeVersionRegistry scopeVersionRegistry;
+
+    /**
+     * 可視範囲が変わったことをキャッシュ層へ知らせる。
+     *
+     * <p>コミット後に世代を進める。ロールバックした変更でキャッシュを捨てる必要はなく、
+     * またコミット前に進めると、まだ見えないはずの新scopeでキャッシュが作られてしまう。
+     */
+    private void markScopeChanged() {
+        if (scopeVersionRegistry == null) {
+            return;
+        }
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            scopeVersionRegistry.bump();
+            return;
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        scopeVersionRegistry.bump();
+                    }
+                });
+    }
+
     @Override
+    @Transactional
     public boolean save(OrganizationUnit entity) {
         validateOrganization(entity, null);
-        return super.save(entity);
+        boolean saved = super.save(entity);
+        if (saved) {
+            // 初版を組織の有効開始日から記録する。これが無いとasOf解決が現在値へ落ちる。
+            recordRelation(entity.getId(), entity.getParentId(), entity.getStatus(), entity.getValidFrom());
+            markScopeChanged();
+        }
+        return saved;
     }
 
     @Override
@@ -77,6 +117,9 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (baseMapper.updateById(entity) != 1) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
+        recordRelation(entity.getId(), entity.getParentId(),
+                entity.getStatus() == null ? current.getStatus() : entity.getStatus(), LocalDate.now());
+        markScopeChanged();
         return true;
     }
 
@@ -86,8 +129,16 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (organizationId == null || targetOrganizationId == null || organizationId.equals(targetOrganizationId)) {
             throw BusinessException.of("error.organization.invalid");
         }
-        OrganizationUnit current = getById(organizationId);
-        OrganizationUnit target = getById(targetOrganizationId);
+        // source/target とも同一トランザクション内で行ロックしてから検査する。
+        // ロック前に読むと、検査通過後に相手が無効化・統合されても気付けない。
+        OrganizationUnit current = baseMapper.selectByIdForUpdate(organizationId);
+        OrganizationUnit target = baseMapper.selectByIdForUpdate(targetOrganizationId);
+        if (current == null) {
+            current = getById(organizationId);
+        }
+        if (target == null) {
+            target = getById(targetOrganizationId);
+        }
         if (current == null || target == null) {
             throw BusinessException.of(404, "error.organization.scope.notFound");
         }
@@ -97,20 +148,30 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (expectedVersion == null || !Objects.equals(expectedVersion, current.getVersion())) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
-        // 統合先が統合元の子孫だと、親子関係の付け替えで循環する。
-        if (descendantIds(organizationId, LocalDate.now()).contains(targetOrganizationId)) {
-            throw BusinessException.of("error.organization.cycle");
-        }
         LocalDate today = LocalDate.now();
         LocalDate monthStart = today.withDayOfMonth(1);
+        // 統合日に業務上使えない組織へ付け替えると、所属・原価部門・予算の行き先が
+        // その場で不可視（scope外・期間外）になり、以後の維持操作もできなくなる。
+        // 統合元が既に統合済み・無効の場合も二重統合になるため拒否する。
+        if (current.getMergedInto() != null) {
+            throw BusinessException.of("error.organization.merge.alreadyMerged");
+        }
+        assertUsableForMerge(current, today, "error.organization.merge.sourceUnusable");
+        assertUsableForMerge(target, today, "error.organization.merge.targetUnusable");
+        // 統合先が統合元の子孫だと、親子関係の付け替えで循環する。
+        if (descendantIds(organizationId, today).contains(targetOrganizationId)) {
+            throw BusinessException.of("error.organization.cycle");
+        }
 
-        // 子組織を統合先へ付け替える。
+        // 子組織を統合先へ付け替える。付け替えは統合日から有効とし、旧親は履歴に残す。
+        // 履歴を残さないと「統合前の日付の組織ツリー」が今日の親を返してしまう。
         for (OrganizationUnit child : list(new LambdaQueryWrapper<OrganizationUnit>()
                 .eq(OrganizationUnit::getParentId, organizationId))) {
             child.setParentId(targetOrganizationId);
             if (baseMapper.updateById(child) != 1) {
                 throw BusinessException.of(409, "error.organization.versionConflict");
             }
+            recordRelation(child.getId(), targetOrganizationId, child.getStatus(), today);
         }
         // 有効な所属は統合日で旧行を閉じ、統合先の新しい履歴行を作る。
         // 旧行のorganization_idを直接書き換えると、統合日前のas-of照会まで改変される。
@@ -190,20 +251,36 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (baseMapper.updateById(current) != 1) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
+        // 無効化も統合日から。統合前の日付では統合元が「有効」として解決される必要がある
+        // （でないと統合元の部門責任者が統合前の自組織データを遡って見られなくなる）。
+        recordRelation(organizationId, current.getParentId(), "無効", today);
+        markScopeChanged();
         return true;
     }
 
+    /**
+     * 指定日時点の組織ツリー。親子・状態は履歴から解決する。
+     *
+     * <p>現在の{@code parent_id}/{@code status}を読むと、今日の統合結果が「昨日のツリー」にも
+     * 反映され、過去のscope・部門損益・監査結果が後から変わってしまう（R1.3/R2.2違反）。
+     */
     @Override
     public List<OrganizationUnit> listTree(Long legalEntityId, LocalDate asOf) {
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        Map<Long, OrganizationRelationHistory> relations = relationsAsOf(date);
         return list(new LambdaQueryWrapper<OrganizationUnit>()
                 .eq(legalEntityId != null, OrganizationUnit::getLegalEntityId, legalEntityId)
                 .le(OrganizationUnit::getValidFrom, date)
                 .and(w -> w.isNull(OrganizationUnit::getValidTo)
                         .or().ge(OrganizationUnit::getValidTo, date))
-                .eq(OrganizationUnit::getStatus, "有効")
                 .orderByAsc(OrganizationUnit::getParentId)
-                .orderByAsc(OrganizationUnit::getCode));
+                .orderByAsc(OrganizationUnit::getCode))
+                .stream()
+                .filter(unit -> "有効".equals(statusAsOf(relations, unit)))
+                // 呼び出し側（画面・API）は parentId をツリー組み立てに使うため、
+                // 現在値ではなく指定日時点の親を載せて返す。
+                .peek(unit -> unit.setParentId(parentAsOf(relations, unit)))
+                .toList();
     }
 
     @Override
@@ -212,24 +289,81 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             return List.of();
         }
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        Map<Long, OrganizationRelationHistory> relations = relationsAsOf(date);
         List<OrganizationUnit> units = list(new LambdaQueryWrapper<OrganizationUnit>()
                 .le(OrganizationUnit::getValidFrom, date)
                 .and(w -> w.isNull(OrganizationUnit::getValidTo)
-                        .or().ge(OrganizationUnit::getValidTo, date))
-                .eq(OrganizationUnit::getStatus, "有効"));
+                        .or().ge(OrganizationUnit::getValidTo, date)))
+                .stream()
+                .filter(unit -> "有効".equals(statusAsOf(relations, unit)))
+                .toList();
         Set<Long> result = new HashSet<>();
         result.add(organizationId);
         boolean changed;
         do {
             changed = false;
             for (OrganizationUnit unit : units) {
-                if (unit.getId() != null && unit.getParentId() != null
-                        && result.contains(unit.getParentId())) {
+                Long parentId = parentAsOf(relations, unit);
+                if (unit.getId() != null && parentId != null && result.contains(parentId)) {
                     changed |= result.add(unit.getId());
                 }
             }
         } while (changed);
         return new ArrayList<>(result);
+    }
+
+    /** 指定日時点の親子・状態を組織IDごとに引ける形で取得する。 */
+    private Map<Long, OrganizationRelationHistory> relationsAsOf(LocalDate asOf) {
+        if (relationHistoryMapper == null) {
+            return Map.of();
+        }
+        Map<Long, OrganizationRelationHistory> map = new java.util.HashMap<>();
+        for (OrganizationRelationHistory row : relationHistoryMapper.selectAsOf(asOf)) {
+            if (row.getOrganizationId() != null) {
+                map.put(row.getOrganizationId(), row);
+            }
+        }
+        return map;
+    }
+
+    private Long parentAsOf(Map<Long, OrganizationRelationHistory> relations, OrganizationUnit unit) {
+        OrganizationRelationHistory row = relations.get(unit.getId());
+        return row == null ? unit.getParentId() : row.getParentId();
+    }
+
+    private String statusAsOf(Map<Long, OrganizationRelationHistory> relations, OrganizationUnit unit) {
+        OrganizationRelationHistory row = relations.get(unit.getId());
+        return row == null || row.getStatus() == null ? unit.getStatus() : row.getStatus();
+    }
+
+    /**
+     * 親子・状態の変更を履歴へ記録する。現行版を前日で閉じ、変更日から新しい版を開く。
+     *
+     * <p>同日内の複数回変更は最後の値で上書きする（同じ日に2つの版を持たせない）。
+     */
+    private void recordRelation(Long organizationId, Long parentId, String status, LocalDate effectiveFrom) {
+        if (relationHistoryMapper == null || organizationId == null) {
+            return;
+        }
+        OrganizationRelationHistory currentRow = relationHistoryMapper.selectCurrent(organizationId);
+        if (currentRow != null
+                && Objects.equals(currentRow.getParentId(), parentId)
+                && Objects.equals(currentRow.getStatus(), status)) {
+            return;
+        }
+        if (currentRow != null) {
+            if (!currentRow.getValidFrom().isBefore(effectiveFrom)) {
+                // 同日（またはそれ以降に開始した）版は履歴を増やさず更新する。
+                currentRow.setParentId(parentId);
+                currentRow.setStatus(status);
+                relationHistoryMapper.updateById(currentRow);
+                return;
+            }
+            relationHistoryMapper.closeCurrent(organizationId, effectiveFrom.minusDays(1));
+        }
+        relationHistoryMapper.insert(OrganizationRelationHistory.builder()
+                .organizationId(organizationId).parentId(parentId).status(status)
+                .validFrom(effectiveFrom).validTo(null).build());
     }
 
     @Override
@@ -253,15 +387,19 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (current == null) {
             return false;
         }
+        LocalDate today = LocalDate.now();
         if ("無効".equals(status)) {
             if (count(new LambdaQueryWrapper<OrganizationUnit>()
                     .eq(OrganizationUnit::getParentId, organizationId)
                     .eq(OrganizationUnit::getStatus, "有効")) > 0) {
                 throw BusinessException.of("error.organization.deactivate.hasChildren");
             }
+            // 「終了日が未設定」だけを在籍と見なすと、終了日が未来の在籍者を取りこぼす。
+            // 未開始（valid_from が未来）の所属も、無効化後に開始してしまうため同じく拒否する。
             if (userOrganizationMapper.selectCount(new LambdaQueryWrapper<UserOrganization>()
                     .eq(UserOrganization::getOrganizationId, organizationId)
-                    .isNull(UserOrganization::getValidTo)) > 0) {
+                    .and(w -> w.isNull(UserOrganization::getValidTo)
+                            .or().ge(UserOrganization::getValidTo, today))) > 0) {
                 throw BusinessException.of("error.organization.deactivate.hasMembers");
             }
         }
@@ -272,6 +410,8 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (baseMapper.updateById(patch) != 1) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
+        recordRelation(organizationId, current.getParentId(), status, today);
+        markScopeChanged();
         return true;
     }
 
@@ -331,6 +471,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (userOrganizationMapper.insert(assignment) != 1) {
             throw BusinessException.of("error.organization.assignment.saveFailed");
         }
+        markScopeChanged();
         return assignment;
     }
 
@@ -350,6 +491,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (userOrganizationMapper.updateById(assignment) != 1) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
+        markScopeChanged();
         return true;
     }
 
@@ -393,6 +535,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (userOrganizationMapper.insert(assignment) != 1) {
             throw BusinessException.of("error.organization.assignment.saveFailed");
         }
+        markScopeChanged();
         return assignment;
     }
 
@@ -417,6 +560,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (userOrganizationMapper.updateById(patch) != 1) {
             throw BusinessException.of(409, "error.organization.versionConflict");
         }
+        markScopeChanged();
         return true;
     }
 
@@ -446,6 +590,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         }
         // 上長として登録されている行も外す。退職者が上長のまま残ると承認者不在になる。
         userOrganizationMapper.clearManager(userId);
+        markScopeChanged();
         return closed;
     }
 
@@ -509,6 +654,15 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                     || createsCycle(candidate.getParentId(), candidate.getId(), new HashSet<>())) {
                 throw BusinessException.of("error.organization.cycle");
             }
+            if (!"有効".equals(parent.getStatus())) {
+                throw BusinessException.of("error.organization.parentInactive");
+            }
+            // 親の有効期間が子を完全に包含していないと、親だけ失効した時点で
+            // 「親のいない子」がツリーに残り、scope・人員集計・部門損益が解決不能になる。
+            if (!covers(parent.getValidFrom(), parent.getValidTo(),
+                    candidate.getValidFrom(), candidate.getValidTo())) {
+                throw BusinessException.of("error.organization.parentPeriodNotCovering");
+            }
         }
         List<OrganizationUnit> sameCode = list(new LambdaQueryWrapper<OrganizationUnit>()
                 .eq(OrganizationUnit::getCode, candidate.getCode())
@@ -569,6 +723,12 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                 || (organization.getValidTo() != null && organization.getValidTo().isBefore(candidate.getValidFrom()))) {
             throw BusinessException.of("error.organization.assignment.organizationInactive");
         }
+        // 開始日だけ見ると、終了日が組織より後の所属や、有期限の組織への無期限所属を通してしまう。
+        // 組織失効後も所属だけが有効なままになり、scope・人員集計・管理会計の帰属が壊れる。
+        if (!covers(organization.getValidFrom(), organization.getValidTo(),
+                candidate.getValidFrom(), candidate.getValidTo())) {
+            throw BusinessException.of("error.organization.assignment.organizationPeriodNotCovering");
+        }
         if (candidate.getManagerUserId() != null) {
             SysUser manager = sysUserMapper.selectById(candidate.getManagerUserId());
             if (manager == null || !Integer.valueOf(1).equals(manager.getStatus())
@@ -584,8 +744,34 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         }
     }
 
+    /** 統合日に「有効」かつ有効期間内であることを要求する。 */
+    private void assertUsableForMerge(OrganizationUnit unit, LocalDate mergeDate, String messageKey) {
+        boolean active = "有効".equals(unit.getStatus());
+        boolean started = unit.getValidFrom() != null && !unit.getValidFrom().isAfter(mergeDate);
+        boolean notExpired = unit.getValidTo() == null || !unit.getValidTo().isBefore(mergeDate);
+        if (!active || !started || !notExpired) {
+            throw BusinessException.of(messageKey);
+        }
+    }
+
     private boolean isPrimary(UserOrganization assignment) {
         return Integer.valueOf(1).equals(assignment.getPrimaryFlag());
+    }
+
+    /**
+     * outer が inner の期間を完全に包含するか。
+     *
+     * <p>終了日 {@code null} は無期限。無期限の inner を有期限の outer へぶら下げることはできない
+     * （outer 失効後も inner だけが残り、時間的に無効な関係になる）。
+     */
+    private boolean covers(LocalDate outerFrom, LocalDate outerTo, LocalDate innerFrom, LocalDate innerTo) {
+        if (outerFrom != null && innerFrom != null && outerFrom.isAfter(innerFrom)) {
+            return false;
+        }
+        if (outerTo == null) {
+            return true;
+        }
+        return innerTo != null && !innerTo.isAfter(outerTo);
     }
 
     private boolean overlaps(LocalDate from1, LocalDate to1, LocalDate from2, LocalDate to2) {

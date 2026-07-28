@@ -122,6 +122,59 @@ class DashboardScopeKeyGeneratorTest {
     @SuppressWarnings("unused")
     private void dummyMethod() {}
 
+    /**
+     * 同一ユーザーでも、所属・組織階層・DataScopeが変わればキーが変わること。
+     *
+     * <p>ユーザーIDだけでキーを分けると、異動や権限剥奪の直後にTTL(既定60秒)が切れるまで
+     * 旧scopeで計算した他組織のデータを返し続ける（第十三次Review P1-6の短時間越権）。
+     */
+    @Test
+    void sameUser_keyChangesWhenScopeVersionBumps() throws Exception {
+        DataScopeService dataScope = mock(DataScopeService.class);
+        when(dataScope.isScoped()).thenReturn(false);
+        OrganizationScopeService orgScope = mock(OrganizationScopeService.class);
+        when(orgScope.hasFullAccess()).thenReturn(false);
+
+        com.ses.service.security.ScopeVersionRegistry scopeVersion =
+                new com.ses.service.security.ScopeVersionRegistry();
+        setAuth(10L, "マネージャー");
+        Method method = DashboardScopeKeyGeneratorTest.class.getDeclaredMethod("dummyMethod");
+
+        KeyGenerator keyGen = buildKeyGenerator(dataScope, orgScope, scopeVersion);
+        Object before = keyGen.generate(this, method, new Object[]{null});
+        // 同じ状態なら同じキー（キャッシュが効く）。
+        assertThat(keyGen.generate(this, method, new Object[]{null})).isEqualTo(before);
+
+        // 組織所属が変わった＝可視範囲が変わった。
+        scopeVersion.bump();
+        Object after = keyGen.generate(this, method, new Object[]{null});
+
+        assertThat(after).isNotEqualTo(before);
+        assertThat(after.toString()).contains("U10");
+    }
+
+    /** 管理者など共有キー("ALL")の利用者も、世代が進めば作り直される。 */
+    @Test
+    void sharedAllKey_alsoChangesWhenScopeVersionBumps() throws Exception {
+        DataScopeService dataScope = mock(DataScopeService.class);
+        when(dataScope.isScoped()).thenReturn(false);
+        OrganizationScopeService orgScope = mock(OrganizationScopeService.class);
+        when(orgScope.hasFullAccess()).thenReturn(true);
+
+        com.ses.service.security.ScopeVersionRegistry scopeVersion =
+                new com.ses.service.security.ScopeVersionRegistry();
+        setAuth(1L, "管理者");
+        Method method = DashboardScopeKeyGeneratorTest.class.getDeclaredMethod("dummyMethod");
+        KeyGenerator keyGen = buildKeyGenerator(dataScope, orgScope, scopeVersion);
+
+        Object before = keyGen.generate(this, method, new Object[]{null});
+        scopeVersion.bump();
+        Object after = keyGen.generate(this, method, new Object[]{null});
+
+        assertThat(after).isNotEqualTo(before);
+        assertThat(after.toString()).contains("ALL");
+    }
+
     private void setAuth(Long userId, String role) {
         // SecurityUtils.currentUserId() は principal が String の場合 parseLong する
         var auth = new UsernamePasswordAuthenticationToken(
@@ -133,12 +186,22 @@ class DashboardScopeKeyGeneratorTest {
     @SuppressWarnings("unchecked")
     private KeyGenerator buildKeyGenerator(DataScopeService dataScope,
                                             OrganizationScopeService orgScope) {
+        return buildKeyGenerator(dataScope, orgScope,
+                new com.ses.service.security.ScopeVersionRegistry());
+    }
+
+    @SuppressWarnings("unchecked")
+    private KeyGenerator buildKeyGenerator(DataScopeService dataScope,
+                                            OrganizationScopeService orgScope,
+                                            com.ses.service.security.ScopeVersionRegistry scopeVersion) {
         ObjectProvider<DataScopeService> dsProvider = mock(ObjectProvider.class);
         when(dsProvider.getIfAvailable()).thenReturn(dataScope);
         ObjectProvider<OrganizationScopeService> orgProvider = mock(ObjectProvider.class);
         when(orgProvider.getIfAvailable()).thenReturn(orgScope);
+        ObjectProvider<com.ses.service.security.ScopeVersionRegistry> versionProvider = mock(ObjectProvider.class);
+        when(versionProvider.getIfAvailable()).thenReturn(scopeVersion);
 
         CacheConfig config = new CacheConfig();
-        return config.dashboardScopeKeyGenerator(dsProvider, orgProvider);
+        return config.dashboardScopeKeyGenerator(dsProvider, orgProvider, versionProvider);
     }
 }

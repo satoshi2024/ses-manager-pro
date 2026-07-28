@@ -153,6 +153,26 @@ public class AutocompleteApiController {
                 .collect(Collectors.toList()));
     }
 
+    /**
+     * 営業担当の選択肢。管理会計の営業別絞り込みがID直打ちにならないように共有する。
+     *
+     * <p>組織scopeで絞らないのは、営業は組織を跨いで契約を担当するのが通常運用のため
+     * （design.md「組織scopeとDataScopeの結合規則」）。実データの可視範囲はsummary側の
+     * SQL境界で担保されるので、ここで見えない担当者名を選んでも件数が増えることはない。
+     */
+    @GetMapping("/sales-users")
+    public ApiResult<List<com.ses.dto.organization.AssignableUserDto>> getSalesUsers() {
+        List<SysUser> users = sysUserService.list(new QueryWrapper<SysUser>()
+                .select("id", "username", "real_name", "role")
+                .eq("status", 1)
+                .eq("role", "営業")
+                .orderByAsc("id"));
+        return ApiResult.success(users.stream()
+                .map(user -> new com.ses.dto.organization.AssignableUserDto(
+                        user.getId(), user.getUsername(), user.getRealName(), user.getRole()))
+                .collect(Collectors.toList()));
+    }
+
     /** ログインユーザー一覧オートコンプリート。管理者のみ利用可。 */
     @GetMapping("/users")
     @PreAuthorize("hasRole('管理者')")

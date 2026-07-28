@@ -65,7 +65,8 @@ public class CacheConfig {
     @Bean("dashboardScopeKeyGenerator")
     public KeyGenerator dashboardScopeKeyGenerator(
             ObjectProvider<DataScopeService> dataScopeProvider,
-            ObjectProvider<OrganizationScopeService> orgScopeProvider) {
+            ObjectProvider<OrganizationScopeService> orgScopeProvider,
+            ObjectProvider<com.ses.service.security.ScopeVersionRegistry> scopeVersionProvider) {
         return (target, method, params) -> {
             DataScopeService dataScope = dataScopeProvider.getIfAvailable();
             OrganizationScopeService orgScope = orgScopeProvider.getIfAvailable();
@@ -88,7 +89,11 @@ public class CacheConfig {
             } else {
                 scopeKey = "ALL";
             }
-            return method.getName() + ":" + scopeKey + ":" + Arrays.deepToString(params);
+            // 同一ユーザーでも所属・組織階層・DataScope・担当が変わればキーを変える。
+            // これが無いと権限縮小後もTTLが切れるまで旧scopeの集計が返る。
+            com.ses.service.security.ScopeVersionRegistry scopeVersion = scopeVersionProvider.getIfAvailable();
+            long generation = scopeVersion == null ? 0L : scopeVersion.current();
+            return method.getName() + ":" + scopeKey + ":v" + generation + ":" + Arrays.deepToString(params);
         };
     }
 }
