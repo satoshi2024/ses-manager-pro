@@ -1,4 +1,15 @@
-# 全spec共通実装標準
+# 全spec共通実装標準 v2.0
+
+## 0. 必須実行基線
+
+本書を読む全ての実装AI・子Agent・Review AIは、作業前に `execution-review-handbook.md` v2.0を全文読み、
+READINESS、TASK CONTRACT、Review Packet、Issue Register、再Review収束規則を適用する。
+S02の再発防止根拠は `s02-review-retrospective.md` を正とする。
+
+本規則は2026-07-28以前に作成されたcopyable conversationにも適用する。既存対話は継続利用できるが、
+旧対話文だけを完了条件にしてはならない。矛盾時の優先順位はhandbook §1に従う。
+各specのreview-ledgerは `review-ledger-template.md` の現行判定、Issue Register、Review Packet、証拠表を使用する。
+既存対話へ送る切替文面は `conversation-baseline-v2.md` を使用する。
 
 ## 1. 既存資産を唯一の正として再利用する
 

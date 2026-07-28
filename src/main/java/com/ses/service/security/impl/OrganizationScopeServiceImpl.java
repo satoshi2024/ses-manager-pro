@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.OrganizationRelationHistory;
 import com.ses.entity.OrganizationUnit;
+import com.ses.entity.Proposal;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.ContractMapper;
@@ -51,6 +52,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     private final OrganizationUnitMapper organizationUnitMapper;
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final ContractMapper contractMapper;
+    private final com.ses.mapper.ProposalMapper proposalMapper;
     private final InvoiceMapper invoiceMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
@@ -236,6 +238,35 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
             return Set.of();
         }
         return Set.copyOf(contractMapper.selectProjectIdsByContractIds(new java.util.ArrayList<>(contractIds)));
+    }
+
+    @Override
+    public Set<Long> allowedProposalIds(LocalDate asOf) {
+        if (hasFullAccess()) {
+            return Set.of();
+        }
+        Set<Long> engineerIds = allowedEngineerIds(asOf);
+        Set<Long> projectIds = allowedProjectIds(asOf);
+        if (engineerIds.isEmpty() && projectIds.isEmpty()) {
+            return Set.of();
+        }
+        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>()
+                .select(Proposal::getId)
+                .and(w -> {
+                    if (!engineerIds.isEmpty()) {
+                        w.in(Proposal::getEngineerId, engineerIds);
+                    }
+                    if (!projectIds.isEmpty()) {
+                        if (!engineerIds.isEmpty()) {
+                            w.or();
+                        }
+                        w.in(Proposal::getProjectId, projectIds);
+                    }
+                });
+        return proposalMapper.selectList(query).stream()
+                .map(Proposal::getId)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     @Override

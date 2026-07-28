@@ -141,6 +141,7 @@ class NotificationGenerateServiceTest {
         inv.setStatus("送付済");
         inv.setDueDate(LocalDate.now().minusDays(5));
         when(invoiceMapper.selectList(any())).thenReturn(List.of(inv));
+        when(invoiceMapper.selectOrganizationIdsByInvoiceId(eq(7L), any())).thenReturn(List.of(11L));
         Customer c = new Customer();
         c.setCompanyName("顧客A");
         when(customerMapper.selectById(3L)).thenReturn(c);
@@ -148,15 +149,15 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.invoiceOverdue();
 
         // メッセージに請求書番号・顧客名・超過日数(5日)を含み、dedupeKeyが所定形式であること
-        verify(notificationService, times(1)).publishToUser(
-                any(),
+        verify(notificationService, times(1)).publishToOrganization(
+                eq(11L),
                 eq("INVOICE_OVERDUE"),
                 eq("支払期限超過"),
                 contains("INV-202605-0001"),
                 eq("/invoice"),
                 contains("INVOICE_OVERDUE:7:"));
-        verify(notificationService, times(1)).publishToUser(
-                any(), any(), any(), contains("5日"), any(), any());
+        verify(notificationService, times(1)).publishToOrganization(
+                eq(11L), any(), any(), contains("5日"), any(), any());
     }
 
     // ===== FR-11: フォロー期日超過通知 =====

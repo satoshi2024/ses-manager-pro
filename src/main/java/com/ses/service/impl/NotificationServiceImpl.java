@@ -156,7 +156,26 @@ public class NotificationServiceImpl implements NotificationService {
         publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey);
     }
 
+    @Override
+    public void publishToOrganization(Long organizationId, String type, String title, String message,
+                                       String linkUrl, String dedupeKey) {
+        if (organizationId == null) {
+            return;
+        }
+        publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type), organizationId);
+    }
+
     private void publishInternal(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null);
+    }
+
+    private void publishInternal(Long userId, String type, String title, String message, String linkUrl,
+                                 String dedupeKey, String menuKey, Long organizationId) {
+        // 宛先ユーザーも組織も解決できない業務通知を全体配信へフォールバックさせない。
+        // NULL組織を許すのは、明示的なプラットフォーム共通通知(SYSTEM)だけとする。
+        if (userId == null && organizationId == null && !"SYSTEM".equals(type)) {
+            return;
+        }
         try {
             Notification notification = new Notification();
             notification.setRecipientUserId(userId);
@@ -166,7 +185,7 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setLinkUrl(linkUrl);
             notification.setMenuKey(menuKey);
             // 宛先ユーザーが明確な通知は、宛先の現在主所属へ固定する。NULLは全組織共通通知だけに残す。
-            notification.setOrganizationId(resolveRecipientOrganizationId(userId));
+            notification.setOrganizationId(organizationId != null ? organizationId : resolveRecipientOrganizationId(userId));
             // dedupe_key はグローバル一意のため、宛先ユーザーごとに個別発行するイベントでは受信者を含める。
             // これがないと同一eventの2人目以降がユニーク制約で破棄される（R3R-33）。
             notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);

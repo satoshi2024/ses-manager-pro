@@ -5,6 +5,7 @@ import com.ses.entity.Invoice;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
+import com.ses.service.BpPaymentService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,9 @@ class InvoiceApiControllerTest {
 
     @MockBean
     private InvoiceService invoiceService;
+
+    @MockBean
+    private BpPaymentService bpPaymentService;
 
     @MockBean
     private InvoicePdfService invoicePdfService;

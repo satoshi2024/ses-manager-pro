@@ -15,27 +15,32 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
 
     @Select("""
         <script>
-        SELECT DISTINCT i.id
+        SELECT i.id
         FROM t_invoice i
-        JOIN t_invoice_item ii ON ii.invoice_id = i.id
-        JOIN t_work_record w ON w.id = ii.work_record_id
-        JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
-        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
-        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
-        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
-             AND uo.valid_from &lt;= #{asOf}
-             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
         WHERE i.deleted_flag = 0
-          AND (
-            <if test="organizationIds != null and organizationIds.size() > 0">
-              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
-            </if>
-            <if test="directUserIds != null and directUserIds.size() > 0">
-              <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
-              l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
-            </if>
-            <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
+          AND EXISTS (SELECT 1 FROM t_invoice_item ii0 WHERE ii0.invoice_id = i.id)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM t_invoice_item ii
+            LEFT JOIN t_work_record w ON w.id = ii.work_record_id
+            LEFT JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+            LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+            LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+            LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+                 AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+                 AND uo.valid_from &lt;= #{asOf}
+                 AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+            WHERE ii.invoice_id = i.id
+              AND NOT (
+                <if test="organizationIds != null and organizationIds.size() > 0">
+                  COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                </if>
+                <if test="directUserIds != null and directUserIds.size() > 0">
+                  <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
+                  l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                </if>
+                <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
+              )
           )
         </script>
         """)
@@ -141,6 +146,68 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           )
     """)
     List<UnbilledWorkRecordDto> selectUnbilledWorkRecords(@Param("customerId") Long customerId, @Param("billingMonth") String billingMonth);
+
+    /** 組織scope内の未請求実績だけを選び、混在組織の請求書生成を分割する。 */
+    @Select("""
+        <script>
+        SELECT
+            w.id AS workRecordId,
+            w.billing_amount AS billingAmount,
+            e.full_name AS engineerName,
+            p.project_name AS projectName
+        FROM t_work_record w
+        INNER JOIN t_contract c ON w.contract_id = c.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_project p ON c.project_id = p.id
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE c.customer_id = #{customerId}
+          AND c.deleted_flag = 0
+          AND w.work_month = #{billingMonth}
+          AND w.status = '確定'
+          AND w.id NOT IN (
+              SELECT it.work_record_id FROM t_invoice_item it
+              JOIN t_invoice i ON it.invoice_id = i.id AND i.deleted_flag = 0
+          )
+          AND (
+            <if test="organizationIds != null and organizationIds.size() > 0">
+              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="directUserIds != null and directUserIds.size() > 0">
+              <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
+              l.sys_user_id IN <foreach collection="directUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="(organizationIds == null or organizationIds.size() == 0) and (directUserIds == null or directUserIds.size() == 0)">1 = 0</if>
+          )
+        </script>
+        """)
+    List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsScoped(
+            @Param("customerId") Long customerId,
+            @Param("billingMonth") String billingMonth,
+            @Param("asOf") java.time.LocalDate asOf,
+            @Param("organizationIds") List<Long> organizationIds,
+            @Param("directUserIds") List<Long> directUserIds);
+
+    /** 請求書内の明細組織。組織通知の宛先解決に使用する。 */
+    @Select("""
+        SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id)
+        FROM t_invoice_item ii
+        JOIN t_work_record w ON w.id = ii.work_record_id
+        JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE ii.invoice_id = #{invoiceId}
+          AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
+        """)
+    List<Long> selectOrganizationIdsByInvoiceId(@Param("invoiceId") Long invoiceId,
+                                                 @Param("asOf") java.time.LocalDate asOf);
 
     /**
      * 全顧客版の確定済み未請求実績（月次締めチェックリスト用）。

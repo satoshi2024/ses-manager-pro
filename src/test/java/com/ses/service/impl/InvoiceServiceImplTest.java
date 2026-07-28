@@ -110,6 +110,34 @@ public class InvoiceServiceImplTest {
     }
 
     @Test
+    void testGenerate_ManagerUsesOnlyOrganizationScopedWorkRecords() {
+        Long customerId = 1L;
+        String billingMonth = "2026-07";
+        UnbilledWorkRecordDto scoped = new UnbilledWorkRecordDto();
+        scoped.setWorkRecordId(10L);
+        scoped.setBillingAmount(new BigDecimal("100000"));
+        scoped.setEngineerName("組織A要員");
+        scoped.setProjectName("組織A案件");
+
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of(11L));
+        when(organizationScopeService.allowedDirectUserIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of());
+        when(invoiceMapper.selectUnbilledWorkRecordsScoped(any(), any(), any(), any(), any()))
+                .thenReturn(Collections.singletonList(scoped));
+        when(invoiceMapper.selectMaxInvoiceNoIncludingDeleted(anyString())).thenReturn(null);
+        when(invoiceMapper.insert(any(Invoice.class))).thenReturn(1);
+        when(invoiceItemMapper.insert(any(InvoiceItem.class))).thenReturn(1);
+        when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
+
+        invoiceService.generate(customerId, billingMonth);
+
+        verify(invoiceMapper).selectUnbilledWorkRecordsScoped(any(), any(), any(), any(), any());
+        verify(invoiceMapper, never()).selectUnbilledWorkRecords(customerId, billingMonth);
+    }
+
+    @Test
     void testGenerate_NoUnbilledRecords() {
         Long customerId = 1L;
         String billingMonth = "2026-07";

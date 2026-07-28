@@ -10,6 +10,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpPaymentService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.WorkRecordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -30,9 +31,27 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     private final BpPaymentMapper bpPaymentMapper;
     private final WorkRecordMapper workRecordMapper;
     private final MonthlyClosingService monthlyClosingService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private WorkRecordService workRecordService;
+
+    private void assertWorkRecordAllowed(Long workRecordId) {
+        if (workRecordService != null) {
+            workRecordService.assertAllowed(workRecordId);
+        }
+    }
+
+    @Override
+    public void assertAllowed(Long bpPaymentId) {
+        BpPayment payment = bpPaymentMapper.selectById(bpPaymentId);
+        if (payment == null) {
+            throw BusinessException.of("error.bpPayment.notFound");
+        }
+        assertWorkRecordAllowed(payment.getWorkRecordId());
+    }
 
     @Override
     public List<BpPaymentTreeDto> getTreeByWorkRecordId(Long workRecordId) {
+        assertWorkRecordAllowed(workRecordId);
         List<BpPayment> payments = bpPaymentMapper.selectByWorkRecordIdOrderByLayer(workRecordId);
         if (payments == null || payments.isEmpty()) {
             return new ArrayList<>();
@@ -89,6 +108,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     @Transactional
     public BpPayment addLayer(BpPayment bpPayment) {
         if (bpPayment.getWorkRecordId() != null) {
+            assertWorkRecordAllowed(bpPayment.getWorkRecordId());
             WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
             if (wr != null) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
@@ -130,6 +150,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         if (existing == null) {
             throw BusinessException.of("error.bpPayment.notFound");
         }
+        assertWorkRecordAllowed(existing.getWorkRecordId());
         if (existing.getWorkRecordId() != null) {
             WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
             if (wr != null) {
@@ -170,6 +191,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         if (existing == null) {
             throw BusinessException.of("error.bpPayment.notFound");
         }
+        assertWorkRecordAllowed(existing.getWorkRecordId());
         if (existing.getWorkRecordId() != null) {
             WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
             if (wr != null) {

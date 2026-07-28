@@ -98,7 +98,15 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public Invoice generate(Long customerId, String billingMonth) {
         dataScopeService.assertAllowedCustomer(customerId);
         checkClosing(billingMonth);
-        List<UnbilledWorkRecordDto> unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
+        LocalDate billingAsOf = com.ses.common.util.DateUtils.parseYearMonth(billingMonth).atDay(1);
+        List<UnbilledWorkRecordDto> unbilledList;
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            unbilledList = baseMapper.selectUnbilledWorkRecordsScoped(customerId, billingMonth, billingAsOf,
+                    new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(billingAsOf)),
+                    new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(billingAsOf)));
+        } else {
+            unbilledList = baseMapper.selectUnbilledWorkRecords(customerId, billingMonth);
+        }
         if (unbilledList == null || unbilledList.isEmpty()) {
             throw BusinessException.of("error.invoice.noWorkRecord");
         }

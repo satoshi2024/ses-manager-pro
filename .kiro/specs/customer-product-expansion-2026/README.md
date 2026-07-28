@@ -1,5 +1,9 @@
 # 顧客視点プロダクト拡張 2026 — 全体実装ロードマップ
 
+> 実装・Reviewの現行基線は `execution-review-handbook.md` v2.0である。S02のReview反復から得た再発防止は
+> `s02-review-retrospective.md` に記録する。2026-07-28以前のcopyable conversationも
+> `shared-standards.md`を介して本基線へ更新される。
+
 ## 1. 目的
 
 2026-07-26 の顧客視点レビューで採用された全提案を、別AIがそのまま実装へ移せる粒度へ分解した

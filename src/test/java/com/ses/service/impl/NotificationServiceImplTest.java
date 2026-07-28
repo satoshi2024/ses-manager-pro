@@ -87,7 +87,7 @@ class NotificationServiceImplTest {
 
     @Test
     void testPublish_Success() {
-        notificationService.publish("TYPE", "Title", "Msg", "Url", "Key");
+        notificationService.publish("SYSTEM", "Title", "Msg", "Url", "Key");
         verify(notificationMapper, times(1)).insert(any(Notification.class));
         verify(webhookNotifier, times(1)).notify(any(Notification.class));
     }
@@ -107,7 +107,7 @@ class NotificationServiceImplTest {
     @Test
     void testPublish_Duplicate() {
         doThrow(new DuplicateKeyException("Duplicate")).when(notificationMapper).insert(any(Notification.class));
-        assertDoesNotThrow(() -> notificationService.publish("TYPE", "Title", "Msg", "Url", "Key"));
+        assertDoesNotThrow(() -> notificationService.publish("SYSTEM", "Title", "Msg", "Url", "Key"));
         verify(webhookNotifier, never()).notify(any(Notification.class));
     }
 
