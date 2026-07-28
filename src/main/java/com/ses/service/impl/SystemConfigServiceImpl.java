@@ -167,15 +167,15 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         }
 
         SystemConfig existing = systemConfigMapper.selectById(key);
-        boolean hadCachedValue = cache.containsKey(key);
-        String previousCachedValue = cache.get(key);
         SystemConfig config = new SystemConfig(key, value, description);
         if (existing == null) {
             systemConfigMapper.insert(config);
         } else {
             systemConfigMapper.updateById(config);
         }
-        // キャッシュ更新 (トランザクションコミット後にのみ可視化し、ロールバック時は破棄)
+        // キャッシュ更新（トランザクションコミット後にのみ可視化する）。
+        // put前はキャッシュを書き換えていないため、rollbackで旧値を書き戻さない。
+        // 別トランザクションのcommit済み値をrollback callbackが上書きする競合を防ぐ。
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                 new org.springframework.transaction.support.TransactionSynchronization() {
@@ -188,16 +188,6 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                         }
                     }
 
-                    @Override
-                    public void afterCompletion(int status) {
-                        if (status != STATUS_COMMITTED) {
-                            if (hadCachedValue) {
-                                cache.put(key, previousCachedValue);
-                            } else {
-                                cache.remove(key);
-                            }
-                        }
-                    }
                 }
             );
         } else {

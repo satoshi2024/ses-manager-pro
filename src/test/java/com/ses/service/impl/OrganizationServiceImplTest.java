@@ -2,9 +2,14 @@ package com.ses.service.impl;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.OrganizationUnit;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountingHistory;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
+import com.ses.mapper.EngineerAccountingHistoryMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.ManagementBudgetService;
 import com.ses.service.CostCenterService;
@@ -42,6 +47,15 @@ class OrganizationServiceImplTest {
 
     @Autowired
     private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private UserOrganizationMapper userOrganizationMapper;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
+    private EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
 
     @Test
     void 親子登録と子孫取得ができる() {
@@ -198,6 +212,65 @@ class OrganizationServiceImplTest {
     }
 
     @Test
+    void 統合元の主所属と統合先の副所属を安全に主所属へ切り替える() {
+        OrganizationUnit source = organization("ORG-MERGE-PRIMARY-SRC", "主所属元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-PRIMARY-DST", "主所属先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(1)
+                .validFrom(today.minusDays(10)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(target.getId()).primaryFlag(0)
+                .validFrom(today.minusDays(10)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<UserOrganization> active = userOrganizationMapper.selectByUserForUpdate(userId).stream()
+                .filter(row -> row.getValidFrom() != null && !row.getValidFrom().isAfter(today)
+                        && (row.getValidTo() == null || !row.getValidTo().isBefore(today)))
+                .toList();
+        assertEquals(1, active.stream().filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag())).count());
+        assertEquals(target.getId(), active.stream().filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag()))
+                .findFirst().orElseThrow().getOrganizationId());
+    }
+
+    @Test
+    void 未来所属の前段が覆われた場合は統合元の原記録を残さず尾段だけを移す() {
+        OrganizationUnit source = organization("ORG-MERGE-PREFIX-SRC", "前段元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-PREFIX-DST", "前段先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(0)
+                .positionName("元属性").validFrom(today.plusDays(5)).validTo(today.plusDays(20)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(target.getId()).primaryFlag(0)
+                .positionName("先属性").validFrom(today.plusDays(5)).validTo(today.plusDays(10)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<UserOrganization> activeRows = userOrganizationMapper.selectByUserForUpdate(userId);
+        assertTrue(activeRows.stream().noneMatch(row -> source.getId().equals(row.getOrganizationId())),
+                "前段が覆われた未来のsource原記録を残してはいけない");
+        List<UserOrganization> targetRows = activeRows.stream()
+                .filter(row -> target.getId().equals(row.getOrganizationId())).toList();
+        assertEquals(2, targetRows.size());
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(5).equals(row.getValidFrom())
+                && today.plusDays(10).equals(row.getValidTo())));
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(11).equals(row.getValidFrom())
+                && today.plusDays(20).equals(row.getValidTo())));
+    }
+
+    @Test
     void 統合日開始の所属は昨日終了にせず同じ行を統合先へ更新する() {
         OrganizationUnit source = organization("ORG-MERGE-SAME-DAY-SRC", "同日元", null,
                 LocalDate.of(2026, 1, 1), null);
@@ -239,6 +312,37 @@ class OrganizationServiceImplTest {
         assertEquals(target.getId(), assignment.getOrganizationId());
         assertEquals(today.plusDays(5), assignment.getValidFrom());
         assertEquals(today.plusDays(20), assignment.getValidTo());
+    }
+
+    @Test
+    void 同日開始の会計履歴は昨日終了にせず組織を原地更新する() {
+        OrganizationUnit source = organization("ORG-MERGE-HISTORY-SRC", "履歴元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-HISTORY-DST", "履歴先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+
+        Engineer engineer = Engineer.builder()
+                .fullName("同日履歴要員").employmentType("正社員").status("Bench")
+                .organizationId(source.getId()).expectedUnitPrice(new BigDecimal("500000")).build();
+        engineerMapper.insert(engineer);
+        LocalDate today = LocalDate.now();
+        engineerAccountingHistoryMapper.insert(EngineerAccountingHistory.builder()
+                .engineerId(engineer.getId()).organizationId(source.getId())
+                .expectedUnitPrice(new BigDecimal("500000")).validFrom(today).validTo(null).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<EngineerAccountingHistory> histories = engineerAccountingHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerAccountingHistory>()
+                        .eq(EngineerAccountingHistory::getEngineerId, engineer.getId()));
+        assertEquals(1, histories.size());
+        assertEquals(target.getId(), histories.get(0).getOrganizationId());
+        assertEquals(today, histories.get(0).getValidFrom());
+        assertNull(histories.get(0).getValidTo());
+        assertTrue(histories.stream().allMatch(history -> history.getValidTo() == null
+                || !history.getValidFrom().isAfter(history.getValidTo())));
     }
 
     /** 退職・停止時に有効な所属が残ると、退職者が組織scopeと部門損益の帰属に居座り続ける。 */
