@@ -80,6 +80,34 @@ class NotificationOrganizationScopeTest {
                 user.getId(), null, null, 10, 0, true, List.of()).size());
     }
 
+    @Test
+    void NULL組織の業務通知は全組織へ配信せずSYSTEMだけを共通表示する() {
+        SysUser user = insertUser("notify-null-business");
+
+        Notification business = new Notification();
+        business.setType("INVOICE_OVERDUE");
+        business.setTitle("請求期限超過");
+        business.setDedupeKey("null-business");
+        business.setOrganizationId(null);
+        notificationMapper.insert(business);
+
+        Notification system = new Notification();
+        system.setType("SYSTEM");
+        system.setTitle("メンテナンス");
+        system.setDedupeKey("null-system");
+        system.setOrganizationId(null);
+        notificationMapper.insert(system);
+
+        List<NotificationDto> page = notificationMapper.selectPageForUserScoped(
+                user.getId(), null, null, 10, 0, false, List.of(200L));
+        assertEquals(1, page.size());
+        assertEquals(system.getId(), page.get(0).getId());
+        assertEquals(1, notificationMapper.countVisibleScoped(
+                system.getId(), user.getId(), false, List.of(200L)));
+        assertEquals(0, notificationMapper.countVisibleScoped(
+                business.getId(), user.getId(), false, List.of(200L)));
+    }
+
     private SysUser insertUser(String username) {
         SysUser user = new SysUser();
         user.setUsername(username);

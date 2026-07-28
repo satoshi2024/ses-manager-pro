@@ -70,6 +70,9 @@ public interface OrganizationScopeService {
     /** 組織所属契約から導出した案件ID。顧客単位の後フィルターには依存しない。 */
     Set<Long> allowedProjectIds(LocalDate asOf);
 
+    /** 組織所属の要員または案件から導出した提案ID。 */
+    Set<Long> allowedProposalIds(LocalDate asOf);
+
     List<OrganizationUnit> listVisibleOrganizations(Long legalEntityId, LocalDate asOf);
 
     long countVisibleOrganizations(Long legalEntityId, LocalDate asOf);

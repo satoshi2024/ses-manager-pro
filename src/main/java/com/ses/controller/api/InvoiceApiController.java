@@ -48,6 +48,9 @@ public class InvoiceApiController {
     private BpPaymentMapper bpPaymentMapper;
 
     @Autowired
+    private com.ses.service.BpPaymentService bpPaymentService;
+
+    @Autowired
     private ExcelExportService excelExportService;
 
     @Autowired
@@ -244,7 +247,27 @@ public class InvoiceApiController {
     @GetMapping("/bp-payments")
     public ApiResult<?> bpPaymentsList(@RequestParam(required = false) String month,
                                     @RequestParam(required = false) String status) {
-        List<BpPaymentListDto> list = bpPaymentMapper.selectListWithDetails(month, status);
+        List<BpPaymentListDto> list;
+        boolean organizationScoped = !organizationScopeService.hasFullAccess();
+        boolean dataScoped = dataScopeService.isScoped();
+        if (!organizationScoped && !dataScoped) {
+            list = bpPaymentMapper.selectListWithDetails(month, status);
+        } else {
+            java.util.List<Long> organizationIds = organizationScoped ? new java.util.ArrayList<>(
+                    organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now())) : null;
+            java.util.List<Long> directUserIds = organizationScoped ? new java.util.ArrayList<>(
+                    organizationScopeService.allowedDirectUserIds(java.time.LocalDate.now())) : null;
+            java.util.List<Long> contractIds = dataScopeService.isScoped()
+                    ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
+            if (contractIds != null && contractIds.isEmpty()) {
+                return ApiResult.success(List.of());
+            }
+            if (organizationScoped && organizationIds.isEmpty() && directUserIds.isEmpty()) {
+                return ApiResult.success(List.of());
+            }
+            list = bpPaymentMapper.selectListWithDetailsScoped(month, status, contractIds, organizationIds,
+                    directUserIds, java.time.LocalDate.now());
+        }
         return ApiResult.success(list);
     }
 
@@ -258,6 +281,7 @@ public class InvoiceApiController {
         // BP支払は請求書に紐づかない原価側データのため、請求書スコープ検証(assertInvoiceVisible)は
         // 誤り（BP支払IDを請求書IDとして扱ってしまう）。BP支払はメニュー権限で保護される管理業務であり、
         // データスコープ対象外のため請求書可視性検証は行わない（R3R-35）。
+        bpPaymentService.assertAllowed(id);
         invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
         return ApiResult.success(null);
     }

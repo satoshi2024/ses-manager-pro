@@ -118,7 +118,10 @@ public class NotificationGenerateService {
             long days = ChronoUnit.DAYS.between(inv.getDueDate(), today);
             String dedupeKey = "INVOICE_OVERDUE:" + inv.getId() + ":" + today;
             String message = "[\"notification.msg.INVOICE_OVERDUE\", \"" + inv.getInvoiceNo() + "\", \"" + customerName + "\", \"" + days + "日\"]";
-            notificationService.publishToUser(null, "INVOICE_OVERDUE", "支払期限超過", message, NotificationLinks.INVOICE, dedupeKey);
+            for (Long organizationId : invoiceMapper.selectOrganizationIdsByInvoiceId(inv.getId(), today)) {
+                notificationService.publishToOrganization(organizationId, "INVOICE_OVERDUE", "支払期限超過",
+                        message, NotificationLinks.INVOICE, dedupeKey + "#o" + organizationId);
+            }
         }
     }
 
@@ -195,7 +198,10 @@ public class NotificationGenerateService {
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
-            notificationService.publishToUser(null, "PROJECT_URGENT", "急募案件", message, NotificationLinks.PROJECT_LIST, dedupeKey);
+            for (Long organizationId : contractMapper.selectOrganizationIdsByProjectId(p.getId(), LocalDate.now())) {
+                notificationService.publishToOrganization(organizationId, "PROJECT_URGENT", "急募案件",
+                        message, NotificationLinks.PROJECT_LIST, dedupeKey + "#o" + organizationId);
+            }
         }
     }
 

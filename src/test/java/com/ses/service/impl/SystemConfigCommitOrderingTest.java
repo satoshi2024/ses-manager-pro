@@ -90,4 +90,39 @@ class SystemConfigCommitOrderingTest {
         assertEquals("B", systemConfigService.getString("company_name", ""),
                 "逆順callback後もcache missから最新DB値を読む");
     }
+
+    @Test
+    void cache失効callback実行中の読み取りはデフォルト値へフォールバックしない() throws Exception {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.executeWithoutResult(status -> systemConfigService.put("company_name", "Before", "会社名"));
+        assertEquals("Before", systemConfigService.getString("company_name", "DEFAULT"));
+
+        CountDownLatch callbackEntered = new CountDownLatch(1);
+        CountDownLatch releaseCallback = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            var transaction = executor.submit(() -> template.executeWithoutResult(status -> {
+                systemConfigService.put("company_name", "After", "会社名");
+                // service callbackの後に実行され、callback連鎖を一時停止する。
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        callbackEntered.countDown();
+                        assertTrue(await(releaseCallback));
+                    }
+                });
+            }));
+
+            assertTrue(await(callbackEntered));
+            var reader = executor.submit(() -> systemConfigService.getString("company_name", "DEFAULT"));
+            assertEquals("After", reader.get(10, TimeUnit.SECONDS),
+                    "cache失効の中間状態を外部へ公開せずDBの最新値を返す");
+
+            releaseCallback.countDown();
+            transaction.get(15, TimeUnit.SECONDS);
+        } finally {
+            releaseCallback.countDown();
+            executor.shutdownNow();
+        }
+    }
 }

@@ -429,13 +429,15 @@ class WorkRecordServiceImplTest {
         root.setParentPaymentId(null);
         root.setAmount(new BigDecimal("600000"));
         when(bpPaymentMapper.selectList(any())).thenReturn(Collections.singletonList(root));
+        when(contractMapper.selectOrganizationIdsByContractIds(anyList()))
+                .thenReturn(Collections.singletonList(1L));
 
         workRecordService.confirmMonth(workMonth);
 
         // 支払済は更新せず通知に留める。リンク先は /invoice(存在するページ)であること。
         verify(bpPaymentMapper, never()).update(any(), any());
-        verify(notificationService, times(1)).publish(
-                eq("BP_AMOUNT_MISMATCH"), any(), any(), eq("/invoice"), any());
+        verify(notificationService, times(1)).publishToOrganization(
+                eq(1L), eq("BP_AMOUNT_MISMATCH"), any(), any(), eq("/invoice"), any());
     }
 
     @Test
@@ -656,16 +658,16 @@ class WorkRecordServiceImplTest {
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
+        when(contractMapper.selectOrganizationIdsByContractIds(anyList())).thenReturn(java.util.List.of(1L));
         // R3R-10: 条件付きUPDATE(CAS)へ変更。update件数1で後続処理。
         when(workRecordMapper.update(isNull(), any())).thenReturn(1);
 
         workRecordService.submit(5L);
 
         verify(workRecordMapper).update(isNull(), any());
-        verify(notificationService).publish(
-                eq("TIMESHEET_SUBMITTED"), any(), any(), any(),
-                org.mockito.ArgumentMatchers.startsWith("timesheet-submitted-5-"),
-                eq("work-record"));
+        verify(notificationService).publishToOrganization(
+                eq(1L), eq("TIMESHEET_SUBMITTED"), any(), any(), any(),
+                org.mockito.ArgumentMatchers.startsWith("timesheet-submitted-5-"));
     }
 
     @Test

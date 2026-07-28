@@ -6,6 +6,7 @@ import com.ses.entity.BpPayment;
 import java.util.List;
 
 public interface BpPaymentService {
+    void assertAllowed(Long bpPaymentId);
     List<BpPaymentTreeDto> getTreeByWorkRecordId(Long workRecordId);
     BpPayment addLayer(BpPayment bpPayment);
     BpPayment updateLayer(Long id, BpPayment bpPayment);

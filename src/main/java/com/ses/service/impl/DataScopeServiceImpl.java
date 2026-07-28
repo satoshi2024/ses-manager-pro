@@ -15,6 +15,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -47,6 +48,7 @@ public class DataScopeServiceImpl implements DataScopeService {
     private final ProposalMapper proposalMapper;
     private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
+    private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
 
     /**
      * リクエスト単位のキャッシュ。リクエスト外では毎回新しい入れ物を返してキャッシュしない。
@@ -81,39 +83,70 @@ public class DataScopeServiceImpl implements DataScopeService {
 
     @Override
     public boolean isScoped() {
+        if (isOrganizationScoped()) {
+            return true;
+        }
         if (!"true".equalsIgnoreCase(systemConfigService.getString(CONFIG_KEY, "false"))) {
             return false;
         }
         return "営業".equals(SecurityUtils.currentRole());
     }
 
+    private boolean isOrganizationScoped() {
+        com.ses.service.security.OrganizationScopeService scope = organizationScopeServiceProvider == null
+                ? null : organizationScopeServiceProvider.getIfAvailable();
+        return scope != null && !scope.hasFullAccess();
+    }
+
+    private com.ses.service.security.OrganizationScopeService organizationScope() {
+        return organizationScopeServiceProvider == null ? null : organizationScopeServiceProvider.getIfAvailable();
+    }
+
     @Override
     public Set<Long> allowedEngineerIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedEngineerIds(java.time.LocalDate.now());
+        }
         return computeEngineerIds(SecurityUtils.currentUserId());
     }
 
     @Override
     public Set<Long> allowedContractIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedContractIds(java.time.LocalDate.now());
+        }
         return computeContractIds(SecurityUtils.currentUserId());
     }
 
     @Override
     public Set<Long> allowedProposalIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedProposalIds(java.time.LocalDate.now());
+        }
         return computeProposalIds(SecurityUtils.currentUserId());
     }
 
     @Override
     public Set<Long> allowedCustomerIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedCustomerIds(java.time.LocalDate.now());
+        }
         return computeCustomerIds(SecurityUtils.currentUserId());
     }
 
     @Override
     public Set<Long> allowedProjectIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedProjectIds(java.time.LocalDate.now());
+        }
         return computeProjectIds(SecurityUtils.currentUserId());
     }
 
     @Override
     public Set<Long> allowedOrganizationIds() {
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedOrganizationIds(java.time.LocalDate.now());
+        }
         if (!isScoped()) return Collections.emptySet();
         Set<Long> contracts = allowedContractIds();
         if (contracts.isEmpty()) return Collections.emptySet();

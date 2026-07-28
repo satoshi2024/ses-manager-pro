@@ -8,10 +8,10 @@ import java.time.LocalDate;
 /** 原価部門の登録・更新リクエスト。 */
 public record CostCenterSaveRequest(
         Long legalEntityId,
-        @NotBlank(message = "原価部門コードは必須です") String code,
-        @NotBlank(message = "原価部門名は必須です") String name,
+        @NotBlank(message = "{validation.costCenter.code.required}") String code,
+        @NotBlank(message = "{validation.costCenter.name.required}") String name,
         Long organizationId,
-        @NotNull(message = "有効開始日は必須です") LocalDate validFrom,
+        @NotNull(message = "{validation.organization.validFrom.required}") LocalDate validFrom,
         LocalDate validTo,
         String status,
         Integer version) {

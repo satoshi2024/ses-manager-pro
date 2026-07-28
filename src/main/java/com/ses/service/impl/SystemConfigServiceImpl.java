@@ -104,9 +104,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Override
     public String getString(String key, String defaultValue) {
-        ensureLoaded();
-        String v = cache.get(key);
-        return StringUtils.hasText(v) ? v : defaultValue;
+        synchronized (this) {
+            ensureLoaded();
+            String v = cache.get(key);
+            return StringUtils.hasText(v) ? v : defaultValue;
+        }
     }
 
     @Override
@@ -183,9 +185,12 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                     public void afterCommit() {
                         // commit順序が逆転しても旧callbackが新値を上書きしないよう、
                         // 値は次回DBから再読込させる。scope generationもcommit側で別管理される。
-                        // loadedも戻さないと、cache miss後にensureLoaded()がDBを再読込しない。
-                        cache.clear();
-                        loaded = false;
+                        // getString()と同じロック内で不可分に失効させ、空cache+loaded=trueの
+                        // 窓からscope.sales-own-data-onlyがfalseへfail-openしないようにする。
+                        synchronized (SystemConfigServiceImpl.this) {
+                            cache.clear();
+                            loaded = false;
+                        }
                     }
 
                 }

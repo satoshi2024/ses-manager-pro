@@ -4,8 +4,8 @@ import java.util.Set;
 
 /**
  * データスコープ（行レベル可視性）解決サービス。
- * 発動条件は「config scope.sales-own-data-only=true かつ 現在ユーザーが営業ロール」。
- * 管理者・マネージャー等は常に全件（isScoped=false）。
+ * 発動条件は「config scope.sales-own-data-only=true かつ 現在ユーザーが営業ロール」または
+ * 「組織scopeが有効なマネージャー」。管理者・一般ロールは既存の全件/DataScope規則を維持する。
  *
  * <p>適用パターンは2種に限定する（散在防止）:
  * <ul>
@@ -16,7 +16,7 @@ import java.util.Set;
  */
 public interface DataScopeService {
 
-    /** スコープ発動中か（config=true かつ 現在ユーザーが営業）。 */
+    /** スコープ発動中か（営業のDataScopeまたはマネージャーの組織scope）。 */
     boolean isScoped();
 
     /** 現任担当（t_engineer_sales.released_at IS NULL）の要員ID集合。 */

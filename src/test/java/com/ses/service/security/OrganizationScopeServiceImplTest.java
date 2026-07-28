@@ -40,6 +40,9 @@ class OrganizationScopeServiceImplTest {
     private OrganizationScopeService scopeService;
 
     @Autowired
+    private DataScopeService dataScopeService;
+
+    @Autowired
     private OrganizationService organizationService;
 
     @Autowired
@@ -207,6 +210,10 @@ class OrganizationScopeServiceImplTest {
         authenticate(manager);
         assertEquals(java.util.Set.of(ownEngineer.getId()),
                 scopeService.allowedEngineerIds(LocalDate.of(2026, 7, 1)));
+        assertTrue(dataScopeService.isScoped(), "マネージャーも既存DataScope入口を組織scopeで保護する");
+        assertEquals(java.util.Set.of(ownEngineer.getId()), dataScopeService.allowedEngineerIds());
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> dataScopeService.assertAllowedEngineer(otherEngineer.getId()));
     }
 
     @Test

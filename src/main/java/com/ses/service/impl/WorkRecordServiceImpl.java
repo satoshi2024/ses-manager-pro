@@ -424,7 +424,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             } else {
                 log.warn("支払済BP支払(id={})の金額 {} が最新の支払額 {} と不一致ですが、確定済みのため更新しません",
                         root.getId(), root.getAmount(), record.getPaymentAmount());
-                notificationService.publish(
+                publishToRecordOrganizations(record,
                         "BP_AMOUNT_MISMATCH",
                         "BP支払金額の不一致",
                         "[\"notification.msg.BP_AMOUNT_MISMATCH\", \"" + root.getId() + "\"]",
@@ -683,13 +683,28 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (updated != 1) {
             throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
-        notificationService.publish(
+        publishToRecordOrganizations(record,
                 "TIMESHEET_SUBMITTED",
                 "勤怠が提出されました",
                 "[\"notification.msg.TIMESHEET_SUBMITTED\", \"" + record.getWorkMonth() + "\"]",
                 NotificationLinks.WORK_RECORD,
-                "timesheet-submitted-" + record.getId() + "-" + System.currentTimeMillis(),
-                "work-record");
+                "timesheet-submitted-" + record.getId() + "-" + System.currentTimeMillis());
+    }
+
+    private void publishToRecordOrganizations(WorkRecord record, String type, String title, String message,
+                                              String linkUrl, String dedupeKey) {
+        if (record == null || record.getContractId() == null) {
+            return;
+        }
+        List<Long> organizationIds = contractMapper.selectOrganizationIdsByContractIds(
+                List.of(record.getContractId()));
+        if (organizationIds == null) {
+            return;
+        }
+        for (Long organizationId : organizationIds) {
+            notificationService.publishToOrganization(organizationId, type, title, message, linkUrl,
+                    dedupeKey + "#o" + organizationId);
+        }
     }
 
     @Override

@@ -18,4 +18,8 @@ public interface NotificationService {
     default void publishToUser(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         publishToUser(userId, type, title, message, linkUrl, dedupeKey);
     }
+
+    /** 組織固有の全体通知。organizationId=nullはプラットフォーム共通通知に限定する。 */
+    void publishToOrganization(Long organizationId, String type, String title, String message,
+                               String linkUrl, String dedupeKey);
 }

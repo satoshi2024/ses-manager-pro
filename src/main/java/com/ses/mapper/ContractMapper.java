@@ -75,6 +75,24 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("<script>SELECT DISTINCT project_id FROM t_contract WHERE deleted_flag = 0 AND project_id IS NOT NULL AND id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<Long> selectProjectIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids);
 
+    /** 案件に紐づく要員所属組織。組織通知の宛先解決に使用する。 */
+    @Select("""
+        <script>
+        SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id)
+        FROM t_contract c
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+        WHERE c.deleted_flag = 0 AND c.project_id = #{projectId}
+          AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
+        </script>
+        """)
+    List<Long> selectOrganizationIdsByProjectId(@org.apache.ibatis.annotations.Param("projectId") Long projectId,
+                                                 @org.apache.ibatis.annotations.Param("asOf") LocalDate asOf);
+
     /** 管理会計用。契約を所属組織の有効期間・primary所属でSQL絞り込みする。 */
     @Select("""
         <script>
