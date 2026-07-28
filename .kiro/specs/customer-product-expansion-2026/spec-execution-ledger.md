@@ -35,7 +35,7 @@
 | 16 | 3 | `jp-pint-digital-invoice` | T102〜T108 | `NOT READY` | accounting PASS、G5決定後S16 |  |  |  | R16 PASSでWave 3完了 |
 | 17 | 4 | `ai-feedback-learning` | T109〜T115 | `NOT READY` | CRM/proposal/staffing/outcome完了、G10方針後S17 |  |  |  | R17 PASSでroadmap完了 |
 
-## 2.1 第十六次レビュー修正の最新実績（2026-07-28）
+## 2.1 第十六次レビュー修正の最新実績（2026-07-28、上表のS02/S03行を更新する最新記録）
 
 S02のP1-1〜P1-4修正を作業ブランチで実装済み。定向50/50、全量874/0/0/1(font)、Node 1/0/0/0、Docker fresh/legacy/repair/concurrency/V62各0 skip、`git diff --check` exit 0。PR/merge後独立Reviewは未実施であり、desktop/390px Demoも未実施のまま本番前硬门禁として保持する。S03はS02のP1=0・merge後Review完了までNOT READYとする。
 
