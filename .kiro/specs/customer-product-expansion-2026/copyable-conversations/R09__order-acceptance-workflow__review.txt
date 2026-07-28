@@ -14,7 +14,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V67
+- Migration: V69
 - 先行条件: approval-workflow-internal-control完了・merge済み。
 - Decision gate: 承認状態機械と帳票archive interfaceが固定済み。
 - 期待するtask順: F1→F2→(A1 || B1)→B2→M

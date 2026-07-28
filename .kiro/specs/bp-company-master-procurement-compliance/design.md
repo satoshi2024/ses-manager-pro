@@ -1,6 +1,6 @@
 # Design — BP会社マスタ・発注コンプライアンス
 
-## 1. DDL（予約V64）
+## 1. DDL（予約V66）
 
 - `m_bp_company(id, tenant_id, legal_name, name_kana, entity_type, corporate_number,
   invoice_registration_number, capital_band, employee_band, address, representative, status,

@@ -1,6 +1,6 @@
 # Design — 会計・支払連携
 
-## 1. DDL（予約V73）
+## 1. DDL（予約V75）
 
 - `m_integration_connection(id, tenant_id, legal_entity_id, provider, product, external_company_id,
   encrypted_tokens, expires_at, status, version)`。既存`t_freee_connection`を段階移行。

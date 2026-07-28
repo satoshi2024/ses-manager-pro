@@ -21,10 +21,19 @@ public interface UserOrganizationMapper extends BaseMapper<UserOrganization> {
     @Select("SELECT organization_id FROM t_user_organization WHERE user_id = #{userId} AND primary_flag = 1 AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
     Long selectPrimaryOrganizationId(@Param("userId") Long userId, @Param("asOf") java.time.LocalDate asOf);
 
-    /** 組織統合で付け替える対象（終了していない所属）を行ロック付きで取得する。 */
-    @Select("SELECT * FROM t_user_organization WHERE organization_id = #{organizationId} AND valid_to IS NULL "
+    /**
+     * 組織統合で付け替える対象を行ロック付きで取得する。
+     *
+     * <p>{@code valid_to IS NULL}だけを対象にすると、期間限定（統合日以降に終了予定）の
+     * 現在有効な所属を取りこぼし、無効化された統合元組織に有効な所属だけが残ってしまう
+     * （第十三次Review P1-2）。統合日時点でまだ終了していない所属（無期限、または
+     * 終了日が統合日以降）を対象にする。
+     */
+    @Select("SELECT * FROM t_user_organization WHERE organization_id = #{organizationId} "
+            + "AND (valid_to IS NULL OR valid_to >= #{mergeDate}) "
             + "AND deleted_flag = 0 ORDER BY id FOR UPDATE")
-    List<UserOrganization> selectByUserOrganizationForUpdate(@Param("organizationId") Long organizationId);
+    List<UserOrganization> selectByUserOrganizationForUpdate(@Param("organizationId") Long organizationId,
+                                                              @Param("mergeDate") java.time.LocalDate mergeDate);
 
     /** 退職者を上長から外す。承認者不在の所属を残さないため。 */
     @org.apache.ibatis.annotations.Update(

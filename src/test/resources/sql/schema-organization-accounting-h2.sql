@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS t_organization_relation_history (
 CREATE TABLE IF NOT EXISTS t_engineer_accounting_history (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   engineer_id         BIGINT NOT NULL,
+  organization_id     BIGINT,
+  organization_history_status VARCHAR(20) NOT NULL DEFAULT 'KNOWN',
   cost_center_id      BIGINT,
   expected_unit_price DECIMAL(12,0),
   valid_from          DATE NOT NULL,

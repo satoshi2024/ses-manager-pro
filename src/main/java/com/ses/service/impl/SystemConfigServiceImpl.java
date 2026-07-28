@@ -167,6 +167,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         }
 
         SystemConfig existing = systemConfigMapper.selectById(key);
+        boolean hadCachedValue = cache.containsKey(key);
+        String previousCachedValue = cache.get(key);
         SystemConfig config = new SystemConfig(key, value, description);
         if (existing == null) {
             systemConfigMapper.insert(config);
@@ -189,7 +191,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                     @Override
                     public void afterCompletion(int status) {
                         if (status != STATUS_COMMITTED) {
-                            cache.remove(key);
+                            if (hadCachedValue) {
+                                cache.put(key, previousCachedValue);
+                            } else {
+                                cache.remove(key);
+                            }
                         }
                     }
                 }

@@ -10,6 +10,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -31,6 +32,10 @@ public class SystemConfigApiController {
 
     private final SystemConfigService systemConfigService;
 
+    /** scope設定変更時のDashboardキャッシュ世代更新。テストスライスでは未配置でも動作させる。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
+
     /** 全設定一覧（機微情報はマスキングして返す） */
     @GetMapping
     public ApiResult<List<SystemConfig>> list() {
@@ -48,6 +53,12 @@ public class SystemConfigApiController {
     @PutMapping
     @Transactional
     public ApiResult<Boolean> update(@RequestBody List<SystemConfig> configs) {
+        String previousScopeValue = systemConfigService.all().stream()
+                .filter(c -> "scope.sales-own-data-only".equals(c.getConfigKey()))
+                .map(SystemConfig::getConfigValue)
+                .findFirst()
+                .orElse(null);
+        String finalScopeValue = previousScopeValue;
         if (configs != null) {
             for (SystemConfig c : configs) {
                 if (SYSTEM_MANAGED_KEYS.contains(c.getConfigKey())) {
@@ -57,8 +68,15 @@ public class SystemConfigApiController {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;
                 }
+                if ("scope.sales-own-data-only".equals(c.getConfigKey())) {
+                    finalScopeValue = c.getConfigValue();
+                }
                 systemConfigService.put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
             }
+        }
+        if (!Objects.equals(previousScopeValue, finalScopeValue) && scopeChangeInvalidator != null) {
+            // ScopeChangeInvalidatorはトランザクションのafterCommitでのみ世代を進める。
+            scopeChangeInvalidator.invalidate();
         }
         return ApiResult.success(Boolean.TRUE);
     }

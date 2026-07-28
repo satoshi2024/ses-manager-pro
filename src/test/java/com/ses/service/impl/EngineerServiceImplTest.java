@@ -41,6 +41,9 @@ class EngineerServiceImplTest {
     @Mock
     private com.ses.mapper.SysUserMapper sysUserMapper;
 
+    @Mock
+    private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
+
     private EngineerServiceImpl service;
 
     @BeforeEach
@@ -48,6 +51,7 @@ class EngineerServiceImplTest {
         service = new EngineerServiceImpl(contractMapper, proposalMapper, engineerSalesService,
                 engineerAccountLinkService, sysUserMapper);
         ReflectionTestUtils.setField(service, "baseMapper", engineerMapper);
+        ReflectionTestUtils.setField(service, "scopeChangeInvalidator", scopeChangeInvalidator);
         // 削除ガードは通過する状態にする
         when(contractMapper.selectCount(any())).thenReturn(0L);
         when(proposalMapper.selectCount(any())).thenReturn(0L);
@@ -68,5 +72,41 @@ class EngineerServiceImplTest {
 
         assertFalse(service.removeById(1L));
         verify(engineerSalesService, never()).releaseAllByEngineerId(any());
+    }
+
+    /**
+     * 要員自身の所属組織（organizationId）はscope派生SQLの一次情報。変更後にDataScope世代を
+     * 進めないと、Dashboardキャッシュ経由でTTLが切れるまで旧scopeの母集団が返る
+     * （第十四次Review P1-3）。
+     */
+    @Test
+    void updateWithStatusGuard_所属組織変更時はscope世代を進める() {
+        Engineer old = Engineer.builder().fullName("要員A").organizationId(100L).build();
+        old.setId(1L);
+        when(engineerMapper.selectById(1L)).thenReturn(old);
+        when(engineerMapper.updateById(any(Engineer.class))).thenReturn(1);
+
+        Engineer changed = Engineer.builder().fullName("要員A").organizationId(200L).build();
+        changed.setId(1L);
+        when(engineerMapper.selectOne(any())).thenReturn(null);
+
+        service.updateWithStatusGuard(changed);
+
+        verify(scopeChangeInvalidator, times(1)).invalidate();
+    }
+
+    @Test
+    void updateWithStatusGuard_所属組織が変わらなければscope世代を進めない() {
+        Engineer old = Engineer.builder().fullName("要員A").organizationId(100L).build();
+        old.setId(1L);
+        when(engineerMapper.selectById(1L)).thenReturn(old);
+        when(engineerMapper.updateById(any(Engineer.class))).thenReturn(1);
+
+        Engineer unchanged = Engineer.builder().fullName("要員A").organizationId(100L).build();
+        unchanged.setId(1L);
+
+        service.updateWithStatusGuard(unchanged);
+
+        verify(scopeChangeInvalidator, never()).invalidate();
     }
 }

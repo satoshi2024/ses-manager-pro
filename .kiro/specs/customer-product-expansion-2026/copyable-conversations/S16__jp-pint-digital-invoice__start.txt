@@ -12,7 +12,7 @@
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V74
+- Migration: V76
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

@@ -21,9 +21,17 @@ class EngineerAccountLinkServiceImplTest {
 
     @Mock private EngineerAccountLinkMapper linkMapper;
     @Mock private SysUserMapper sysUserMapper;
+    @Mock private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
 
     @InjectMocks
     private EngineerAccountLinkServiceImpl service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        // @InjectMocksはコンストラクタ注入(linkMapper, sysUserMapper)が成功すると、
+        // @Autowired(required=false)の任意フィールドへは注入しないため明示的に設定する。
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "scopeChangeInvalidator", scopeChangeInvalidator);
+    }
 
     private SysUser user(String role) {
         SysUser u = new SysUser();
@@ -42,6 +50,9 @@ class EngineerAccountLinkServiceImplTest {
         EngineerAccountLink link = service.link(1L, 3L, 9L);
         assertEquals(1L, link.getEngineerId());
         assertEquals(3L, link.getSysUserId());
+        // 要員↔ログインアカウントの紐付けは組織scope解決に影響するため、DataScope世代を進める
+        // 必要がある（第十四次Review P1-3）。
+        verify(scopeChangeInvalidator).invalidate();
     }
 
     @Test
@@ -86,5 +97,6 @@ class EngineerAccountLinkServiceImplTest {
         when(linkMapper.deleteById(11L)).thenReturn(1);
         service.unlinkByEngineerId(1L);
         verify(linkMapper).deleteById(11L);
+        verify(scopeChangeInvalidator).invalidate();
     }
 }

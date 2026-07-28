@@ -12,6 +12,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
+import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,10 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     /** 会計属性の版を記録する。既存テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
+
+    /** DataScope invalidation。既存テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ScopeChangeInvalidator scopeChangeInvalidator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -90,6 +95,15 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         boolean updated = updateById(engineer);
         if (updated) {
             recordAccountingHistory(engineer.getId());
+            // 要員自身の所属組織（organizationId）はscope派生SQLの一次情報。変更後もTTLが切れる
+            // まで旧scopeの母集団が返らないよう進める（第十四次Review P1-3）。
+            // organizationIdはupdate-strategy:not_nullのため、リクエストがnullなら未変更のまま
+            // （old値が維持される）。nullの場合はここで比較する意味がないので対象から外す。
+            if (old != null && engineer.getOrganizationId() != null
+                    && !java.util.Objects.equals(old.getOrganizationId(), engineer.getOrganizationId())
+                    && scopeChangeInvalidator != null) {
+                scopeChangeInvalidator.invalidate();
+            }
         }
         return updated;
     }
@@ -123,6 +137,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         com.ses.entity.EngineerAccountingHistory currentRow =
                 engineerAccountingHistoryMapper.selectCurrent(engineerId);
         if (currentRow != null
+                && java.util.Objects.equals(currentRow.getOrganizationId(), saved.getOrganizationId())
                 && java.util.Objects.equals(currentRow.getCostCenterId(), saved.getCostCenterId())
                 && numericEquals(currentRow.getExpectedUnitPrice(), saved.getExpectedUnitPrice())) {
             return;
@@ -131,6 +146,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (currentRow != null) {
             if (!currentRow.getValidFrom().isBefore(today)) {
                 // 同日中の複数回変更は版を増やさず最後の値で上書きする。
+                currentRow.setOrganizationId(saved.getOrganizationId());
                 currentRow.setCostCenterId(saved.getCostCenterId());
                 currentRow.setExpectedUnitPrice(saved.getExpectedUnitPrice());
                 engineerAccountingHistoryMapper.updateById(currentRow);
@@ -140,6 +156,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         }
         engineerAccountingHistoryMapper.insert(com.ses.entity.EngineerAccountingHistory.builder()
                 .engineerId(engineerId)
+                .organizationId(saved.getOrganizationId())
                 .costCenterId(saved.getCostCenterId())
                 .expectedUnitPrice(saved.getExpectedUnitPrice())
                 .validFrom(today).validTo(null).build());

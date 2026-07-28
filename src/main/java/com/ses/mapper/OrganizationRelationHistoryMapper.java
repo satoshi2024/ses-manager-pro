@@ -19,11 +19,18 @@ public interface OrganizationRelationHistoryMapper extends BaseMapper<Organizati
      *
      * <p>履歴が1件も無い組織（V61適用前に作られ、backfillも走っていない異常系）は
      * 現在値へフォールバックする。ここで組織ごと落とすと過去月の部門損益が丸ごと消えるため。
+     *
+     * <p><b>{@code COALESCE} ではなく {@code CASE WHEN h.id IS NULL}</b> で判定する。
+     * 履歴行が見つかった（{@code h.id}が非NULL）のに、その版の{@code parent_id}が
+     * 「当時は正しくルート組織だった」ことを示す明示的なNULLである場合、{@code COALESCE}は
+     * 現在の{@code parent_id}へフォールバックしてしまい、統合前の日付を照会しても
+     * 統合後の親を返す（第十三次Review P1-1）。履歴の有無で分岐すれば、
+     * 見つかった版のNULLはそのままNULL（ルート）として扱われる。
      */
     @Select("""
         SELECT o.id AS organizationId,
-               COALESCE(h.parent_id, o.parent_id) AS parentId,
-               COALESCE(h.status, o.status) AS status
+               CASE WHEN h.id IS NULL THEN o.parent_id ELSE h.parent_id END AS parentId,
+               CASE WHEN h.id IS NULL THEN o.status ELSE h.status END AS status
         FROM m_organization_unit o
         LEFT JOIN t_organization_relation_history h
                ON h.organization_id = o.id

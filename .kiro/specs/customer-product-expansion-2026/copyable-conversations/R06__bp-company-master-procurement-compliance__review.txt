@@ -15,8 +15,8 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 1
-- Migration: V64
-- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV64→V65順にmerge。
+- Migration: V66
+- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV66→V67順にmerge。
 - Decision gate: G2の法務監修と対象法令・帳票項目が正式決定済み。
 - 期待するtask順: 0→F1→F2→(A1 || B1 || B2)→M
 

@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.Serializable;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,10 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     /** 親子・状態のasOf解決元。既存テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.OrganizationRelationHistoryMapper relationHistoryMapper;
+
+    /** 要員の会計属性履歴（所属組織・原価部門・想定単価の版）。既存テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
 
     /** 可視範囲の世代番号。既存テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -175,49 +180,97 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         }
         // 有効な所属は統合日で旧行を閉じ、統合先の新しい履歴行を作る。
         // 旧行のorganization_idを直接書き換えると、統合日前のas-of照会まで改変される。
-        for (UserOrganization assignment : userOrganizationMapper.selectByUserOrganizationForUpdate(organizationId)) {
-            if (assignment.getValidFrom() != null && assignment.getValidFrom().isBefore(today)) {
+        //
+        // 対象は「統合日時点でまだ終了していない」所属全部。valid_to IS NULL だけを対象にすると、
+        // 期間限定（valid_to が統合日以降）の現在有効な所属を取りこぼし、無効化された統合元組織に
+        // 有効な所属だけが残ってしまう（第十三次Review P1-2）。既に統合日より前に終了した所属は
+        // 対象外（過去の事実は動かさない）。
+        for (UserOrganization assignment : userOrganizationMapper
+                .selectByUserOrganizationForUpdate(organizationId, today)) {
+            // 元の終了日を保持し、統合先の既存所属で覆われた部分だけを差し引く。
+            // 「重複が1件でもあればcontinue」すると、部分重複の前後の所属期間を失う。
+            LocalDate originalFrom = assignment.getValidFrom();
+            LocalDate originalValidTo = assignment.getValidTo();
+            LocalDate relocationFrom = originalFrom.isBefore(today) ? today : originalFrom;
+            List<UserOrganization> userAssignments = userOrganizationMapper
+                    .selectByUserForUpdate(assignment.getUserId());
+            List<UserOrganization> targetAssignments = userAssignments.stream()
+                    .filter(existing -> !Objects.equals(existing.getId(), assignment.getId())
+                            && Objects.equals(existing.getOrganizationId(), targetOrganizationId)
+                            && overlaps(existing.getValidFrom(), existing.getValidTo(), relocationFrom, originalValidTo))
+                    .sorted(Comparator.comparing(UserOrganization::getValidFrom))
+                    .toList();
+
+            List<DateRange> uncovered = subtractCovered(relocationFrom, originalValidTo, targetAssignments);
+            for (UserOrganization targetAssignment : targetAssignments) {
+                if (isPrimary(assignment) && !isPrimary(targetAssignment)) {
+                    targetAssignment.setPrimaryFlag(1);
+                    if (userOrganizationMapper.updateById(targetAssignment) != 1) {
+                        throw BusinessException.of(409, "error.organization.versionConflict");
+                    }
+                }
+            }
+
+            if (originalFrom.isBefore(today)) {
+                // 過去部分は旧組織の事実として昨日で閉じる。
                 assignment.setValidTo(today.minusDays(1));
                 if (userOrganizationMapper.updateById(assignment) != 1) {
                     throw BusinessException.of(409, "error.organization.versionConflict");
                 }
-                UserOrganization targetExisting = userOrganizationMapper.selectByUserForUpdate(assignment.getUserId()).stream()
-                        .filter(existing -> Objects.equals(existing.getOrganizationId(), targetOrganizationId)
-                                && overlaps(existing.getValidFrom(), existing.getValidTo(), today, null))
-                        .findFirst().orElse(null);
-                if (targetExisting != null) {
-                    // 既存の統合先所属がある場合は同日重複行を作らず、主所属だけ必要なら昇格する。
-                    if (isPrimary(assignment) && !isPrimary(targetExisting)) {
-                        targetExisting.setPrimaryFlag(1);
-                        if (userOrganizationMapper.updateById(targetExisting) != 1) {
-                            throw BusinessException.of(409, "error.organization.versionConflict");
-                        }
-                    }
-                    continue;
+            } else if (uncovered.isEmpty()) {
+                // 開始日が統合日以後で全期間が統合先に覆われる場合は冗長行を論理削除する。
+                if (userOrganizationMapper.deleteById(assignment.getId()) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
                 }
+            }
+
+            if (!uncovered.isEmpty() && !originalFrom.isBefore(today)
+                    && uncovered.get(0).from().equals(relocationFrom)) {
+                // 同日開始を含む未開始行は、逆向きの valid_to を作らず既存行を原地更新する。
+                DateRange first = uncovered.remove(0);
+                assignment.setOrganizationId(targetOrganizationId);
+                assignment.setValidFrom(first.from());
+                assignment.setValidTo(first.to());
+                if (userOrganizationMapper.updateById(assignment) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+            }
+            for (DateRange range : uncovered) {
                 UserOrganization successor = new UserOrganization();
                 successor.setUserId(assignment.getUserId());
                 successor.setOrganizationId(targetOrganizationId);
                 successor.setPositionName(assignment.getPositionName());
                 successor.setManagerUserId(assignment.getManagerUserId());
                 successor.setPrimaryFlag(assignment.getPrimaryFlag());
-                successor.setValidFrom(today);
-                successor.setValidTo(null);
+                successor.setValidFrom(range.from());
+                successor.setValidTo(range.to());
                 successor.setVersion(0);
                 if (userOrganizationMapper.insert(successor) != 1) {
                     throw BusinessException.of("error.organization.assignment.saveFailed");
-                }
-            } else {
-                // まだ開始していない未来行は歴史を持たないため統合先へ移す。
-                assignment.setOrganizationId(targetOrganizationId);
-                if (userOrganizationMapper.updateById(assignment) != 1) {
-                    throw BusinessException.of(409, "error.organization.versionConflict");
                 }
             }
         }
         // 要員の所属組織も付け替える。
         if (engineerMapper != null) {
             engineerMapper.reassignOrganization(organizationId, targetOrganizationId);
+        }
+        // 要員の会計属性履歴（V62）も同じ統合日から新しい所属組織を記録する。
+        // t_engineer.organization_id だけを書き換えると、統合日より前の日付でBench待機原価を
+        // 照会したときに統合後の組織へ焼き付いてしまう（現行版だけを閉じて新版を作る）。
+        if (engineerAccountingHistoryMapper != null) {
+            List<com.ses.entity.EngineerAccountingHistory> currentHistories =
+                    engineerAccountingHistoryMapper.selectCurrentByOrganizationId(organizationId);
+            if (!currentHistories.isEmpty()) {
+                engineerAccountingHistoryMapper.closeCurrentByOrganizationId(organizationId, today.minusDays(1));
+                for (com.ses.entity.EngineerAccountingHistory history : currentHistories) {
+                    engineerAccountingHistoryMapper.insert(com.ses.entity.EngineerAccountingHistory.builder()
+                            .engineerId(history.getEngineerId())
+                            .organizationId(targetOrganizationId)
+                            .costCenterId(history.getCostCenterId())
+                            .expectedUnitPrice(history.getExpectedUnitPrice())
+                            .validFrom(today).validTo(null).build());
+                }
+            }
         }
         // 原価部門は組織にぶら下がるマスタなので全件付け替える。
         for (CostCenter center : costCenterMapper.selectList(new LambdaQueryWrapper<CostCenter>()
@@ -267,7 +320,8 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     @Override
     public List<OrganizationUnit> listTree(Long legalEntityId, LocalDate asOf) {
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
-        Map<Long, OrganizationRelationHistory> relations = relationsAsOf(date);
+        Map<Long, OrganizationRelationHistory> relations = com.ses.service.security.OrganizationRelationResolver
+                .asOfMap(relationHistoryMapper, date);
         return list(new LambdaQueryWrapper<OrganizationUnit>()
                 .eq(legalEntityId != null, OrganizationUnit::getLegalEntityId, legalEntityId)
                 .le(OrganizationUnit::getValidFrom, date)
@@ -276,10 +330,12 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                 .orderByAsc(OrganizationUnit::getParentId)
                 .orderByAsc(OrganizationUnit::getCode))
                 .stream()
-                .filter(unit -> "有効".equals(statusAsOf(relations, unit)))
+                .filter(unit -> "有効".equals(
+                        com.ses.service.security.OrganizationRelationResolver.status(relations, unit)))
                 // 呼び出し側（画面・API）は parentId をツリー組み立てに使うため、
                 // 現在値ではなく指定日時点の親を載せて返す。
-                .peek(unit -> unit.setParentId(parentAsOf(relations, unit)))
+                .peek(unit -> unit.setParentId(
+                        com.ses.service.security.OrganizationRelationResolver.parentId(relations, unit)))
                 .toList();
     }
 
@@ -289,13 +345,15 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             return List.of();
         }
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
-        Map<Long, OrganizationRelationHistory> relations = relationsAsOf(date);
+        Map<Long, OrganizationRelationHistory> relations = com.ses.service.security.OrganizationRelationResolver
+                .asOfMap(relationHistoryMapper, date);
         List<OrganizationUnit> units = list(new LambdaQueryWrapper<OrganizationUnit>()
                 .le(OrganizationUnit::getValidFrom, date)
                 .and(w -> w.isNull(OrganizationUnit::getValidTo)
                         .or().ge(OrganizationUnit::getValidTo, date)))
                 .stream()
-                .filter(unit -> "有効".equals(statusAsOf(relations, unit)))
+                .filter(unit -> "有効".equals(
+                        com.ses.service.security.OrganizationRelationResolver.status(relations, unit)))
                 .toList();
         Set<Long> result = new HashSet<>();
         result.add(organizationId);
@@ -303,37 +361,13 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         do {
             changed = false;
             for (OrganizationUnit unit : units) {
-                Long parentId = parentAsOf(relations, unit);
+                Long parentId = com.ses.service.security.OrganizationRelationResolver.parentId(relations, unit);
                 if (unit.getId() != null && parentId != null && result.contains(parentId)) {
                     changed |= result.add(unit.getId());
                 }
             }
         } while (changed);
         return new ArrayList<>(result);
-    }
-
-    /** 指定日時点の親子・状態を組織IDごとに引ける形で取得する。 */
-    private Map<Long, OrganizationRelationHistory> relationsAsOf(LocalDate asOf) {
-        if (relationHistoryMapper == null) {
-            return Map.of();
-        }
-        Map<Long, OrganizationRelationHistory> map = new java.util.HashMap<>();
-        for (OrganizationRelationHistory row : relationHistoryMapper.selectAsOf(asOf)) {
-            if (row.getOrganizationId() != null) {
-                map.put(row.getOrganizationId(), row);
-            }
-        }
-        return map;
-    }
-
-    private Long parentAsOf(Map<Long, OrganizationRelationHistory> relations, OrganizationUnit unit) {
-        OrganizationRelationHistory row = relations.get(unit.getId());
-        return row == null ? unit.getParentId() : row.getParentId();
-    }
-
-    private String statusAsOf(Map<Long, OrganizationRelationHistory> relations, OrganizationUnit unit) {
-        OrganizationRelationHistory row = relations.get(unit.getId());
-        return row == null || row.getStatus() == null ? unit.getStatus() : row.getStatus();
     }
 
     /**
@@ -756,6 +790,38 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
 
     private boolean isPrimary(UserOrganization assignment) {
         return Integer.valueOf(1).equals(assignment.getPrimaryFlag());
+    }
+
+    /** 統合元の残存期間から、統合先の既存所属期間を引いた未被覆区間。 */
+    private List<DateRange> subtractCovered(LocalDate from, LocalDate to,
+                                            List<UserOrganization> coveredAssignments) {
+        List<DateRange> result = new ArrayList<>();
+        LocalDate cursor = from;
+        LocalDate end = to == null ? LocalDate.MAX : to;
+        for (UserOrganization covered : coveredAssignments) {
+            LocalDate coveredFrom = covered.getValidFrom().isBefore(from) ? from : covered.getValidFrom();
+            LocalDate coveredTo = covered.getValidTo() == null || covered.getValidTo().isAfter(end)
+                    ? end : covered.getValidTo();
+            if (cursor.isBefore(coveredFrom)) {
+                result.add(new DateRange(cursor, coveredFrom.minusDays(1)));
+            }
+            if (!cursor.isAfter(coveredTo)) {
+                if (coveredTo.equals(end)) {
+                    return result;
+                }
+                cursor = coveredTo.plusDays(1);
+            }
+            if (cursor.isAfter(end)) {
+                return result;
+            }
+        }
+        if (!cursor.isAfter(end)) {
+            result.add(new DateRange(cursor, to));
+        }
+        return result;
+    }
+
+    private record DateRange(LocalDate from, LocalDate to) {
     }
 
     /**

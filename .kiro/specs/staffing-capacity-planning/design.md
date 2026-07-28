@@ -1,6 +1,6 @@
 # Design — 要員配置・需給計画
 
-## 1. DDL（予約V70）
+## 1. DDL（予約V72）
 
 - `t_project_position(id, project_id, position_no, role_name, required_count, skills_json,
   unit_price_min/max, start/end_date, location, allocation_percent, priority, status, version)`。

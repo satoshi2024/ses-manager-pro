@@ -13,6 +13,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerStatusService;
+import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
     private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
     private final com.ses.service.AuditLogService auditLogService;
+
+    /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ScopeChangeInvalidator scopeChangeInvalidator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -162,6 +167,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if ("稼動中".equals(contract.getStatus())) {
             engineerStatusService.onContractActive(contract.getEngineerId());
         }
+        // 新規契約の担当営業もDataScopeの母集団を変える（第十四次Review P1-3）。
+        if (contract.getSalesUserId() != null) {
+            invalidateScope();
+        }
 
         return checkComplianceAndRecord(contract, "POST");
     }
@@ -203,7 +212,20 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             engineerStatusService.releaseIfIdle(newEngineerId);
         }
 
+        // 担当営業(salesUserId)の変更はDataScope（担当契約/担当顧客の母集団）を変える。
+        // 進めないと、変更直後もDashboardキャッシュのTTLが切れるまで旧担当のscopeで集計される
+        // （第十四次Review P1-3）。
+        if (!Objects.equals(old.getSalesUserId(), contract.getSalesUserId())) {
+            invalidateScope();
+        }
+
         return checkComplianceAndRecord(contract, "PUT");
+    }
+
+    private void invalidateScope() {
+        if (scopeChangeInvalidator != null) {
+            scopeChangeInvalidator.invalidate();
+        }
     }
 
     /**

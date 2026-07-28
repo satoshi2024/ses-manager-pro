@@ -1,6 +1,6 @@
 # Design — 注文・注文請・月次検収
 
-## 1. DDL（予約V67）
+## 1. DDL（予約V69）
 
 - `t_sales_order(id, tenant_id, legal_entity_id, order_no, customer_po_no, customer_id, contact_id,
   quotation_id, order_date, start/end_date, status, total_amount_snapshot, payment_terms_snapshot,

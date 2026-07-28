@@ -192,6 +192,8 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_organization_relation_history", "valid_from");
             assertColumnExists(st, "t_engineer_accounting_history", "cost_center_id");
             assertColumnExists(st, "t_engineer_accounting_history", "expected_unit_price");
+            assertColumnExists(st, "t_engineer_accounting_history", "organization_id");
+            assertColumnExists(st, "t_engineer_accounting_history", "organization_history_status");
             assertColumnExists(st, "t_engineer_accounting_history", "valid_from");
             // LEGACY組織はV60で作られるので、V61のbackfillで履歴の初版も必ず生まれる。
             assertRowExists(st, "SELECT 1 FROM t_organization_relation_history h "

@@ -1,6 +1,6 @@
 # Design — JP PINTデジタルインボイス
 
-## 1. DDL（予約V74）
+## 1. DDL（予約V76）
 
 - `t_peppol_participant(owner_type/id, scheme_id, participant_id, provider, verified_at, status)`。
 - `t_digital_invoice(id, invoice_id NULL, direction, profile, specification_version, message_id,

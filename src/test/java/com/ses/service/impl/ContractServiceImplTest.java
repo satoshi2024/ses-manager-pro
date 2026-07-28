@@ -54,6 +54,9 @@ class ContractServiceImplTest {
     @Mock
     private com.ses.service.AuditLogService auditLogService;
 
+    @Mock
+    private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
+
     @InjectMocks
     private ContractServiceImpl contractService;
 
@@ -61,6 +64,10 @@ class ContractServiceImplTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         org.springframework.test.util.ReflectionTestUtils.setField(contractService, "baseMapper", contractMapper);
+        // Mockitoの@InjectMocksはコンストラクタ注入が成功すると、非final(任意注入)フィールドへの
+        // フィールド注入を行わない。@Autowired(required=false)のscopeChangeInvalidatorは
+        // 明示的に注入する必要がある。
+        org.springframework.test.util.ReflectionTestUtils.setField(contractService, "scopeChangeInvalidator", scopeChangeInvalidator);
     }
 
     @Test
@@ -779,5 +786,48 @@ class ContractServiceImplTest {
                 () -> contractService.updateRenewalDecision(1L, "UNKNOWN"));
         assertEquals(400, ex.getCode());
         verify(contractMapper, never()).update(any(), any());
+    }
+
+    // ===== DataScope invalidation（第十四次Review P1-3） =====
+
+    /**
+     * 担当営業(salesUserId)の変更はDataScope（担当契約/担当顧客の母集団）を変える。
+     * 変更しない更新でinvalidateすると無駄な再計算コストがかかるため、変更時だけ呼ぶことも固定する。
+     */
+    @Test
+    void updateWithBusinessRules_担当営業変更時のみscope世代を進める() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setSalesUserId(10L);
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+
+        Contract sameSalesUser = new Contract();
+        sameSalesUser.setId(1L);
+        sameSalesUser.setSalesUserId(10L);
+        contractService.updateWithBusinessRules(sameSalesUser);
+        verify(scopeChangeInvalidator, never()).invalidate();
+
+        Contract changedSalesUser = new Contract();
+        changedSalesUser.setId(1L);
+        changedSalesUser.setSalesUserId(20L);
+        when(engineerSalesService.isActiveSalesUser(20L)).thenReturn(true);
+        contractService.updateWithBusinessRules(changedSalesUser);
+        verify(scopeChangeInvalidator, times(1)).invalidate();
+    }
+
+    @Test
+    void saveWithBusinessRules_新規契約の担当営業もscope世代を進める() {
+        Contract contract = new Contract();
+        contract.setStartDate(LocalDate.of(2026, 7, 1));
+        contract.setSalesUserId(30L);
+        when(engineerSalesService.isActiveSalesUser(30L)).thenReturn(true);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(contract)).thenReturn(1);
+
+        contractService.saveWithBusinessRules(contract);
+
+        verify(scopeChangeInvalidator, times(1)).invalidate();
     }
 }

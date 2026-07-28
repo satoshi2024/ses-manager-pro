@@ -16,7 +16,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V73
+- Migration: V75
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 - 期待するtask順: 0→F1→F2→(A1 || B1 || B2)→B3→M

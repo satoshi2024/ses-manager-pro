@@ -14,7 +14,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 0
-- Migration: V63
+- Migration: V65
 - 先行条件: legal-document-ledger-archive完了・merge済み。
 - Decision gate: blocking decisionなし。共通検索・scope・大量処理標準を確認。
 - 期待するtask順: F1→(A1 || A2 || B1 || B2)→M

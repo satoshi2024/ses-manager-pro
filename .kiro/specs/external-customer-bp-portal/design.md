@@ -1,6 +1,6 @@
 # Design — 顧客・BP外部ポータル
 
-## 1. DDL（予約V71）
+## 1. DDL（予約V73）
 
 - `m_portal_organization(id, tenant_id, type CUSTOMER/BP, customer_id, bp_company_id, status)`。
 - `t_portal_user(id, portal_org_id, email, display_name, status, mfa_policy, last_login_at, version)`。

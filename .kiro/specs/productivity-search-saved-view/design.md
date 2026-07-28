@@ -1,6 +1,6 @@
 # Design — 横断検索・実ToDo・保存ビュー・一括操作
 
-## 1. DDL（予約V63）
+## 1. DDL（予約V65）
 
 - `t_task(id, tenant_id, title, description, assignee_user_id, requester_user_id, due_date, priority,
   status, target_type, target_id, completed_at, version, timestamps)`。

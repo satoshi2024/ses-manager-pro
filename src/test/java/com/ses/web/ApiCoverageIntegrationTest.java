@@ -82,6 +82,32 @@ class ApiCoverageIntegrationTest extends BaseIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    /**
+     * customer/project autocompleteは既存<datalist>と契約(会社名/案件名の文字列配列)を共有している。
+     * <select>系フォーム(管理会計フィルター等)にはID付きの専用エンドポイントが要る
+     * （第十四次Review P1-6: 文字列配列を<select>のvalueへ渡すと option value="undefined" になる）。
+     */
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void testCustomerAndProjectOptionApi() throws Exception {
+        mockMvc.perform(get("/api/autocomplete/customer-options"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(200));
+
+        mockMvc.perform(get("/api/autocomplete/project-options"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(200));
+    }
+
+    /** 法人フィルターはID直打ちではなくoption選択式にする（第十四次Review P2-1）。 */
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void testLegalEntityOptionApi() throws Exception {
+        mockMvc.perform(get("/api/autocomplete/legal-entities"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(200));
+    }
+
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void testInvoiceApi() throws Exception {

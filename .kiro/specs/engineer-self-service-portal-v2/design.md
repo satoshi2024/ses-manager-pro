@@ -1,6 +1,6 @@
 # Design — 要員セルフサービスポータルV2
 
-## 1. DDL（予約V72）
+## 1. DDL（予約V74）
 
 - `t_engineer_change_request(id, engineer_id, request_type, payload_json, diff_json, status,
   approval_request_id, applied_at, version)`。

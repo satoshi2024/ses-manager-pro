@@ -53,6 +53,8 @@ class UserApiControllerTest {
     private EngineerAccountLinkService engineerAccountLinkService;
     @MockBean
     private OrganizationService organizationService;
+    @MockBean
+    private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
 
     @Test
     @WithMockUser
@@ -210,6 +212,32 @@ class UserApiControllerTest {
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    /**
+     * ロール変更はDataScope（営業のisScoped()判定）・組織scopeの分岐（部門責任者/一般ユーザー）を
+     * 変える。進めないと変更直後もDashboardキャッシュのTTLが切れるまで旧ロールの母集団で
+     * 集計される（第十四次Review P1-3）。
+     */
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void update_ロール変更時はscope世代を進める() throws Exception {
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
+        when(sysUserService.getOne(any())).thenReturn(null);
+        SysUser old = SysUser.builder().username("hruser1").role("HR").build();
+        old.setId(5L);
+        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserService.updateById(any())).thenReturn(true);
+
+        SysUser body = SysUser.builder().username("hruser1").role("マネージャー").build();
+        body.setId(5L);
+        mockMvc.perform(put("/api/users/5").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(scopeChangeInvalidator, org.mockito.Mockito.times(1)).invalidate();
     }
 
     @Test

@@ -461,3 +461,85 @@ P0/P1が4件顕在化した。** いずれも修正・回帰テスト済み。
 - P1-1〜P1-6、P2-1: いずれも修正・回帰テスト追加済み。
 - Spec全体の最終判定と`enterprise-identity-security`の開始可否は、次の独立Reviewの結果による。
   本記録は「指摘へ対応した」ことの記録であって、PASSの自己宣言ではない。
+
+## 第十四次独立Review（2026-07-27、T008〜T013）
+
+Base `add488c`（HEAD, origin/main） / 対象: 未commit working tree diff（75ファイル、673 insertions / 217 deletions）。
+第十三次Review指摘（P1×6/P2×1）への対応を独立semantic reviewで検証した。
+
+### 事前準備（本Round）
+
+- 本機にNode.js v24.18.0 + npm 11.16.0をwinget経由で導入し、Docker Desktopの稼働を確認した。
+- V61（第十三次で追加した`t_organization_relation_history`/`t_engineer_accounting_history`）に続けて
+  **V62** を新設し、`t_engineer_accounting_history.organization_id`をbackfillした上で
+  Bench SQLの帰属解決順を「要員自身の`organization_id`優先→account link後方fallback」へ修正（design.md準拠）。
+- これに伴い、`enterprise-identity-security`以降15 specのmigration予約番号をV61→V63以降へ順次繰り上げた
+  （design.md 15件、README.md予約表、parallel-execution-plan.md、spec-start/review-conversations.md、
+  task-start-conversations.md、copyable-conversations/ S03〜S17・R03〜R17、gate-0-readiness-report.mdを同期。
+  Java/SQL実装コードへの影響なし）。
+
+### 第十三次指摘7件への対応と検証結果
+
+| # | 修正内容 | 検証結果 | 判定 |
+|---|---|---|---|
+| P1-1 | `OrganizationRelationHistoryMapper.selectAsOf`をCOALESCE→CASE WHEN h.id IS NULLへ。共通`OrganizationRelationResolver`で`OrganizationServiceImpl`と`OrganizationScopeServiceImpl`のas-of解決を統一。`visibleQuery`のstatus='有効'をSQLからJava側履歴解決後フィルタへ変更 | コード確認・ロジック正確。境界ケース（履歴行はあるがparent_idが明示NULL）の直接mapper単体テストはやや薄いが実害なし | PASS |
+| P1-2 | `UserOrganizationMapper.selectByUserOrganizationForUpdate`にmergeDateパラメータ追加（valid_to IS NULL OR valid_to >= mergeDate）。`OrganizationServiceImpl.merge`でoriginalValidToをsuccessorへ保持 | コード確認・ロジック正確。期間限定所属の専用回帰テストはやや薄いが実害なし | PASS |
+| P1-3 | 新設`ScopeChangeInvalidator`をEngineerSales(assign/setPrimary/release/releaseAll)、Contract(salesUserId変更save/update)、EngineerAccountLink(link/unlink)、Engineer(organizationId変更updateWithStatusGuard)、UserApiController(role変更)へ配線 | 全5箇所への配線を確認。`@Autowired(required=false)`は`ReflectionTestUtils.setField`で明示注入されテスト済み。verify(times)/verify(never)双方向テストあり | PASS |
+| P1-4 | 新migration V62でt_engineer_accounting_history.organization_id追加+backfill。EngineerMapperのBench SQL2本の解決順を「要員自身優先→account link後方fallback」へ修正 | Docker実MySQL（空DB・legacy両方）でV62適用・backfill確認済み。解決順修正も両SQLで確認 | PASS |
+| P1-5 | CASE WHEN eh.id IS NULLで、履歴行が見つかったが値が明示NULLのケースを誤fallbackしない | H2実行テストで「異なる原価部門/単価」「履歴なし要員のfallback」を確認。最も厳密な境界（一部フィールドのみ明示NULL）は間接検証のみ | PASS |
+| P1-6 | AutocompleteApiControllerに`/customer-options`,`/project-options`,`/legal-entities`新設(id+name DTO)。既存`/customers`/`/projects`文字列datalist契約は変更なし | 新規4テストでDTO契約とscope外0件を確認。既存エンドポイントの契約破壊なし | PASS |
+| P2-1 | management-accounting.js/index.htmlの法人フィルターをinput(number)→select化 | diff範囲は`accountingLegalEntityId`のみで正確 | PASS |
+
+### 軽微な指摘（P2、ブロッカーではない）
+
+1. 待機原価集計SQL（`selectAccountingWaitCost`、組織横断summary用）はMockito差し替えのみで検証され、
+   実SQL自体はsnapshot用の`selectAccountingWaitCostByEngineer`側のH2テストでのみ間接的に裏付けられている。
+2. `OrganizationServiceImpl.merge`時の要員会計履歴付け替え（`t_engineer_accounting_history`の新版作成・旧版close）
+   に専用アサーションがない（`t_engineer.organization_id`側は既存テストでカバー）。
+3. `EngineerSalesServiceImplTest`に未使用の`scopeVersionRegistry`フィールドが残存（リンター指摘レベル、実害なし）。
+
+### migration予約番号の文書同期の完全性
+
+**完全**。independent reviewerによるgrep検証で、15件のdesign.md（V63〜V77）、README.md予約表、
+copyable-conversations/ S03〜S17・R03〜R17が全て一致し、重複・欠落なし。`gate-0-readiness-report.md`は
+過去の記録（V58時点作成、V60〜V75計画値）を時系列として保持しつつ、現在の正はREADME.mdであることを
+明記する形で訂正した（履歴改変ではない）。Java/SQL実装コードには一切影響がないことも確認された。
+
+### 検証された実測値
+
+- `mvn clean test`: **862 tests / Failures 0 / Errors 0 / Skipped 1**（`QuotationPdfServiceImplTest`、
+  既存無関係のフォント環境依存skip）、BUILD SUCCESS。independent reviewerが本環境で再実行して確認。
+- Docker MySQL smoke: `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、
+  `FlywayRepairRunbookTest`、`ConcurrentUpdateTest` の4件、**0 skipped、全て成功**。実MySQL 8で確認。
+- `JsSyntaxCheckTest`: 0 skippedで成功（Node.js v24.18.0導入済み）。
+- `git diff --check`: exit 0（LF→CRLF警告のみ、実質問題なし）。
+
+### 未検証環境・条件
+
+- desktop/390px 実ブラウザ一気通貫Demo: 未実施（本環境はアプリ常駐用MySQLを持てないため）。
+  第十二次Review以降継続する既知の残課題であり、今回のP1×6/P2×1修正の対象ではない。S03と並行して
+  本番リリース前に消化する。
+
+### 判定
+
+- T008 F1〜T013 M: 第十三次指摘7件は全件根本修正（回避的パッチではない）と確認。
+- **Spec全体: PASS**。
+- **`enterprise-identity-security`(S03): 開始可（NOT READY解除の可否について、ユーザー確認待ち）**。
+  organization-management-accountingはT008〜T013全てPASS、Docker MySQL smoke・Node syntax smoke・
+  全量mvn testを本Roundで実機確認済み。残る実ブラウザDemoはS03と並行して本番リリース前に消化する
+  残課題として記録し、S03開始のブロッカーとはしない。
+
+### 転記用結論文
+
+> 第十四次独立Review（Base `add488c`, 未commit working tree diff, 75ファイル/673+/217-）: 第十三次指摘の
+> P1×6/P2×1は全件、根本原因（現在値と履歴値の混同によるNULL誤fallback、期間限定所属の取りこぼし、
+> DataScope変更の伝播漏れ、要員の所属組織帰属順序の誤り、autocomplete契約の不一致、法人フィルタのUX）
+> に対応する修正であることをコード読解・実機テストの両方で確認した。`mvn clean test`は862 tests/0 failures/
+> 0 errors/1 skipped（font依存の既知skip）、Docker実MySQL 8でのFlywayMigrationSmokeTest/
+> FlywayLegacyV60MigrationSmokeTest/FlywayRepairRunbookTest/ConcurrentUpdateTestは4件/0 skipped/全て成功、
+> `git diff --check`はexit 0を本Reviewで独立に再現した。P0=0/P1=0。軽微なテストカバレッジの薄さ
+> （待機原価集計SQLの実SQL未検証、merge時の要員会計履歴付け替えの専用テスト欠如、未使用フィールド）を
+> P2として3件記録するが、ブロッカーではない。**判定: PASS**。migration予約番号の文書同期（V61/V62実使用に伴う
+> 後続15 specのV63〜V77への繰り上げ）も全ファイルで完全一致を確認した。`enterprise-identity-security`(S03)
+> の開始条件は満たされたが、NOT READY解除の最終判断はユーザー確認を待つ。実ブラウザDemoはS03と並行して
+> 本番リリース前に消化する残課題として引き続き記録する。

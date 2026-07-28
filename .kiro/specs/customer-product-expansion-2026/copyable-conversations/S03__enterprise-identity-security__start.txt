@@ -12,7 +12,7 @@
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V61
+- Migration: V63（organization-management-accountingの独立ReviewでV61/V62を使用したため、以前のV61予約から2つ後ろへ繰り上げ）
 - 先行条件: organization-management-accounting完了・merge済み。
 - Decision gate: G1（IdP、MFA、break-glass）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

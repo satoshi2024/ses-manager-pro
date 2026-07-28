@@ -109,6 +109,46 @@ public class AutocompleteApiController {
     }
 
     /**
+     * 顧客の選択肢（id + 表示名）。管理会計フィルターのような<select>用。
+     *
+     * <p>{@link #getCustomers()} は既存の自由入力{@code <datalist>}（顧客/案件一覧の検索欄）向けに
+     * 会社名の文字列配列を返す契約が固定されており、そちらを壊さずに済ませるため別エンドポイントにする。
+     * <select>側は選択肢の{@code value}にIDを必要とするため、文字列配列を渡すと
+     * {@code option value="undefined"} になり、顧客/案件でのID絞り込みが機能しない
+     * （第十四次Review P1-6）。
+     */
+    @GetMapping("/customer-options")
+    public ApiResult<List<com.ses.dto.common.OptionDto>> getCustomerOptions() {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Customer> query =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Customer>()
+                        .orderByAsc(Customer::getId);
+        java.util.Set<Long> ids = effectiveCustomerIds();
+        if (ids != null) {
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            query.in(Customer::getId, ids);
+        }
+        return ApiResult.success(customerService.list(query).stream()
+                .map(c -> new com.ses.dto.common.OptionDto(c.getId(), c.getCompanyName()))
+                .collect(Collectors.toList()));
+    }
+
+    /** 案件の選択肢（id + 表示名）。{@link #getCustomerOptions()} と同じ理由で自由入力用とは別に持つ。 */
+    @GetMapping("/project-options")
+    public ApiResult<List<com.ses.dto.common.OptionDto>> getProjectOptions() {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> query =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project>()
+                        .orderByAsc(Project::getId);
+        java.util.Set<Long> ids = effectiveProjectIds();
+        if (ids != null) {
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            query.in(Project::getId, ids);
+        }
+        return ApiResult.success(projectService.list(query).stream()
+                .map(p -> new com.ses.dto.common.OptionDto(p.getId(), p.getProjectName()))
+                .collect(Collectors.toList()));
+    }
+
+    /**
      * 組織の選択肢。要員・契約・管理会計の各フォームがID直打ちにならないように共有する。
      * 返すのは id/code/name だけで、組織scopeを適用する（部門責任者は自組織と子孫のみ）。
      */
@@ -118,6 +158,34 @@ public class AutocompleteApiController {
                 .stream()
                 .map(unit -> new com.ses.dto.organization.OrganizationOptionDto(
                         unit.getId(), unit.getCode(), unit.getName(), unit.getParentId()))
+                .collect(Collectors.toList()));
+    }
+
+    /**
+     * 法人の選択肢。管理会計・組織一覧の法人フィルターがID直打ちにならないように共有する。
+     *
+     * <p>法人マスタは未導入で {@code m_organization_unit.legal_entity_id} が唯一の法人識別子のため、
+     * 表示名はscope内で見える組織から代表1件（ルート優先）の組織名を借用する。代表組織が
+     * scope外で見えない場合のみ「法人#ID」に留める（第十四次Review P2-1）。
+     */
+    @GetMapping("/legal-entities")
+    public ApiResult<List<com.ses.dto.common.OptionDto>> getLegalEntities() {
+        List<com.ses.entity.OrganizationUnit> visible =
+                organizationScopeService.listVisibleOrganizations(null, java.time.LocalDate.now());
+        java.util.Map<Long, com.ses.entity.OrganizationUnit> representative = new java.util.LinkedHashMap<>();
+        for (com.ses.entity.OrganizationUnit unit : visible) {
+            if (unit.getLegalEntityId() == null) {
+                continue;
+            }
+            com.ses.entity.OrganizationUnit current = representative.get(unit.getLegalEntityId());
+            // ルート組織(parentIdなし)を優先して法人の代表名にする。
+            if (current == null || (current.getParentId() != null && unit.getParentId() == null)) {
+                representative.put(unit.getLegalEntityId(), unit);
+            }
+        }
+        return ApiResult.success(representative.entrySet().stream()
+                .map(entry -> new com.ses.dto.common.OptionDto(entry.getKey(), entry.getValue().getName()))
+                .sorted(java.util.Comparator.comparing(com.ses.dto.common.OptionDto::getId))
                 .collect(Collectors.toList()));
     }
 

@@ -1,6 +1,6 @@
 # Design — 承認ワークフロー・内部統制
 
-## 1. DDL（予約V66）
+## 1. DDL（予約V68）
 
 - `m_approval_route(id, tenant_id, request_type, organization_id, min/max_amount, version_no,
   valid_from/to, active_flag)`。
