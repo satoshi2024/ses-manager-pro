@@ -5,6 +5,10 @@
 本台帳を対話管理の唯一の入口とする。通常は1specにつき主実装対話1つ、独立Review対話1つを使用し、
 115個の原子taskごとに対話を作らない。原子taskは各specの `tasks.md` と `review-ledger.md` で追跡する。
 
+2026-07-28以降は `execution-review-handbook.md` v2.0を必須基線とし、最終PASSはmerge済みHeadの独立Reviewに限る。
+再ReviewはIssue RegisterのOPEN項目、修正diff、direct regressionへ限定する。既存対話の切替文面は
+`conversation-baseline-v2.md`を使用する。
+
 - `NOT READY`: decisionまたは先行spec待ち。対話を開始しない。
 - `READY`: 開始条件を満たし、主実装対話を開始できる。
 - `IN PROGRESS`: 主実装対話でtaskを順次実行中。
@@ -18,8 +22,8 @@
 | # | Wave | spec | カタログtask | 現在状態 | 開始条件/次のaction | 実装対話 | Base/Head | Review | 次へ進む条件 |
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
-| 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX/REVIEW`（第十七次独立ReviewのP1=2を修正中） | 組織期間分割・双commit callback回帰を含む全量/Docker/Node確認後、commit/PR/mergeし、merge後R02再Review | S02 organization-management-accounting 修正対話 | Base `origin/main=14b3b65`、現在の修正作業ツリー | 定向36/0/0/0を確認済み。全量・merge後独立Review待ち | commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASS。desktop/390pxは本番前硬门禁として未実施のまま保持 |
-| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `NOT READY`（S02の第十七次ReviewはP1=2→修正中） | S02のP1=0、commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASSを完了後、S03の0→F1→A1/A2/B1/B2→Mを実装 | S03開始前ゲート修正対話 | V63予約を全conversation/specで確認 | 前提修正の定向36/0/0/0を確認済み。全量/merge後独立Review待ち | S03 feature実装完了、commit/merge済み、R03 P0=0/P1=0/PASS |
+| 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX/REVIEW`（最新ReviewのP1=4を修正済み、merge後Review待ち） | `90f50c0`をPR化・mergeし、merge済みHeadでR02独立Review | S02 organization-management-accounting 修正対話 | Base `origin/main=fb91943` → fix `90f50c0` | 883/0/0/1、Node/JS実行、Docker smoke全5系統0 skipped。独立Reviewは未実施 | merge後独立ReviewでP0=0/P1=0/PASS。desktop/390pxは本番前硬门禁として保持 |
+| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `NOT READY`（S02最新Review P1=4のmerge後PASS待ち） | S02のP1=0、commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASSを完了後、S03の0→F1→A1/A2/B1/B2→Mを実装 | S03開始前ゲート修正対話 | V63予約を全conversation/specで確認 | S02 fix `90f50c0` は未merge。現行自動テストは883/0/0/1 | S02 merge後独立ReviewでP0=0/P1=0/PASS、発注者のS03開始指示 |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |
@@ -35,9 +39,9 @@
 | 16 | 3 | `jp-pint-digital-invoice` | T102〜T108 | `NOT READY` | accounting PASS、G5決定後S16 |  |  |  | R16 PASSでWave 3完了 |
 | 17 | 4 | `ai-feedback-learning` | T109〜T115 | `NOT READY` | CRM/proposal/staffing/outcome完了、G10方針後S17 |  |  |  | R17 PASSでroadmap完了 |
 
-## 2.1 第十七次レビュー修正の最新実績（2026-07-28、上表のS02/S03行を更新する最新記録）
+## 2.1 第十八次Review対応の最新実績（2026-07-29）
 
-S02の今回P1-1/P1-2修正と精確回帰を`origin/main=14b3b65`基底で実装済み。定向36/0/0/0、全量878/0/0/1（QuotationPdfServiceImplTest、CJKフォントなし）、Node/JS syntax 1/0/0/0、DockerのFlyway fresh・legacy V60・repair・V62 closed fixture・ConcurrentUpdate各0 skipped、`git diff --check` exit 0を確認した。PR/merge後独立Reviewは未実施であり、desktop/390px Demoも未実施のまま本番前硬门禁として保持する。S03はS02のP1=0・merge後Review完了までNOT READYとする。
+最新ReviewのBaseは`origin/main=fb91943`（PR #42 merge済み）。P1-1〜P1-4のキャッシュ競合、manager組織scope漏れ、混在組織請求書、NULL業務通知を`90f50c0`で修正し、manager/notification/invoiceの実行級回帰を追加した。定向・全量は883/0/0/1（唯一skipはCJKフォントなし）、Node/JS syntaxは実行済み、Flyway fresh・legacy V60・repair・V62 closed fixture・migration integrity・ConcurrentUpdateは0 skippedで実行済み、`git diff --check` exit 0。`90f50c0`は未mergeのため、S02はFIX/REVIEW、S03はNOT READYとする。desktop/390px Demoは本番前硬门禁として未実施のまま保持する。
 
 ## 3. 1specの状態遷移
 
