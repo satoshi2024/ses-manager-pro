@@ -6,6 +6,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
+import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,10 @@ public class EngineerAccountLinkServiceImpl implements EngineerAccountLinkServic
 
     private final EngineerAccountLinkMapper linkMapper;
     private final SysUserMapper sysUserMapper;
+
+    /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ScopeChangeInvalidator scopeChangeInvalidator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -38,6 +43,9 @@ public class EngineerAccountLinkServiceImpl implements EngineerAccountLinkServic
         link.setSysUserId(sysUserId);
         link.setLinkedBy(linkedBy);
         linkMapper.insert(link);
+        // 要員↔ログインアカウントの紐付けは要員の組織scope解決（account link主所属フォールバック）
+        // に影響する（第十四次Review P1-3）。
+        invalidateScope();
         return link;
     }
 
@@ -47,6 +55,13 @@ public class EngineerAccountLinkServiceImpl implements EngineerAccountLinkServic
         EngineerAccountLink link = linkMapper.selectByEngineerId(engineerId);
         if (link != null) {
             linkMapper.deleteById(link.getId());
+            invalidateScope();
+        }
+    }
+
+    private void invalidateScope() {
+        if (scopeChangeInvalidator != null) {
+            scopeChangeInvalidator.invalidate();
         }
     }
 

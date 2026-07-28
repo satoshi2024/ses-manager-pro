@@ -12,6 +12,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerSalesService;
+import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,10 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
         implements EngineerSalesService {
 
     private final SysUserMapper sysUserMapper;
+
+    /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ScopeChangeInvalidator scopeChangeInvalidator;
 
     @Override
     public List<EngineerSalesDto> listActive(Long engineerId) {
@@ -72,6 +77,10 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
                 .remarks(remarks)
                 .build();
         save(entity);
+        // 要員↔担当営業の割当はDataScope（担当要員/担当契約の母集団）を変える。
+        // 進めないと、割当直後もDashboardキャッシュのTTLが切れるまで旧scopeの集計が返る
+        // （第十四次Review P1-3）。
+        invalidateScope();
     }
 
     @Override
@@ -84,6 +93,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
         demoteCurrentPrimary(listActiveEntities(engineerId));
         target.setPrimaryFlag(1);
         updateById(target);
+        invalidateScope();
     }
 
     @Override
@@ -97,6 +107,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
         }
         target.setReleasedAt(LocalDate.now());
         updateById(target);
+        invalidateScope();
     }
 
     @Override
@@ -137,6 +148,13 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
                 .isNull(EngineerSales::getReleasedAt)
                 .set(EngineerSales::getReleasedAt, LocalDate.now())
                 .set(EngineerSales::getUpdatedAt, java.time.LocalDateTime.now()));
+        invalidateScope();
+    }
+
+    private void invalidateScope() {
+        if (scopeChangeInvalidator != null) {
+            scopeChangeInvalidator.invalidate();
+        }
     }
 
     @Override

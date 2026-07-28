@@ -1,6 +1,6 @@
 # Design — 雇用勤怠・休暇・時間外労働
 
-## 1. DDL（予約V69）
+## 1. DDL（予約V71）
 
 - `m_work_calendar(id, legal_entity_id, name, valid_from/to)`、`m_work_calendar_day(calendar_id,date,type,scheduled_minutes)`。
 - `t_employee_attendance(id, engineer_id, work_date, clock_in/out, break_minutes, work_type,

@@ -4,16 +4,19 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.entity.OrganizationRelationHistory;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.OrganizationRelationHistoryMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationRelationResolver;
 import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -51,6 +54,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     private final InvoiceMapper invoiceMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
+    private final OrganizationRelationHistoryMapper relationHistoryMapper;
     /**
      * {@code OrganizationServiceImpl} は上長のscope検査で本サービスを参照するため、
      * 双方をシングルトンにすると循環参照になる。遅延解決して循環を断つ。
@@ -258,18 +262,46 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public List<OrganizationUnit> listVisibleOrganizations(Long legalEntityId, LocalDate asOf) {
-        return organizationUnitMapper.selectList(visibleQuery(legalEntityId, asOf, true));
+        return visibleOrganizationsAsOf(legalEntityId, asOf);
     }
 
     @Override
     public long countVisibleOrganizations(Long legalEntityId, LocalDate asOf) {
-        return organizationUnitMapper.selectCount(visibleQuery(legalEntityId, asOf, false));
+        return visibleOrganizationsAsOf(legalEntityId, asOf).size();
     }
 
     @Override
     public List<OrganizationUnit> exportVisibleOrganizations(Long legalEntityId, LocalDate asOf) {
-        // exportも同じSQL母集団を使う。画面一覧を取得してから絞り込まない。
-        return organizationUnitMapper.selectList(visibleQuery(legalEntityId, asOf, true));
+        // exportも同じ母集団を使う。画面一覧を取得してから絞り込まない。
+        return visibleOrganizationsAsOf(legalEntityId, asOf);
+    }
+
+    /**
+     * asOf時点で「有効」な組織を、scope∩法人条件のSQL母集団から解決する。
+     *
+     * <p>{@code m_organization_unit.status/parent_id}は現在値しか持たないため、
+     * SQL条件へ直接{@code status = '有効'}を積むと統合・無効化の前後で過去日照会の
+     * 結果が変わってしまう（第十三次Review P1-1）。組織自体の有効期間
+     * （{@code valid_from}/{@code valid_to}）と法人・scope条件はSQLへ渡し、
+     * 状態と親IDだけは{@link OrganizationRelationResolver}でasOf解決する
+     * （{@link com.ses.service.impl.OrganizationServiceImpl#listTree}と同じ規則）。
+     */
+    private List<OrganizationUnit> visibleOrganizationsAsOf(Long legalEntityId, LocalDate asOf) {
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        LambdaQueryWrapper<OrganizationUnit> query = new LambdaQueryWrapper<OrganizationUnit>()
+                .eq(legalEntityId != null, OrganizationUnit::getLegalEntityId, legalEntityId)
+                .le(OrganizationUnit::getValidFrom, date)
+                .and(w -> w.isNull(OrganizationUnit::getValidTo)
+                        .or().ge(OrganizationUnit::getValidTo, date))
+                .orderByAsc(OrganizationUnit::getParentId)
+                .orderByAsc(OrganizationUnit::getCode);
+        applyOrganizationScope(query, OrganizationUnit::getId, date);
+        java.util.Map<Long, OrganizationRelationHistory> relations =
+                OrganizationRelationResolver.asOfMap(relationHistoryMapper, date);
+        return organizationUnitMapper.selectList(query).stream()
+                .filter(unit -> "有効".equals(OrganizationRelationResolver.status(relations, unit)))
+                .peek(unit -> unit.setParentId(OrganizationRelationResolver.parentId(relations, unit)))
+                .toList();
     }
 
     @Override
@@ -330,23 +362,6 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         }
         com.ses.entity.SysUser user = sysUserMapper.selectByUsername(username);
         return user == null ? null : user.getId();
-    }
-
-    private LambdaQueryWrapper<OrganizationUnit> visibleQuery(Long legalEntityId,
-                                                                LocalDate asOf,
-                                                                boolean ordered) {
-        LocalDate date = asOf == null ? LocalDate.now() : asOf;
-        LambdaQueryWrapper<OrganizationUnit> query = new LambdaQueryWrapper<OrganizationUnit>()
-                .eq(legalEntityId != null, OrganizationUnit::getLegalEntityId, legalEntityId)
-                .le(OrganizationUnit::getValidFrom, date)
-                .and(w -> w.isNull(OrganizationUnit::getValidTo)
-                        .or().ge(OrganizationUnit::getValidTo, date))
-                .eq(OrganizationUnit::getStatus, "有効");
-        if (ordered) {
-            query.orderByAsc(OrganizationUnit::getParentId)
-                    .orderByAsc(OrganizationUnit::getCode);
-        }
-        return applyOrganizationScope(query, OrganizationUnit::getId, date);
     }
 
     private record ScopeCacheKey(Long tenantId, Long userId, String role,

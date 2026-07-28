@@ -1,6 +1,6 @@
 # Design — 派遣・準委任コンプライアンス台帳
 
-## 1. DDL（予約V68）
+## 1. DDL（予約V70）
 
 - `m_workplace(id, customer_id, name, address, organization_unit, phone)`。
 - `t_contract_compliance_profile(contract_id, contract_type_detail, workplace_id, work_description,

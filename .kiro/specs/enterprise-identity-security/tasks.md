@@ -9,7 +9,7 @@
 
 - [ ] F1. identity/MFA/session/permission DDL
   - **Objective**: F1. identity/MFA/session/permission DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V61/V1/H2/smoke、暗号鍵version設計。
+  - **実装ガイダンス**: V63/V1/H2/smoke、暗号鍵version設計。
   - **テスト要件**: unique、recovery code hash、tenant分離。
   - **Demo**: F1. identity/MFA/session/permission DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

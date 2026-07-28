@@ -41,17 +41,23 @@
             if (res.code !== 200) { return; }
             fillOptions('#accountingCostCenterId', res.data, function (i) { return i.code + ' ' + i.name; });
         });
-        $.get('/api/autocomplete/customers').done(function (res) {
+        // customers/projectsは他画面の自由入力<datalist>と契約を共有しているため文字列配列を返す。
+        // <select>にはID付きの専用option系エンドポイントを使う（第十四次Review P1-6）。
+        $.get('/api/autocomplete/customer-options').done(function (res) {
             if (res.code !== 200) { return; }
-            fillOptions('#accountingCustomerId', res.data, function (i) { return i.name || i.companyName; });
+            fillOptions('#accountingCustomerId', res.data, function (i) { return i.name; });
         });
-        $.get('/api/autocomplete/projects').done(function (res) {
+        $.get('/api/autocomplete/project-options').done(function (res) {
             if (res.code !== 200) { return; }
-            fillOptions('#accountingProjectId', res.data, function (i) { return i.name || i.projectName; });
+            fillOptions('#accountingProjectId', res.data, function (i) { return i.name; });
         });
         $.get('/api/autocomplete/sales-users').done(function (res) {
             if (res.code !== 200) { return; }
             fillOptions('#accountingSalesUserId', res.data, function (i) { return i.name || i.realName; });
+        });
+        $.get('/api/autocomplete/legal-entities').done(function (res) {
+            if (res.code !== 200) { return; }
+            fillOptions('#accountingLegalEntityId', res.data, function (i) { return i.name; });
         });
     }
 

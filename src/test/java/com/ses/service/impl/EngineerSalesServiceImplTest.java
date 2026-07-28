@@ -40,6 +40,9 @@ public class EngineerSalesServiceImplTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private com.ses.service.security.ScopeVersionRegistry scopeVersionRegistry;
+
     private Long salesUser1Id;
     private Long salesUser2Id;
     private Long hrUserId;
@@ -73,6 +76,26 @@ public class EngineerSalesServiceImplTest {
         assertEquals(1, actives.size());
         assertEquals(1, actives.get(0).getPrimaryFlag());
         assertEquals(salesUser1Id, actives.get(0).getSalesUserId());
+    }
+
+    /**
+     * 要員↔担当営業の割当・解除はDataScope（担当要員/担当契約の母集団）を変える。
+     * 進めないと、変更直後もDashboardキャッシュのTTLが切れるまで旧scopeの集計が返る
+     * （第十四次Review P1-3）。トランザクション外（テストの@Transactionalの外）なら
+     * 即時にbumpされるため、ここでは同一トランザクション内でのafterCommit予約が
+     * サービス呼び出しごとに登録されること自体を確認する材料として、直接の世代確認は
+     * 統合テスト（ScopeChangeInvalidatorTest）と役割分担する。ここではNPEにならず
+     * 正常に完了することを固定する（scopeChangeInvalidatorが未配線でも動く既存契約は
+     * @Autowired(required=false)側の責務）。
+     */
+    @Test
+    void assignとreleaseはscope世代のinvalidationを呼び出しても例外にならない() {
+        engineerSalesService.assign(ENGINEER_ID, salesUser1Id, true, null);
+        Long assignmentId = engineerSalesService.listActive(ENGINEER_ID).get(0).getId();
+        engineerSalesService.setPrimary(ENGINEER_ID, assignmentId);
+        engineerSalesService.release(ENGINEER_ID, assignmentId);
+
+        assertTrue(engineerSalesService.listActive(ENGINEER_ID).isEmpty());
     }
 
     @Test

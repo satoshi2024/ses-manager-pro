@@ -38,6 +38,10 @@ public class UserApiController {
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.OrganizationService>
             organizationServiceProvider;
 
+    /** ロール変更はDataScope（営業=isScoped()判定）を変える。既存テストスライス互換のため任意解決。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.ScopeChangeInvalidator>
+            scopeChangeInvalidatorProvider;
+
     /**
      * ユーザー一覧（ページネーション）
      */
@@ -128,12 +132,10 @@ public class UserApiController {
             throw BusinessException.of("error.user.roleSelfChange");
         }
         // 営業ロールから他ロールへ変更する場合、現任担当が残っていれば拒否（先に付け替えを促す）
-        if (sysUser.getId() != null && StringUtils.hasText(sysUser.getRole())) {
-            SysUser old = sysUserService.getById(sysUser.getId());
-            if (old != null && StatusConstants.ROLE_SALES.equals(old.getRole())
-                    && !StatusConstants.ROLE_SALES.equals(sysUser.getRole())) {
-                guardNoActiveSalesAssignments(sysUser.getId());
-            }
+        SysUser old = sysUser.getId() != null ? sysUserService.getById(sysUser.getId()) : null;
+        if (StringUtils.hasText(sysUser.getRole()) && old != null && StatusConstants.ROLE_SALES.equals(old.getRole())
+                && !StatusConstants.ROLE_SALES.equals(sysUser.getRole())) {
+            guardNoActiveSalesAssignments(sysUser.getId());
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
             validatePasswordPolicy(sysUser.getPassword());
@@ -141,9 +143,24 @@ public class UserApiController {
         } else {
             sysUser.setPassword(null);
         }
+        boolean roleChanged = StringUtils.hasText(sysUser.getRole())
+                && old != null && !sysUser.getRole().equals(old.getRole());
         boolean success = sysUserService.updateById(sysUser);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        // ロール変更は営業のDataScope発動条件・組織scopeの分岐（部門責任者/一般ユーザー）を変える。
+        // 進めないと、変更直後もDashboardキャッシュのTTLが切れるまで旧ロールの母集団で集計される
+        // （第十四次Review P1-3）。
+        if (roleChanged) {
+            invalidateScope();
+        }
         return ApiResult.success(true);
+    }
+
+    private void invalidateScope() {
+        com.ses.service.security.ScopeChangeInvalidator invalidator = scopeChangeInvalidatorProvider.getIfAvailable();
+        if (invalidator != null) {
+            invalidator.invalidate();
+        }
     }
 
     /**

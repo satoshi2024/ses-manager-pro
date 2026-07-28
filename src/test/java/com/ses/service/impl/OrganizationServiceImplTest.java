@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -163,6 +164,81 @@ class OrganizationServiceImplTest {
         assertEquals(target.getId(), organizationService.getById(source.getId()).getMergedInto());
         // 統合済み組織の名前は引けること。過去snapshotの組織別合計を突合するのに必要(R4)。
         assertEquals("統合元", organizationService.namesByIds(java.util.List.of(source.getId())).get(source.getId()));
+    }
+
+    @Test
+    void 統合先所属との部分重複は未被覆期間を分割して保持する() {
+        OrganizationUnit source = organization("ORG-MERGE-PARTIAL-SRC", "部分重複元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-PARTIAL-DST", "部分重複先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(0)
+                .positionName("元属性").validFrom(today.minusDays(10)).validTo(today.plusDays(30)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(target.getId()).primaryFlag(0)
+                .positionName("先属性").validFrom(today.plusDays(10)).validTo(today.plusDays(20)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<UserOrganization> beforeTarget = organizationService.listUserOrganizations(userId, today.plusDays(5));
+        assertEquals(1, beforeTarget.size());
+        assertEquals(target.getId(), beforeTarget.get(0).getOrganizationId());
+        assertEquals("元属性", beforeTarget.get(0).getPositionName());
+        List<UserOrganization> coveredByExisting = organizationService.listUserOrganizations(userId, today.plusDays(15));
+        assertEquals(1, coveredByExisting.size());
+        assertEquals("先属性", coveredByExisting.get(0).getPositionName());
+        List<UserOrganization> afterTarget = organizationService.listUserOrganizations(userId, today.plusDays(25));
+        assertEquals(1, afterTarget.size());
+        assertEquals("元属性", afterTarget.get(0).getPositionName());
+    }
+
+    @Test
+    void 統合日開始の所属は昨日終了にせず同じ行を統合先へ更新する() {
+        OrganizationUnit source = organization("ORG-MERGE-SAME-DAY-SRC", "同日元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-SAME-DAY-DST", "同日先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(0)
+                .validFrom(today).validTo(today.plusDays(10)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        UserOrganization assignment = organizationService.listUserOrganizations(userId, today).get(0);
+        assertEquals(target.getId(), assignment.getOrganizationId());
+        assertEquals(today, assignment.getValidFrom());
+        assertEquals(today.plusDays(10), assignment.getValidTo());
+    }
+
+    @Test
+    void 統合前に開始する未来所属は開始日と終了日を保ったまま移す() {
+        OrganizationUnit source = organization("ORG-MERGE-FUTURE-SRC", "未来元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-FUTURE-DST", "未来先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(0)
+                .validFrom(today.plusDays(5)).validTo(today.plusDays(20)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        UserOrganization assignment = organizationService.listUserOrganizations(userId, today.plusDays(10)).get(0);
+        assertEquals(target.getId(), assignment.getOrganizationId());
+        assertEquals(today.plusDays(5), assignment.getValidFrom());
+        assertEquals(today.plusDays(20), assignment.getValidTo());
     }
 
     /** 退職・停止時に有効な所属が残ると、退職者が組織scopeと部門損益の帰属に居座り続ける。 */

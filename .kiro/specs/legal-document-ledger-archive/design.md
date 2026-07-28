@@ -1,6 +1,6 @@
 # Design — 法定文書台帳・電子保存
 
-## 1. DDL（予約V62）
+## 1. DDL（予約V64）
 
 - `m_document_type(code, name, direction, retention_years, retention_start_rule, legal_hold_supported)`。
 - `t_document(id, tenant_id, legal_entity_id, document_type, document_no, title, counterparty_type/id/name_snapshot,

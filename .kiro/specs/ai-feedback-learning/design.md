@@ -1,6 +1,6 @@
 # Design — AI推薦フィードバック・評価ループ
 
-## 1. DDL（予約V75）
+## 1. DDL（予約V77）
 
 - `m_ai_artifact_version(id, use_case, provider, model_name, prompt/rule_version, config_hash,
   status DRAFT/SHADOW/ACTIVE/RETIRED, activated_at)`。

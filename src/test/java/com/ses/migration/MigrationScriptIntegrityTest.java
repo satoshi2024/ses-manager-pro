@@ -243,6 +243,30 @@ class MigrationScriptIntegrityTest {
                 "V61でも生成列はVIRTUALに揃えてください");
     }
 
+    /**
+     * V62は要員の所属組織もV61の会計属性履歴テーブルへ同時に記録できるようにする。
+     * 列追加とbackfillが揃っていること、順序が逆でないことを固定する
+     * （version/organization_id列と同じ「先に列、あとでbackfill」の事故を防ぐ）。
+     */
+    @Test
+    void V62は所属組織列追加の後にbackfillすること() throws Exception {
+        String sql = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V62__engineer_organization_history.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        int addColumn = sql.indexOf("ALTER TABLE t_engineer_accounting_history ADD COLUMN organization_id");
+        int addStatusColumn = sql.indexOf("ADD COLUMN organization_history_status");
+        int backfill = sql.indexOf("UPDATE t_engineer_accounting_history");
+
+        assertTrue(addColumn >= 0, "V62に所属組織列の追加がありません");
+        assertTrue(addStatusColumn >= 0, "V62に復元不能履歴の状態列がありません");
+        assertTrue(backfill >= 0, "V62に既存履歴行への所属組織backfillがありません");
+        assertTrue(addColumn < backfill && addStatusColumn < backfill,
+                "所属組織列と状態列を追加してからbackfillしてください");
+        assertTrue(sql.contains("organization_history_status = 'UNKNOWN'"),
+                "復元不能なclosed行はUNKNOWNとして明示してください");
+    }
+
     /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */
     private String withoutComments(String sql) {
         return sql.lines()

@@ -12,7 +12,7 @@
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V62
+- Migration: V64
 - 先行条件: enterprise-identity-security完了・merge済み。
 - Decision gate: G2の法務監修者、保存期間、訂正削除方針が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

@@ -1,6 +1,6 @@
 # Design — 企業認証・セキュリティ
 
-## 1. DDL（予約V61）
+## 1. DDL（予約V63）
 
 - `m_identity_provider(tenant_id, type, issuer_uri/metadata_uri, client_id, encrypted_secret_ref, enabled)`。
 - `t_user_external_identity(user_id, provider_id, subject, email_snapshot, linked_at)`。

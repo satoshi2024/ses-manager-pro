@@ -26,6 +26,10 @@ import java.time.LocalDate;
 public class EngineerAccountingHistory extends BaseEntity {
 
     private Long engineerId;
+    /** 対象月時点の所属組織。V62で追加（第十四次Review P1-4）。 */
+    private Long organizationId;
+    /** V61〜V62間のclosed行など、過去の所属を復元できない場合はUNKNOWN。 */
+    private String organizationHistoryStatus;
     private Long costCenterId;
     private BigDecimal expectedUnitPrice;
     private LocalDate validFrom;

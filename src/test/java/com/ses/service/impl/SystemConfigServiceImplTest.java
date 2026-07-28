@@ -5,6 +5,8 @@ import com.ses.mapper.SystemConfigMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -80,5 +82,26 @@ class SystemConfigServiceImplTest {
 
         verify(mapper).insert(any(SystemConfig.class));
         assertEquals("v", service.getString("notification.webhook-url", "def"));
+    }
+
+    @Test
+    void put_rollback時は更新前のキャッシュ値を復元する() {
+        seed(new SystemConfig("company_name", "Old", "会社名"));
+        when(mapper.selectById("company_name")).thenReturn(new SystemConfig("company_name", "Old", "会社名"));
+        assertEquals("Old", service.getString("company_name", ""));
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.put("company_name", "New", "会社名");
+            assertEquals("Old", service.getString("company_name", ""), "commit前は旧値を読む");
+            for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+            }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+        assertEquals("Old", service.getString("company_name", ""), "rollback後も旧キャッシュを維持する");
     }
 }

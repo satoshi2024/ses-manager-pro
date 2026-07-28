@@ -14,7 +14,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V72
+- Migration: V74
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 - 期待するtask順: F1→(A1 || A2 || B1 || B2)→M

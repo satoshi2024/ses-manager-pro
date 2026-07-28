@@ -1,6 +1,6 @@
 # Design — CRM複数担当者・商機管理
 
-## 1. DDL（予約V65）
+## 1. DDL（予約V67）
 
 - `t_customer_contact(id, customer_id, name, name_kana, department, position, roles_json,
   email, phone, primary_flag, valid_from/to, status, version)`。

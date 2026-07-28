@@ -15,7 +15,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 0
-- Migration: V61
+- Migration: V63（organization-management-accountingの独立ReviewでV61/V62を使用したため、以前のV61予約から2つ後ろへ繰り上げ）
 - 先行条件: organization-management-accounting完了・merge済み。
 - Decision gate: G1（IdP、MFA、break-glass）が正式決定済み。
 - 期待するtask順: 0→F1→[(A1→A2) || B1 || B2]→M
