@@ -19,7 +19,7 @@
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
 | 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX/REVIEW`（第十五次レビューでP1=4を再検出。修正実装・定向/全量/Docker検証済み、merge後独立Review待ち） | P1-1〜P1-3と同日逆区間、migration/Bench回帰を確認してcommit/PR/mergeし、merge後R02再Review | S02 organization-management-accounting 実装（既存差分を含む） | Base `add488c` + 現在の未commit差分（実測90 paths: tracked 82 + untracked 8、tracked diff 1016+/243-） | 第十五次レビュー指摘を修正。定向38/38、全量870/0/0/1(font)、Node 1/0/0/0、Docker fresh/legacy/repair/concurrency各0 skip、V62 fixture 0 skip、`git diff --check` exit 0 | commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASS。desktop/390pxは本番前硬門禁として未実施のまま保持 |
-| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `READY`（S03開始指示済み。先行S02の第十五次P1修正とV63台帳同期を検証済み。S03 feature実装は未着手） | 先行S02のcommit/PR mergeと独立Reviewを完了後、S03の0→F1→A1/A2/B1/B2→Mを実装 | S03開始前ゲート修正対話 | V63予約を全conversation/specで確認 | 前提門禁: 全量870 tests/1 skipped、Node実行、Docker 5門禁0 skipped。S03独立Reviewはfeature実装後に実施 | S03 feature実装完了、commit/merge済み、R03 P0=0/P1=0/PASS |
+| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `NOT READY`（第十六次ReviewでS02 P1=4を再検出。P1修正は作業ブランチで検証中） | S02のP1=0、commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASSを完了後、S03の0→F1→A1/A2/B1/B2→Mを実装 | S03開始前ゲート修正対話 | V63予約を全conversation/specで確認 | 前提門禁: 全量874 tests/1 skipped、Node実行、Docker 5門禁0 skipped。S03独立ReviewはS02 merge後に実施 | S03 feature実装完了、commit/merge済み、R03 P0=0/P1=0/PASS |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |
@@ -35,9 +35,9 @@
 | 16 | 3 | `jp-pint-digital-invoice` | T102〜T108 | `NOT READY` | accounting PASS、G5決定後S16 |  |  |  | R16 PASSでWave 3完了 |
 | 17 | 4 | `ai-feedback-learning` | T109〜T115 | `NOT READY` | CRM/proposal/staffing/outcome完了、G10方針後S17 |  |  |  | R17 PASSでroadmap完了 |
 
-## 2.1 第十五次レビュー修正の最新実績（2026-07-28）
+## 2.1 第十六次レビュー修正の最新実績（2026-07-28）
 
-S02の実装差分は pushed branch tip にcommit済み（実測92 paths: tracked 84 + untracked 8）。定向38/38、全量869/0/0/1(font)、最終修正影響単体7/0/0/0、Node 1/0/0/0、Docker fresh/legacy/repair/concurrency/V62各0 skip、`git diff --check` exit 0。gh未導入のためpush/PR mergeとmerge後独立Reviewは未実施であり、desktop/390px Demoも未実施のまま本番前硬门禁として保持する。
+S02のP1-1〜P1-4修正を作業ブランチで実装済み。定向50/50、全量874/0/0/1(font)、Node 1/0/0/0、Docker fresh/legacy/repair/concurrency/V62各0 skip、`git diff --check` exit 0。PR/merge後独立Reviewは未実施であり、desktop/390px Demoも未実施のまま本番前硬门禁として保持する。S03はS02のP1=0・merge後Review完了までNOT READYとする。
 
 ## 3. 1specの状態遷移
 

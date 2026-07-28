@@ -11,6 +11,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +38,15 @@ class SystemConfigServiceImplTest {
 
     private void seed(SystemConfig... configs) {
         when(mapper.selectList(isNull())).thenReturn(new ArrayList<>(List.of(configs)));
+    }
+
+    private boolean await(CountDownLatch latch) {
+        try {
+            return latch.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("テストスレッドが中断された", e);
+        }
     }
 
     @Test
@@ -85,7 +98,7 @@ class SystemConfigServiceImplTest {
     }
 
     @Test
-    void put_rollback時は更新前のキャッシュ値を復元する() {
+    void put_rollback時は更新前のキャッシュを維持する() {
         seed(new SystemConfig("company_name", "Old", "会社名"));
         when(mapper.selectById("company_name")).thenReturn(new SystemConfig("company_name", "Old", "会社名"));
         assertEquals("Old", service.getString("company_name", ""));
@@ -102,6 +115,48 @@ class SystemConfigServiceImplTest {
             TransactionSynchronizationManager.clearSynchronization();
             TransactionSynchronizationManager.setActualTransactionActive(false);
         }
-        assertEquals("Old", service.getString("company_name", ""), "rollback後も旧キャッシュを維持する");
+        assertEquals("Old", service.getString("company_name", ""), "rollback後もcommit前のキャッシュを維持する");
+    }
+
+    @Test
+    void put_rollbackは後続commitのキャッシュ値を上書きしない() throws Exception {
+        seed(new SystemConfig("company_name", "Old", "会社名"));
+        when(mapper.selectById("company_name"))
+                .thenReturn(new SystemConfig("company_name", "Old", "会社名"));
+        assertEquals("Old", service.getString("company_name", ""));
+
+        CountDownLatch transactionARegistered = new CountDownLatch(1);
+        CountDownLatch transactionBCommitted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            var transactionA = executor.submit(() -> {
+                TransactionSynchronizationManager.setActualTransactionActive(true);
+                TransactionSynchronizationManager.initSynchronization();
+                try {
+                    service.put("company_name", "A", "会社名");
+                    transactionARegistered.countDown();
+                    assertTrue(await(transactionBCommitted));
+                    for (TransactionSynchronization synchronization
+                            : TransactionSynchronizationManager.getSynchronizations()) {
+                        synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+                    }
+                } finally {
+                    TransactionSynchronizationManager.clearSynchronization();
+                    TransactionSynchronizationManager.setActualTransactionActive(false);
+                }
+            });
+            var transactionB = executor.submit(() -> {
+                assertTrue(await(transactionARegistered));
+                service.put("company_name", "B", "会社名");
+                transactionBCommitted.countDown();
+            });
+            transactionA.get(10, TimeUnit.SECONDS);
+            transactionB.get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals("B", service.getString("company_name", ""),
+                "後続commitのキャッシュを先行rollbackで巻き戻してはいけない");
     }
 }

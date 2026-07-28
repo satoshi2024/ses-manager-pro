@@ -36,8 +36,4 @@ public interface EngineerAccountingHistoryMapper extends BaseMapper<EngineerAcco
     java.util.List<EngineerAccountingHistory> selectCurrentByOrganizationId(
             @Param("organizationId") Long organizationId);
 
-    /** 指定組織を現行版として持つ全行を、指定日の前日で締める。 */
-    @Update("UPDATE t_engineer_accounting_history SET valid_to = #{validTo} "
-            + "WHERE organization_id = #{organizationId} AND valid_to IS NULL AND deleted_flag = 0")
-    int closeCurrentByOrganizationId(@Param("organizationId") Long organizationId, @Param("validTo") LocalDate validTo);
 }

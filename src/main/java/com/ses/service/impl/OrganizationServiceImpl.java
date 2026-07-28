@@ -202,6 +202,38 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                     .toList();
 
             List<DateRange> uncovered = subtractCovered(relocationFrom, originalValidTo, targetAssignments);
+            boolean futureSource = !originalFrom.isBefore(today);
+            boolean canUpdateSourceInPlace = !uncovered.isEmpty()
+                    && uncovered.get(0).from().equals(relocationFrom);
+
+            if (originalFrom.isBefore(today)) {
+                // 過去部分は旧組織の事実として昨日で閉じる。
+                assignment.setValidTo(today.minusDays(1));
+                if (userOrganizationMapper.updateById(assignment) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+            } else if (!canUpdateSourceInPlace) {
+                // 未来開始の元行が統合先の前段から覆われる場合は、元の全期間を残さない。
+                // 残したまま未被覆の尾段だけを追加すると、無効な統合元と統合先が重複する。
+                if (userOrganizationMapper.deleteById(assignment.getId()) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+            }
+
+            if (!uncovered.isEmpty() && futureSource && canUpdateSourceInPlace) {
+                // 同日開始を含む未開始行は、逆向きの valid_to を作らず既存行を原地更新する。
+                // targetの主所属昇格より前に行い、sourceが主所属でも一意制約に触れないようにする。
+                DateRange first = uncovered.remove(0);
+                assignment.setOrganizationId(targetOrganizationId);
+                assignment.setValidFrom(first.from());
+                assignment.setValidTo(first.to());
+                if (userOrganizationMapper.updateById(assignment) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+            }
+
+            // sourceを閉じる・削除する処理を先に行い、同一ユーザーの主所属一意制約を
+            // 解放してからtargetの副所属を主所属へ昇格する。
             for (UserOrganization targetAssignment : targetAssignments) {
                 if (isPrimary(assignment) && !isPrimary(targetAssignment)) {
                     targetAssignment.setPrimaryFlag(1);
@@ -211,30 +243,6 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
                 }
             }
 
-            if (originalFrom.isBefore(today)) {
-                // 過去部分は旧組織の事実として昨日で閉じる。
-                assignment.setValidTo(today.minusDays(1));
-                if (userOrganizationMapper.updateById(assignment) != 1) {
-                    throw BusinessException.of(409, "error.organization.versionConflict");
-                }
-            } else if (uncovered.isEmpty()) {
-                // 開始日が統合日以後で全期間が統合先に覆われる場合は冗長行を論理削除する。
-                if (userOrganizationMapper.deleteById(assignment.getId()) != 1) {
-                    throw BusinessException.of(409, "error.organization.versionConflict");
-                }
-            }
-
-            if (!uncovered.isEmpty() && !originalFrom.isBefore(today)
-                    && uncovered.get(0).from().equals(relocationFrom)) {
-                // 同日開始を含む未開始行は、逆向きの valid_to を作らず既存行を原地更新する。
-                DateRange first = uncovered.remove(0);
-                assignment.setOrganizationId(targetOrganizationId);
-                assignment.setValidFrom(first.from());
-                assignment.setValidTo(first.to());
-                if (userOrganizationMapper.updateById(assignment) != 1) {
-                    throw BusinessException.of(409, "error.organization.versionConflict");
-                }
-            }
             for (DateRange range : uncovered) {
                 UserOrganization successor = new UserOrganization();
                 successor.setUserId(assignment.getUserId());
@@ -260,16 +268,28 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         if (engineerAccountingHistoryMapper != null) {
             List<com.ses.entity.EngineerAccountingHistory> currentHistories =
                     engineerAccountingHistoryMapper.selectCurrentByOrganizationId(organizationId);
-            if (!currentHistories.isEmpty()) {
-                engineerAccountingHistoryMapper.closeCurrentByOrganizationId(organizationId, today.minusDays(1));
-                for (com.ses.entity.EngineerAccountingHistory history : currentHistories) {
-                    engineerAccountingHistoryMapper.insert(com.ses.entity.EngineerAccountingHistory.builder()
-                            .engineerId(history.getEngineerId())
-                            .organizationId(targetOrganizationId)
-                            .costCenterId(history.getCostCenterId())
-                            .expectedUnitPrice(history.getExpectedUnitPrice())
-                            .validFrom(today).validTo(null).build());
+            for (com.ses.entity.EngineerAccountingHistory history : currentHistories) {
+                if (history.getValidFrom() != null && !history.getValidFrom().isBefore(today)) {
+                    // 同日（および未来開始）の現行版は閉じずに組織だけ差し替える。
+                    // today.minusDays(1)へ閉じると valid_from > valid_to の逆向き履歴になる。
+                    history.setOrganizationId(targetOrganizationId);
+                    if (engineerAccountingHistoryMapper.updateById(history) != 1) {
+                        throw BusinessException.of(409, "error.organization.versionConflict");
+                    }
+                    continue;
                 }
+                // 過去開始の現行版だけを昨日で閉じ、統合日から新しい版を開始する。
+                history.setValidTo(today.minusDays(1));
+                if (engineerAccountingHistoryMapper.updateById(history) != 1) {
+                    throw BusinessException.of(409, "error.organization.versionConflict");
+                }
+                engineerAccountingHistoryMapper.insert(com.ses.entity.EngineerAccountingHistory.builder()
+                        .engineerId(history.getEngineerId())
+                        .organizationId(targetOrganizationId)
+                        .organizationHistoryStatus(history.getOrganizationHistoryStatus())
+                        .costCenterId(history.getCostCenterId())
+                        .expectedUnitPrice(history.getExpectedUnitPrice())
+                        .validFrom(today).validTo(null).build());
             }
         }
         // 原価部門は組織にぶら下がるマスタなので全件付け替える。
