@@ -233,13 +233,10 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             }
 
             // sourceを閉じる・削除する処理を先に行い、同一ユーザーの主所属一意制約を
-            // 解放してからtargetの副所属を主所属へ昇格する。
-            for (UserOrganization targetAssignment : targetAssignments) {
-                if (isPrimary(assignment) && !isPrimary(targetAssignment)) {
-                    targetAssignment.setPrimaryFlag(1);
-                    if (userOrganizationMapper.updateById(targetAssignment) != 1) {
-                        throw BusinessException.of(409, "error.organization.versionConflict");
-                    }
+            // 解放してから、sourceの移行期間と重なるtarget区間だけを主所属へ切り替える。
+            if (isPrimary(assignment)) {
+                for (UserOrganization targetAssignment : targetAssignments) {
+                    splitTargetPrimaryWindow(targetAssignment, relocationFrom, originalValidTo);
                 }
             }
 
@@ -841,7 +838,73 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
         return result;
     }
 
+    /** target所属をsourceの移行期間に合わせて分割し、重複区間だけを主所属にする。 */
+    private void splitTargetPrimaryWindow(UserOrganization targetAssignment,
+                                          LocalDate primaryFrom, LocalDate primaryTo) {
+        LocalDate targetFrom = targetAssignment.getValidFrom();
+        LocalDate targetTo = targetAssignment.getValidTo();
+        LocalDate overlapFrom = targetFrom.isAfter(primaryFrom) ? targetFrom : primaryFrom;
+        LocalDate overlapTo = minEnd(targetTo, primaryTo);
+        if (overlapTo != null && overlapFrom.isAfter(overlapTo)) {
+            return;
+        }
+
+        List<AssignmentSegment> segments = new ArrayList<>();
+        if (targetFrom.isBefore(overlapFrom)) {
+            segments.add(new AssignmentSegment(new DateRange(targetFrom, overlapFrom.minusDays(1)),
+                    targetAssignment.getPrimaryFlag()));
+        }
+        segments.add(new AssignmentSegment(new DateRange(overlapFrom, overlapTo), 1));
+        if (overlapTo != null) {
+            LocalDate afterFrom = overlapTo.plusDays(1);
+            if (targetTo == null || !afterFrom.isAfter(targetTo)) {
+                segments.add(new AssignmentSegment(new DateRange(afterFrom, targetTo),
+                        targetAssignment.getPrimaryFlag()));
+            }
+        }
+
+        applyAssignmentSegment(targetAssignment, segments.get(0).range());
+        targetAssignment.setPrimaryFlag(segments.get(0).primaryFlag());
+        if (userOrganizationMapper.updateById(targetAssignment) != 1) {
+            throw BusinessException.of(409, "error.organization.versionConflict");
+        }
+        for (int i = 1; i < segments.size(); i++) {
+            AssignmentSegment segment = segments.get(i);
+            UserOrganization successor = UserOrganization.builder()
+                    .userId(targetAssignment.getUserId())
+                    .organizationId(targetAssignment.getOrganizationId())
+                    .positionName(targetAssignment.getPositionName())
+                    .managerUserId(targetAssignment.getManagerUserId())
+                    .primaryFlag(segment.primaryFlag())
+                    .validFrom(segment.range().from())
+                    .validTo(segment.range().to())
+                    .version(0)
+                    .build();
+            if (userOrganizationMapper.insert(successor) != 1) {
+                throw BusinessException.of("error.organization.assignment.saveFailed");
+            }
+        }
+    }
+
+    private void applyAssignmentSegment(UserOrganization assignment, DateRange range) {
+        assignment.setValidFrom(range.from());
+        assignment.setValidTo(range.to());
+    }
+
+    private LocalDate minEnd(LocalDate left, LocalDate right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return left.isBefore(right) ? left : right;
+    }
+
     private record DateRange(LocalDate from, LocalDate to) {
+    }
+
+    private record AssignmentSegment(DateRange range, Integer primaryFlag) {
     }
 
     /**

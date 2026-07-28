@@ -230,6 +230,13 @@ class OrganizationServiceImplTest {
 
         assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
 
+        List<UserOrganization> beforeMergeDate = organizationService.listUserOrganizations(userId, today.minusDays(1));
+        assertEquals(1, beforeMergeDate.stream().filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag())).count());
+        assertEquals(source.getId(), beforeMergeDate.stream()
+                .filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag()))
+                .findFirst().orElseThrow().getOrganizationId(),
+                "統合前の日付ではsourceだけが主所属である");
+
         List<UserOrganization> active = userOrganizationMapper.selectByUserForUpdate(userId).stream()
                 .filter(row -> row.getValidFrom() != null && !row.getValidFrom().isAfter(today)
                         && (row.getValidTo() == null || !row.getValidTo().isBefore(today)))
@@ -237,6 +244,81 @@ class OrganizationServiceImplTest {
         assertEquals(1, active.stream().filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag())).count());
         assertEquals(target.getId(), active.stream().filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag()))
                 .findFirst().orElseThrow().getOrganizationId());
+    }
+
+    @Test
+    void 有限sourceと開放targetと後続主所属を期間分割して統合できる() {
+        OrganizationUnit source = organization("ORG-MERGE-FINITE-SRC", "有限主所属元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-FINITE-DST", "有限統合先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        OrganizationUnit later = organization("ORG-MERGE-FINITE-LATER", "後続主所属", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(later);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(1)
+                .validFrom(today).validTo(today.plusDays(10)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(target.getId()).primaryFlag(0)
+                .validFrom(today).validTo(null).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(later.getId()).primaryFlag(1)
+                .validFrom(today.plusDays(11)).validTo(null).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        for (LocalDate asOf : List.of(today, today.plusDays(5), today.plusDays(11), today.plusDays(30))) {
+            long primaryCount = organizationService.listUserOrganizations(userId, asOf).stream()
+                    .filter(row -> Integer.valueOf(1).equals(row.getPrimaryFlag())).count();
+            assertEquals(1, primaryCount, "任意の日付で主所属は1件だけ: " + asOf);
+        }
+        List<UserOrganization> targetRows = userOrganizationMapper.selectByUserForUpdate(userId).stream()
+                .filter(row -> target.getId().equals(row.getOrganizationId())).toList();
+        assertTrue(targetRows.stream().anyMatch(row -> today.equals(row.getValidFrom())
+                && today.plusDays(10).equals(row.getValidTo())
+                && Integer.valueOf(1).equals(row.getPrimaryFlag())));
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(11).equals(row.getValidFrom())
+                && row.getValidTo() == null
+                && Integer.valueOf(0).equals(row.getPrimaryFlag())));
+    }
+
+    @Test
+    void 未来sourceの中央被覆は前段既存区間と後段新規区間へ分割する() {
+        OrganizationUnit source = organization("ORG-MERGE-CENTER-SRC", "中央元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-CENTER-DST", "中央先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+        Long userId = sysUserMapper.selectByUsername("admin").getId();
+        LocalDate today = LocalDate.now();
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(source.getId()).primaryFlag(1)
+                .validFrom(today.plusDays(5)).validTo(today.plusDays(20)).build());
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(userId).organizationId(target.getId()).primaryFlag(0)
+                .validFrom(today.plusDays(10)).validTo(today.plusDays(15)).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<UserOrganization> rows = userOrganizationMapper.selectByUserForUpdate(userId);
+        assertTrue(rows.stream().noneMatch(row -> source.getId().equals(row.getOrganizationId())));
+        List<UserOrganization> targetRows = rows.stream()
+                .filter(row -> target.getId().equals(row.getOrganizationId())).toList();
+        assertEquals(3, targetRows.size());
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(5).equals(row.getValidFrom())
+                && today.plusDays(9).equals(row.getValidTo())
+                && Integer.valueOf(1).equals(row.getPrimaryFlag())));
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(10).equals(row.getValidFrom())
+                && today.plusDays(15).equals(row.getValidTo())
+                && Integer.valueOf(1).equals(row.getPrimaryFlag())));
+        assertTrue(targetRows.stream().anyMatch(row -> today.plusDays(16).equals(row.getValidFrom())
+                && today.plusDays(20).equals(row.getValidTo())
+                && Integer.valueOf(1).equals(row.getPrimaryFlag())));
     }
 
     @Test
@@ -343,6 +425,35 @@ class OrganizationServiceImplTest {
         assertNull(histories.get(0).getValidTo());
         assertTrue(histories.stream().allMatch(history -> history.getValidTo() == null
                 || !history.getValidFrom().isAfter(history.getValidTo())));
+    }
+
+    @Test
+    void 未来開始の会計履歴は原地更新して開始日と無期限を保つ() {
+        OrganizationUnit source = organization("ORG-MERGE-FUTURE-HISTORY-SRC", "未来履歴元", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(source);
+        OrganizationUnit target = organization("ORG-MERGE-FUTURE-HISTORY-DST", "未来履歴先", null,
+                LocalDate.of(2026, 1, 1), null);
+        organizationService.save(target);
+
+        Engineer engineer = Engineer.builder()
+                .fullName("未来履歴要員").employmentType("正社員").status("Bench")
+                .organizationId(source.getId()).expectedUnitPrice(new BigDecimal("500000")).build();
+        engineerMapper.insert(engineer);
+        LocalDate validFrom = LocalDate.now().plusDays(5);
+        engineerAccountingHistoryMapper.insert(EngineerAccountingHistory.builder()
+                .engineerId(engineer.getId()).organizationId(source.getId())
+                .expectedUnitPrice(new BigDecimal("500000")).validFrom(validFrom).validTo(null).build());
+
+        assertTrue(organizationService.merge(source.getId(), target.getId(), 0));
+
+        List<EngineerAccountingHistory> histories = engineerAccountingHistoryMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerAccountingHistory>()
+                        .eq(EngineerAccountingHistory::getEngineerId, engineer.getId()));
+        assertEquals(1, histories.size());
+        assertEquals(target.getId(), histories.get(0).getOrganizationId());
+        assertEquals(validFrom, histories.get(0).getValidFrom());
+        assertNull(histories.get(0).getValidTo());
     }
 
     /** 退職・停止時に有効な所属が残ると、退職者が組織scopeと部門損益の帰属に居座り続ける。 */
