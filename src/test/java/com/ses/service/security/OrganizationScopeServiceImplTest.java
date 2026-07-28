@@ -227,6 +227,51 @@ class OrganizationScopeServiceImplTest {
                 scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)));
     }
 
+    /**
+     * リクエストスレッド以外（バッチ・{@code @Async}・承認処理のワーカースレッド）から呼んでも
+     * scope解決が例外にならないこと。
+     *
+     * <p>{@code @RequestScope}に戻すとここで
+     * {@code ScopeNotActiveException: No thread-bound request found}になり、
+     * {@code WorkRecordService#approve}のような業務処理そのものが失敗する
+     * （実MySQLの{@code ConcurrentUpdateTest}で顕在化した回帰）。
+     */
+    @Test
+    void リクエスト外のスレッドでもscope解決が例外にならない() throws Exception {
+        OrganizationUnit own = organization("SCOPE-NO-REQUEST", "非同期組織", null);
+        organizationService.save(own);
+        SysUser manager = insertUser("no-request-manager", "非同期部門長", "マネージャー");
+        organizationService.assignUser(UserOrganization.builder()
+                .userId(manager.getId()).organizationId(own.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+
+        java.util.concurrent.ExecutorService executor =
+                java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            // 認証なしのワーカースレッド＝バッチ相当。ロール未解決なので全件アクセス扱いになり、
+            // 例外ではなく通常の結果を返すこと。
+            java.util.concurrent.Future<Boolean> unauthenticated =
+                    executor.submit(() -> scopeService.hasFullAccess());
+            assertTrue(unauthenticated.get(), "リクエスト外の未認証スレッドは全件アクセス扱い");
+
+            // 認証つきワーカースレッドでも、リクエスト属性が無いだけでscope解決は最後まで走ること。
+            // 本テストは@Transactionalで未コミットのため、別スレッド(別コネクション)からは
+            // 登録した組織が見えない。ここで確認するのは「例外にならず、ロール判定が効くこと」。
+            java.util.concurrent.Future<java.util.Set<Long>> scoped = executor.submit(() -> {
+                authenticate(manager);
+                try {
+                    assertFalse(scopeService.hasFullAccess(), "部門責任者はリクエスト外でも全件にしない");
+                    return scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1));
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            });
+            assertTrue(scoped.get().isEmpty(), "未コミットの組織は別コネクションから見えない");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private OrganizationUnit organization(String code, String name, Long parentId) {
         return OrganizationUnit.builder()
                 .code(code).name(name).type("部").parentId(parentId)

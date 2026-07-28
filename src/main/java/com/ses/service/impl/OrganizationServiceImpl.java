@@ -437,7 +437,12 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
             patch.setId(assignment.getId());
             patch.setValidTo(validTo);
             patch.setVersion(assignment.getVersion());
-            closed += userOrganizationMapper.updateById(patch);
+            // CAS失敗を黙って捨てると、退職・無効化が「成功」で返るのに所属が開いたまま残り、
+            // 退職者が組織scope・部門損益に居座る。トランザクションごと失敗させて再実行させる。
+            if (userOrganizationMapper.updateById(patch) != 1) {
+                throw BusinessException.of(409, "error.organization.versionConflict");
+            }
+            closed++;
         }
         // 上長として登録されている行も外す。退職者が上長のまま残ると承認者不在になる。
         userOrganizationMapper.clearManager(userId);

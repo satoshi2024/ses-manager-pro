@@ -19,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.annotation.RequestScope;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -30,9 +29,16 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** 組織スコープの実装。組織ID条件はSQL wrapperへ追加し、画面後処理では絞り込まない。 */
+/**
+ * 組織スコープの実装。組織ID条件はSQL wrapperへ追加し、画面後処理では絞り込まない。
+ *
+ * <p><b>シングルトンである理由</b>: 本サービスは{@code WorkRecordService#approve}のような
+ * 業務サービスから呼ばれる。業務サービスはHTTPリクエスト以外（バッチ、{@code @Async}、
+ * テストのワーカースレッド）からも実行されるため、{@code @RequestScope}にすると
+ * {@code ScopeNotActiveException}（No thread-bound request found）で承認そのものが落ちる。
+ * キャッシュはリクエスト属性へ退避し、リクエスト外では都度算出する（下記{@code cache()}）。
+ */
 @Service
-@RequestScope
 @RequiredArgsConstructor
 public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
@@ -45,15 +51,19 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     private final InvoiceMapper invoiceMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
-    private final OrganizationService organizationService;
+    /**
+     * {@code OrganizationServiceImpl} は上長のscope検査で本サービスを参照するため、
+     * 双方をシングルトンにすると循環参照になる。遅延解決して循環を断つ。
+     */
+    private final ObjectProvider<OrganizationService> organizationServiceProvider;
     private final ObjectProvider<DataScopeService> dataScopeServiceProvider;
 
     /** 既存DBの所属backfill完了前はscopeを公開しないための明示的な rollout gate。 */
     @Value("${organization.scope.enabled:false}")
     private boolean organizationScopeEnabled;
 
-    private ScopeCacheKey cachedKey;
-    private Set<Long> cachedIds;
+    /** リクエスト属性へ退避するキャッシュの格納キー。 */
+    private static final String CACHE_ATTRIBUTE = OrganizationScopeServiceImpl.class.getName() + ".CACHE";
 
     /**
      * 組織階層によるscopeを受けないか。
@@ -104,8 +114,9 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
                 .max(LocalDateTime::compareTo)
                 .orElse(LocalDateTime.MIN);
         ScopeCacheKey key = new ScopeCacheKey(null, userId, role, date, version);
-        if (key.equals(cachedKey) && cachedIds != null) {
-            return cachedIds;
+        ScopeCache cache = cache();
+        if (cache != null && key.equals(cache.key) && cache.ids != null) {
+            return cache.ids;
         }
 
         Set<Long> result = new HashSet<>();
@@ -115,12 +126,45 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
             }
             // ここへ来るのは部門責任者(マネージャー)だけ。主所属の組織とその子孫が閲覧範囲になる。
             if (Integer.valueOf(1).equals(assignment.getPrimaryFlag())) {
-                result.addAll(organizationService.descendantIds(assignment.getOrganizationId(), date));
+                result.addAll(organizationServiceProvider.getObject()
+                        .descendantIds(assignment.getOrganizationId(), date));
             }
         }
-        cachedKey = key;
-        cachedIds = Collections.unmodifiableSet(result);
-        return cachedIds;
+        Set<Long> resolved = Collections.unmodifiableSet(result);
+        if (cache != null) {
+            cache.key = key;
+            cache.ids = resolved;
+        }
+        return resolved;
+    }
+
+    /**
+     * リクエストスコープのキャッシュ置き場を返す。リクエスト外（バッチ・{@code @Async}・
+     * ワーカースレッド）では{@code null}を返し、キャッシュせず毎回算出する。
+     *
+     * <p>スレッドローカルにしないのは、Tomcatのワーカースレッドが使い回されるため、
+     * リクエスト境界で捨てないと別ユーザーへ許可組織が漏れる／古い権限が残るからである。
+     */
+    private ScopeCache cache() {
+        org.springframework.web.context.request.RequestAttributes attributes =
+                org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        if (attributes == null) {
+            return null;
+        }
+        Object existing = attributes.getAttribute(CACHE_ATTRIBUTE,
+                org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        if (existing instanceof ScopeCache scopeCache) {
+            return scopeCache;
+        }
+        ScopeCache created = new ScopeCache();
+        attributes.setAttribute(CACHE_ATTRIBUTE, created,
+                org.springframework.web.context.request.RequestAttributes.SCOPE_REQUEST);
+        return created;
+    }
+
+    private static final class ScopeCache {
+        private ScopeCacheKey key;
+        private Set<Long> ids;
     }
 
     @Override

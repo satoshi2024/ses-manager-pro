@@ -50,6 +50,11 @@ public final class CsvUtils {
     /**
      * Excel等の表計算ソフトが数式として解釈しうる先頭文字（= + - @ タブ CR）を持つ場合、
      * シングルクォートを前置して文字列として扱わせる（CWE-1236対策）。
+     *
+     * <p>ただし数値そのものは無害化しない。管理会計の予算差(revenueVariance/grossProfitVariance)は
+     * 予算未達の行で必ず負数になるため、{@code -50000} を {@code '-50000} にすると
+     * Excel上で文字列になり、合計・並べ替え・グラフが一切効かなくなる。
+     * 数式として解釈されうるのは数値として解釈できない文字列だけである。
      */
     static String sanitizeForSpreadsheet(String field) {
         if (field == null || field.isEmpty()) {
@@ -57,9 +62,19 @@ public final class CsvUtils {
         }
         char c = field.charAt(0);
         if (c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' || c == '\r') {
-            return "'" + field;
+            return isNumeric(field) ? field : "'" + field;
         }
         return field;
+    }
+
+    /** 符号付き十進数（指数表記を含む）として解釈できるか。 */
+    private static boolean isNumeric(String field) {
+        try {
+            new java.math.BigDecimal(field);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     /**

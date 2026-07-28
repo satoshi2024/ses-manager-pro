@@ -54,13 +54,43 @@ class ManagementAccountingApiControllerTest {
     @Autowired
     private ManagementAccountingApiController controller;
 
+    /**
+     * 組織名は利用者入力なので数式・制御文字を無害化する。一方で予算差は
+     * 予算未達の行で必ず負数になるため、数値のまま出力しないとExcelで集計できない。
+     * 実レスポンスをCSVとして読み直して両方を同時に固定する。
+     */
     @Test
-    void csvValueは制御文字を数式文字列として出力しない() throws Exception {
-        java.lang.reflect.Method method = ManagementAccountingApiController.class.getDeclaredMethod("csvValue", Object.class);
-        method.setAccessible(true);
-        assertEquals("'\t=SUM(A1)", method.invoke(controller, "\t=SUM(A1)"));
-        assertEquals("\"'\r@cmd\"", method.invoke(controller, "\r@cmd"));
-        assertEquals("\"部署\r名\"", method.invoke(controller, "部署\r名"));
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    void export_組織名は無害化し負の予算差は数値のまま出力する() throws Exception {
+        ManagementAccountingSummaryDto.Row row = ManagementAccountingSummaryDto.Row.builder()
+                .organizationId(1L).organizationName("=SUM(A1)\r営業部").costCenterId(2L)
+                .revenue(new BigDecimal("100")).cost(new BigDecimal("160"))
+                .grossProfit(new BigDecimal("-60")).budgetRevenue(new BigDecimal("300"))
+                .budgetGrossProfit(new BigDecimal("90")).revenueVariance(new BigDecimal("-200"))
+                .grossProfitVariance(new BigDecimal("-150")).waitCost(new BigDecimal("5"))
+                .build();
+        when(managementAccountingService.summary("2026-06", null, null, null, null, null, null))
+                .thenReturn(ManagementAccountingSummaryDto.builder()
+                        .month("2026-06").rows(List.of(row)).details(List.of()).build());
+
+        byte[] body = mockMvc.perform(get("/api/management-accounting/export").param("month", "2026-06"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        String csv = new String(body, java.nio.charset.StandardCharsets.UTF_8).replace("﻿", "");
+
+        List<List<String>> rows;
+        try (java.io.InputStream in = new java.io.ByteArrayInputStream(
+                csv.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            rows = com.ses.common.util.CsvUtils.parse(in);
+        }
+        List<String> data = rows.get(1);
+        assertEquals(15, data.size());
+        // 数式・CRを含む組織名はクォート前置で無害化される。
+        assertEquals("'=SUM(A1)\r営業部", data.get(2));
+        // 粗利・予算差の負数は「'」を付けずに数値のまま出す。
+        assertEquals("-60", data.get(9));
+        assertEquals("-200", data.get(12));
+        assertEquals("-150", data.get(13));
     }
 
     @Test

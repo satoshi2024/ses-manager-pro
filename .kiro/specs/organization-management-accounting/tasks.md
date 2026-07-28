@@ -41,10 +41,13 @@
 ## 残課題（チェック済みでも未検証のもの）
 
 チェックは「Objective・自動テスト・サービス層Demoを満たした」ことを表す。
-次の2点は本環境で実行できないため、**本番リリース前の必須条件**として残す。
 
-1. **Docker MySQL smoke**: `FlywayMigrationSmokeTest` / `FlywayLegacyV60MigrationSmokeTest` は
-   Dockerデーモンが無い環境のためskip。V1→V60の実MySQL適用は未実証。
-   （Docker無しでも効く構造検査は `MigrationScriptIntegrityTest` 6件へ移してある）
+1. ~~**Docker MySQL smoke**~~ → **完了（2026-07-27 第十二次Review）**。
+   Docker Engine 29.3.1 上で `FlywayMigrationSmokeTest`（空庫V1→V60）と
+   `FlywayLegacyV60MigrationSmokeTest`（旧V58形状→V60）を実行し成功。
+   この実行で、V60の生成列がSTOREDだと既存DBのALTERが `ERROR 1215` で必ず失敗する
+   P0を検出・修正した（詳細は `review-ledger.md` 第十二次）。
+   `mvn clean test` は **836 tests / Failures 0 / Errors 0 / Skipped 0**。
 2. **実ブラウザDemo**: desktop/390px での組織作成→所属→異動→契約→締め→部門損益の一気通貫は未実施。
-   Thymeleafのレンダリングは `MobileResponsiveLayoutTest`、JS構文は `JsSyntaxCheckTest` までの確認にとどまる。
+   Thymeleafのレンダリングは `MobileResponsiveLayoutTest`、JS構文は `JsSyntaxCheckTest`（Node.js v22で実行済み）
+   までの確認にとどまる。**本番リリース前の必須条件**として残す。
