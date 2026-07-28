@@ -181,11 +181,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        if (value != null) {
-                            cache.put(key, value);
-                        } else {
-                            cache.remove(key);
-                        }
+                        // commit順序が逆転しても旧callbackが新値を上書きしないよう、
+                        // 値は次回DBから再読込させる。scope generationもcommit側で別管理される。
+                        // loadedも戻さないと、cache miss後にensureLoaded()がDBを再読込しない。
+                        cache.clear();
+                        loaded = false;
                     }
 
                 }
