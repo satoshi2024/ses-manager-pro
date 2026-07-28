@@ -1,10 +1,23 @@
-# 他AIへの実装ディスパッチガイド
+# 他AIへの実装ディスパッチガイド v2.0
+
+## 0. 2026-07-28以降の必須規則
+
+全ての新規・継続対話は `execution-review-handbook.md` v2.0を実行基線とする。S02で十数回の指摘対応が
+発生した原因と再発防止は `s02-review-retrospective.md` を読む。既存copyable conversationは廃棄しない。
+そこに記載された `shared-standards.md` の必須基線条項を介してv2.0を適用する。
+
+- 実装開始前: READINESSとTASK CONTRACTを提示する。
+- Review開始前: commit固定済みREVIEW PACKETを提示する。
+- 指摘管理: 一意issue IDと状態を使用する。
+- 再Review: OPEN issue、修正diff、direct regressionだけを対象にする。
+- Round 4以降: 個別修正を止め、spec/test matrixのretrospectiveを先に行う。
+- 最終Review: merge済みHeadを対象にする。未commit差分のPASSで次specを解放しない。
 
 ## 1. 最初の指示（Gate 0専用）
 
 ```text
 .kiro/specs/customer-product-expansion-2026/README.md、decision-log.md、shared-standards.md、
-dependency-matrix.md、research-sources.mdを全て読んでください。
+execution-review-handbook.md、s02-review-retrospective.md、dependency-matrix.md、research-sources.mdを全て読んでください。
 
 G1〜G6決定後の実装では `gate-decisions-g1-g6.md` も全て読んでください。
 
@@ -25,17 +38,19 @@ blocking=yesのG0〜G6を推測で決めてはいけません。G7〜G10も推�
 
 ```text
 .kiro/specs/customer-product-expansion-2026/README.md、decision-log.md、shared-standards.md、
-dependency-matrix.mdを先に全て読み、その後 .kiro/specs/<spec-name>/ の
+execution-review-handbook.md、s02-review-retrospective.md、dependency-matrix.mdを先に全て読み、その後 .kiro/specs/<spec-name>/ の
 requirements.md、design.md、tasks.mdを全て読んでください。
 
-担当は <task-id> だけです。先行taskとblocking decisionが完了済みか、予約migration番号が現在も
+担当は <task-id> だけです。production fileを変更する前にhandbook所定のREADINESSとTASK CONTRACTを提示してください。
+先行taskとblocking decisionが完了済みか、予約migration番号が現在も
 有効か、共有ファイルに未mergeの変更がないかを最初に確認してください。未完了なら実装せず報告してください。
 
 tasks.mdのObjective/実装ガイダンス/テスト要件/Demoを全て満たし、無関係な変更をしないでください。
 DDL変更はV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke assertを同一コミットで同期し、
 4言語i18n、CSRF、tenant/data scope、audit、file scope、export/notification経路も確認してください。
 
-完了時は変更ファイル、対応requirements ID、実行テスト、Demo結果、未検証事項、rollback方法を報告し、
+完了時はhandbook所定のREVIEW PACKETとして、変更ファイル、対応requirements/acceptance ID、実行テスト、
+Demo結果、skip、未検証事項、rollback方法、Base/Headを報告し、
 完了したtaskだけ - [x] にしてください。spec全体の完了や別taskを先取りしないでください。
 ```
 
@@ -63,9 +78,14 @@ DDL変更はV1、増分Flyway、H2 replay、engineer-schema-h2、MySQL smoke ass
 ## 5. レビューAIへの指示
 
 ```text
+execution-review-handbook.md v2.0とs02-review-retrospective.mdを全文読み、REVIEW PACKETのBase/Head、task、
+test/Demo証拠が固定されていることを確認してください。不足時はNOT REVIEWABLEとして停止してください。
 実装者の説明を前提にせず、担当specのrequirements/design/tasksと実diffを照合してください。
 各requirements IDについて「実装箇所・テスト・Demo」を表にし、未達、過剰実装、認可漏れ、
 状態競合、二重登録、migration/H2不整合、外部API障害、PII漏洩を確認してください。
 特にlist/detail/count/export/download/notification/schedulerのscope母集団が同じかを検証してください。
 修正不要ならその根拠を示し、問題があれば重大度、再現手順、最小修正範囲を提示してください。
+各指摘へ一意issue ID、requirements/acceptance ID、file:line、再現証拠、direct regression scopeを付けてください。
+再ReviewではOPEN issue、修正diff、direct regressionだけを確認し、証拠なしにclosed issueを再開しないでください。
+最終判定はPASS / CONDITIONAL PASS / FAIL / NOT REVIEWABLEのいずれかにしてください。
 ```
