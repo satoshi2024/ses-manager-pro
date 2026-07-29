@@ -3,6 +3,9 @@
 本書を通常の派工入口とする。1specにつき1つの主対話を維持し、tasks.mdの原子taskを順番に処理する。
 T001は完了済みであり、本書の実行対象から除外する。`task-start-conversations.md` は例外的な再分割時だけ使う。
 
+S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常TaskはL0〜L3の定向test・直接回帰で完了でき、
+各specのM taskでL4全量を実行する。通常Taskへ無条件の全量testを要求してはならない。
+
 ## 使い方
 
 1. `spec-execution-ledger.md` で開始条件と前WaveのReview合格を確認する。
@@ -10,6 +13,7 @@ T001は完了済みであり、本書の実行対象から除外する。`task-s
 3. 主AIはtaskを順番に完了し、並行レーンだけ子Agentへ限定分派する。
 4. spec実装が止まったら同じ対話で無理に進めず、ledgerへblockerを記録する。
 5. M完了後、新しい対話で `spec-review-conversations.md` の同じspecを実行する。
+6. S03〜S17では各TaskのTEST SCOPE DECISIONをreview-ledgerへ残し、次のL4 checkpointを明記する。
 
 ## S01 — `multi-company-tenant-isolation`
 

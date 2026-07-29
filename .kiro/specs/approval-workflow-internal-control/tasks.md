@@ -1,5 +1,8 @@
 # Implementation Plan — 承認ワークフロー・内部統制
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T041〜T046はL0〜L3の定向test・直接回帰、T047でL4全量を実行する。
+> 共通approval adapter/state machine合流時はL3、昇格条件該当時だけ中間L4とする。
+
 - [ ] 0. G7と対象操作inventory
   - **Objective**: 0. G7と対象操作inventory を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: 操作、現endpoint/service、申請field、route、SLA、職務分離表。

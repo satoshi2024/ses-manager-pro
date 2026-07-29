@@ -1,5 +1,7 @@
 # Design — 法定文書台帳・電子保存
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V64）
 
 - `m_document_type(code, name, direction, retention_years, retention_start_rule, legal_hold_supported)`。

@@ -1,5 +1,8 @@
 # Implementation Plan — AI推薦フィードバック・評価ループ
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T109〜T114はL0〜L3の定向test・直接回帰、T115でL4全量を実行する。
+> provider/PII/evaluationの対象fixtureをTask単位で行い、全adapter・全量安全性回帰はMへ集約する。
+
 - [ ] 0. G10/use case/PII/metric確定
   - **Objective**: 0. G10/use case/PII/metric確定 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: provider DPA、field allowlist、mask規則、保存期間、成功metric、禁止属性。

@@ -1,5 +1,8 @@
 # Implementation Plan — 横断検索・実ToDo・保存ビュー・一括操作
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T028〜T032はL1〜L3の定向test・直接回帰、T033でL4全量を実行する。
+> 通常Taskの完了条件へ無条件の`mvn test`全量を追加しない。
+
 - [ ] F1. task/saved view基盤
   - **Objective**: F1. task/saved view基盤 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: V63/V1/H2/smoke、schema registry、状態機械。

@@ -1,5 +1,7 @@
 # Design — JP PINTデジタルインボイス
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V76）
 
 - `t_peppol_participant(owner_type/id, scheme_id, participant_id, provider, verified_at, status)`。

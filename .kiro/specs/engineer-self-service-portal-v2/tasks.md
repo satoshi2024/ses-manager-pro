@@ -1,5 +1,8 @@
 # Implementation Plan — 要員セルフサービスポータルV2
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T088〜T092はL1〜L3の定向test・直接回帰、T093でL4全量を実行する。
+> UI Taskは対象browser/MVCを実施し、全画面回帰はMへ集約する。
+
 - [ ] F1. change/expense/1on1/survey DDL
   - **Objective**: F1. change/expense/1on1/survey DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: V72/V1/H2/smoke、本人scope、field allowlist。

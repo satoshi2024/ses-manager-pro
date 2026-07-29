@@ -1,5 +1,8 @@
 # Implementation Plan — 派遣・準委任コンプライアンス台帳
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T060〜T065はL0〜L3の定向test・直接回帰、T066でL4全量を実行する。
+> 法務受入gateと全量testの実行時点を混同しない。
+
 - [ ] 0. G2公式様式field mapping
   - **Objective**: 0. G2公式様式field mapping を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: 帳票ごとの法定項目→DB/画面/生成位置、保存期間、権限。

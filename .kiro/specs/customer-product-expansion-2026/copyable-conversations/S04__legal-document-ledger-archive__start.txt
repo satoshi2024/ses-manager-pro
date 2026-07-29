@@ -36,6 +36,7 @@
 - 0→F1→F2→(A1 || B1 || B2)→M
 - 並行ルール: F2 merge後、台帳UI、既存帳票統合、export/retentionを3レーン可。
 - task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
+- T014〜T115は `test-execution-policy-s03-s17.md` を適用し、通常TaskはL0〜L3の定向test・直接回帰だけを実行する。無条件の全量testは禁止し、各specのM taskでL4全量を1回実行する。
 - 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
 - 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
 - migration、SecurityConfig、共通entity/service、message bundle、sidebar、tasks.md、M taskは主担当が所有する。

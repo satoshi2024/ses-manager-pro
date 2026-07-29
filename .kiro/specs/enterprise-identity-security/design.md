@@ -1,5 +1,7 @@
 # Design — 企業認証・セキュリティ
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V63）
 
 - `m_identity_provider(tenant_id, type, issuer_uri/metadata_uri, client_id, encrypted_secret_ref, enabled)`。

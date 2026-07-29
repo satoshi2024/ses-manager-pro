@@ -1,5 +1,7 @@
 # Design — 横断検索・実ToDo・保存ビュー・一括操作
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V65）
 
 - `t_task(id, tenant_id, title, description, assignee_user_id, requester_user_id, due_date, priority,

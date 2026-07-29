@@ -1,5 +1,7 @@
 # Design — AI推薦フィードバック・評価ループ
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V77）
 
 - `m_ai_artifact_version(id, use_case, provider, model_name, prompt/rule_version, config_hash,

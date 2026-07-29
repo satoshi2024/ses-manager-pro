@@ -1,5 +1,8 @@
 # Implementation Plan — CRM複数担当者・商機管理
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T048〜T052はL1〜L3の定向test・直接回帰、T053でL4全量を実行する。
+> 通常Taskごとの全量test反復は禁止する。
+
 - [ ] F1. contact/lead/opportunity DDLと移行
   - **Objective**: F1. contact/lead/opportunity DDLと移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: V65/V1/H2/smoke、既存contact→初回contact。

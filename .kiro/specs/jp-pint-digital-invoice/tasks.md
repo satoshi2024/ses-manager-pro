@@ -1,5 +1,8 @@
 # Implementation Plan — JP PINTデジタルインボイス
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T102〜T107はL0〜L3の定向test・直接回帰、T108でL4全量を実行する。
+> canonical model/schema変更はL3、provider sandbox全体受入はMで行う。
+
 - [ ] 0. G5/provider/spec version spike
   - **Objective**: 0. G5/provider/spec version spike を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: provider契約/API/webhook/validator/test participant/spec version/料金/SLA。

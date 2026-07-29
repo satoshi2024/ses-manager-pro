@@ -3,6 +3,7 @@
 > 実装・Reviewの現行基線は `execution-review-handbook.md` v2.0である。S02のReview反復から得た再発防止は
 > `s02-review-retrospective.md` に記録する。2026-07-28以前のcopyable conversationも
 > `shared-standards.md`を介して本基線へ更新される。
+> S03〜S17のtestは `test-execution-policy-s03-s17.md` に従い、通常Taskは定向/直接回帰、M taskで全量を実行する。
 
 ## 1. 目的
 
@@ -133,5 +134,5 @@ V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属�
 3. APIの更新系はCSRF、監査ログ、データスコープ/tenant scope、状態機械、楽観ロックを確認する。
 4. 新規文言は日本語・英語・中国語・韓国語の4バンドルへ追加する。
 5. ページ/API/通知リンク/エクスポート/ファイルダウンロードに同じ認可母集団を適用する。
-6. `mvn test`全緑、Docker環境でMySQL migration smoke、主要ブラウザDemoを行う。
+6. 各通常Taskは定向/直接回帰を完了し、各specのM taskで`mvn test`全量、必要なMySQL smoke、主要browser Demoを行う。
 7. `.kiro/specs/README.md` と本書の状態を更新する。

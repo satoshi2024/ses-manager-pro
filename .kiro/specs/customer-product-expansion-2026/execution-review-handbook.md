@@ -161,6 +161,9 @@ DDL taskは次の5形状を検証する。
 
 ## 7. Test Matrix・証拠・Demo
 
+S03〜S17では `test-execution-policy-s03-s17.md` を併用する。通常Taskは定向testと直接回帰を必須とするが、
+全量testはM taskまたは同方針の昇格条件へ集約する。Review AIも同一commitのL4を理由なく再実行しない。
+
 各acceptance IDに最低1行を作る。
 
 | AC | 正常 | 拒否/異常 | 境界 | 競合/再送 | 実DB/UI | 証拠 |
@@ -196,6 +199,9 @@ Demoはrole、data、操作、期待、実測、desktop/390px、keyboard、二�
 - review-ledgerにcommit、証拠、未検証、rollbackを記録。
 
 code作成、compile、主要test成功だけでは完了にしない。
+
+ここでいう「必要な全量回帰」は全Task一律ではない。S03〜S17の通常Taskは分層方針のL0〜L3証拠と次のL4 checkpointを
+記録すれば完了できる。M taskまたは昇格条件に該当する変更だけL4を必須とする。
 
 ## 9. Review開始契約
 

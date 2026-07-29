@@ -1,5 +1,8 @@
 # Implementation Plan — BP会社マスタ・発注コンプライアンス
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T034〜T039はL0〜L3の定向test・直接回帰、T040でL4全量を実行する。
+> migration/共通取引先contract変更時だけ中間昇格を判定する。
+
 - [ ] 0. G2法務確認/既存自由入力profiling
   - **Objective**: 0. G2法務確認/既存自由入力profiling を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: 適用確認票、必須明示項目、支払rule、distinct値/件数/候補衝突。

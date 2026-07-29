@@ -5,6 +5,9 @@
 通常運用は `spec-start-conversations.md` と `spec-review-conversations.md` を使用し、本書から115対話を作らない。
 T001は完了済みのため再派工しない。
 
+T014〜T115は `test-execution-policy-s03-s17.md` を必須適用する。通常Taskは定向testと直接回帰で完了し、
+無条件の全量testを実行しない。全量は各specのM task、明記された昇格checkpoint、CI/releaseへ集約する。
+
 ## 使用ルール
 
 1. 1つの対話につき、原則として1つの実装AI/1つのbranchまたはworktreeへ渡す。
@@ -12,6 +15,7 @@ T001は完了済みのため再派工しない。
 4. task本文の順番は編集しない。依存未完了、blocking decision未決、migration競合、共有ファイル競合なら停止報告させる。
 5. `M` taskは統合担当だけが実行する。複数AIが同時にチェックを付けない。
 6. 各task完了後、別AIまたは主担当が実diffと受入条件をレビューしてから次へ進む。
+7. T014〜T115はTEST SCOPE DECISION（level、対象consumer、除外suite、昇格条件、次のL4 checkpoint）を提出する。
 
 ## T番号索引
 

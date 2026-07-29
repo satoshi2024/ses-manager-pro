@@ -1,5 +1,8 @@
 # Implementation Plan — 要員配置・需給計画
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T075〜T079はL1〜L3の定向test・直接回帰、T080でL4全量を実行する。
+> 性能testは対象datasetと変更contractに限定し、各Taskで全量負荷testを反復しない。
+
 - [ ] F1. position/allocation/scenario DDL
   - **Objective**: F1. position/allocation/scenario DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: V70/V1/H2/smoke、状態/区間/競合service。

@@ -1,5 +1,8 @@
 # Implementation Plan — 注文・注文請・月次検収
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T054〜T058はL1〜L3の定向test・直接回帰、T059でL4全量を実行する。
+> 契約/請求の共有状態機械を変更した場合は昇格条件を評価する。
+
 - [ ] F1. 注文/明細/検収DDL
   - **Objective**: F1. 注文/明細/検収DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: V67/V1/H2/smoke、entity/mapper/number/状態。

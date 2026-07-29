@@ -12,6 +12,7 @@
 - 再Review: OPEN issue、修正diff、direct regressionだけを対象にする。
 - Round 4以降: 個別修正を止め、spec/test matrixのretrospectiveを先に行う。
 - 最終Review: merge済みHeadを対象にする。未commit差分のPASSで次specを解放しない。
+- S03〜S17の通常Task: `test-execution-policy-s03-s17.md`に従い定向/直接回帰だけを実行し、M taskで全量を行う。
 
 ## 1. 最初の指示（Gate 0専用）
 

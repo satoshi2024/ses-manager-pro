@@ -1,5 +1,8 @@
 # Implementation Plan — 会計・支払連携
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T094〜T100はL0〜L3の定向test・直接回帰、T101でL4全量を実行する。
+> provider error matrixは対象adapter単位、全量/sandbox障害訓練はM/release gateへ集約する。
+
 - [ ] 0. G4/API spike/canonical mapping
   - **Objective**: 0. G4/API spike/canonical mapping を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: plan/API可否、sandboxまたはofficial fixture response、勘定/税/部門/取引先mapping、rate limit、fallback。

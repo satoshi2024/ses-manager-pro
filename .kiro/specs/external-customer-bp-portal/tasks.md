@@ -1,5 +1,8 @@
 # Implementation Plan — 顧客・BP外部ポータル
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T081〜T086はL0〜L3の定向test・直接回帰、T087でL4全量を実行する。
+> SecurityFilterChain/portal scope変更はL3、昇格条件該当時だけ中間L4とする。
+
 - [ ] 0. G3/G8と公開field inventory
   - **Objective**: 0. G3/G8と公開field inventory を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: domain/規約/本人確認/permission×画面×field matrix、threat model。

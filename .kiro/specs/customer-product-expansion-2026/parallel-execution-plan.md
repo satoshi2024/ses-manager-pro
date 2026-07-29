@@ -106,6 +106,9 @@ C=同時編集せず、子Agentはread-only調査・テスト・レビューへ�
 5. 全レーンmerge後に、list/detail/count/export/download/notification/schedulerのscope母集団を横断確認する。
 6. 最後に `M` taskを単独実行し、spec状態とcheckboxを更新する。
 
+S03〜S17の各laneは定向testと直接回帰（L1/L2、共有境界はL3）を提出する。laneごとの全量testは禁止し、
+全lane合流後のM taskでL4全量を1回実行する。merge競合解消または共有基盤変更がある場合だけ昇格条件を適用する。
+
 ## 6. 並行を直ちに停止する条件
 
 - 同じFlyway番号、V1、H2 schema、`engineer-schema-h2.sql`を複数AIが変更している。

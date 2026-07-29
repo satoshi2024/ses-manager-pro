@@ -89,8 +89,10 @@ P2/NOTEのDEFERREDにはownerと期限または対象spec/backlogを記載する
 
 ## 7. Test Evidence
 
-| command | environment | tests | failures | errors | skipped | exit | commit | executor |
-|---|---|---:|---:|---:|---:|---:|---|---|
+S03〜S17では各行にtest level（L0〜L5）を記載し、通常Taskは除外suiteと次のL4 checkpointを残す。
+
+| level | command | environment | tests | failures | errors | skipped | exit | commit | executor |
+|---|---|---|---:|---:|---:|---:|---:|---|---|
 
 skipは別表でtest名、理由、blocker、release gate、owner、期限を記録する。
 

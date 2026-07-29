@@ -1,5 +1,8 @@
 # Implementation Plan — 企業認証・セキュリティ
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T014〜T019は`test-execution-policy-s03-s17.md`のL0〜L3で定向testと直接回帰を行い、
+> 無条件の全量testを要求しない。T020でL4全量を1回実行する。共有security/schema変更等の昇格条件時だけ中間L4を行う。
+
 - [ ] 0. G1/脅威モデル/permission inventory
   - **Objective**: 0. G1/脅威モデル/permission inventory を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: Entra test tenant/app登録、claim/group mapping、認証flow、action一覧、PII分類、2アカウントbreak-glass手順。

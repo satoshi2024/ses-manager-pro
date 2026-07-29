@@ -1,5 +1,7 @@
 # Design — 派遣・準委任コンプライアンス台帳
 
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+
 ## 1. DDL（予約V70）
 
 - `m_workplace(id, customer_id, name, address, organization_unit, phone)`。

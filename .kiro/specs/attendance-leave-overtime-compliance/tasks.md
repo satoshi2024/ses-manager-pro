@@ -1,5 +1,8 @@
 # Implementation Plan — 雇用勤怠・休暇・時間外労働
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T067〜T073はL0〜L3の定向test・直接回帰、T074でL4全量を実行する。
+> calculator/締め/共通transaction変更はL3、昇格条件該当時だけ中間L4とする。
+
 - [ ] 0. G6/36協定/就業規則確認
   - **Objective**: 0. G6/36協定/就業規則確認 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: source of truth、勤務区分、丸め、カレンダー、休暇、協定期間/上限。

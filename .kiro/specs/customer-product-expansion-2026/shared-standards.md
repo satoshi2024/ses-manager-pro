@@ -10,6 +10,8 @@ S02の再発防止根拠は `s02-review-retrospective.md` を正とする。
 旧対話文だけを完了条件にしてはならない。矛盾時の優先順位はhandbook §1に従う。
 各specのreview-ledgerは `review-ledger-template.md` の現行判定、Issue Register、Review Packet、証拠表を使用する。
 既存対話へ送る切替文面は `conversation-baseline-v2.md` を使用する。
+S03〜S17（T014〜T115）のtest実行範囲は `test-execution-policy-s03-s17.md` を正とし、通常Taskへ
+無条件の全量testを要求しない。全量はM task、明記された高risk checkpoint、CI/releaseへ集約する。
 
 ## 1. 既存資産を唯一の正として再利用する
 
@@ -63,6 +65,9 @@ S02の再発防止根拠は `s02-review-retrospective.md` を正とする。
 - 状態、金額、担当、法令警告は色だけで表現しない。
 
 ## 6. テストの最低セット
+
+以下はspec全体で満たすべき種類であり、各通常Taskで全種類・全量を毎回実行する意味ではない。
+Task単位の選択と昇格は `test-execution-policy-s03-s17.md` のL0〜L5に従う。
 
 | 種別 | 必須内容 |
 |---|---|

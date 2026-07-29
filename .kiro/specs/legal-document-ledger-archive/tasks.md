@@ -1,5 +1,8 @@
 # Implementation Plan — 法定文書台帳・電子保存
 
+> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T021〜T026はL0〜L3の定向test・直接回帰、T027でL4全量を実行する。
+> file/storage/schema等の共有境界変更は方針の昇格条件に従う。
+
 - [ ] 0. G2法務確認と既存file inventory
   - **Objective**: 0. G2法務確認と既存file inventory を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: 文書種別、起算日、保存年、法的hold、既存path/参照元/件数/容量。

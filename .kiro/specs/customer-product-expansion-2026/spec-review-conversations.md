@@ -3,12 +3,16 @@
 各Reviewは実装対話と分離した新規対話で実行する。過去の会話を貼らず、spec、review ledger、commit/diffをrepositoryから読む。
 T001は完了済みのため本書のReview対象から除外する。
 
+R03〜R17は `test-execution-policy-s03-s17.md` を必須適用する。同一Headの有効なL4全量証拠を理由なく再実行せず、
+再ReviewはOPEN issue、修正diff、direct regressionのL1〜L3を既定とする。昇格条件時だけL4を要求する。
+
 ## 使い方
 
 1. `<BASE_COMMIT>`と`<HEAD_COMMIT>`を分かる場合だけ置換する。不明ならreview ledgerとgit statusから範囲を特定させる。
 2. Review AIは変更しない。指摘は元の実装対話へ返す。
 3. 修正後は同じReview対話へcommit/diffだけ伝えて再Reviewする。
 4. 合格後だけ中央ledgerのReviewをPASSにし、次spec/Waveを開始する。
+5. L4再実行の要否はM証拠commitとReview Headの一致、merge差分、共有境界変更から判定し、理由をledgerへ記録する。
 
 ## R01 — `multi-company-tenant-isolation` Review
 
