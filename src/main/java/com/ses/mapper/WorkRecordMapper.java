@@ -77,10 +77,18 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           <if test="fullAccess == false">
             AND (
               <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">
-                EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND uo.deleted_flag = 0
-                    AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
-                    AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
+                (
+                  CASE WHEN w.accounting_dimension_frozen = 1 THEN w.organization_id ELSE e.organization_id END
+                    IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                  OR (
+                    (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
+                    AND e.organization_id IS NULL
+                    AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+                      WHERE l.engineer_id = c.engineer_id AND uo.deleted_flag = 0
+                        AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+                        AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
+                  )
+                )
               </if>
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
@@ -110,6 +118,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         <script>
         SELECT w.* FROM t_work_record w
         INNER JOIN t_contract c ON c.id = w.contract_id
+        INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         WHERE w.id = #{id} AND c.deleted_flag = 0
           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="contractId" open="(" separator="," close=")">#{contractId}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
@@ -117,10 +126,18 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           <if test="fullAccess == false">
             AND (
               <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">
-                EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND uo.deleted_flag = 0
-                    AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
-                    AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>)
+                (
+                  CASE WHEN w.accounting_dimension_frozen = 1 THEN w.organization_id ELSE e.organization_id END
+                    IN <foreach collection="allowedOrganizationIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+                  OR (
+                    (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
+                    AND e.organization_id IS NULL
+                    AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+                      WHERE l.engineer_id = c.engineer_id AND uo.deleted_flag = 0
+                        AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+                        AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>)
+                  )
+                )
               </if>
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>

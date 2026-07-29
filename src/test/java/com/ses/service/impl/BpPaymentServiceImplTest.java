@@ -11,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -33,11 +34,15 @@ class BpPaymentServiceImplTest {
     @Mock
     private com.ses.service.MonthlyClosingService monthlyClosingService;
 
+    @Mock
+    private com.ses.service.WorkRecordService workRecordService;
+
     @InjectMocks
     private BpPaymentServiceImpl bpPaymentService;
 
     @BeforeEach
     void setUp() {
+        ReflectionTestUtils.setField(bpPaymentService, "workRecordService", workRecordService);
     }
 
     @Test
@@ -194,5 +199,29 @@ class BpPaymentServiceImplTest {
 
         assertEquals("error.bpPayment.paidDelete", ex.getMessage());
         verify(bpPaymentMapper, never()).deleteById(1L);
+    }
+
+    @Test
+    void BPの読取更新削除はいずれも同じ勤怠scope守衛を通る() {
+        BpPayment existing = new BpPayment();
+        existing.setId(1L);
+        existing.setWorkRecordId(7L);
+        existing.setStatus("未払");
+        existing.setAmount(new BigDecimal("500000"));
+        com.ses.entity.WorkRecord workRecord = new com.ses.entity.WorkRecord();
+        workRecord.setId(7L);
+        workRecord.setWorkMonth("2026-07");
+
+        when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
+        when(workRecordMapper.selectById(7L)).thenReturn(workRecord);
+        when(bpPaymentMapper.selectByWorkRecordIdOrderByLayer(7L)).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(bpPaymentMapper.update(isNull(), any())).thenReturn(1);
+
+        bpPaymentService.getTreeByWorkRecordId(7L);
+        bpPaymentService.updateLayer(1L, new BpPayment());
+        bpPaymentService.deleteLayer(1L);
+
+        verify(workRecordService, times(3)).assertAllowed(7L);
     }
 }

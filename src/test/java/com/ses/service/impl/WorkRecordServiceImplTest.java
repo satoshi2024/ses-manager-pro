@@ -6,6 +6,7 @@ import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.BpPayment;
 import com.ses.entity.Contract;
 import com.ses.entity.WorkRecord;
+import com.ses.entity.Engineer;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
@@ -185,6 +186,58 @@ class WorkRecordServiceImplTest {
                 .thenReturn(null);
 
         assertThatThrownBy(() -> workRecordService.assertAllowed(99L))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void assertContractScope_直属組織がありaccountLinkなしでも許可する() {
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
+        ReflectionTestUtils.setField(workRecordService, "engineerAccountLinkMapper", engineerAccountLinkMapper);
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setEngineerId(7L);
+        Engineer engineer = new Engineer();
+        engineer.setId(7L);
+        engineer.setOrganizationId(20L);
+
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of(20L));
+        when(engineerMapper.selectById(7L)).thenReturn(engineer);
+
+        org.assertj.core.api.Assertions.assertThatCode(() ->
+                ReflectionTestUtils.invokeMethod(workRecordService, "assertContractScope", contract, "2026-07"))
+                .doesNotThrowAnyException();
+        verify(engineerAccountLinkMapper, never()).selectByEngineerId(any());
+    }
+
+    @Test
+    void assertContractScope_直属組織がscope外なら通常のaccountLinkへフォールバックしない() {
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
+        ReflectionTestUtils.setField(workRecordService, "engineerAccountLinkMapper", engineerAccountLinkMapper);
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setEngineerId(7L);
+        Engineer engineer = new Engineer();
+        engineer.setId(7L);
+        engineer.setOrganizationId(30L);
+        com.ses.entity.EngineerAccountLink link = new com.ses.entity.EngineerAccountLink();
+        link.setEngineerId(7L);
+        link.setSysUserId(77L);
+
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of(20L));
+        when(organizationScopeService.allowedDirectUserIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of());
+        when(engineerMapper.selectById(7L)).thenReturn(engineer);
+        when(engineerAccountLinkMapper.selectByEngineerId(7L)).thenReturn(link);
+        when(organizationScopeService.isAllowedUser(77L, LocalDate.of(2026, 7, 1))).thenReturn(true);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                ReflectionTestUtils.invokeMethod(workRecordService, "assertContractScope", contract, "2026-07"))
                 .isInstanceOf(BusinessException.class);
     }
 

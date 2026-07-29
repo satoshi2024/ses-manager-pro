@@ -75,7 +75,10 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             <if test="organizationIds != null or directUserIds != null">
             AND (
               <if test="organizationIds != null and organizationIds.size() > 0">
-                COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                CASE WHEN w.accounting_dimension_frozen = 1
+                     THEN w.organization_id
+                     ELSE COALESCE(e.organization_id, uo.organization_id)
+                END IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
               </if>
               <if test="directUserIds != null and directUserIds.size() > 0">
                 <if test="organizationIds != null and organizationIds.size() > 0">OR</if>

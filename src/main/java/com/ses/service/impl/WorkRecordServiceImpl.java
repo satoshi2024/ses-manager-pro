@@ -127,11 +127,25 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
             return;
         }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
         LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
-        if (link == null || !organizationScopeService.isAllowedUser(link.getSysUserId(), asOf)) {
-            throw BusinessException.of(404, "error.workRecord.notFound2");
+        com.ses.entity.Engineer engineer = engineerMapper == null ? null
+                : engineerMapper.selectById(contract.getEngineerId());
+        if (engineer != null && engineer.getOrganizationId() != null
+                && organizationScopeService.allowedOrganizationIds(asOf).contains(engineer.getOrganizationId())) {
+            return;
         }
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
+        if (link != null && directUserIds != null && directUserIds.contains(link.getSysUserId())) {
+            return;
+        }
+        boolean canUseAccountLinkFallback = engineerMapper == null
+                || (engineer != null && engineer.getOrganizationId() == null);
+        if (canUseAccountLinkFallback && link != null
+                && organizationScopeService.isAllowedUser(link.getSysUserId(), asOf)) {
+            return;
+        }
+        throw BusinessException.of(404, "error.workRecord.notFound2");
     }
 
     @Override

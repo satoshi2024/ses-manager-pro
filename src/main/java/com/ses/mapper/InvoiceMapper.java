@@ -33,7 +33,14 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
             WHERE ii.invoice_id = i.id
               AND NOT (
                 <if test="organizationIds != null and organizationIds.size() > 0">
-                  COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                  CASE WHEN w.accounting_dimension_frozen = 1
+                       THEN w.organization_id
+                       ELSE COALESCE(e.organization_id, uo.organization_id)
+                  END IS NOT NULL
+                  AND CASE WHEN w.accounting_dimension_frozen = 1
+                           THEN w.organization_id
+                           ELSE COALESCE(e.organization_id, uo.organization_id)
+                      END IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
                 </if>
                 <if test="directUserIds != null and directUserIds.size() > 0">
                   <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
@@ -174,7 +181,10 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           )
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              CASE WHEN w.accounting_dimension_frozen = 1
+                   THEN w.organization_id
+                   ELSE COALESCE(e.organization_id, uo.organization_id)
+              END IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>
@@ -193,7 +203,10 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
 
     /** 請求書内の明細組織。組織通知の宛先解決に使用する。 */
     @Select("""
-        SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id)
+        SELECT DISTINCT CASE WHEN w.accounting_dimension_frozen = 1
+                             THEN w.organization_id
+                             ELSE COALESCE(e.organization_id, uo.organization_id)
+                        END
         FROM t_invoice_item ii
         JOIN t_work_record w ON w.id = ii.work_record_id
         JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
@@ -201,10 +214,13 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
-             AND uo.valid_from &lt;= #{asOf}
-             AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
+             AND uo.valid_from <= #{asOf}
+             AND (uo.valid_to IS NULL OR uo.valid_to >= #{asOf})
         WHERE ii.invoice_id = #{invoiceId}
-          AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
+          AND CASE WHEN w.accounting_dimension_frozen = 1
+                   THEN w.organization_id
+                   ELSE COALESCE(e.organization_id, uo.organization_id)
+              END IS NOT NULL
         """)
     List<Long> selectOrganizationIdsByInvoiceId(@Param("invoiceId") Long invoiceId,
                                                  @Param("asOf") java.time.LocalDate asOf);
