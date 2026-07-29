@@ -6,6 +6,7 @@ import com.ses.entity.SysUser;
 import com.ses.service.SysUserService;
 import com.ses.service.OrganizationService;
 import com.ses.service.EngineerAccountLinkService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -55,6 +56,15 @@ class UserApiControllerTest {
     private OrganizationService organizationService;
     @MockBean
     private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
+    @MockBean
+    private com.ses.service.security.PersistentSessionService persistentSessionService;
+    @MockBean
+    private com.ses.service.security.MfaService mfaService;
+
+    @BeforeEach
+    void allowMockMvcSessions() {
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+    }
 
     @Test
     @WithMockUser
@@ -238,6 +248,7 @@ class UserApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         verify(scopeChangeInvalidator, org.mockito.Mockito.times(1)).invalidate();
+        verify(persistentSessionService).revokeAllForUser(5L, "ROLE_CHANGED");
     }
 
     @Test

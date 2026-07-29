@@ -219,6 +219,34 @@ class FlywayMigrationSmokeTest {
             org.junit.jupiter.api.Assertions.assertTrue(duplicateRejected,
                     "有効な主所属の二重登録はDBのUNIQUEでも拒否されるはず");
 
+            // 企業認証・MFA・session・action permission・file scan metadata(V63)
+            assertTableExists(st, "m_identity_provider");
+            assertTableExists(st, "t_user_external_identity");
+            assertTableExists(st, "t_user_mfa");
+            assertTableExists(st, "t_mfa_recovery_code");
+            assertTableExists(st, "t_user_session");
+            assertTableExists(st, "m_permission_group");
+            assertTableExists(st, "t_user_permission_group");
+            assertTableExists(st, "t_permission_group_action");
+            assertTableExists(st, "t_file_security_metadata");
+            assertColumnExists(st, "m_identity_provider", "issuer_uri");
+            assertColumnExists(st, "t_user_external_identity", "subject");
+            assertColumnExists(st, "t_user_mfa", "encrypted_totp_secret");
+            assertColumnExists(st, "t_mfa_recovery_code", "code_hash");
+            assertColumnExists(st, "t_user_session", "revoked_at");
+            assertColumnExists(st, "t_permission_group_action", "action_key");
+            assertColumnExists(st, "t_file_security_metadata", "scan_status");
+            assertColumnExists(st, "t_file_security_metadata", "scanner_version");
+            assertIndexExists(st, "m_identity_provider", "uk_identity_provider_issuer");
+            assertIndexExists(st, "t_user_external_identity", "uk_external_identity_subject");
+            assertIndexExists(st, "t_user_mfa", "uk_user_mfa_user");
+            assertIndexExists(st, "t_mfa_recovery_code", "uk_mfa_recovery_code_hash");
+            assertIndexExists(st, "t_user_session", "uk_user_session_hash");
+            assertIndexExists(st, "m_permission_group", "uk_permission_group_key");
+            assertIndexExists(st, "t_user_permission_group", "uk_user_permission_group");
+            assertIndexExists(st, "t_permission_group_action", "uk_permission_group_action");
+            assertIndexExists(st, "t_file_security_metadata", "uk_file_security_stored_name");
+
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(
                     "SELECT c.id, su.real_name AS salesUserName FROM t_contract c " +

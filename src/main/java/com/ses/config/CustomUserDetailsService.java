@@ -6,6 +6,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
@@ -19,14 +20,18 @@ import java.util.Collections;
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final SysUserMapper sysUserMapper;
+    private final OidcSecurityProperties oidcSecurityProperties;
 
     /**
      * コンストラクタインジェクション
      *
      * @param sysUserMapper ユーザーマッパー
+     * @param oidcSecurityProperties OIDC/local login設定
      */
-    public CustomUserDetailsService(SysUserMapper sysUserMapper) {
+    public CustomUserDetailsService(SysUserMapper sysUserMapper,
+                                    OidcSecurityProperties oidcSecurityProperties) {
         this.sysUserMapper = sysUserMapper;
+        this.oidcSecurityProperties = oidcSecurityProperties;
     }
 
     /**
@@ -44,6 +49,11 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         if (sysUser == null) {
             throw new UsernameNotFoundException("ユーザーが見つかりません: " + username);
+        }
+        if (!oidcSecurityProperties.isLocalLoginEnabled()
+                && !oidcSecurityProperties.isBreakGlassUsername(username)) {
+            // IdP障害時の無制限local fallbackを防ぎ、明示されたbreak-glassだけを残す。
+            throw new DisabledException("local login is disabled");
         }
 
         // ユーザーステータスの確認は LoginUser の isEnabled() で行われます

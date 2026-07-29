@@ -9,12 +9,15 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import jakarta.servlet.FilterChain;
@@ -42,6 +45,11 @@ public class SecurityConfig {
     private final ApiAuditFilter apiAuditFilter;
     private final LoginSuccessHandler loginSuccessHandler;
     private final LoginFailureHandler loginFailureHandler;
+    private final OidcSecurityProperties oidcSecurityProperties;
+    private final OidcLoginUserService oidcLoginUserService;
+    private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
+    private final MfaEnforcementFilter mfaEnforcementFilter;
+    private final PersistentSessionFilter persistentSessionFilter;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -80,6 +88,10 @@ public class SecurityConfig {
             .addFilterAfter(menuPermissionFilter, UsernamePasswordAuthenticationFilter.class)
             // API操作ログフィルター（メニュー権限フィルターの後に実行）
             .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
+            // break-glassのMFA未完了中はMFA endpoint以外を遮断
+            .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
+            // DB上で失効・期限切れになったsessionを即時拒否
+            .addFilterAfter(persistentSessionFilter, MfaEnforcementFilter.class)
             // アクセス制御の設定
             .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
@@ -90,12 +102,15 @@ public class SecurityConfig {
                     "/js/**",
                     "/lib/**",
                     "/img/**",
-                    "/api/auth/**"
+                    "/api/auth/**",
+                    "/oauth2/**",
+                    "/login/oauth2/**"
                 ).permitAll()
                 // ユーザー管理・ロール権限設定は管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",
                     "/api/users/**",
+                    "/api/identity-providers/**",
                     "/api/role-menus/**",
                     "/api/notifications/generate",
                     "/system-config/**",
@@ -116,6 +131,8 @@ public class SecurityConfig {
                 //   /api/notifications   ← 通知ベル
                 .requestMatchers("/", "/api/profile/**").authenticated()
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
+                // MFA/session管理は認証後の共通セキュリティ経路（管理者resetはmethod securityで制限）
+                .requestMatchers("/mfa/**", "/api/security/**").authenticated()
                 // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する
                 .anyRequest().hasAnyRole("管理者", "営業", "HR", "マネージャー")
             )
@@ -126,24 +143,42 @@ public class SecurityConfig {
                     new AntPathRequestMatcher("/api/**")
                 )
             )
-            // フォームログインの設定
+            // フォームログインの設定（local-login-enabled=false時はUserDetailsService側でbreak-glass以外を拒否）
             .formLogin(form -> form
                 .loginPage("/login")
                 .loginProcessingUrl("/login")
                 .successHandler(loginSuccessHandler)
                 .failureHandler(loginFailureHandler)
                 .permitAll()
-            )
-            // ログアウトの設定
-            .logout(logout -> logout
-                // POST 限定: GET /logout による外部サイトからの強制ログアウト（A7-27）を防ぐ。
-                // ヘッダーのログアウトリンクは form POST で呼ぶこと（layout/header.html 参照）。
-                .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "POST"))
-                .logoutSuccessUrl("/login?logout")
+            );
+
+        if (oidcSecurityProperties.isEnabled()) {
+            http.oauth2Login(oauth2 -> oauth2
+                .loginPage("/login")
+                .successHandler(loginSuccessHandler)
+                .failureHandler(new OidcAuthenticationFailureHandler())
+                .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcLoginUserService))
+                .permitAll());
+        }
+
+        // ログアウトの設定。OIDC endpointが利用可能な場合だけRP initiated logoutへ遷移する。
+        http.logout(logout -> {
+            // POST 限定: GET /logout による外部サイトからの強制ログアウト（A7-27）を防ぐ。
+            logout.logoutRequestMatcher(new AntPathRequestMatcher("/logout", "POST"))
                 .invalidateHttpSession(true)
                 .deleteCookies("JSESSIONID")
-                .permitAll()
-            )
+                .permitAll();
+            ClientRegistrationRepository repository = clientRegistrationRepositoryProvider.getIfAvailable();
+            if (oidcSecurityProperties.isEnabled() && repository != null) {
+                OidcClientInitiatedLogoutSuccessHandler handler =
+                        new OidcClientInitiatedLogoutSuccessHandler(repository);
+                // redirect先は固定したlogin画面だけにし、request parameterのopen redirectを許さない。
+                handler.setPostLogoutRedirectUri("{baseUrl}/login?logout");
+                logout.logoutSuccessHandler(handler);
+            } else {
+                logout.logoutSuccessUrl("/login?logout");
+            }
+        })
             // CSRF: Cookie(XSRF-TOKEN)→ヘッダー(X-XSRF-TOKEN)方式に移行。
             // 生トークンをCookieに載せ、JSがヘッダーへ複製する（SPA/AJAX向け標準構成）。
             .csrf(csrf -> csrf

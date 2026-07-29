@@ -163,6 +163,30 @@ app:
     dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
+    oidc:
+      enabled: ${OIDC_ENABLED:false}
+      local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
+      tenant-id: ${OIDC_TENANT_ID:default}
+      provider-registration-id: ${OIDC_PROVIDER_REGISTRATION_ID:enterprise}
+      issuer-uri: ${OIDC_ISSUER_URI:}
+      client-id: ${OIDC_CLIENT_ID:}
+      client-secret: ${OIDC_CLIENT_SECRET:}
+      break-glass-usernames: ${BREAK_GLASS_USERNAMES:}
+    mfa:
+      enabled: ${MFA_ENABLED:true}
+      required-for-break-glass: ${MFA_REQUIRED_FOR_BREAK_GLASS:true}
+      issuer: ${MFA_ISSUER:SES Manager Pro}
+      digits: ${MFA_DIGITS:6}
+      period-seconds: ${MFA_PERIOD_SECONDS:30}
+      clock-skew-steps: ${MFA_CLOCK_SKEW_STEPS:1}
+      recovery-code-count: ${MFA_RECOVERY_CODE_COUNT:10}
+      encryption-key: ${MFA_ENCRYPTION_KEY:dev-only-change-this-mfa-key}
+    session:
+      enabled: ${PERSISTENT_SESSION_ENABLED:true}
+      idle-timeout-minutes: ${SESSION_IDLE_TIMEOUT_MINUTES:30}
+      max-lifetime-hours: ${SESSION_MAX_LIFETIME_HOURS:12}
+      max-concurrent-sessions: ${SESSION_MAX_CONCURRENT:5}
+      hash-key: ${SESSION_HASH_KEY:dev-only-change-this-session-key}
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}

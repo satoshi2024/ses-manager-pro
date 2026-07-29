@@ -23,7 +23,7 @@
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
 | 2 | 0 | `organization-management-accounting` | T008〜T013 | `PASS` | R02最終merge後独立Review完了。desktop/390px実ブラウザDemoは本番前hard gateとして継続管理 | S02 organization-management-accounting 修正対話 | Base `4015785` → Head `f6f0027`（`main` / `origin/main`） | P0=0/P1=0。全量904/0/0/1、Node/JS 0 skipped、Docker MySQL smoke全5系統0 skipped。`organization-management-accounting-R21-P1-01` VERIFIED_CLOSED | PASS維持。desktop/390pxを本番リリース前に完了 |
-| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `READY` | S02 merge後PASS済み。S03主実装対話で0→F1→A1/A2/B1/B2→Mを順次実装 | S03 enterprise-identity-security 実装対話 | V63予約を全conversation/specで確認 | S02 Head `f6f0027`をR02が独立ReviewしP0=0/P1=0/PASS | 発注者の開始指示に従いS03を開始 |
+| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `IN PROGRESS` | T014 L0、T015 V63 DDL、T016 A1 OIDC/login/provision/logout、T017 A2 MFA/sessionをL3完了。次はB1/action、B2/fileをL3で実装し、最後にM/L4 | S03 enterprise-identity-security 実装対話 | Base `f6f0027` / current working tree（T017 L3済み） | S02 Head `f6f0027`をR02が独立ReviewしP0=0/P1=0/PASS | T020 L4と独立Review PASSまでS03を完了扱いにしない |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |

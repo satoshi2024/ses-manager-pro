@@ -29,6 +29,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Select("SELECT * FROM sys_user WHERE username = #{username} AND deleted_flag = 0")
     SysUser selectByUsername(@Param("username") String username);
 
+    /** emailは一意とは限らないため、OIDC自動linkに使わず衝突検知専用にcollectionで返す。 */
+    @Select("SELECT * FROM sys_user WHERE LOWER(email) = LOWER(#{email}) AND deleted_flag = 0")
+    Collection<SysUser> selectByEmail(@Param("email") String email);
+
     /**
      * ログイン失敗回数とロック解除日時を更新する。
      * lockedUntil に null を渡すとロック解除（NULLに設定）される。

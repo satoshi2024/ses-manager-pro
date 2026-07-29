@@ -42,6 +42,10 @@ public class UserApiController {
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.ScopeChangeInvalidator>
             scopeChangeInvalidatorProvider;
 
+    /** ロール・有効性・削除変更時に対象ユーザーの全sessionを失効する。未配線のsliceでは何もしない。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.PersistentSessionService>
+            persistentSessionServiceProvider;
+
     /**
      * ユーザー一覧（ページネーション）
      */
@@ -152,6 +156,7 @@ public class UserApiController {
         // （第十四次Review P1-3）。
         if (roleChanged) {
             invalidateScope();
+            revokeUserSessions(id, "ROLE_CHANGED");
         }
         return ApiResult.success(true);
     }
@@ -184,6 +189,7 @@ public class UserApiController {
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         if (status != 1) {
             closeOrganizationAssignments(id);
+            revokeUserSessions(id, "USER_DISABLED");
         }
         return ApiResult.success(true);
     }
@@ -203,7 +209,16 @@ public class UserApiController {
         boolean success = sysUserService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         closeOrganizationAssignments(id);
+        revokeUserSessions(id, "USER_DELETED");
         return ApiResult.success(true);
+    }
+
+    private void revokeUserSessions(Long userId, String reason) {
+        com.ses.service.security.PersistentSessionService sessionService =
+                persistentSessionServiceProvider.getIfAvailable();
+        if (sessionService != null) {
+            sessionService.revokeAllForUser(userId, reason);
+        }
     }
 
     /**

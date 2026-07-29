@@ -1,6 +1,7 @@
 package com.ses.common.util;
 
 import com.ses.config.LoginUser;
+import com.ses.config.OidcLoginUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -17,6 +18,9 @@ public final class SecurityUtils {
             return null;
         }
         Object principal = authentication.getPrincipal();
+        if (principal instanceof OidcLoginUser) {
+            return ((OidcLoginUser) principal).getSysUser().getId();
+        }
         if (principal instanceof LoginUser) {
             return ((LoginUser) principal).getSysUser().getId();
         }
@@ -28,6 +32,9 @@ public final class SecurityUtils {
 
     public static String currentRole() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof OidcLoginUser) {
+            return ((OidcLoginUser) authentication.getPrincipal()).getSysUser().getRole();
+        }
         if (authentication != null && authentication.getPrincipal() instanceof LoginUser) {
             return ((LoginUser) authentication.getPrincipal()).getSysUser().getRole();
         }
@@ -44,6 +51,9 @@ public final class SecurityUtils {
 
     public static String currentUsername() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof OidcLoginUser) {
+            return ((OidcLoginUser) authentication.getPrincipal()).getUsername();
+        }
         if (authentication != null && authentication.getPrincipal() instanceof LoginUser) {
             return ((LoginUser) authentication.getPrincipal()).getUsername();
         }

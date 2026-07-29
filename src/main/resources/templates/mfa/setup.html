@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>MFA登録 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-7 col-xl-6">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-4">
+                    <h2 class="h4 text-light mb-3"><i class="bi bi-shield-lock me-2 text-warning"></i>MFA登録</h2>
+                    <p class="text-muted">認証アプリで下記のsecretを登録し、表示された6桁コードを入力してください。登録完了まで通常画面へは移動できません。</p>
+                    <button id="mfa-setup-button" class="btn btn-primary mb-3">secretを発行</button>
+                    <div id="mfa-setup-result" class="d-none">
+                        <label class="form-label text-muted">Secret</label>
+                        <div id="mfa-secret" class="form-control bg-dark text-light mb-2 user-select-all"></div>
+                        <label class="form-label text-muted">otpauth URI</label>
+                        <textarea id="mfa-uri" class="form-control bg-dark text-light mb-3" rows="3" readonly></textarea>
+                        <div class="input-group mb-3">
+                            <input id="mfa-enable-code" class="form-control bg-dark border-secondary text-light" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6桁コード">
+                            <button id="mfa-enable-button" class="btn btn-success">有効化</button>
+                        </div>
+                    </div>
+                    <div id="mfa-recovery-result" class="alert alert-warning d-none">
+                        <strong>Recovery code（今回だけ表示）</strong>
+                        <div id="mfa-recovery-codes" class="font-monospace mt-2"></div>
+                        <a class="btn btn-outline-light btn-sm mt-3" href="/">完了して移動</a>
+                    </div>
+                    <div id="mfa-message" class="small text-danger mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/mfa.js}"></script>
+</th:block>
+</body>
+</html>

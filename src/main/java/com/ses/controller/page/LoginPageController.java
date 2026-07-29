@@ -1,6 +1,7 @@
 package com.ses.controller.page;
 
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 public class LoginPageController {
 
     private final com.ses.service.MenuCacheService menuCacheService;
+    private final com.ses.config.OidcSecurityProperties oidcSecurityProperties;
 
     /**
      * ログインページを表示する
@@ -21,7 +23,10 @@ public class LoginPageController {
      * @return ログインテンプレート名
      */
     @GetMapping("/login")
-    public String loginPage() {
+    public String loginPage(Model model) {
+        model.addAttribute("oidcEnabled", oidcSecurityProperties.isEnabled());
+        model.addAttribute("localLoginEnabled", oidcSecurityProperties.isLocalLoginEnabled());
+        model.addAttribute("oidcRegistrationId", oidcSecurityProperties.getProviderRegistrationId());
         return "login";
     }
 

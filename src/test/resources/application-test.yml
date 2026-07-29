@@ -37,6 +37,7 @@ spring:
         - classpath:sql/schema-labor-compliance-h2.sql
         - classpath:sql/schema-engineer-followup-h2.sql
         - classpath:sql/schema-shedlock-h2.sql
+        - classpath:sql/schema-enterprise-identity-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -69,6 +70,12 @@ mybatis-plus:
 app:
   upload:
     base-path: ./target/test-uploads
+  security:
+    oidc:
+      enabled: false
+      local-login-enabled: true
+      tenant-id: test-tenant
+      break-glass-usernames: []
   mail:
     from: test@example.com
 

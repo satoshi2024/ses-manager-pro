@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>MFA認証 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-5 col-xl-4">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-4">
+                    <h2 class="h4 text-light mb-3"><i class="bi bi-shield-check me-2 text-success"></i>MFA認証</h2>
+                    <p class="text-muted">認証アプリの6桁コード、または未使用のRecovery codeを入力してください。</p>
+                    <input id="mfa-verify-code" class="form-control bg-dark border-secondary text-light mb-3" inputmode="numeric" autocomplete="one-time-code" placeholder="コード">
+                    <button id="mfa-verify-button" class="btn btn-primary w-100">認証する</button>
+                    <div id="mfa-message" class="small text-danger mt-3"></div>
+                    <div class="text-center mt-3"><button id="mfa-logout-button" type="button" class="btn btn-link text-muted">ログアウト</button></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/mfa.js}"></script>
+</th:block>
+</body>
+</html>
