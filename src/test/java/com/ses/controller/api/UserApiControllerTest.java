@@ -60,10 +60,15 @@ class UserApiControllerTest {
     private com.ses.service.security.PersistentSessionService persistentSessionService;
     @MockBean
     private com.ses.service.security.MfaService mfaService;
+    @MockBean
+    private com.ses.service.security.AuthorizationService authorizationService;
+    @MockBean
+    private com.ses.service.security.PermissionGroupManagementService permissionGroupManagementService;
 
     @BeforeEach
     void allowMockMvcSessions() {
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+        when(authorizationService.isAllowed(any(), anyString())).thenReturn(true);
     }
 
     @Test
@@ -165,7 +170,7 @@ class UserApiControllerTest {
         when(sysUserService.getOne(any())).thenReturn(null); // 自己変更ガード通過
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);
-        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserMapper.selectByIdForUpdate(5L)).thenReturn(old);
         when(engineerSalesMapper.selectCount(any())).thenReturn(1L);
 
         SysUser body = SysUser.builder().username("sales9").role("HR").build();
@@ -186,7 +191,7 @@ class UserApiControllerTest {
         when(sysUserService.getOne(any())).thenReturn(null);
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);
-        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserMapper.selectByIdForUpdate(5L)).thenReturn(old);
         when(sysUserService.updateById(any())).thenReturn(true);
 
         SysUser body = SysUser.builder().username("sales9").role("営業").build();
@@ -211,7 +216,7 @@ class UserApiControllerTest {
         when(sysUserService.getOne(any())).thenReturn(null);
         SysUser old = SysUser.builder().username("sales9").role("営業").build();
         old.setId(5L);
-        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserMapper.selectByIdForUpdate(5L)).thenReturn(old);
         when(sysUserService.updateById(any())).thenReturn(true);
 
         // ロールは営業のまま（変更なし）→ 担当ガードは発動しない
@@ -236,7 +241,7 @@ class UserApiControllerTest {
         when(sysUserService.getOne(any())).thenReturn(null);
         SysUser old = SysUser.builder().username("hruser1").role("HR").build();
         old.setId(5L);
-        when(sysUserService.getById(5L)).thenReturn(old);
+        when(sysUserMapper.selectByIdForUpdate(5L)).thenReturn(old);
         when(sysUserService.updateById(any())).thenReturn(true);
 
         SysUser body = SysUser.builder().username("hruser1").role("マネージャー").build();
@@ -248,7 +253,8 @@ class UserApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         verify(scopeChangeInvalidator, org.mockito.Mockito.times(1)).invalidate();
-        verify(persistentSessionService).revokeAllForUser(5L, "ROLE_CHANGED");
+        verify(permissionGroupManagementService).replaceAssignments(
+                org.mockito.ArgumentMatchers.eq(5L), org.mockito.ArgumentMatchers.eq(java.util.Set.of()), any());
     }
 
     @Test

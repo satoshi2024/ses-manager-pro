@@ -140,7 +140,7 @@
             <span th:text="#{login.logout}">ログアウトしました</span>
         </div>
 
-        <form th:if="${localLoginEnabled}" th:action="@{/login}" method="post">
+        <form th:if="${localLoginEnabled or breakGlassLoginEnabled}" th:action="@{/login}" method="post">
             <div class="mb-4 position-relative">
                 <i class="bi bi-person-fill input-icon"></i>
                 <input type="text" class="form-control form-control-dark" id="username" name="username" th:placeholder="#{login.username}" required autofocus autocomplete="username">

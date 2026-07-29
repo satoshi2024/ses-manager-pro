@@ -33,6 +33,7 @@ public class UserApiController {
     private final PasswordEncoder passwordEncoder;
     private final EngineerSalesMapper engineerSalesMapper;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+    private final com.ses.service.security.PermissionGroupManagementService permissionGroupManagementService;
 
     /** 組織所属のクローズ用。組織機能を配線しないテストスライスでも壊れないよう任意解決にする。 */
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.OrganizationService>
@@ -117,6 +118,7 @@ public class UserApiController {
      * ユーザー更新
      * パスワードが空の場合は既存パスワードを維持する
      */
+    @Transactional(rollbackFor = Exception.class)
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SysUser sysUser, Authentication authentication) {
         sysUser.setId(id);
@@ -136,7 +138,11 @@ public class UserApiController {
             throw BusinessException.of("error.user.roleSelfChange");
         }
         // 営業ロールから他ロールへ変更する場合、現任担当が残っていれば拒否（先に付け替えを促す）
-        SysUser old = sysUser.getId() != null ? sysUserService.getById(sysUser.getId()) : null;
+        // role判定と更新を同一ユーザー行で直列化し、並行更新の古いrole判定を防ぐ。
+        SysUser old = sysUserMapper.selectByIdForUpdate(id);
+        if (old == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         if (StringUtils.hasText(sysUser.getRole()) && old != null && StatusConstants.ROLE_SALES.equals(old.getRole())
                 && !StatusConstants.ROLE_SALES.equals(sysUser.getRole())) {
             guardNoActiveSalesAssignments(sysUser.getId());
@@ -155,8 +161,10 @@ public class UserApiController {
         // 進めないと、変更直後もDashboardキャッシュのTTLが切れるまで旧ロールの母集団で集計される
         // （第十四次Review P1-3）。
         if (roleChanged) {
+            // V63で既存roleをdefault groupへ移行済みのため、role変更時も旧role groupを残さない。
+            // 空集合は対象ユーザーの新roleに対応するdefault groupへのresetを表す。
+            permissionGroupManagementService.replaceAssignments(id, java.util.Set.of(), authentication);
             invalidateScope();
-            revokeUserSessions(id, "ROLE_CHANGED");
         }
         return ApiResult.success(true);
     }

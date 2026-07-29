@@ -68,6 +68,7 @@ public class ExportApiController {
     private final CustomerMapper customerMapper;
     private final WorkRecordMapper workRecordMapper;
     private final ExcelExportService excelExportService;
+    private final com.ses.service.security.AuthorizationService authorizationService;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -248,6 +249,9 @@ public class ExportApiController {
         }
         queryWrapper.orderByDesc("id");
 
+        boolean canViewCost = authorizationService.isAllowed(
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                "contract.cost.view");
         assertWithinMaxRows(contractMapper.selectCount(queryWrapper));
         prepareFileResponse(response, "契約一覧", "xlsx");
         excelExportService.streamContracts(new BatchIterable<>(lastId -> {
@@ -257,7 +261,7 @@ public class ExportApiController {
             }
             batchQuery.orderByDesc("id").last("LIMIT " + configuredBatchSize);
             return contractMapper.selectList(batchQuery);
-        }, this::toContractExportDtos, Contract::getId, configuredBatchSize), response.getOutputStream());
+        }, rows -> toContractExportDtos(rows, canViewCost), Contract::getId, configuredBatchSize), response.getOutputStream());
     }
 
     /**
@@ -273,7 +277,7 @@ public class ExportApiController {
     /**
      * 契約エンティティを要員名・案件名・顧客名解決済みのDTOに変換する(N+1回避のためID一括取得)。
      */
-    private List<ContractExportDto> toContractExportDtos(List<Contract> contracts) {
+    private List<ContractExportDto> toContractExportDtos(List<Contract> contracts, boolean canViewCost) {
         Set<Long> engineerIds = contracts.stream()
                 .map(Contract::getEngineerId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
         Set<Long> projectIds = contracts.stream()
@@ -304,7 +308,7 @@ public class ExportApiController {
                     .startDate(c.getStartDate())
                     .endDate(c.getEndDate())
                     .sellingPrice(c.getSellingPrice())
-                    .costPrice(c.getCostPrice())
+                    .costPrice(canViewCost ? c.getCostPrice() : null)
                     .status(c.getStatus())
                     .build());
         }

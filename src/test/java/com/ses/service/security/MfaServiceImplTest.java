@@ -112,6 +112,18 @@ class MfaServiceImplTest {
     }
 
     @Test
+    void 前方skewのTOTPは実際に受理したstepをCASへ渡す() {
+        String secret = prepareSecret();
+        mfa.setEnabledAt(java.time.LocalDateTime.now(clock));
+        long currentStep = 1_700_000_000L / 30L;
+        long acceptedStep = currentStep + 1;
+        when(userMfaMapper.advanceLastUsedStep(10L, acceptedStep)).thenReturn(1);
+
+        assertTrue(service.verify(1L, TotpUtil.code(secret, acceptedStep, 6)));
+        verify(userMfaMapper).advanceLastUsedStep(10L, acceptedStep);
+    }
+
+    @Test
     void recoveryCodeは使用済みになると再利用できない() {
         prepareSecret();
         mfa.setEnabledAt(java.time.LocalDateTime.now(clock));

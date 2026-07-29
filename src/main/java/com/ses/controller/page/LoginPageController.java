@@ -26,6 +26,7 @@ public class LoginPageController {
     public String loginPage(Model model) {
         model.addAttribute("oidcEnabled", oidcSecurityProperties.isEnabled());
         model.addAttribute("localLoginEnabled", oidcSecurityProperties.isLocalLoginEnabled());
+        model.addAttribute("breakGlassLoginEnabled", oidcSecurityProperties.isBreakGlassLoginEnabled());
         model.addAttribute("oidcRegistrationId", oidcSecurityProperties.getProviderRegistrationId());
         return "login";
     }

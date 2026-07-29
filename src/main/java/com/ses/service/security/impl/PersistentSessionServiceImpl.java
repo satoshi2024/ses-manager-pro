@@ -7,6 +7,8 @@ import com.ses.config.OidcSecurityProperties;
 import com.ses.config.PersistentSessionProperties;
 import com.ses.dto.security.SessionSummary;
 import com.ses.entity.UserSession;
+import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserSessionMapper;
 import com.ses.service.security.PersistentSessionService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +29,7 @@ import java.util.List;
 public class PersistentSessionServiceImpl implements PersistentSessionService {
 
     private final UserSessionMapper userSessionMapper;
+    private final SysUserMapper sysUserMapper;
     private final PersistentSessionProperties properties;
     private final OidcSecurityProperties oidcProperties;
     private final Clock clock;
@@ -41,6 +44,12 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         if (userId == null) {
             throw new BusinessException("認証ユーザーを解決できないためsessionを発行できません");
         }
+        // session行が0件の初回同時loginでも確実に直列化できるよう、
+        // 存在が保証されるsys_user行をmutexとして先にlockする。
+        SysUser lockedUser = sysUserMapper.selectByIdForUpdate(userId);
+        if (lockedUser == null || !Integer.valueOf(1).equals(lockedUser.getStatus())) {
+            throw new BusinessException("有効な認証ユーザーを確認できないためsessionを発行できません");
+        }
         HttpSession session = request.getSession(true);
         String sessionHash = sessionHash(session.getId());
         LocalDateTime now = LocalDateTime.now(clock);
@@ -51,7 +60,10 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
             return;
         }
 
-        List<UserSession> active = userSessionMapper.selectActiveByUser(tenantId(), userId, now);
+        List<UserSession> active = userSessionMapper.selectActiveByUserForUpdate(tenantId(), userId, now);
+        if (active == null) {
+            throw new BusinessException("session上限を確認できないためsessionを発行できません");
+        }
         int max = Math.max(1, properties.getMaxConcurrentSessions());
         int toRevoke = Math.max(0, active.size() - max + 1);
         for (int i = active.size() - 1; i >= 0 && toRevoke > 0; i--, toRevoke--) {
@@ -81,7 +93,7 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         }
         HttpSession session = request.getSession(false);
         if (session == null || !Boolean.TRUE.equals(session.getAttribute(TRACKED_ATTRIBUTE))) {
-            return true;
+            return properties.isAllowUntrackedSessions();
         }
         String sessionHash = (String) session.getAttribute(SESSION_HASH_ATTRIBUTE);
         Long userId = SecurityUtils.currentUserId();

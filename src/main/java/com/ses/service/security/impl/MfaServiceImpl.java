@@ -38,7 +38,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MfaServiceImpl implements MfaService {
 
-    private static final String KEY_VERSION = "v1";
     private static final String AES_TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
 
@@ -54,6 +53,7 @@ public class MfaServiceImpl implements MfaService {
     @Override
     public boolean isRequired(Authentication authentication) {
         return properties.isEnabled() && properties.isRequiredForBreakGlass()
+                && oidcProperties.isBreakGlassLoginEnabled()
                 && authentication != null && oidcProperties.isBreakGlassUsername(authentication.getName());
     }
 
@@ -75,10 +75,10 @@ public class MfaServiceImpl implements MfaService {
             mfa.setTenantId(tenantId());
             mfa.setUserId(userId);
             mfa.setEncryptedTotpSecret(encrypted);
-            mfa.setSecretKeyVersion(KEY_VERSION);
+            mfa.setSecretKeyVersion(currentKeyVersion());
             userMfaMapper.insert(mfa);
         } else {
-            userMfaMapper.prepareSetup(mfa.getId(), encrypted, KEY_VERSION);
+            userMfaMapper.prepareSetup(mfa.getId(), encrypted, currentKeyVersion());
         }
         recoveryCodeMapper.revokeAvailable(tenantId(), userId, LocalDateTime.now(clock));
         SysUser user = sysUserMapper.selectById(userId);
@@ -96,7 +96,7 @@ public class MfaServiceImpl implements MfaService {
         String secret = decrypt(mfa.getEncryptedTotpSecret());
         long currentStep = currentStep();
         long acceptedStep = matchingStep(secret, code, currentStep);
-        if (acceptedStep < 0 || userMfaMapper.advanceLastUsedStep(mfa.getId(), currentStep) != 1) {
+        if (acceptedStep < 0 || userMfaMapper.advanceLastUsedStep(mfa.getId(), acceptedStep) != 1) {
             throw BusinessException.of("error.mfa.invalidCode");
         }
         userMfaMapper.enable(mfa.getId(), LocalDateTime.now(clock));
@@ -116,7 +116,7 @@ public class MfaServiceImpl implements MfaService {
         long currentStep = currentStep();
         long acceptedStep = matchingStep(secret, normalizedCode, currentStep);
         if (acceptedStep >= 0) {
-            return userMfaMapper.advanceLastUsedStep(mfa.getId(), currentStep) == 1;
+            return userMfaMapper.advanceLastUsedStep(mfa.getId(), acceptedStep) == 1;
         }
         if (!StringUtils.hasText(normalizedCode)) {
             return false;
@@ -196,12 +196,13 @@ public class MfaServiceImpl implements MfaService {
 
     private String encrypt(String secret) {
         try {
+            String keyVersion = currentKeyVersion();
             byte[] iv = new byte[12];
             secureRandom.nextBytes(iv);
             Cipher cipher = Cipher.getInstance(AES_TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, key(), new GCMParameterSpec(GCM_TAG_BITS, iv));
+            cipher.init(Cipher.ENCRYPT_MODE, key(keyVersion), new GCMParameterSpec(GCM_TAG_BITS, iv));
             byte[] encrypted = cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));
-            return KEY_VERSION + ":" + Base64.getUrlEncoder().withoutPadding().encodeToString(iv)
+            return keyVersion + ":" + Base64.getUrlEncoder().withoutPadding().encodeToString(iv)
                     + ":" + Base64.getUrlEncoder().withoutPadding().encodeToString(encrypted);
         } catch (Exception e) {
             throw new IllegalStateException("MFA secretの暗号化に失敗しました", e);
@@ -211,11 +212,11 @@ public class MfaServiceImpl implements MfaService {
     private String decrypt(String value) {
         try {
             String[] parts = value.split(":", 3);
-            if (parts.length != 3 || !KEY_VERSION.equals(parts[0])) {
+            if (parts.length != 3 || !StringUtils.hasText(parts[0])) {
                 throw new IllegalArgumentException("MFA secretのkey versionが不正です");
             }
             Cipher cipher = Cipher.getInstance(AES_TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(GCM_TAG_BITS,
+            cipher.init(Cipher.DECRYPT_MODE, key(parts[0]), new GCMParameterSpec(GCM_TAG_BITS,
                     Base64.getUrlDecoder().decode(parts[1])));
             return new String(cipher.doFinal(Base64.getUrlDecoder().decode(parts[2])), StandardCharsets.UTF_8);
         } catch (Exception e) {
@@ -223,14 +224,25 @@ public class MfaServiceImpl implements MfaService {
         }
     }
 
-    private SecretKeySpec key() {
+    private SecretKeySpec key(String version) {
         try {
+            String configured = properties.getKeyring() == null ? null : properties.getKeyring().get(version);
+            if (!StringUtils.hasText(configured) && "v1".equals(version)) {
+                configured = properties.getEncryptionKey();
+            }
+            if (!StringUtils.hasText(configured)) {
+                throw new IllegalArgumentException("MFA secretのkey versionが設定されていません");
+            }
             byte[] bytes = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(properties.getEncryptionKey().getBytes(StandardCharsets.UTF_8));
+                    .digest(configured.getBytes(StandardCharsets.UTF_8));
             return new SecretKeySpec(bytes, "AES");
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256が利用できません", e);
         }
+    }
+
+    private String currentKeyVersion() {
+        return StringUtils.hasText(properties.getCurrentKeyVersion()) ? properties.getCurrentKeyVersion() : "v1";
     }
 
     private String otpauthUri(String username, String secret) {

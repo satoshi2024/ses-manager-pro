@@ -7,8 +7,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -16,10 +18,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** 本番環境のHTTPS、HSTS、Cookieセキュリティ設定を検証する。 */
-@SpringBootTest
+@SpringBootTest(properties = {
+    "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",
+    "app.security.oidc.break-glass-usernames=admin,breakglass2",
+    "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
+    "app.security.session.hash-key=test-production-session-hash-key-0001"
+})
 @AutoConfigureMockMvc
 @ActiveProfiles({"test", "prod"})
 class ProductionSecurityConfigurationTest {
+
+    @MockBean
+    private ClientRegistrationRepository clientRegistrationRepository;
 
     @Autowired
     private MockMvc mockMvc;

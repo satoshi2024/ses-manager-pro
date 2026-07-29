@@ -50,8 +50,9 @@ public class CustomUserDetailsService implements UserDetailsService {
         if (sysUser == null) {
             throw new UsernameNotFoundException("ユーザーが見つかりません: " + username);
         }
-        if (!oidcSecurityProperties.isLocalLoginEnabled()
-                && !oidcSecurityProperties.isBreakGlassUsername(username)) {
+        boolean breakGlassLogin = oidcSecurityProperties.isBreakGlassLoginEnabled()
+                && oidcSecurityProperties.isBreakGlassUsername(username);
+        if (!oidcSecurityProperties.isLocalLoginEnabled() && !breakGlassLogin) {
             // IdP障害時の無制限local fallbackを防ぎ、明示されたbreak-glassだけを残す。
             throw new DisabledException("local login is disabled");
         }

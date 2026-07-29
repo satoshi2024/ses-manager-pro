@@ -56,10 +56,36 @@ class ContractApiControllerTest {
     private com.ses.service.security.DataScopeService dataScopeService;
     @MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
+    @MockBean
+    private com.ses.service.security.AuthorizationService authorizationService;
+    @MockBean
+    private com.ses.service.security.MfaService mfaService;
+    @MockBean
+    private com.ses.service.security.PersistentSessionService persistentSessionService;
 
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(authorizationService.isAllowed(any(), any())).thenReturn(true);
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+    }
+
+    @Test
+    @WithMockUser
+    void page_原価閲覧権限がない場合はcostPriceをmaskする() throws Exception {
+        ContractListDto row = new ContractListDto();
+        row.setId(1L);
+        row.setCostPrice(new BigDecimal("600000"));
+        Page<ContractListDto> result = new Page<>(1, 100);
+        result.setRecords(List.of(row));
+        result.setTotal(1);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any())).thenReturn(result);
+        when(authorizationService.isAllowed(any(), eq("contract.cost.view"))).thenReturn(false);
+
+        mockMvc.perform(get("/api/contracts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].costPrice").doesNotExist());
     }
 
     @Test

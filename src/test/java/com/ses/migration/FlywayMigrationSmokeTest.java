@@ -246,6 +246,24 @@ class FlywayMigrationSmokeTest {
             assertIndexExists(st, "t_user_permission_group", "uk_user_permission_group");
             assertIndexExists(st, "t_permission_group_action", "uk_permission_group_action");
             assertIndexExists(st, "t_file_security_metadata", "uk_file_security_stored_name");
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_user_permission_group upg "
+                            + "JOIN sys_user u ON u.id = upg.user_id "
+                            + "JOIN m_permission_group g ON g.id = upg.group_id "
+                            + "WHERE u.username = 'admin' AND g.group_key = 'role-admin' "
+                            + "AND upg.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
+                        "既存adminがrole-admin groupへseedされるはず");
+            }
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key = 'role-sales' "
+                            + "AND a.action_key IN ('contract.cost.view', 'export.execute') "
+                            + "AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 2,
+                        "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
+            }
 
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(

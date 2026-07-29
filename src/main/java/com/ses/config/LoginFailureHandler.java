@@ -1,6 +1,7 @@
 package com.ses.config;
 
 import com.ses.service.security.AccountLockService;
+import com.ses.service.AuditLogService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,10 +24,18 @@ public class LoginFailureHandler extends SimpleUrlAuthenticationFailureHandler {
 
     private final AccountLockService accountLockService;
 
+    /** 認証失敗イベント監査。失敗したusername以外の認証情報は記録しない。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.AuditLogService auditLogService;
+
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
                                         AuthenticationException exception) throws IOException, ServletException {
         String username = request.getParameter("username");
+        if (auditLogService != null) {
+            auditLogService.record(username, "AUTH", "/login", exception instanceof LockedException ? 423 : 401,
+                    exception instanceof LockedException ? "LOGIN_LOCKED" : "LOGIN_FAILURE", false);
+        }
         String target;
         if (exception instanceof LockedException) {
             target = "/login?locked";

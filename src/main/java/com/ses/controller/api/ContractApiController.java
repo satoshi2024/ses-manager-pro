@@ -31,6 +31,7 @@ public class ContractApiController {
     private final ContractMapper contractMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.security.AuthorizationService authorizationService;
     private final org.springframework.context.MessageSource messageSource;
 
     /**
@@ -52,7 +53,8 @@ public class ContractApiController {
             @RequestParam(required = false) Long salesUserId,
             @RequestParam(required = false) Boolean salesUnassigned,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodFrom,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodTo) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodTo,
+            org.springframework.security.core.Authentication authentication) {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<ContractListDto> page = PageUtils.safePage(current, size, 1000L);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
@@ -63,6 +65,9 @@ public class ContractApiController {
         }
         java.util.List<Long> allowedIds = effectiveIds == null ? null : new java.util.ArrayList<>(effectiveIds);
         Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds);
+        if (!authorizationService.isAllowed(authentication, "contract.cost.view")) {
+            result.getRecords().forEach(row -> row.setCostPrice(null));
+        }
         return ApiResult.success(result);
     }
 
@@ -110,10 +115,14 @@ public class ContractApiController {
     }
 
     @GetMapping("/{id}")
-    public ApiResult<Contract> getById(@PathVariable Long id) {
+    public ApiResult<Contract> getById(@PathVariable Long id,
+                                       org.springframework.security.core.Authentication authentication) {
         assertContractVisible(id);
         var entity = contractService.getById(id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        if (!authorizationService.isAllowed(authentication, "contract.cost.view")) {
+            entity.setCostPrice(null);
+        }
         return ApiResult.success(entity);
     }
 

@@ -1,6 +1,15 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
-## 現行判定（T014完了、T015開始前）
+## 現行判定（T018/T019完了、T020外部gate待ち）
+
+- spec状態: `IN PROGRESS`。T014〜T019の実装とL0〜L3、T020のL4全量・Node/JS・Docker migration回帰まで完了した。
+- T018状態: **実装・L3検証完了、独立Review待ち**。legacy role→既定group seed、group優先認可、action enforcement、自己権限変更拒否、同一transaction監査、role変更時group/session更新、契約原価field maskingを実装した。
+- T019状態: **実装・L3検証完了、独立Review待ち**。magic byte/MIME検証、quarantine→scan→published、ClamAV INSTREAM prod adapter、非prod EICAR fake、scanner unavailable、再scan、未知file/download拒否、file拒否監査を実装した。
+- T020 L4結果: Maven全量 **971 tests / 0 failures / 0 errors / 1 skipped**（skipは既存の`QuotationPdfServiceImplTest` CJK font環境依存）、Node/JS syntax **42 files / 0 failures**、`git diff --check` exit 0。Docker上でfresh V1〜V63、legacy V60、repair runbook、V62 closed-historyを全て実行し、skipなしで成功した。
+- T020未完了gate: OWASP依存スキャン相当の仕組みはrepository未設定のため未実施。実Entra tenantでのOIDC login/logout・MFA assurance、実browser、login→権限変更→session失効、2名break-glass復旧訓練も外部環境未提供のため未実施。`M. セキュリティ回帰`は完了扱いにしない。
+- release判定: B1/B2は完了、S03全体は`FIX/REVIEW`相当。外部gateと独立ReviewのP0=0/P1=0/PASSまで`PASS`へ進めない。
+
+## 旧判定（T014完了、T015開始前）
 
 - spec状態: `IN PROGRESS`。S02 R02はHead `f6f002706dd201ed40e1d2ba808c30d6bb96eea6`でP0=0/P1=0/PASS、中央台帳と同期済み。
 - implementation base: `f6f0027`、working treeはT014変更前にclean。
@@ -94,3 +103,29 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 - Demo: MockMvc/unit fixtureでbreak-glass MFA pending redirect、TOTP/recovery検証、replay拒否、secret/recovery/session保存境界、role変更時session全失効、session管理経路を再現済み。実Entra login、管理者MFA登録、実端末失効、break-glass復旧訓練は外部gateとして未実施。
 - rollback: `MFA_ENABLED=false`またはbreak-glass username設定を空にしてlocal MFA enforcementを無効化し、session管理設定を既存互換値へ戻す。V63以降の履歴、V61/V62、既存migrationは変更しない。実装差分をrevertする場合もV63の既存データを平文化・削除する変換は行わず、バックアップ復元と機能停止を先に行う。
 - next L4 checkpoint: **T020 M**。T018/T019のL3完了後、OIDC/MFA/session/action/fileを統合した全量Maven、Node/JS、必要なDocker/MySQL、security/browser/provider回帰を一度実施する。
+
+## T018 TASK CONTRACT / TEST SCOPE DECISION
+
+- task / base: T018 B1 / `f6f0027` base + current working tree。
+- requirements/acceptance: R3.1〜R3.4。group割当がある場合はlegacy roleとunionせずgroup actionだけを正とし、未割当時だけlegacy fallbackを使う。自己権限変更を拒否し、他ユーザーの変更・監査・session失効を同一transaction境界へ置く。画面/API/exportの原価fieldを同じactionでmaskする。
+- changed contracts: `AuthorizationService`、`ActionPermissionResolver`、`PermissionGroupManagementService`/API、`MenuPermissionFilter`、`UserApiController` role lifecycle、V63 default group/action/user seed、contract/export cost masking、権限拒否監査。
+- selected level: **L3**。直接回帰は`AuthorizationServiceImplTest` 4、`ActionPermissionResolverTest` 3、`PermissionGroupManagementServiceImplTest` 2、`PermissionGroupApiControllerTest` 3、`ContractApiControllerTest` 12、`ExportApiControllerTest` 11、`UserApiControllerTest` 12の計**47 tests / 0 failures / 0 errors / 0 skipped**。DB判定例外、prefix近似、自己変更、CSRF、field masking、role変更を含む。
+- Demo: fixtureでgroup未割当fallback、group割当時の非union、原価mask、自己昇格403、他者変更時session失効・監査を再現済み。実browserの財務担当シナリオはT020外部gateへ繰越。
+- rollback: action enforcement公開を止め、V63以前のrole/menu経路へ戻す。適用済みV63は編集せず、permission assignmentはバックアップ復元とする。
+
+## T019 TASK CONTRACT / TEST SCOPE DECISION
+
+- task / base: T019 B2 / `f6f0027` base + current working tree。
+- requirements/acceptance: R4.1〜R4.4。extension/MIME/magic byte、quarantine、scanner CLEAN後だけpublished、infected/unavailable保持、再scan、metadata未登録・未知参照download拒否、監査を共通経路にする。
+- changed contracts: `FileScanner`/`FileScanResult`、prod `ClamAvFileScanner` INSTREAM adapter、非prod `LocalSignatureFileScanner` fake、`FileStorageServiceImpl`、`FileScopeValidationService`、`FileApiController`再scan、`FileSecurityMetadataMapper`、file download/rejection監査、scanner接続設定。
+- selected level: **L3**。直接回帰は`ClamAvFileScannerTest` 3、`FileStorageServiceImplTest` 10、`FileScopeValidationServiceTest` 5、`ActionPermissionResolverTest` 3、`ApiAuditFilterTest` 1の計**22 tests / 0 failures / 0 errors / 0 skipped**。CLEAN/FOUND/接続不能、EICAR、quarantine保持、再scan、未知file、監査を含む。
+- Demo: EICAR fixtureはINFECTEDとしてquarantineへ残りdownload不可、scanner接続不能はUNAVAILABLEとして公開不可、CLEAN再scanだけpublishedへ移ることを再現済み。
+- rollback: upload受付を停止するか`FILE_SCANNER_ENABLED=false`で全uploadをfail-closed拒否する。published/quarantine metadataとV63履歴は削除・改変せず、バックアップ復元を使用する。
+
+## T020 TEST SCOPE DECISION（外部gate待ち）
+
+- selected level: **L4**。最終ソースでMaven全量 **161 suites / 971 tests / 0 failures / 0 errors / 1 skipped**。唯一のskipは`QuotationPdfServiceImplTest`のCJK font環境依存。
+- Docker/MySQL: `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`を実コンテナで実行し全成功。V63の既存user→default group seedとaction seed assertionを含む。
+- frontend/static: `src/main/resources/static/js`の**42 files**へ`node --check`を実行し0 failures。`git diff --check` exit 0。
+- 未実施: repositoryにOWASP dependency scan相当の設定が無く未実施。実Entra/OIDC/MFA assurance、実browser、2名break-glass復旧訓練は外部環境・認証情報がないため未実施でありPASS扱いしない。
+- 判定: L4コード回帰はPASS、T020 MとS03全体は外部gate・独立Review待ち。次の解放条件は依存性スキャン、実環境Demo、独立Review P0=0/P1=0/PASS、中央台帳再同期。

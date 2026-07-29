@@ -14,5 +14,7 @@ public class PersistentSessionProperties {
     private int idleTimeoutMinutes = 30;
     private int maxLifetimeHours = 12;
     private int maxConcurrentSessions = 5;
+    /** 永続metadata未追跡のsessionを許可するのは移行期間の開発環境だけに限定する。 */
+    private boolean allowUntrackedSessions = true;
     private String hashKey = "dev-only-change-this-session-key";
 }

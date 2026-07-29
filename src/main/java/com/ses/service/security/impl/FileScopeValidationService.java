@@ -84,7 +84,8 @@ public class FileScopeValidationService {
             return;
         }
 
-        // 該当なしの場合は一律許可（未設定の写真などの可能性があるため、URLを知っていて認証済みなら許可する）
+        // 未登録・未知のstoredNameは、URLを知っているだけの認証済みユーザーへ公開しない。
+        throw BusinessException.of(403, "error.file.unknownReference");
     }
 
     /** 対象メニューを閲覧できるロールか（管理者は常に可。MenuPermissionFilter と同じ判定）。 */

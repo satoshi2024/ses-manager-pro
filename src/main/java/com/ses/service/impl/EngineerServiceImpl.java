@@ -33,6 +33,10 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
 
+    /** 要員アカウント無効化時のsession失効。未配線のテストsliceでは何もしない。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.PersistentSessionService persistentSessionService;
+
     /** 会計属性の版を記録する。既存テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
@@ -71,6 +75,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
                 if (user != null) {
                     user.setStatus(0);
                     sysUserMapper.updateById(user);
+                    if (persistentSessionService != null) {
+                        persistentSessionService.revokeAllForUser(userId, "ENGINEER_DELETED");
+                    }
                 }
             }
         }

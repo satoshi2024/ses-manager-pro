@@ -73,8 +73,11 @@ public class OidcLoginUserService implements OAuth2UserService<OidcUserRequest, 
                     new OAuth2Error("oidc_provider_unavailable"), "OIDC providerへ接続できません", e);
         }
 
+        if (properties.isEnabled() && properties.isRequireMfaAssurance() && !hasMfaAssurance(oidcUser)) {
+            throw authError("oidc_mfa_assurance_missing", "IdPのMFA assuranceが確認できません");
+        }
         String tokenIssuer = oidcUser.getClaimAsString("iss");
-        if (StringUtils.hasText(tokenIssuer) && !issuer.equals(tokenIssuer)) {
+        if (!StringUtils.hasText(tokenIssuer) || !issuer.equals(tokenIssuer)) {
             throw authError("oidc_issuer_mismatch", "OIDC issuerが登録内容と一致しません");
         }
         String subject = oidcUser.getSubject();
@@ -98,6 +101,17 @@ public class OidcLoginUserService implements OAuth2UserService<OidcUserRequest, 
 
         SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + user.getRole());
         return new OidcLoginUser(user, oidcUser, Collections.singletonList(authority));
+    }
+
+    private boolean hasMfaAssurance(OidcUser oidcUser) {
+        java.util.List<String> amr = oidcUser.getClaimAsStringList("amr");
+        if (amr != null && properties.getAcceptedMfaAmr() != null
+                && amr.stream().anyMatch(value -> properties.getAcceptedMfaAmr().contains(value))) {
+            return true;
+        }
+        String acr = oidcUser.getClaimAsString("acr");
+        return StringUtils.hasText(acr) && properties.getAcceptedMfaAcr() != null
+                && properties.getAcceptedMfaAcr().contains(acr);
     }
 
     private OAuth2AuthenticationException authError(String code, String message) {

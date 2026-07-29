@@ -47,9 +47,11 @@ public class SecurityConfig {
     private final LoginFailureHandler loginFailureHandler;
     private final OidcSecurityProperties oidcSecurityProperties;
     private final OidcLoginUserService oidcLoginUserService;
+    private final OidcAuthenticationFailureHandler oidcAuthenticationFailureHandler;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PersistentSessionFilter persistentSessionFilter;
+    private final com.ses.service.AuditLogService auditLogService;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -110,7 +112,9 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/user/**",
                     "/api/users/**",
-                    "/api/identity-providers/**",
+                     "/api/identity-providers/**",
+                    "/api/permission-groups/**",
+                    "/api/files/*/rescan",
                     "/api/role-menus/**",
                     "/api/notifications/generate",
                     "/system-config/**",
@@ -156,7 +160,7 @@ public class SecurityConfig {
             http.oauth2Login(oauth2 -> oauth2
                 .loginPage("/login")
                 .successHandler(loginSuccessHandler)
-                .failureHandler(new OidcAuthenticationFailureHandler())
+                .failureHandler(oidcAuthenticationFailureHandler)
                 .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcLoginUserService))
                 .permitAll());
         }
@@ -169,15 +173,22 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .permitAll();
             ClientRegistrationRepository repository = clientRegistrationRepositoryProvider.getIfAvailable();
+            OidcClientInitiatedLogoutSuccessHandler oidcHandler = null;
             if (oidcSecurityProperties.isEnabled() && repository != null) {
-                OidcClientInitiatedLogoutSuccessHandler handler =
-                        new OidcClientInitiatedLogoutSuccessHandler(repository);
+                oidcHandler = new OidcClientInitiatedLogoutSuccessHandler(repository);
                 // redirect先は固定したlogin画面だけにし、request parameterのopen redirectを許さない。
-                handler.setPostLogoutRedirectUri("{baseUrl}/login?logout");
-                logout.logoutSuccessHandler(handler);
-            } else {
-                logout.logoutSuccessUrl("/login?logout");
+                oidcHandler.setPostLogoutRedirectUri("{baseUrl}/login?logout");
             }
+            final OidcClientInitiatedLogoutSuccessHandler selectedOidcHandler = oidcHandler;
+            logout.logoutSuccessHandler((request, response, authentication) -> {
+                String username = authentication == null ? null : authentication.getName();
+                auditLogService.record(username, "AUTH", "/logout", 302, "LOGOUT", true);
+                if (selectedOidcHandler != null) {
+                    selectedOidcHandler.onLogoutSuccess(request, response, authentication);
+                } else {
+                    response.sendRedirect("/login?logout");
+                }
+            });
         })
             // CSRF: Cookie(XSRF-TOKEN)→ヘッダー(X-XSRF-TOKEN)方式に移行。
             // 生トークンをCookieに載せ、JSがヘッダーへ複製する（SPA/AJAX向け標準構成）。

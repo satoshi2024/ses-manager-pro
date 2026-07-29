@@ -57,4 +57,11 @@ public class FileApiController {
                 .header("X-Content-Type-Options", "nosniff")
                 .body(resource);
     }
+
+    /** scanner復旧・signature更新後にquarantineファイルを再検査する（管理者限定）。 */
+    @PostMapping("/{storedName}/rescan")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
+    public ApiResult<Boolean> rescan(@PathVariable String storedName) {
+        return ApiResult.success(fileStorageService.rescan(storedName));
+    }
 }

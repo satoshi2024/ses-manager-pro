@@ -24,4 +24,7 @@ public interface FileStorageService {
      * 保存済みファイルを読み込む。パストラバーサルは拒否する。
      */
     Resource load(String storedName);
+
+    /** quarantine中のファイルを再scanし、CLEANなら公開領域へ移す。 */
+    boolean rescan(String storedName);
 }

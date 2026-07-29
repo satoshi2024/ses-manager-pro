@@ -15,11 +15,18 @@ public class UploadProperties {
     /** 保存先ベースディレクトリ（既定: ./uploads） */
     private String basePath = "./uploads";
 
-    /**
-     * 孤児ファイル清理の安全マージン（時間）。
-     * アップロード直後、DBへの紐付け（PUT /api/engineers 等）が完了するまでの
-     * 短い時間差でファイルだけ存在する状態と誤判定しないよう、
-     * 最終更新からこの時間が経過したファイルのみ削除対象にする。
-     */
+    /** 孤児清理の安全マージン（時間）。 */
     private int cleanupSafetyHours = 24;
+
+    /** falseの場合はscanner unavailableとして全uploadを拒否する。 */
+    private boolean scannerEnabled = true;
+
+    /** ClamAV daemonの接続先。prod profileで使用する。 */
+    private String scannerHost = "localhost";
+
+    private int scannerPort = 3310;
+
+    private int scannerConnectTimeoutMs = 2000;
+
+    private int scannerReadTimeoutMs = 10000;
 }

@@ -123,4 +123,14 @@ class FileScopeValidationServiceTest {
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("abc.eml"));
     }
+
+    @Test
+    void 未登録のstoredNameはdefaultDeny() {
+        noMatchOnEarlierTables();
+        loginAs("営業");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("unknown.png"));
+        assertEquals(403, ex.getCode());
+    }
 }

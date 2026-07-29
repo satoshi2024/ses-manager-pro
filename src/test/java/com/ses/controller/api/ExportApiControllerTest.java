@@ -81,9 +81,20 @@ class ExportApiControllerTest {
     @MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
+    @MockBean
+    private com.ses.service.security.AuthorizationService authorizationService;
+
+    @MockBean
+    private com.ses.service.security.MfaService mfaService;
+
+    @MockBean
+    private com.ses.service.security.PersistentSessionService persistentSessionService;
+
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(authorizationService.isAllowed(any(), any())).thenReturn(true);
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
     }
 
     @MockBean
@@ -213,6 +224,30 @@ class ExportApiControllerTest {
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("status"));
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("customer_id"));
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("sales_user_id"));
+    }
+
+    @Test
+    @WithMockUser
+    void exportContracts_原価閲覧権限なしではcostPriceを出力しない() throws Exception {
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setCostPrice(new java.math.BigDecimal("600000"));
+        when(contractMapper.selectCount(any())).thenReturn(1L);
+        when(contractMapper.selectList(any())).thenReturn(List.of(contract), List.of());
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("contract.cost.view")))
+                .thenReturn(false);
+        List<ContractExportDto> exported = new ArrayList<>();
+        doAnswer(invocation -> {
+            Iterable<List<ContractExportDto>> batches = invocation.getArgument(0);
+            for (List<ContractExportDto> batch : batches) exported.addAll(batch);
+            return null;
+        }).when(excelExportService).streamContracts(any(Iterable.class), any(OutputStream.class));
+
+        mockMvc.perform(get("/api/contracts/export"))
+                .andExpect(status().isOk());
+
+        assertEquals(1, exported.size());
+        org.junit.jupiter.api.Assertions.assertNull(exported.get(0).getCostPrice());
     }
 
     @Test

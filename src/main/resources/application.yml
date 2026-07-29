@@ -166,11 +166,13 @@ app:
     oidc:
       enabled: ${OIDC_ENABLED:false}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
+      break-glass-login-enabled: ${BREAK_GLASS_LOGIN_ENABLED:true}
       tenant-id: ${OIDC_TENANT_ID:default}
       provider-registration-id: ${OIDC_PROVIDER_REGISTRATION_ID:enterprise}
       issuer-uri: ${OIDC_ISSUER_URI:}
       client-id: ${OIDC_CLIENT_ID:}
       client-secret: ${OIDC_CLIENT_SECRET:}
+      require-mfa-assurance: ${OIDC_REQUIRE_MFA_ASSURANCE:true}
       break-glass-usernames: ${BREAK_GLASS_USERNAMES:}
     mfa:
       enabled: ${MFA_ENABLED:true}
@@ -180,16 +182,24 @@ app:
       period-seconds: ${MFA_PERIOD_SECONDS:30}
       clock-skew-steps: ${MFA_CLOCK_SKEW_STEPS:1}
       recovery-code-count: ${MFA_RECOVERY_CODE_COUNT:10}
+      current-key-version: ${MFA_CURRENT_KEY_VERSION:v1}
+      # rotation時はMFA_KEYRING_<VERSION>等をアプリ設定へ安全に注入し、旧versionも一定期間保持する。
       encryption-key: ${MFA_ENCRYPTION_KEY:dev-only-change-this-mfa-key}
     session:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       idle-timeout-minutes: ${SESSION_IDLE_TIMEOUT_MINUTES:30}
       max-lifetime-hours: ${SESSION_MAX_LIFETIME_HOURS:12}
       max-concurrent-sessions: ${SESSION_MAX_CONCURRENT:5}
+      allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:true}
       hash-key: ${SESSION_HASH_KEY:dev-only-change-this-session-key}
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}
+    scanner-enabled: ${FILE_SCANNER_ENABLED:true}
+    scanner-host: ${FILE_SCANNER_HOST:localhost}
+    scanner-port: ${FILE_SCANNER_PORT:3310}
+    scanner-connect-timeout-ms: ${FILE_SCANNER_CONNECT_TIMEOUT_MS:2000}
+    scanner-read-timeout-ms: ${FILE_SCANNER_READ_TIMEOUT_MS:10000}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}

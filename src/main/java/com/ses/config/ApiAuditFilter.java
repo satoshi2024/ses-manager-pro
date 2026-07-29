@@ -21,7 +21,7 @@ import java.io.IOException;
  * /api/** への更新系リクエスト（POST/PUT/DELETE）について、
  * 実行者・HTTPメソッド・URI・レスポンスステータスをアプリケーションログに記録し、
  * t_audit_log にも永続化する（アプリケーションログはローテーションで消えるため）。
- * 参照系（GET）は記録対象外。
+ * 参照系（GET）は原則対象外。ただしファイルdownloadは成功・拒否とも記録する。
  *
  * AuditLogServiceはObjectProviderで任意依存にし、@WebMvcTest等の薄いテスト
  * コンテキストでBeanが無い場合でもフィルター自体は動作するようにする
@@ -57,7 +57,11 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         username != null ? username : "-", method, uri, status);
                 AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
                 if (auditLogService != null) {
-                    auditLogService.record(username, method, uri, status, "ses-manager", status >= 200 && status < 400);
+                    String applicationCode = "GET".equals(method) && uri.startsWith("/api/files/")
+                            ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
+                            : "ses-manager";
+                    auditLogService.record(username, method, uri, status, applicationCode,
+                            status >= 200 && status < 400);
                 }
             }
         }
@@ -72,6 +76,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             return false;
         }
         String method = request.getMethod();
-        return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method);
+        return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method)
+                || ("GET".equals(method) && uri.startsWith("/api/files/"));
     }
 }

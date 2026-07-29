@@ -3,6 +3,7 @@ package com.ses.config;
 import com.ses.service.security.AccountLockService;
 import com.ses.service.security.MfaService;
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.AuditLogService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -26,6 +27,10 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     private final MfaService mfaService;
     private final PersistentSessionService persistentSessionService;
 
+    /** 認証成功イベント監査。sliceで未配線の場合もログイン処理は継続する。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.AuditLogService auditLogService;
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
@@ -39,6 +44,10 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
                     ? "/mfa/challenge" : "/mfa/setup");
         } else {
             setDefaultTargetUrl("/");
+        }
+        // session発行まで完了した認証だけを成功として監査する。
+        if (auditLogService != null) {
+            auditLogService.record(authentication.getName(), "AUTH", "/login", 200, "LOGIN_SUCCESS", true);
         }
         setAlwaysUseDefaultTargetUrl(true);
         super.onAuthenticationSuccess(request, response, authentication);

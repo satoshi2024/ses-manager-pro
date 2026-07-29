@@ -43,23 +43,27 @@ public class FileCleanupServiceImpl implements FileCleanupService {
         Instant safeBefore = Instant.now().minus(uploadProperties.getCleanupSafetyHours(), ChronoUnit.HOURS);
         int deleted = 0;
 
-        try (Stream<Path> files = Files.list(base)) {
-            List<Path> candidates = files.filter(Files::isRegularFile).toList();
-            for (Path file : candidates) {
-                String fileName = file.getFileName().toString();
-                if (referenced.contains(fileName)) {
-                    continue;
-                }
-                try {
-                    Instant lastModified = Files.getLastModifiedTime(file).toInstant();
-                    if (lastModified.isAfter(safeBefore)) {
-                        continue; // アップロード直後・DB紐付け前かもしれないためスキップ
+        try (Stream<Path> roots = Stream.of(base, base.resolve("quarantine"), base.resolve("published"))) {
+            List<Path> directories = roots.filter(Files::isDirectory).toList();
+            for (Path directory : directories) {
+                try (Stream<Path> files = Files.list(directory)) {
+                    for (Path file : files.filter(Files::isRegularFile).toList()) {
+                        String fileName = file.getFileName().toString();
+                        if (referenced.contains(fileName)) {
+                            continue;
+                        }
+                        try {
+                            Instant lastModified = Files.getLastModifiedTime(file).toInstant();
+                            if (lastModified.isAfter(safeBefore)) {
+                                continue;
+                            }
+                            Files.delete(file);
+                            deleted++;
+                            log.info("孤児ファイルを削除しました: {}", fileName);
+                        } catch (IOException e) {
+                            log.warn("孤児ファイルの削除に失敗しました: {}", fileName, e);
+                        }
                     }
-                    Files.delete(file);
-                    deleted++;
-                    log.info("孤児ファイルを削除しました: {}", fileName);
-                } catch (IOException e) {
-                    log.warn("孤児ファイルの削除に失敗しました: {}", fileName, e);
                 }
             }
         } catch (IOException e) {

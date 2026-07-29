@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -18,15 +19,24 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class PersistentSessionFilter extends OncePerRequestFilter {
 
-    private final PersistentSessionService persistentSessionService;
+    private final ObjectProvider<PersistentSessionService> persistentSessionServiceProvider;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        PersistentSessionService persistentSessionService = persistentSessionServiceProvider.getIfAvailable();
+        if (persistentSessionService == null) {
+            // @WebMvcTest等のsliceではsession実行層を配線しない。実アプリではBeanが必須で存在する。
+            filterChain.doFilter(request, response);
+            return;
+        }
         if (authentication != null && authentication.isAuthenticated()
                 && !persistentSessionService.validateAndTouch(request, authentication)) {
-            request.getSession(false).invalidate();
+            jakarta.servlet.http.HttpSession session = request.getSession(false);
+            if (session != null) {
+                session.invalidate();
+            }
             SecurityContextHolder.clearContext();
             if (request.getRequestURI().startsWith("/api/")) {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

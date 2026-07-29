@@ -28,3 +28,19 @@ logging:
 app:
   security:
     require-https: true
+    oidc:
+      enabled: ${OIDC_ENABLED:true}
+      local-login-enabled: ${LOCAL_LOGIN_ENABLED:false}
+      break-glass-login-enabled: ${BREAK_GLASS_LOGIN_ENABLED:true}
+      require-mfa-assurance: ${OIDC_REQUIRE_MFA_ASSURANCE:true}
+      break-glass-usernames: ${BREAK_GLASS_USERNAMES:}
+    mfa:
+      enabled: ${MFA_ENABLED:true}
+      required-for-break-glass: ${MFA_REQUIRED_FOR_BREAK_GLASS:true}
+      current-key-version: ${MFA_CURRENT_KEY_VERSION:v1}
+      keyring: {}
+      encryption-key: ${MFA_ENCRYPTION_KEY:}
+    session:
+      enabled: ${PERSISTENT_SESSION_ENABLED:true}
+      allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
+      hash-key: ${SESSION_HASH_KEY:}

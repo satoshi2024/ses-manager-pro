@@ -19,8 +19,11 @@ public class OidcSecurityProperties {
     /** 本番でも明示的に有効化するまでOIDCを起動しない。 */
     private boolean enabled = false;
 
-    /** falseの場合、break-glass usernames以外のform loginを拒否する。 */
+    /** falseの場合、通常のlocal username/password loginを拒否する。 */
     private boolean localLoginEnabled = true;
+
+    /** 通常local loginを閉じても、明示したbreak-glass login入口を表示・許可する。 */
+    private boolean breakGlassLoginEnabled = true;
 
     private String tenantId = "default";
     private String providerRegistrationId = "enterprise";
@@ -28,6 +31,10 @@ public class OidcSecurityProperties {
     private String clientId;
     private String clientSecret;
     private Set<String> breakGlassUsernames = new LinkedHashSet<>();
+    /** IdP側でMFA assurance claimを要求する。prodではtrueを維持する。 */
+    private boolean requireMfaAssurance = true;
+    private Set<String> acceptedMfaAmr = new LinkedHashSet<>(Set.of("mfa", "otp", "fido", "fido2"));
+    private Set<String> acceptedMfaAcr = new LinkedHashSet<>();
 
     public boolean isBreakGlassUsername(String username) {
         return username != null && breakGlassUsernames != null && breakGlassUsernames.contains(username);

@@ -3,6 +3,8 @@ package com.ses.config;
 import com.ses.entity.Menu;
 import com.ses.mapper.MenuMapper;
 import com.ses.service.RoleMenuService;
+import com.ses.service.security.AuthorizationService;
+import com.ses.service.security.ActionPermissionResolver;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +40,8 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
     private static final String ADMIN_ROLE = "管理者";
 
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
+    private final ObjectProvider<AuthorizationService> authorizationServiceProvider;
+    private final ObjectProvider<com.ses.service.AuditLogService> auditLogServiceProvider;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -46,10 +50,32 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String uri = request.getRequestURI();
 
-        com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
+        if (authentication == null || !authentication.isAuthenticated() || !isMenuControlledPath(uri)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-        if (authentication == null || !authentication.isAuthenticated() || !isMenuControlledPath(uri)
-                || menuCacheService == null) {
+        // action権限はmenu cacheの有無に依存させない。cache未構築・障害中でも、
+        // 既知の更新/機密APIが権限なしで通過することを防ぐ。
+        AuthorizationService authorizationService = authorizationServiceProvider.getIfAvailable();
+        String actionKey = ActionPermissionResolver.resolve(request.getMethod(), uri);
+        if (actionKey != null && authorizationService != null) {
+            try {
+                if (!authorizationService.isAllowed(authentication, actionKey)) {
+                    deny(request, response);
+                    return;
+                }
+            } catch (RuntimeException e) {
+                log.warn("action権限の判定に失敗したためアクセスを拒否します: uri={}, action={}",
+                        uri, actionKey, e);
+                deny(request, response);
+                return;
+            }
+        }
+
+        com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
+        if (menuCacheService == null) {
+            // テストslice等でメニューDBが存在しない場合は、action判定済みの要求だけ通す。
             filterChain.doFilter(request, response);
             return;
         }
@@ -78,10 +104,8 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
             allowedMenuKeys = role == null ? List.of() : menuCacheService.getMenuKeysByRole(role);
         } catch (Exception e) {
-            // A7-15: 可用性優先で fail-open とし、DB障害中もシステム全体が停止しないようにする設計判断。
-            // 権限制御の空白期間が生じるため、このwarnログを監視しアラートを上げる前提とする。
-            log.warn("メニュー権限の判定に失敗しました。可用性優先のためアクセスを一時的に許可します: uri={}", uri, e);
-            filterChain.doFilter(request, response);
+            log.warn("メニュー権限の判定に失敗したためアクセスを拒否します: uri={}", uri, e);
+            deny(request, response);
             return;
         }
 
@@ -91,11 +115,25 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         }
 
         if (uri.startsWith("/api/")) {
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"code\":403,\"message\":\"このメニューへのアクセス権限がありません\",\"data\":null}");
+            deny(request, response);
         } else {
             // 画面遷移はエラーディスパッチ経由で統一エラーページ(CustomErrorController)を描画する
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+        }
+    }
+
+    private void deny(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        com.ses.service.AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
+        if (auditLogService != null) {
+            auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), request.getMethod(),
+                    request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
+                    "PERMISSION_DENIED", false);
+        }
+        if (request.getRequestURI().startsWith("/api/")) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"code\":403,\"message\":\"このactionへのアクセス権限がありません\",\"data\":null}");
+        } else {
             response.sendError(HttpServletResponse.SC_FORBIDDEN);
         }
     }

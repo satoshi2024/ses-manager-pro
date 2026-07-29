@@ -25,6 +25,7 @@ import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -121,6 +122,44 @@ class OidcLoginUserServiceTest {
                 () -> service().loadUser(request));
 
         assertEquals("oidc_provider_unavailable", exception.getError().getErrorCode());
+    }
+
+    @Test
+    void oidc有効時はMfaAssuranceClaim不足を拒否する() {
+        properties.setEnabled(true);
+        OidcUser oidcUser = mock(OidcUser.class);
+        when(delegate.loadUser(request)).thenReturn(oidcUser);
+
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
+                () -> service().loadUser(request));
+
+        assertEquals("oidc_mfa_assurance_missing", exception.getError().getErrorCode());
+    }
+
+    @Test
+    void 許可済みMfaAmrは受理する() {
+        properties.setEnabled(true);
+        OidcUser oidcUser = oidcUser("subject-1", provider.getIssuerUri());
+        when(oidcUser.getClaimAsStringList("amr")).thenReturn(List.of("pwd", "mfa"));
+        when(delegate.loadUser(request)).thenReturn(oidcUser);
+        when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-1"))
+                .thenReturn(link(99L, 10L));
+        when(sysUserMapper.selectById(99L)).thenReturn(user(99L, "alice", "営業"));
+
+        OidcLoginUser result = (OidcLoginUser) service().loadUser(request);
+
+        assertEquals(99L, result.getSysUser().getId());
+    }
+
+    @Test
+    void tokenIssuerClaim欠落は拒否する() {
+        OidcUser oidcUser = mock(OidcUser.class);
+        when(delegate.loadUser(request)).thenReturn(oidcUser);
+
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
+                () -> service().loadUser(request));
+
+        assertEquals("oidc_issuer_mismatch", exception.getError().getErrorCode());
     }
 
     private OidcLoginUserService service() {

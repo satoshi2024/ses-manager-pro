@@ -6,6 +6,7 @@ import com.ses.config.PersistentSessionProperties;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserSession;
 import com.ses.mapper.UserSessionMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.impl.PersistentSessionServiceImpl;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.AfterEach;
@@ -39,6 +40,8 @@ class PersistentSessionServiceImplTest {
 
     @Mock
     private UserSessionMapper userSessionMapper;
+    @Mock
+    private SysUserMapper sysUserMapper;
 
     private PersistentSessionServiceImpl service;
     private UsernamePasswordAuthenticationToken authentication;
@@ -53,11 +56,13 @@ class PersistentSessionServiceImplTest {
         properties.setMaxLifetimeHours(12);
         OidcSecurityProperties oidcProperties = new OidcSecurityProperties();
         oidcProperties.setTenantId("tenant-a");
-        service = new PersistentSessionServiceImpl(userSessionMapper, properties, oidcProperties, clock);
-
         SysUser user = new SysUser();
         user.setId(7L);
         user.setUsername("admin");
+        user.setStatus(1);
+        org.mockito.Mockito.lenient().when(sysUserMapper.selectByIdForUpdate(7L)).thenReturn(user);
+        service = new PersistentSessionServiceImpl(userSessionMapper, sysUserMapper, properties, oidcProperties, clock);
+
         authentication = new UsernamePasswordAuthenticationToken(
                 new LoginUser(user, List.of()), null, List.of());
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -72,12 +77,13 @@ class PersistentSessionServiceImplTest {
     void sessionIDを平文保存せず登録属性を設定する() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         when(userSessionMapper.selectBySessionHash(anyString(), anyString())).thenReturn(null);
-        when(userSessionMapper.selectActiveByUser(anyString(), eq(7L), any())).thenReturn(List.of());
+        when(userSessionMapper.selectActiveByUserForUpdate(anyString(), eq(7L), any())).thenReturn(List.of());
 
         service.register(request, authentication);
 
         ArgumentCaptor<UserSession> captor = ArgumentCaptor.forClass(UserSession.class);
         verify(userSessionMapper).insert(captor.capture());
+        verify(sysUserMapper).selectByIdForUpdate(7L);
         HttpSession session = request.getSession(false);
         assertNotEquals(session.getId(), captor.getValue().getSessionIdHash());
         assertTrue(Boolean.TRUE.equals(session.getAttribute(PersistentSessionService.TRACKED_ATTRIBUTE)));
@@ -108,7 +114,7 @@ class PersistentSessionServiceImplTest {
         UserSession oldest = active(1L, LocalDateTime.of(2025, 12, 1, 0, 0));
         UserSession newest = active(2L, LocalDateTime.of(2025, 12, 31, 0, 0));
         when(userSessionMapper.selectBySessionHash(anyString(), anyString())).thenReturn(null);
-        when(userSessionMapper.selectActiveByUser(anyString(), eq(7L), any()))
+        when(userSessionMapper.selectActiveByUserForUpdate(anyString(), eq(7L), any()))
                 .thenReturn(List.of(newest, oldest));
 
         service.register(request, authentication);

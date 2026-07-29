@@ -49,8 +49,8 @@ public class SecuritySessionApiController {
     }
 
     @PostMapping("/mfa/setup")
-    public ApiResult<MfaSetupResponse> setup(Authentication authentication) {
-        requireMfaUser(authentication);
+    public ApiResult<MfaSetupResponse> setup(Authentication authentication, HttpServletRequest httpRequest) {
+        requireEnrollmentAccess(authentication, httpRequest);
         return ApiResult.success(mfaService.setup(currentUserId()));
     }
 
@@ -58,7 +58,7 @@ public class SecuritySessionApiController {
     public ApiResult<MfaSetupResponse> enable(@Valid @RequestBody MfaCodeRequest request,
                                                Authentication authentication,
                                                HttpServletRequest httpRequest) {
-        requireMfaUser(authentication);
+        requireEnrollmentAccess(authentication, httpRequest);
         MfaSetupResponse response = mfaService.enable(currentUserId(), request.code());
         markVerified(httpRequest);
         return ApiResult.success(response);
@@ -79,7 +79,11 @@ public class SecuritySessionApiController {
     /** 管理者がMFAをresetした場合は対象ユーザーの全sessionも同時失効する。 */
     @PostMapping("/mfa/{userId}/reset")
     @PreAuthorize("hasRole('管理者')")
-    public ApiResult<Boolean> reset(@PathVariable Long userId) {
+    public ApiResult<Boolean> reset(@PathVariable Long userId, HttpServletRequest request) {
+        Long currentUserId = currentUserId();
+        if (currentUserId.equals(userId) && !isMfaVerified(request)) {
+            throw BusinessException.of(403, "error.mfa.reauthenticationRequired");
+        }
         mfaService.reset(userId, "MFA_RESET_BY_ADMIN");
         return ApiResult.success(true);
     }
@@ -117,6 +121,19 @@ public class SecuritySessionApiController {
         if (!mfaService.isRequired(authentication)) {
             throw BusinessException.of(403, "error.mfa.notRequired");
         }
+    }
+
+    private void requireEnrollmentAccess(Authentication authentication, HttpServletRequest request) {
+        requireMfaUser(authentication);
+        if (mfaService.isConfigured(currentUserId()) && !isMfaVerified(request)) {
+            throw BusinessException.of(403, "error.mfa.reauthenticationRequired");
+        }
+    }
+
+    private boolean isMfaVerified(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        return session != null && Boolean.TRUE.equals(
+                session.getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
     }
 
     private Long currentUserId() {

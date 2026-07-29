@@ -28,13 +28,13 @@
   - **テスト要件**: replay防止、code一回限り、role変更即失効。
   - **Demo**: 管理者MFA登録と端末失効。
 
-- [ ] B1. action permission移行
+- [x] B1. action permission移行
   - **Objective**: B1. action permission移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: legacy seed、AuthorizationService、主要高リスクAPIから適用。
   - **テスト要件**: role/group/action matrix、自己昇格拒否、field masking。
   - **Demo**: 財務担当は請求可・原価閲覧不可等。
 
-- [ ] B2. file quarantine/scan/fail-closed
+- [x] B2. file quarantine/scan/fail-closed
   - **Objective**: B2. file quarantine/scan/fail-closed を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: FileScanner、quarantine、再scan、未知file拒否。
   - **テスト要件**: clean/infected/unavailable/既存file参照。
