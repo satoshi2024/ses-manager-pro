@@ -122,6 +122,20 @@ class PersistentSessionServiceImplTest {
         verify(userSessionMapper).revoke(1L, LocalDateTime.of(2026, 1, 1, 0, 0), "MAX_CONCURRENT");
     }
 
+    @Test
+    void logout時に現在の永続session行を失効する() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        HttpSession httpSession = request.getSession(true);
+        httpSession.setAttribute(PersistentSessionService.SESSION_HASH_ATTRIBUTE, "hashed-session");
+        UserSession current = active(10L, LocalDateTime.of(2025, 12, 31, 0, 0));
+        current.setSessionIdHash("hashed-session");
+        when(userSessionMapper.selectBySessionHash("tenant-a", "hashed-session")).thenReturn(current);
+
+        service.revokeCurrent(request, authentication, "LOGOUT");
+
+        verify(userSessionMapper).revoke(10L, LocalDateTime.of(2026, 1, 1, 0, 0), "LOGOUT");
+    }
+
     private UserSession active(Long id, LocalDateTime issuedAt) {
         UserSession session = new UserSession();
         session.setId(id);

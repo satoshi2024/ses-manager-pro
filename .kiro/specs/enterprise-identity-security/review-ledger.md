@@ -1,13 +1,25 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
-## 現行判定（T018/T019完了、T020外部gate待ち）
+## 現行判定（2026-07-30 再独立Review FAIL対応）
 
-- spec状態: `IN PROGRESS`。T014〜T019の実装とL0〜L3、T020のL4全量・Node/JS・Docker migration回帰まで完了した。
-- T018状態: **実装・L3検証完了、独立Review待ち**。legacy role→既定group seed、group優先認可、action enforcement、自己権限変更拒否、同一transaction監査、role変更時group/session更新、契約原価field maskingを実装した。
-- T019状態: **実装・L3検証完了、独立Review待ち**。magic byte/MIME検証、quarantine→scan→published、ClamAV INSTREAM prod adapter、非prod EICAR fake、scanner unavailable、再scan、未知file/download拒否、file拒否監査を実装した。
-- T020 L4結果: Maven全量 **971 tests / 0 failures / 0 errors / 1 skipped**（skipは既存の`QuotationPdfServiceImplTest` CJK font環境依存）、Node/JS syntax **42 files / 0 failures**、`git diff --check` exit 0。Docker上でfresh V1〜V63、legacy V60、repair runbook、V62 closed-historyを全て実行し、skipなしで成功した。
-- T020未完了gate: OWASP依存スキャン相当の仕組みはrepository未設定のため未実施。実Entra tenantでのOIDC login/logout・MFA assurance、実browser、login→権限変更→session失効、2名break-glass復旧訓練も外部環境未提供のため未実施。`M. セキュリティ回帰`は完了扱いにしない。
-- release判定: B1/B2は完了、S03全体は`FIX/REVIEW`相当。外部gateと独立ReviewのP0=0/P1=0/PASSまで`PASS`へ進めない。
+- 証拠scope: repository Headは`5cd1dd3e1dcbe894f967b87737fa237f27771d3e`、修正は未commit working-tree patchである。正式Review Headまたは固定fix Headの証拠ではなく、最終PASSには使用しない。
+- P0: 公開済みV63を`710eecc`時点の内容へ復元し、seed/backfillをV64、break-glass制御DDLをV65へ追加した。`FlywayV63UpgradeMigrationSmokeTest`は旧V63適用後にrepairなしでV64/V65へupgradeし、`FlywayMigrationSmokeTest`は空MySQLからV65まで成功した（各1/0/0/0）。
+- P1: API/action inventoryとgroup優先認可/sidebar、OOXML構造・画像decode・polyglot拒否、quarantine metadata保護、固定OIDC metadataとtimeout、incident/IdP障害確認/申請者と異なる2名承認、account/session/source別MFA rate limit、critical audit fail-closed、prod MFA enrollment検証を実装した。
+- P2: logout時のpersistent session失効、外部identity duplicate-keyのidempotent/409化、台帳の証拠scope修正を実装した。`M. セキュリティ回帰`は外部gate未完了のため未checkのまま保持する。
+- L1〜L3: 統合定向回帰111 tests / 0 failures / 0 errors / 0 skipped。追加のbreak-glass/MFA回帰11/0/0/0、MFA scope回帰3/0/0/0、4言語message key 36件、Node/JS 42 files / 0 failures、`git diff --check` exit 0。
+- T020 L4: 1回だけ実行し、外側30分timeoutまでに168 reports / 1008 tests / 6 failures / 0 errors / 1 skippedを出力した。6 failuresはanonymous filter、candidate/profile/autocomplete legacy整合、break-glass entity列mappingの4 consumerに限定され、修正後の該当6 suitesは101 tests / 0 failures / 0 errors / 0 skipped。方針に従い全量L4は無条件再実行せず、したがって最終treeのL4全緑証拠は未成立と記録する。
+- 未完了gate: repositoryにOWASP dependency-check相当の設定がない。実Entra login/logout・MFA assurance、desktop/390px browser、login→権限変更→session失効、2名break-glass復旧訓練は環境/credential未提供で未実施。release判定は`FIX/REVIEW`、独立Review P0=0/P1=0/PASSと外部gate完了まで`PASS`へ進めない。
+
+### 再Review対応 TEST SCOPE DECISION（T014〜T019）
+
+| Task | level / 対象 | 直接consumer | 除外suite / 理由 | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review、inventory、policy、台帳scope | requirements/design/tasks/identity inventory | Maven、Docker、browserはproduction差分なし | なし。次はT020 |
+| T015 | L3。V63 checksum静的検査、旧V63→V65、空DB→V65 | Flyway history、V64 seed/backfill、V65 DDL、H2 schema | legacy V60/repair/V62 fixtureは今回P0の直接consumer外 | schema変更あり。T020でL4を1回実行 |
+| T016 | L3。固定OIDC metadata、unreachable provider起動、prod context、identity競合 | ClientRegistration、token client、SecurityConfig、provision service | 実Entra/CA/logoutは外部tenantなし | 共有security変更あり。T020でL4を1回実行 |
+| T017 | L3。incident二者承認、IdP障害限定、MFA rate limit/critical audit、session logout、prod enrollment | login success、MFA API、audit、persistent session、prod validator | 実2名訓練/多instanceは外部環境なし | security/session/transaction/schema変更あり。T020でL4を1回実行 |
+| T018 | L3。全business API resolver、restrictive group、sidebar、legacy seed | MenuPermissionFilter、AuthorizationService、GlobalControllerAdvice、candidate/profile/autocomplete | 実browserの権限matrixは外部gate | cache/security/schema変更あり。T020でL4を1回実行 |
+| T019 | L3。ZIP/OOXML/MIME/画像/PDF、polyglot、quarantine cleanup | FileStorage、FileKind、cleanup/reference provider、download/rescan | 実ClamAV長時間timeoutはsandboxなし | shared file/security変更あり。T020でL4を1回実行 |
 
 ## 旧判定（T014完了、T015開始前）
 
@@ -132,7 +144,9 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 - Demo: EICAR fixtureはINFECTEDとしてquarantineへ残りdownload不可、scanner接続不能はUNAVAILABLEとして公開不可、CLEAN再scanだけpublishedへ移ることを再現済み。
 - rollback: upload受付を停止するか`FILE_SCANNER_ENABLED=false`で全uploadをfail-closed拒否する。published/quarantine metadataとV63履歴は削除・改変せず、バックアップ復元を使用する。
 
-## T020 TEST SCOPE DECISION（外部gate待ち）
+## 旧T020 TEST SCOPE DECISION（2026-07-30のproduction差分により失効）
+
+> 以下は修正前treeの履歴証拠であり、現行working treeのPASS根拠には使用しない。現行結果は冒頭の判定を正とする。
 
 - task / commit: T020 M / `f6f0027` base + T019完了時working tree。L4後の差分はcomment・台帳文書のみで、production contract変更なし。
 - changed contracts: T014〜T019のOIDC、MFA、persistent session、action permission、file quarantine/ClamAV、監査、V63 schemaを統合したspec全体。

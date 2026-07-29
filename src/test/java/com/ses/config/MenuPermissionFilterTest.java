@@ -4,6 +4,8 @@ import com.ses.service.MenuCacheService;
 import com.ses.service.security.AuthorizationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -53,5 +55,38 @@ class MenuPermissionFilterTest {
                 org.mockito.ArgumentMatchers.eq(403),
                 org.mockito.ArgumentMatchers.eq("PERMISSION_DENIED"),
                 org.mockito.ArgumentMatchers.eq(false));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "POST,/api/work-records/10/approve,work-record.approve",
+            "PUT,/api/organizations/12,organization.update",
+            "GET,/api/invoices,invoice.view",
+            "PUT,/api/profile/password,profile.update",
+            "GET,/api/new-business-resource,new-business-resource.view"
+    })
+    void restrictiveGroupで未許可の直接consumerを拒否する(String method, String uri, String action)
+            throws Exception {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq(action))).thenReturn(false);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("7", null, java.util.List.of()));
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq(action));
+        verify(chain, never()).doFilter(any(), any());
     }
 }

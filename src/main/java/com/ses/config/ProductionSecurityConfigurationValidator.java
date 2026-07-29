@@ -2,8 +2,10 @@ package com.ses.config;
 
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
-import jakarta.annotation.PostConstruct;
+import com.ses.mapper.UserMfaMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -17,7 +19,7 @@ import java.util.Set;
 @Component
 @Profile("prod")
 @RequiredArgsConstructor
-public class ProductionSecurityConfigurationValidator {
+public class ProductionSecurityConfigurationValidator implements ApplicationRunner {
 
     private static final String DEFAULT_MFA_KEY = "dev-only-change-this-mfa-key";
     private static final String DEFAULT_SESSION_KEY = "dev-only-change-this-session-key";
@@ -27,13 +29,19 @@ public class ProductionSecurityConfigurationValidator {
     private final MfaSecurityProperties mfaProperties;
     private final PersistentSessionProperties sessionProperties;
     private final SysUserMapper sysUserMapper;
+    private final UserMfaMapper userMfaMapper;
 
-    @PostConstruct
+    @Override
+    public void run(ApplicationArguments args) {
+        validate();
+    }
+
     public void validate() {
         List<String> errors = new ArrayList<>();
         if (!oidcProperties.isEnabled()) {
             errors.add("OIDCを有効化してください");
         }
+        validateOidcMetadata(errors);
         if (oidcProperties.isLocalLoginEnabled()) {
             errors.add("通常local loginを無効化してください");
         }
@@ -85,7 +93,23 @@ public class ProductionSecurityConfigurationValidator {
             SysUser user = sysUserMapper.selectByUsername(username);
             if (user == null || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
                 errors.add("break-glass usernameは有効な管理者ユーザーでなければなりません: " + username);
+                continue;
             }
+            if (userMfaMapper.countEnrolled(oidcProperties.getTenantId(), user.getId()) != 1) {
+                errors.add("break-glass usernameはMFA enrollment完了済みでなければなりません: " + username);
+            }
+        }
+    }
+
+    private void validateOidcMetadata(List<String> errors) {
+        if (!StringUtils.hasText(oidcProperties.getIssuerUri())
+                || !StringUtils.hasText(oidcProperties.getAuthorizationUri())
+                || !StringUtils.hasText(oidcProperties.getTokenUri())
+                || !StringUtils.hasText(oidcProperties.getJwkSetUri())
+                || !StringUtils.hasText(oidcProperties.getUserInfoUri())
+                || !StringUtils.hasText(oidcProperties.getClientId())
+                || !StringUtils.hasText(oidcProperties.getClientSecret())) {
+            errors.add("OIDCの固定provider metadataとclient credentialを設定してください");
         }
     }
 

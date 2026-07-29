@@ -37,6 +37,9 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if ("管理者".equals(role)) {
             return true;
         }
+        if (actionKey.startsWith("profile.")) {
+            return true;
+        }
         try {
             Long userId = SecurityUtils.currentUserId();
             if (userId != null) {
@@ -55,10 +58,12 @@ public class AuthorizationServiceImpl implements AuthorizationService {
                     if (enabledGroupIds.isEmpty()) {
                         return false;
                     }
+                    int separator = actionKey.indexOf('.');
+                    String resourceWildcard = separator > 0 ? actionKey.substring(0, separator + 1) + "*" : actionKey;
                     return permissionGroupActionMapper.selectCount(new LambdaQueryWrapper<PermissionGroupAction>()
                             .eq(PermissionGroupAction::getTenantId, tenantId())
                             .in(PermissionGroupAction::getGroupId, enabledGroupIds)
-                            .eq(PermissionGroupAction::getActionKey, actionKey)) > 0;
+                            .in(PermissionGroupAction::getActionKey, actionKey, resourceWildcard, "*")) > 0;
                 }
             }
             return legacyRoleAllows(role, actionKey);
@@ -81,12 +86,14 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         }
         if ("HR".equals(role)) {
             return actionKey.startsWith("engineer.") || actionKey.startsWith("candidate.")
-                    || actionKey.startsWith("file.") || actionKey.equals("export.execute");
+                    || actionKey.startsWith("file.") || actionKey.equals("export.execute")
+                    || actionKey.equals("autocomplete.view");
         }
         if ("営業".equals(role)) {
             return actionKey.startsWith("engineer.") || actionKey.startsWith("customer.")
                     || actionKey.startsWith("project.") || actionKey.startsWith("proposal.")
-                    || actionKey.startsWith("contract.") || actionKey.equals("export.execute")
+                    || actionKey.startsWith("contract.") || actionKey.startsWith("candidate.")
+                    || actionKey.equals("export.execute") || actionKey.equals("autocomplete.view")
                     || actionKey.equals("file.download")
                     || actionKey.equals("file.upload");
         }

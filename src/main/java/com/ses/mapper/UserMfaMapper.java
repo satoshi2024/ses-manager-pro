@@ -5,9 +5,14 @@ import com.ses.entity.UserMfa;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface UserMfaMapper extends BaseMapper<UserMfa> {
+
+    @Select("SELECT COUNT(*) FROM t_user_mfa WHERE tenant_id = #{tenantId} AND user_id = #{userId} "
+            + "AND encrypted_totp_secret IS NOT NULL AND enabled_at IS NOT NULL AND deleted_flag = 0")
+    int countEnrolled(@Param("tenantId") String tenantId, @Param("userId") Long userId);
 
     @Update("UPDATE t_user_mfa SET last_used_step = #{step}, updated_at = CURRENT_TIMESTAMP "
             + "WHERE id = #{id} AND deleted_flag = 0 "

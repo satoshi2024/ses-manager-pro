@@ -771,3 +771,43 @@ CREATE TABLE t_monthly_accounting_dimension (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+DROP TABLE IF EXISTS t_break_glass_incident CASCADE;
+CREATE TABLE t_break_glass_incident (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  incident_key VARCHAR(64) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  reason VARCHAR(500) NOT NULL,
+  idp_outage_confirmed TINYINT NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(100) NOT NULL,
+  requested_by BIGINT NOT NULL,
+  approved_by_1 BIGINT,
+  approved_at_1 DATETIME,
+  approved_by_2 BIGINT,
+  approved_at_2 DATETIME,
+  enabled_from DATETIME,
+  enabled_until DATETIME NOT NULL,
+  closed_by BIGINT,
+  closed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  UNIQUE (tenant_id, incident_key)
+);
+
+DROP TABLE IF EXISTS t_mfa_attempt_guard CASCADE;
+CREATE TABLE t_mfa_attempt_guard (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  user_id BIGINT NOT NULL,
+  session_key_hash CHAR(64) NOT NULL,
+  source_hash CHAR(64) NOT NULL,
+  failed_count INT NOT NULL DEFAULT 0,
+  window_started_at DATETIME,
+  locked_until DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  UNIQUE (tenant_id, user_id, session_key_hash, source_hash)
+);

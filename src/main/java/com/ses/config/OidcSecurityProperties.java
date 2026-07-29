@@ -28,8 +28,16 @@ public class OidcSecurityProperties {
     private String tenantId = "default";
     private String providerRegistrationId = "enterprise";
     private String issuerUri;
+    /** 起動時discoveryを行わず使用する固定metadata。 */
+    private String authorizationUri;
+    private String tokenUri;
+    private String jwkSetUri;
+    private String userInfoUri;
     private String clientId;
     private String clientSecret;
+    /** token endpoint等の外部通信上限。startup discoveryは行わない。 */
+    private int connectTimeoutMillis = 2000;
+    private int readTimeoutMillis = 5000;
     private Set<String> breakGlassUsernames = new LinkedHashSet<>();
     /** IdP側でMFA assurance claimを要求する。prodではtrueを維持する。 */
     private boolean requireMfaAssurance = true;

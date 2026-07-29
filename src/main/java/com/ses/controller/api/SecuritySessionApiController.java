@@ -35,6 +35,8 @@ public class SecuritySessionApiController {
 
     private final MfaService mfaService;
     private final PersistentSessionService persistentSessionService;
+    private final com.ses.service.security.MfaAttemptService mfaAttemptService;
+    private final com.ses.service.AuditLogService auditLogService;
 
     @GetMapping("/mfa/status")
     public ApiResult<MfaStatusResponse> mfaStatus(Authentication authentication, HttpServletRequest request) {
@@ -59,7 +61,18 @@ public class SecuritySessionApiController {
                                                Authentication authentication,
                                                HttpServletRequest httpRequest) {
         requireEnrollmentAccess(authentication, httpRequest);
-        MfaSetupResponse response = mfaService.enable(currentUserId(), request.code());
+        Long userId = currentUserId();
+        mfaAttemptService.assertAllowed(userId, httpRequest);
+        MfaSetupResponse response;
+        try {
+            response = mfaService.enable(userId, request.code());
+        } catch (BusinessException e) {
+            mfaAttemptService.recordFailure(userId, httpRequest);
+            throw e;
+        }
+        auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/enable", 200,
+                "BREAK_GLASS_MFA_ENABLED", true);
+        mfaAttemptService.recordSuccess(userId, httpRequest);
         markVerified(httpRequest);
         return ApiResult.success(response);
     }
@@ -69,9 +82,15 @@ public class SecuritySessionApiController {
                                      Authentication authentication,
                                      HttpServletRequest httpRequest) {
         requireMfaUser(authentication);
-        if (!mfaService.verify(currentUserId(), request.code())) {
+        Long userId = currentUserId();
+        mfaAttemptService.assertAllowed(userId, httpRequest);
+        if (!mfaService.verify(userId, request.code())) {
+            mfaAttemptService.recordFailure(userId, httpRequest);
             throw BusinessException.of(401, "error.mfa.invalidCode");
         }
+        auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/verify", 200,
+                "BREAK_GLASS_MFA_VERIFIED", true);
+        mfaAttemptService.recordSuccess(userId, httpRequest);
         markVerified(httpRequest);
         return ApiResult.success(true);
     }

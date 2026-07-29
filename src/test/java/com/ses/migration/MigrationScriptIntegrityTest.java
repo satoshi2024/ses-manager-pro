@@ -181,6 +181,20 @@ class MigrationScriptIntegrityTest {
     }
 
     @Test
+    void 公開済みV63はchecksumを変更しないこと() throws Exception {
+        Resource resource = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V63__enterprise_identity_security.sql");
+        String normalized = resource.getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(normalized.getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals("3fb36799a753780cb4451d567d0f7ed6943354cdf81e2f50b5c9d6ef0dc1f292", checksum,
+                "公開済みV63を編集せず、追加DDL/DMLはV64以降へ置いてください");
+        assertFalse(normalized.contains("role-admin"),
+                "default permission group seedはV63へ戻さずV64へ置いてください");
+    }
+
+    @Test
     void V60のlegacy補列は対象列ごとに独立しBP外部キーより先に追加されること() throws Exception {
         String sql = v60();
         int bpColumn = sql.indexOf("ALTER TABLE t_bp_payment ADD COLUMN cost_center_id");
@@ -265,6 +279,18 @@ class MigrationScriptIntegrityTest {
                 "所属組織列と状態列を追加してからbackfillしてください");
         assertTrue(sql.contains("organization_history_status = 'UNKNOWN'"),
                 "復元不能なclosed行はUNKNOWNとして明示してください");
+    }
+
+    @Test
+    void V64の既定groupは既存candidate導線を維持すること() throws Exception {
+        String sql = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V64__seed_default_permission_groups.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertTrue(sql.contains("SELECT 'role-sales', 'candidate.*'"),
+                "V16で営業へ公開した候補者導線を既定groupにも移行してください");
+        assertTrue(sql.contains("SELECT 'role-hr', 'candidate.*'"),
+                "V16でHRへ公開した候補者導線を既定groupにも移行してください");
     }
 
     /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */

@@ -10,7 +10,15 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.Resource;
 import org.springframework.mock.web.MockMultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,15 +41,16 @@ class FileStorageServiceImplTest {
 
     @Test
     void store_正常な写真は保存されload可能になる() {
+        byte[] png = image("png");
         MockMultipartFile file = new MockMultipartFile(
-                "file", "avatar.png", "image/png", new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
+                "file", "avatar.png", "image/png", png);
 
         StoredFile stored = service.store(file, FileKind.PHOTO);
 
         assertNotNull(stored.getStoredName());
         assertTrue(stored.getStoredName().endsWith(".png"), "拡張子が維持されること");
         assertEquals("avatar.png", stored.getOriginalName());
-        assertEquals(8, stored.getSize());
+        assertEquals(png.length, stored.getSize());
 
         Resource resource = service.load(stored.getStoredName());
         assertTrue(resource.exists(), "保存直後にloadで取得できること");
@@ -67,7 +76,8 @@ class FileStorageServiceImplTest {
     @Test
     void store_スキルシートのpdfは保存できる() {
         MockMultipartFile file = new MockMultipartFile(
-                "file", "skill.pdf", "application/pdf", "%PDF-1.7\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                "file", "skill.pdf", "application/pdf",
+                "%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII));
 
         StoredFile stored = service.store(file, FileKind.SKILL_SHEET);
         assertTrue(stored.getStoredName().endsWith(".pdf"));
@@ -118,6 +128,62 @@ class FileStorageServiceImplTest {
     }
 
     @Test
+    void store_拡張子とMIMEが不一致なら拒否される() {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "fake.docx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ooxml("docx"));
+
+        assertThrows(BusinessException.class, () -> service.store(file, FileKind.SKILL_SHEET));
+    }
+
+    @Test
+    void store_汎用zipをdocxとして偽装した場合は拒否される() {
+        byte[] genericZip = zip(Map.of("note.txt", "hello"));
+        MockMultipartFile file = new MockMultipartFile("file", "fake.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", genericZip);
+
+        assertThrows(BusinessException.class, () -> service.store(file, FileKind.SKILL_SHEET));
+    }
+
+    @Test
+    void store_xlsx内部構造をdocxとして偽装した場合は拒否される() {
+        MockMultipartFile file = new MockMultipartFile("file", "fake.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ooxml("xlsx"));
+
+        assertThrows(BusinessException.class, () -> service.store(file, FileKind.SKILL_SHEET));
+    }
+
+    @Test
+    void store_正しいdocx内部構造は保存できる() {
+        MockMultipartFile file = new MockMultipartFile("file", "skill.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ooxml("docx"));
+
+        assertTrue(service.store(file, FileKind.SKILL_SHEET).getStoredName().endsWith(".docx"));
+    }
+
+    @Test
+    void store_末尾に別形式を連結したOOXMLは拒否される() {
+        byte[] original = ooxml("xlsx");
+        byte[] polyglot = java.util.Arrays.copyOf(original, original.length + 8);
+        System.arraycopy("MZPAYLOAD".getBytes(StandardCharsets.US_ASCII), 0, polyglot, original.length, 8);
+        MockMultipartFile file = new MockMultipartFile("file", "skill.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", polyglot);
+
+        assertThrows(BusinessException.class, () -> service.store(file, FileKind.SKILL_SHEET));
+    }
+
+    @Test
+    void store_壊れた画像とEOFのないPDFは拒否される() {
+        MockMultipartFile image = new MockMultipartFile("file", "broken.png", "image/png",
+                new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
+        MockMultipartFile pdf = new MockMultipartFile("file", "broken.pdf", "application/pdf",
+                "%PDF-1.7\ntruncated".getBytes(StandardCharsets.US_ASCII));
+
+        assertThrows(BusinessException.class, () -> service.store(image, FileKind.PHOTO));
+        assertThrows(BusinessException.class, () -> service.store(pdf, FileKind.SKILL_SHEET));
+    }
+
+    @Test
     void rescan_cleanになったquarantineファイルを公開する() throws java.io.IOException {
         String storedName = "quarantined.txt";
         java.nio.file.Files.createDirectories(tempDir.resolve("quarantine"));
@@ -148,6 +214,46 @@ class FileStorageServiceImplTest {
     private long regularFileCount(Path directory) {
         try (java.util.stream.Stream<Path> files = java.nio.file.Files.list(directory)) {
             return files.filter(java.nio.file.Files::isRegularFile).count();
+        } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private byte[] image(String format) {
+        try {
+            BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            if (!ImageIO.write(image, format, out)) {
+                throw new AssertionError("image writer unavailable");
+            }
+            return out.toByteArray();
+        } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private byte[] ooxml(String type) {
+        Map<String, String> entries = new LinkedHashMap<>();
+        String mainType = "docx".equals(type)
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+                : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+        entries.put("[Content_Types].xml", "<Types><Override ContentType=\"" + mainType + "\"/></Types>");
+        entries.put("_rels/.rels", "<Relationships/>");
+        entries.put("docx".equals(type) ? "word/document.xml" : "xl/workbook.xml", "<root/>");
+        return zip(entries);
+    }
+
+    private byte[] zip(Map<String, String> entries) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                for (Map.Entry<String, String> entry : entries.entrySet()) {
+                    zip.putNextEntry(new ZipEntry(entry.getKey()));
+                    zip.write(entry.getValue().getBytes(StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            return out.toByteArray();
         } catch (java.io.IOException e) {
             throw new AssertionError(e);
         }

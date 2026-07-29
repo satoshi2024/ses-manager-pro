@@ -21,6 +21,7 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final SysUserMapper sysUserMapper;
     private final OidcSecurityProperties oidcSecurityProperties;
+    private final com.ses.service.security.BreakGlassService breakGlassService;
 
     /**
      * コンストラクタインジェクション
@@ -29,9 +30,11 @@ public class CustomUserDetailsService implements UserDetailsService {
      * @param oidcSecurityProperties OIDC/local login設定
      */
     public CustomUserDetailsService(SysUserMapper sysUserMapper,
-                                    OidcSecurityProperties oidcSecurityProperties) {
+                                    OidcSecurityProperties oidcSecurityProperties,
+                                    com.ses.service.security.BreakGlassService breakGlassService) {
         this.sysUserMapper = sysUserMapper;
         this.oidcSecurityProperties = oidcSecurityProperties;
+        this.breakGlassService = breakGlassService;
     }
 
     /**
@@ -50,8 +53,7 @@ public class CustomUserDetailsService implements UserDetailsService {
         if (sysUser == null) {
             throw new UsernameNotFoundException("ユーザーが見つかりません: " + username);
         }
-        boolean breakGlassLogin = oidcSecurityProperties.isBreakGlassLoginEnabled()
-                && oidcSecurityProperties.isBreakGlassUsername(username);
+        boolean breakGlassLogin = breakGlassService.isLoginAllowed(username);
         if (!oidcSecurityProperties.isLocalLoginEnabled() && !breakGlassLogin) {
             // IdP障害時の無制限local fallbackを防ぎ、明示されたbreak-glassだけを残す。
             throw new DisabledException("local login is disabled");

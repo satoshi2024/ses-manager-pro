@@ -51,6 +51,17 @@ class AuthorizationServiceImplTest {
     }
 
     @Test
+    void 未割当の営業は既存roleMenu相当のcandidateProfileAutocompleteを維持する() {
+        authenticate(7L, "営業");
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of());
+
+        AuthorizationServiceImpl service = service();
+        assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "candidate.create"));
+        assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "profile.update"));
+        assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "autocomplete.view"));
+    }
+
+    @Test
     void group割当済みユーザーはlegacyRoleとの和集合にならない() {
         authenticate(7L, "営業");
         UserPermissionGroup assignment = new UserPermissionGroup();
@@ -69,6 +80,23 @@ class AuthorizationServiceImplTest {
     void 管理者はaction設定による自己lockoutを受けない() {
         authenticate(1L, "管理者");
         assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "user.delete"));
+    }
+
+    @Test
+    void resourceWildcardは同一resourceのactionだけ許可する() {
+        authenticate(7L, "営業");
+        UserPermissionGroup assignment = new UserPermissionGroup();
+        assignment.setGroupId(10L);
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of(assignment));
+        PermissionGroup group = new PermissionGroup();
+        group.setId(10L);
+        group.setEnabled(1);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
+        when(permissionGroupActionMapper.selectCount(any())).thenReturn(1L, 0L);
+
+        AuthorizationServiceImpl service = service();
+        assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "invoice.view"));
+        assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "organization.view"));
     }
 
     @Test

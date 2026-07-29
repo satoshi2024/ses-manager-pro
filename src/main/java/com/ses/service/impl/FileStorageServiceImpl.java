@@ -82,7 +82,12 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (file.getSize() > kind.getMaxBytes()) {
             throw BusinessException.of("error.file.sizeOver", (kind.getMaxBytes() / 1024 / 1024));
         }
-        if (!kind.isContentTypeAllowed(file.getContentType())) {
+        String cleanName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
+        String extension = StringUtils.getFilenameExtension(cleanName);
+        if (!kind.isExtensionAllowed(extension)) {
+            throw BusinessException.of("error.file.extensionInvalid", kind.allowedExtensionsLabel());
+        }
+        if (!kind.isContentTypeAllowed(extension, file.getContentType())) {
             throw BusinessException.of("error.file.formatInvalid");
         }
         try {

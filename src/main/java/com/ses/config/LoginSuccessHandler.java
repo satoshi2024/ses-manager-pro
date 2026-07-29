@@ -25,6 +25,8 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     private final AccountLockService accountLockService;
     private final MfaService mfaService;
     private final PersistentSessionService persistentSessionService;
+    private final OidcSecurityProperties oidcSecurityProperties;
+    private final com.ses.service.security.BreakGlassService breakGlassService;
 
     /** 認証成功イベント監査。sliceで未配線の場合もログイン処理は継続する。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -33,6 +35,19 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
+        boolean breakGlass = authentication instanceof UsernamePasswordAuthenticationToken
+                && oidcSecurityProperties.isBreakGlassUsername(authentication.getName());
+        if (breakGlass) {
+            if (!breakGlassService.isLoginAllowed(authentication.getName()) || auditLogService == null) {
+                rejectBreakGlass(request, "break-glass incidentまたは監査が利用できません");
+            }
+            try {
+                auditLogService.recordRequired(authentication.getName(), "AUTH", "/login", 200,
+                        "BREAK_GLASS_LOGIN_SUCCESS", true);
+            } catch (RuntimeException e) {
+                rejectBreakGlass(request, "break-glass監査を永続化できません", e);
+            }
+        }
         accountLockService.onLoginSuccess(authentication.getName());
         persistentSessionService.register(request, authentication);
         if (authentication instanceof UsernamePasswordAuthenticationToken && mfaService.isRequired(authentication)) {
@@ -45,10 +60,24 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             setDefaultTargetUrl("/");
         }
         // session発行まで完了した認証だけを成功として監査する。
-        if (auditLogService != null) {
+        if (!breakGlass && auditLogService != null) {
             auditLogService.record(authentication.getName(), "AUTH", "/login", 200, "LOGIN_SUCCESS", true);
         }
         setAlwaysUseDefaultTargetUrl(true);
         super.onAuthenticationSuccess(request, response, authentication);
+    }
+
+    private void rejectBreakGlass(HttpServletRequest request, String message) throws ServletException {
+        rejectBreakGlass(request, message, null);
+    }
+
+    private void rejectBreakGlass(HttpServletRequest request, String message, RuntimeException cause)
+            throws ServletException {
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        throw cause == null ? new ServletException(message) : new ServletException(message, cause);
     }
 }

@@ -2,6 +2,7 @@ package com.ses.config;
 
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserMfaMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
@@ -21,7 +22,8 @@ class ProductionSecurityConfigurationValidatorTest {
         PersistentSessionProperties session = new PersistentSessionProperties();
 
         ProductionSecurityConfigurationValidator validator =
-                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mock(SysUserMapper.class));
+                new ProductionSecurityConfigurationValidator(oidc, mfa, session,
+                        mock(SysUserMapper.class), mock(UserMfaMapper.class));
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -33,6 +35,13 @@ class ProductionSecurityConfigurationValidatorTest {
         oidc.setLocalLoginEnabled(false);
         oidc.setBreakGlassLoginEnabled(true);
         oidc.setBreakGlassUsernames(Set.of("admin-a", "admin-b"));
+        oidc.setIssuerUri("https://idp.example/tenant/v2.0");
+        oidc.setAuthorizationUri("https://idp.example/authorize");
+        oidc.setTokenUri("https://idp.example/token");
+        oidc.setJwkSetUri("https://idp.example/jwks");
+        oidc.setUserInfoUri("https://idp.example/userinfo");
+        oidc.setClientId("client");
+        oidc.setClientSecret("secret");
         MfaSecurityProperties mfa = new MfaSecurityProperties();
         mfa.setEncryptionKey("01234567890123456789012345678901");
         PersistentSessionProperties session = new PersistentSessionProperties();
@@ -43,12 +52,16 @@ class ProductionSecurityConfigurationValidatorTest {
         when(mapper.selectByUsername(anyString())).thenAnswer(invocation -> {
             SysUser user = new SysUser();
             user.setUsername(invocation.getArgument(0));
+            user.setId("admin-a".equals(invocation.getArgument(0)) ? 1L : 2L);
             user.setRole("管理者");
             user.setStatus(1);
             return user;
         });
+        UserMfaMapper userMfaMapper = mock(UserMfaMapper.class);
+        when(userMfaMapper.countEnrolled(org.mockito.ArgumentMatchers.eq("default"),
+                org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         ProductionSecurityConfigurationValidator validator =
-                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper);
+                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper);
 
         assertDoesNotThrow(validator::validate);
     }

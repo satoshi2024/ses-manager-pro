@@ -1,4 +1,6 @@
 -- 企業認証・セキュリティ（V63）H2用schema
+DROP TABLE IF EXISTS t_mfa_attempt_guard;
+DROP TABLE IF EXISTS t_break_glass_incident;
 DROP TABLE IF EXISTS t_file_security_metadata;
 DROP TABLE IF EXISTS t_permission_group_action;
 DROP TABLE IF EXISTS t_user_permission_group;
@@ -139,4 +141,42 @@ CREATE TABLE t_file_security_metadata (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_file_security_stored_name UNIQUE (tenant_id, stored_name)
+);
+
+CREATE TABLE t_break_glass_incident (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  incident_key VARCHAR(64) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  reason VARCHAR(500) NOT NULL,
+  idp_outage_confirmed TINYINT NOT NULL DEFAULT 0,
+  correlation_id VARCHAR(100) NOT NULL,
+  requested_by BIGINT NOT NULL,
+  approved_by_1 BIGINT,
+  approved_at_1 TIMESTAMP,
+  approved_by_2 BIGINT,
+  approved_at_2 TIMESTAMP,
+  enabled_from TIMESTAMP,
+  enabled_until TIMESTAMP NOT NULL,
+  closed_by BIGINT,
+  closed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_break_glass_incident_key UNIQUE (tenant_id, incident_key)
+);
+
+CREATE TABLE t_mfa_attempt_guard (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  user_id BIGINT NOT NULL,
+  session_key_hash CHAR(64) NOT NULL,
+  source_hash CHAR(64) NOT NULL,
+  failed_count INT NOT NULL DEFAULT 0,
+  window_started_at TIMESTAMP,
+  locked_until TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_mfa_attempt_scope UNIQUE (tenant_id, user_id, session_key_hash, source_hash)
 );
