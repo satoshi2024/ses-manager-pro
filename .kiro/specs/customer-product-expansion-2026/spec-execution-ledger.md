@@ -22,8 +22,8 @@
 | # | Wave | spec | カタログtask | 現在状態 | 開始条件/次のaction | 実装対話 | Base/Head | Review | 次へ進む条件 |
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
-| 2 | 0 | `organization-management-accounting` | T008〜T013 | `FIX/REVIEW`（最新ReviewのP1=4を修正済み、merge後Review待ち） | `90f50c0`をPR化・mergeし、merge済みHeadでR02独立Review | S02 organization-management-accounting 修正対話 | Base `origin/main=fb91943` → fix `90f50c0` | 883/0/0/1、Node/JS実行、Docker smoke全5系統0 skipped。独立Reviewは未実施 | merge後独立ReviewでP0=0/P1=0/PASS。desktop/390pxは本番前硬门禁として保持 |
-| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `NOT READY`（S02最新Review P1=4のmerge後PASS待ち） | S02のP1=0、commit/PR merge、merge後独立ReviewでP0=0/P1=0/PASSを完了後、S03の0→F1→A1/A2/B1/B2→Mを実装 | S03開始前ゲート修正対話 | V63予約を全conversation/specで確認 | S02 fix `90f50c0` は未merge。現行自動テストは883/0/0/1 | S02 merge後独立ReviewでP0=0/P1=0/PASS、発注者のS03開始指示 |
+| 2 | 0 | `organization-management-accounting` | T008〜T013 | `PASS` | R02最終merge後独立Review完了。desktop/390px実ブラウザDemoは本番前hard gateとして継続管理 | S02 organization-management-accounting 修正対話 | Base `4015785` → Head `f6f0027`（`main` / `origin/main`） | P0=0/P1=0。全量904/0/0/1、Node/JS 0 skipped、Docker MySQL smoke全5系統0 skipped。`organization-management-accounting-R21-P1-01` VERIFIED_CLOSED | PASS維持。desktop/390pxを本番リリース前に完了 |
+| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `READY` | S02 merge後PASS済み。S03主実装対話で0→F1→A1/A2/B1/B2→Mを順次実装 | S03 enterprise-identity-security 実装対話 | V63予約を全conversation/specで確認 | S02 Head `f6f0027`をR02が独立ReviewしP0=0/P1=0/PASS | 発注者の開始指示に従いS03を開始 |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |

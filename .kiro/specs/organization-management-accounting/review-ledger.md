@@ -543,3 +543,46 @@ copyable-conversations/ S03〜S17・R03〜R17が全て一致し、重複・欠�
 > 後続15 specのV63〜V77への繰り上げ）も全ファイルで完全一致を確認した。`enterprise-identity-security`(S03)
 > の開始条件は満たされたが、NOT READY解除の最終判断はユーザー確認を待つ。実ブラウザDemoはS03と並行して
 > 本番リリース前に消化する残課題として引き続き記録する。
+
+## R02 最終merge後差分Review（R21、2026-07-29）
+
+- Review種別: `execution-review-handbook.md` v2.0準拠のmerge後最終差分Review。
+- 固定範囲: Base `4015785` → Head `f6f002706dd201ed40e1d2ba808c30d6bb96eea6`。
+- Head状態: `main` / `origin/main`一致、ledger更新前のworking tree clean、`git diff --check` exit 0。
+- Review範囲: 既存OPEN issue、各fix delta、direct regressionのみ。VERIFIED_CLOSED済み指摘は再審査・再openしていない。
+
+### Issue Register
+
+- issue ID: `organization-management-accounting-R21-P1-01`
+- severity: P1
+- violated requirement/acceptance: R2.2、R3.1、R3.2、R4
+- final state: **VERIFIED_CLOSED**
+- root cause: WorkRecord更新認可が既存recordの凍結組織より先に要員の現在組織を参照し、修正途中では
+  非凍結recordの非NULL歴史組織をaccount-link所属で上書きできた。
+- fix commit: `f6f002706dd201ed40e1d2ba808c30d6bb96eea6`
+- verification evidence: 凍結recordはlock取得後にsnapshot組織で判定。非凍結recordは対象月の
+  `t_engineer_accounting_history.organization_id`を正とし、非NULL時は通常account-link fallbackを禁止。
+  直属上長だけを追加許可し、`UNKNOWN`はfail-closed、既知NULL/履歴なしだけlegacy fallbackを許可する。
+- regression evidence: `saveHours`/`saveDaily`それぞれについて、凍結・非凍結のManager A拒否（永続化0件）と
+  Manager B許可を双方向testで確認。
+- reopen condition: 対象月の非NULL要員履歴より現在組織または通常account-linkを優先する経路、あるいは
+  拒否後にWorkRecord/WorkRecordDailyが更新される再現証拠が得られた場合のみ再openする。
+
+### 最終テスト証拠
+
+- 定向: `WorkRecordServiceImplTest` 43件、`EngineerAccountingHistoryMapperTest` 3件、合計
+  **46 tests / Failures 0 / Errors 0 / Skipped 0**。
+- L4全量: `mvn clean test`をHead `f6f0027`で独立実行し、
+  **904 tests / Failures 0 / Errors 0 / Skipped 1 / BUILD SUCCESS**。
+- 唯一のskip: `QuotationPdfServiceImplTest`（既知のCJK font環境依存）。S02差分およびR21とは無関係。
+- Docker MySQL 8: `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、
+  `FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`ConcurrentUpdateTest`を
+  **5 tests / Failures 0 / Errors 0 / Skipped 0**で確認。
+- Node/JS: `JsSyntaxCheckTest` **1 test / Failures 0 / Errors 0 / Skipped 0**。
+
+### 最終判定
+
+- OPEN P0: 0、OPEN P1: 0。
+- **Spec全体: PASS**。
+- `enterprise-identity-security`（S03）は **READY**。中央`spec-execution-ledger.md`へ同期済み。
+- desktop/390px実ブラウザ一気通貫Demoは既知の本番前hard gateとして維持し、S03開始を阻止しない。
