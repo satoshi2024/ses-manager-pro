@@ -110,7 +110,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth));
         }
         LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
-        List<Long> dataScopeIds = dataScopeService != null && dataScopeService.isScoped()
+        List<Long> dataScopeIds = isSalesDataScoped()
                 ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
         return baseMapper.selectMonthlyGridScoped(workMonth, monthEndOf(workMonth), asOf, false,
                 new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
@@ -121,7 +121,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
-        if (dataScopeService != null && dataScopeService.isScoped()) {
+        if (isSalesDataScoped()) {
             dataScopeService.assertAllowedContract(contract.getId());
         }
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
@@ -150,7 +150,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     @Override
     public void assertAllowed(Long workRecordId) {
-        if (organizationScopeService == null && (dataScopeService == null || !dataScopeService.isScoped())) {
+        if (organizationScopeService == null && !isSalesDataScoped()) {
             return;
         }
         String workMonth = baseMapper.selectWorkMonthById(workRecordId);
@@ -163,12 +163,17 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 : new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf));
         List<Long> directUserIds = organizationScopeService == null ? List.of()
                 : new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf));
-        List<Long> dataScopeIds = dataScopeService != null && dataScopeService.isScoped()
+        List<Long> dataScopeIds = isSalesDataScoped()
                 ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
         if (baseMapper.selectByIdScoped(workRecordId, asOf, fullAccess, organizationIds,
                 directUserIds, dataScopeIds) == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
+    }
+
+    /** 営業固有のDataScopeだけを勤怠へ渡す。マネージャーは対象月の組織scopeを正とする。 */
+    private boolean isSalesDataScoped() {
+        return dataScopeService != null && dataScopeService.isSalesDataScoped();
     }
 
     @Override

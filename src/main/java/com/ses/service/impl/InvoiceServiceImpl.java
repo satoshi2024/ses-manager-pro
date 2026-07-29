@@ -96,7 +96,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Invoice generate(Long customerId, String billingMonth) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertSalesDataScopeCustomer(customerId);
         checkClosing(billingMonth);
         LocalDate billingAsOf = com.ses.common.util.DateUtils.parseYearMonth(billingMonth).atDay(1);
         List<UnbilledWorkRecordDto> unbilledList;
@@ -206,7 +206,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         // 完済（入金済）からの手動状態変更は拒否する（入金行由来の最終状態を保護）。
         if ("入金済".equals(invoice.getStatus())) {
@@ -235,7 +235,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertInvoiceWriteScope(invoice);
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
         }
@@ -276,7 +277,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
         }
@@ -445,7 +446,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     /** エイジングのscopeは行取得後ではなく残高SQLのWHEREへ適用する。 */
     private List<InvoiceBalanceDto> selectOutstandingBalances(LocalDate asOf) {
         boolean organizationScoped = !organizationScopeService.hasFullAccess();
-        boolean dataScoped = dataScopeService.isScoped();
+        boolean dataScoped = dataScopeService.isSalesDataScoped();
         if (!organizationScoped && !dataScoped) {
             return baseMapper.selectOutstandingBalances();
         }
@@ -494,7 +495,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
         if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), LocalDate.now())) {
             throw BusinessException.of("error.invoice.reminderNotAllowed");
         }
@@ -568,7 +569,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         List<InvoicePaymentResponse> payments = listPayments(id);
         // 入金行あり、または status=入金済（入金行0件のlegacy完済含む）のどちらでも取消を拒否する。
@@ -585,7 +586,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        assertSalesDataScopeCustomer(invoice.getCustomerId());
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
         
@@ -609,6 +610,27 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         dto.setTaxRatePercent(rate.multiply(new BigDecimal("100")).stripTrailingZeros().toPlainString());
 
         return dto;
+    }
+
+    /**
+     * 営業固有のDataScopeだけを請求書操作へ適用する。
+     * マネージャーの履歴請求書はController/SQLの対象月組織scopeで判定する。
+     */
+    private void assertSalesDataScopeCustomer(Long customerId) {
+        if (dataScopeService.isSalesDataScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
+    }
+
+    /** 入金書込では請求書の対象月時点の組織scopeを必ず先に検証する。 */
+    private void assertInvoiceWriteScope(Invoice invoice) {
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return;
+        }
+        LocalDate monthStart = com.ses.common.util.DateUtils.parseYearMonth(invoice.getBillingMonth()).atDay(1);
+        if (!organizationScopeService.allowedInvoiceIds(monthStart).contains(invoice.getId())) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
     }
 
 

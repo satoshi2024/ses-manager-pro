@@ -236,6 +236,43 @@ class PaymentReconciliationServiceImplTest {
         verify(bankDepositMapper, times(1)).update(isNull(), any());
     }
 
+    @Test
+    void apply_請求書scope拒否時は入金を消込済へ更新しない() {
+        LocalDate date = LocalDate.of(2026, 7, 20);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("200000"), "組織外入金", "未消込");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        when(invoiceService.addPayment(eq(10L), any()))
+                .thenThrow(BusinessException.of(404, "error.scope.notFound"));
+
+        assertThrows(BusinessException.class, () -> service.apply(1L, 10L));
+
+        verify(bankDepositMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void fetchAndReconcile_自動消込の請求書scope拒否時は入金を変更しない() {
+        LocalDate date = LocalDate.of(2026, 7, 20);
+        when(freeeIntegrationService.bankDeposits(any(), any()))
+                .thenReturn(List.of(depositDto("D-SCOPE", date, new BigDecimal("550000"), "組織外商事株式会社")));
+        when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
+
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("550000"), "組織外商事株式会社", "未消込");
+        when(bankDepositMapper.selectList(any())).thenReturn(List.of(unresolved));
+        when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(
+                invoiceBalance(55L, "INV-202607-0003", 9L, "組織外商事", new BigDecimal("550000"), date)
+        ));
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        when(invoiceService.addPayment(eq(55L), any()))
+                .thenThrow(BusinessException.of(404, "error.scope.notFound"));
+        when(bankDepositMapper.selectCount(any())).thenReturn(1L);
+
+        ReconciliationFetchResultDto result = service.fetchAndReconcile(date.minusDays(1), date);
+
+        assertEquals(0, result.getAutoMatchedCount());
+        assertEquals(1, result.getPendingCount());
+        verify(bankDepositMapper, never()).update(isNull(), any());
+    }
+
     // ===== apply: 二重消込防止。既に消込済の入金へ再度applyすると例外になる =====
     @Test
     void apply_rejectsDoubleReconciliation() {

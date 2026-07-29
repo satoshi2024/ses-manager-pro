@@ -19,6 +19,9 @@ public interface DataScopeService {
     /** スコープ発動中か（営業のDataScopeまたはマネージャーの組織scope）。 */
     boolean isScoped();
 
+    /** 営業ロール固有のDataScopeが発動中か。組織scopeは含めない。 */
+    boolean isSalesDataScoped();
+
     /** 現任担当（t_engineer_sales.released_at IS NULL）の要員ID集合。 */
     Set<Long> allowedEngineerIds();
 

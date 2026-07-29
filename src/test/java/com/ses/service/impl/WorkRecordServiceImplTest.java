@@ -71,6 +71,9 @@ class WorkRecordServiceImplTest {
     @Mock
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
+    @Mock
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     @InjectMocks
     private WorkRecordServiceImpl workRecordService;
 
@@ -187,6 +190,46 @@ class WorkRecordServiceImplTest {
 
         assertThatThrownBy(() -> workRecordService.assertAllowed(99L))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void monthlyGrid_過去月は現在のDataScopeで二重絞り込みしない() {
+        LocalDate asOf = LocalDate.of(2026, 1, 1);
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        ReflectionTestUtils.setField(workRecordService, "dataScopeService", dataScopeService);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(asOf)).thenReturn(java.util.Set.of(200L));
+        when(organizationScopeService.allowedDirectUserIds(asOf)).thenReturn(java.util.Set.of());
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(dataScopeService.isSalesDataScoped()).thenReturn(false);
+        when(workRecordMapper.selectMonthlyGridScoped("2026-01", "2026-01-31", asOf, false,
+                java.util.List.of(200L), java.util.List.of(), null)).thenReturn(Collections.emptyList());
+
+        assertThat(workRecordService.monthlyGrid("2026-01")).isEmpty();
+
+        verify(dataScopeService, never()).allowedContractIds();
+        verify(workRecordMapper).selectMonthlyGridScoped("2026-01", "2026-01-31", asOf, false,
+                java.util.List.of(200L), java.util.List.of(), null);
+    }
+
+    @Test
+    void assertAllowed_凍結済み過去月は現在DataScopeを二重適用しない() {
+        LocalDate asOf = LocalDate.of(2026, 1, 1);
+        when(workRecordMapper.selectWorkMonthById(99L)).thenReturn("2026-01");
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        ReflectionTestUtils.setField(workRecordService, "dataScopeService", dataScopeService);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(asOf)).thenReturn(java.util.Set.of(200L));
+        when(organizationScopeService.allowedDirectUserIds(asOf)).thenReturn(java.util.Set.of());
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(dataScopeService.isSalesDataScoped()).thenReturn(false);
+        when(workRecordMapper.selectByIdScoped(99L, asOf, false, java.util.List.of(200L), java.util.List.of(), null))
+                .thenReturn(new WorkRecord());
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> workRecordService.assertAllowed(99L))
+                .doesNotThrowAnyException();
+
+        verify(dataScopeService, never()).allowedContractIds();
     }
 
     @Test

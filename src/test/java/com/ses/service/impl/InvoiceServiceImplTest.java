@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
+import com.ses.dto.invoice.InvoicePaymentCreateRequest;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoiceItem;
 import com.ses.entity.InvoicePayment;
@@ -365,11 +366,10 @@ public class InvoiceServiceImplTest {
     }
 
     @Test
-    void testAging_組織とDataScopeを残高SQLへ渡す() {
+    void testAging_営業DataScopeを残高SQLへ渡す() {
         LocalDate asOf = LocalDate.of(2026, 7, 17);
-        when(organizationScopeService.hasFullAccess()).thenReturn(false);
-        when(organizationScopeService.allowedInvoiceIds(asOf)).thenReturn(java.util.Set.of(11L));
-        when(dataScopeService.isScoped()).thenReturn(true);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(dataScopeService.isSalesDataScoped()).thenReturn(true);
         when(dataScopeService.allowedCustomerIds()).thenReturn(java.util.Set.of(7L));
 
         com.ses.dto.invoice.InvoiceBalanceDto balance = new com.ses.dto.invoice.InvoiceBalanceDto();
@@ -385,8 +385,31 @@ public class InvoiceServiceImplTest {
 
         assertEquals(0, new BigDecimal("30000").compareTo(report.getTotal().getD1to30()));
         verify(invoiceMapper).selectOutstandingBalancesScoped(
-                eq(java.util.List.of(11L)), eq(java.util.List.of(7L)));
+                isNull(), eq(java.util.List.of(7L)));
         verify(invoiceMapper, never()).selectOutstandingBalances();
+    }
+
+    @Test
+    void testAddPayment_マネージャーは請求対象月の組織scope外を拒否する() {
+        Invoice invoice = new Invoice();
+        invoice.setId(55L);
+        invoice.setCustomerId(7L);
+        invoice.setBillingMonth("2026-07");
+        invoice.setStatus("送付済");
+        invoice.setTotal(new BigDecimal("100000"));
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(LocalDate.of(2026, 7, 1)))
+                .thenReturn(java.util.Set.of());
+
+        InvoicePaymentCreateRequest request = new InvoicePaymentCreateRequest();
+        request.setAmount(new BigDecimal("1000"));
+        request.setPaidDate(LocalDate.of(2026, 7, 20));
+
+        assertThrows(BusinessException.class, () -> invoiceService.addPayment(55L, request));
+
+        verify(organizationScopeService).allowedInvoiceIds(LocalDate.of(2026, 7, 1));
+        verify(invoicePaymentMapper, never()).insert(any(InvoicePayment.class));
     }
 
     @Test

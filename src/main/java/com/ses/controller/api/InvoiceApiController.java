@@ -70,12 +70,12 @@ public class InvoiceApiController {
         Page<Invoice> page = PageUtils.safePage(current, size);
         QueryWrapper<Invoice> query = new QueryWrapper<>();
         
-        java.util.Set<Long> organizationInvoiceIds = effectiveInvoiceIds();
+        java.util.Set<Long> organizationInvoiceIds = effectiveInvoiceIds(month);
         if (organizationInvoiceIds != null) {
             if (organizationInvoiceIds.isEmpty()) return ApiResult.success(new Page<>());
             query.in("id", organizationInvoiceIds);
         }
-        if (dataScopeService.isScoped()) {
+        if (dataScopeService.isSalesDataScoped()) {
             java.util.Set<Long> allowedCustomers = dataScopeService.allowedCustomerIds();
             if (allowedCustomers.isEmpty()) return ApiResult.success(new Page<>());
             query.in("customer_id", allowedCustomers);
@@ -173,7 +173,9 @@ public class InvoiceApiController {
                                     @RequestParam(required = false)
                                     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         // 顧客スコープ検証（担当外顧客の明細を返さない）。
-        dataScopeService.assertAllowedCustomer(customerId);
+        if (dataScopeService.isSalesDataScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
         return ApiResult.success(invoiceService.agingDetail(customerId, bucket, asOf));
     }
 
@@ -249,15 +251,16 @@ public class InvoiceApiController {
                                     @RequestParam(required = false) String status) {
         List<BpPaymentListDto> list;
         boolean organizationScoped = !organizationScopeService.hasFullAccess();
-        boolean dataScoped = dataScopeService.isScoped();
+        boolean dataScoped = dataScopeService.isSalesDataScoped();
+        LocalDate asOf = asOfForMonth(month);
         if (!organizationScoped && !dataScoped) {
             list = bpPaymentMapper.selectListWithDetails(month, status);
         } else {
             java.util.List<Long> organizationIds = organizationScoped ? new java.util.ArrayList<>(
-                    organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now())) : null;
+                    organizationScopeService.allowedOrganizationIds(asOf)) : null;
             java.util.List<Long> directUserIds = organizationScoped ? new java.util.ArrayList<>(
-                    organizationScopeService.allowedDirectUserIds(java.time.LocalDate.now())) : null;
-            java.util.List<Long> contractIds = dataScopeService.isScoped()
+                    organizationScopeService.allowedDirectUserIds(asOf)) : null;
+            java.util.List<Long> contractIds = dataScoped
                     ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
             if (contractIds != null && contractIds.isEmpty()) {
                 return ApiResult.success(List.of());
@@ -266,7 +269,7 @@ public class InvoiceApiController {
                 return ApiResult.success(List.of());
             }
             list = bpPaymentMapper.selectListWithDetailsScoped(month, status, contractIds, organizationIds,
-                    directUserIds, java.time.LocalDate.now());
+                    directUserIds, asOf);
         }
         return ApiResult.success(list);
     }
@@ -286,22 +289,28 @@ public class InvoiceApiController {
         return ApiResult.success(null);
     }
 
-    private java.util.Set<Long> effectiveInvoiceIds() {
+    private java.util.Set<Long> effectiveInvoiceIds(String month) {
         return organizationScopeService.hasFullAccess()
-                ? null : organizationScopeService.allowedInvoiceIds(java.time.LocalDate.now());
+                ? null : organizationScopeService.allowedInvoiceIds(asOfForMonth(month));
     }
 
     private void assertInvoiceVisible(Long id) {
-        java.util.Set<Long> allowed = effectiveInvoiceIds();
-        if (allowed != null && !allowed.contains(id)) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
         Invoice invoice = invoiceService.getById(id);
         if (invoice == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        if (dataScopeService.isScoped()) {
+        java.util.Set<Long> allowed = effectiveInvoiceIds(invoice.getBillingMonth());
+        if (allowed != null && !allowed.contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+        if (dataScopeService.isSalesDataScoped()) {
             dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         }
+    }
+
+    private LocalDate asOfForMonth(String month) {
+        return month == null || month.isBlank()
+                ? LocalDate.now()
+                : com.ses.common.util.DateUtils.parseYearMonth(month).atDay(1);
     }
 }

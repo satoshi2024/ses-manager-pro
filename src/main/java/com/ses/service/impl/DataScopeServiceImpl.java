@@ -86,10 +86,13 @@ public class DataScopeServiceImpl implements DataScopeService {
         if (isOrganizationScoped()) {
             return true;
         }
-        if (!"true".equalsIgnoreCase(systemConfigService.getString(CONFIG_KEY, "false"))) {
-            return false;
-        }
-        return "営業".equals(SecurityUtils.currentRole());
+        return isSalesDataScoped();
+    }
+
+    @Override
+    public boolean isSalesDataScoped() {
+        return "true".equalsIgnoreCase(systemConfigService.getString(CONFIG_KEY, "false"))
+                && "営業".equals(SecurityUtils.currentRole());
     }
 
     private boolean isOrganizationScoped() {

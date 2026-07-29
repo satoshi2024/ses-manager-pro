@@ -17,6 +17,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -126,6 +130,68 @@ class InvoiceApiControllerTest {
                 .andExpect(status().isOk());
 
         org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getSqlSegment().contains("id"));
+    }
+
+    @Test
+    @WithMockUser
+    void list_過去月の組織scopeは現在のDataScopeで二重絞り込みしない() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(java.time.LocalDate.of(2026, 1, 1)))
+                .thenReturn(java.util.Set.of(101L));
+        // isScoped=trueでも営業固有DataScopeでなければ、現在所属由来の顧客集合を使わない。
+        when(dataScopeService.isScoped()).thenReturn(true);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        when(invoiceService.page(any(), captor.capture()))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
+
+        mockMvc.perform(get("/api/invoices").param("month", "2026-01"))
+                .andExpect(status().isOk());
+
+        verify(dataScopeService, never()).allowedCustomerIds();
+        verify(organizationScopeService).allowedInvoiceIds(java.time.LocalDate.of(2026, 1, 1));
+        org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getSqlSegment().contains("id"));
+    }
+
+    @Test
+    @WithMockUser
+    void detail_過去月の組織scopeは現在のDataScopeで再拒否しない() throws Exception {
+        Invoice invoice = new Invoice();
+        invoice.setId(101L);
+        invoice.setCustomerId(501L);
+        invoice.setBillingMonth("2026-01");
+        when(invoiceService.getById(101L)).thenReturn(invoice);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedInvoiceIds(java.time.LocalDate.of(2026, 1, 1)))
+                .thenReturn(java.util.Set.of(101L));
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(invoiceService.detail(101L)).thenReturn(new InvoiceDetailDto());
+
+        mockMvc.perform(get("/api/invoices/101"))
+                .andExpect(status().isOk());
+
+        verify(dataScopeService, never()).assertAllowedCustomer(anyLong());
+    }
+
+    @Test
+    @WithMockUser
+    void bpPayments_過去月は対象月の組織scopeだけをmapperへ渡す() throws Exception {
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(java.time.LocalDate.of(2026, 1, 1)))
+                .thenReturn(java.util.Set.of(200L));
+        when(organizationScopeService.allowedDirectUserIds(java.time.LocalDate.of(2026, 1, 1)))
+                .thenReturn(java.util.Set.of());
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(bpPaymentMapper.selectListWithDetailsScoped(eq("2026-01"), isNull(), isNull(),
+                eq(java.util.List.of(200L)), eq(java.util.List.of()), eq(java.time.LocalDate.of(2026, 1, 1))))
+                .thenReturn(java.util.List.of());
+
+        mockMvc.perform(get("/api/invoices/bp-payments").param("month", "2026-01"))
+                .andExpect(status().isOk());
+
+        verify(dataScopeService, never()).allowedContractIds();
+        verify(bpPaymentMapper).selectListWithDetailsScoped(eq("2026-01"), isNull(), isNull(),
+                eq(java.util.List.of(200L)), eq(java.util.List.of()), eq(java.time.LocalDate.of(2026, 1, 1)));
     }
 
     @Test
