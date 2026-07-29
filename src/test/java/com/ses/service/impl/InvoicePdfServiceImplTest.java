@@ -1,7 +1,6 @@
 package com.ses.service.impl;
 
 import com.lowagie.text.pdf.PdfReader;
-import com.ses.common.exception.BusinessException;
 import com.ses.config.PdfProperties;
 import com.ses.dto.InvoiceDetailDto;
 import com.ses.entity.Customer;
@@ -15,7 +14,6 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -63,7 +61,7 @@ class InvoicePdfServiceImplTest {
     @Test
     void generate_有効なPDFバイト列を返し日本語テキストが抽出できること() throws Exception {
         com.ses.common.util.PdfFontUtils pdfFontUtils = new com.ses.common.util.PdfFontUtils(new PdfProperties());
-        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(new PdfProperties(), systemConfigService(), pdfFontUtils);
+        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(systemConfigService(), pdfFontUtils);
 
         byte[] bytes = service.generate(sampleDetail());
 

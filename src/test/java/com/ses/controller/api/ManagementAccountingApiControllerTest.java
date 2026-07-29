@@ -2,7 +2,6 @@ package com.ses.controller.api;
 
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
 import com.ses.entity.ManagementBudget;
-import com.ses.entity.MonthlyAccountingDimension;
 import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.service.ManagementAccountingService;
@@ -50,9 +49,6 @@ class ManagementAccountingApiControllerTest {
     private MonthlyAccountingDimensionMapper dimensionMapper;
     @MockBean
     private OrganizationScopeService organizationScopeService;
-
-    @Autowired
-    private ManagementAccountingApiController controller;
 
     /**
      * 組織名は利用者入力なので数式・制御文字を無害化する。一方で予算差は

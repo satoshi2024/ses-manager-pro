@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.ses.entity.SystemConfig;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;

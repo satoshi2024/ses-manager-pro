@@ -20,7 +20,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDate;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -54,7 +53,8 @@ class AutocompleteApiControllerTest {
         Customer customer = new Customer();
         customer.setId(10L);
         customer.setCompanyName("株式会社テスト");
-        when(customerService.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of(customer));
+        when(customerService.list(org.mockito.ArgumentMatchers
+                .<com.baomidou.mybatisplus.core.conditions.Wrapper<Customer>>any())).thenReturn(List.of(customer));
 
         mockMvc.perform(get("/api/autocomplete/customer-options"))
                 .andExpect(status().isOk())
@@ -71,7 +71,8 @@ class AutocompleteApiControllerTest {
         Project project = new Project();
         project.setId(20L);
         project.setProjectName("基幹システム移行");
-        when(projectService.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of(project));
+        when(projectService.list(org.mockito.ArgumentMatchers
+                .<com.baomidou.mybatisplus.core.conditions.Wrapper<Project>>any())).thenReturn(List.of(project));
 
         mockMvc.perform(get("/api/autocomplete/project-options"))
                 .andExpect(status().isOk())

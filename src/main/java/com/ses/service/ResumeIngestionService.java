@@ -1,6 +1,5 @@
 package com.ses.service;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.resume.ReviewedResumeDto;
 import com.ses.entity.ResumeIngestion;

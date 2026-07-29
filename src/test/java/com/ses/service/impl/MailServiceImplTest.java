@@ -3,7 +3,6 @@ package com.ses.service.impl;
 import com.ses.entity.EmailTemplate;
 import com.ses.service.EmailTemplateService;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;

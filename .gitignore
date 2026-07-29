@@ -13,7 +13,8 @@ logs/
 *.iml
 *.ipr
 *.iws
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .settings/
 .project
 .classpath

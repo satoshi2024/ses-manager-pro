@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FlywayLegacyV60MigrationSmokeTest {
 
     @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_legacy")
             .withUsername("ses")

@@ -5,7 +5,6 @@ import com.ses.entity.BpPayment;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -16,9 +15,6 @@ class BpPaymentMapperTest extends BaseIntegrationTest {
 
     @Autowired
     private BpPaymentMapper bpPaymentMapper;
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     @Test
     void testLayerOrderAndUniqueConstraint() {

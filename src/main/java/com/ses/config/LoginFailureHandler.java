@@ -1,7 +1,6 @@
 package com.ses.config;
 
 import com.ses.service.security.AccountLockService;
-import com.ses.service.AuditLogService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

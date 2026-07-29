@@ -29,7 +29,6 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -311,7 +310,7 @@ class WorkRecordServiceImplTest {
         WorkRecord record = configureFrozenWorkRecordScope(200L);
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
                 .thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
 
         WorkRecord result = workRecordService.saveHours(
@@ -325,7 +324,7 @@ class WorkRecordServiceImplTest {
 
     @Test
     void saveDaily_凍結組織Bの過去月を現在組織AのManagerは更新できない() {
-        WorkRecord record = configureFrozenWorkRecordScope(100L);
+        configureFrozenWorkRecordScope(100L);
         Engineer currentEngineer = new Engineer();
         currentEngineer.setId(7L);
         currentEngineer.setOrganizationId(100L);
@@ -347,13 +346,13 @@ class WorkRecordServiceImplTest {
         WorkRecordDaily daily = validDaily("2026-06-15");
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
                 .thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
         when(workRecordMapper.selectWorkMonthById(10L)).thenReturn("2026-06");
         when(workRecordMapper.selectByIdScoped(eq(10L), eq(LocalDate.of(2026, 6, 1)), eq(false),
                 anyList(), anyList(), isNull())).thenReturn(record);
-        when(workRecordDailyMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
-        when(workRecordDailyMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(daily));
+        when(workRecordDailyMapper.selectOne(any())).thenReturn(null);
+        when(workRecordDailyMapper.selectList(any())).thenReturn(Collections.singletonList(daily));
 
         WorkRecord result = workRecordService.saveDaily(1L, "2026-06", daily);
 
@@ -411,8 +410,8 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectWorkMonthById(10L)).thenReturn("2026-06");
         when(workRecordMapper.selectByIdScoped(eq(10L), eq(LocalDate.of(2026, 6, 1)), eq(false),
                 anyList(), anyList(), isNull())).thenReturn(record);
-        when(workRecordDailyMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
-        when(workRecordDailyMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(daily));
+        when(workRecordDailyMapper.selectOne(any())).thenReturn(null);
+        when(workRecordDailyMapper.selectList(any())).thenReturn(Collections.singletonList(daily));
 
         WorkRecord result = workRecordService.saveDaily(1L, "2026-06", daily);
 
@@ -478,7 +477,7 @@ class WorkRecordServiceImplTest {
     private void stubWorkRecordWriteDependencies() {
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
                 .thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
     }
 
@@ -560,7 +559,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
@@ -582,7 +581,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
         doReturn(true).when(spyService).updateBatchById(any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
@@ -605,7 +604,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.singletonList("INV-202607-0001"));
 
@@ -624,7 +623,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
         doReturn(true).when(spyService).updateBatchById(any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
@@ -648,7 +647,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(Collections.singletonList(r1)).when(spyService).list((com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>) any());
+        doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
 
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         // 支払済はなし
@@ -772,7 +771,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
-        org.mockito.ArgumentCaptor<QueryWrapper> captor = org.mockito.ArgumentCaptor.forClass(QueryWrapper.class);
+        org.mockito.ArgumentCaptor<QueryWrapper<BpPayment>> captor = org.mockito.ArgumentCaptor.captor();
         when(bpPaymentMapper.selectList(captor.capture())).thenReturn(Collections.emptyList());
 
         workRecordService.confirmMonth(workMonth);

@@ -2,7 +2,6 @@ package com.ses.service.ai.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.config.AiConfig;
 import com.ses.dto.resume.ParsedResumeDto;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.ResumeParseService;
@@ -22,7 +21,6 @@ import org.springframework.stereotype.Service;
 public class GeminiResumeParseServiceImpl implements ResumeParseService {
 
     private final AiTextService aiTextService;
-    private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
 
     private static final String PROMPT_TEMPLATE = """

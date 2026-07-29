@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FlywayRepairRunbookTest {
 
     @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_db")
             .withUsername("ses")
@@ -60,19 +61,7 @@ class FlywayRepairRunbookTest {
                 .callbacks(new com.ses.config.LegacyDatabaseFlywayCallback()) // コールバックを明示的に登録
                 .load();
 
-        // repair() 実行前に、不一致エントリがアローリスト（V10のみ）に限定されることを確認する。
-        // アローリスト外のスクリプトが壊れていた場合は repair() を呼んでも良いか判断できないため、事前に assert する。
-        final java.util.List<String> ALLOWED_REPAIR_VERSIONS = java.util.List.of("10");
-        try (java.sql.Connection conn = MYSQL.createConnection("");
-             java.sql.Statement st = conn.createStatement();
-             java.sql.ResultSet rs = st.executeQuery(
-                     "SELECT version, script FROM flyway_schema_history WHERE success = 0 OR " +
-                     "(version IS NOT NULL AND checksum != (SELECT MIN(checksum) FROM flyway_schema_history WHERE version IS NULL LIMIT 0))")) {
-            // 実際に不一致を起こすエントリを checksum 差異で特定するのが理想だが、
-            // ここでは success=0（エラー）行のみ allowlist と照合する
-        }
-        // 旧 prod V10 が異なる description でインサートされているため、Flyway は V10 チェックサム不一致を検出する。
-        // repair はこの V10 エントリのみを対象とするべきであることを確認する。
+        // repair() 実行前に、許可対象の V10 以外の履歴が混入していないことを確認する。
         try (java.sql.Connection conn = MYSQL.createConnection("");
              java.sql.Statement st = conn.createStatement();
              java.sql.ResultSet rs = st.executeQuery(

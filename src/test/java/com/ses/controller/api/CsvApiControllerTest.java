@@ -70,7 +70,7 @@ class CsvApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineersCsv_consumesThreeKeysetBatchesWithoutDuplicates() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(1201L);
+        when(engineerService.count(any())).thenReturn(1201L);
         when(retentionRiskService.scoreBatchFor(any())).thenAnswer(invocation -> {
             List<Engineer> rows = invocation.getArgument(0);
             Map<Long, RetentionRiskDto> result = new HashMap<>();
@@ -80,7 +80,7 @@ class CsvApiControllerTest {
         });
         AtomicInteger fetchCount = new AtomicInteger();
         List<Wrapper<Engineer>> batchWrappers = new ArrayList<>();
-        when(engineerService.list(any(Wrapper.class))).thenAnswer(invocation -> {
+        when(engineerService.list(org.mockito.ArgumentMatchers.<Wrapper<Engineer>>any())).thenAnswer(invocation -> {
             batchWrappers.add(invocation.getArgument(0));
             int batch = fetchCount.incrementAndGet();
             int phaseBatch = ((batch - 1) % 3) + 1;
@@ -134,7 +134,7 @@ class CsvApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineersCsv_rejectsHighRiskCandidateSetBeforeScoring() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(100001L);
+        when(engineerService.count(any())).thenReturn(100001L);
 
         mockMvc.perform(get("/api/engineers/export-csv").param("riskLevel", "high"))
                 .andExpect(status().isBadRequest())
@@ -148,12 +148,12 @@ class CsvApiControllerTest {
     void exportEngineersCsv_appliesDataScopeBeforeCounting() throws Exception {
         when(dataScopeService.isScoped()).thenReturn(true);
         when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of(7L));
-        when(engineerService.count(any(Wrapper.class))).thenReturn(0L);
+        when(engineerService.count(any())).thenReturn(0L);
 
         mockMvc.perform(get("/api/engineers/export-csv"))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<Wrapper<Engineer>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        ArgumentCaptor<Wrapper<Engineer>> captor = ArgumentCaptor.captor();
         verify(engineerService).count(captor.capture());
         assertTrue(captor.getValue().getSqlSegment().contains("id IN"));
     }
@@ -161,7 +161,7 @@ class CsvApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineersCsv_rejectsRowsAboveConfiguredMaximum() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(50001L);
+        when(engineerService.count(any())).thenReturn(50001L);
 
         mockMvc.perform(get("/api/engineers/export-csv"))
                 .andExpect(status().isBadRequest())
@@ -171,8 +171,8 @@ class CsvApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineersCsv_allowsExactlyConfiguredMaximum() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(50000L);
-        when(engineerService.list(any(Wrapper.class))).thenReturn(List.of());
+        when(engineerService.count(any())).thenReturn(50000L);
+        when(engineerService.list(org.mockito.ArgumentMatchers.<Wrapper<Engineer>>any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/engineers/export-csv"))
                 .andExpect(status().isOk());

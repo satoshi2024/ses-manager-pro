@@ -13,7 +13,6 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordDailyMapper;
 import com.ses.mapper.WorkRecordMapper;
-import com.ses.mapper.CostCenterMapper;
 import com.ses.common.constant.NotificationLinks;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationService;
@@ -34,7 +33,6 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,9 +66,6 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private CostCenterMapper costCenterMapper;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -119,6 +114,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds);
     }
 
+    /** テストおよび保守ツールからリフレクション経由で利用する互換エントリーポイント。 */
+    @SuppressWarnings("unused")
     private void assertContractScope(Contract contract, String workMonth) {
         assertContractScope(contract, workMonth, null);
     }

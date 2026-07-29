@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
 import com.ses.entity.Project;
@@ -769,7 +768,7 @@ class ContractServiceImplTest {
         contractService.updateRenewalDecision(1L, "CONTINUE");
 
         org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<Contract>> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+                org.mockito.ArgumentCaptor.captor();
         verify(contractMapper).update(isNull(), captor.capture());
 
         String setSql = captor.getValue().getSqlSet();

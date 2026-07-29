@@ -103,7 +103,8 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineers_returnsXlsxWithAttachmentHeader() throws Exception {
-        when(engineerService.list(any(Wrapper.class))).thenReturn(List.of(new Engineer()));
+        when(engineerService.list(org.mockito.ArgumentMatchers.<Wrapper<Engineer>>any()))
+                .thenReturn(List.of(new Engineer()));
         when(excelExportService.exportEngineers(any())).thenReturn(new byte[]{1, 2, 3});
 
         mockMvc.perform(get("/api/engineers/export"))
@@ -143,7 +144,7 @@ class ExportApiControllerTest {
                 .thenReturn(java.util.Set.of(22L));
         when(organizationScopeService.intersectWithDataScope(any(), any()))
                 .thenReturn(java.util.Set.of(22L));
-        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.captor();
         when(contractMapper.selectCount(any())).thenReturn(0L);
 
         mockMvc.perform(get("/api/contracts/export"))
@@ -183,7 +184,8 @@ class ExportApiControllerTest {
             Iterable<List<ContractExportDto>> batches = invocation.getArgument(0);
             for (List<ContractExportDto> batch : batches) exported.addAll(batch);
             return null;
-        }).when(excelExportService).streamContracts(any(Iterable.class), any(OutputStream.class));
+        }).when(excelExportService).streamContracts(
+                org.mockito.ArgumentMatchers.<Iterable<List<ContractExportDto>>>any(), any(OutputStream.class));
 
         mockMvc.perform(get("/api/contracts/export")
                         .param("status", "稼動中")
@@ -194,7 +196,7 @@ class ExportApiControllerTest {
                         .param("endDateTo", "2026-07-31"))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.captor();
         verify(contractMapper, times(3)).selectList(captor.capture());
         assertEquals(1201, exported.size());
         assertEquals("C-1201", exported.get(0).getContractNo());
@@ -218,7 +220,7 @@ class ExportApiControllerTest {
             org.junit.jupiter.api.Assertions.assertTrue(batchSql.contains("end_date >="));
             org.junit.jupiter.api.Assertions.assertTrue(batchSql.contains("end_date <="));
         }
-        ArgumentCaptor<Wrapper<Contract>> countCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        ArgumentCaptor<Wrapper<Contract>> countCaptor = ArgumentCaptor.captor();
         verify(contractMapper).selectCount(countCaptor.capture());
         String countSql = countCaptor.getValue().getSqlSegment();
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("status"));
@@ -233,7 +235,7 @@ class ExportApiControllerTest {
         contract.setId(1L);
         contract.setCostPrice(new java.math.BigDecimal("600000"));
         when(contractMapper.selectCount(any())).thenReturn(1L);
-        when(contractMapper.selectList(any())).thenReturn(List.of(contract), List.of());
+        when(contractMapper.selectList(any())).thenReturn(List.of(contract)).thenReturn(List.of());
         when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("contract.cost.view")))
                 .thenReturn(false);
         List<ContractExportDto> exported = new ArrayList<>();
@@ -241,7 +243,8 @@ class ExportApiControllerTest {
             Iterable<List<ContractExportDto>> batches = invocation.getArgument(0);
             for (List<ContractExportDto> batch : batches) exported.addAll(batch);
             return null;
-        }).when(excelExportService).streamContracts(any(Iterable.class), any(OutputStream.class));
+        }).when(excelExportService).streamContracts(
+                org.mockito.ArgumentMatchers.<Iterable<List<ContractExportDto>>>any(), any(OutputStream.class));
 
         mockMvc.perform(get("/api/contracts/export"))
                 .andExpect(status().isOk());
@@ -253,7 +256,7 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineers_overMaxRowsFailsBeforeResponseHeaders() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(50001L);
+        when(engineerService.count(any())).thenReturn(50001L);
 
         mockMvc.perform(get("/api/engineers/export"))
                 .andExpect(status().isBadRequest())
@@ -263,7 +266,7 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineers_rejectsHighRiskCandidateSetBeforeScoring() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(100001L);
+        when(engineerService.count(any())).thenReturn(100001L);
 
         mockMvc.perform(get("/api/engineers/export").param("riskLevel", "high"))
                 .andExpect(status().isBadRequest())
@@ -275,7 +278,7 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineers_highRiskScansBatchesForCountThenStreamsBatches() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(1201L);
+        when(engineerService.count(any())).thenReturn(1201L);
         when(retentionRiskService.scoreBatchFor(any())).thenAnswer(invocation -> {
             List<Engineer> rows = invocation.getArgument(0);
             Map<Long, RetentionRiskDto> result = new HashMap<>();
@@ -285,7 +288,7 @@ class ExportApiControllerTest {
         });
 
         AtomicInteger fetchCount = new AtomicInteger();
-        when(engineerService.list(any(Wrapper.class))).thenAnswer(invocation -> {
+        when(engineerService.list(org.mockito.ArgumentMatchers.<Wrapper<Engineer>>any())).thenAnswer(invocation -> {
             int batch = fetchCount.incrementAndGet();
             int phaseBatch = ((batch - 1) % 3) + 1;
             int start = phaseBatch == 1 ? 1201 : phaseBatch == 2 ? 701 : 201;
@@ -306,7 +309,8 @@ class ExportApiControllerTest {
                 batch.forEach(engineer -> exportedIds.add(engineer.getId()));
             }
             return null;
-        }).when(excelExportService).streamEngineers(any(Iterable.class), any(OutputStream.class));
+        }).when(excelExportService).streamEngineers(
+                org.mockito.ArgumentMatchers.<Iterable<List<Engineer>>>any(), any(OutputStream.class));
 
         mockMvc.perform(get("/api/engineers/export").param("riskLevel", "high"))
                 .andExpect(status().isOk());
@@ -336,15 +340,16 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportEngineers_releasesPermitWhenStreamingFails() throws Exception {
-        when(engineerService.count(any(Wrapper.class))).thenReturn(0L);
+        when(engineerService.count(any())).thenReturn(0L);
         doThrow(new RuntimeException("stream failed"))
-                .when(excelExportService).streamEngineers(any(Iterable.class), any(OutputStream.class));
+                .when(excelExportService).streamEngineers(
+                        org.mockito.ArgumentMatchers.<Iterable<List<Engineer>>>any(), any(OutputStream.class));
 
         org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
                 () -> mockMvc.perform(get("/api/engineers/export")));
 
         doNothing().when(excelExportService)
-                .streamEngineers(any(Iterable.class), any(OutputStream.class));
+                .streamEngineers(org.mockito.ArgumentMatchers.<Iterable<List<Engineer>>>any(), any(OutputStream.class));
         mockMvc.perform(get("/api/engineers/export"))
                 .andExpect(status().isOk());
     }

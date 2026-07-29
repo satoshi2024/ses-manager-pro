@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.entity.Contract;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.MonthlyAccountingDimension;
@@ -66,12 +65,12 @@ class MonthlyAccountingSnapshotServiceImplTest {
                 .workMonth(LocalDate.of(2026, 6, 1)).sourceType("work-record").sourceId(501L)
                 .organizationId(1001L).build();
 
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
-        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of(existing));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(existing));
         when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
         when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(null);
         when(engineerAccountLinkMapper.selectByEngineerId(701L)).thenReturn(link);
-        when(userOrganizationMapper.selectList(any())).thenReturn(null, null);
+        when(userOrganizationMapper.selectList(any())).thenReturn(null).thenReturn(null);
         when(userOrganizationMapper.selectOne(any())).thenReturn(beforeTransfer);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
@@ -101,7 +100,7 @@ class MonthlyAccountingSnapshotServiceImplTest {
         engineer.setId(702L);
         engineer.setOrganizationId(2002L);
 
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
         when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(engineer));
@@ -142,7 +141,7 @@ class MonthlyAccountingSnapshotServiceImplTest {
         frozenCenter.setId(4004L);
         frozenCenter.setOrganizationId(3003L);
 
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
         when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
@@ -169,7 +168,7 @@ class MonthlyAccountingSnapshotServiceImplTest {
         wait.setCostCenterId(1002L);
         wait.setWaitCost(new BigDecimal("350000"));
 
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(workRecordMapper.selectList(any())).thenReturn(List.of());
         when(engineerMapper.selectAccountingWaitCostByEngineer(any(), any())).thenReturn(List.of(wait));
         when(costCenterMapper.selectById(1002L)).thenReturn(null);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
@@ -205,7 +204,7 @@ class MonthlyAccountingSnapshotServiceImplTest {
         movedEngineer.setOrganizationId(9009L);
         movedEngineer.setCostCenterId(9999L);
 
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
         when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
@@ -226,6 +225,6 @@ class MonthlyAccountingSnapshotServiceImplTest {
     void invalidMonth_isRejectedBeforeReadingRecords() {
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                 () -> service.snapshotMonth("2026/06"));
-        verify(workRecordMapper, never()).selectList(any(QueryWrapper.class));
+        verify(workRecordMapper, never()).selectList(any());
     }
 }

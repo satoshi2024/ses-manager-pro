@@ -1,6 +1,5 @@
 package com.ses.service.compliance;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.compliance.ComplianceFinding;
 import com.ses.dto.compliance.ContractComplianceDto;
 import com.ses.dto.compliance.ContractTierDto;
@@ -173,7 +172,7 @@ class LaborComplianceServiceImplTest {
         Contract c2 = contract(2L, "準委任");
         c2.setContractNo("C-002");
 
-        when(contractMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
         ContractTierDto tier1 = new ContractTierDto();
         tier1.setContractId(1L);
         tier1.setMaxLayer(2);
@@ -225,7 +224,7 @@ class LaborComplianceServiceImplTest {
         untyped.setEngineerId(11L);
         untyped.setProjectId(21L);
         untyped.setDirectCommandFlag(true);
-        when(contractMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(untyped, typed));
+        when(contractMapper.selectList(any())).thenReturn(List.of(untyped, typed));
         ContractTierDto tier = new ContractTierDto();
         tier.setContractId(1L);
         tier.setMaxLayer(2);

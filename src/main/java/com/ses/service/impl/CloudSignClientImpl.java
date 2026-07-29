@@ -5,6 +5,7 @@ import com.ses.service.CloudSignClient;
 import com.ses.common.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -48,8 +49,10 @@ public class CloudSignClientImpl implements CloudSignClient {
                     "email", d.getRecipientEmail()
             );
             
-            ResponseEntity<Map> r = rest.postForEntity(baseUrl + "/documents", new HttpEntity<>(body, h), Map.class);
-            Map m = r.getBody() == null ? Map.of() : r.getBody();
+            ResponseEntity<Map<String, Object>> r = rest.exchange(
+                    baseUrl + "/documents", HttpMethod.POST, new HttpEntity<>(body, h),
+                    new ParameterizedTypeReference<>() {});
+            Map<String, Object> m = r.getBody() == null ? Map.of() : r.getBody();
             String id = Objects.toString(m.get("id"), "");
             
             if (id.isBlank()) {
@@ -69,8 +72,10 @@ public class CloudSignClientImpl implements CloudSignClient {
             throw BusinessException.of("error.contract.document.cloudsignInvalid");
         }
         try {
-            ResponseEntity<Map> r = rest.exchange(baseUrl + "/documents/" + id, HttpMethod.GET, auth(), Map.class);
-            Map m = r.getBody() == null ? Map.of() : r.getBody();
+            ResponseEntity<Map<String, Object>> r = rest.exchange(
+                    baseUrl + "/documents/" + id, HttpMethod.GET, auth(),
+                    new ParameterizedTypeReference<>() {});
+            Map<String, Object> m = r.getBody() == null ? Map.of() : r.getBody();
             
             String statusStr = Objects.toString(m.getOrDefault("status", "確認中"), "確認中");
             String fileId = Objects.toString(m.get("file_id"), null);

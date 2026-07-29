@@ -85,8 +85,8 @@ class InvoiceApiControllerTest {
     @Test
     @WithMockUser
     void list_overdueフィルタで期限超過条件が付与される() throws Exception {
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.Invoice>> captor =
+                org.mockito.ArgumentCaptor.captor();
         when(invoiceService.page(any(), captor.capture()))
                 .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
 
@@ -103,8 +103,8 @@ class InvoiceApiControllerTest {
     @Test
     @WithMockUser
     void list_overdue未指定なら期限条件は付与されない() throws Exception {
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.Invoice>> captor =
+                org.mockito.ArgumentCaptor.captor();
         when(invoiceService.page(any(), captor.capture()))
                 .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
 
@@ -121,8 +121,8 @@ class InvoiceApiControllerTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedInvoiceIds(any(java.time.LocalDate.class)))
                 .thenReturn(java.util.Set.of(7L));
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.Invoice>> captor =
+                org.mockito.ArgumentCaptor.captor();
         when(invoiceService.page(any(), captor.capture()))
                 .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
 
@@ -140,8 +140,8 @@ class InvoiceApiControllerTest {
                 .thenReturn(java.util.Set.of(101L));
         // isScoped=trueでも営業固有DataScopeでなければ、現在所属由来の顧客集合を使わない。
         when(dataScopeService.isScoped()).thenReturn(true);
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.Invoice>> captor =
+                org.mockito.ArgumentCaptor.captor();
         when(invoiceService.page(any(), captor.capture()))
                 .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
 

@@ -38,16 +38,26 @@ class AllMappersSchemaSweepTest {
 
     @TestFactory
     Stream<DynamicTest> allMappersSelectListWithoutSchemaError() {
-        Map<String, BaseMapper> mappers = applicationContext.getBeansOfType(BaseMapper.class);
+        Map<String, BaseMapper<?>> mappers = allMappers();
 
         return mappers.entrySet().stream().map(entry ->
                 DynamicTest.dynamicTest(entry.getKey(), () -> {
                     try {
-                        entry.getValue().selectList(null);
+                        selectAll(entry.getValue());
                     } catch (Exception e) {
                         fail(entry.getKey() + " の selectList(null) がエンティティ/スキーマ不一致で失敗しました: "
                                 + e.getMessage(), e);
                     }
                 }));
+    }
+
+    private static <T> void selectAll(BaseMapper<T> mapper) {
+        mapper.selectList(null);
+    }
+
+    /** Spring の型消去済み Bean 検索結果を、呼び出し側で安全に capture できる形へ限定変換する。 */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Map<String, BaseMapper<?>> allMappers() {
+        return (Map) applicationContext.getBeansOfType(BaseMapper.class);
     }
 }

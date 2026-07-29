@@ -1,11 +1,7 @@
 package com.ses.web;
 
 import com.ses.BaseIntegrationTest;
-import com.ses.controller.api.*;
-import com.ses.entity.*;
-import com.ses.service.*;
 
-import com.ses.service.impl.DashboardServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -13,13 +9,9 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDate;
-import java.util.HashMap;
-import java.util.List;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.springframework.test.context.TestPropertySource;
 
@@ -28,12 +20,7 @@ import org.springframework.test.context.TestPropertySource;
 class AdvancedCoverageIntegrationTest extends BaseIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
-    @Autowired private NotificationGenerateService notificationGenerateService;
-    @Autowired private DashboardServiceImpl dashboardService;
     @Autowired private com.ses.service.ai.AiMatchingService ruleMatchingService;
-    @Autowired private ProjectSkillService projectSkillService;
-    @Autowired private ProposalService proposalService;
-    @Autowired private InvoiceService invoiceService;
 
     @Test
     @WithMockUser(username = "admin", roles = "管理者")

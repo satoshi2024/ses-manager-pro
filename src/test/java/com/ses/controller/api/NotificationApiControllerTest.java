@@ -1,6 +1,5 @@
 package com.ses.controller.api;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.notification.NotificationDto;
 import com.ses.entity.SysUser;
@@ -20,7 +19,6 @@ import java.util.Collections;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
@@ -53,8 +51,8 @@ class NotificationApiControllerTest {
         SysUser mockUser = new SysUser();
         mockUser.setId(1L);
         mockUser.setUsername("user");
-        doReturn(mockUser).when(sysUserService).getOne(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class));
-        doReturn(mockUser).when(sysUserService).getOne(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class), anyBoolean());
+        doReturn(mockUser).when(sysUserService).getOne(any());
+        doReturn(mockUser).when(sysUserService).getOne(any(), anyBoolean());
     }
 
     @Test

@@ -6,7 +6,6 @@ import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Invoice;
 import com.ses.entity.InvoicePayment;
-import com.ses.entity.SysUser;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;

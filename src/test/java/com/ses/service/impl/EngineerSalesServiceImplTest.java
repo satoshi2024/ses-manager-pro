@@ -40,9 +40,6 @@ public class EngineerSalesServiceImplTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private com.ses.service.security.ScopeVersionRegistry scopeVersionRegistry;
-
     private Long salesUser1Id;
     private Long salesUser2Id;
     private Long hrUserId;

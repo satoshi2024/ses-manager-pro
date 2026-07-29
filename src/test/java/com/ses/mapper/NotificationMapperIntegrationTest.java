@@ -71,7 +71,7 @@ class NotificationMapperIntegrationTest {
     @Test
     void markAllReadForUser_未読を一括既読化し既読済みは重複挿入しない() {
         Long n1 = insertNotification("k1");
-        Long n2 = insertNotification("k2");
+        insertNotification("k2");
 
         // n1は事前に既読化済み（この状態でも重複INSERTでエラーにならないこと）
         NotificationRead pre = new NotificationRead();

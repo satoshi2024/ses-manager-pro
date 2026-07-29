@@ -1,6 +1,5 @@
 package com.ses.service.ai.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.ai.ProposalDraftDto;

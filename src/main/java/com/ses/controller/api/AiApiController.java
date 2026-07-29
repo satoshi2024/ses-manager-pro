@@ -1,8 +1,6 @@
 package com.ses.controller.api;
 
-import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
-import com.ses.config.AiConfig;
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.service.ai.AiMatchingService;
 import com.ses.service.security.DataScopeService;
@@ -22,13 +20,6 @@ public class AiApiController {
 
     private final AiMatchingService aiMatchingService;
     private final DataScopeService dataScopeService;
-    private final AiConfig aiConfig;
-
-    private void checkAiEnabled() {
-        if (!aiConfig.isEnabled()) {
-            throw BusinessException.of("error.ai.disabled");
-        }
-    }
 
     /**
      * エンジニアと案件のマッチングを行う

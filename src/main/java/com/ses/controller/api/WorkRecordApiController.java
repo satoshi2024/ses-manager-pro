@@ -25,8 +25,6 @@ public class WorkRecordApiController {
 
     private final WorkRecordService workRecordService;
     private final TimesheetPdfService timesheetPdfService;
-    private final com.ses.service.security.DataScopeService dataScopeService;
-
     @GetMapping("/grid")
     public ApiResult<List<WorkRecordGridDto>> getGrid(@RequestParam String month) {
         return ApiResult.success(workRecordService.monthlyGrid(month));

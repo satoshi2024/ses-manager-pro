@@ -63,7 +63,7 @@ public class SalesPerformanceServiceImplTest {
     @Test
     void 営業ユーザーは実績なしでも表示される() {
         SysUser u1 = user(1L, "Sales1");
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
 
@@ -90,7 +90,7 @@ public class SalesPerformanceServiceImplTest {
         wonByU2.setProposedBy(2L);
         wonByU2.setStatus(StatusConstants.PROPOSAL_CONTRACTED);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1, u2));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1, u2));
         when(proposalMapper.selectList(ArgumentMatchers.any()))
@@ -110,7 +110,7 @@ public class SalesPerformanceServiceImplTest {
                 LocalDate.of(2023, 10, 1), null, "800000", "500000",
                 LocalDateTime.of(2023, 10, 5, 10, 0), null);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(currentSales));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
                 .thenReturn(Arrays.asList(currentSales, formerSales));
@@ -132,7 +132,7 @@ public class SalesPerformanceServiceImplTest {
                 LocalDate.of(2023, 10, 1), null, "800000", "500000",
                 LocalDateTime.of(2023, 10, 5, 10, 0), null);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Collections.emptyList());
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
                 .thenReturn(Arrays.asList(formerSales));
@@ -157,7 +157,7 @@ public class SalesPerformanceServiceImplTest {
         overrideContract.setCommissionRate(new BigDecimal("10.0"));
         WorkRecord confirmed = workRecord(10L, "2023-10", "900000", "550000");
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(actualContract, overrideContract));
@@ -180,7 +180,7 @@ public class SalesPerformanceServiceImplTest {
                 LocalDate.of(2023, 10, 1), null, "600000", "400000",
                 LocalDateTime.of(2023, 10, 6, 10, 0), 9L);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(newContract, renewalContract));
@@ -199,7 +199,7 @@ public class SalesPerformanceServiceImplTest {
                 LocalDate.of(2023, 10, 1), null, "300000", "400000",
                 LocalDateTime.of(2023, 10, 1, 10, 0), null);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(lossContract));
@@ -217,7 +217,7 @@ public class SalesPerformanceServiceImplTest {
                 null, null, "800000", "500000",
                 LocalDateTime.of(2023, 9, 1, 10, 0), null);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(invalidContract));
@@ -239,7 +239,7 @@ public class SalesPerformanceServiceImplTest {
                 LocalDate.of(2023, 10, 1), null, "600000", "400000",
                 LocalDateTime.of(2023, 10, 1, 10, 0), null);
 
-        when(sysUserService.list((com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>) ArgumentMatchers.any()))
+        when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
         when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(attributed, unassigned));

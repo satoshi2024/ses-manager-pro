@@ -13,7 +13,6 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -103,7 +102,7 @@ class DashboardServiceImplTest {
         Engineer e1 = createEngineer(1L, "Test Engineer 1");
         Project p1 = createProject(1L, "Test Project 1");
 
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
@@ -126,7 +125,7 @@ class DashboardServiceImplTest {
         Engineer e1 = createEngineer(1L, "Test Engineer 1");
         Project p1 = createProject(1L, "Test Project 1");
 
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1));
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
@@ -143,7 +142,7 @@ class DashboardServiceImplTest {
         Contract c1 = createContract(1L, "C001", 1000000, 600000, LocalDate.of(2026, 7, 1)); // Older
         Contract c2 = createContract(2L, "C002", 800000, 500000, LocalDate.of(2026, 8, 1)); // Newer
         
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(createEngineer(1L, "Eng")));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(createProject(1L, "Proj")));
 
@@ -156,7 +155,7 @@ class DashboardServiceImplTest {
 
     @Test
     void testGetProfitAnalysis_Empty() {
-        when(contractMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
         List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
         assertTrue(result.isEmpty());
     }
@@ -214,12 +213,12 @@ class DashboardServiceImplTest {
         proposal.setEngineerId(101L);
         proposal.setStatus(com.ses.common.constant.StatusConstants.PROPOSAL_DOCUMENT_SCREENING);
         proposal.setProposedUnitPrice(new java.math.BigDecimal("500000"));
-        when(proposalMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(proposal));
+        when(proposalMapper.selectList(any())).thenReturn(List.of(proposal));
 
         dashboardService.getSummary(2027);
 
         org.mockito.ArgumentCaptor<QueryWrapper<com.ses.entity.Proposal>> captor =
-                org.mockito.ArgumentCaptor.forClass(QueryWrapper.class);
+                org.mockito.ArgumentCaptor.captor();
         verify(proposalMapper).selectList(captor.capture());
         assertTrue(captor.getValue().getSqlSegment().contains("engineer_id"),
                 captor.getValue().getSqlSegment());

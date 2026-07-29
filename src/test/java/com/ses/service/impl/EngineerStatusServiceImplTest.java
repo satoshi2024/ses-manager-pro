@@ -1,16 +1,12 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
-import com.ses.entity.Proposal;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -78,7 +74,7 @@ class EngineerStatusServiceImplTest {
     @Test
     void testReleaseIfIdle_HasProposals() {
         when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
-        when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
+        when(proposalMapper.selectCount(any())).thenReturn(1L);
 
         engineerStatusService.releaseIfIdle(1L);
 
@@ -88,8 +84,8 @@ class EngineerStatusServiceImplTest {
     @Test
     void testReleaseIfIdle_HasContracts() {
         when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
-        when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
-        when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
+        when(proposalMapper.selectCount(any())).thenReturn(0L);
+        when(contractMapper.selectCount(any())).thenReturn(1L);
 
         engineerStatusService.releaseIfIdle(1L);
 
@@ -100,8 +96,8 @@ class EngineerStatusServiceImplTest {
     void testReleaseIfIdle_Idle() {
         engineer.setStatus("提案中");
         when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
-        when(proposalMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
-        when(contractMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(proposalMapper.selectCount(any())).thenReturn(0L);
+        when(contractMapper.selectCount(any())).thenReturn(0L);
 
         engineerStatusService.releaseIfIdle(1L);
 

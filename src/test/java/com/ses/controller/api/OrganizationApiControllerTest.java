@@ -1,10 +1,8 @@
 package com.ses.controller.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.CostCenter;
 import com.ses.entity.OrganizationUnit;
-import com.ses.entity.UserOrganization;
 import com.ses.service.CostCenterService;
 import com.ses.service.OrganizationService;
 import com.ses.service.security.OrganizationScopeService;
@@ -40,9 +38,6 @@ class OrganizationApiControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @MockBean
     private OrganizationService organizationService;

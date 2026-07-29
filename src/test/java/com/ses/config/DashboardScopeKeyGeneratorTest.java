@@ -183,7 +183,6 @@ class DashboardScopeKeyGeneratorTest {
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
-    @SuppressWarnings("unchecked")
     private KeyGenerator buildKeyGenerator(DataScopeService dataScope,
                                             OrganizationScopeService orgScope) {
         return buildKeyGenerator(dataScope, orgScope,

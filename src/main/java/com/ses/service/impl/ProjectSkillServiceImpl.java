@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.dto.project.ProjectSkillDetailDto;
 import com.ses.entity.ProjectSkill;
-import com.ses.mapper.ProjectSkillMapper;
 import com.ses.service.ProjectSkillService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

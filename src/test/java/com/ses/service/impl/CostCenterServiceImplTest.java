@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
@@ -47,42 +46,42 @@ class CostCenterServiceImplTest {
         ReflectionTestUtils.setField(service, "invoiceMapper", invoiceMapper);
         ReflectionTestUtils.setField(service, "bpPaymentMapper", bpPaymentMapper);
         ReflectionTestUtils.setField(service, "workRecordMapper", workRecordMapper);
-        lenient().when(managementBudgetMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(monthlyAccountingDimensionMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(engineerMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(contractMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(invoiceMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(bpPaymentMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
-        lenient().when(workRecordMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(0L);
+        lenient().when(managementBudgetMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(monthlyAccountingDimensionMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(engineerMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(contractMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(invoiceMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(workRecordMapper.selectCount(any())).thenReturn(0L);
     }
 
     @Test
     void engineer参照中は削除を拒否する() {
-        when(engineerMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1L);
+        when(engineerMapper.selectCount(any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 
     @Test
     void contract参照中は削除を拒否する() {
-        when(contractMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1L);
+        when(contractMapper.selectCount(any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 
     @Test
     void invoice参照中は削除を拒否する() {
-        when(invoiceMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1L);
+        when(invoiceMapper.selectCount(any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 
     @Test
     void workRecord参照中は削除を拒否する() {
-        when(workRecordMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1L);
+        when(workRecordMapper.selectCount(any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 
     @Test
     void bpPayment参照中は削除を拒否する() {
-        when(bpPaymentMapper.selectCount(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1L);
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 }

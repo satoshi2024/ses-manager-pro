@@ -2,7 +2,6 @@ package com.ses.service.skillsheet.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.config.AiConfig;
 import com.ses.dto.bpavailability.ParsedBpAvailabilityDto;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.skillsheet.BpAvailabilityParseService;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Service;
 public class GeminiBpAvailabilityParseServiceImpl implements BpAvailabilityParseService {
 
     private final AiTextService aiTextService;
-    private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
 
     private static final String PROMPT_TEMPLATE = """

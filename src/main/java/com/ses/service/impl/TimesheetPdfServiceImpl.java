@@ -12,7 +12,6 @@ import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import com.ses.common.exception.BusinessException;
-import com.ses.config.PdfProperties;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
@@ -29,14 +28,9 @@ import com.ses.service.TimesheetPdfService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -47,7 +41,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TimesheetPdfServiceImpl implements TimesheetPdfService {
 
-    private final PdfProperties pdfProperties;
     private final WorkRecordMapper workRecordMapper;
     private final WorkRecordDailyMapper workRecordDailyMapper;
     private final ContractMapper contractMapper;

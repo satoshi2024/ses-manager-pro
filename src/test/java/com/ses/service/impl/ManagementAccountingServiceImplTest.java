@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.dto.accounting.AccountingWaitCostRow;
 import com.ses.dto.accounting.ManagementAccountingContractRow;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
@@ -75,7 +74,7 @@ class ManagementAccountingServiceImplTest {
         actualContract.setId(10L);
         actualContract.setCustomerId(500L);
         when(contractMapper.selectList(any())).thenReturn(List.of(actualContract));
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of(snapshot));
         when(budgetMapper.selectList(any())).thenReturn(List.of(budget(100L, new BigDecimal("110"), new BigDecimal("40"))));
         when(organizationService.namesByIds(any())).thenReturn(Map.of(100L, "営業本部"));
@@ -103,8 +102,8 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(organizationScopeService.allowedOrganizationIds(any())).thenReturn(Set.of());
         when(contractMapper.selectAccountingContracts(any(), any(), eq(true), isNull(), isNull())).thenReturn(List.of());
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of(waitSnapshot));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(waitSnapshot));
         when(dimensionMapper.selectCount(any())).thenReturn(1L);
         when(budgetMapper.selectList(any())).thenReturn(List.of());
         when(organizationService.namesByIds(any())).thenReturn(Map.of(100L, "営業本部"));
@@ -120,8 +119,8 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
         when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList())).thenReturn(List.of());
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of());
+        when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of());
         when(dimensionMapper.selectCount(any())).thenReturn(1L);
         when(budgetMapper.selectList(any())).thenReturn(List.of());
         when(organizationService.namesByIds(any())).thenReturn(Map.of());
@@ -147,9 +146,9 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
         when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList()))
                 .thenReturn(List.of(contract));
-        when(workRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(record));
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
         // 旧所属(200)のsnapshotはscope queryで不可視となり、現在所属100のforecastへ戻してはいけない。
-        when(dimensionMapper.selectList(any())).thenReturn(List.of(), List.of());
+        when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of());
         when(budgetMapper.selectList(any())).thenReturn(List.of());
         when(organizationService.namesByIds(any())).thenReturn(Map.of());
 
@@ -223,7 +222,7 @@ class ManagementAccountingServiceImplTest {
 
         ManagementAccountingSummaryDto result = service.summary("2026-06");
 
-        ArgumentCaptor<List<Long>> allowed = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<Long>> allowed = ArgumentCaptor.captor();
         verify(engineerMapper).selectAccountingWaitCost(eq(LocalDate.of(2026, 6, 1)), eq(LocalDate.of(2026, 6, 30)),
                 eq(false), allowed.capture(), isNull(), isNull(), isNull());
         assertEquals(List.of(100L), allowed.getValue());
@@ -252,7 +251,7 @@ class ManagementAccountingServiceImplTest {
         service.summary("2026-06", 99L, null, null, null, null, null);
 
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ManagementBudget>> captor =
-                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+                ArgumentCaptor.captor();
         verify(budgetMapper).selectList(captor.capture());
         verify(organizationScopeService, org.mockito.Mockito.atLeastOnce())
                 .listVisibleOrganizations(99L, LocalDate.of(2026, 6, 1));

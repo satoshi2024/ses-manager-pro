@@ -6,7 +6,6 @@ import com.ses.dto.invoice.AgingReportDto;
 import com.ses.dto.mail.MailDispatchResult;
 import com.ses.entity.Invoice;
 import com.ses.entity.MailDelivery;
-import com.ses.entity.InvoicePayment;
 import com.ses.dto.invoice.InvoicePaymentCreateRequest;
 import com.ses.dto.invoice.InvoicePaymentResponse;
 

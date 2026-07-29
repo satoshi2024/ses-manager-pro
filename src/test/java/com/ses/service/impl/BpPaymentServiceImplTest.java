@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
@@ -51,7 +50,7 @@ class BpPaymentServiceImplTest {
         payment.setWorkRecordId(1L);
         payment.setLayerOrder(1);
 
-        when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.insert(payment)).thenReturn(1);
 
         BpPayment result = bpPaymentService.addLayer(payment);
@@ -65,7 +64,7 @@ class BpPaymentServiceImplTest {
         payment.setWorkRecordId(1L);
         payment.setLayerOrder(1);
 
-        when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
+        when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
 
         Exception exception = assertThrows(BusinessException.class, () -> {
             bpPaymentService.addLayer(payment);
@@ -80,7 +79,7 @@ class BpPaymentServiceImplTest {
         payment.setLayerOrder(2);
         payment.setParentPaymentId(100L);
 
-        when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
 
         BpPayment parent = new BpPayment();
         parent.setId(100L);
@@ -215,7 +214,7 @@ class BpPaymentServiceImplTest {
         when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
         when(workRecordMapper.selectById(7L)).thenReturn(workRecord);
         when(bpPaymentMapper.selectByWorkRecordIdOrderByLayer(7L)).thenReturn(Collections.emptyList());
-        when(bpPaymentMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.update(isNull(), any())).thenReturn(1);
 
         bpPaymentService.getTreeByWorkRecordId(7L);

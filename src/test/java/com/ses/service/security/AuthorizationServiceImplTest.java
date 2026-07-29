@@ -3,7 +3,6 @@ package com.ses.service.security;
 import com.ses.config.LoginUser;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.PermissionGroup;
-import com.ses.entity.PermissionGroupAction;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserPermissionGroup;
 import com.ses.mapper.PermissionGroupActionMapper;

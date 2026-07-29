@@ -7,12 +7,10 @@ import com.ses.entity.Engineer;
 import com.ses.entity.Quotation;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
-import com.ses.mapper.QuotationMapper;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,16 +38,6 @@ class QuotationPdfServiceImplTest {
         SystemConfigService cfg = Mockito.mock(SystemConfigService.class);
         when(cfg.getString(anyString(), any())).thenAnswer(inv -> inv.getArgument(1));
 
-        QuotationMapper qm = Mockito.mock(QuotationMapper.class);
-        Quotation q = new Quotation();
-        q.setId(1L);
-        q.setQuotationNo("Q-202607-0001");
-        q.setTitle("金融システム開発");
-        q.setUnitPrice(new BigDecimal("700000"));
-        q.setCustomerId(1L);
-        q.setEngineerId(2L);
-        when(qm.selectById(1L)).thenReturn(q);
-
         CustomerMapper cm = Mockito.mock(CustomerMapper.class);
         Customer c = new Customer();
         c.setCompanyName("株式会社テスト商事");
@@ -62,7 +50,7 @@ class QuotationPdfServiceImplTest {
         when(em.selectById(2L)).thenReturn(e);
 
         PdfProperties pdfProps = new PdfProperties();
-        return new QuotationPdfServiceImpl(pdfProps, cfg, qm, cm, em, new com.ses.common.util.PdfFontUtils(pdfProps));
+        return new QuotationPdfServiceImpl(cfg, cm, em, new com.ses.common.util.PdfFontUtils(pdfProps));
     }
 
     @Test

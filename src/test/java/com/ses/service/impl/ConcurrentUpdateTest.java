@@ -40,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ConcurrentUpdateTest {
 
     @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_db")
             .withUsername("ses")
@@ -142,6 +143,7 @@ class ConcurrentUpdateTest {
         ready.await();
         start.countDown(); 
         done.await(10, TimeUnit.SECONDS);
+        executor.shutdownNow();
 
         // 1つだけが成功し、もう1つはCAS失敗(409)でBusinessExceptionを投げるはず
         assertEquals(1, successCount.get(), "1つの操作のみ成功するべき");

@@ -232,6 +232,7 @@ public class SecurityConfig {
      */
     @Bean
     @Profile("!prod")
+    @SuppressWarnings("deprecation") // 開発・テスト用の平文シードとの互換性を維持する。
     public PasswordEncoder passwordEncoder() {
         return NoOpPasswordEncoder.getInstance();
     }

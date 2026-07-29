@@ -12,7 +12,6 @@ import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import com.ses.common.exception.BusinessException;
-import com.ses.config.PdfProperties;
 import com.ses.dto.InvoiceDetailDto;
 import com.ses.entity.InvoiceItem;
 import com.ses.service.InvoicePdfService;
@@ -25,10 +24,6 @@ import org.springframework.util.StringUtils;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -40,7 +35,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class InvoicePdfServiceImpl implements InvoicePdfService {
 
-    private final PdfProperties pdfProperties;
     private final SystemConfigService systemConfigService;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
 

@@ -28,7 +28,7 @@ public class SkillTagResolverTest {
     void resolveOrCrate_createsNewTag() {
         when(skillTagMapper.selectList(any())).thenReturn(Collections.emptyList());
 
-        Long resolvedId = skillTagResolver.resolveOrCreate("Java");
+        skillTagResolver.resolveOrCreate("Java");
 
         verify(skillTagMapper).insert(any(SkillTag.class));
     }

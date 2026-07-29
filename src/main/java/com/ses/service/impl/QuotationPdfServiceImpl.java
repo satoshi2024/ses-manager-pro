@@ -12,13 +12,11 @@ import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import com.ses.common.exception.BusinessException;
-import com.ses.config.PdfProperties;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.entity.Quotation;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
-import com.ses.mapper.QuotationMapper;
 import com.ses.service.QuotationPdfService;
 import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
@@ -29,10 +27,6 @@ import org.springframework.util.StringUtils;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * OpenPDF による見積書PDF生成。請求書PDF(InvoicePdfServiceImpl)と同じフォント解決・レイアウト方針。
@@ -42,9 +36,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class QuotationPdfServiceImpl implements QuotationPdfService {
 
-    private final PdfProperties pdfProperties;
     private final SystemConfigService systemConfigService;
-    private final QuotationMapper quotationMapper;
     private final CustomerMapper customerMapper;
     private final EngineerMapper engineerMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;

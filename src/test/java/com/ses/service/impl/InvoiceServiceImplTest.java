@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import com.ses.dto.invoice.InvoicePaymentCreateRequest;
@@ -437,8 +436,8 @@ public class InvoiceServiceImplTest {
 
         invoiceService.addPayment(invoiceId, req);
 
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper> cap =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Invoice>> cap =
+                org.mockito.ArgumentCaptor.captor();
         verify(invoiceMapper).update(any(), cap.capture());
         assertTrue(cap.getValue().getParamNameValuePairs().containsValue("一部入金"));
     }
@@ -519,8 +518,8 @@ public class InvoiceServiceImplTest {
 
         invoiceService.deletePayment(invoiceId, 5L);
 
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper> cap =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Invoice>> cap =
+                org.mockito.ArgumentCaptor.captor();
         verify(invoiceMapper).update(any(), cap.capture());
         assertTrue(cap.getValue().getParamNameValuePairs().containsValue("送付済"));
     }
@@ -772,8 +771,8 @@ public class InvoiceServiceImplTest {
 
         // 消込解除が「入金の物理削除より先に」行われること（順序が逆だとFK違反になる）
         org.mockito.InOrder inOrder = inOrder(bankDepositMapper, invoicePaymentMapper);
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper> captor =
-                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<com.ses.entity.BankDeposit>> captor =
+                org.mockito.ArgumentCaptor.captor();
         inOrder.verify(bankDepositMapper).update(isNull(), captor.capture());
         inOrder.verify(invoicePaymentMapper).deleteById(paymentId);
 

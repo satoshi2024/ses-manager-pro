@@ -110,6 +110,11 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 - requirements/acceptance: R3.1〜R3.4。group割当がある場合はlegacy roleとunionせずgroup actionだけを正とし、未割当時だけlegacy fallbackを使う。自己権限変更を拒否し、他ユーザーの変更・監査・session失効を同一transaction境界へ置く。画面/API/exportの原価fieldを同じactionでmaskする。
 - changed contracts: `AuthorizationService`、`ActionPermissionResolver`、`PermissionGroupManagementService`/API、`MenuPermissionFilter`、`UserApiController` role lifecycle、V63 default group/action/user seed、contract/export cost masking、権限拒否監査。
 - selected level: **L3**。直接回帰は`AuthorizationServiceImplTest` 4、`ActionPermissionResolverTest` 3、`PermissionGroupManagementServiceImplTest` 2、`PermissionGroupApiControllerTest` 3、`ContractApiControllerTest` 12、`ExportApiControllerTest` 11、`UserApiControllerTest` 12の計**47 tests / 0 failures / 0 errors / 0 skipped**。DB判定例外、prefix近似、自己変更、CSRF、field masking、role変更を含む。
+- selected tests and consumers: permission service/API、menu/action filter、user role lifecycle、contract detail/list、contract exportを直接consumerとして選定した。
+- excluded suites and reason: Maven全量、Node/JS全量、browser、provider sandbox、全migration smokeはT018の直接consumer外であり、固定checkpoint T020へ集約した。
+- escalation trigger present: **yes**（共有security filter、認可service、V63 seed、transaction/session境界）。L3直接回帰がgreenで未知失敗が残らず、固定checkpointが直後のT020だったため中間L4は追加しなかった。
+- exact result: **47 tests / 0 failures / 0 errors / 0 skipped**。compile成功。
+- next L4 checkpoint: **T020 M**。
 - Demo: fixtureでgroup未割当fallback、group割当時の非union、原価mask、自己昇格403、他者変更時session失効・監査を再現済み。実browserの財務担当シナリオはT020外部gateへ繰越。
 - rollback: action enforcement公開を止め、V63以前のrole/menu経路へ戻す。適用済みV63は編集せず、permission assignmentはバックアップ復元とする。
 
@@ -119,13 +124,25 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 - requirements/acceptance: R4.1〜R4.4。extension/MIME/magic byte、quarantine、scanner CLEAN後だけpublished、infected/unavailable保持、再scan、metadata未登録・未知参照download拒否、監査を共通経路にする。
 - changed contracts: `FileScanner`/`FileScanResult`、prod `ClamAvFileScanner` INSTREAM adapter、非prod `LocalSignatureFileScanner` fake、`FileStorageServiceImpl`、`FileScopeValidationService`、`FileApiController`再scan、`FileSecurityMetadataMapper`、file download/rejection監査、scanner接続設定。
 - selected level: **L3**。直接回帰は`ClamAvFileScannerTest` 3、`FileStorageServiceImplTest` 10、`FileScopeValidationServiceTest` 5、`ActionPermissionResolverTest` 3、`ApiAuditFilterTest` 1の計**22 tests / 0 failures / 0 errors / 0 skipped**。CLEAN/FOUND/接続不能、EICAR、quarantine保持、再scan、未知file、監査を含む。
+- selected tests and consumers: scanner adapter、FileStorage、file scope、再scan action、download auditを直接consumerとして選定した。
+- excluded suites and reason: Maven全量、Node/JS全量、実ClamAV sandbox、browser、全migration smokeはT019の直接consumer外または外部環境gateであり、固定checkpoint T020またはrelease gateへ集約した。
+- escalation trigger present: **yes**（共有FileStorage/file scope、prod profile、V63 metadata consumer）。L3とprod context回帰がgreenで、T020直前のため中間L4は追加しなかった。
+- exact result: **22 tests / 0 failures / 0 errors / 0 skipped**。prod/non-prod scanner profileとcompile成功。
+- next L4 checkpoint: **T020 M**。
 - Demo: EICAR fixtureはINFECTEDとしてquarantineへ残りdownload不可、scanner接続不能はUNAVAILABLEとして公開不可、CLEAN再scanだけpublishedへ移ることを再現済み。
 - rollback: upload受付を停止するか`FILE_SCANNER_ENABLED=false`で全uploadをfail-closed拒否する。published/quarantine metadataとV63履歴は削除・改変せず、バックアップ復元を使用する。
 
 ## T020 TEST SCOPE DECISION（外部gate待ち）
 
+- task / commit: T020 M / `f6f0027` base + T019完了時working tree。L4後の差分はcomment・台帳文書のみで、production contract変更なし。
+- changed contracts: T014〜T019のOIDC、MFA、persistent session、action permission、file quarantine/ClamAV、監査、V63 schemaを統合したspec全体。
 - selected level: **L4**。最終ソースでMaven全量 **161 suites / 971 tests / 0 failures / 0 errors / 1 skipped**。唯一のskipは`QuotationPdfServiceImplTest`のCJK font環境依存。
+- selected tests and consumers: Maven全量、全security/schema/service/MVC consumer、Node/JS全静的asset、fresh/legacy/repair/closed-history MySQL migrationを選定した。
 - Docker/MySQL: `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`を実コンテナで実行し全成功。V63の既存user→default group seedとaction seed assertionを含む。
 - frontend/static: `src/main/resources/static/js`の**42 files**へ`node --check`を実行し0 failures。`git diff --check` exit 0。
 - 未実施: repositoryにOWASP dependency scan相当の設定が無く未実施。実Entra/OIDC/MFA assurance、実browser、2名break-glass復旧訓練は外部環境・認証情報がないため未実施でありPASS扱いしない。
+- excluded suites and reason: OWASP依存スキャン、実provider sandbox、desktop/390px browser、break-glass訓練はtool/tenant/認証情報が未提供の外部gateとして除外し、未実施を明記した。
+- escalation trigger present: **yes**（M task固定checkpoint）。L4後はcomment・台帳文書だけを変更しており、§7/§8により同一証拠を再実行しない。
+- exact result: Maven **971/0/0/1**、Node/JS **42/0**、Docker/MySQL 4 suites成功、`git diff --check` exit 0。
+- next L4 checkpoint: 同一treeでは追加なし。production/schema/security差分、merge競合手編集、またはrelease候補化時だけ§5/§8に従いL4/L5を再判定する。
 - 判定: L4コード回帰はPASS、T020 MとS03全体は外部gate・独立Review待ち。次の解放条件は依存性スキャン、実環境Demo、独立Review P0=0/P1=0/PASS、中央台帳再同期。

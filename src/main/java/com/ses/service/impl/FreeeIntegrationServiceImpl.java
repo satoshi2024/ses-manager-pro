@@ -3,7 +3,6 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollStatementDto;
@@ -15,7 +14,6 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.FreeeConnectionMapper;
 import com.ses.mapper.FreeeEmployeeLinkMapper;
 import com.ses.service.FreeeIntegrationService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -45,7 +43,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     private final FreeeEmployeeLinkMapper linkMapper;
     private final EngineerMapper engineerMapper;
     private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
     private final org.springframework.context.ApplicationContext applicationContext;
     
     @Value("${freee.client-id:}")
@@ -71,13 +68,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             FreeeEmployeeLinkMapper linkMapper,
             EngineerMapper engineerMapper,
             @Qualifier("saasRestTemplate") RestTemplate restTemplate,
-            ObjectMapper objectMapper,
             org.springframework.context.ApplicationContext applicationContext) {
         this.connectionMapper = connectionMapper;
         this.linkMapper = linkMapper;
         this.engineerMapper = engineerMapper;
         this.restTemplate = restTemplate;
-        this.objectMapper = objectMapper;
         this.applicationContext = applicationContext;
     }
 

@@ -22,7 +22,6 @@ import java.util.List;
 import com.ses.dto.skillsheet.SkillSheetOptions;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,7 +71,7 @@ class SkillSheetGeneratorTest {
             when(pdfFontUtils.resolveCjkFont()).thenReturn(BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED));
         } catch (Exception e) {}
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         // Act
         SkillSheetOptions options = new SkillSheetOptions();
@@ -107,7 +106,7 @@ class SkillSheetGeneratorTest {
         career.setRole("SE");
 
         when(engineerSkillService.listDetail(1L)).thenReturn(List.of(skill));
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(List.of(career));
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(List.of(career));
 
         // Act
         SkillSheetOptions options = new SkillSheetOptions();
@@ -131,7 +130,7 @@ class SkillSheetGeneratorTest {
         skill.setExperienceYears(2);
 
         when(engineerSkillService.listDetail(1L)).thenReturn(List.of(skill));
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         // Act
         SkillSheetOptions options = new SkillSheetOptions();
@@ -172,7 +171,7 @@ class SkillSheetGeneratorTest {
             when(pdfFontUtils.resolveCjkFont()).thenReturn(BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED));
         } catch (Exception e) {}
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         // Act
         SkillSheetOptions options = new SkillSheetOptions();
@@ -194,7 +193,7 @@ class SkillSheetGeneratorTest {
     void testGenerateExcel_WithAnonymize_ShouldMaskName() throws Exception {
         // Arrange
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         // Act
         SkillSheetOptions options = new SkillSheetOptions();
@@ -232,7 +231,7 @@ class SkillSheetGeneratorTest {
     @Test
     void testGenerateExcel_StandardVsSimple_ShouldHaveDifferentColumns() throws Exception {
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         SkillSheetOptions optionsStandard = new SkillSheetOptions();
         optionsStandard.setTemplate("STANDARD");
@@ -279,7 +278,7 @@ class SkillSheetGeneratorTest {
     @Test
     void testGenerateExcel_ClientA_ShouldAddRemarksAndKeepTeamSize() throws Exception {
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         SkillSheetOptions options = new SkillSheetOptions();
         options.setTemplate("CLIENT_A");
@@ -315,7 +314,7 @@ class SkillSheetGeneratorTest {
     @Test
     void testGenerateExcel_ClientA匿名化でも備考列が残る() throws Exception {
         when(engineerSkillService.listDetail(1L)).thenReturn(Collections.emptyList());
-        when(engineerCareerService.list((Wrapper<EngineerCareer>) any())).thenReturn(Collections.emptyList());
+        when(engineerCareerService.list(org.mockito.ArgumentMatchers.<Wrapper<EngineerCareer>>any())).thenReturn(Collections.emptyList());
 
         SkillSheetOptions options = new SkillSheetOptions();
         options.setTemplate("CLIENT_A");
