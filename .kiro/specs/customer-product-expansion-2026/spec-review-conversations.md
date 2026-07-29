@@ -227,6 +227,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -287,6 +288,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -348,6 +350,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -409,6 +412,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -469,6 +473,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -529,6 +534,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -590,6 +596,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -652,6 +659,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -712,6 +720,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -773,6 +782,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -833,6 +843,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -895,6 +906,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -956,6 +968,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
@@ -1017,6 +1030,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md

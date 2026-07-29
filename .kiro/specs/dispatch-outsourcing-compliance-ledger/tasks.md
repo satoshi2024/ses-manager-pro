@@ -2,46 +2,82 @@
 
 > **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T060〜T065はL0〜L3の定向test・直接回帰、T066でL4全量を実行する。
 > 法務受入gateと全量testの実行時点を混同しない。
+>
+> **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
+> 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
+>
+> **Migration**: 本specの予約番号は **V70**。order(V69)のmerge後、attendance(V71)と並行可。
+> 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G2公式様式field mapping
-  - **Objective**: 0. G2公式様式field mapping を完了し、requirementsに定義した利用者効果を検証可能にする。
+  - **Objective**: 派遣元管理台帳・就業条件明示書・派遣先通知書・個別契約書の各法定項目が、
+    DB列・画面・生成位置へ1対1で対応付けられる。以降の帳票生成が「どの項目をどこから取るか」を推測せずに済む。
   - **成果物**: 帳票ごとの法定項目→DB/画面/生成位置、保存期間、権限。
   - **Demo**: 厚生労働省公式URL/版/確認日付きmappingの社内責任者承認。外部社労士/法務承認はM/本番gate。
-  - **実装ガイダンス**: requirements.md、design.md、全体shared-standards.mdの境界と既存資産再利用規約に従い、未決事項を黙って補完しない。
-  - **テスト要件**: 成果物を該当requirements ID、権限、境界値、失敗時挙動、後方互換の観点でレビューし、判断根拠を記録する。
+  - **実装ガイダンス**: production codeを変更しない。`field-mapping.md`として保存する（design §3）。
+    **システムは法的適否を自動確定しない**（前提節）。mappingは項目の対応であって適法性の判断ではない。
+    クーリング期間の日数など判断値は`m_system_config`へ置く前提で、コードへ直書きしないことを明記する。
+  - **テスト要件**: L0。全帳票の法定項目が漏れなく対応付いていること、
+    各項目に公式URL/版/確認日が付いていること、`git diff --check` exit 0。
 
 - [ ] F1. workplace/profile/finding/delivery DDL
-  - **Objective**: F1. workplace/profile/finding/delivery DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V68/V1/H2/smoke、snapshot/permission。
-  - **テスト要件**: FK/期間/PII scope。
-  - **Demo**: F1. workplace/profile/finding/delivery DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
+  - **Objective**: 契約ごとに就業先・業務内容・就業時間・指揮命令者・責任者・抵触日・待遇方式を登録でき、
+    契約時点のsnapshotが保持される。マスタを変更しても過去帳票の内容が変わらない。
+  - **実装ガイダンス**: **V70**/V1/H2(`sql/schema-dispatch-compliance-h2.sql`)/MySQL smoke、snapshot/permission。
+    `t_compliance_finding`に`UNIQUE(contract_id, code, condition_fingerprint)`を置く（design §5.4）。
+    **`limitation_date IS NULL`は「抵触日なし」ではなく「未算定」**（design §5.1）。findingの対象にする。
+  - **テスト要件**: L1〜L3。FK、期間、PII scope（待遇情報がマネージャー/営業からmaskされること）、
+    profile snapshotがマスタ変更に追随しないこと、`limitation_date IS NULL`がfindingになること。
+  - **Demo**: 派遣契約のprofileを登録し帳票用snapshotを固定。就業先マスタの住所を変更しても
+    既存契約のsnapshotが変わらないことを確認。
 
 - [ ] F2. ComplianceRule分割/拡張
-  - **Objective**: F2. ComplianceRule分割/拡張 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: 既存4rule維持、期限/欠落/期間/指示経路rule、upsert。
-  - **テスト要件**: code別境界、解消、重複なし。
-  - **Demo**: 欠落profileを補完してfinding解消。
+  - **Objective**: 既存の4つのcompliance ruleが挙動を変えずに動き続けたうえで、
+    抵触日・責任者欠落・明示書未交付・保険未確認・期間外稼動・指示経路の各findingが検出される。
+    rule再実行でfindingが重複せず、ack済みfindingがOPENへ戻らない。
+  - **実装ガイダンス**: 既存`LaborComplianceService`を`ComplianceRule`群へ分解し、**既存4 code/挙動を維持**（design §2）。
+    findingは`(contract_id, code, condition_fingerprint)`でupsert。毎回insertしない。
+    抵触日は**後続契約・組織単位変更を考慮**し、契約chainを辿る（design §5.2）。
+    rule実行はread-only＋upsert。契約や勤怠の業務状態を変更しない。
+  - **テスト要件**: L2〜L3。**既存4 ruleの出力をgolden fixtureで固定**、
+    code別境界、rule再実行でfinding重複0、ack済みfindingが再実行でOPENへ戻らないこと、
+    契約chain（連続更新/クーリング/組織単位変更/並行契約）の抵触日算定。
+  - **Demo**: 欠落profileを補完してfinding解消。rule を2回実行してfinding件数が増えないことを確認。
 
 - [ ] A1. 契約compliance profile/UI
-  - **Objective**: A1. 契約compliance profile/UI を完了し、requirementsに定義した利用者効果を検証可能にする。
+  - **Objective**: 契約詳細で派遣と準委任で異なる入力項目が出て、必須項目の不足がその場で分かる。
+    待遇情報や個人情報は権限のないユーザーにはmaskされる。
   - **実装ガイダンス**: 契約形態別field、help、権限、差分。
-  - **テスト要件**: validation/field mask/mobile。
-  - **Demo**: 派遣/準委任で異なる入力項目。
+    **待遇・個人情報はHR/法務/管理者のみ**。マネージャー/営業にはfield単位でmask（design §5.3）。
+  - **テスト要件**: L1〜L3。validation、**field mask（画面・export・PDFすべて）**、mobile 390px、
+    契約形態切替時の項目切替。
+  - **Demo**: 派遣/準委任で異なる入力項目。営業ログインで待遇欄がmaskされることを画面とCSVの両方で確認。
 
 - [ ] B1. 法定帳票/交付/archive
-  - **Objective**: B1. 法定帳票/交付/archive を完了し、requirementsに定義した利用者効果を検証可能にする。
+  - **Objective**: 同一snapshotから派遣元管理台帳等を再生成でき、版差分が説明できる。
+    生成物がarchiveへ保存され、交付日・交付方法・受領確認が追跡できる。
   - **実装ガイダンス**: generator/template version/delivery/受領。
-  - **テスト要件**: golden file、版、hash、ACL。
-  - **Demo**: 派遣元台帳等を生成し交付記録。
+    生成の冪等キーは`(contract_id, document_type, template_version, snapshot_hash)`（design §5.4）。
+    同じsnapshotからの再生成で2件目を作らない。
+    `t_document_delivery.confirmed_at IS NULL`は**受領未確認**（未交付ではない、design §5.1）。
+  - **テスト要件**: L2〜L3。golden file照合、template version切替、hash、document ACL、
+    同一snapshotの再生成で版が増えないこと。
+  - **Demo**: 派遣元台帳等を生成し交付記録。同じsnapshotで再生成して版が増えないことを確認。
 
 - [ ] B2. deadline/リスク運用
-  - **Objective**: B2. deadline/リスク運用 を完了し、requirementsに定義した利用者効果を検証可能にする。
+  - **Objective**: 抵触日と文書期限の90/60/30日前に通知が届き、対応担当・ack・解消・例外承認が記録できる。
+    同じ期限で通知が重複しない。
   - **実装ガイダンス**: 90/60/30日、担当、ack/resolution/evidence。
-  - **テスト要件**: 日付境界/notification scope/冪等。
-  - **Demo**: 抵触日alert→対応→解消。
+    通知の宛先は担当営業/法務/HRの個人指定（design §5.3）。組織一斉にしない。
+  - **テスト要件**: L2〜L3。日付境界（91/90/89日など各段階）、notification scope、
+    冪等（同一期限・同一段階で1回）、例外承認の期限切れでOPENへ戻ること。
+  - **Demo**: 抵触日alert→対応→解消。90日ちょうどと89日で通知段階が変わることを確認。
 
 - [ ] M. 法務受入/回帰
-  - **Objective**: M. 法務受入/回帰 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **テスト要件**: 全test/MySQL smoke/既存compliance回帰。
-  - **Demo**: 法務fixture3契約の台帳とfindingを照合。
-  - **実装ガイダンス**: requirements.md、design.md、全体shared-standards.mdの境界と既存資産再利用規約に従い、未決事項を黙って補完しない。
+  - **Objective**: 法務fixtureの3契約について台帳とfindingが期待どおりで、
+    既存のcompliance機能・契約機能が壊れていない。
+  - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
+    既存4 ruleの回帰、法務fixture golden file、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
+  - **Demo**: 法務fixture3契約の台帳とfindingを照合。既存4 ruleの出力が変わっていないことを提示。
+  - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
+    外部社労士/弁護士Reviewは本taskのPASS条件ではなく、**本番releaseのgate**として別管理する。

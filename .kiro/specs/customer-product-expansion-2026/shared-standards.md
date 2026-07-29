@@ -13,6 +13,18 @@ S02の再発防止根拠は `s02-review-retrospective.md` を正とする。
 S03〜S17（T014〜T115）のtest実行範囲は `test-execution-policy-s03-s17.md` を正とし、通常Taskへ
 無条件の全量testを要求しない。全量はM task、明記された高risk checkpoint、CI/releaseへ集約する。
 
+**S04以降（T021〜T115）は `platform-invariants.md` を必須基線に追加する。** 同書はチェックリストではなく
+**既定解の表**であり、S02が21ラウンドのReviewで到達した時間モデル・認可母集団・cache/transaction・期間代数・
+Migration fixture・金額/CSVの結論を全specの既定として固定したものである。各specの`design.md`は既定解を再掲せず、
+**逸脱だけ**を「逸脱と根拠」として書く。逸脱の記載がなければ既定解を実装する。
+
+適用範囲の注意:
+
+- **S01/S02/S03へ遡及適用しない。** S02はPASS済み、S03は実装進行中であり、`platform-invariants.md`の
+  追加だけを理由に再実装・再Reviewしない。判定は`spec-execution-ledger.md`を正とする。
+- S04以降の各`design.md`は「決定表」節（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）を持つ。
+  この3表が埋まっていないtaskを開始しない。
+
 ## 1. 既存資産を唯一の正として再利用する
 
 - API応答: `ApiResult<T>`、業務例外: `BusinessException`、API例外変換: `GlobalExceptionHandler`。

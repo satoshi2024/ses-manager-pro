@@ -223,6 +223,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -282,6 +283,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -342,6 +344,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -402,6 +405,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -461,6 +465,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -520,6 +525,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -580,6 +586,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -641,6 +648,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -700,6 +708,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -760,6 +769,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -819,6 +829,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -880,6 +891,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -940,6 +952,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
@@ -1000,6 +1013,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
+- .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
 - .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md
 - .kiro/specs/customer-product-expansion-2026/subagent-delegation-summary.md
