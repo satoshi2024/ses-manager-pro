@@ -17,9 +17,12 @@
   - **Demo**: security/HR/product owner承認。
   - **実装ガイダンス**: production codeを変更しない。
     **G10/DPA/PII方針が確定するまで実データを外部AIへ送らない**（前提節）。mock/rule providerを既定として維持する。
-    **雇用差別につながる属性をmatching特徴量にもsegment軸にも使わない**（R3.3）。禁止属性を明示列挙する。
+    **禁止属性リストは`design.md`§5.2で確定済み。本taskで決め直さない。**
+    本taskが決めるのは、その禁止リストと突き合わせる**送信field allowlist**と、
+    provider別のDPA・保存期間・region・opt-outである。
   - **テスト要件**: L0。allowlistの全fieldに送信可否と根拠が付いていること、
-    禁止属性リストが存在すること、保存期間がprovider別に定義されていること、`git diff --check` exit 0。
+    **allowlistが`design.md`§5.2の禁止属性と1件も交差しないこと**、
+    保存期間がprovider別に定義されていること、`git diff --check` exit 0。
 
 - [ ] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: AIのmodel/prompt/rule versionが登録でき、推薦の実行・候補・採否・成果が

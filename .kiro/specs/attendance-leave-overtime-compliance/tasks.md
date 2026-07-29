@@ -5,23 +5,29 @@
 >
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
-> **design.md §5.2の時間外計算の境界定義（起算・期間単位・休日労働の扱い）を0で埋め、
-> 空欄のままF2を開始しない。** 法定計算をコード上のその場判断で決めない。
+>
+> **時間外計算の値・境界・変更手順の唯一の正は `overtime-rules.md`。** 値は**確定済み**であり、
+> 社労士確認待ちではない。実装は同書の値でそのまま進める。確認結果がずれた場合は同書§4の手順で変更する
+> （多くは`/system-config`の値変更だけで済む）。**閾値をコードへ直書きしないこと。**
 >
 > **Migration**: 本specの予約番号は **V71**。order(V69)のmerge後、dispatch(V70)と並行可。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. G6/36協定/就業規則確認
+- [ ] 0. source matrixと法人別36協定の棚卸し
   - **Objective**: 雇用勤怠の正が本システムであることがsource matrixとして確定し、
-    **design.md §5.2の空欄（各上限の起算・期間単位・休日労働を含むか）が全行埋まる**。
-    勤務区分・丸め・カレンダー・休暇種別・協定期間も確定し、F2が判断を持ち込まずに実装できる状態にする。
-  - **成果物**: source of truth、勤務区分、丸め、カレンダー、休暇、協定期間/上限、**§5.2の完成した表**。
-  - **Demo**: 本システムを正とするsource matrixのHR確認。法人別36協定/就業規則と外部社労士確認はM/本番gate。
+    法人ごとの36協定の実内容（特別条項の有無、上限、起算日、法定休日の曜日）と適用除外者が棚卸しされる。
+    F1が`m_overtime_agreement`へ登録すべき行を、推測せずに決められる状態にする。
+  - **成果物**: source of truth matrix、勤務区分、カレンダー（法定休日の曜日）、休暇種別、
+    **法人別の36協定内容一覧**、適用除外者（管理監督者）の一覧。
+  - **Demo**: 本システムを正とするsource matrixのHR確認と、法人別36協定の棚卸し結果の提示。
   - **実装ガイダンス**: production codeを変更しない。
+    **時間外の計算ルール自体は`overtime-rules.md`で確定済みなので、本taskで決め直さない。**
+    本taskが集めるのは「その確定ルールへ流し込む法人別のデータ」である。
     `t_work_record_daily`（客先請求工数）と雇用勤怠が**別sourceである**境界を明文化する。
-    法人別36協定の実物が未入手でも、公式の一般定義をbaselineとして表を埋め、
-    **未確認である旨を明記**する。確認済みと偽らない。
-  - **テスト要件**: L0。§5.2の表に空欄がないこと、各行に確定者と根拠が付いていること、
+    協定書が未入手の法人は「未入手」と記録する。`overtime-rules.md`§3のとおり、
+    協定行が無い法人は判定不能としてfindingになる（既定値で「適合」にしない）。
+  - **テスト要件**: L0。法人ごとに協定の有無と入手状況が記録されていること、
+    法定休日の曜日が全法人分そろっているか未確認と明記されていること、
     source matrixが既存work recordとの境界を含むこと、`git diff --check` exit 0。
 
 - [ ] F1. calendar/attendance/month/leave/agreement DDL
@@ -31,21 +37,33 @@
     **分の整数モデル**（浮動小数を使わない、design §1）、scope。
     `(source, source_external_id)`にUNIQUE。
     `scheduled_minutes IS NULL`（所定日でない）と`= 0`（所定日だが0分）を区別する（design §5.1）。
+    **同じV71で`overtime.*`のconfigをseedする**（`overtime-rules.md`§1/§2のconfig key全件）。
+    seedは`INSERT IGNORE`で既存値を壊さない（V56の書き方に合わせる）。
+    `m_overtime_agreement.valid_from`は**月初のみ許可**する制約を入れる（`overtime-rules.md`§2 #7）。
   - **テスト要件**: L1〜L3。期間/unique、締め済みの変更拒否、休暇との整合、
-    `scheduled_minutes`のNULLと0の区別、外部sourceの重複登録拒否。
+    `scheduled_minutes`のNULLと0の区別、外部sourceの重複登録拒否、
+    **月初でない`valid_from`の登録が拒否されること**、`overtime.*` configが全キーseedされていること。
   - **Demo**: 社員の1週間分の勤怠を登録し月次集計が出ることを確認。
     締め済み月を更新しようとして拒否されることを確認。
+    `/system-config`に`overtime.*`が表示され編集できることを確認。
 
 - [ ] F2. 集計/時間外calculator
-  - **Objective**: 月45h・年360h・特別条項720h・月100h未満・2〜6か月平均80h・45h超過月数が計算され、
-    §5.2で確定した定義どおりの境界で警告が出る。跨夜・休日・休憩が正しく扱われる。
-  - **実装ガイダンス**: official boundary fixtureをtest resource JSONへ保存（design §2）。
-    **rolling平均は`n=2..6`のすべてを判定**する（design §5.2）。1つでも超過なら警告。
-    休日労働を含む/含まないをruleごとに明示する。丸めなし、分単位。
-    JST日界、跨夜は**始業日の勤務**として計上。
-  - **テスト要件**: L1〜L3。**各上限の`limit-1/limit/limit+1`の3点fixture**、
-    跨夜/休日/休憩、協定期間の途中変更で期間が分割されること、
-    協定年度をまたぐrolling平均、月中入退職を按分しないこと。
+  - **Objective**: `overtime-rules.md` §1の6ルールが計算され、同書の境界どおりに警告が出る。
+    特に**月100時間だけが「ちょうどで違反」**、他の上限は「ちょうどは適合」になる。
+    協定行の無い法人は「適合」ではなく判定不能のfindingになる。
+  - **実装ガイダンス**: **値は`overtime-rules.md`が正。ここでも設計判断をしない。**
+    実装が守る構造制約は同書§4/design §5.2の3点:
+    (1) 判定式は`OvertimeComplianceCalculator`に**1メソッド1ルール**で書く、
+    (2) 閾値をコードへ直書きせず`m_overtime_agreement`→`m_system_config`→定数の順で解決する、
+    (3) 休日労働の算入可否は**calculatorへ渡す入力の選択1箇所**に閉じ、ルール内へ条件を持ち込まない。
+    `special_clause = false`の協定ではルール3〜6を判定しない（同書§3）。
+    boundary fixtureは`src/test/resources/fixtures/overtime/`へJSON。
+    **fixtureはconfig値を読んで`limit±1`を生成**し、境界の向きだけ明示的に書く（同書§5）。
+  - **テスト要件**: L1〜L3。`overtime-rules.md` §5の推奨fixture最小セット全件、特に
+    **ルール4が`limit`ちょうどで違反、他は適合**、休日労働のみ超過時のルール1/2/3適合とルール4/5違反、
+    所定休日労働がルール1へ算入されること、n月分データ不足時のskip（0扱いにしない）、
+    協定年度またぎ（ルール2/3/6はリセット、ルール5はまたぐ）、適用除外者の全ルール非判定、
+    **協定行が無い法人が「適合」にならないこと**、月中入退職を按分しないこと。
   - **Demo**: fixture結果をHRへ提示。45h/360h/80h平均それぞれの境界値ちょうどで判定が変わることを確認。
 
 - [ ] A1. 本人/管理画面と月次状態

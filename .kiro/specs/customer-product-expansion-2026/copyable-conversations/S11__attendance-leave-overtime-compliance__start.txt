@@ -32,6 +32,7 @@
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
 - .kiro/specs/attendance-leave-overtime-compliance/requirements.md
 - .kiro/specs/attendance-leave-overtime-compliance/design.md
+- .kiro/specs/attendance-leave-overtime-compliance/overtime-rules.md
 - .kiro/specs/attendance-leave-overtime-compliance/tasks.md
 
 【spec内の実行順】

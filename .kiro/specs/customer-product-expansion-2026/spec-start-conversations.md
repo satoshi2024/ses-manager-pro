@@ -655,6 +655,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md
 - .kiro/specs/attendance-leave-overtime-compliance/requirements.md
 - .kiro/specs/attendance-leave-overtime-compliance/design.md
+- .kiro/specs/attendance-leave-overtime-compliance/overtime-rules.md
 - .kiro/specs/attendance-leave-overtime-compliance/tasks.md
 
 【spec内の実行順】
