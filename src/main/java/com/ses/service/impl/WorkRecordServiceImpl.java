@@ -148,14 +148,22 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         com.ses.entity.EngineerAccountingHistory history = engineerAccountingHistoryMapper == null
                 ? null : engineerAccountingHistoryMapper.selectAt(contract.getEngineerId(), asOf);
-        if (history != null && !"UNKNOWN".equals(history.getOrganizationHistoryStatus())
-                && history.getOrganizationId() != null
-                && allowedOrganizationIds.contains(history.getOrganizationId())) {
-            return;
-        }
-        if (history != null && !"UNKNOWN".equals(history.getOrganizationHistoryStatus())
-                && isHistoricalAccountLinkAllowed(contract, asOf)) {
-            return;
+        if (history != null) {
+            // 対象月の要員履歴に組織がある場合、account-linkの所属で上書きしない。
+            // 直属上長だけは組織scopeへの追加許可として扱う。
+            if (history.getOrganizationId() != null) {
+                if (allowedOrganizationIds.contains(history.getOrganizationId())
+                        || isDirectUserAllowed(contract, asOf)) {
+                    return;
+                }
+                throw BusinessException.of(404, "error.workRecord.notFound2");
+            }
+            // UNKNOWN/未配賦の履歴は推測補完しない。既知のNULL履歴だけlegacy fallbackを許可する。
+            if (!"UNKNOWN".equals(history.getOrganizationHistoryStatus())
+                    && isHistoricalAccountLinkAllowed(contract, asOf)) {
+                return;
+            }
+            throw BusinessException.of(404, "error.workRecord.notFound2");
         }
 
         // 履歴がまだ作成されない当月だけは、現行直属組織を新規入力の基準にできる。

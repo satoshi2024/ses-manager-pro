@@ -364,6 +364,63 @@ class WorkRecordServiceImplTest {
         verify(workRecordMapper, atLeastOnce()).insertOrUpdate(record);
     }
 
+    @Test
+    void saveHours_非凍結でも対象月履歴BをaccountLinkのAで上書きして更新できない() {
+        WorkRecord record = configureHistoricalWorkRecordScope(100L);
+        stubWorkRecordWriteDependencies();
+
+        assertThatThrownBy(() -> workRecordService.saveHours(
+                1L, "2026-06", new BigDecimal("150"), "越権更新"))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(record.getActualHours()).isNull();
+        verify(organizationScopeService, never()).isAllowedUser(77L, LocalDate.of(2026, 6, 1));
+        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+    }
+
+    @Test
+    void saveHours_非凍結の対象月履歴Bを組織BのManagerは更新できる() {
+        WorkRecord record = configureHistoricalWorkRecordScope(200L);
+        stubWorkRecordWriteDependencies();
+
+        WorkRecord result = workRecordService.saveHours(
+                1L, "2026-06", new BigDecimal("150"), "正当な更新");
+
+        assertThat(result).isSameAs(record);
+        verify(workRecordMapper).insertOrUpdate(record);
+    }
+
+    @Test
+    void saveDaily_非凍結でも対象月履歴BをaccountLinkのAで上書きして更新できない() {
+        configureHistoricalWorkRecordScope(100L);
+        stubWorkRecordWriteDependencies();
+
+        assertThatThrownBy(() -> workRecordService.saveDaily(1L, "2026-06", validDaily("2026-06-15")))
+                .isInstanceOf(BusinessException.class);
+
+        verify(organizationScopeService, never()).isAllowedUser(77L, LocalDate.of(2026, 6, 1));
+        verify(workRecordDailyMapper, never()).insert(any(WorkRecordDaily.class));
+        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+    }
+
+    @Test
+    void saveDaily_非凍結の対象月履歴Bを組織BのManagerは更新できる() {
+        WorkRecord record = configureHistoricalWorkRecordScope(200L);
+        WorkRecordDaily daily = validDaily("2026-06-15");
+        stubWorkRecordWriteDependencies();
+        when(workRecordMapper.selectWorkMonthById(10L)).thenReturn("2026-06");
+        when(workRecordMapper.selectByIdScoped(eq(10L), eq(LocalDate.of(2026, 6, 1)), eq(false),
+                anyList(), anyList(), isNull())).thenReturn(record);
+        when(workRecordDailyMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(workRecordDailyMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(daily));
+
+        WorkRecord result = workRecordService.saveDaily(1L, "2026-06", daily);
+
+        assertThat(result).isSameAs(record);
+        verify(workRecordDailyMapper).insert(daily);
+        verify(workRecordMapper, atLeastOnce()).insertOrUpdate(record);
+    }
+
     private WorkRecord configureFrozenWorkRecordScope(Long allowedOrganizationId) {
         ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
         ReflectionTestUtils.setField(workRecordService, "dataScopeService", dataScopeService);
@@ -397,6 +454,32 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByContractIdAndMonthForUpdate(1L, "2026-06"))
                 .thenReturn(record);
         return record;
+    }
+
+    private WorkRecord configureHistoricalWorkRecordScope(Long allowedOrganizationId) {
+        WorkRecord record = configureFrozenWorkRecordScope(allowedOrganizationId);
+        record.setOrganizationId(null);
+        record.setAccountingDimensionFrozen(0);
+
+        com.ses.entity.EngineerAccountingHistory history = new com.ses.entity.EngineerAccountingHistory();
+        history.setEngineerId(7L);
+        history.setOrganizationId(200L);
+        history.setOrganizationHistoryStatus("KNOWN");
+        when(engineerAccountingHistoryMapper.selectAt(7L, LocalDate.of(2026, 6, 1))).thenReturn(history);
+
+        com.ses.entity.EngineerAccountLink link = new com.ses.entity.EngineerAccountLink();
+        link.setEngineerId(7L);
+        link.setSysUserId(77L);
+        when(engineerAccountLinkMapper.selectByEngineerId(7L)).thenReturn(link);
+        when(organizationScopeService.isAllowedUser(77L, LocalDate.of(2026, 6, 1))).thenReturn(true);
+        return record;
+    }
+
+    private void stubWorkRecordWriteDependencies() {
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
+                .thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
     }
 
     private WorkRecordDaily validDaily(String date) {
