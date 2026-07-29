@@ -23,6 +23,13 @@ public interface EngineerAccountingHistoryMapper extends BaseMapper<EngineerAcco
             + "AND valid_to IS NULL AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
     EngineerAccountingHistory selectCurrent(@Param("engineerId") Long engineerId);
 
+    /** 対象月時点の要員会計履歴を1件返す。履歴が無ければnull。 */
+    @Select("SELECT * FROM t_engineer_accounting_history WHERE engineer_id = #{engineerId} "
+            + "AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) "
+            + "AND deleted_flag = 0 ORDER BY valid_from DESC, id DESC LIMIT 1")
+    EngineerAccountingHistory selectAt(@Param("engineerId") Long engineerId,
+                                       @Param("asOf") LocalDate asOf);
+
     /**
      * 指定組織が現行版として記録されている要員の会計履歴を返す。
      *

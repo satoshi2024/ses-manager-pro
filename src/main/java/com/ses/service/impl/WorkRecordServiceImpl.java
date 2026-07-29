@@ -66,6 +66,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     private com.ses.mapper.EngineerMapper engineerMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private CostCenterMapper costCenterMapper;
@@ -118,6 +120,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     private void assertContractScope(Contract contract, String workMonth) {
+        assertContractScope(contract, workMonth, null);
+    }
+
+    private void assertContractScope(Contract contract, String workMonth, WorkRecord record) {
         if (contract == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
@@ -128,24 +134,64 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return;
         }
         LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
-        com.ses.entity.Engineer engineer = engineerMapper == null ? null
-                : engineerMapper.selectById(contract.getEngineerId());
-        if (engineer != null && engineer.getOrganizationId() != null
-                && organizationScopeService.allowedOrganizationIds(asOf).contains(engineer.getOrganizationId())) {
+        Set<Long> allowedOrganizationIds = organizationScopeService.allowedOrganizationIds(asOf);
+
+        if (record != null && Integer.valueOf(1).equals(record.getAccountingDimensionFrozen())) {
+            if (record.getOrganizationId() != null && allowedOrganizationIds.contains(record.getOrganizationId())) {
+                return;
+            }
+            if (isDirectUserAllowed(contract, asOf)) {
+                return;
+            }
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
+
+        com.ses.entity.EngineerAccountingHistory history = engineerAccountingHistoryMapper == null
+                ? null : engineerAccountingHistoryMapper.selectAt(contract.getEngineerId(), asOf);
+        if (history != null && !"UNKNOWN".equals(history.getOrganizationHistoryStatus())
+                && history.getOrganizationId() != null
+                && allowedOrganizationIds.contains(history.getOrganizationId())) {
             return;
+        }
+        if (history != null && !"UNKNOWN".equals(history.getOrganizationHistoryStatus())
+                && isHistoricalAccountLinkAllowed(contract, asOf)) {
+            return;
+        }
+
+        // 履歴がまだ作成されない当月だけは、現行直属組織を新規入力の基準にできる。
+        // 過去月では現行 organization_id を履歴の代用にしない。
+        if (YearMonth.from(asOf).equals(YearMonth.now())) {
+            com.ses.entity.Engineer engineer = engineerMapper == null ? null
+                    : engineerMapper.selectById(contract.getEngineerId());
+            if (engineer != null && engineer.getOrganizationId() != null
+                    && allowedOrganizationIds.contains(engineer.getOrganizationId())) {
+                return;
+            }
+            if (isDirectUserAllowed(contract, asOf)) {
+                return;
+            }
+        } else if (history == null && isHistoricalAccountLinkAllowed(contract, asOf)) {
+            return;
+        }
+
+        throw BusinessException.of(404, "error.workRecord.notFound2");
+    }
+
+    private boolean isDirectUserAllowed(Contract contract, LocalDate asOf) {
+        if (engineerAccountLinkMapper == null) {
+            return false;
         }
         com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
         Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
-        if (link != null && directUserIds != null && directUserIds.contains(link.getSysUserId())) {
-            return;
+        return link != null && directUserIds != null && directUserIds.contains(link.getSysUserId());
+    }
+
+    private boolean isHistoricalAccountLinkAllowed(Contract contract, LocalDate asOf) {
+        if (engineerAccountLinkMapper == null) {
+            return false;
         }
-        boolean canUseAccountLinkFallback = engineerMapper == null
-                || (engineer != null && engineer.getOrganizationId() == null);
-        if (canUseAccountLinkFallback && link != null
-                && organizationScopeService.isAllowedUser(link.getSysUserId(), asOf)) {
-            return;
-        }
-        throw BusinessException.of(404, "error.workRecord.notFound2");
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        return link != null && organizationScopeService.isAllowedUser(link.getSysUserId(), asOf);
     }
 
     @Override
@@ -193,8 +239,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        assertContractScope(contract, workMonth);
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        assertContractScope(contract, workMonth, record);
 
 
         // 保存許可状態は「入力中」「差戻し」のみ（提出済・確定は編集不可）。
@@ -529,8 +575,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        assertContractScope(contract, workMonth);
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        assertContractScope(contract, workMonth, record);
 
 
         if (contract.getStartDate() != null && daily.getWorkDate().isBefore(contract.getStartDate())) {

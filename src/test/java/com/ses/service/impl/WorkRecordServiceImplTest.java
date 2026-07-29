@@ -7,6 +7,7 @@ import com.ses.entity.BpPayment;
 import com.ses.entity.Contract;
 import com.ses.entity.WorkRecord;
 import com.ses.entity.Engineer;
+import com.ses.entity.WorkRecordDaily;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
@@ -67,6 +68,9 @@ class WorkRecordServiceImplTest {
 
     @Mock
     private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
+    @Mock
+    private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
 
     @Mock
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -282,6 +286,126 @@ class WorkRecordServiceImplTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 ReflectionTestUtils.invokeMethod(workRecordService, "assertContractScope", contract, "2026-07"))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void saveHours_凍結組織Bの過去月を現在組織AのManagerは更新できない() {
+        WorkRecord record = configureFrozenWorkRecordScope(100L);
+        Engineer currentEngineer = new Engineer();
+        currentEngineer.setId(7L);
+        currentEngineer.setOrganizationId(100L);
+        when(engineerMapper.selectById(7L)).thenReturn(currentEngineer);
+
+        assertThatThrownBy(() -> workRecordService.saveHours(
+                1L, "2026-06", new BigDecimal("150"), "越権更新"))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(record.getActualHours()).isNull();
+        verify(engineerMapper, never()).selectById(7L);
+        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+        verify(workRecordMapper, never()).insert(any(WorkRecord.class));
+    }
+
+    @Test
+    void saveHours_凍結組織Bの過去月を組織BのManagerは更新できる() {
+        WorkRecord record = configureFrozenWorkRecordScope(200L);
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
+                .thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
+
+        WorkRecord result = workRecordService.saveHours(
+                1L, "2026-06", new BigDecimal("150"), "正当な更新");
+
+        assertThat(result).isSameAs(record);
+        assertThat(record.getActualHours()).isEqualByComparingTo("150");
+        verify(engineerMapper, never()).selectById(7L);
+        verify(workRecordMapper).insertOrUpdate(record);
+    }
+
+    @Test
+    void saveDaily_凍結組織Bの過去月を現在組織AのManagerは更新できない() {
+        WorkRecord record = configureFrozenWorkRecordScope(100L);
+        Engineer currentEngineer = new Engineer();
+        currentEngineer.setId(7L);
+        currentEngineer.setOrganizationId(100L);
+        when(engineerMapper.selectById(7L)).thenReturn(currentEngineer);
+        WorkRecordDaily daily = validDaily("2026-06-15");
+
+        assertThatThrownBy(() -> workRecordService.saveDaily(1L, "2026-06", daily))
+                .isInstanceOf(BusinessException.class);
+
+        verify(workRecordDailyMapper, never()).insert(any(WorkRecordDaily.class));
+        verify(workRecordDailyMapper, never()).updateById(any(WorkRecordDaily.class));
+        verify(engineerMapper, never()).selectById(7L);
+        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+    }
+
+    @Test
+    void saveDaily_凍結組織Bの過去月を組織BのManagerは更新できる() {
+        WorkRecord record = configureFrozenWorkRecordScope(200L);
+        WorkRecordDaily daily = validDaily("2026-06-15");
+        when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(anyList()))
+                .thenReturn(Collections.emptyList());
+        when(bpPaymentMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
+        when(workRecordMapper.selectWorkMonthById(10L)).thenReturn("2026-06");
+        when(workRecordMapper.selectByIdScoped(eq(10L), eq(LocalDate.of(2026, 6, 1)), eq(false),
+                anyList(), anyList(), isNull())).thenReturn(record);
+        when(workRecordDailyMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(workRecordDailyMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(daily));
+
+        WorkRecord result = workRecordService.saveDaily(1L, "2026-06", daily);
+
+        assertThat(result).isSameAs(record);
+        assertThat(daily.getWorkedHours()).isEqualByComparingTo("8");
+        verify(engineerMapper, never()).selectById(7L);
+        verify(workRecordDailyMapper).insert(daily);
+        verify(workRecordMapper, atLeastOnce()).insertOrUpdate(record);
+    }
+
+    private WorkRecord configureFrozenWorkRecordScope(Long allowedOrganizationId) {
+        ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
+        ReflectionTestUtils.setField(workRecordService, "dataScopeService", dataScopeService);
+        ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
+        ReflectionTestUtils.setField(workRecordService, "engineerAccountingHistoryMapper", engineerAccountingHistoryMapper);
+        when(dataScopeService.isSalesDataScoped()).thenReturn(false);
+        when(organizationScopeService.hasFullAccess()).thenReturn(false);
+        when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1)))
+                .thenReturn(java.util.Set.of(allowedOrganizationId));
+        when(organizationScopeService.allowedDirectUserIds(LocalDate.of(2026, 6, 1)))
+                .thenReturn(java.util.Set.of());
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setEngineerId(7L);
+        contract.setSellingPrice(new BigDecimal("800000"));
+        contract.setCostPrice(new BigDecimal("600000"));
+        contract.setSettlementHoursMin(new BigDecimal("140"));
+        contract.setSettlementHoursMax(new BigDecimal("180"));
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setStatus("稼動中");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
+
+        WorkRecord record = new WorkRecord();
+        record.setId(10L);
+        record.setContractId(1L);
+        record.setWorkMonth("2026-06");
+        record.setStatus("入力中");
+        record.setOrganizationId(200L);
+        record.setAccountingDimensionFrozen(1);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdate(1L, "2026-06"))
+                .thenReturn(record);
+        return record;
+    }
+
+    private WorkRecordDaily validDaily(String date) {
+        WorkRecordDaily daily = new WorkRecordDaily();
+        daily.setWorkDate(LocalDate.parse(date));
+        daily.setStartTime(java.time.LocalTime.of(9, 0));
+        daily.setEndTime(java.time.LocalTime.of(18, 0));
+        daily.setBreakMinutes(60);
+        return daily;
     }
 
     /**
