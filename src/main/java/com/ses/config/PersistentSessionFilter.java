@@ -1,6 +1,7 @@
 package com.ses.config;
 
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.security.BreakGlassService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,6 +21,7 @@ import java.io.IOException;
 public class PersistentSessionFilter extends OncePerRequestFilter {
 
     private final ObjectProvider<PersistentSessionService> persistentSessionServiceProvider;
+    private final ObjectProvider<BreakGlassService> breakGlassServiceProvider;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -31,8 +33,11 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        if (authentication != null && authentication.isAuthenticated()
-                && !persistentSessionService.validateAndTouch(request, authentication)) {
+        BreakGlassService breakGlassService = breakGlassServiceProvider.getIfAvailable();
+        boolean valid = authentication == null || !authentication.isAuthenticated()
+                || (persistentSessionService.validateAndTouch(request, authentication)
+                && (breakGlassService == null || breakGlassService.validateBoundSession(request, authentication)));
+        if (!valid) {
             jakarta.servlet.http.HttpSession session = request.getSession(false);
             if (session != null) {
                 session.invalidate();

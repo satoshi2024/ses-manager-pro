@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 /** 本番起動時に、OIDC・break-glass・暗号鍵のfail-closed設定を検証する。 */
 @Component
@@ -110,6 +112,26 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
                 || !StringUtils.hasText(oidcProperties.getClientId())
                 || !StringUtils.hasText(oidcProperties.getClientSecret())) {
             errors.add("OIDCの固定provider metadataとclient credentialを設定してください");
+        }
+        validateHttpsUri(errors, oidcProperties.getIssuerUri(), "issuer-uri");
+        validateHttpsUri(errors, oidcProperties.getAuthorizationUri(), "authorization-uri");
+        validateHttpsUri(errors, oidcProperties.getTokenUri(), "token-uri");
+        validateHttpsUri(errors, oidcProperties.getJwkSetUri(), "jwk-set-uri");
+        validateHttpsUri(errors, oidcProperties.getUserInfoUri(), "user-info-uri");
+    }
+
+    private void validateHttpsUri(List<String> errors, String value, String name) {
+        if (!StringUtils.hasText(value)) {
+            return;
+        }
+        try {
+            URI uri = new URI(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || !StringUtils.hasText(uri.getHost())
+                    || uri.getUserInfo() != null) {
+                errors.add("OIDC " + name + "はuserinfoを含まない有効なHTTPS URLでなければなりません");
+            }
+        } catch (URISyntaxException e) {
+            errors.add("OIDC " + name + "はuserinfoを含まない有効なHTTPS URLでなければなりません");
         }
     }
 

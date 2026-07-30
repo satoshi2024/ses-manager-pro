@@ -1,6 +1,7 @@
 package com.ses.config;
 
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.security.BreakGlassService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -30,7 +31,9 @@ class PersistentSessionFilterTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<PersistentSessionService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(service);
-        PersistentSessionFilter filter = new PersistentSessionFilter(provider);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<BreakGlassService> breakGlassProvider = mock(ObjectProvider.class);
+        PersistentSessionFilter filter = new PersistentSessionFilter(provider, breakGlassProvider);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("7", null, java.util.List.of()));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/dashboard");

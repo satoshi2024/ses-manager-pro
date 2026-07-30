@@ -26,7 +26,8 @@ public class BreakGlassIncidentApiController {
     @PostMapping
     public ApiResult<BreakGlassIncident> create(@Valid @RequestBody BreakGlassIncidentRequest request) {
         return ApiResult.success(breakGlassService.create(actorId(), request.reason(),
-                Boolean.TRUE.equals(request.idpOutageConfirmed()), request.durationMinutes(), request.correlationId()));
+                Boolean.TRUE.equals(request.idpOutageConfirmed()), request.durationMinutes(), request.correlationId(),
+                request.allowedActions()));
     }
 
     @PostMapping("/{id}/approve")

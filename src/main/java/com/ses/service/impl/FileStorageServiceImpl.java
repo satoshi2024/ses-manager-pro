@@ -242,11 +242,23 @@ public class FileStorageServiceImpl implements FileStorageService {
         }
         FileScanResult result;
         try {
-            result = fileScanner == null
-                    ? FileScanResult.unavailable("scanner is not configured")
-                    : fileScanner.scan(quarantine, kind);
-        } catch (RuntimeException e) {
-            result = FileScanResult.unavailable("scanner failed");
+            long size = Files.size(quarantine);
+            String extension = StringUtils.getFilenameExtension(storedName);
+            if (size == 0 || size > kind.getMaxBytes()) {
+                result = FileScanResult.unavailable("file size is outside the allowed range");
+            } else if (!kind.isMagicBytesAllowed(extension, Files.readAllBytes(quarantine))) {
+                result = FileScanResult.unavailable("file signature does not match the extension");
+            } else {
+                try {
+                    result = fileScanner == null
+                            ? FileScanResult.unavailable("scanner is not configured")
+                            : fileScanner.scan(quarantine, kind);
+                } catch (RuntimeException e) {
+                    result = FileScanResult.unavailable("scanner failed");
+                }
+            }
+        } catch (IOException e) {
+            result = FileScanResult.unavailable("file validation failed");
         }
         if (result == null || result.status() != FileScanResult.Status.CLEAN) {
             updateMetadata(metadata, "QUARANTINED",

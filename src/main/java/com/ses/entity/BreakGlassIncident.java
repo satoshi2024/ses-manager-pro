@@ -18,6 +18,7 @@ public class BreakGlassIncident extends BaseEntity {
     private String reason;
     private Integer idpOutageConfirmed;
     private String correlationId;
+    private String allowedActions;
     private Long requestedBy;
     @TableField("approved_by_1")
     private Long approvedBy1;

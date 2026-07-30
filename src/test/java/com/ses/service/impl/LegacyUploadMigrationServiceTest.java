@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.ses.config.UploadProperties;
+import com.ses.common.enums.FileKind;
 import com.ses.entity.FileSecurityMetadata;
 import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.FileReferenceProvider;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -37,7 +39,7 @@ class LegacyUploadMigrationServiceTest {
 
     @Test
     void 参照されている既存ファイルはscan後にpublishedへ移りmetadataが登録される() throws Exception {
-        Files.writeString(uploadRoot.resolve("aaa.pdf"), "legacy skill sheet");
+        Files.write(uploadRoot.resolve("aaa.pdf"), validPdf());
         List<FileSecurityMetadata> inserted = new ArrayList<>();
 
         LegacyUploadMigrationService.Result result =
@@ -54,23 +56,23 @@ class LegacyUploadMigrationServiceTest {
 
     @Test
     void scannerが使えない場合はquarantineへ残し公開しない() throws Exception {
-        Files.writeString(uploadRoot.resolve("bbb.png"), "legacy photo");
+        Files.write(uploadRoot.resolve("bbb.pdf"), validPdf());
         List<FileSecurityMetadata> inserted = new ArrayList<>();
 
         LegacyUploadMigrationService.Result result =
-                service(Set.of("bbb.png"), FileScanResult.unavailable("daemon down"), inserted).migrate();
+                service(Set.of("bbb.pdf"), FileScanResult.unavailable("daemon down"), inserted).migrate();
 
         assertEquals(0, result.published());
         assertEquals(1, result.quarantined());
-        assertTrue(Files.exists(uploadRoot.resolve("quarantine/bbb.png")));
-        assertFalse(Files.exists(uploadRoot.resolve("published/bbb.png")));
+        assertTrue(Files.exists(uploadRoot.resolve("quarantine/bbb.pdf")));
+        assertFalse(Files.exists(uploadRoot.resolve("published/bbb.pdf")));
         assertEquals("QUARANTINED", inserted.get(0).getStorageState());
         assertEquals("UNAVAILABLE", inserted.get(0).getScanStatus());
     }
 
     @Test
     void 感染ファイルは公開せずquarantineへ残す() throws Exception {
-        Files.writeString(uploadRoot.resolve("ccc.pdf"), "infected");
+        Files.write(uploadRoot.resolve("ccc.pdf"), validPdf());
         List<FileSecurityMetadata> inserted = new ArrayList<>();
 
         service(Set.of("ccc.pdf"), FileScanResult.infected("test-1"), inserted).migrate();
@@ -78,6 +80,34 @@ class LegacyUploadMigrationServiceTest {
         assertTrue(Files.exists(uploadRoot.resolve("quarantine/ccc.pdf")));
         assertFalse(Files.exists(uploadRoot.resolve("published/ccc.pdf")));
         assertEquals("INFECTED", inserted.get(0).getScanStatus());
+    }
+
+    @Test
+    void pdfを装ったplainTextはcleanScannerでも公開しない() throws Exception {
+        Files.writeString(uploadRoot.resolve("fake.pdf"), "plain text");
+        List<FileSecurityMetadata> inserted = new ArrayList<>();
+
+        LegacyUploadMigrationService.Result result =
+                service(Set.of("fake.pdf"), FileScanResult.clean("test-1"), inserted).migrate();
+
+        assertEquals(0, result.published());
+        assertEquals(1, result.quarantined());
+        assertEquals("UNAVAILABLE", inserted.get(0).getScanStatus());
+        assertTrue(Files.exists(uploadRoot.resolve("quarantine/fake.pdf")));
+    }
+
+    @Test
+    void 種別上限を超える既存ファイルはcleanScannerでも公開しない() throws Exception {
+        Files.write(uploadRoot.resolve("oversize.png"),
+                new byte[(int) FileKind.PHOTO.getMaxBytes() + 1]);
+        List<FileSecurityMetadata> inserted = new ArrayList<>();
+
+        LegacyUploadMigrationService.Result result =
+                service(Set.of("oversize.png"), FileScanResult.clean("test-1"), inserted).migrate();
+
+        assertEquals(0, result.published());
+        assertEquals(1, result.quarantined());
+        assertEquals("UNAVAILABLE", inserted.get(0).getScanStatus());
     }
 
     @Test
@@ -152,5 +182,9 @@ class LegacyUploadMigrationServiceTest {
         FileReferenceProvider referenceProvider = () -> referenced;
         return new LegacyUploadMigrationService(properties, List.of(referenceProvider),
                 metadataProvider, scannerProvider);
+    }
+
+    private byte[] validPdf() {
+        return "%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII);
     }
 }

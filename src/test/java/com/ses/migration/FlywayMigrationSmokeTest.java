@@ -235,6 +235,7 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_user_mfa", "encrypted_totp_secret");
             assertColumnExists(st, "t_mfa_recovery_code", "code_hash");
             assertColumnExists(st, "t_user_session", "revoked_at");
+            assertColumnExists(st, "t_break_glass_incident", "allowed_actions");
             assertColumnExists(st, "t_permission_group_action", "action_key");
             assertColumnExists(st, "t_file_security_metadata", "scan_status");
             assertColumnExists(st, "t_file_security_metadata", "scanner_version");
@@ -266,17 +267,25 @@ class FlywayMigrationSmokeTest {
                         "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
             }
             assertColumnExists(st, "t_permission_group_action", "deny_flag");
-            // V66: 営業/HR/マネージャーはbaseline '*' を持ち、旧menu相当の業務actionを維持する。
-            // これが無いとdashboard.view等の未列挙actionが全て拒否される（V64の回帰）。
+            // V66.1: 全局wildcardは管理者だけに限定し、未知actionを既定拒否する。
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "
                             + "JOIN m_permission_group g ON g.id = a.group_id "
                             + "WHERE g.group_key IN ('role-admin','role-sales','role-hr','role-manager') "
                             + "AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
-                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 4,
-                        "管理者/営業/HR/マネージャーへbaseline actionがseedされるはず");
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
+                        "全局wildcardは管理者だけにseedされるはず");
             }
-            // V66: role-managerのbaselineは後方互換のため維持し、機密actionは拒否指定で外す。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key IN ('role-sales','role-hr','role-manager') "
+                            + "AND a.action_key IN ('dashboard.*','proposal.*','notifications.*') "
+                            + "AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 9,
+                        "非管理者には既知resourceだけが明示seedされるはず");
+            }
+            // V66: role-managerの機密actionは拒否指定で外す。
             // V64はこの拒否が無く、action層がuser.*やpayroll.viewまで素通しだった。
             try (ResultSet rs = st.executeQuery(
                     "SELECT COUNT(*) FROM t_permission_group_action a "

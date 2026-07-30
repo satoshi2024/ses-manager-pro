@@ -293,6 +293,18 @@ class MigrationScriptIntegrityTest {
                 "V16でHRへ公開した候補者導線を既定groupにも移行してください");
     }
 
+    @Test
+    void V66_1は非管理者の全局wildcardを削除して既知actionへ置換すること() throws Exception {
+        String sql = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V66_1__close_security_review_boundaries.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertTrue(sql.contains("AND a.action_key = '*'"), "旧全局wildcardの削除条件が必要です");
+        assertTrue(sql.contains("SELECT 'dashboard.*'") && sql.contains("SELECT 'proposal.*'"),
+                "後方互換は既知resourceの明示許可で維持してください");
+        assertTrue(sql.contains("ADD COLUMN allowed_actions"), "break-glass scope列が必要です");
+    }
+
     /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */
     private String withoutComments(String sql) {
         return sql.lines()

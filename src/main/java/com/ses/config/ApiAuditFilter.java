@@ -2,6 +2,7 @@ package com.ses.config;
 
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
+import com.ses.service.security.BreakGlassService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +38,21 @@ public class ApiAuditFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
+        boolean breakGlassRequest = isBreakGlassRequest(request);
+        if (breakGlassRequest) {
+            if (auditLogService == null) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+            try {
+                auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
+                        request.getRequestURI(), 102, "BREAK_GLASS_ACCESS_ATTEMPT", false);
+            } catch (RuntimeException e) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+        }
         int observedStatus = HttpServletResponse.SC_OK;
         try {
             filterChain.doFilter(request, response);
@@ -55,9 +71,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
                 log.info("操作ログ user={} method={} uri={} status={}",
                         username != null ? username : "-", method, uri, status);
-                AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
                 if (auditLogService != null) {
-                    String applicationCode = "GET".equals(method) && uri.startsWith("/api/files/")
+                    String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
+                            : "GET".equals(method) && uri.startsWith("/api/files/")
                             ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
                             : "ses-manager";
                     auditLogService.record(username, method, uri, status, applicationCode,
@@ -71,6 +87,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
      * 記録対象か判定する（/api/** かつ 更新系メソッド）。
      */
     private boolean isAuditTarget(HttpServletRequest request) {
+        if (isBreakGlassRequest(request)) {
+            return true;
+        }
         String uri = request.getRequestURI();
         if (uri == null || !uri.startsWith("/api/")) {
             return false;
@@ -78,5 +97,15 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method)
                 || ("GET".equals(method) && uri.startsWith("/api/files/"));
+    }
+
+    private boolean isBreakGlassRequest(HttpServletRequest request) {
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        if (session == null || session.getAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE) == null) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        return uri != null && !uri.startsWith("/css/") && !uri.startsWith("/js/")
+                && !uri.startsWith("/img/") && !uri.startsWith("/lib/");
     }
 }

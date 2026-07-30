@@ -128,12 +128,20 @@ public class LegacyUploadMigrationService {
                             Path quarantinedFile, Path publishedDir) throws IOException {
         FileScanner scanner = scannerProvider.getIfAvailable();
         FileScanResult result;
-        try {
-            result = scanner == null
-                    ? FileScanResult.unavailable("scanner is not configured")
-                    : scanner.scan(quarantinedFile, kind);
-        } catch (RuntimeException e) {
-            result = FileScanResult.unavailable("scanner failed");
+        long size = Files.size(quarantinedFile);
+        String extension = StringUtils.getFilenameExtension(storedName);
+        if (size == 0 || size > kind.getMaxBytes()) {
+            result = FileScanResult.unavailable("file size is outside the allowed range");
+        } else if (!kind.isMagicBytesAllowed(extension, Files.readAllBytes(quarantinedFile))) {
+            result = FileScanResult.unavailable("file signature does not match the extension");
+        } else {
+            try {
+                result = scanner == null
+                        ? FileScanResult.unavailable("scanner is not configured")
+                        : scanner.scan(quarantinedFile, kind);
+            } catch (RuntimeException e) {
+                result = FileScanResult.unavailable("scanner failed");
+            }
         }
         boolean clean = result != null && result.status() == FileScanResult.Status.CLEAN;
         FileSecurityMetadata metadata = new FileSecurityMetadata();

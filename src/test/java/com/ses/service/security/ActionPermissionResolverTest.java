@@ -3,6 +3,7 @@ package com.ses.service.security;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ActionPermissionResolverTest {
 
@@ -15,8 +16,9 @@ class ActionPermissionResolverTest {
     }
 
     @Test
-    void 未登録業務ApiもresourceActionへ正規化して判定を迂回させない() {
-        assertEquals("users-archive.view", ActionPermissionResolver.resolve("GET", "/api/users-archive"));
+    void 未登録業務Apiはactionを生成せず未知として扱う() {
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/users-archive"));
+        assertNull(ActionPermissionResolver.resolve("POST", "/api/future-sensitive"));
         assertEquals("management-accounting.create",
                 ActionPermissionResolver.resolve("POST", "/api/management-accounting/budgets"));
         assertEquals("organization.update",

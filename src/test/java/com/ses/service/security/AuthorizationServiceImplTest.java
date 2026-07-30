@@ -48,6 +48,7 @@ class AuthorizationServiceImplTest {
 
         assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "proposal.view"));
         assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "payroll.view"));
+        assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "future-sensitive.view"));
     }
 
     @Test

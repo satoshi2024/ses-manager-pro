@@ -1,4 +1,4 @@
--- V64 + V66 のpermission group seedをH2で再現するfixture。
+-- V64〜V66.1 のpermission group seedをH2で再現するfixture。
 -- 本体migrationは MySQL 固有構文（INSERT IGNORE / DELETE a FROM ... JOIN）を使うため
 -- そのままH2へ流せない。最終状態だけを同じ内容で作る。
 -- 差異が出ないよう、action keyと deny_flag は V64/V66 と1対1で対応させること。
@@ -24,12 +24,30 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   ('default', 5, 'file.download', 0, 0),
   ('default', 5, 'profile.*', 0, 0);
 
--- V66のbaseline許可
+-- V66.1の既知resource許可。非管理者のV66全局wildcardは削除済み。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT 'default', g.group_id, a.action_key, 0, 0
+FROM (VALUES (2), (3), (4)) g(group_id)
+CROSS JOIN (VALUES
+  ('ai.*'), ('analytics.*'), ('autocomplete.*'), ('bp-availability.*'),
+  ('bp-availability-ingestion.*'), ('candidate.*'), ('cashflow.*'), ('compliance.*'),
+  ('contract-document.*'), ('contract.*'), ('customer.*'), ('dashboard.*'), ('email.*'),
+  ('engineer.*'), ('file.*'), ('identity-provider.*'), ('invoice.*'),
+  ('management-accounting.*'), ('monthly-closing.*'), ('my.*'), ('notifications.*'), ('organization.*'),
+  ('payroll.*'), ('profile.*'), ('project-ingestion.*'), ('project.*'), ('proposal.*'),
+  ('quotation.*'), ('reconciliation.*'), ('resume-ingestion.*'), ('sales-performance.*'),
+  ('skill-tag.*'), ('skillsheet-template.*'), ('system-config.*'), ('work-record.*'),
+  ('export.execute')
+) a(action_key)
+WHERE NOT EXISTS (
+  SELECT 1 FROM t_permission_group_action existing
+  WHERE existing.tenant_id = 'default'
+    AND existing.group_id = g.group_id
+    AND existing.action_key = a.action_key
+);
+
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
   ('default', 1, '*', 0, 0),
-  ('default', 2, '*', 0, 0),
-  ('default', 3, '*', 0, 0),
-  ('default', 4, '*', 0, 0),
   ('default', 5, 'my.*', 0, 0),
   ('default', 5, 'notifications.*', 0, 0);
 

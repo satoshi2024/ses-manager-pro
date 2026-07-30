@@ -64,5 +64,11 @@ class ProductionSecurityConfigurationValidatorTest {
                 new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper);
 
         assertDoesNotThrow(validator::validate);
+
+        oidc.setTokenUri("http://idp.example/token");
+        assertThrows(IllegalStateException.class, validator::validate);
+        oidc.setTokenUri("https://idp.example/token");
+        oidc.setIssuerUri("https://user@idp.example/tenant");
+        assertThrows(IllegalStateException.class, validator::validate);
     }
 }

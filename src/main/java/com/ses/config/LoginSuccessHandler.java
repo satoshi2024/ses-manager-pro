@@ -50,6 +50,10 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         }
         accountLockService.onLoginSuccess(authentication.getName());
         persistentSessionService.register(request, authentication);
+        if (breakGlass && !breakGlassService.bindSession(request, authentication.getName())) {
+            persistentSessionService.revokeCurrent(request, authentication, "BREAK_GLASS_INCIDENT_UNAVAILABLE");
+            rejectBreakGlass(request, "break-glass incidentをsessionへ固定できません");
+        }
         // 遷移先はrequestごとのlocal変数で決める。setDefaultTargetUrl等はこのhandler
         // （singleton）のフィールドを書き換えるため、同時loginで遷移先が混ざる。
         String targetUrl = "/";

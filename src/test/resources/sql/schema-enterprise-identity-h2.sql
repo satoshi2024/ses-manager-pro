@@ -152,6 +152,7 @@ CREATE TABLE t_break_glass_incident (
   reason VARCHAR(500) NOT NULL,
   idp_outage_confirmed TINYINT NOT NULL DEFAULT 0,
   correlation_id VARCHAR(100) NOT NULL,
+  allowed_actions VARCHAR(1000) NOT NULL DEFAULT 'dashboard.view',
   requested_by BIGINT NOT NULL,
   approved_by_1 BIGINT,
   approved_at_1 TIMESTAMP,

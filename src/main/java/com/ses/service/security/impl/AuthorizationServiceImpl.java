@@ -26,8 +26,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private static final String ROLE_ADMIN = "管理者";
     private static final String ROLE_HR = "HR";
     private static final String ROLE_MEMBER = "要員";
-    /** baseline（旧menu相当の全action）を持つrole。 */
-    private static final Set<String> BASELINE_ROLES = Set.of("営業", ROLE_HR, "マネージャー");
+    /** 既知inventoryのactionを旧menuとの積集合で維持するrole。 */
+    private static final Set<String> INTERNAL_ROLES = Set.of("営業", ROLE_HR, "マネージャー");
     /** roleに関係なく管理者だけが実行できるaction。SecurityConfigでも重ねて制限している。 */
     private static final Set<String> ADMIN_ONLY_ACTIONS =
             Set.of("permission.manage", "audit.security.view", "file.scan.retry");
@@ -84,14 +84,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     }
 
     /**
-     * group未割当ユーザーのfallback。V66のseedと同じ「baseline＋拒否」規則で判定する。
-     *
-     * <p>許可listの列挙にしてはいけない。action keyは
-     * {@link com.ses.service.security.ActionPermissionResolver}が
-     * URI rootから機械生成するため、列挙式にすると{@code dashboard.view}・{@code analytics.view}・
-     * {@code quotation.view}・{@code my.view}のような未列挙keyが全て拒否され、
-     * R3.1の後方互換（旧menu権限で到達できた範囲を維持する）を破る。
-     * 新しいAPI rootを追加したときにここへ追記しなくても壊れないことが要件である。
+     * group未割当ユーザーのfallback。inventory登録済みactionだけを旧menu層へ渡す。
+     * 未知actionを追加コードなしで許可しないことが境界である。
      */
     private boolean legacyRoleAllows(String role, String actionKey) {
         if (role == null) {
@@ -106,7 +100,8 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return actionKey.equals("file.download") || actionKey.startsWith("profile.")
                     || actionKey.startsWith("my.") || actionKey.startsWith("notifications.");
         }
-        if (!BASELINE_ROLES.contains(role)) {
+        if (!INTERNAL_ROLES.contains(role)
+                || !com.ses.service.security.ActionPermissionResolver.isKnownAction(actionKey)) {
             return false;
         }
         if (actionKey.startsWith("user.") || ADMIN_ONLY_ACTIONS.contains(actionKey)) {

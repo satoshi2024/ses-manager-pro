@@ -25,19 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * URI rootから機械生成するため列挙しきれず、{@code dashboard.view}・{@code analytics.view}・
  * {@code quotation.view}・{@code *.delete}などが全roleで拒否されていた。
  *
- * <p><b>新しいAPI rootを追加したときにこのtestを直す必要が生じたら、それはseedか
- * legacy fallbackが列挙式に戻った合図である。</b>baselineと拒否指定で表すこと。
+ * <p>V67以降はinventory登録済みresource wildcardだけを許可し、未知rootは拒否する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/permission-group-seed-h2.sql")
 class ActionPermissionMatrixTest {
 
-    /** 旧menu権限で到達できた業務action。roleに関係なくbaselineで通す必要がある。 */
+    /** 旧menu権限で到達できた既知業務action。 */
     private static final List<String> BUSINESS_ACTIONS = List.of(
             "dashboard.view", "analytics.view", "quotation.view", "quotation.create",
             "work-record.view", "sales-performance.view", "monthly-closing.view",
-            "email-templates.view", "skill-tags.view", "organization.view",
+            "email.view", "skill-tag.view", "organization.view",
             "invoice.view", "engineer.view", "engineer.delete", "customer.delete",
             "contract.delete", "export.execute", "file.download");
 
@@ -66,7 +65,7 @@ class ActionPermissionMatrixTest {
     }
 
     @Test
-    void baselineを持つroleでも機密actionは拒否指定が優先される() {
+    void 既知resource許可を持つroleでも機密actionは拒否指定が優先される() {
         Authentication sales = authenticate(9001L, "営業");
         assertFalse(authorizationService.isAllowed(sales, "user.view"));
         assertFalse(authorizationService.isAllowed(sales, "user.delete"));
@@ -133,6 +132,14 @@ class ActionPermissionMatrixTest {
         Authentication hr = authenticate(9997L, "HR");
         assertTrue(authorizationService.isAllowed(hr, "payroll.view"));
         assertFalse(authorizationService.isAllowed(hr, "contract.cost.view"));
+    }
+
+    @Test
+    void group割当済みとlegacyFallbackの双方で未知actionを拒否する() {
+        assertFalse(authorizationService.isAllowed(
+                authenticate(9001L, "営業"), "future-sensitive.view"));
+        assertFalse(authorizationService.isAllowed(
+                authenticate(9999L, "営業"), "future-sensitive.view"));
     }
 
     private Authentication authenticate(Long id, String role) {

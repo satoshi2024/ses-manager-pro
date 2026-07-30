@@ -1,5 +1,46 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
+## 2026-07-30 merge Head `b36922a` 再Review FAIL対応
+
+- Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
+- 修正scope: 同Head上の未commit working-tree patch。固定fix Headではないため、独立再Reviewが完了するまで判定は`FIX/REVIEW`とする。
+- migration: 公開済みV66を変更せず、後続予約V67を維持できるよう **V66.1**
+  (`V66_1__close_security_review_boundaries.sql`) を追加した。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実Entra、実browser、2名break-glass訓練、依存scan、実MySQLは未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R03-P1-01 | P1 | FIXED_PENDING_REVIEW | 非管理者の全局`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
+| S03-R03-P1-02 | P1 | FIXED_PENDING_REVIEW | break-glass事件へexact `allowed_actions`を追加。sessionを事件へ固定し、各requestで状態・期限・scopeを再検証してpersistent sessionを即時失効。参照/exportを含む全操作を事前必須監査し、ACTIVE時に申請者・承認者へ即時通知 |
+| S03-R03-P1-03 | P1 | FIXED_PENDING_REVIEW | legacy移行とrescanでmax size・magic/構造検証をscanner前に実施。偽装PDF・上限超過はclean scannerでもquarantine |
+| S03-R03-P1-04 | P1 | FIXED_PENDING_REVIEW | page URIをmatched menuのAPI prefixから同じview actionへ解決し、restrictive groupのpage直達を403 |
+| S03-R03-P2-01 | P2 | FIXED_PENDING_REVIEW | prod validatorでissuer/authorization/token/JWK/user-infoをuserinfoなしの有効なHTTPS URLに限定 |
+| S03-R03-P2-02 | P2 | FIXED_PENDING_COMMIT | 台帳baseを`b36922a`へ更新し本Issue Registerを追加。固定fix Headはcommit後に記録する |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review本文、issue ID、Head、migration採番、台帳整合 | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。文書inventoryのみ | なし。次はT020 |
+| T015 | L3。V66.1 integrity、H2 schema/seed、fresh/V63 upgrade smoke定義 | Flyway history、permission seed、break-glass entity/mapper | 実MySQLはDocker daemon不在で2件skip | schema変更のため条件式中間L4を1回実施。次はT020 |
+| T016 | L3。prod HTTPS metadata、OIDC registration/login/security integration | prod validator、client registration、login/logout、identity API | 実Entra/Conditional Accessはcredentialなし | security変更。次はT020 |
+| T017 | L3。事件scope/session期限/監査/通知/ログイン、persistent session consumer | LoginSuccessHandler、ApiAuditFilter、PersistentSessionFilter、session API | 実2名訓練・multi-instanceは環境なし | security/session変更。次はT020 |
+| T018 | L3。未知API/portal、role×action、page/API parity、permission/user consumer | resolver、AuthorizationService、MenuPermissionFilter、sidebar、permission/user API | 実browser role matrixはUI変更なし・外部gate | security/cache境界。次はT020 |
+| T019 | L3。legacy max/magic、clean/infected/unavailable、rescan/load | LegacyUploadMigration、FileStorage、metadata、download | 実ClamAVはsandboxなし | shared FileStorage変更。次はT020 |
+
+### 実行結果
+
+- L1/L2定向: 65 tests / 0 failures / 0 errors / 0 skipped。
+- L3 subsystem: 124 tests / 0 failures / 0 errors / 2 skipped。skipはDocker必須の
+  `FlywayMigrationSmokeTest`と`FlywayV63UpgradeMigrationSmokeTest`。
+- 最終差分の直接再確認: 39 tests / 0 failures / 0 errors / 0 skipped。
+- 条件式中間L4: 共有security/schema/session/FileStorage変更のため1回だけ実行し、
+  **1036 tests / 0 failures / 0 errors / 7 skipped**。skipはDocker必須6件とCJK font必須1件。
+- `git diff --check`: exit 0。JS/UI変更なしのためNode/browserは本checkpointから除外。
+- 未成立証拠: Docker daemon不在のためV66.1のfresh/V63-upgrade実MySQL証拠なし。固定fix commitと独立再Reviewも未完了。
+
 ## 追加修正（2026-07-30 S02/S03実装差分の独立バグ検査対応）
 
 merge前のbranch実装（S02 organization-management-accounting、S03 F1〜B2）に対する追加検査で、

@@ -6,19 +6,45 @@ import java.util.Map;
 /** URIとHTTP methodをaction keyへ正規化する。業務APIは未登録のまま通過させない。 */
 public final class ActionPermissionResolver {
 
+    /** 後段filter・break-glassが同じ解決結果を使うためのrequest属性。 */
+    public static final String REQUEST_ACTION_ATTRIBUTE =
+            ActionPermissionResolver.class.getName() + ".ACTION";
+
     private static final Map<String, String> RESOURCE_NAMES = Map.ofEntries(
+            Map.entry("ai", "ai"),
+            Map.entry("analytics", "analytics"),
+            Map.entry("autocomplete", "autocomplete"),
             Map.entry("audit-logs", "audit"),
+            Map.entry("bp-availabilities", "bp-availability"),
+            Map.entry("bp-availability-ingestions", "bp-availability-ingestion"),
             Map.entry("candidates", "candidate"),
+            Map.entry("cashflow", "cashflow"),
+            Map.entry("compliance", "compliance"),
+            Map.entry("contract-documents", "contract-document"),
             Map.entry("contracts", "contract"),
             Map.entry("customers", "customer"),
+            Map.entry("dashboard", "dashboard"),
+            Map.entry("email-templates", "email"),
             Map.entry("engineers", "engineer"),
             Map.entry("identity-providers", "identity-provider"),
             Map.entry("invoices", "invoice"),
+            Map.entry("management-accounting", "management-accounting"),
+            Map.entry("monthly-closing", "monthly-closing"),
+            Map.entry("my", "my"),
+            Map.entry("notifications", "notifications"),
             Map.entry("organizations", "organization"),
+            Map.entry("payroll", "payroll"),
+            Map.entry("profile", "profile"),
+            Map.entry("project-ingestions", "project-ingestion"),
             Map.entry("projects", "project"),
             Map.entry("proposals", "proposal"),
             Map.entry("quotations", "quotation"),
+            Map.entry("reconciliation", "reconciliation"),
+            Map.entry("resume-ingestions", "resume-ingestion"),
             Map.entry("role-menus", "permission"),
+            Map.entry("sales-performance", "sales-performance"),
+            Map.entry("skill-tags", "skill-tag"),
+            Map.entry("skillsheet-templates", "skillsheet-template"),
             Map.entry("system-configs", "system-config"),
             Map.entry("users", "user"),
             Map.entry("work-records", "work-record")
@@ -35,6 +61,9 @@ public final class ActionPermissionResolver {
         int queryIndex = uri.indexOf('?');
         if (queryIndex >= 0) {
             uri = uri.substring(0, queryIndex);
+        }
+        if ("/".equals(uri)) {
+            return "dashboard.view";
         }
         // MFA/sessionはログイン完了に必要な認証基盤APIで、業務permission groupの対象外。
         if (matchesPrefix(uri, "/api/security")) {
@@ -98,8 +127,26 @@ public final class ActionPermissionResolver {
         if (root.isBlank()) {
             return null;
         }
-        String resource = RESOURCE_NAMES.getOrDefault(root, root);
+        String resource = RESOURCE_NAMES.get(root);
+        if (resource == null) {
+            return null;
+        }
         return action(resource, method);
+    }
+
+    /** inventoryに登録済みのactionだけをlegacy/default group互換対象にする。 */
+    public static boolean isKnownAction(String actionKey) {
+        if (actionKey == null || actionKey.isBlank()) {
+            return false;
+        }
+        if (actionKey.equals("export.execute") || actionKey.equals("file.download")
+                || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
+                || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")) {
+            return true;
+        }
+        int separator = actionKey.indexOf('.');
+        String resource = separator > 0 ? actionKey.substring(0, separator) : actionKey;
+        return RESOURCE_NAMES.containsValue(resource);
     }
 
     private static boolean matchesPrefix(String uri, String prefix) {
