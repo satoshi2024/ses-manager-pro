@@ -130,10 +130,15 @@ public class DocumentServiceImpl implements DocumentService {
             version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
-            // 6. storage promote
+            // 6. 業務リンク登録
+            if (request.getTargetType() != null && request.getTargetId() != null) {
+                link(doc.getId(), request.getTargetType(), request.getTargetId());
+            }
+
+            // 7. storage promote
             documentStorage.promote(storageKey);
 
-            // 7. アクセスログ
+            // 8. アクセスログ
             recordAccessLog(doc.getId(), version.getId(), "REGISTER");
 
             log.info("[文書台帳] 登録完了: documentId={} versionId={} sha256={}", doc.getId(), version.getId(), streamResult.sha256());
@@ -621,6 +626,148 @@ public class DocumentServiceImpl implements DocumentService {
 
     private static String generateStorageKey() {
         return UUID.randomUUID().toString().replace("-", "") + "/" + UUID.randomUUID();
+    }
+
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.document.DocumentListDTO> searchDocuments(com.ses.dto.document.DocumentSearchQuery query) {
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Document> pageParam =
+                com.ses.common.util.PageUtils.safePage(query.getPage(), query.getPageSize(), 1000L);
+
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, DEFAULT_TENANT_ID);
+
+        if (query.getDocumentType() != null && !query.getDocumentType().isBlank()) {
+            wrapper.eq(Document::getDocumentType, query.getDocumentType());
+        }
+        if (query.getCounterpartyName() != null && !query.getCounterpartyName().isBlank()) {
+            wrapper.like(Document::getCounterpartyNameSnapshot, query.getCounterpartyName().trim());
+        }
+        if (query.getStartDate() != null) {
+            wrapper.ge(Document::getTransactionDate, query.getStartDate());
+        }
+        if (query.getEndDate() != null) {
+            wrapper.le(Document::getTransactionDate, query.getEndDate());
+        }
+        if (query.getMinAmount() != null) {
+            wrapper.ge(Document::getAmount, query.getMinAmount());
+        }
+        if (query.getMaxAmount() != null) {
+            wrapper.le(Document::getAmount, query.getMaxAmount());
+        }
+        if (query.getDirection() != null && !query.getDirection().isBlank()) {
+            wrapper.eq(Document::getDirection, query.getDirection());
+        }
+        if (query.getStatus() != null && !query.getStatus().isBlank()) {
+            wrapper.eq(Document::getStatus, query.getStatus());
+        }
+        if (query.getLegalHoldFlag() != null) {
+            wrapper.eq(Document::getLegalHoldFlag, query.getLegalHoldFlag());
+        }
+
+        wrapper.orderByDesc(Document::getId);
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Document> pageResult = documentMapper.selectPage(pageParam, wrapper);
+
+        List<com.ses.dto.document.DocumentListDTO> dtoList = new ArrayList<>();
+        for (Document doc : pageResult.getRecords()) {
+            DocumentVersion latestVersion = documentVersionMapper.findLatestByDocumentId(doc.getId());
+            DocumentType type = documentTypeMapper.selectOne(new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
+
+            com.ses.dto.document.DocumentListDTO dto = com.ses.dto.document.DocumentListDTO.builder()
+                    .id(doc.getId())
+                    .tenantId(doc.getTenantId())
+                    .documentType(doc.getDocumentType())
+                    .documentTypeName(type != null ? type.getName() : doc.getDocumentType())
+                    .documentNo(doc.getDocumentNo())
+                    .title(doc.getTitle())
+                    .counterpartyType(doc.getCounterpartyType())
+                    .counterpartyNameSnapshot(doc.getCounterpartyNameSnapshot())
+                    .transactionDate(doc.getTransactionDate())
+                    .amount(doc.getAmount())
+                    .currency(doc.getCurrency())
+                    .direction(doc.getDirection())
+                    .status(doc.getStatus())
+                    .retentionUntil(doc.getRetentionUntil())
+                    .legalHoldFlag(doc.getLegalHoldFlag())
+                    .version(doc.getVersion())
+                    .latestVersionNo(latestVersion != null ? latestVersion.getVersionNo() : null)
+                    .latestOriginalName(latestVersion != null ? latestVersion.getOriginalName() : null)
+                    .latestSizeBytes(latestVersion != null ? latestVersion.getSizeBytes() : null)
+                    .latestSha256(latestVersion != null ? latestVersion.getSha256() : null)
+                    .createdAt(doc.getCreatedAt())
+                    .build();
+            dtoList.add(dto);
+        }
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.document.DocumentListDTO> dtoPage =
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageResult.getCurrent(), pageResult.getSize(), pageResult.getTotal());
+        dtoPage.setRecords(dtoList);
+        return dtoPage;
+    }
+
+    @Override
+    public com.ses.dto.document.DocumentDetailDTO getDocumentDetail(Long documentId) {
+        Document doc = getDocumentOrThrow(documentId);
+        DocumentType type = documentTypeMapper.selectOne(new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
+
+        List<DocumentVersion> versionEntities = documentVersionMapper.findByDocumentId(documentId);
+        List<com.ses.dto.document.DocumentVersionDTO> versionDTOs = new ArrayList<>();
+        for (DocumentVersion v : versionEntities) {
+            versionDTOs.add(com.ses.dto.document.DocumentVersionDTO.builder()
+                    .id(v.getId())
+                    .documentId(v.getDocumentId())
+                    .versionNo(v.getVersionNo())
+                    .storageKey(v.getStorageKey())
+                    .originalName(v.getOriginalName())
+                    .contentType(v.getContentType())
+                    .sizeBytes(v.getSizeBytes())
+                    .sha256(v.getSha256())
+                    .sourceType(v.getSourceType())
+                    .businessKey(v.getBusinessKey())
+                    .versionDiscriminator(v.getVersionDiscriminator())
+                    .externalId(v.getExternalId())
+                    .scanStatus(v.getScanStatus())
+                    .changeReason(v.getChangeReason())
+                    .createdBy(v.getCreatedBy())
+                    .createdAt(v.getCreatedAt())
+                    .build());
+        }
+
+        List<DocumentLink> linkEntities = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, documentId));
+        List<com.ses.dto.document.DocumentLinkDTO> linkDTOs = new ArrayList<>();
+        for (DocumentLink l : linkEntities) {
+            linkDTOs.add(com.ses.dto.document.DocumentLinkDTO.builder()
+                    .id(l.getId())
+                    .documentId(l.getDocumentId())
+                    .targetType(l.getTargetType())
+                    .targetId(l.getTargetId())
+                    .createdAt(l.getCreatedAt())
+                    .build());
+        }
+
+        return com.ses.dto.document.DocumentDetailDTO.builder()
+                .id(doc.getId())
+                .tenantId(doc.getTenantId())
+                .documentType(doc.getDocumentType())
+                .documentTypeName(type != null ? type.getName() : doc.getDocumentType())
+                .documentNo(doc.getDocumentNo())
+                .title(doc.getTitle())
+                .counterpartyType(doc.getCounterpartyType())
+                .counterpartyId(doc.getCounterpartyId())
+                .counterpartyNameSnapshot(doc.getCounterpartyNameSnapshot())
+                .transactionDate(doc.getTransactionDate())
+                .amount(doc.getAmount())
+                .currency(doc.getCurrency())
+                .direction(doc.getDirection())
+                .status(doc.getStatus())
+                .retentionUntil(doc.getRetentionUntil())
+                .legalHoldFlag(doc.getLegalHoldFlag())
+                .version(doc.getVersion())
+                .createdAt(doc.getCreatedAt())
+                .updatedAt(doc.getUpdatedAt())
+                .versions(versionDTOs)
+                .links(linkDTOs)
+                .build();
     }
 
     static String computeSha256(byte[] data) {

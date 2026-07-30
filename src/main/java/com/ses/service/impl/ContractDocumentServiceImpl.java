@@ -17,6 +17,7 @@ import java.nio.file.*;
 import java.security.MessageDigest;
 import java.util.*;
 
+@lombok.extern.slf4j.Slf4j
 @Service
 @RequiredArgsConstructor
 public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMapper, ContractDocument> implements ContractDocumentService {
@@ -27,6 +28,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.FileSecurityMetadataMapper> metadataMapperProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.FileScanner> fileScannerProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
     
     @Value("${app.upload.base-path:./uploads}")
     private String uploadBase;
@@ -91,6 +93,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         save(d);
         if (d.getPdfPath() != null) {
             recordSelfGeneratedMetadata(Paths.get(d.getPdfPath()), d.getId());
+            registerToDocumentLedger(d, c);
         }
         return d;
     }
@@ -316,6 +319,42 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
                     throw BusinessException.of("error.file.saveFailed");
                 }
             }
+        }
+    }
+
+    private void registerToDocumentLedger(ContractDocument doc, Contract contract) {
+        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
+        if (docService == null || doc.getPdfPath() == null) {
+            return;
+        }
+        try {
+            Path path = Paths.get(doc.getPdfPath());
+            if (!Files.exists(path)) {
+                return;
+            }
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("CONTRACT")
+                    .title("契約書 PDF: " + Objects.toString(contract.getContractNo(), "ID:" + contract.getId()))
+                    .documentNo(contract.getContractNo())
+                    .counterpartyType("CUSTOMER")
+                    .counterpartyId(contract.getCustomerId())
+                    .transactionDate(contract.getStartDate())
+                    .amount(contract.getSellingPrice())
+                    .direction("OUTGOING")
+                    .originalName(path.getFileName().toString())
+                    .contentType("application/pdf")
+                    .sourceType("GENERATED")
+                    .businessKey("CONTRACT:" + contract.getId() + ":DOC:" + doc.getId())
+                    .versionDiscriminator("v1")
+                    .targetType("CONTRACT")
+                    .targetId(contract.getId())
+                    .build();
+
+            try (java.io.InputStream is = Files.newInputStream(path)) {
+                docService.registerGenerated(req, is);
+            }
+        } catch (Exception e) {
+            log.warn("[帳票連携] 法定文書台帳への自動登録に失敗しました: contractId={} error={}", contract.getId(), e.getMessage());
         }
     }
 }

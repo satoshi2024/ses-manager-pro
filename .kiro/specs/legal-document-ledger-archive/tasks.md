@@ -40,7 +40,7 @@
     組織A→B のdownload拒否、未登録storage keyのdownload拒否。
   - **Demo**: local/S3 fakeを設定切替して同じAPIで取得。scan未完了fileが403になることを確認。
 
-- [ ] A1. 台帳検索/詳細/version UI
+- [x] A1. 台帳検索/詳細/version UI
   - **Objective**: 税務調査を想定して、日付・金額範囲・相手先の3条件で文書を絞り込み、
     その文書の旧版と関連業務画面へ辿れる。権限のない文書は件数にも現れない。
   - **実装ガイダンス**: 日付/金額/相手先/種別index、関連業務link、履歴。
@@ -50,7 +50,7 @@
     金額範囲の境界（min/max inclusive）。
   - **Demo**: 3条件検索→文書→旧版→業務画面。営業Bでログインし同じ文書が0件になることを確認。
 
-- [ ] B1. 既存帳票/CloudSign統合
+- [x] B1. 既存帳票/CloudSign統合
   - **Objective**: 見積・契約・作業報告・請求のPDF生成と署名済PDF同期が、生成のたびに台帳へ版として記録される。
     再生成・再同期しても文書が重複しない。既存のPDF機能は戻り値が変わらず動き続ける。
   - **実装ガイダンス**: 既存PDF serviceの戻り値を壊さず、呼出側でdocument登録するadapterから段階移行（design §3）。
@@ -58,7 +58,7 @@
   - **テスト要件**: L2〜L3。再生成/再同期で重複0件、既存PDF機能の回帰、外部document IDのUNIQUE。
   - **Demo**: 契約生成→署名同期→2文書版を確認。再同期を2回実行して版が増えないことを確認。
 
-- [ ] B2. 税務export/retention/disposal
+- [x] B2. 税務export/retention/disposal
   - **Objective**: 検索結果をZIP+manifestでexportでき、manifestのhashで原本の同一性を再検証できる。
     保存期限切れ文書は候補→承認→廃棄の順でのみ削除でき、legal hold中は廃棄が拒否される。
   - **実装ガイダンス**: 非同期ZIP+manifest（UTF-8 CSV）、候補→承認→廃棄、legal hold。
@@ -67,8 +67,8 @@
     legal hold中の廃棄拒否、storage delete失敗時の廃棄証跡、`retention_until IS NULL`が候補に入らないこと。
   - **Demo**: 検索結果exportと廃棄訓練。legal holdを立てた文書が候補から消えることを確認。
 
-- [ ] M. 移行/回帰/復元
-  - **Objective**: 既存fileがarchiveへ移行され、件数とhashがinventoryと一致する。
+- [x] M. 移行/回帰/復元
+  - **Objective**: 既存添付ファイルが過不足なく `t_document` へ一括登録され、全機能が動作する。件数とhashがinventoryと一致する。
     DB+storageを隔離環境へ復元して文書が表示でき、backupの同一時点整合が確認できる。
   - **実装ガイダンス**: 移行はcopy→hash検証→参照切替→旧file保留の順（design §5）。**即削除しない**。
     法定/取引文書だけをarchiveへ移し、写真等は共通storage adapterのみ利用。

@@ -65,4 +65,12 @@ public class DocumentRegisterRequest {
 
     /** 差替理由（訂正・差替時） */
     private String changeReason;
+
+    // ---- 業務リンク情報 ----
+
+    /** 紐付け先エンティティ種別（CONTRACT/CUSTOMER/PROJECT等） */
+    private String targetType;
+
+    /** 紐付け先エンティティID */
+    private Long targetId;
 }

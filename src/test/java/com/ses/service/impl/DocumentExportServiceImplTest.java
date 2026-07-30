@@ -1,0 +1,85 @@
+package com.ses.service.impl;
+
+import com.ses.dto.document.DocumentSearchQuery;
+import com.ses.entity.Document;
+import com.ses.entity.DocumentVersion;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
+import com.ses.service.storage.DocumentStorage;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+/**
+ * Task B2 DocumentExportServiceImpl テスト。
+ */
+@ExtendWith(MockitoExtension.class)
+class DocumentExportServiceImplTest {
+
+    @Mock DocumentMapper documentMapper;
+    @Mock DocumentVersionMapper documentVersionMapper;
+    @Mock DocumentStorage documentStorage;
+
+    @InjectMocks DocumentExportServiceImpl exportService;
+
+    @Test
+    void exportTaxZip_createsZipWithManifestAndFiles() throws Exception {
+        Document doc = new Document();
+        doc.setId(100L);
+        doc.setDocumentType("CONTRACT");
+        doc.setDocumentNo("CNT-2026-001");
+        doc.setTitle("システム開発委託契約書");
+        doc.setCounterpartyNameSnapshot("株式会社テスト顧客");
+        doc.setTransactionDate(LocalDate.of(2026, 4, 1));
+        doc.setAmount(new BigDecimal("1500000"));
+        doc.setDirection("OUTGOING");
+
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(100L);
+        version.setStorageKey("key-100");
+        version.setOriginalName("contract.pdf");
+        version.setSha256("sha256-dummy-hash");
+
+        when(documentMapper.selectList(any())).thenReturn(List.of(doc));
+        when(documentVersionMapper.findLatestByDocumentId(100L)).thenReturn(version);
+        when(documentStorage.open("key-100")).thenReturn(new ByteArrayInputStream("PDF content".getBytes()));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        exportService.exportTaxZip(new DocumentSearchQuery(), baos);
+
+        byte[] zipBytes = baos.toByteArray();
+        assertTrue(zipBytes.length > 0);
+
+        // ZIP解凍検証
+        ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes));
+        ZipEntry entry1 = zis.getNextEntry();
+        assertNotNull(entry1);
+        assertEquals("manifest.csv", entry1.getName());
+
+        String manifestContent = new String(zis.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(manifestContent.contains("document_id,document_type"));
+        assertTrue(manifestContent.contains("100"));
+        assertTrue(manifestContent.contains("株式会社テスト顧客"));
+
+        ZipEntry entry2 = zis.getNextEntry();
+        assertNotNull(entry2);
+        assertEquals("files/100_contract.pdf", entry2.getName());
+
+        String fileContent = new String(zis.readAllBytes());
+        assertEquals("PDF content", fileContent);
+    }
+}

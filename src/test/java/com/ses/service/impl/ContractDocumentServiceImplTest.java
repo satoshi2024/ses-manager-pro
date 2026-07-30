@@ -10,6 +10,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractTemplateMapper;
 import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.CloudSignClient;
+import com.ses.service.DocumentService;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,10 +58,12 @@ class ContractDocumentServiceImplTest {
         ObjectProvider<FileScanner> fileScannerProvider = mock(ObjectProvider.class);
         when(fileScannerProvider.getIfAvailable()).thenReturn(fileScanner);
 
+        ObjectProvider<DocumentService> documentServiceProvider = mock(ObjectProvider.class);
+
         ContractDocumentMapper baseMapper = mock(ContractDocumentMapper.class);
 
         service = new ContractDocumentServiceImpl(templateMapper, contractMapper, cloudSignClient,
-                pdfFontUtils, metadataMapperProvider, fileScannerProvider);
+                pdfFontUtils, metadataMapperProvider, fileScannerProvider, documentServiceProvider);
         ReflectionTestUtils.setField(service, "baseMapper", baseMapper);
         ReflectionTestUtils.setField(service, "uploadBase", tempDir.toString());
 

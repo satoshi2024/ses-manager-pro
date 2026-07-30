@@ -125,12 +125,21 @@ public interface DocumentService {
     void confirm(Long documentId);
 
     /**
-     * 文書の最新版をダウンロード用InputStreamとして返す。
-     * scan未完了・未知のファイルは BusinessException（fail-closed）。
+     * 条件付き文書台帳検索（ページネーション・認可母集団適用）。
+     */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.document.DocumentListDTO> searchDocuments(com.ses.dto.document.DocumentSearchQuery query);
+
+    /**
+     * 文書詳細取得（版履歴・リンク一覧を含む）。
+     */
+    com.ses.dto.document.DocumentDetailDTO getDocumentDetail(Long documentId);
+
+    /**
+     * 最新または指定版のファイルをダウンロード用ストリームとして開く。
      *
-     * @param documentId   文書ID
-     * @param versionNo    版番号（null=最新版）
-     * @return バイナリストリーム
+     * @param documentId 文書ID
+     * @param versionNo  版番号（nullの場合は最新版）
+     * @return 入力ストリーム
      */
     InputStream download(Long documentId, Integer versionNo);
 }

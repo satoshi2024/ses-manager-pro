@@ -24,6 +24,7 @@ public final class ActionPermissionResolver {
             Map.entry("contracts", "contract"),
             Map.entry("customers", "customer"),
             Map.entry("dashboard", "dashboard"),
+            Map.entry("documents", "document"),
             Map.entry("email-templates", "email"),
             Map.entry("engineers", "engineer"),
             Map.entry("files", "file"),
@@ -131,6 +132,9 @@ public final class ActionPermissionResolver {
         }
         if (matchesPrefix(uri, "/api/invoices")) {
             return action("invoice", method);
+        }
+        if (matchesPrefix(uri, "/api/documents")) {
+            return action("document", method);
         }
         if (matchesPrefix(uri, "/api/payroll")) {
             return "payroll.view";
