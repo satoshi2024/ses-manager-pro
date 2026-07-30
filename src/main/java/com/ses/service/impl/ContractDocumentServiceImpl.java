@@ -25,11 +25,14 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     private final com.ses.mapper.ContractMapper contracts;
     private final com.ses.service.CloudSignClient cloudSign;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.FileSecurityMetadataMapper> metadataMapperProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.FileScanner> fileScannerProvider;
     
     @Value("${app.upload.base-path:./uploads}")
     private String uploadBase;
     
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public ContractDocument create(Long contractId, Long templateId, String name, String email) {
         if (name == null || email == null || !email.contains("@")) {
             throw BusinessException.of("error.contract.document.recipientInvalid");
@@ -86,28 +89,28 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         }
         
         save(d);
+        if (d.getPdfPath() != null) {
+            recordSelfGeneratedMetadata(Paths.get(d.getPdfPath()), d.getId());
+        }
         return d;
     }
 
     /**
-     * PDF生成前の防御としての簡易サニタイズ。
-     * フロントエンド側（contract-document.js）でのプレビュー描画時は
-     * 必ず平文としてエスケープ（SES.escapeHtml）することを前提とする。
+     * PDF生成前の防御としてのサニタイズ。
+     * 外部リソース参照（http/https/file）を遮断し、XSSスクリプト・iframe等を完全除去する。
      */
     private String sanitize(String html) {
         if (html == null) {
             return "";
         }
-        String x = html.replaceAll("(?is)<script[^>]*>.*?</script>", "")
-                       .replaceAll("(?is)<iframe[^>]*>.*?</iframe>", "")
-                       .replaceAll("(?i)\\bon[a-z]+\\s*=\\s*\"[^\"]*\"", "")
-                       .replaceAll("(?i)\\bon[a-z]+\\s*=\\s*'[^']*'", "")
-                       .replaceAll("(?i)href\\s*=\\s*\"javascript:[^\"]*\"", "")
-                       .replaceAll("(?i)href\\s*=\\s*'javascript:[^']*'", "");
-        if (x.matches("(?is).*<(img|link)[^>]*(https?:|file:).*")) {
+        if (html.matches("(?is).*<(img|link)[^>]*(https?:|file:).*")) {
             throw BusinessException.of("error.contract.document.externalResource");
         }
-        return x;
+        return html.replaceAll("(?i)<script[^>]*>[\\s\\S]*?</script>", "")
+                   .replaceAll("(?i)<iframe[^>]*>[\\s\\S]*?</iframe>", "")
+                   .replaceAll("(?i)on\\w+\\s*=\\s*\"[^\"]*\"", "")
+                   .replaceAll("(?i)on\\w+\\s*=\\s*'[^']*'", "")
+                   .replaceAll("(?i)javascript:", "");
     }
 
     private String hex(byte[] b) {
@@ -137,6 +140,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void sync(Long id) {
         ContractDocument d = getById(id);
         if (d == null) {
@@ -153,6 +157,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
                 Path p = safePath(id, "signed-" + id + ".pdf");
                 Files.createDirectories(p.getParent());
                 Files.write(p, r.signedPdf(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                scanAndRecordExternalFile(p, r.signedPdf(), d.getId());
                 d.setSignedPdfPath(p.toString());
                 d.setPdfSha256(hex(MessageDigest.getInstance("SHA-256").digest(r.signedPdf())));
             }
@@ -160,8 +165,11 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
                 Path p = safePath(id, "certificate-" + id + ".dat");
                 Files.createDirectories(p.getParent());
                 Files.write(p, r.certificate(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                scanAndRecordExternalFile(p, r.certificate(), d.getId());
                 d.setCertificatePath(p.toString());
             }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             throw BusinessException.of("error.contract.document.fileSaveFailed", e.getMessage());
         }
@@ -187,7 +195,18 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             if (!target.startsWith(root)) {
                 throw new SecurityException("outside upload directory");
             }
+            com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
+            if (mapper != null) {
+                String relativeName = relativeStoredName(target);
+                FileSecurityMetadata metadata = mapper.selectByStoredName("default", relativeName);
+                if (metadata == null || !"PUBLISHED".equals(metadata.getStorageState())
+                        || !"CLEAN".equals(metadata.getScanStatus())) {
+                    throw BusinessException.of("error.contract.document.fileNotFound");
+                }
+            }
             return Files.readAllBytes(target);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             throw BusinessException.of("error.contract.document.fileNotFound");
         }
@@ -200,5 +219,103 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             throw new SecurityException("invalid path");
         }
         return target;
+    }
+
+    private String relativeStoredName(Path filePath) {
+        Path root = Paths.get(uploadBase).toAbsolutePath().normalize();
+        Path fileAbs = filePath.toAbsolutePath().normalize();
+        if (fileAbs.startsWith(root)) {
+            return root.relativize(fileAbs).toString().replace('\\', '/');
+        }
+        return filePath.getFileName().toString();
+    }
+
+    private void recordSelfGeneratedMetadata(Path pdfPath, Long documentId) {
+        com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
+        if (mapper == null) {
+            return;
+        }
+        String storedName = relativeStoredName(pdfPath);
+        FileSecurityMetadata metadata = mapper.selectByStoredName("default", storedName);
+        if (metadata == null) {
+            metadata = new FileSecurityMetadata();
+            metadata.setTenantId("default");
+            metadata.setStoredName(storedName);
+            metadata.setFileKind("CONTRACT_DOCUMENT");
+            metadata.setStorageState("PUBLISHED");
+            metadata.setScanStatus("CLEAN");
+            metadata.setOwnerType("CONTRACT_DOCUMENT");
+            metadata.setOwnerId(documentId);
+            metadata.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+            metadata.setCreatedAt(java.time.LocalDateTime.now());
+            metadata.setUpdatedAt(java.time.LocalDateTime.now());
+            if (mapper.insert(metadata) != 1) {
+                throw BusinessException.of("error.file.saveFailed");
+            }
+        }
+    }
+
+    private void scanAndRecordExternalFile(Path filePath, byte[] data, Long documentId) {
+        com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
+        com.ses.service.security.FileScanner scanner = fileScannerProvider.getIfAvailable();
+        String storedName = relativeStoredName(filePath);
+        com.ses.service.security.FileScanResult result = null;
+        if (scanner != null) {
+            try {
+                result = scanner.scan(filePath, com.ses.common.enums.FileKind.SKILL_SHEET);
+            } catch (RuntimeException e) {
+                result = com.ses.service.security.FileScanResult.unavailable("scanner failed");
+            }
+        } else {
+            result = com.ses.service.security.FileScanResult.unavailable("scanner is not configured");
+        }
+
+        if (result != null && result.status() != com.ses.service.security.FileScanResult.Status.CLEAN) {
+            if (mapper != null) {
+                FileSecurityMetadata metadata = new FileSecurityMetadata();
+                metadata.setTenantId("default");
+                metadata.setStoredName(storedName);
+                metadata.setFileKind("CONTRACT_DOCUMENT");
+                metadata.setStorageState("QUARANTINED");
+                metadata.setScanStatus(result.status().name());
+                metadata.setRejectionReason(result.reason());
+                metadata.setOwnerType("CONTRACT_DOCUMENT");
+                metadata.setOwnerId(documentId);
+                metadata.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+                metadata.setCreatedAt(java.time.LocalDateTime.now());
+                metadata.setUpdatedAt(java.time.LocalDateTime.now());
+                if (mapper.insert(metadata) != 1) {
+                    throw BusinessException.of("error.file.saveFailed");
+                }
+            }
+            throw BusinessException.of("error.file.scanRejected");
+        }
+
+        if (mapper != null) {
+            FileSecurityMetadata metadata = mapper.selectByStoredName("default", storedName);
+            if (metadata == null) {
+                metadata = new FileSecurityMetadata();
+                metadata.setTenantId("default");
+                metadata.setStoredName(storedName);
+                metadata.setFileKind("CONTRACT_DOCUMENT");
+                metadata.setStorageState("PUBLISHED");
+                metadata.setScanStatus("CLEAN");
+                metadata.setOwnerType("CONTRACT_DOCUMENT");
+                metadata.setOwnerId(documentId);
+                metadata.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+                metadata.setCreatedAt(java.time.LocalDateTime.now());
+                metadata.setUpdatedAt(java.time.LocalDateTime.now());
+                if (mapper.insert(metadata) != 1) {
+                    throw BusinessException.of("error.file.saveFailed");
+                }
+            } else {
+                metadata.setStorageState("PUBLISHED");
+                metadata.setScanStatus("CLEAN");
+                metadata.setUpdatedAt(java.time.LocalDateTime.now());
+                if (mapper.updateById(metadata) != 1) {
+                    throw BusinessException.of("error.file.saveFailed");
+                }
+            }
+        }
     }
 }

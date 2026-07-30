@@ -142,6 +142,33 @@ class ActionPermissionMatrixTest {
                 authenticate(9999L, "営業"), "future-sensitive.view"));
     }
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @Test
+    void permissionGroupSeedの内容そのものを検査する() {
+        // 非管理者group (2, 3, 4, 5) に action_key='*' AND deny_flag=0 が存在しないこと
+        Integer nonAdminWildcardCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id IN (2, 3, 4, 5) AND action_key = '*' AND deny_flag = 0",
+                Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(0, nonAdminWildcardCount, "非管理者groupに全局*許可が存在する");
+
+        // role-admin (group 1) に baseline ('*') が1件存在すること
+        Integer adminBaselineCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 1 AND action_key = '*' AND deny_flag = 0",
+                Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(1, adminBaselineCount, "管理者groupにbaselineが未セット");
+
+        // manager(4) と sales(2) の deny 行がそれぞれ5件存在すること
+        Integer salesDenyCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 AND deny_flag = 1", Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(5, salesDenyCount, "営業groupのdeny行数が不一致");
+
+        Integer managerDenyCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 AND deny_flag = 1", Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(5, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+    }
+
     private Authentication authenticate(Long id, String role) {
         SysUser user = new SysUser();
         user.setId(id);

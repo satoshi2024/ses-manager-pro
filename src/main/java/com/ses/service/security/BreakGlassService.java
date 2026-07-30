@@ -10,6 +10,12 @@ public interface BreakGlassService {
     String INCIDENT_ID_ATTRIBUTE = "SES_BREAK_GLASS_INCIDENT_ID";
     String EXPIRES_AT_ATTRIBUTE = "SES_BREAK_GLASS_EXPIRES_AT";
 
+    enum BreakGlassDecision {
+        ALLOW,
+        DENY_SCOPE,
+        REVOKE
+    }
+
     boolean hasActiveIncident();
     boolean isLoginAllowed(String username);
     BreakGlassIncident create(Long actorId, String reason, boolean idpOutageConfirmed,
@@ -17,5 +23,5 @@ public interface BreakGlassService {
     BreakGlassIncident approve(Long actorId, Long incidentId);
     void close(Long actorId, Long incidentId);
     boolean bindSession(HttpServletRequest request, String username);
-    boolean validateBoundSession(HttpServletRequest request, Authentication authentication);
+    BreakGlassDecision validateBoundSession(HttpServletRequest request, Authentication authentication);
 }

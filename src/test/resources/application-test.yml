@@ -74,7 +74,7 @@ app:
     oidc:
       enabled: false
       local-login-enabled: true
-      tenant-id: test-tenant
+      tenant-id: default
       break-glass-usernames: []
   mail:
     from: test@example.com

@@ -81,16 +81,93 @@ class BreakGlassFilterChainIntegrationTest {
         verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
     }
 
+    /**
+     * R07-P1-01修正: scope外の通知API直接要求はsessionを失効させず403と必備監査のみ返す。
+     * （従来は失効させていたが、IdP停止中にセッションが破壊される問題を防ぐため403化へ移行した）。
+     */
     @Test
-    void dashboardScopeで通知Apiを直接要求するとsessionを失効する() throws Exception {
+    void dashboardScopeで通知Apiを直接要求すると失効せず403と必備監査を返す() throws Exception {
         when(incidentMapper.selectById(10L)).thenReturn(activeIncident());
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         mockMvc.perform(get("/api/notifications")
                         .session(boundSession()).with(breakGlassAuthentication()))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION"));
 
-        verify(persistentSessionService).revokeCurrent(any(), any(), eq("BREAK_GLASS_SCOPE_VIOLATION"));
+        verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
+        verify(auditLogService).recordRequired(eq("BG-01"), eq("GET"), eq("/api/notifications"), eq(403), eq("BREAK_GLASS_SCOPE_VIOLATION"), eq(false));
+    }
+
+    @Test
+    void engineerListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
+        BreakGlassIncident incident = activeIncident();
+        incident.setAllowedActions("engineer.view");
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+
+        MockHttpSession session = boundSession();
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+
+        // engineer/list 画面到達は許可される
+        mockMvc.perform(get("/engineer/list").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isOk());
+
+        // 受動API（autocomplete/skill-tags）はscope外のため403を返すが、sessionは維持される
+        mockMvc.perform(get("/api/autocomplete/organizations").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION"));
+
+        mockMvc.perform(get("/api/skill-tags").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden());
+
+        // scope外の更新系（DELETE）も403となり、かつsessionは失効しない
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/engineers/1")
+                        .session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden());
+
+        verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
+        verify(auditLogService).recordRequired(eq("BG-01"), eq("GET"), eq("/api/autocomplete/organizations"), eq(403), eq("BREAK_GLASS_SCOPE_VIOLATION"), eq(false));
+    }
+
+    @Test
+    void contractListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
+        BreakGlassIncident incident = activeIncident();
+        incident.setAllowedActions("contract.view");
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+
+        MockHttpSession session = boundSession();
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+
+        mockMvc.perform(get("/contract/list").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/notifications").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION"));
+
+        verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
+    }
+
+    @Test
+    void projectListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
+        BreakGlassIncident incident = activeIncident();
+        incident.setAllowedActions("project.view");
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+
+        MockHttpSession session = boundSession();
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+
+        mockMvc.perform(get("/project/list").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/notifications").session(session).with(breakGlassAuthentication()))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION"));
+
+        verify(persistentSessionService, never()).revokeCurrent(any(), any(), any());
     }
 
     @Test
@@ -104,8 +181,7 @@ class BreakGlassFilterChainIntegrationTest {
 
         mockMvc.perform(get("/future-sensitive")
                         .session(boundSession()).with(breakGlassAuthentication()))
-                .andExpect(status().is3xxRedirection())
-                .andExpect(header().string("Location", "/login?sessionExpired"));
+                .andExpect(status().isForbidden());
     }
 
     private MockHttpSession boundSession() {
@@ -128,7 +204,7 @@ class BreakGlassFilterChainIntegrationTest {
     private BreakGlassIncident activeIncident() {
         BreakGlassIncident incident = new BreakGlassIncident();
         incident.setId(10L);
-        incident.setTenantId("test-tenant");
+        incident.setTenantId("default");
         incident.setStatus("ACTIVE");
         incident.setIdpOutageConfirmed(1);
         incident.setApprovedBy1(11L);

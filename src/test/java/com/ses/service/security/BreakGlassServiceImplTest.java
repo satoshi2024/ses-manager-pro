@@ -108,19 +108,19 @@ class BreakGlassServiceImplTest {
         MockHttpServletRequest request = boundRequest("dashboard.view");
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertFalse(service.validateBoundSession(request, authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.REVOKE, service.validateBoundSession(request, authentication));
         verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_INCIDENT_EXPIRED");
     }
 
     @Test
-    void 承認scope外のactionは既存sessionを即時失効する() {
+    void 承認scope外のactionはDENY_SCOPEを返しsessionは維持する() {
         BreakGlassIncident incident = active();
         when(incidentMapper.selectById(10L)).thenReturn(incident);
         MockHttpServletRequest request = boundRequest("invoice.view");
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertFalse(service.validateBoundSession(request, authentication));
-        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
+        verifyNoInteractions(sessionService);
     }
 
     @Test
@@ -132,8 +132,8 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertFalse(service.validateBoundSession(request, authentication));
-        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
+        verifyNoInteractions(sessionService);
     }
 
     @Test
@@ -145,7 +145,7 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertTrue(service.validateBoundSession(request, authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request, authentication));
     }
 
     @Test
@@ -156,8 +156,8 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertFalse(service.validateBoundSession(request, authentication));
-        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
+        verifyNoInteractions(sessionService);
     }
 
     @Test
@@ -170,11 +170,11 @@ class BreakGlassServiceImplTest {
                 "/img/logo.svg", "/favicon.ico")) {
             MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
             request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-            assertTrue(service.validateBoundSession(request, authentication), uri);
+            assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request, authentication), uri);
         }
         MockHttpServletRequest headRequest = new MockHttpServletRequest("HEAD", "/css/common.css");
         headRequest.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        assertTrue(service.validateBoundSession(headRequest, authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(headRequest, authentication));
 
         verifyNoInteractions(sessionService);
     }
@@ -186,8 +186,8 @@ class BreakGlassServiceImplTest {
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
         var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
 
-        assertFalse(service.validateBoundSession(request, authentication));
-        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
+        verifyNoInteractions(sessionService);
     }
 
     @Test
@@ -198,12 +198,12 @@ class BreakGlassServiceImplTest {
         dispatch.setDispatcherType(DispatcherType.ERROR);
         dispatch.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
 
-        assertTrue(service.validateBoundSession(dispatch, authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(dispatch, authentication));
 
         MockHttpServletRequest direct = new MockHttpServletRequest("GET", "/error");
         direct.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        assertFalse(service.validateBoundSession(direct, authentication));
-        verify(sessionService).revokeCurrent(direct, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(direct, authentication));
+        verifyNoInteractions(sessionService);
     }
 
     @Test
@@ -215,7 +215,7 @@ class BreakGlassServiceImplTest {
                 "POST", "/api/security/mfa/123/reset");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
 
-        assertTrue(service.validateBoundSession(request,
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request,
                 new UsernamePasswordAuthenticationToken("BG-01", "n/a")));
     }
 

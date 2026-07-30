@@ -23,8 +23,8 @@ import org.springframework.stereotype.Service;
  * ファイルダウンロード時のアクセス制御（A8-04）を行うサービス。
  *
  * <p><b>ファイルを保存する機能を追加したら、必ずここに判定を1つ足すこと。</b>
- * 末尾のフォールスルーは「該当なし＝許可」であり、登録漏れは黙って
- * 認証済み全ユーザーへの公開になる（取込機能の原本は氏名・連絡先を含むPIIを持つ）。
+ * 未登録・未知のstoredNameは error.file.unknownReference で拒否する（fail-closed）。
+ * ファイル保存機能を追加した際の判定追加漏れは正当なダウンロードが403拒否となる。
  * 孤児清理の {@code FileReferenceProvider} と対で必要になる点に注意。
  */
 @Service

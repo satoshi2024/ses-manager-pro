@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
 import com.ses.service.security.BreakGlassService;
@@ -104,8 +105,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         if (session == null || session.getAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE) == null) {
             return false;
         }
-        String uri = request.getRequestURI();
-        return uri != null && !uri.startsWith("/css/") && !uri.startsWith("/js/")
-                && !uri.startsWith("/img/") && !uri.startsWith("/lib/");
+        return !SecurityInfrastructureUtils.isStaticResource(request)
+                && !SecurityInfrastructureUtils.isErrorDispatch(request);
     }
 }

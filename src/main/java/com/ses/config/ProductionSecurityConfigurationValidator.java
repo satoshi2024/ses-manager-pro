@@ -32,6 +32,7 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     private final PersistentSessionProperties sessionProperties;
     private final SysUserMapper sysUserMapper;
     private final UserMfaMapper userMfaMapper;
+    private final com.ses.mapper.PermissionGroupMapper permissionGroupMapper;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -51,6 +52,7 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             errors.add("break-glass login入口を有効化してください");
         }
         validateBreakGlassUsers(errors);
+        validateDefaultPermissionGroups(errors);
         if (!mfaProperties.isEnabled() || !mfaProperties.isRequiredForBreakGlass()) {
             errors.add("break-glass MFAを必須化してください");
         }
@@ -65,6 +67,20 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         if (!errors.isEmpty()) {
             throw new IllegalStateException("本番security configurationが安全な既定値を満たしません: "
                     + String.join("; ", errors));
+        }
+    }
+
+    private void validateDefaultPermissionGroups(List<String> errors) {
+        String tenantId = StringUtils.hasText(oidcProperties.getTenantId()) ? oidcProperties.getTenantId() : "default";
+        List<String> requiredGroupKeys = List.of("role-admin", "role-sales", "role-hr", "role-manager", "role-member");
+        for (String groupKey : requiredGroupKeys) {
+            Long count = permissionGroupMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.PermissionGroup>()
+                    .eq(com.ses.entity.PermissionGroup::getTenantId, tenantId)
+                    .eq(com.ses.entity.PermissionGroup::getGroupKey, groupKey)
+                    .eq(com.ses.entity.PermissionGroup::getEnabled, 1));
+            if (count == null || count == 0) {
+                errors.add("設定tenant(" + tenantId + ")にdefault permission groupが存在しません: " + groupKey);
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.SecurityInfrastructureUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,7 +48,7 @@ public class MfaEnforcementFilter extends OncePerRequestFilter {
                 || uri.equals("/api/security/mfa/enable")
                 || uri.equals("/api/security/mfa/verify");
         return uri.equals("/logout") || uri.startsWith("/mfa/") || mfaFlowEndpoint
-                || uri.equals("/error") || uri.startsWith("/css/") || uri.startsWith("/js/")
-                || uri.startsWith("/img/") || uri.startsWith("/lib/");
+                || SecurityInfrastructureUtils.isStaticResource(request)
+                || SecurityInfrastructureUtils.isErrorDispatch(request);
     }
 }

@@ -8,11 +8,11 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.AuditLogMapper;
 import com.ses.mapper.BreakGlassIncidentMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.service.security.BreakGlassService;
 import com.ses.service.security.ActionPermissionResolver;
 import com.ses.service.security.PersistentSessionService;
 import com.ses.service.NotificationService;
-import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
@@ -143,9 +143,9 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     }
 
     @Override
-    public boolean validateBoundSession(HttpServletRequest request, Authentication authentication) {
+    public BreakGlassDecision validateBoundSession(HttpServletRequest request, Authentication authentication) {
         if (authentication == null || !properties.isBreakGlassUsername(authentication.getName())) {
-            return true;
+            return BreakGlassDecision.ALLOW;
         }
         HttpSession session = request.getSession(false);
         if (session == null || !(session.getAttribute(INCIDENT_ID_ATTRIBUTE) instanceof Long incidentId)) {
@@ -162,17 +162,17 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!isActiveBoundIncident(incident, now)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_EXPIRED");
         }
+        if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
+            return BreakGlassDecision.ALLOW;
+        }
         String action = (String) request.getAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE);
         if (!StringUtils.hasText(action)) {
             action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
         }
-        if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
-            return true;
-        }
         if (!StringUtils.hasText(action) || !allowedActions(incident).contains(action)) {
-            return revokeAndReject(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+            return BreakGlassDecision.DENY_SCOPE;
         }
-        return true;
+        return BreakGlassDecision.ALLOW;
     }
 
     @Override
@@ -213,7 +213,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         try {
             return incidentMapper.selectActive(tenantId(), LocalDateTime.now(clock));
         } catch (RuntimeException e) {
-            log.warn("break-glass incidentを取得できないためsessionを発行しません", e);
+            log.warn("break-glass incidentを取得出来ないためsessionを発行しません", e);
             return null;
         }
     }
@@ -233,19 +233,10 @@ public class BreakGlassServiceImpl implements BreakGlassService {
                 request.getMethod(), request.getRequestURI());
     }
 
-    /** incidentを再検証した上で、画面描画に不可欠な非業務requestだけscope対象外とする。 */
+    /** incidentを再検証した上で、画面描画に不可欠な静的リソースとERRORディスパッチだけscope対象外とする。 */
     private boolean isPassiveInfrastructure(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        if (request.getDispatcherType() == DispatcherType.ERROR) {
-            return "/error".equals(uri);
-        }
-        String method = request.getMethod();
-        if (!("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))) {
-            return false;
-        }
-        return uri != null && (uri.startsWith("/css/") || uri.startsWith("/js/")
-                || uri.startsWith("/lib/") || uri.startsWith("/img/")
-                || uri.equals("/favicon.ico"));
+        return SecurityInfrastructureUtils.isStaticResource(request)
+                || SecurityInfrastructureUtils.isErrorDispatch(request);
     }
 
     private Set<String> allowedActions(BreakGlassIncident incident) {
@@ -256,13 +247,13 @@ public class BreakGlassServiceImpl implements BreakGlassService {
                 .map(String::trim).filter(StringUtils::hasText).collect(Collectors.toUnmodifiableSet());
     }
 
-    private boolean revokeAndReject(HttpServletRequest request, Authentication authentication, String reason) {
+    private BreakGlassDecision revokeAndReject(HttpServletRequest request, Authentication authentication, String reason) {
         try {
             persistentSessionService.revokeCurrent(request, authentication, reason);
         } catch (RuntimeException e) {
             log.error("break-glass sessionの失効記録に失敗しました: {}", reason, e);
         }
-        return false;
+        return BreakGlassDecision.REVOKE;
     }
 
     private String validateAndSerializeActions(Set<String> actions) {

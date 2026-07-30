@@ -23,7 +23,7 @@ class ProductionSecurityConfigurationValidatorTest {
 
         ProductionSecurityConfigurationValidator validator =
                 new ProductionSecurityConfigurationValidator(oidc, mfa, session,
-                        mock(SysUserMapper.class), mock(UserMfaMapper.class));
+                        mock(SysUserMapper.class), mock(UserMfaMapper.class), mock(com.ses.mapper.PermissionGroupMapper.class));
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -60,8 +60,10 @@ class ProductionSecurityConfigurationValidatorTest {
         UserMfaMapper userMfaMapper = mock(UserMfaMapper.class);
         when(userMfaMapper.countEnrolled(org.mockito.ArgumentMatchers.eq("default"),
                 org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
+        com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
+        when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
         ProductionSecurityConfigurationValidator validator =
-                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper);
+                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper, permissionGroupMapper);
 
         assertDoesNotThrow(validator::validate);
 
