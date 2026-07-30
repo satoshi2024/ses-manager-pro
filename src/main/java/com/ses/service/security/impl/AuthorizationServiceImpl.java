@@ -30,7 +30,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private static final Set<String> INTERNAL_ROLES = Set.of("営業", ROLE_HR, "マネージャー");
     /** roleに関係なく管理者だけが実行できるaction。SecurityConfigでも重ねて制限している。 */
     private static final Set<String> ADMIN_ONLY_ACTIONS =
-            Set.of("permission.manage", "audit.security.view", "file.scan.retry");
+            Set.of("permission.manage", "audit.security.view", "file.scan.retry", "mfa.reset");
 
     private final UserPermissionGroupMapper userPermissionGroupMapper;
     private final PermissionGroupActionMapper permissionGroupActionMapper;
@@ -45,6 +45,9 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         String role = SecurityUtils.currentRole();
         if (ROLE_ADMIN.equals(role)) {
             return true;
+        }
+        if (ADMIN_ONLY_ACTIONS.contains(actionKey)) {
+            return false;
         }
         if (actionKey.startsWith("profile.")) {
             return true;
@@ -104,7 +107,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
                 || !com.ses.service.security.ActionPermissionResolver.isKnownAction(actionKey)) {
             return false;
         }
-        if (actionKey.startsWith("user.") || ADMIN_ONLY_ACTIONS.contains(actionKey)) {
+        if (actionKey.startsWith("user.")) {
             return false;
         }
         // payroll menuはV21で管理者とHRにだけ付与されている。

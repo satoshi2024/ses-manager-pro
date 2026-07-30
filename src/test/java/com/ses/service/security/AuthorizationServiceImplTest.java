@@ -22,6 +22,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,7 +49,17 @@ class AuthorizationServiceImplTest {
 
         assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "proposal.view"));
         assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "payroll.view"));
+        assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "mfa.reset"));
         assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "future-sensitive.view"));
+    }
+
+    @Test
+    void 管理者専用actionはpermissionGroup判定より先に拒否する() {
+        authenticate(7L, "営業");
+
+        assertFalse(service().isAllowed(
+                SecurityContextHolder.getContext().getAuthentication(), "mfa.reset"));
+        verifyNoInteractions(userPermissionGroupMapper, permissionGroupActionMapper, permissionGroupMapper);
     }
 
     @Test
@@ -81,6 +92,7 @@ class AuthorizationServiceImplTest {
     void 管理者はaction設定による自己lockoutを受けない() {
         authenticate(1L, "管理者");
         assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "user.delete"));
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "mfa.reset"));
     }
 
     @Test

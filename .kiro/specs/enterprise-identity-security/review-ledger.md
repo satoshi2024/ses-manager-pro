@@ -1,5 +1,49 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
+## 2026-07-30 Head `3f1ac69` CONDITIONAL PASS後P2対応
+
+- Reviewの正式base: `f06b01d426176d295a46fa3bfad0e2a1769161f1`。
+- Reviewの正式Head: `3f1ac695a56ac680aacd72e5b23569a581fc52a0`。Review開始時点で
+  `HEAD = origin/main`、working tree cleanであることが確認された。
+- 独立Review結論: **CONDITIONAL PASS（P0=0、P1=0、P2=3）**。
+  `S03-R04-P1-01`と`S03-R04-P1-02`は`VERIFIED_CLOSED`とする。
+- 今回の修正scope: 同Headをbaseとする本修正commit。commit・push後も独立再Reviewが完了するまで
+  spec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、
+  desktop/390px browser、実ClamAV、2名break-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R05-P2-01 | P2 | FIXED_PENDING_REVIEW | `mfa.reset`を`ADMIN_ONLY_ACTIONS`へ追加し、全permission group判定より前に非管理者を拒否。管理者は許可し、静的`@PreAuthorize`とaction層を一致 |
+| S03-R05-P2-02 | P2 | FIXED_PENDING_REVIEW | 認証基盤allowlistを`POST /logout`、`GET /mfa/setup`、`GET /mfa/challenge`へmethod込みで固定。未知/null actionもbreak-glass scope違反としてfail-closed |
+| S03-R05-P2-03 | P2 | FIXED_PENDING_REVIEW | 正式Base/Head、R04 CONDITIONAL PASS、P1閉鎖、本P2修正commitを本台帳と中央台帳へ同期 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、Issue状態、台帳scope | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provision service、login/logout provider | 実Entra/CA/provider logout。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。認証基盤method allowlist、null action fail-closed、break-glass session失効 | resolver、BreakGlassService、login/session/MFA API・service・filter、audit | 実2名訓練、multi-instance、実IdP。外部環境なし | shared security境界だが通常Taskのため、次はT020 |
+| T018 | L3。`mfa.reset` admin-only、legacy/group/action matrix、Menu filter | AuthorizationService、resolver、action matrix、MenuPermissionFilter | 実browser role matrix。UI差分なし | shared authorization境界だが通常Taskのため、次はT020 |
+| T019 | L0。file upload/download/scanner差分なしを確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- 最初のL1再現: 26 tests / 0 failures / **1 error** / 0 skipped。
+  methodを収束したことで未知/null actionの`Set.contains(null)`が顕在化したため、scope違反としてfail-closedへ修正した。
+- 修正後L1: resolver、AuthorizationService、BreakGlassServiceの3 suiteを実行し、
+  **26 tests / 0 failures / 0 errors / 0 skipped**。Surefire report完了後にJava processも終了したが、
+  外側commandは120秒timeoutとなったためBUILD SUCCESSとは記録しない。
+- L3 direct consumer: resolver、AuthorizationService、action matrix、Menu filter、audit、break-glass、
+  login、persistent session、MFA API/service/attemptの12 suiteを実行し、
+  **67 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 本patchではL4を実行していない。test policyに従い通常Taskの共有security変更はL3で直接consumerを固定し、
+  Maven全量、Node/JS、必要なDocker/MySQL/security/browser/provider gateはT020へ集約する。
+
 ## 2026-07-30 fixed Head `f06b01d` 再独立Review FAIL対応
 
 - Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
@@ -16,9 +60,9 @@
 
 | Issue | 深刻度 | 状態 | 修正・再現境界 |
 |---|---|---|---|
-| S03-R04-P1-01 | P1 | FIXED_PENDING_REVIEW | resource inventory判定をexport/download suffix判定より先に実施。未知の通常API、`/export`、`/download`、拡張子download、未知security APIをactionへ昇格させず403 |
-| S03-R04-P1-02 | P1 | FIXED_PENDING_REVIEW | 認証基盤の除外をmethod+exact URI allowlistへ限定。管理者向けMFA resetを独立`mfa.reset` actionとして解決し、break-glass事件のexact scope外では即時失効 |
-| S03-R04-P2-01 | P2 | FIXED_PENDING_REVIEW | 正式Review Headを`f06b01d`として記録し、本修正は未commit patchで次のfixed Headではないことを中央台帳と同期 |
+| S03-R04-P1-01 | P1 | VERIFIED_CLOSED | resource inventory判定をexport/download suffix判定より先に実施。未知の通常API、`/export`、`/download`、拡張子download、未知security APIをactionへ昇格させず403 |
+| S03-R04-P1-02 | P1 | VERIFIED_CLOSED | 認証基盤の除外をmethod+exact URI allowlistへ限定。管理者向けMFA resetを独立`mfa.reset` actionとして解決し、break-glass事件のexact scope外では即時失効 |
+| S03-R04-P2-01 | P2 | VERIFIED_CLOSED | 正式Review Headを`f06b01d`として記録し、本修正は`3f1ac69`としてcommit・push済み |
 
 ### TEST SCOPE DECISION（T014〜T019）
 

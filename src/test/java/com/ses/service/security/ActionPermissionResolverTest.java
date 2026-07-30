@@ -50,6 +50,18 @@ class ActionPermissionResolverTest {
     @Test
     void 認証基盤allowListは本人flowだけに限定する() {
         assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "POST", "/logout"));
+        assertFalse(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "GET", "/logout"));
+        assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "GET", "/mfa/setup"));
+        assertFalse(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "POST", "/mfa/setup"));
+        assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "GET", "/mfa/challenge"));
+        assertFalse(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "POST", "/mfa/challenge"));
+        assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
                 "GET", "/api/security/mfa/status"));
         assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
                 "POST", "/api/security/mfa/verify"));

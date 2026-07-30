@@ -168,7 +168,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (isAuthenticationInfrastructure(request)) {
             return true;
         }
-        if (!allowedActions(incident).contains(action)) {
+        if (!StringUtils.hasText(action) || !allowedActions(incident).contains(action)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
         }
         return true;

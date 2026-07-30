@@ -147,6 +147,18 @@ class BreakGlassServiceImplTest {
     }
 
     @Test
+    void MfaPageと同じUriでも誤ったmethodはscope免除しない() {
+        BreakGlassIncident incident = active();
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/mfa/setup");
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+
+        assertFalse(service.validateBoundSession(request, authentication));
+        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+    }
+
+    @Test
     void 管理者MfaResetは独立actionが明示承認された場合だけ許可する() {
         BreakGlassIncident incident = active();
         incident.setAllowedActions("mfa.reset");

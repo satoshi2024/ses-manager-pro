@@ -164,7 +164,9 @@ public final class ActionPermissionResolver {
             return false;
         }
         method = method.toUpperCase(Locale.ROOT);
-        if (uri.equals("/logout") || uri.equals("/mfa/setup") || uri.equals("/mfa/challenge")) {
+        if (("POST".equals(method) && uri.equals("/logout"))
+                || ("GET".equals(method)
+                && (uri.equals("/mfa/setup") || uri.equals("/mfa/challenge")))) {
             return true;
         }
         if ("GET".equals(method)) {
