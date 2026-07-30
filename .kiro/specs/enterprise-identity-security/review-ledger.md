@@ -1,5 +1,55 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
+## 2026-07-30 Head `c839a2e` 再独立Review FAIL対応
+
+- Reviewの正式base: `3f1ac695a56ac680aacd72e5b23569a581fc52a0`。
+- Reviewの正式Head: `c839a2ebe709334d4b60dd5295779619d601bfa3`。Review開始時点で
+  `HEAD = origin/main`、working tree cleanであることが確認された。
+- 独立Review結論: **FAIL（P0=0、P1=1、P2=0）**。
+  前回`S03-R05-P2-01`〜`03`は`VERIFIED_CLOSED`とする。
+- 今回の修正scope: Review Headをbaseとするfixed commit
+  `f68708b15bd287e6a3a3f9afd827d177f1431994`。独立再Reviewが完了するまで
+  spec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、
+  desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、
+  multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R06-P1-01 | P1 | FIXED_PENDING_REVIEW | active incidentを毎request再検証した後、GET/HEADの`/css/**`・`/js/**`・`/lib/**`・`/img/**`・`/favicon.ico`と内部`ERROR /error`だけbusiness scope対象外とした。安全でないmethod、直接`/error`、未知API/page、scope外actionはfail-closedを維持。break-glass sessionでは通知componentを描画せず、`common.js`から通知APIを発行しない |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R05閉鎖、R06 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。static/error scope、MFA→dashboard request列、session失効、通知抑止 | BreakGlassService、PersistentSessionFilter、Menu/監査/MFA filter、MFA API、共有layout/common.js | 実担当者2名、multi-instance、実IdP。環境/担当者なし | shared security/layout境界。次はT020 |
+| T018 | L2/L3同梱。未知API/page、scope外通知action、action matrix | resolver、AuthorizationService、MenuPermissionFilter | 実browser role matrix。今回permission model差分なし | 未知経路のfail-closedをL3で確認。次はT020 |
+| T019 | L0。file upload/download/scanner差分なしを確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- L1再現: `BreakGlassServiceImplTest` **14 tests / 2 failures / 0 errors / 0 skipped**。
+  `GET /css/common.css`と内部`ERROR /error`がscope違反で失効することを再現した。
+- 修正後L1: 同suite **14 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 完全filter chain: MFA page→静的resource→MFA status API→dashboardを同一sessionで通し、
+  通知component非描画、直接通知APIの失効、未知API 403、未知page session失効を確認。
+  **3 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- L3 direct consumer: security 12 suiteに上記filter chain、OIDC/MFA integration、共有layout回帰を加え、
+  **98 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 実browser drill: in-app browserと隔離H2/test profileを使用し、双承認済みACTIVE incident fixture、
+  break-glass login、MFA setup/enable、dashboard遷移を実行した。MFA画面で13 asset
+  （`/css/common.css`、`/lib/**`、`/js/common.js`、`/js/modules/mfa.js`を含む）のloadを確認し、
+  dashboardでも`#notification-list`は0件、server auditに`/api/notifications`はなく、session失効なし。
+  dashboard data API 2件は最小fixture不足で500となったため業務dashboardのbrowser PASS証拠には使用しない。
+  またfixture上の承認者IDであり、実担当者2名の訓練完了とは扱わない。
+- 本patchではL4を実行していない。Maven全量、Node/JS、必要なDocker/MySQL/security/browser/provider gateは
+  test policyに従いT020へ集約する。
+
 ## 2026-07-30 Head `3f1ac69` CONDITIONAL PASS後P2対応
 
 - Reviewの正式base: `f06b01d426176d295a46fa3bfad0e2a1769161f1`。
@@ -16,9 +66,9 @@
 
 | Issue | 深刻度 | 状態 | 修正・再現境界 |
 |---|---|---|---|
-| S03-R05-P2-01 | P2 | FIXED_PENDING_REVIEW | `mfa.reset`を`ADMIN_ONLY_ACTIONS`へ追加し、全permission group判定より前に非管理者を拒否。管理者は許可し、静的`@PreAuthorize`とaction層を一致 |
-| S03-R05-P2-02 | P2 | FIXED_PENDING_REVIEW | 認証基盤allowlistを`POST /logout`、`GET /mfa/setup`、`GET /mfa/challenge`へmethod込みで固定。未知/null actionもbreak-glass scope違反としてfail-closed |
-| S03-R05-P2-03 | P2 | FIXED_PENDING_REVIEW | 正式Base/Head、R04 CONDITIONAL PASS、P1閉鎖、本P2修正commitを本台帳と中央台帳へ同期 |
+| S03-R05-P2-01 | P2 | VERIFIED_CLOSED | `mfa.reset`を`ADMIN_ONLY_ACTIONS`へ追加し、全permission group判定より前に非管理者を拒否。管理者は許可し、静的`@PreAuthorize`とaction層を一致 |
+| S03-R05-P2-02 | P2 | VERIFIED_CLOSED | 認証基盤allowlistを`POST /logout`、`GET /mfa/setup`、`GET /mfa/challenge`へmethod込みで固定。未知/null actionもbreak-glass scope違反としてfail-closed |
+| S03-R05-P2-03 | P2 | VERIFIED_CLOSED | 正式Base/Head、R04 CONDITIONAL PASS、P1閉鎖、本P2修正commitを本台帳と中央台帳へ同期 |
 
 ### TEST SCOPE DECISION（T014〜T019）
 

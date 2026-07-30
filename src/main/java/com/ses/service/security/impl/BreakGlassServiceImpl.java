@@ -12,6 +12,7 @@ import com.ses.service.security.BreakGlassService;
 import com.ses.service.security.ActionPermissionResolver;
 import com.ses.service.security.PersistentSessionService;
 import com.ses.service.NotificationService;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
@@ -165,7 +166,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!StringUtils.hasText(action)) {
             action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
         }
-        if (isAuthenticationInfrastructure(request)) {
+        if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
             return true;
         }
         if (!StringUtils.hasText(action) || !allowedActions(incident).contains(action)) {
@@ -230,6 +231,21 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     private boolean isAuthenticationInfrastructure(HttpServletRequest request) {
         return ActionPermissionResolver.isAuthenticationInfrastructure(
                 request.getMethod(), request.getRequestURI());
+    }
+
+    /** incidentを再検証した上で、画面描画に不可欠な非業務requestだけscope対象外とする。 */
+    private boolean isPassiveInfrastructure(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        if (request.getDispatcherType() == DispatcherType.ERROR) {
+            return "/error".equals(uri);
+        }
+        String method = request.getMethod();
+        if (!("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))) {
+            return false;
+        }
+        return uri != null && (uri.startsWith("/css/") || uri.startsWith("/js/")
+                || uri.startsWith("/lib/") || uri.startsWith("/img/")
+                || uri.equals("/favicon.ico"));
     }
 
     private Set<String> allowedActions(BreakGlassIncident incident) {

@@ -9,6 +9,7 @@ import com.ses.mapper.BreakGlassIncidentMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.impl.BreakGlassServiceImpl;
 import com.ses.service.NotificationService;
+import jakarta.servlet.DispatcherType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.eq;
 
@@ -156,6 +158,52 @@ class BreakGlassServiceImplTest {
 
         assertFalse(service.validateBoundSession(request, authentication));
         verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+    }
+
+    @Test
+    void 安全methodの静的resourceはincident検証後にscope判定をskipする() {
+        when(incidentMapper.selectById(10L)).thenReturn(active());
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+
+        for (String uri : java.util.List.of(
+                "/css/common.css", "/js/common.js", "/lib/bootstrap/bootstrap.min.js",
+                "/img/logo.svg", "/favicon.ico")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
+            request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+            assertTrue(service.validateBoundSession(request, authentication), uri);
+        }
+        MockHttpServletRequest headRequest = new MockHttpServletRequest("HEAD", "/css/common.css");
+        headRequest.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        assertTrue(service.validateBoundSession(headRequest, authentication));
+
+        verifyNoInteractions(sessionService);
+    }
+
+    @Test
+    void 静的resourceと同じUriでも安全でないmethodはscope違反にする() {
+        when(incidentMapper.selectById(10L)).thenReturn(active());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/css/common.css");
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+
+        assertFalse(service.validateBoundSession(request, authentication));
+        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+    }
+
+    @Test
+    void 内部errorDispatchだけscope判定をskipし直接error要求は拒否する() {
+        when(incidentMapper.selectById(10L)).thenReturn(active());
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        MockHttpServletRequest dispatch = new MockHttpServletRequest("GET", "/error");
+        dispatch.setDispatcherType(DispatcherType.ERROR);
+        dispatch.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+
+        assertTrue(service.validateBoundSession(dispatch, authentication));
+
+        MockHttpServletRequest direct = new MockHttpServletRequest("GET", "/error");
+        direct.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        assertFalse(service.validateBoundSession(direct, authentication));
+        verify(sessionService).revokeCurrent(direct, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
     }
 
     @Test
