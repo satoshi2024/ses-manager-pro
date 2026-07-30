@@ -159,8 +159,9 @@ public class DocumentExportServiceImpl implements DocumentExportService {
 
     private String csvEscape(String val) {
         if (val == null) return "";
-        // CSV 式注入対策: 先頭が =, +, -, @ の場合はエスケープ
-        if (val.startsWith("=") || val.startsWith("+") || val.startsWith("-") || val.startsWith("@")) {
+        // CSV 式注入対策: 先頭が =, +, @ または数値以外の - の場合にエスケープ
+        if (val.startsWith("=") || val.startsWith("+") || val.startsWith("@") ||
+                (val.startsWith("-") && !val.matches("^-[0-9]+(\\.[0-9]+)?$"))) {
             val = "'" + val;
         }
         if (val.contains(",") || val.contains("\"") || val.contains("\n") || val.contains("\r")) {

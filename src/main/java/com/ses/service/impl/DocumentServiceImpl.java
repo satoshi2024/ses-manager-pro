@@ -338,9 +338,71 @@ public class DocumentServiceImpl implements DocumentService {
         recordAccessLog(req.getDocumentId(), null, "DISPOSE_REJECT");
     }
 
+    private void assertAdminUser() {
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+        if (!isAdmin) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void approveDisposal(Long disposalRequestId) {
+        assertAdminUser();
+        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
+        if (!"PENDING".equals(req.getStatus())) {
+            throw BusinessException.of(400, "error.document.disposalNotPending");
+        }
+
+        Long currentUserId = SecurityUtils.currentUserId();
+        if (currentUserId.equals(req.getRequestedBy())) {
+            throw BusinessException.of(400, "error.document.disposalSelfApproval");
+        }
+
+        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+                .eq(DocumentDisposalRequest::getId, disposalRequestId)
+                .eq(DocumentDisposalRequest::getStatus, "PENDING")
+                .set(DocumentDisposalRequest::getStatus, "APPROVED")
+                .set(DocumentDisposalRequest::getApprovedBy, currentUserId)
+                .set(DocumentDisposalRequest::getApprovedAt, LocalDateTime.now()));
+
+        if (updated == 0) {
+            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
+        }
+
+        log.info("[文書台帳] 廃棄申請を承認しました: requestId={} approvedBy={}", disposalRequestId, currentUserId);
+    }
+
+    @Override
+    @Transactional
+    public void rejectDisposal(Long disposalRequestId, String reason) {
+        assertAdminUser();
+        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
+        if (!"PENDING".equals(req.getStatus())) {
+            throw BusinessException.of(400, "error.document.disposalNotPending");
+        }
+
+        Long currentUserId = SecurityUtils.currentUserId();
+        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+                .eq(DocumentDisposalRequest::getId, disposalRequestId)
+                .eq(DocumentDisposalRequest::getStatus, "PENDING")
+                .set(DocumentDisposalRequest::getStatus, "REJECTED")
+                .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | 却下理由: " : "却下理由: ") + reason)
+                .set(DocumentDisposalRequest::getApprovedBy, currentUserId)
+                .set(DocumentDisposalRequest::getApprovedAt, LocalDateTime.now()));
+
+        if (updated == 0) {
+            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
+        }
+
+        log.info("[文書台帳] 廃棄申請を却下しました: requestId={} rejectedBy={}", disposalRequestId, currentUserId);
+    }
+
     @Override
     @Transactional
     public void executeDisposal(Long disposalRequestId) {
+        assertAdminUser();
         DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
         if (!"APPROVED".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotApproved");
@@ -385,7 +447,7 @@ public class DocumentServiceImpl implements DocumentService {
                         documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
                                 .eq(DocumentDisposalRequest::getId, disposalRequestId)
                                 .set(DocumentDisposalRequest::getStatus, "FAILED")
-                                .set(DocumentDisposalRequest::getReason, "Storage物理削除失敗: " + String.join(", ", failedKeys)));
+                                .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys)));
                     }
                 }
             });
@@ -402,7 +464,7 @@ public class DocumentServiceImpl implements DocumentService {
                 documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
                         .eq(DocumentDisposalRequest::getId, disposalRequestId)
                         .set(DocumentDisposalRequest::getStatus, "FAILED")
-                        .set(DocumentDisposalRequest::getReason, "Storage物理削除失敗: " + String.join(", ", failedKeys)));
+                        .set(DocumentDisposalRequest::getReason, (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys)));
             }
         }
 
@@ -728,7 +790,7 @@ public class DocumentServiceImpl implements DocumentService {
                     .id(v.getId())
                     .documentId(v.getDocumentId())
                     .versionNo(v.getVersionNo())
-                    .storageKey(v.getStorageKey())
+                    .storageKey(null)
                     .originalName(v.getOriginalName())
                     .contentType(v.getContentType())
                     .sizeBytes(v.getSizeBytes())
@@ -834,6 +896,10 @@ public class DocumentServiceImpl implements DocumentService {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (isAdmin) {
+            return;
+        }
+
+        if (!dataScopeService.isScoped()) {
             return;
         }
 

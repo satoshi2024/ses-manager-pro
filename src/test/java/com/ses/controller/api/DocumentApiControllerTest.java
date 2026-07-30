@@ -80,4 +80,24 @@ class DocumentApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.title").value("テスト請求書"));
     }
+
+    @Test
+    void disposalApprove_asNonAdmin_returns403() throws Exception {
+        var principal = User.withUsername("salesUser").password("").authorities("ROLE_営業").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/documents/disposal/100/approve"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void disposalExecute_asNonAdmin_returns403() throws Exception {
+        var principal = User.withUsername("salesUser").password("").authorities("ROLE_営業").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/documents/disposal/100/execute"))
+                .andExpect(status().isForbidden());
+    }
 }

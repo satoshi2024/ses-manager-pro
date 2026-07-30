@@ -40,6 +40,7 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
     private final CustomerMapper customerMapper;
     private final EngineerMapper engineerMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
 
     @Override
     public byte[] generate(Quotation q) {
@@ -100,10 +101,44 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
             }
 
             document.close();
-            return baos.toByteArray();
+            byte[] pdfBytes = baos.toByteArray();
+            registerQuotationToLedger(q, pdfBytes);
+            return pdfBytes;
         } catch (DocumentException e) {
             log.error("見積書PDF生成に失敗しました: quotationNo={}", q.getQuotationNo(), e);
             throw BusinessException.of("error.quotation.pdfGenerateFailed");
+        }
+    }
+
+    private void registerQuotationToLedger(Quotation q, byte[] pdfBytes) {
+        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
+        if (docService == null || q == null || pdfBytes == null || pdfBytes.length == 0) {
+            return;
+        }
+        try {
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("QUOTATION")
+                    .title("見積書 PDF: " + (q.getQuotationNo() != null ? q.getQuotationNo() : "ID:" + q.getId()))
+                    .documentNo(q.getQuotationNo())
+                    .counterpartyType("CUSTOMER")
+                    .counterpartyId(q.getCustomerId())
+                    .transactionDate(q.getIssueDate())
+                    .amount(q.getMonthlyFee())
+                    .direction("OUTGOING")
+                    .originalName("quotation_" + (q.getQuotationNo() != null ? q.getQuotationNo() : q.getId()) + ".pdf")
+                    .contentType("application/pdf")
+                    .sourceType("GENERATED")
+                    .businessKey("QUOTATION:" + q.getId())
+                    .versionDiscriminator(q.getId() != null ? "quo-" + q.getId() : "v1")
+                    .targetType("QUOTATION")
+                    .targetId(q.getId())
+                    .build();
+
+            try (java.io.InputStream is = new java.io.ByteArrayInputStream(pdfBytes)) {
+                docService.registerGenerated(req, is);
+            }
+        } catch (Exception e) {
+            log.warn("[帳票連携] 見積書PDFの法定文書台帳登録失敗: quotationId={} error={}", q.getId(), e.getMessage());
         }
     }
 

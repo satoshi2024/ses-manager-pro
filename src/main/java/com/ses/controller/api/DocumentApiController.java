@@ -13,6 +13,7 @@ import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
@@ -95,12 +96,14 @@ public class DocumentApiController {
     }
 
     @PostMapping("/disposal/{requestId}/approve")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> approveDisposal(@PathVariable("requestId") Long requestId) {
         documentService.approveDisposal(requestId);
         return ApiResult.success(null);
     }
 
     @PostMapping("/disposal/{requestId}/reject")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> rejectDisposal(
             @PathVariable("requestId") Long requestId,
             @RequestParam("reason") String reason) {
@@ -109,6 +112,7 @@ public class DocumentApiController {
     }
 
     @PostMapping("/disposal/{requestId}/execute")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> executeDisposal(@PathVariable("requestId") Long requestId) {
         documentService.executeDisposal(requestId);
         return ApiResult.success(null);

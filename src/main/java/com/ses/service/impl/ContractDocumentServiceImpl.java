@@ -347,7 +347,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
                     .contentType("application/pdf")
                     .sourceType("GENERATED")
                     .businessKey("CONTRACT:" + contract.getId())
-                    .versionDiscriminator("v1")
+                    .versionDiscriminator(doc.getId() != null ? "doc-" + doc.getId() : "v1")
                     .targetType("CONTRACT")
                     .targetId(contract.getId())
                     .build();
