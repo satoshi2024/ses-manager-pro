@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -54,7 +55,9 @@ class DocumentStorageTest {
                 projectIngestionMapper,
                 bpAvailabilityIngestionMapper,
                 documentVersionMapperProvider,
-                null, null
+                mock(ObjectProvider.class),
+                mock(com.ses.service.security.DataScopeService.class),
+                mock(ObjectProvider.class)
         );
     }
 

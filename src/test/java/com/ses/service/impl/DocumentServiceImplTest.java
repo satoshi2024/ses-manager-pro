@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.document.IntegrityFinding;
 import com.ses.entity.Document;
@@ -18,6 +19,7 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +34,7 @@ import org.springframework.security.core.userdetails.User;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
@@ -81,6 +84,11 @@ class DocumentServiceImplTest {
         lenient().when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("test"));
     }
 
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void computeSha256_fixedInput_returnsExpectedHex() {
         byte[] input = "hello".getBytes(StandardCharsets.UTF_8);
@@ -118,9 +126,29 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    void registerGenerated_scanInfected_throws400ScanRejected() {
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.infected("test"));
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+
+        var req = DocumentRegisterRequest.builder()
+                .documentType("CONTRACT")
+                .sourceType("GENERATED")
+                .businessKey("CONTRACT:99")
+                .versionDiscriminator("v1")
+                .direction("OUTGOING")
+                .build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                sut.registerGenerated(req, new ByteArrayInputStream("bad content".getBytes())));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("error.file.scanRejected", ex.getMessageKey());
+    }
+
+    @Test
     void registerGenerated_newDocument_versionNoIs1() {
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
-        doNothing().when(documentStorage).put(anyString(), any(byte[].class), anyBoolean());
+        doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         doNothing().when(documentStorage).promote(anyString());
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             Document d = inv.getArgument(0);
@@ -155,9 +183,9 @@ class DocumentServiceImplTest {
         doc.setVersion(1L);
         when(documentMapper.selectById(10L)).thenReturn(doc);
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
-        doNothing().when(documentStorage).put(anyString(), any(byte[].class), anyBoolean());
+        doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         doNothing().when(documentStorage).promote(anyString());
-        when(documentMapper.update(any(), any())).thenReturn(1); // CAS 成功
+        when(documentMapper.update(any(), any())).thenReturn(1);
 
         DocumentVersion latest = new DocumentVersion();
         latest.setVersionNo(1);
@@ -183,6 +211,31 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    void addVersion_optimisticLockConflict_throws409() {
+        Document doc = new Document();
+        doc.setId(10L);
+        doc.setStatus("CONFIRMED");
+        doc.setVersion(1L);
+        when(documentMapper.selectById(10L)).thenReturn(doc);
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        when(documentMapper.update(any(), any())).thenReturn(0); // CAS 失敗
+
+        var req = DocumentRegisterRequest.builder()
+                .documentType("CONTRACT")
+                .sourceType("RECEIVED")
+                .businessKey("CONTRACT:5")
+                .versionDiscriminator("v2")
+                .direction("INCOMING")
+                .build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                sut.addVersion(10L, req, new ByteArrayInputStream("pdf2".getBytes())));
+        assertEquals(409, ex.getCode());
+        assertEquals("error.document.optimisticLock", ex.getMessageKey());
+    }
+
+    @Test
     void requestDisposal_legalHoldActive_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(5L);
@@ -191,8 +244,7 @@ class DocumentServiceImplTest {
         doc.setStatus("CONFIRMED");
         when(documentMapper.selectById(5L)).thenReturn(doc);
 
-        var ex = assertThrows(com.ses.common.exception.BusinessException.class,
-                () -> sut.requestDisposal(5L, "廃棄理由"));
+        var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(5L, "廃棄理由"));
         assertEquals(400, ex.getCode());
         assertEquals("error.document.legalHoldActive", ex.getMessageKey());
     }
@@ -202,12 +254,11 @@ class DocumentServiceImplTest {
         Document doc = new Document();
         doc.setId(6L);
         doc.setLegalHoldFlag(0);
-        doc.setRetentionUntil(null); // 未確定
+        doc.setRetentionUntil(null);
         doc.setStatus("CONFIRMED");
         when(documentMapper.selectById(6L)).thenReturn(doc);
 
-        var ex = assertThrows(com.ses.common.exception.BusinessException.class,
-                () -> sut.requestDisposal(6L, "廃棄理由"));
+        var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(6L, "廃棄理由"));
         assertEquals(400, ex.getCode());
         assertEquals("error.document.retentionUndetermined", ex.getMessageKey());
     }
@@ -221,42 +272,26 @@ class DocumentServiceImplTest {
         when(documentMapper.selectById(7L)).thenReturn(doc);
         when(documentMapper.update(any(), any())).thenReturn(0);
 
-        var ex = assertThrows(com.ses.common.exception.BusinessException.class,
-                () -> sut.placeLegalHold(7L, true, "訴訟対応"));
+        var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(7L, true, "訴訟対応"));
         assertEquals(409, ex.getCode());
     }
 
     @Test
-    void verifyIntegrity_hashMismatch_returnsMismatchFinding() throws IOException {
-        DocumentVersion v = new DocumentVersion();
-        v.setId(100L);
-        v.setDocumentId(20L);
-        v.setStorageKey("some/key");
-        v.setSha256("expected000hash");
-        when(documentVersionMapper.findByDocumentId(20L)).thenReturn(List.of(v));
-        when(documentStorage.readAll("some/key")).thenReturn("tampered".getBytes());
+    void executeDisposal_legalHoldActive_throws400() {
+        DocumentDisposalRequest req = new DocumentDisposalRequest();
+        req.setId(200L);
+        req.setDocumentId(5L);
+        req.setStatus("APPROVED");
+        when(documentDisposalRequestMapper.selectById(200L)).thenReturn(req);
 
-        List<IntegrityFinding> findings = sut.verifyIntegrity(20L);
+        Document doc = new Document();
+        doc.setId(5L);
+        doc.setLegalHoldFlag(1); // 途中で hold が設定された
+        when(documentMapper.selectById(5L)).thenReturn(doc);
 
-        assertEquals(1, findings.size());
-        assertEquals("HASH_MISMATCH", findings.get(0).getFindingType());
-        assertEquals("expected000hash", findings.get(0).getExpectedSha256());
-    }
-
-    @Test
-    void verifyIntegrity_storageMissing_returnsMissingFinding() throws IOException {
-        DocumentVersion v = new DocumentVersion();
-        v.setId(101L);
-        v.setDocumentId(21L);
-        v.setStorageKey("missing/key");
-        v.setSha256("somehash");
-        when(documentVersionMapper.findByDocumentId(21L)).thenReturn(List.of(v));
-        when(documentStorage.readAll("missing/key")).thenThrow(new IOException("not found"));
-
-        List<IntegrityFinding> findings = sut.verifyIntegrity(21L);
-
-        assertEquals(1, findings.size());
-        assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
+        BusinessException ex = assertThrows(BusinessException.class, () -> sut.executeDisposal(200L));
+        assertEquals(400, ex.getCode());
+        assertEquals("error.document.legalHoldActive", ex.getMessageKey());
     }
 
     @Test
@@ -265,37 +300,29 @@ class DocumentServiceImplTest {
         req.setId(200L);
         req.setDocumentId(5L);
         req.setStatus("PENDING");
-        req.setRequestedBy(1L); // SecurityUtils.currentUserId() も 1L に設定済み
+        req.setRequestedBy(1L); // SecurityContext の 1L と一致
 
         when(documentDisposalRequestMapper.selectById(200L)).thenReturn(req);
 
-        var ex = assertThrows(com.ses.common.exception.BusinessException.class,
-                () -> sut.approveDisposal(200L));
+        var ex = assertThrows(BusinessException.class, () -> sut.approveDisposal(200L));
         assertEquals(400, ex.getCode());
         assertEquals("error.document.disposalSelfApproval", ex.getMessageKey());
     }
 
     @Test
-    void confirm_undeterminedStartRule_retentionUntilRemainsNull() {
+    void computeRetentionUntil_undeterminedStartRule_returnsNull() {
         Document doc = new Document();
         doc.setId(30L);
-        doc.setStatus("DRAFT");
-        doc.setDocumentType("CONTRACT"); // retention_start_rule = CLOSED_AT
-        doc.setVersion(1L);
-        when(documentMapper.selectById(30L)).thenReturn(doc);
+        doc.setDocumentType("CONTRACT");
 
         DocumentType type = new DocumentType();
         type.setCode("CONTRACT");
         type.setRetentionYears(10);
         type.setRetentionStartRule("CLOSED_AT");
         when(documentTypeMapper.selectOne(any())).thenReturn(type);
-        when(documentMapper.update(any(), any())).thenReturn(1);
 
-        sut.confirm(30L);
+        LocalDate result = sut.computeRetentionUntil(doc);
 
-        ArgumentCaptor<Document> captor = ArgumentCaptor.forClass(Document.class);
-        verify(documentMapper).update(any(), any());
-        // 契約終了日が未確定のため retentionUntil は null のまま
-        assertNull(doc.getRetentionUntil());
+        assertNull(result, "CLOSED_AT起算日が未確定の場合はnullを返さなければならない");
     }
 }

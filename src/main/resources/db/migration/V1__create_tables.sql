@@ -633,6 +633,7 @@ CREATE TABLE t_document (
 
 CREATE TABLE t_document_version (
   id               BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id        VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
   document_id      BIGINT        NOT NULL,
   version_no       INT           NOT NULL,
   storage_key      VARCHAR(500)  NOT NULL,
@@ -641,8 +642,8 @@ CREATE TABLE t_document_version (
   size_bytes       BIGINT,
   sha256           CHAR(64)      NOT NULL,
   source_type      VARCHAR(50)   NOT NULL,
-  business_key     VARCHAR(200),
-  version_discriminator VARCHAR(100),
+  business_key     VARCHAR(200)  NOT NULL,
+  version_discriminator VARCHAR(100) NOT NULL,
   external_id      VARCHAR(200),
   scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
   change_reason    VARCHAR(500),
@@ -651,10 +652,11 @@ CREATE TABLE t_document_version (
   updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag     TINYINT       NOT NULL DEFAULT 0,
   UNIQUE KEY uk_document_version_no (document_id, version_no),
-  UNIQUE KEY uk_document_idempotency (source_type, business_key, version_discriminator),
+  UNIQUE KEY uk_document_idempotency (tenant_id, source_type, business_key, version_discriminator),
   INDEX idx_dv_document   (document_id),
   INDEX idx_dv_sha256     (sha256),
-  INDEX idx_dv_external   (external_id)
+  INDEX idx_dv_external   (external_id),
+  INDEX idx_dv_scan_status (scan_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書版';
 
 CREATE TABLE t_document_link (

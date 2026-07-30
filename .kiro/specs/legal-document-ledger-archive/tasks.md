@@ -20,17 +20,17 @@
   - **テスト要件**: L0。inventoryの件数がFileReferenceProvider実装数と一致すること、
     保存年数の根拠URLが全種別に付いていること、`git diff --check` exit 0。
 
-- [x] F1. 文書DDLとDocumentService
+- [ ] F1. 文書DDLとDocumentService (Round 2 FIX中)
   - **Objective**: 受領したPDFを登録すると、文書種別・相手先・取引日・金額・SHA-256が台帳に記録され、
     同じ操作を再実行しても2件目が作られない。原本確定後は通常UIから上書き・物理削除ができない。
   - **実装ガイダンス**: **V67**/V1/H2(`sql/schema-document-archive-h2.sql`)/MySQL smoke、version/link/access/disposal。
-    冪等キーは`(source_type, business_key, version_discriminator)`のUNIQUE（design §6.3）。
+    冪等キーは`(tenant_id, source_type, business_key, version_discriminator)`のUNIQUE（design §6.3）。
     `counterparty_name_snapshot`は登録時に固定し、顧客/BP名称変更で過去文書の表示を変えない。
   - **テスト要件**: L1〜L3。hash算出、version append-only、冪等（同一sourceの2回登録で1件）、
     legal hold中の廃棄拒否、`version`楽観ロック競合、`retention_until IS NULL`が廃棄候補に**入らない**こと。
   - **Demo**: 受領PDFを登録しmetadataとhash表示。同じPDFをもう一度登録して件数が増えないことを確認。
 
-- [x] F2. Storage adapterとstream download
+- [ ] F2. Storage adapterとstream download (Round 2 FIX中)
   - **Objective**: 業務コードがstorage pathを直接扱わずにfileを保存・取得でき、local/S3を設定だけで切り替えられる。
     scan未完了・未知のfileはdownloadできない。大きいfileでもheapが増えない。
   - **実装ガイダンス**: local/S3 interface、quarantine→scan→hash→DB tx→promoteの順（design §2）、

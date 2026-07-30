@@ -30,8 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -76,7 +80,6 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
-        // P1-05: businessKey が未指定の場合のフォールバック
         String sourceType = request.getSourceType() != null ? request.getSourceType() : "GENERATED";
         String businessKey = (request.getBusinessKey() != null && !request.getBusinessKey().isBlank())
                 ? request.getBusinessKey()
@@ -94,37 +97,46 @@ public class DocumentServiceImpl implements DocumentService {
             return documentMapper.selectById(existingVersion.getDocumentId());
         }
 
-        // 2. storage put（quarantine）
+        // 2. 一時ファイルへストリーミング書き出し＆SHA-256ハッシュ算出（固定ヒープ化）
         String storageKey = generateStorageKey();
-        byte[] contentBytes = readAllBytes(content);
-        String sha256 = computeSha256(contentBytes);
-        documentStorage.put(storageKey, contentBytes, true /* quarantine */);
+        StreamDigestResult streamResult = writeToTempAndDigest(content);
 
-        // P1-03: スキャン処理の実行
-        FileScanResult scanResult = scanQuarantinedContent(contentBytes);
-        if (scanResult.status() == FileScanResult.Status.INFECTED) {
-            log.warn("[文書台帳] マルウェアを検出したため登録を拒否します: storageKey={}", storageKey);
+        // 3. Storage の quarantine 領域へストリーミング保存
+        try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
+            documentStorage.put(storageKey, tempIs, true /* quarantine */);
+        } catch (Exception e) {
+            deleteTempFile(streamResult.tempPath());
+            throw new RuntimeException("Storage quarantine保存失敗", e);
+        }
+
+        // 4. P1-02: スキャン処理（fail-closed 判定）
+        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
+        if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
+            deleteTempFile(streamResult.tempPath());
+            log.warn("[文書台帳] スキャン失敗・感染のため登録を拒否します: storageKey={} result={}", storageKey, scanResult);
             throw BusinessException.of(400, "error.file.scanRejected");
         }
 
+        deleteTempFile(streamResult.tempPath());
+
         try {
-            // 3. DB tx: document + version 保存
+            // 5. DB tx: document + version 保存
             Document doc = buildDocument(request);
             documentMapper.insert(doc);
 
-            DocumentVersion version = buildVersion(request, doc.getId(), storageKey, contentBytes.length, sha256);
+            DocumentVersion version = buildVersion(request, doc.getId(), storageKey, streamResult.sizeBytes(), streamResult.sha256());
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
-            // 4. storage promote
+            // 6. storage promote
             documentStorage.promote(storageKey);
 
-            // 5. アクセスログ
+            // 7. アクセスログ
             recordAccessLog(doc.getId(), version.getId(), "REGISTER");
 
-            log.info("[文書台帳] 登録完了: documentId={} versionId={} sha256={}", doc.getId(), version.getId(), sha256);
+            log.info("[文書台帳] 登録完了: documentId={} versionId={} sha256={}", doc.getId(), version.getId(), streamResult.sha256());
             return doc;
 
         } catch (Exception e) {
@@ -150,7 +162,6 @@ public class DocumentServiceImpl implements DocumentService {
                 ? request.getVersionDiscriminator()
                 : "v" + System.currentTimeMillis();
 
-        // 冪等チェック
         DocumentVersion existing = documentVersionMapper.findByIdempotencyKey(
                 DEFAULT_TENANT_ID, sourceType, businessKey, discriminator);
         if (existing != null) {
@@ -158,26 +169,32 @@ public class DocumentServiceImpl implements DocumentService {
             return existing;
         }
 
-        // storage put
         String storageKey = generateStorageKey();
-        byte[] contentBytes = readAllBytes(content);
-        String sha256 = computeSha256(contentBytes);
-        documentStorage.put(storageKey, contentBytes, true);
+        StreamDigestResult streamResult = writeToTempAndDigest(content);
 
-        // P1-03: スキャン処理
-        FileScanResult scanResult = scanQuarantinedContent(contentBytes);
-        if (scanResult.status() == FileScanResult.Status.INFECTED) {
+        try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
+            documentStorage.put(storageKey, tempIs, true);
+        } catch (Exception e) {
+            deleteTempFile(streamResult.tempPath());
+            throw new RuntimeException("Storage quarantine保存失敗", e);
+        }
+
+        // P1-02: fail-closed スキャン
+        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
+        if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
+            deleteTempFile(streamResult.tempPath());
             throw BusinessException.of(400, "error.file.scanRejected");
         }
 
+        deleteTempFile(streamResult.tempPath());
+
         try {
-            DocumentVersion version = buildVersion(request, documentId, storageKey, contentBytes.length, sha256);
+            DocumentVersion version = buildVersion(request, documentId, storageKey, streamResult.sizeBytes(), streamResult.sha256());
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
-            // P1-06: CONFIRMED状態なら AMENDED へ遷移（CAS＋バージョンインクリメント）
             if ("CONFIRMED".equals(doc.getStatus())) {
                 int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                         .eq(Document::getId, documentId)
@@ -202,7 +219,7 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     // ----------------------------------------------------------------
-    // リンク
+    // リンク / 法的hold / 廃棄 / 他
     // ----------------------------------------------------------------
 
     @Override
@@ -221,10 +238,6 @@ public class DocumentServiceImpl implements DocumentService {
             documentLinkMapper.insert(link);
         }
     }
-
-    // ----------------------------------------------------------------
-    // 法的hold
-    // ----------------------------------------------------------------
 
     @Override
     @Transactional
@@ -245,10 +258,6 @@ public class DocumentServiceImpl implements DocumentService {
         recordAccessLog(documentId, null, hold ? "LEGAL_HOLD" : "LEGAL_HOLD_RELEASE");
         log.info("[文書台帳] legal hold {}. documentId={} reason={}", hold ? "設定" : "解除", documentId, reason);
     }
-
-    // ----------------------------------------------------------------
-    // 廃棄
-    // ----------------------------------------------------------------
 
     @Override
     @Transactional
@@ -309,7 +318,6 @@ public class DocumentServiceImpl implements DocumentService {
         if (!"PENDING".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotPending");
         }
-        // P2-04: 状態CAS＋更新確認
         int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
                 .eq(DocumentDisposalRequest::getId, disposalRequestId)
                 .eq(DocumentDisposalRequest::getStatus, "PENDING")
@@ -329,18 +337,16 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(400, "error.document.disposalNotApproved");
         }
 
-        // P1-07: 対象Documentの最新状態を再検証
         Document doc = getDocumentOrThrow(req.getDocumentId());
         if (doc.getLegalHoldFlag() != null && doc.getLegalHoldFlag() == 1) {
             throw BusinessException.of(400, "error.document.legalHoldActive");
         }
         if ("DISPOSED".equals(doc.getStatus())) {
-            return; // 既に廃棄済み
+            return;
         }
 
         List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(req.getDocumentId());
 
-        // DBステータスを先に DISPOSED へ更新
         documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                 .eq(Document::getId, req.getDocumentId())
                 .set(Document::getStatus, "DISPOSED"));
@@ -349,17 +355,24 @@ public class DocumentServiceImpl implements DocumentService {
                 .set(DocumentDisposalRequest::getStatus, "DISPOSED")
                 .set(DocumentDisposalRequest::getDisposedAt, LocalDateTime.now()));
 
-        // P1-07: DBコミット成功後に Storage の物理削除を実行
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
+                    boolean allSuccess = true;
+                    List<String> failedKeys = new ArrayList<>();
                     for (DocumentVersion v : versions) {
                         try {
                             documentStorage.delete(v.getStorageKey());
                         } catch (Exception e) {
+                            allSuccess = false;
+                            failedKeys.add(v.getStorageKey());
                             log.error("[文書台帳] Storage削除失敗: key={} error={}", v.getStorageKey(), e.getMessage());
                         }
+                    }
+                    if (!allSuccess) {
+                        log.error("[文書台帳] 一部Storageの削除に失敗しました: documentId={} failedKeys={}",
+                                req.getDocumentId(), failedKeys);
                     }
                 }
             });
@@ -373,19 +386,21 @@ public class DocumentServiceImpl implements DocumentService {
         log.info("[文書台帳] 廃棄実行指示完了: documentId={}", req.getDocumentId());
     }
 
-    // ----------------------------------------------------------------
-    // 整合性検証
-    // ----------------------------------------------------------------
-
     @Override
     public List<IntegrityFinding> verifyIntegrity(Long documentId) {
         List<IntegrityFinding> findings = new ArrayList<>();
         List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(documentId);
 
         for (DocumentVersion v : versions) {
-            try {
-                byte[] storageBytes = documentStorage.readAll(v.getStorageKey());
-                String actualSha256 = computeSha256(storageBytes);
+            try (InputStream is = documentStorage.open(v.getStorageKey())) {
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = is.read(buffer)) != -1) {
+                    md.update(buffer, 0, read);
+                }
+                String actualSha256 = HexFormat.of().formatHex(md.digest());
+
                 if (!v.getSha256().equals(actualSha256)) {
                     findings.add(IntegrityFinding.builder()
                             .documentId(documentId)
@@ -411,10 +426,6 @@ public class DocumentServiceImpl implements DocumentService {
         return findings;
     }
 
-    // ----------------------------------------------------------------
-    // 確定
-    // ----------------------------------------------------------------
-
     @Override
     @Transactional
     public void confirm(Long documentId) {
@@ -437,10 +448,6 @@ public class DocumentServiceImpl implements DocumentService {
         log.info("[文書台帳] 確定: documentId={} retentionUntil={}", documentId, retentionUntil);
     }
 
-    // ----------------------------------------------------------------
-    // ダウンロード
-    // ----------------------------------------------------------------
-
     @Override
     public InputStream download(Long documentId, Integer versionNo) {
         DocumentVersion version;
@@ -455,7 +462,7 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
         String scanStatus = version.getScanStatus();
-        if (scanStatus == null || "PENDING".equals(scanStatus) || "REJECTED".equals(scanStatus)) {
+        if (scanStatus == null || !"CLEAN".equals(scanStatus)) {
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
 
@@ -464,7 +471,7 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     // ----------------------------------------------------------------
-    // ユーティリティ
+    // 内部ユーティリティ
     // ----------------------------------------------------------------
 
     private Document getDocumentOrThrow(Long documentId) {
@@ -523,10 +530,10 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
-     * P1-08: 法定保存期限算出。
+     * 法定保存期限算出。
      * 起算日が明確に確定できない場合は null を返し、勝手に LocalDate.now() へフォールバックしない。
      */
-    private LocalDate computeRetentionUntil(Document doc) {
+    LocalDate computeRetentionUntil(Document doc) {
         DocumentType docType = documentTypeMapper.selectOne(
                 new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
         if (docType == null || docType.getRetentionYears() == null) {
@@ -538,31 +545,49 @@ public class DocumentServiceImpl implements DocumentService {
         if ("TRANSACTION_DATE".equals(rule)) {
             startDate = doc.getTransactionDate();
         }
-        // CLOSED_AT / SIGNED_AT / DISPATCH_END 等で日付が未確定の場合は null のままにする
         if (startDate == null) {
             return null;
         }
         return startDate.plusYears(docType.getRetentionYears());
     }
 
-    private FileScanResult scanQuarantinedContent(byte[] content) {
+    private record StreamDigestResult(Path tempPath, long sizeBytes, String sha256) {}
+
+    private StreamDigestResult writeToTempAndDigest(InputStream input) {
+        try {
+            Path temp = Files.createTempFile("doc-upload-", ".tmp");
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            long size = 0;
+            try (DigestInputStream dis = new DigestInputStream(new BufferedInputStream(input), md)) {
+                size = Files.copy(dis, temp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            String sha256 = HexFormat.of().formatHex(md.digest());
+            return new StreamDigestResult(temp, size, sha256);
+        } catch (Exception e) {
+            throw new RuntimeException("アップロードストリーム書込・ハッシュ計算失敗", e);
+        }
+    }
+
+    private FileScanResult scanQuarantinedPath(Path path) {
         FileScanner scanner = fileScannerProvider.getIfAvailable();
         if (scanner == null) {
-            return FileScanResult.clean("no-op-scanner");
+            log.warn("[文書台帳] FileScannerが未配線のためfail-closedで感染扱いとします");
+            return FileScanResult.infected("scanner-unavailable");
         }
         try {
-            // テンプファイル経由でスキャン
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("scan-", ".tmp");
-            java.nio.file.Files.write(tempFile, content);
-            try {
-                return scanner.scan(tempFile, com.ses.common.enums.FileKind.SKILL_SHEET);
-            } finally {
-                java.nio.file.Files.deleteIfExists(tempFile);
-            }
+            return scanner.scan(path, com.ses.common.enums.FileKind.SKILL_SHEET);
         } catch (Exception e) {
             log.warn("[文書台帳] スキャン実行中例外: {}", e.getMessage());
-            return FileScanResult.clean("fallback");
+            return FileScanResult.unavailable(e.getMessage());
         }
+    }
+
+    private void deleteTempFile(Path temp) {
+        try {
+            if (temp != null) {
+                Files.deleteIfExists(temp);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void recordAccessLog(Long documentId, Long versionId, String action) {
@@ -581,14 +606,6 @@ public class DocumentServiceImpl implements DocumentService {
 
     private static String generateStorageKey() {
         return UUID.randomUUID().toString().replace("-", "") + "/" + UUID.randomUUID();
-    }
-
-    private static byte[] readAllBytes(InputStream is) {
-        try {
-            return is.readAllBytes();
-        } catch (java.io.IOException e) {
-            throw new RuntimeException("ファイル読込失敗", e);
-        }
     }
 
     static String computeSha256(byte[] data) {
