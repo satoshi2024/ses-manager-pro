@@ -28,7 +28,8 @@ public class DocumentRetentionJob {
     /**
      * 毎日深夜 02:00 に実行され、保存期限が切れた非ホールド文書を廃棄申請候補（PENDING）に追加する。
      */
-    @Scheduled(cron = "0 0 2 * * ?")
+    @Scheduled(cron = "0 30 2 * * ?")
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "DocumentRetentionJob_processExpiredDocuments", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void processExpiredDocuments() {
         log.info("[保存期限ジョブ] 保存期限経過文書のチェックを開始します");
 

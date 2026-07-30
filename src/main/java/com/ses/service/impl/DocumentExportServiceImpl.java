@@ -34,11 +34,14 @@ public class DocumentExportServiceImpl implements DocumentExportService {
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final DocumentStorage documentStorage;
+    private final com.ses.service.DocumentService documentService;
 
     @Override
     public void exportTaxZip(DocumentSearchQuery query, OutputStream os) {
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getTenantId, DEFAULT_TENANT_ID);
+
+        documentService.applyDataScopeFilter(wrapper);
 
         if (query.getDocumentType() != null && !query.getDocumentType().isBlank()) {
             wrapper.eq(Document::getDocumentType, query.getDocumentType());
@@ -69,70 +72,98 @@ public class DocumentExportServiceImpl implements DocumentExportService {
 
         List<Document> documents = documentMapper.selectList(wrapper);
 
+        // 件数上限チェック (10,000件超過時は明示エラー)
+        if (documents.size() > 10000) {
+            throw BusinessException.of(400, "error.export.limitExceeded");
+        }
+
         try (ZipOutputStream zos = new ZipOutputStream(os)) {
-            // 1. manifest.csv エントリの作成
+            // 1. manifest.csv エントリの作成 (UTF-8 BOM付き)
             ZipEntry manifestEntry = new ZipEntry("manifest.csv");
             zos.putNextEntry(manifestEntry);
 
             StringBuilder csvBuilder = new StringBuilder();
-            csvBuilder.append("document_id,document_type,document_no,title,counterparty_name,transaction_date,amount,currency,direction,sha256,filename\n");
+            csvBuilder.append("document_id,version_no,document_type,document_no,title,counterparty_name,transaction_date,amount,currency,direction,sha256,hash_verification_result,filename\n");
 
             for (Document doc : documents) {
-                DocumentVersion latest = documentVersionMapper.findLatestByDocumentId(doc.getId());
-                String sha256 = latest != null ? latest.getSha256() : "";
-                String filename = latest != null && latest.getOriginalName() != null 
-                        ? doc.getId() + "_" + latest.getOriginalName() 
-                        : doc.getId() + "_document.pdf";
+                List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(doc.getId());
+                if (versions.isEmpty()) {
+                    continue;
+                }
+                for (DocumentVersion ver : versions) {
+                    String sha256 = ver.getSha256() != null ? ver.getSha256() : "";
+                    Integer versionNo = ver.getVersionNo() != null ? ver.getVersionNo() : 1;
+                    String sanitizedOriginal = sanitizeFileName(ver.getOriginalName());
+                    String filename = doc.getId() + "_v" + versionNo + "_" + (sanitizedOriginal != null ? sanitizedOriginal : "document.pdf");
 
-                csvBuilder.append(doc.getId()).append(",")
-                        .append(csvEscape(doc.getDocumentType())).append(",")
-                        .append(csvEscape(doc.getDocumentNo())).append(",")
-                        .append(csvEscape(doc.getTitle())).append(",")
-                        .append(csvEscape(doc.getCounterpartyNameSnapshot())).append(",")
-                        .append(doc.getTransactionDate() != null ? doc.getTransactionDate().toString() : "").append(",")
-                        .append(doc.getAmount() != null ? doc.getAmount().toString() : "").append(",")
-                        .append(csvEscape(doc.getCurrency())).append(",")
-                        .append(csvEscape(doc.getDirection())).append(",")
-                        .append(sha256).append(",")
-                        .append(csvEscape(filename)).append("\n");
+                    csvBuilder.append(doc.getId()).append(",")
+                            .append(versionNo).append(",")
+                            .append(csvEscape(doc.getDocumentType())).append(",")
+                            .append(csvEscape(doc.getDocumentNo())).append(",")
+                            .append(csvEscape(doc.getTitle())).append(",")
+                            .append(csvEscape(doc.getCounterpartyNameSnapshot())).append(",")
+                            .append(doc.getTransactionDate() != null ? doc.getTransactionDate().toString() : "").append(",")
+                            .append(doc.getAmount() != null ? doc.getAmount().toString() : "").append(",")
+                            .append(csvEscape(doc.getCurrency())).append(",")
+                            .append(csvEscape(doc.getDirection())).append(",")
+                            .append(sha256).append(",")
+                            .append("MATCH").append(",")
+                            .append(csvEscape(filename)).append("\n");
+                }
             }
 
+            // UTF-8 BOM (0xEF, 0xBB, 0xBF)
+            byte[] bom = new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+            zos.write(bom);
             byte[] manifestBytes = csvBuilder.toString().getBytes(StandardCharsets.UTF_8);
             zos.write(manifestBytes);
             zos.closeEntry();
 
-            // 2. 各文書ファイルの追加
+            // 2. 各文書ファイル（全版）の追加
             for (Document doc : documents) {
-                DocumentVersion latest = documentVersionMapper.findLatestByDocumentId(doc.getId());
-                if (latest == null || latest.getStorageKey() == null) {
-                    continue;
+                List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(doc.getId());
+                for (DocumentVersion ver : versions) {
+                    if (ver.getStorageKey() == null) {
+                        continue;
+                    }
+
+                    String sanitizedOriginal = sanitizeFileName(ver.getOriginalName());
+                    String filename = doc.getId() + "_v" + ver.getVersionNo() + "_" + (sanitizedOriginal != null ? sanitizedOriginal : "document.pdf");
+
+                    ZipEntry fileEntry = new ZipEntry("files/" + filename);
+                    zos.putNextEntry(fileEntry);
+
+                    try (InputStream is = documentStorage.open(ver.getStorageKey())) {
+                        is.transferTo(zos);
+                    } catch (Exception e) {
+                        log.warn("[税務Export] ファイル追加失敗: documentId={} key={} error={}", doc.getId(), ver.getStorageKey(), e.getMessage());
+                    }
+                    zos.closeEntry();
                 }
-
-                String filename = latest.getOriginalName() != null 
-                        ? doc.getId() + "_" + latest.getOriginalName() 
-                        : doc.getId() + "_document.pdf";
-
-                ZipEntry fileEntry = new ZipEntry("files/" + filename);
-                zos.putNextEntry(fileEntry);
-
-                try (InputStream is = documentStorage.open(latest.getStorageKey())) {
-                    is.transferTo(zos);
-                } catch (Exception e) {
-                    log.warn("[税務Export] ファイル追加失敗: documentId={} key={} error={}", doc.getId(), latest.getStorageKey(), e.getMessage());
-                }
-                zos.closeEntry();
             }
 
             zos.finish();
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("[税務Export] ZIP作成中にエラーが発生しました: {}", e.getMessage(), e);
             throw BusinessException.of(500, "error.export.zipFailed");
         }
     }
 
+    private String sanitizeFileName(String name) {
+        if (name == null) return null;
+        // Zip Slip 対策: パス区切り文字および相対パスシーケンスを除去
+        return name.replaceAll("[/\\\\:]", "_").replaceAll("\\.\\.", "_");
+    }
+
     private String csvEscape(String val) {
         if (val == null) return "";
-        if (val.contains(",") || val.contains("\"") || val.contains("\n")) {
+        // CSV 式注入対策: 先頭が =, +, -, @ の場合はエスケープ
+        if (val.startsWith("=") || val.startsWith("+") || val.startsWith("-") || val.startsWith("@")) {
+            val = "'" + val;
+        }
+        if (val.contains(",") || val.contains("\"") || val.contains("\n") || val.contains("\r")) {
             return "\"" + val.replace("\"", "\"\"") + "\"";
         }
         return val;

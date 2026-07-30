@@ -58,6 +58,7 @@ class DocumentServiceImplTest {
     @Mock DocumentAccessLogMapper documentAccessLogMapper;
     @Mock DocumentDisposalRequestMapper documentDisposalRequestMapper;
     @Mock DocumentTypeMapper documentTypeMapper;
+    @Mock com.ses.service.security.DataScopeService dataScopeService;
     @Mock DocumentStorage documentStorage;
     @Mock ObjectProvider<FileScanner> fileScannerProvider;
     @Mock FileScanner fileScanner;

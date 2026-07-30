@@ -9,6 +9,7 @@ import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.impl.DocumentServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,79 +67,13 @@ public class DocumentMigrationScript implements CommandLineRunner {
     }
 
     public int migrateResumes() {
-        int count = 0;
-        List<ResumeIngestion> list = resumeIngestionMapper.selectList(
-                new LambdaQueryWrapper<ResumeIngestion>()
-                        .isNotNull(ResumeIngestion::getStoredFileName)
-                        .ne(ResumeIngestion::getStatus, "廃棄"));
-
-        for (ResumeIngestion r : list) {
-            try {
-                Path path = Paths.get(uploadBase, "resumes", r.getStoredFileName());
-                if (!Files.exists(path)) {
-                    continue;
-                }
-                DocumentRegisterRequest req = DocumentRegisterRequest.builder()
-                        .documentType("RESUME")
-                        .title("職務経歴書: " + (r.getOriginalFileName() != null ? r.getOriginalFileName() : r.getStoredFileName()))
-                        .counterpartyType("ENGINEER")
-                        .transactionDate(r.getCreatedAt() != null ? r.getCreatedAt().toLocalDate() : LocalDate.now())
-                        .direction("INCOMING")
-                        .originalName(r.getOriginalFileName() != null ? r.getOriginalFileName() : r.getStoredFileName())
-                        .contentType("application/octet-stream")
-                        .sourceType("RECEIVED")
-                        .businessKey("RESUME_INGESTION:" + r.getId())
-                        .versionDiscriminator("v1")
-                        .targetType("ENGINEER")
-                        .targetId(r.getId())
-                        .build();
-
-                try (InputStream is = Files.newInputStream(path)) {
-                    documentService.registerReceived(req, is);
-                    count++;
-                }
-            } catch (Exception e) {
-                log.warn("[文書台帳移行] 職務経歴書スキップ: id={} error={}", r.getId(), e.getMessage());
-            }
-        }
-        return count;
+        log.info("[文書台帳移行] 職務経歴書の移行はS04-NOTE-1の決定待ちのためスキップします");
+        return 0;
     }
 
     public int migrateSkillSheets() {
-        int count = 0;
-        List<Proposal> list = proposalMapper.selectList(
-                new LambdaQueryWrapper<Proposal>().isNotNull(Proposal::getSkillSheetPath));
-
-        for (Proposal p : list) {
-            try {
-                Path path = Paths.get(uploadBase, "skillsheets", p.getSkillSheetPath());
-                if (!Files.exists(path)) {
-                    continue;
-                }
-                DocumentRegisterRequest req = DocumentRegisterRequest.builder()
-                        .documentType("SKILL_SHEET")
-                        .title("スキルシート: 提案ID=" + p.getId())
-                        .counterpartyType("CUSTOMER")
-                        .transactionDate(p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : LocalDate.now())
-                        .direction("OUTGOING")
-                        .originalName(path.getFileName().toString())
-                        .contentType("application/octet-stream")
-                        .sourceType("GENERATED")
-                        .businessKey("PROPOSAL_SKILL_SHEET:" + p.getId())
-                        .versionDiscriminator("v1")
-                        .targetType("PROPOSAL")
-                        .targetId(p.getId())
-                        .build();
-
-                try (InputStream is = Files.newInputStream(path)) {
-                    documentService.registerGenerated(req, is);
-                    count++;
-                }
-            } catch (Exception e) {
-                log.warn("[文書台帳移行] スキルシートスキップ: proposalId={} error={}", p.getId(), e.getMessage());
-            }
-        }
-        return count;
+        log.info("[文書台帳移行] スキルシートの移行はS04-NOTE-1の決定待ちのためスキップします");
+        return 0;
     }
 
     public int migrateContractDocuments() {
@@ -152,6 +87,17 @@ public class DocumentMigrationScript implements CommandLineRunner {
                 if (!Files.exists(path)) {
                     continue;
                 }
+
+                byte[] bytes = Files.readAllBytes(path);
+                if (d.getPdfSha256() != null && !d.getPdfSha256().isBlank()) {
+                    String actualSha256 = DocumentServiceImpl.computeSha256(bytes);
+                    if (!d.getPdfSha256().equalsIgnoreCase(actualSha256)) {
+                        log.warn("[文書台帳移行] ハッシュ不一致により契約PDF移行をスキップ: docId={} expected={} actual={}",
+                                d.getId(), d.getPdfSha256(), actualSha256);
+                        continue;
+                    }
+                }
+
                 DocumentRegisterRequest req = DocumentRegisterRequest.builder()
                         .documentType("CONTRACT")
                         .title("契約書PDF: ドキュメントID=" + d.getId())
@@ -161,13 +107,13 @@ public class DocumentMigrationScript implements CommandLineRunner {
                         .originalName(path.getFileName().toString())
                         .contentType("application/pdf")
                         .sourceType("GENERATED")
-                        .businessKey("CONTRACT_DOCUMENT:" + d.getId())
+                        .businessKey("CONTRACT:" + d.getContractId())
                         .versionDiscriminator("v1")
                         .targetType("CONTRACT")
                         .targetId(d.getContractId())
                         .build();
 
-                try (InputStream is = Files.newInputStream(path)) {
+                try (InputStream is = new ByteArrayInputStream(bytes)) {
                     documentService.registerGenerated(req, is);
                     count++;
                 }

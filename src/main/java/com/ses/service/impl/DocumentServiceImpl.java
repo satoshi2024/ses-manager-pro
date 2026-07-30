@@ -28,6 +28,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
+import java.util.Set;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.BufferedInputStream;
@@ -42,7 +43,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * 文書台帳サービス実装。
@@ -58,6 +61,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentAccessLogMapper documentAccessLogMapper;
     private final DocumentDisposalRequestMapper documentDisposalRequestMapper;
     private final DocumentTypeMapper documentTypeMapper;
+    private final com.ses.service.security.DataScopeService dataScopeService;
     private final DocumentStorage documentStorage;
     private final ObjectProvider<FileScanner> fileScannerProvider;
 
@@ -636,6 +640,8 @@ public class DocumentServiceImpl implements DocumentService {
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getTenantId, DEFAULT_TENANT_ID);
 
+        applyDataScopeFilter(wrapper);
+
         if (query.getDocumentType() != null && !query.getDocumentType().isBlank()) {
             wrapper.eq(Document::getDocumentType, query.getDocumentType());
         }
@@ -668,16 +674,20 @@ public class DocumentServiceImpl implements DocumentService {
 
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<Document> pageResult = documentMapper.selectPage(pageParam, wrapper);
 
+        // N+1 対策: 全DocumentTypeをキャッシュ
+        Map<String, String> typeNameMap = documentTypeMapper.selectList(new LambdaQueryWrapper<DocumentType>())
+                .stream().collect(Collectors.toMap(DocumentType::getCode, DocumentType::getName, (a, b) -> a));
+
         List<com.ses.dto.document.DocumentListDTO> dtoList = new ArrayList<>();
         for (Document doc : pageResult.getRecords()) {
             DocumentVersion latestVersion = documentVersionMapper.findLatestByDocumentId(doc.getId());
-            DocumentType type = documentTypeMapper.selectOne(new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
+            String typeName = typeNameMap.getOrDefault(doc.getDocumentType(), doc.getDocumentType());
 
             com.ses.dto.document.DocumentListDTO dto = com.ses.dto.document.DocumentListDTO.builder()
                     .id(doc.getId())
                     .tenantId(doc.getTenantId())
                     .documentType(doc.getDocumentType())
-                    .documentTypeName(type != null ? type.getName() : doc.getDocumentType())
+                    .documentTypeName(typeName)
                     .documentNo(doc.getDocumentNo())
                     .title(doc.getTitle())
                     .counterpartyType(doc.getCounterpartyType())
@@ -708,6 +718,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     public com.ses.dto.document.DocumentDetailDTO getDocumentDetail(Long documentId) {
         Document doc = getDocumentOrThrow(documentId);
+        assertDocumentAccessAllowed(doc);
         DocumentType type = documentTypeMapper.selectOne(new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
 
         List<DocumentVersion> versionEntities = documentVersionMapper.findByDocumentId(documentId);
@@ -770,7 +781,110 @@ public class DocumentServiceImpl implements DocumentService {
                 .build();
     }
 
-    static String computeSha256(byte[] data) {
+    public void assertDocumentAccessAllowed(Document doc) {
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+        if (isAdmin) {
+            return;
+        }
+
+        List<DocumentLink> links = documentLinkMapper.selectList(
+                new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, doc.getId()));
+        if (links.isEmpty()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+
+        boolean anyAllowed = false;
+        for (DocumentLink link : links) {
+            try {
+                String type = link.getTargetType();
+                Long targetId = link.getTargetId();
+                if ("CUSTOMER".equals(type)) {
+                    dataScopeService.assertAllowedCustomer(targetId);
+                    anyAllowed = true;
+                    break;
+                } else if ("ENGINEER".equals(type)) {
+                    dataScopeService.assertAllowedEngineer(targetId);
+                    anyAllowed = true;
+                    break;
+                } else if ("CONTRACT".equals(type)) {
+                    dataScopeService.assertAllowedContract(targetId);
+                    anyAllowed = true;
+                    break;
+                } else if ("PROJECT".equals(type)) {
+                    dataScopeService.assertAllowedProject(targetId);
+                    anyAllowed = true;
+                    break;
+                } else if ("PROPOSAL".equals(type)) {
+                    dataScopeService.assertAllowedProposal(targetId);
+                    anyAllowed = true;
+                    break;
+                }
+                // 未対応・未定義のターゲットタイプはスキップ（fail-closed）
+            } catch (BusinessException ignored) {
+                // 次のリンクを試行
+            }
+        }
+        if (!anyAllowed) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    public void applyDataScopeFilter(LambdaQueryWrapper<Document> wrapper) {
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+        if (isAdmin) {
+            return;
+        }
+
+        // 非管理者の場合: 許可されたターゲットID集合により SQL レベルで絞り込み
+        Set<Long> allowedCustomers = dataScopeService.allowedCustomerIds();
+        Set<Long> allowedEngineers = dataScopeService.allowedEngineerIds();
+        Set<Long> allowedContracts = dataScopeService.allowedContractIds();
+        Set<Long> allowedProjects = dataScopeService.allowedProjectIds();
+        Set<Long> allowedProposals = dataScopeService.allowedProposalIds();
+
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<DocumentLink> linkWrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        boolean hasCondition = false;
+
+        if (allowedCustomers != null && !allowedCustomers.isEmpty()) {
+            linkWrapper.or(w -> w.eq("target_type", "CUSTOMER").in("target_id", allowedCustomers));
+            hasCondition = true;
+        }
+        if (allowedEngineers != null && !allowedEngineers.isEmpty()) {
+            linkWrapper.or(w -> w.eq("target_type", "ENGINEER").in("target_id", allowedEngineers));
+            hasCondition = true;
+        }
+        if (allowedContracts != null && !allowedContracts.isEmpty()) {
+            linkWrapper.or(w -> w.eq("target_type", "CONTRACT").in("target_id", allowedContracts));
+            hasCondition = true;
+        }
+        if (allowedProjects != null && !allowedProjects.isEmpty()) {
+            linkWrapper.or(w -> w.eq("target_type", "PROJECT").in("target_id", allowedProjects));
+            hasCondition = true;
+        }
+        if (allowedProposals != null && !allowedProposals.isEmpty()) {
+            linkWrapper.or(w -> w.eq("target_type", "PROPOSAL").in("target_id", allowedProposals));
+            hasCondition = true;
+        }
+
+        if (!hasCondition) {
+            wrapper.eq(Document::getId, -1L);
+            return;
+        }
+
+        List<DocumentLink> links = documentLinkMapper.selectList(linkWrapper);
+        Set<Long> allowedDocIds = links.stream().map(DocumentLink::getDocumentId).collect(Collectors.toSet());
+
+        if (allowedDocIds.isEmpty()) {
+            wrapper.eq(Document::getId, -1L);
+        } else {
+            wrapper.in(Document::getId, allowedDocIds);
+        }
+    }
+
+    public static String computeSha256(byte[] data) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(md.digest(data));

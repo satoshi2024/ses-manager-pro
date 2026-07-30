@@ -98,44 +98,49 @@ public class FileScopeValidationService {
             // P1-03: メニュー権限判定
             assertMenuAllowed("document-archive");
 
-            // P1-03 / P0-01: t_document_link 経由の DataScope 条件判定（和集合: いずれか1つでも許可されれば可）
-            DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
-            if (linkMapper != null) {
-                List<DocumentLink> links = linkMapper.selectList(
-                        new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
-                if (!links.isEmpty()) {
-                    boolean anyAllowed = false;
-                    for (DocumentLink link : links) {
-                        try {
-                            String type = link.getTargetType();
-                            Long targetId = link.getTargetId();
-                            if ("CUSTOMER".equals(type)) {
-                                dataScopeService.assertAllowedCustomer(targetId);
-                                anyAllowed = true;
-                                break;
-                            } else if ("ENGINEER".equals(type)) {
-                                dataScopeService.assertAllowedEngineer(targetId);
-                                anyAllowed = true;
-                                break;
-                            } else if ("CONTRACT".equals(type)) {
-                                dataScopeService.assertAllowedContract(targetId);
-                                anyAllowed = true;
-                                break;
-                            } else if ("PROJECT".equals(type)) {
-                                dataScopeService.assertAllowedProject(targetId);
-                                anyAllowed = true;
-                                break;
-                            } else if ("PROPOSAL".equals(type)) {
-                                dataScopeService.assertAllowedProposal(targetId);
-                                anyAllowed = true;
-                                break;
+            // P1-03 / P0-01 / P2-01: t_document_link 経由の DataScope 条件判定（管理者全許可、営業は和集合）
+            org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+            if (!isAdmin) {
+                DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+                if (linkMapper != null) {
+                    List<DocumentLink> links = linkMapper.selectList(
+                            new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
+                    if (!links.isEmpty()) {
+                        boolean anyAllowed = false;
+                        for (DocumentLink link : links) {
+                            try {
+                                String type = link.getTargetType();
+                                Long targetId = link.getTargetId();
+                                if ("CUSTOMER".equals(type)) {
+                                    dataScopeService.assertAllowedCustomer(targetId);
+                                    anyAllowed = true;
+                                    break;
+                                } else if ("ENGINEER".equals(type)) {
+                                    dataScopeService.assertAllowedEngineer(targetId);
+                                    anyAllowed = true;
+                                    break;
+                                } else if ("CONTRACT".equals(type)) {
+                                    dataScopeService.assertAllowedContract(targetId);
+                                    anyAllowed = true;
+                                    break;
+                                } else if ("PROJECT".equals(type)) {
+                                    dataScopeService.assertAllowedProject(targetId);
+                                    anyAllowed = true;
+                                    break;
+                                } else if ("PROPOSAL".equals(type)) {
+                                    dataScopeService.assertAllowedProposal(targetId);
+                                    anyAllowed = true;
+                                    break;
+                                }
+                                // 未対応・未定義のターゲットタイプは評価せず次のリンクへ（fail-closed）
+                            } catch (BusinessException ignored) {
+                                // 個別の評価で不可の場合は次のリンクへ（和集合）
                             }
-                        } catch (BusinessException ignored) {
-                            // 個別の評価で不可の場合は次のリンクへ（和集合）
                         }
-                    }
-                    if (!anyAllowed) {
-                        throw BusinessException.of(403, "error.forbidden");
+                        if (!anyAllowed) {
+                            throw BusinessException.of(403, "error.forbidden");
+                        }
                     }
                 }
             }

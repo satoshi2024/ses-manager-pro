@@ -37,7 +37,7 @@ CROSS JOIN (VALUES
   ('payroll.*'), ('profile.*'), ('project-ingestion.*'), ('project.*'), ('proposal.*'),
   ('quotation.*'), ('reconciliation.*'), ('resume-ingestion.*'), ('sales-performance.*'),
   ('skill-tag.*'), ('skillsheet-template.*'), ('system-config.*'), ('work-record.*'),
-  ('export.execute')
+  ('export.execute'), ('document.*'), ('document-archive.*')
 ) a(action_key)
 WHERE NOT EXISTS (
   SELECT 1 FROM t_permission_group_action existing

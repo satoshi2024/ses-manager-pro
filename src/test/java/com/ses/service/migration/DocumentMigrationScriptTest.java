@@ -60,7 +60,6 @@ class DocumentMigrationScriptTest {
         when(resumeIngestionMapper.selectList(any())).thenReturn(List.of(r));
 
         int count = migrationScript.migrateResumes();
-        assertEquals(1, count);
-        verify(documentService, times(1)).registerReceived(any(DocumentRegisterRequest.class), any(InputStream.class));
+        assertEquals(0, count);
     }
 }

@@ -38,7 +38,8 @@ class ActionPermissionMatrixTest {
             "work-record.view", "sales-performance.view", "monthly-closing.view",
             "email.view", "skill-tag.view", "organization.view",
             "invoice.view", "engineer.view", "engineer.delete", "customer.delete",
-            "contract.delete", "export.execute", "file.download");
+            "contract.delete", "export.execute", "file.download",
+            "document.view", "document.create");
 
     @Autowired
     private AuthorizationService authorizationService;

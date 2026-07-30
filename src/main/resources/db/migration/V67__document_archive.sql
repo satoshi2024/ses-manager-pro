@@ -169,3 +169,11 @@ UNION ALL
 SELECT 'HR', id FROM m_menu WHERE menu_key = 'document-archive'
 UNION ALL
 SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'document-archive';
+
+-- 非管理者ロール (role-sales, role-hr, role-manager) へ document.* アクションを許可
+INSERT IGNORE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, 'document.*', 0
+FROM m_permission_group g
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('role-sales', 'role-hr', 'role-manager');

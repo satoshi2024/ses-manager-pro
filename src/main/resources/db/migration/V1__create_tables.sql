@@ -579,6 +579,13 @@ CREATE TABLE t_monthly_accounting_dimension (
 -- ============================================================
 -- 法定文書台帳 (V67 legal-document-ledger-archive)
 -- ============================================================
+DROP TABLE IF EXISTS t_document_access_log;
+DROP TABLE IF EXISTS t_document_disposal_request;
+DROP TABLE IF EXISTS t_document_link;
+DROP TABLE IF EXISTS t_document_version;
+DROP TABLE IF EXISTS t_document;
+DROP TABLE IF EXISTS m_document_type;
+
 CREATE TABLE m_document_type (
   id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   code                   VARCHAR(50)   NOT NULL COMMENT '種別コード',

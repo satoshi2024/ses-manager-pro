@@ -111,6 +111,12 @@
                         <i class="bi bi-file-earmark-check me-2"></i><span>契約書・電子署名</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('document-archive')}">
+                    <a th:href="@{/document/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-archive me-2"></i>
+                        <span th:text="#{menu.documentArchive}">法定文書台帳</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('work-record')}">
                     <a th:href="@{/work-record}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/work-record') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-clock-history me-2"></i>

@@ -93,4 +93,24 @@ public class DocumentApiController {
         DocumentDisposalRequest req = documentService.requestDisposal(id, reason);
         return ApiResult.success(req);
     }
+
+    @PostMapping("/disposal/{requestId}/approve")
+    public ApiResult<Void> approveDisposal(@PathVariable("requestId") Long requestId) {
+        documentService.approveDisposal(requestId);
+        return ApiResult.success(null);
+    }
+
+    @PostMapping("/disposal/{requestId}/reject")
+    public ApiResult<Void> rejectDisposal(
+            @PathVariable("requestId") Long requestId,
+            @RequestParam("reason") String reason) {
+        documentService.rejectDisposal(requestId, reason);
+        return ApiResult.success(null);
+    }
+
+    @PostMapping("/disposal/{requestId}/execute")
+    public ApiResult<Void> executeDisposal(@PathVariable("requestId") Long requestId) {
+        documentService.executeDisposal(requestId);
+        return ApiResult.success(null);
+    }
 }

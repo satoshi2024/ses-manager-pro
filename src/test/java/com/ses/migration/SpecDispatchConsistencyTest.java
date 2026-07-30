@@ -40,7 +40,7 @@ class SpecDispatchConsistencyTest {
 
     private static final Path EXPANSION = SPECS.resolve("customer-product-expansion-2026");
 
-    /** 実装対象の14 spec（S04〜S17）。S01は採番未定、S02/S03は適用済みのため対象外。 */
+    /** 実装対象の spec（S04〜S17）。S01は採番未定、S02/S03は適用済みのため対象外。 */
     private static final Map<String, String> SPEC_BY_CONVERSATION = new LinkedHashMap<>();
 
     static {

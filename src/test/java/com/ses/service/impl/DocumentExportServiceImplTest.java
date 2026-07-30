@@ -33,6 +33,7 @@ class DocumentExportServiceImplTest {
     @Mock DocumentMapper documentMapper;
     @Mock DocumentVersionMapper documentVersionMapper;
     @Mock DocumentStorage documentStorage;
+    @Mock com.ses.service.DocumentService documentService;
 
     @InjectMocks DocumentExportServiceImpl exportService;
 
@@ -57,6 +58,7 @@ class DocumentExportServiceImplTest {
         when(documentMapper.selectList(any())).thenReturn(List.of(doc));
         when(documentVersionMapper.findLatestByDocumentId(100L)).thenReturn(version);
         when(documentStorage.open("key-100")).thenReturn(new ByteArrayInputStream("PDF content".getBytes()));
+        org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         exportService.exportTaxZip(new DocumentSearchQuery(), baos);

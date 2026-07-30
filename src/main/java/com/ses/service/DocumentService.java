@@ -142,4 +142,8 @@ public interface DocumentService {
      * @return 入力ストリーム
      */
     InputStream download(Long documentId, Integer versionNo);
+    /**
+     * DataScope フィルタをクエリラッパーに適用する。
+     */
+    void applyDataScopeFilter(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.Document> wrapper);
 }
