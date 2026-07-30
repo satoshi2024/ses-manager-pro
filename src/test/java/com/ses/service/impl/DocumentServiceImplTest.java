@@ -325,4 +325,40 @@ class DocumentServiceImplTest {
 
         assertNull(result, "CLOSED_AT起算日が未確定の場合はnullを返さなければならない");
     }
+
+    @Test
+    void verifyIntegrity_hashMismatch_returnsMismatchFinding() {
+        DocumentVersion v = new DocumentVersion();
+        v.setId(101L);
+        v.setDocumentId(50L);
+        v.setStorageKey("path/to/key.pdf");
+        v.setSha256("0000000000000000000000000000000000000000000000000000000000000000");
+
+        when(documentVersionMapper.findByDocumentId(50L)).thenReturn(List.of(v));
+        when(documentStorage.open("path/to/key.pdf")).thenReturn(new ByteArrayInputStream("actual bytes".getBytes()));
+
+        List<IntegrityFinding> findings = sut.verifyIntegrity(50L);
+
+        assertEquals(1, findings.size());
+        assertEquals("HASH_MISMATCH", findings.get(0).getFindingType());
+        assertEquals(50L, findings.get(0).getDocumentId());
+    }
+
+    @Test
+    void verifyIntegrity_storageMissing_returnsMissingFinding() {
+        DocumentVersion v = new DocumentVersion();
+        v.setId(102L);
+        v.setDocumentId(51L);
+        v.setStorageKey("path/missing.pdf");
+        v.setSha256("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+
+        when(documentVersionMapper.findByDocumentId(51L)).thenReturn(List.of(v));
+        when(documentStorage.open("path/missing.pdf")).thenThrow(new RuntimeException("File not found"));
+
+        List<IntegrityFinding> findings = sut.verifyIntegrity(51L);
+
+        assertEquals(1, findings.size());
+        assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
+        assertEquals(51L, findings.get(0).getDocumentId());
+    }
 }

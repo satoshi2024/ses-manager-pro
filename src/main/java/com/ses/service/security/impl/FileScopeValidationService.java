@@ -51,9 +51,9 @@ public class FileScopeValidationService {
             return;
         }
 
-        // 2. t_engineer の顔写真
+        // 2. t_engineer の顔写真 (photo_url)
         Engineer engineer = engineerMapper.selectOne(
-                new QueryWrapper<Engineer>().eq("photo_path", storedName).last("LIMIT 1"));
+                new QueryWrapper<Engineer>().eq("photo_url", storedName).last("LIMIT 1"));
         if (engineer != null) {
             dataScopeService.assertAllowedEngineer(engineer.getId());
             return;
@@ -98,16 +98,34 @@ public class FileScopeValidationService {
             // P1-03: メニュー権限判定
             assertMenuAllowed("document-archive");
 
-            // P1-03: t_document_link 経由の DataScope 条件判定
+            // P1-03: t_document_link 経由の DataScope 条件判定（和集合: いずれか1つでも許可されれば可）
             DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
             if (linkMapper != null) {
                 List<DocumentLink> links = linkMapper.selectList(
                         new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
-                for (DocumentLink link : links) {
-                    if ("CUSTOMER".equals(link.getTargetType())) {
-                        dataScopeService.assertAllowedCustomer(link.getTargetId());
-                    } else if ("ENGINEER".equals(link.getTargetType())) {
-                        dataScopeService.assertAllowedEngineer(link.getTargetId());
+                if (!links.isEmpty()) {
+                    boolean anyAllowed = false;
+                    for (DocumentLink link : links) {
+                        try {
+                            if ("CUSTOMER".equals(link.getTargetType())) {
+                                dataScopeService.assertAllowedCustomer(link.getTargetId());
+                                anyAllowed = true;
+                                break;
+                            } else if ("ENGINEER".equals(link.getTargetType())) {
+                                dataScopeService.assertAllowedEngineer(link.getTargetId());
+                                anyAllowed = true;
+                                break;
+                            } else {
+                                // 他のターゲットタイプ（CONTRACT等）はデフォルトで許可対象
+                                anyAllowed = true;
+                                break;
+                            }
+                        } catch (BusinessException ignored) {
+                            // 個別の評価で不可の場合は次のリンクへ（和集合）
+                        }
+                    }
+                    if (!anyAllowed) {
+                        throw BusinessException.of(403, "error.forbidden");
                     }
                 }
             }
