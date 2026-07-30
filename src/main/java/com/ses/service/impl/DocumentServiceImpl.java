@@ -373,12 +373,27 @@ public class DocumentServiceImpl implements DocumentService {
                     if (!allSuccess) {
                         log.error("[文書台帳] 一部Storageの削除に失敗しました: documentId={} failedKeys={}",
                                 req.getDocumentId(), failedKeys);
+                        documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+                                .eq(DocumentDisposalRequest::getId, disposalRequestId)
+                                .set(DocumentDisposalRequest::getStatus, "FAILED")
+                                .set(DocumentDisposalRequest::getReason, "Storage物理削除失敗: " + String.join(", ", failedKeys)));
                     }
                 }
             });
         } else {
+            List<String> failedKeys = new ArrayList<>();
             for (DocumentVersion v : versions) {
-                documentStorage.delete(v.getStorageKey());
+                try {
+                    documentStorage.delete(v.getStorageKey());
+                } catch (Exception e) {
+                    failedKeys.add(v.getStorageKey());
+                }
+            }
+            if (!failedKeys.isEmpty()) {
+                documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+                        .eq(DocumentDisposalRequest::getId, disposalRequestId)
+                        .set(DocumentDisposalRequest::getStatus, "FAILED")
+                        .set(DocumentDisposalRequest::getReason, "Storage物理削除失敗: " + String.join(", ", failedKeys)));
             }
         }
 
