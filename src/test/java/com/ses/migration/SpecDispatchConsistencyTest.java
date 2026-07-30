@@ -28,8 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>その時のReviewは「同期は完全」と報告していたが、grepの対象集合に `tasks.md` が入っていなかった。
  * 人手のgrepは対象を取りこぼすので、対象集合そのものをテストで固定する。
- * 中文版 `dispatch-conversations-zh.md` はrepo外で管理されていた時期に同じ漂流を起こしたため、
- * 正本と同じ検査対象に含める。
+ *
+ * <p>派工資料の正本は日本語版だけである（`spec-start-conversations.md` と
+ * `copyable-conversations/*.txt`）。翻訳版を別に持つと同期対象が増えて必ず漂流するため、
+ * 翻訳版は保持しない。新しい派工成果物を追加する場合は本テストの検査対象へも追加する。
  */
 class SpecDispatchConsistencyTest {
 
@@ -62,7 +64,6 @@ class SpecDispatchConsistencyTest {
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);
-    private static final Pattern ZH_TABLE_ROW = Pattern.compile("\\|\\s*S(\\d\\d)\\s+[^|]*\\|\\s*\\*\\*V(\\d+)\\*\\*");
 
     private String read(Path path) throws IOException {
         assertTrue(Files.exists(path), "spec文書が見つかりません: " + path);
@@ -77,13 +78,12 @@ class SpecDispatchConsistencyTest {
 
     /**
      * 予約番号の唯一の正は `design.md` の「予約V##」。
-     * tasks.md（冒頭の宣言と実装ガイダンスの2箇所）、日本語の派工対話、
-     * 個別 .txt、中文版の全てが同じ番号を指していること。
+     * tasks.md（冒頭の宣言と実装ガイダンスの2箇所）、派工対話、個別 .txt の全てが
+     * 同じ番号を指していること。
      */
     @Test
     void 予約Migration番号が全ての派工資料で一致すること() throws Exception {
         String startConversations = read(EXPANSION.resolve("spec-start-conversations.md"));
-        String zh = read(EXPANSION.resolve("dispatch-conversations-zh.md"));
 
         List<String> mismatches = new ArrayList<>();
 
@@ -114,18 +114,11 @@ class SpecDispatchConsistencyTest {
                 mismatches.add(txt.getFileName() + ": V" + txtVersion + " ≠ design.md V" + expected);
             }
 
-            // 日本語の派工対話（該当specの節）
+            // 派工対話（該当specの節）
             int jpVersion = versionInSection(startConversations, "## " + conversation + " — ", spec);
             if (jpVersion != expected) {
                 mismatches.add("spec-start-conversations.md " + conversation
                         + ": V" + jpVersion + " ≠ design.md V" + expected);
-            }
-
-            // 中文版の予約表
-            int zhVersion = zhReservation(zh, conversation);
-            if (zhVersion != expected) {
-                mismatches.add("dispatch-conversations-zh.md " + conversation
-                        + ": V" + zhVersion + " ≠ design.md V" + expected);
             }
         }
 
@@ -133,17 +126,6 @@ class SpecDispatchConsistencyTest {
                 "Migration予約番号が派工資料間でずれています。実装AIが従うのはtasks.mdと派工対話なので、"
                         + "ここがずれると適用済み番号を再利用してFlywayが起動時に例外を投げます。"
                         + "design.mdを正として全資料を揃えてください:\n  " + String.join("\n  ", mismatches));
-    }
-
-    /** 中文版の予約表から番号を読む。 */
-    private int zhReservation(String zh, String conversation) {
-        Matcher m = ZH_TABLE_ROW.matcher(zh);
-        while (m.find()) {
-            if (("S" + m.group(1)).equals(conversation)) {
-                return Integer.parseInt(m.group(2));
-            }
-        }
-        throw new AssertionError("dispatch-conversations-zh.md の予約表に " + conversation + " の行がありません");
     }
 
     /** 派工対話の該当節（次の "## " 見出しまで）から Migration 行を読む。 */
@@ -250,26 +232,73 @@ class SpecDispatchConsistencyTest {
                         + String.join("\n  ", missing));
     }
 
-    /** 派工資料がplatform-invariants.mdを読ませていること（読まれない基線は意味がない）。 */
+    /**
+     * 派工対話が必須基線を読ませ、決定表を確定済みとして扱わせていること。
+     * 読まれない基線は存在しないのと同じで、S02の再発防止がそのまま無効化される。
+     */
     @Test
-    void S04以降の派工対話がplatform_invariantsを読ませること() throws Exception {
+    void S04以降の派工対話が必須基線と決定表を指示すること() throws Exception {
         List<String> missing = new ArrayList<>();
         for (Map.Entry<String, String> entry : SPEC_BY_CONVERSATION.entrySet()) {
             String conversation = entry.getKey();
             String spec = entry.getValue();
-            Path txt = EXPANSION.resolve("copyable-conversations")
+
+            Path start = EXPANSION.resolve("copyable-conversations")
                     .resolve(conversation + "__" + spec + "__start.txt");
-            if (!read(txt).contains("platform-invariants.md")) {
-                missing.add(String.valueOf(txt.getFileName()));
+            String startText = read(start);
+            for (String required : List.of(
+                    "platform-invariants.md",
+                    "execution-review-handbook.md",
+                    "test-execution-policy-s03-s17.md",
+                    "既定解と決定表",
+                    "前の欠番は埋めない")) {
+                if (!startText.contains(required)) {
+                    missing.add(start.getFileName() + " に「" + required + "」がありません");
+                }
             }
+
             Path review = EXPANSION.resolve("copyable-conversations")
                     .resolve(conversation.replace('S', 'R') + "__" + spec + "__review.txt");
             if (!read(review).contains("platform-invariants.md")) {
-                missing.add(String.valueOf(review.getFileName()));
+                missing.add(review.getFileName() + " に「platform-invariants.md」がありません");
             }
         }
         assertTrue(missing.isEmpty(),
-                "派工対話がplatform-invariants.mdを読むよう指示していません（既定解が参照されず再発見が起きます）: "
-                        + missing);
+                "派工対話が必須基線を読ませていません（既定解が参照されず、S02と同じ再発見が起きます）:\n  "
+                        + String.join("\n  ", missing));
+    }
+
+    /**
+     * S11の開始条件が社労士確認を待たないこと。
+     * 時間外計算の値は `overtime-rules.md` で確定済みで、社労士確認は本番releaseのgateである。
+     * これを開工条件に書くとS11が永久に着手できない。
+     */
+    @Test
+    void S11の開始条件が社労士確認で止まらないこと() throws Exception {
+        Path start = EXPANSION.resolve("copyable-conversations")
+                .resolve("S11__attendance-leave-overtime-compliance__start.txt");
+        String text = read(start);
+
+        assertTrue(text.contains("overtime-rules.md"),
+                "S11がovertime-rules.mdを読むよう指示していません（時間外計算の値の唯一の正）");
+        assertTrue(text.contains("本番releaseのgate"),
+                "S11の開始条件が社労士確認を本番gateとして明記していません。開工条件に書くと着手できなくなります");
+        assertTrue(text.contains("1メソッド1ルール"),
+                "S11にcalculatorの構造制約（1メソッド1ルール）がありません");
+    }
+
+    /**
+     * S13は `platform-invariants.md` §2の既定解が適用できない唯一のspecである。
+     * 一律「既定解に従え」と指示すると、portal userに存在しないDataScope/組織scopeを
+     * 流用しようとして破綻するため、例外であることを明示させる。
+     */
+    @Test
+    void S13が認可母集団の例外であることを明示すること() throws Exception {
+        Path start = EXPANSION.resolve("copyable-conversations")
+                .resolve("S13__external-customer-bp-portal__start.txt");
+        String text = read(start);
+        assertTrue(text.contains("唯一のspec"),
+                "S13がplatform-invariants §2の例外であることを明示していません"
+                        + "（portal userはDataScope・組織scope・menu権限を持たない）");
     }
 }

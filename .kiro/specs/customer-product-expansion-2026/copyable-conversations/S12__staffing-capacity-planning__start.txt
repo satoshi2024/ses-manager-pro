@@ -11,7 +11,7 @@
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V72
+- Migration: V72（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -22,6 +22,7 @@
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -31,6 +32,14 @@
 - .kiro/specs/staffing-capacity-planning/requirements.md
 - .kiro/specs/staffing-capacity-planning/design.md
 - .kiro/specs/staffing-capacity-planning/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→F2→(A1 || B1 || B2)→M

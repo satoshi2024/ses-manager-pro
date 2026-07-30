@@ -211,7 +211,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V64
+- Migration: V64（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: enterprise-identity-security完了・merge済み。
 - Decision gate: G2の法務監修者、保存期間、訂正削除方針が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -222,6 +222,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -231,6 +232,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/legal-document-ledger-archive/requirements.md
 - .kiro/specs/legal-document-ledger-archive/design.md
 - .kiro/specs/legal-document-ledger-archive/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(A1 || B1 || B2)→M
@@ -271,7 +280,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V65
+- Migration: V65（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: legal-document-ledger-archive完了・merge済み。
 - Decision gate: blocking decisionなし。共通検索・scope・大量処理標準を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -282,6 +291,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -291,6 +301,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/productivity-search-saved-view/requirements.md
 - .kiro/specs/productivity-search-saved-view/design.md
 - .kiro/specs/productivity-search-saved-view/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→(A1 || A2 || B1 || B2)→M
@@ -332,7 +350,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V66
+- Migration: V66（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV66→V67順にmerge。
 - Decision gate: G2の法務監修と対象法令・帳票項目が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -343,6 +361,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -352,6 +371,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/bp-company-master-procurement-compliance/requirements.md
 - .kiro/specs/bp-company-master-procurement-compliance/design.md
 - .kiro/specs/bp-company-master-procurement-compliance/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(A1 || B1 || B2)→M
@@ -393,7 +420,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V68
+- Migration: V68（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: BP master V66とCRM V67が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -404,6 +431,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -413,6 +441,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/approval-workflow-internal-control/requirements.md
 - .kiro/specs/approval-workflow-internal-control/design.md
 - .kiro/specs/approval-workflow-internal-control/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(A1 || A2 || B1)→M
@@ -453,7 +489,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V67
+- Migration: V67（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: Wave 0完了。BPと並行開始できるがV66 merge後にV67をmerge。
 - Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -464,6 +500,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -473,6 +510,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/crm-contact-opportunity/requirements.md
 - .kiro/specs/crm-contact-opportunity/design.md
 - .kiro/specs/crm-contact-opportunity/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→F2→(A1 || A2 || B1)→M
@@ -513,7 +558,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V69
+- Migration: V69（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: approval-workflow-internal-control完了・merge済み。
 - Decision gate: 承認状態機械と帳票archive interfaceが固定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -524,6 +569,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -533,6 +579,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/order-acceptance-workflow/requirements.md
 - .kiro/specs/order-acceptance-workflow/design.md
 - .kiro/specs/order-acceptance-workflow/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→F2→(A1 || B1)→B2→M
@@ -574,7 +628,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V70
+- Migration: V70（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2の公式様式field mappingと法務受入責任者が確定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -585,6 +639,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -594,6 +649,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/requirements.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/design.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(A1 || B1 || B2)→M
@@ -636,9 +699,11 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V71
+- Migration: V71（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: order-acceptance-workflow完了・merge済み。
-- Decision gate: G6（雇用勤怠の正）、36協定、就業規則が正式決定済み。
+- Decision gate: G6（雇用勤怠の正＝本システム）が正式決定済み。
+- 時間外計算の値は `overtime-rules.md` で**確定済み**である。社労士確認と法人別36協定・就業規則の突合は
+  **本番releaseのgate**であって開工条件ではない。未入手を理由に着手を止めない。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
 【最初に完全に読むもの】
@@ -647,6 +712,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -658,9 +724,24 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/attendance-leave-overtime-compliance/overtime-rules.md
 - .kiro/specs/attendance-leave-overtime-compliance/tasks.md
 
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
+
 【spec内の実行順】
 - 0→F1→[(F2→A1→B2) || A2 || B1]→M
 - 並行ルール: calculatorは主担当。休暇とprovider syncを別レーン可。dispatchとspec間並行可。
+- 時間外計算の唯一の正は `overtime-rules.md`。数値・境界の向き・休日労働の算入可否・優先順位・変更手順は同書に従い、
+  本specで決め直さない。実装が守る構造制約は3点:
+  (1) 判定式は `OvertimeComplianceCalculator` に1メソッド1ルールで書く。
+  (2) 閾値をコードへ直書きせず `m_overtime_agreement`（法人別）→ `m_system_config`（overtime.*）→ 定数の順で解決する。
+      協定行が無い法人は判定不能としてfindingを出し、既定値で「適合」にしない。
+  (3) 休日労働の算入可否はcalculatorへ渡す入力の選択1箇所に閉じ、ルール内部へ条件を持ち込まない。
+- 月100時間だけが `>=` 判定（法条は「100時間未満」）。他の上限は「以内」なので上限ちょうどは適合。
 - task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
 - 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
 - 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
@@ -697,7 +778,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V72
+- Migration: V72（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -708,6 +789,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -717,6 +799,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/staffing-capacity-planning/requirements.md
 - .kiro/specs/staffing-capacity-planning/design.md
 - .kiro/specs/staffing-capacity-planning/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→F2→(A1 || B1 || B2)→M
@@ -758,7 +848,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V73
+- Migration: V73（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -769,6 +859,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -779,9 +870,22 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/external-customer-bp-portal/design.md
 - .kiro/specs/external-customer-bp-portal/tasks.md
 
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
+
 【spec内の実行順】
 - 0→F1→F2→(A1 || A2 || B1)→M
 - 並行ルール: SecurityConfigと公開DTOは主担当。F2後に顧客、BP、管理/通知を3レーン可。
+- 本specは `platform-invariants.md` §2（認可母集団）の既定解が適用できない**唯一のspec**である。portal userは
+  `sys_user` ではなく、DataScope・組織scope・menu権限のいずれも持たない。母集団は
+  `portal_org` → `customer_id`/`bp_company_id` から独立に導出し、既存scope serviceを流用しない。詳細はdesign.mdの決定表。
+- `PortalLoginUser` を内部 `LoginUser` へ変換する経路を作らない。招待tokenの一回性はDB CAS
+  （`UPDATE ... WHERE used_at IS NULL`）で保証し、アプリ側の「存在チェック→更新」にしない。
 - task開始前にObjective、requirements ID、実装ガイダンス、テスト要件、Demoを短く提示する。
 - 1回に完了扱いにするのは1taskだけ。成功条件を満たしたtaskだけtasks.mdを - [x] にする。
 - 子Agentを使う場合はtask、許可file、禁止共有file、入力commit、完了条件を先に宣言する。
@@ -818,7 +922,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V74
+- Migration: V74（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -829,6 +933,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -838,6 +943,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/engineer-self-service-portal-v2/requirements.md
 - .kiro/specs/engineer-self-service-portal-v2/design.md
 - .kiro/specs/engineer-self-service-portal-v2/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - F1→(A1 || A2 || B1 || B2)→M
@@ -880,7 +993,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V75
+- Migration: V75（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -891,6 +1004,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -900,6 +1014,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/accounting-payment-integration/requirements.md
 - .kiro/specs/accounting-payment-integration/design.md
 - .kiro/specs/accounting-payment-integration/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(A1 || B1 || B2)→B3→M
@@ -941,7 +1063,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V76
+- Migration: V76（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -952,6 +1074,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -961,6 +1084,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/jp-pint-digital-invoice/requirements.md
 - .kiro/specs/jp-pint-digital-invoice/design.md
 - .kiro/specs/jp-pint-digital-invoice/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(B1 || A1)→B2→M
@@ -1002,7 +1133,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 4
-- Migration: V77
+- Migration: V77（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: CRM、proposal、staffing、outcome sourceが完了・merge済み。
 - Decision gate: G10はmock/rule継続または実provider/DPA/PII許可を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1013,6 +1144,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -1022,6 +1154,14 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 - .kiro/specs/ai-feedback-learning/requirements.md
 - .kiro/specs/ai-feedback-learning/design.md
 - .kiro/specs/ai-feedback-learning/tasks.md
+
+【既定解と決定表】
+- `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
+  transaction/cache、期間代数、Migration 5形状、金額/CSVの答えがそこにある。既定解を各specで再発明しない。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）は**確定済み**である。
+  実装中に読み替えたり決め直したりしない。
+- 既定解から外れる場合だけ「逸脱と根拠」を書く。書いていなければ既定解をそのまま実装する。
+- 決定表にもplatform-invariantsにも無い論点が出たら、推測実装せずspecを具体化する提案を出して停止する。
 
 【spec内の実行順】
 - 0→F1→F2→(B1 || B2)→A1→M
