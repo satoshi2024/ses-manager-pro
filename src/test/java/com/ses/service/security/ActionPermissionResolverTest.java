@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ActionPermissionResolverTest {
 
@@ -19,6 +21,11 @@ class ActionPermissionResolverTest {
     void 未登録業務Apiはactionを生成せず未知として扱う() {
         assertNull(ActionPermissionResolver.resolve("GET", "/api/users-archive"));
         assertNull(ActionPermissionResolver.resolve("POST", "/api/future-sensitive"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/future-sensitive/export"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/future-sensitive/download"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/future-sensitive/report.pdf"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/export"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/security/future/export"));
         assertEquals("management-accounting.create",
                 ActionPermissionResolver.resolve("POST", "/api/management-accounting/budgets"));
         assertEquals("organization.update",
@@ -32,6 +39,24 @@ class ActionPermissionResolverTest {
     void file再scanはuploadと別actionになる() {
         assertEquals("file.scan.retry",
                 ActionPermissionResolver.resolve("POST", "/api/files/sample.pdf/rescan"));
+    }
+
+    @Test
+    void 管理者MfaResetは認証基盤の無判定pathに含めない() {
+        assertEquals("mfa.reset",
+                ActionPermissionResolver.resolve("POST", "/api/security/mfa/123/reset"));
+    }
+
+    @Test
+    void 認証基盤allowListは本人flowだけに限定する() {
+        assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "GET", "/api/security/mfa/status"));
+        assertTrue(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "POST", "/api/security/mfa/verify"));
+        assertFalse(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "POST", "/api/security/mfa/123/reset"));
+        assertFalse(ActionPermissionResolver.isAuthenticationInfrastructure(
+                "GET", "/api/security/future"));
     }
 
     @Test

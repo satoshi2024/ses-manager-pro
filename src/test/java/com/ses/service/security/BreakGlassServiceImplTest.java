@@ -121,6 +121,44 @@ class BreakGlassServiceImplTest {
         verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
     }
 
+    @Test
+    void dashboardだけ承認されたsessionは管理者MfaResetを実行できない() {
+        BreakGlassIncident incident = active();
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/security/mfa/123/reset");
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+
+        assertFalse(service.validateBoundSession(request, authentication));
+        verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_SCOPE_VIOLATION");
+    }
+
+    @Test
+    void 本人MfaStatusはincidentScope外でも認証継続のため許可する() {
+        BreakGlassIncident incident = active();
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET", "/api/security/mfa/status");
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+
+        assertTrue(service.validateBoundSession(request, authentication));
+    }
+
+    @Test
+    void 管理者MfaResetは独立actionが明示承認された場合だけ許可する() {
+        BreakGlassIncident incident = active();
+        incident.setAllowedActions("mfa.reset");
+        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/security/mfa/123/reset");
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+
+        assertTrue(service.validateBoundSession(request,
+                new UsernamePasswordAuthenticationToken("BG-01", "n/a")));
+    }
+
     private BreakGlassIncident pending() {
         BreakGlassIncident incident = new BreakGlassIncident();
         incident.setId(10L);

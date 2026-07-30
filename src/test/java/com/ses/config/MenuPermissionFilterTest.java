@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -57,6 +58,34 @@ class MenuPermissionFilterTest {
                 org.mockito.ArgumentMatchers.eq(403),
                 org.mockito.ArgumentMatchers.eq("PERMISSION_DENIED"),
                 org.mockito.ArgumentMatchers.eq(false));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/future-sensitive/export",
+            "/api/future-sensitive/download",
+            "/api/future-sensitive/report.pdf",
+            "/api/security/future/export"
+    })
+    void 未知ApiはexportDownload風suffixでもfailClosedにする(String uri) throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(authorizationService.isAllowed(any(), any())).thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "7", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_営業"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        verify(authorizationService, never()).isAllowed(any(), any());
+        verify(chain, never()).doFilter(any(), any());
     }
 
     @ParameterizedTest

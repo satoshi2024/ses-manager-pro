@@ -1,5 +1,49 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
+## 2026-07-30 fixed Head `f06b01d` 再独立Review FAIL対応
+
+- Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
+- Reviewの正式Head: `f06b01d426176d295a46fa3bfad0e2a1769161f1`。Review開始時点で
+  `main = origin/main`、working tree cleanであることが確認された。
+- 今回の修正scope: 同Head上の未commit working-tree patch。次のfixed Headはまだ存在しないため、
+  判定は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- 前回R03の6件は正式Headの再Reviewで閉鎖が確認された。本節では、その後に検出された
+  export/download suffixの未知API迂回、break-glassのMFA管理API迂回、台帳Head不整合を別Issueとして追跡する。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。本修正patchをfixed Headへcommitした後も、
+  独立Review P0=0/P1=0/PASSと外部gate完了まではS03を完了扱いにしない。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R04-P1-01 | P1 | FIXED_PENDING_REVIEW | resource inventory判定をexport/download suffix判定より先に実施。未知の通常API、`/export`、`/download`、拡張子download、未知security APIをactionへ昇格させず403 |
+| S03-R04-P1-02 | P1 | FIXED_PENDING_REVIEW | 認証基盤の除外をmethod+exact URI allowlistへ限定。管理者向けMFA resetを独立`mfa.reset` actionとして解決し、break-glass事件のexact scope外では即時失効 |
+| S03-R04-P2-01 | P2 | FIXED_PENDING_REVIEW | 正式Review Headを`f06b01d`として記録し、本修正は未commit patchで次のfixed Headではないことを中央台帳と同期 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review本文、正式Base/Head、新Issue ID、台帳scope | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。production差分なし | なし。次はT020 |
+| T015 | L0。schema/migration変更なしを差分確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning変更なしを差分確認 | OIDC config、provision service、login/logout | 実Entra/Conditional Access。対象差分なし | identity provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass exact scope、`mfa.reset`、認証基盤exact allowlist | resolver、BreakGlassService、MenuPermissionFilter、MFA/session API・service・filter | 実2名訓練、multi-instance、実IdP。外部環境なし | shared security境界に該当するが既存中間L4を重複せず、次はT020 |
+| T018 | L3。inventory-before-suffix、未知通常/security API、action matrix | resolver、AuthorizationService、MenuPermissionFilter | 実browser role matrix。UI差分なし | shared security境界に該当するが既存中間L4を重複せず、次はT020 |
+| T019 | L0。file upload/download/scanner変更なしを差分確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- L1 direct: `ActionPermissionResolverTest`、`BreakGlassServiceImplTest`、`MenuPermissionFilterTest`、
+  `SecuritySessionApiControllerTest`を実行し、**26 tests / 0 failures / 0 errors / 0 skipped**。
+- L3 direct consumer: resolver/action matrix/authorization/menu/audit/break-glass/login/session/MFAの12 suiteを実行し、
+  **60 tests / 0 failures / 0 errors / 0 skipped**。
+- exact allowlist確定後の最終直接回帰: resolver/menu/break-glassの3 suiteを実行し、
+  **28 tests / 0 failures / 0 errors / 0 skipped**。
+- 本ReviewではL4を再実行していない。`f06b01d`には前回の条件式中間L4
+  **1036 tests / 0 failures / 0 errors / 7 skipped**の証拠があるが、これは本未commit patchのL4証拠ではない。
+  test policyに従い独立Reviewのみを理由とする重複全量は行わず、次のL4 checkpointをT020とする。
+- JS/UI/schema/file差分なしのため、Node/browser/Docker/MySQL/ClamAVは本checkpointから除外した。
+
 ## 2026-07-30 merge Head `b36922a` 再Review FAIL対応
 
 - Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
@@ -12,12 +56,12 @@
 
 | Issue | 深刻度 | 状態 | 修正・再現境界 |
 |---|---|---|---|
-| S03-R03-P1-01 | P1 | FIXED_PENDING_REVIEW | 非管理者の全局`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
-| S03-R03-P1-02 | P1 | FIXED_PENDING_REVIEW | break-glass事件へexact `allowed_actions`を追加。sessionを事件へ固定し、各requestで状態・期限・scopeを再検証してpersistent sessionを即時失効。参照/exportを含む全操作を事前必須監査し、ACTIVE時に申請者・承認者へ即時通知 |
-| S03-R03-P1-03 | P1 | FIXED_PENDING_REVIEW | legacy移行とrescanでmax size・magic/構造検証をscanner前に実施。偽装PDF・上限超過はclean scannerでもquarantine |
-| S03-R03-P1-04 | P1 | FIXED_PENDING_REVIEW | page URIをmatched menuのAPI prefixから同じview actionへ解決し、restrictive groupのpage直達を403 |
-| S03-R03-P2-01 | P2 | FIXED_PENDING_REVIEW | prod validatorでissuer/authorization/token/JWK/user-infoをuserinfoなしの有効なHTTPS URLに限定 |
-| S03-R03-P2-02 | P2 | FIXED_PENDING_COMMIT | 台帳baseを`b36922a`へ更新し本Issue Registerを追加。固定fix Headはcommit後に記録する |
+| S03-R03-P1-01 | P1 | VERIFIED_CLOSED | 非管理者の全局`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
+| S03-R03-P1-02 | P1 | VERIFIED_CLOSED | break-glass事件へexact `allowed_actions`を追加。sessionを事件へ固定し、各requestで状態・期限・scopeを再検証してpersistent sessionを即時失効。参照/exportを含む全操作を事前必須監査し、ACTIVE時に申請者・承認者へ即時通知 |
+| S03-R03-P1-03 | P1 | VERIFIED_CLOSED | legacy移行とrescanでmax size・magic/構造検証をscanner前に実施。偽装PDF・上限超過はclean scannerでもquarantine |
+| S03-R03-P1-04 | P1 | VERIFIED_CLOSED | page URIをmatched menuのAPI prefixから同じview actionへ解決し、restrictive groupのpage直達を403 |
+| S03-R03-P2-01 | P2 | VERIFIED_CLOSED | prod validatorでissuer/authorization/token/JWK/user-infoをuserinfoなしの有効なHTTPS URLに限定 |
+| S03-R03-P2-02 | P2 | VERIFIED_CLOSED | 台帳baseを`b36922a`へ更新し本Issue Registerを追加。修正は`f06b01d`としてcommit・push済み |
 
 ### TEST SCOPE DECISION（T014〜T019）
 

@@ -26,6 +26,7 @@ public final class ActionPermissionResolver {
             Map.entry("dashboard", "dashboard"),
             Map.entry("email-templates", "email"),
             Map.entry("engineers", "engineer"),
+            Map.entry("files", "file"),
             Map.entry("identity-providers", "identity-provider"),
             Map.entry("invoices", "invoice"),
             Map.entry("management-accounting", "management-accounting"),
@@ -34,6 +35,7 @@ public final class ActionPermissionResolver {
             Map.entry("notifications", "notifications"),
             Map.entry("organizations", "organization"),
             Map.entry("payroll", "payroll"),
+            Map.entry("permission-groups", "permission"),
             Map.entry("profile", "profile"),
             Map.entry("project-ingestions", "project-ingestion"),
             Map.entry("projects", "project"),
@@ -65,8 +67,27 @@ public final class ActionPermissionResolver {
         if ("/".equals(uri)) {
             return "dashboard.view";
         }
+        if (matchesPrefix(uri, "/api/security/break-glass/incidents")) {
+            return "break-glass.manage";
+        }
+        if ("POST".equals(method) && uri.matches("/api/security/mfa/\\d+/reset")) {
+            return "mfa.reset";
+        }
         // MFA/sessionはログイン完了に必要な認証基盤APIで、業務permission groupの対象外。
         if (matchesPrefix(uri, "/api/security")) {
+            return null;
+        }
+        if (!uri.startsWith("/api/")) {
+            return null;
+        }
+        String remainder = uri.substring("/api/".length());
+        int slash = remainder.indexOf('/');
+        String root = slash >= 0 ? remainder.substring(0, slash) : remainder;
+        if (root.isBlank()) {
+            return null;
+        }
+        String resource = RESOURCE_NAMES.get(root);
+        if (resource == null) {
             return null;
         }
         if (isExportPath(uri)) {
@@ -118,19 +139,6 @@ public final class ActionPermissionResolver {
                 && (uri.endsWith("/approve") || uri.endsWith("/reject"))) {
             return "work-record.approve";
         }
-        if (!uri.startsWith("/api/")) {
-            return null;
-        }
-        String remainder = uri.substring("/api/".length());
-        int slash = remainder.indexOf('/');
-        String root = slash >= 0 ? remainder.substring(0, slash) : remainder;
-        if (root.isBlank()) {
-            return null;
-        }
-        String resource = RESOURCE_NAMES.get(root);
-        if (resource == null) {
-            return null;
-        }
         return action(resource, method);
     }
 
@@ -141,7 +149,8 @@ public final class ActionPermissionResolver {
         }
         if (actionKey.equals("export.execute") || actionKey.equals("file.download")
                 || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
-                || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")) {
+                || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")
+                || actionKey.equals("mfa.reset")) {
             return true;
         }
         int separator = actionKey.indexOf('.');
@@ -149,12 +158,33 @@ public final class ActionPermissionResolver {
         return RESOURCE_NAMES.containsValue(resource);
     }
 
+    /** 業務scope判定前にも利用できる、本人向け認証継続endpointのexact allow-list。 */
+    public static boolean isAuthenticationInfrastructure(String method, String uri) {
+        if (method == null || uri == null) {
+            return false;
+        }
+        method = method.toUpperCase(Locale.ROOT);
+        if (uri.equals("/logout") || uri.equals("/mfa/setup") || uri.equals("/mfa/challenge")) {
+            return true;
+        }
+        if ("GET".equals(method)) {
+            return uri.equals("/api/security/mfa/status") || uri.equals("/api/security/sessions");
+        }
+        if ("POST".equals(method)) {
+            return uri.equals("/api/security/mfa/setup") || uri.equals("/api/security/mfa/enable")
+                    || uri.equals("/api/security/mfa/verify")
+                    || uri.equals("/api/security/sessions/revoke-others")
+                    || uri.equals("/api/security/sessions/revoke-all");
+        }
+        return "DELETE".equals(method) && uri.matches("/api/security/sessions/\\d+");
+    }
+
     private static boolean matchesPrefix(String uri, String prefix) {
         return uri.equals(prefix) || uri.startsWith(prefix + "/");
     }
 
     private static boolean isExportPath(String uri) {
-        return matchesPrefix(uri, "/api/export") || uri.endsWith("/export")
+        return uri.endsWith("/export")
                 || uri.contains("/export-") || uri.endsWith("-export")
                 || uri.contains("-export/");
     }

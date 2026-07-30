@@ -64,7 +64,9 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
         AuthorizationService authorizationService = authorizationServiceProvider.getIfAvailable();
         String actionKey = ActionPermissionResolver.resolve(request.getMethod(), uri);
-        if (uri.startsWith("/api/") && actionKey == null && !isAuthenticationInfrastructure(uri)) {
+        if (uri.startsWith("/api/") && actionKey == null
+                && !ActionPermissionResolver.isAuthenticationInfrastructure(request.getMethod(), uri)
+                && !isAuthenticationEndpoint(uri)) {
             deny(request, response);
             return;
         }
@@ -174,9 +176,8 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         return !uri.equals("/logout") && !uri.equals("/") && (uri.startsWith("/api/") || !uri.contains("."));
     }
 
-    private boolean isAuthenticationInfrastructure(String uri) {
-        return uri.equals("/api/security") || uri.startsWith("/api/security/")
-                || uri.equals("/api/auth") || uri.startsWith("/api/auth/");
+    private boolean isAuthenticationEndpoint(String uri) {
+        return uri.equals("/api/auth") || uri.startsWith("/api/auth/");
     }
 
     private boolean authorize(Authentication authentication, String actionKey,

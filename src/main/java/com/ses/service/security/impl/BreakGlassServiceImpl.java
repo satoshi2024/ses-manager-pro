@@ -165,7 +165,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!StringUtils.hasText(action)) {
             action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
         }
-        if (isAuthenticationInfrastructure(request.getRequestURI())) {
+        if (isAuthenticationInfrastructure(request)) {
             return true;
         }
         if (!allowedActions(incident).contains(action)) {
@@ -227,10 +227,9 @@ public class BreakGlassServiceImpl implements BreakGlassService {
                 && incident.getEnabledUntil() != null && incident.getEnabledUntil().isAfter(now);
     }
 
-    private boolean isAuthenticationInfrastructure(String uri) {
-        return uri != null && (uri.equals("/logout") || uri.equals("/mfa") || uri.startsWith("/mfa/")
-                || uri.equals("/api/security/mfa") || uri.startsWith("/api/security/mfa/")
-                || uri.startsWith("/api/security/sessions"));
+    private boolean isAuthenticationInfrastructure(HttpServletRequest request) {
+        return ActionPermissionResolver.isAuthenticationInfrastructure(
+                request.getMethod(), request.getRequestURI());
     }
 
     private Set<String> allowedActions(BreakGlassIncident incident) {
