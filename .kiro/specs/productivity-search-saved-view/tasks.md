@@ -6,13 +6,13 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V65**。着手時にmerge済み`db/migration`の最新を再確認し、
+> **Migration**: 本specの予約番号は **V68**。着手時にmerge済み`db/migration`の最新を再確認し、
 > 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
 - [ ] F1. task/saved view基盤
   - **Objective**: 通知とは独立したtaskを登録して担当・期限・状態を管理でき、
     一覧のfilter/sort/列を個人viewとして保存できる。不正なview JSONは保存時に拒否される。
-  - **実装ガイダンス**: **V65**/V1/H2(`sql/schema-productivity-h2.sql`)/MySQL smoke、
+  - **実装ガイダンス**: **V68**/V1/H2(`sql/schema-productivity-h2.sql`)/MySQL smoke、
     `SavedViewSchemaRegistry`によるallowlist、状態機械。
     `m_saved_view.owner_user_id IS NULL`は**共有view**を表す業務値（design §6.1）。未設定として扱わない。
     `due_date IS NULL`は期限なしであり、期限超過判定から明示的に除外する。

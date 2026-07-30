@@ -11,7 +11,7 @@
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V65（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V68（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: legal-document-ledger-archive完了・merge済み。
 - Decision gate: blocking decisionなし。共通検索・scope・大量処理標準を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

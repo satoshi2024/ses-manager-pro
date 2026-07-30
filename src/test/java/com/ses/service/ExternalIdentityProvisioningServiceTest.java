@@ -5,6 +5,7 @@ import com.ses.config.OidcSecurityProperties;
 import com.ses.dto.security.ExternalIdentityProvisionRequest;
 import com.ses.entity.IdentityProvider;
 import com.ses.entity.SysUser;
+import com.ses.entity.UserExternalIdentity;
 import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserExternalIdentityMapper;
@@ -53,6 +54,8 @@ class ExternalIdentityProvisioningServiceTest {
         lenient().when(sysUserMapper.selectById(99L)).thenReturn(target);
         lenient().when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-1"))
                 .thenReturn(null);
+        lenient().when(externalIdentityMapper.insert(
+                org.mockito.ArgumentMatchers.any(UserExternalIdentity.class))).thenReturn(1);
     }
 
     @Test
@@ -98,11 +101,42 @@ class ExternalIdentityProvisioningServiceTest {
     }
 
     @Test
+    void 並行insertで同一targetが先行確定した場合は冪等成功にする() {
+        ExternalIdentityProvisionRequest request = request(99L, "subject-1", null);
+        when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-1"))
+                .thenReturn(null, externalIdentity(1L, 99L));
+        org.mockito.Mockito.when(externalIdentityMapper.insert(
+                org.mockito.ArgumentMatchers.any(UserExternalIdentity.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("concurrent"));
+
+        UserExternalIdentity result = service().provision(10L, request);
+
+        assertEquals(99L, result.getUserId());
+    }
+
+    @Test
+    void 並行insertで別targetが先行確定した場合は409にする() {
+        ExternalIdentityProvisionRequest request = request(99L, "subject-1", null);
+        when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-1"))
+                .thenReturn(null, externalIdentity(1L, 100L));
+        org.mockito.Mockito.when(externalIdentityMapper.insert(
+                org.mockito.ArgumentMatchers.any(UserExternalIdentity.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("concurrent"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service().provision(10L, request));
+
+        assertEquals(409, exception.getCode());
+    }
+
+    @Test
     void localLogin無効時はbreakGlass以外を拒否する() {
         properties.setLocalLoginEnabled(false);
         properties.getBreakGlassUsernames().add("break-glass");
+        com.ses.service.security.BreakGlassService breakGlassService =
+                org.mockito.Mockito.mock(com.ses.service.security.BreakGlassService.class);
         com.ses.config.CustomUserDetailsService service =
-                new com.ses.config.CustomUserDetailsService(sysUserMapper, properties);
+                new com.ses.config.CustomUserDetailsService(sysUserMapper, properties, breakGlassService);
         when(sysUserMapper.selectByUsername("alice")).thenReturn(user(99L, "alice", "営業"));
 
         assertThrows(org.springframework.security.authentication.DisabledException.class,
@@ -110,9 +144,14 @@ class ExternalIdentityProvisioningServiceTest {
 
         when(sysUserMapper.selectByUsername("break-glass")).thenReturn(
                 user(98L, "break-glass", "管理者"));
+        when(breakGlassService.isLoginAllowed("break-glass")).thenReturn(true);
         org.springframework.security.core.userdetails.UserDetails breakGlass =
                 service.loadUserByUsername("break-glass");
         assertEquals("break-glass", breakGlass.getUsername());
+
+        when(breakGlassService.isLoginAllowed("break-glass")).thenReturn(false);
+        assertThrows(org.springframework.security.authentication.DisabledException.class,
+                () -> service.loadUserByUsername("break-glass"));
     }
 
     private ExternalIdentityProvisioningServiceImpl service() {
@@ -126,6 +165,16 @@ class ExternalIdentityProvisioningServiceTest {
         request.setSubject(subject);
         request.setEmailSnapshot(email);
         return request;
+    }
+
+    private UserExternalIdentity externalIdentity(Long id, Long userId) {
+        UserExternalIdentity identity = new UserExternalIdentity();
+        identity.setId(id);
+        identity.setUserId(userId);
+        identity.setTenantId("tenant-a");
+        identity.setProviderId(10L);
+        identity.setSubject("subject-1");
+        return identity;
     }
 
     private SysUser user(Long id, String username, String role) {

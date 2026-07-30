@@ -733,6 +733,12 @@ $(function() {
                 try {
                     const payload = xhr.responseJSON || JSON.parse(xhr.responseText || '{}');
                     message = payload && payload.message;
+                    const isScopeViolation = xhr.getResponseHeader('X-SES-Error-Code') === 'BREAK_GLASS_SCOPE_VIOLATION' ||
+                        (payload && (payload.data === 'BREAK_GLASS_SCOPE_VIOLATION' || payload.message === 'error.breakGlass.scopeViolation' || payload.message === 'break-glass scope違反です'));
+                    if (isScopeViolation) {
+                        // break-glass scope違反の受動API要求は画面を描画継続するためToastを抑止する
+                        return;
+                    }
                 } catch (e) { /* non-JSON error pages are handled by CustomErrorController */ }
                 const fallback = {
                     400: '入力内容に誤りがあります。',

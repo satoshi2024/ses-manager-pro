@@ -15,8 +15,8 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 1
-- Migration: V68
-- 先行条件: BP master V66とCRM V67が完了・merge済み。
+- Migration: V71
+- 先行条件: BP master V69とCRM V70が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M
 

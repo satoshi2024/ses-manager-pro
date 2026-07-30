@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -37,6 +38,14 @@ class AuditLogServiceImplTest {
         when(auditLogMapper.insert(any(AuditLog.class))).thenThrow(new RuntimeException("DB down"));
 
         assertDoesNotThrow(() -> service.record("admin", "POST", "/api/engineers", 500));
+    }
+
+    @Test
+    void recordRequired_DB書き込み失敗時は例外を伝播する() {
+        when(auditLogMapper.insert(any(AuditLog.class))).thenThrow(new RuntimeException("DB down"));
+
+        assertThrows(RuntimeException.class, () -> service.recordRequired(
+                "BG-01", "AUTH", "/login", 200, "BREAK_GLASS_LOGIN_SUCCESS", true));
     }
 
     @Test

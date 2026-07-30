@@ -16,6 +16,8 @@ public class LoginPageController {
 
     private final com.ses.service.MenuCacheService menuCacheService;
     private final com.ses.config.OidcSecurityProperties oidcSecurityProperties;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.BreakGlassService>
+            breakGlassServiceProvider;
 
     /**
      * ログインページを表示する
@@ -26,7 +28,9 @@ public class LoginPageController {
     public String loginPage(Model model) {
         model.addAttribute("oidcEnabled", oidcSecurityProperties.isEnabled());
         model.addAttribute("localLoginEnabled", oidcSecurityProperties.isLocalLoginEnabled());
-        model.addAttribute("breakGlassLoginEnabled", oidcSecurityProperties.isBreakGlassLoginEnabled());
+        com.ses.service.security.BreakGlassService breakGlassService = breakGlassServiceProvider.getIfAvailable();
+        model.addAttribute("breakGlassLoginEnabled", oidcSecurityProperties.isBreakGlassLoginEnabled()
+                && breakGlassService != null && breakGlassService.hasActiveIncident());
         model.addAttribute("oidcRegistrationId", oidcSecurityProperties.getProviderRegistrationId());
         return "login";
     }

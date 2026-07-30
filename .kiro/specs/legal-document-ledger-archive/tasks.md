@@ -7,7 +7,7 @@
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 > どちらにも無い論点が出たら、推測実装せずspecを具体化する。
 >
-> **Migration**: 本specの予約番号は **V64**。着手時にmerge済み`db/migration`の最新を再確認し、
+> **Migration**: 本specの予約番号は **V67**。着手時にmerge済み`db/migration`の最新を再確認し、
 > 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
 - [ ] 0. G2法務確認と既存file inventory
@@ -23,7 +23,7 @@
 - [ ] F1. 文書DDLとDocumentService
   - **Objective**: 受領したPDFを登録すると、文書種別・相手先・取引日・金額・SHA-256が台帳に記録され、
     同じ操作を再実行しても2件目が作られない。原本確定後は通常UIから上書き・物理削除ができない。
-  - **実装ガイダンス**: **V64**/V1/H2(`sql/schema-document-archive-h2.sql`)/MySQL smoke、version/link/access/disposal。
+  - **実装ガイダンス**: **V67**/V1/H2(`sql/schema-document-archive-h2.sql`)/MySQL smoke、version/link/access/disposal。
     冪等キーは`(source_type, business_key, version_discriminator)`のUNIQUE（design §6.3）。
     `counterparty_name_snapshot`は登録時に固定し、顧客/BP名称変更で過去文書の表示を変えない。
   - **テスト要件**: L1〜L3。hash算出、version append-only、冪等（同一sourceの2回登録で1件）、

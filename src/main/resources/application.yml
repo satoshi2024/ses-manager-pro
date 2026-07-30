@@ -200,6 +200,8 @@ app:
     scanner-port: ${FILE_SCANNER_PORT:3310}
     scanner-connect-timeout-ms: ${FILE_SCANNER_CONNECT_TIMEOUT_MS:2000}
     scanner-read-timeout-ms: ${FILE_SCANNER_READ_TIMEOUT_MS:10000}
+    legacy-migration-enabled: ${LEGACY_MIGRATION_ENABLED:true}
+    contract-backfill-enabled: ${CONTRACT_BACKFILL_ENABLED:true}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}

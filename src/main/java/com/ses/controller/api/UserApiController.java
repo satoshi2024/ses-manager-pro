@@ -93,8 +93,9 @@ public class UserApiController {
     /**
      * ユーザー登録
      */
+    @Transactional(rollbackFor = Exception.class)
     @PostMapping
-    public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser) {
+    public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
         com.ses.common.util.EntityProtectUtil.protectForCreate(sysUser);
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw BusinessException.of("error.user.credentialsRequired");
@@ -107,7 +108,14 @@ public class UserApiController {
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         // MI-26: 作成時は常に有効（1）に強制する
         sysUser.setStatus(1);
-        return ApiResult.success(sysUserService.save(sysUser));
+        boolean saved = sysUserService.save(sysUser);
+        if (!saved) {
+            throw BusinessException.of("error.user.saveFailed");
+        }
+        // 新規ユーザーもrole相当のdefault groupへ割当てる。割当が無いとlegacy fallback
+        // 判定になり、group側で権限を編集しても効かないユーザーが増える（V64/V66のbackfillと同じ状態に保つ）。
+        permissionGroupManagementService.replaceAssignments(sysUser.getId(), java.util.Set.of(), authentication);
+        return ApiResult.success(true);
     }
 
     private void validatePasswordPolicy(String password) {

@@ -6,7 +6,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md`（特に§7 外部連携）を実装前に読む。
 > 時間/scope/状態/error分類の判断は `design.md` §6「決定表」を正とする。
 >
-> **Migration**: 本specの予約番号は **V75**。portal系/order/BP/archiveのmerge後に着手する。
+> **Migration**: 本specの予約番号は **V78**。portal系/order/BP/archiveのmerge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G4/API spike/canonical mapping
@@ -25,7 +25,7 @@
   - **Objective**: tenant/法人/provider/product別のconnectionを管理でき、tokenが暗号化・rotationできる。
     既存の単一`t_freee_connection`前提が解消される。jobがpending→running→終端で進み、
     複数workerが同じjobを二重に処理しない。
-  - **実装ガイダンス**: **V75**/V1/H2(`sql/schema-accounting-integration-h2.sql`)/MySQL smoke、
+  - **実装ガイダンス**: **V78**/V1/H2(`sql/schema-accounting-integration-h2.sql`)/MySQL smoke、
     暗号/token race/outbox。既存`t_freee_connection`を段階移行（design §1）。
     **job claimはDB lock/CAS**（`WHERE status='pending'`、design §6.3）。
     `verified_at IS NULL`のmappingは**未検証**で送信を止める（design §6.1）。

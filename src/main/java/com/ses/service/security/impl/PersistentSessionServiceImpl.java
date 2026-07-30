@@ -148,6 +148,27 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
         userSessionMapper.revokeAllForUser(tenantId(), userId, LocalDateTime.now(clock), reason);
     }
 
+    @Override
+    @Transactional
+    public void revokeCurrent(HttpServletRequest request, Authentication authentication, String reason) {
+        if (!properties.isEnabled() || request == null || authentication == null) {
+            return;
+        }
+        HttpSession session = request.getSession(false);
+        String hash = session == null ? null : (String) session.getAttribute(SESSION_HASH_ATTRIBUTE);
+        if (!StringUtils.hasText(hash)) {
+            return;
+        }
+        UserSession current = userSessionMapper.selectBySessionHash(tenantId(), hash);
+        Long userId = authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser
+                ? loginUser.getSysUser().getId() : SecurityUtils.currentUserId();
+        if (current == null || userId == null || !userId.equals(current.getUserId())) {
+            return;
+        }
+        userSessionMapper.revoke(current.getId(), LocalDateTime.now(clock),
+                StringUtils.hasText(reason) ? reason : "LOGOUT");
+    }
+
     private Long requireUser(Authentication authentication) {
         Long userId = SecurityUtils.currentUserId();
         if (authentication == null || userId == null) {

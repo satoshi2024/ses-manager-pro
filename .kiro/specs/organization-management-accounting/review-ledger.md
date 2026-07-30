@@ -500,7 +500,7 @@ Base `add488c`（HEAD, origin/main） / 対象: 未commit working tree diff（75
 
 ### migration予約番号の文書同期の完全性
 
-**完全**。independent reviewerによるgrep検証で、15件のdesign.md（V63〜V77）、README.md予約表、
+**完全**。independent reviewerによるgrep検証で、15件のdesign.md（当時V63〜V77。現在はV63〜V66が`enterprise-identity-security`で使用済みのため予約はV67以降）、README.md予約表、
 copyable-conversations/ S03〜S17・R03〜R17が全て一致し、重複・欠落なし。`gate-0-readiness-report.md`は
 過去の記録（V58時点作成、V60〜V75計画値）を時系列として保持しつつ、現在の正はREADME.mdであることを
 明記する形で訂正した（履歴改変ではない）。Java/SQL実装コードには一切影響がないことも確認された。

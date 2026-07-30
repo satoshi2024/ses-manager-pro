@@ -14,6 +14,10 @@ public interface AuditLogService {
         record(username, method, uri, status);
     }
 
+    /** break-glass等の重要操作用。永続化できなければ呼出処理も失敗させる。 */
+    void recordRequired(String username, String method, String uri, int status,
+                        String applicationCode, boolean successFlag);
+
     /** 監査ログを条件検索する（username部分一致・method完全一致、created_at降順）。 */
     Page<AuditLog> page(long current, long size, String username, String method);
 }

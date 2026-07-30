@@ -11,6 +11,7 @@ import com.ses.mapper.UserExternalIdentityMapper;
 import com.ses.service.ExternalIdentityProvisioningService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -68,8 +69,20 @@ public class ExternalIdentityProvisioningServiceImpl implements ExternalIdentity
         link.setSubject(subject);
         link.setEmailSnapshot(email);
         link.setLinkedAt(LocalDateTime.now());
-        externalIdentityMapper.insert(link);
-        return link;
+        try {
+            if (externalIdentityMapper.insert(link) != 1) {
+                throw BusinessException.of(409, "error.identity.linkConflict");
+            }
+            return link;
+        } catch (DuplicateKeyException e) {
+            // 別node/transactionが同じsubjectを先に確定した場合は再読して結果を正規化する。
+            UserExternalIdentity concurrent = externalIdentityMapper.selectByTenantProviderAndSubject(
+                    provider.getTenantId(), provider.getId(), subject);
+            if (concurrent != null && target.getId().equals(concurrent.getUserId())) {
+                return concurrent;
+            }
+            throw BusinessException.of(409, "error.identity.subjectAlreadyLinked");
+        }
     }
 
     private void validateEmailCollision(SysUser target, String email) {

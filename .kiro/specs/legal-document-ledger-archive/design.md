@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V64）
+## 1. DDL（予約V67）
 
 - `m_document_type(code, name, direction, retention_years, retention_start_rule, legal_hold_supported)`。
 - `t_document(id, tenant_id, legal_entity_id, document_type, document_no, title, counterparty_type/id/name_snapshot,

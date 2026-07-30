@@ -23,4 +23,7 @@ public interface PersistentSessionService {
     void revokeOthers(Long userId, String currentHash, String reason);
 
     void revokeAllForUser(Long userId, String reason);
+
+    /** logout処理でHTTP session破棄前に現在行を失効する。 */
+    void revokeCurrent(HttpServletRequest request, Authentication authentication, String reason);
 }

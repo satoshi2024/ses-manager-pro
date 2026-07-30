@@ -23,6 +23,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
+    ,"app.security.oidc.issuer-uri=https://idp.invalid/tenant/v2.0"
+    ,"app.security.oidc.authorization-uri=https://idp.invalid/authorize"
+    ,"app.security.oidc.token-uri=https://idp.invalid/token"
+    ,"app.security.oidc.jwk-set-uri=https://idp.invalid/jwks"
+    ,"app.security.oidc.user-info-uri=https://idp.invalid/userinfo"
+    ,"app.security.oidc.client-id=test-client"
+    ,"app.security.oidc.client-secret=test-secret"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles({"test", "prod"})
@@ -30,6 +37,10 @@ class ProductionSecurityConfigurationTest {
 
     @MockBean
     private ClientRegistrationRepository clientRegistrationRepository;
+
+    // Cookie/HSTS context試験ではDB依存validatorを単体・fixture試験へ分離する。
+    @MockBean
+    private ProductionSecurityConfigurationValidator productionSecurityConfigurationValidator;
 
     @Autowired
     private MockMvc mockMvc;

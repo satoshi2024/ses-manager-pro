@@ -43,6 +43,22 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     @Override
+    public void recordRequired(String username, String method, String uri, int status,
+                               String applicationCode, boolean successFlag) {
+        AuditLog entry = new AuditLog();
+        entry.setUsername(username);
+        entry.setMethod(method);
+        entry.setUri(uri);
+        entry.setStatus(status);
+        entry.setApplicationCode(applicationCode);
+        entry.setSuccessFlag(successFlag);
+        entry.setCreatedAt(LocalDateTime.now());
+        if (auditLogMapper.insert(entry) != 1) {
+            throw new IllegalStateException("重要security監査を永続化できません");
+        }
+    }
+
+    @Override
     public Page<AuditLog> page(long current, long size, String username, String method) {
         Page<AuditLog> page = new Page<>(current, size);
         LambdaQueryWrapper<AuditLog> qw = new LambdaQueryWrapper<>();

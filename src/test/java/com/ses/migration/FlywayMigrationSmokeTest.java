@@ -235,6 +235,7 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_user_mfa", "encrypted_totp_secret");
             assertColumnExists(st, "t_mfa_recovery_code", "code_hash");
             assertColumnExists(st, "t_user_session", "revoked_at");
+            assertColumnExists(st, "t_break_glass_incident", "allowed_actions");
             assertColumnExists(st, "t_permission_group_action", "action_key");
             assertColumnExists(st, "t_file_security_metadata", "scan_status");
             assertColumnExists(st, "t_file_security_metadata", "scanner_version");
@@ -264,6 +265,45 @@ class FlywayMigrationSmokeTest {
                             + "AND a.deleted_flag = 0")) {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 2,
                         "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
+            }
+            assertColumnExists(st, "t_permission_group_action", "deny_flag");
+            // V66.1: 全局wildcardは管理者だけに限定し、未知actionを既定拒否する。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key IN ('role-admin','role-sales','role-hr','role-manager') "
+                            + "AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
+                        "全局wildcardは管理者だけにseedされるはず");
+            }
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key IN ('role-sales','role-hr','role-manager') "
+                            + "AND a.action_key IN ('dashboard.*','proposal.*','notifications.*') "
+                            + "AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 9,
+                        "非管理者には既知resourceだけが明示seedされるはず");
+            }
+            // V66: role-managerの機密actionは拒否指定で外す。
+            // V64はこの拒否が無く、action層がuser.*やpayroll.viewまで素通しだった。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key = 'role-manager' AND a.deny_flag = 1 "
+                            + "AND a.action_key IN ('user.*','permission.manage','payroll.view',"
+                            + "'audit.security.view','file.scan.retry') AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 5,
+                        "マネージャーの機密actionが拒否指定されるはず");
+            }
+            // V66: 要員は本人向け経路のmy.*を持つ（V64のseedに無く、勤怠が403になっていた）。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key = 'role-member' AND a.action_key = 'my.*' "
+                            + "AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
+                        "要員へmy.*がseedされるはず");
             }
 
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)

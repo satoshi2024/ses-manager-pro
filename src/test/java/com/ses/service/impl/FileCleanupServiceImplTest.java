@@ -113,6 +113,23 @@ class FileCleanupServiceImplTest {
     }
 
     @Test
+    void cleanupOrphanFiles_有効scanMetadataがある古いquarantineは再scan用に保持する() throws IOException {
+        Path quarantine = Files.createDirectories(baseDir.resolve("quarantine"));
+        Path file = quarantine.resolve("infected.txt");
+        Files.writeString(file, "quarantined");
+        Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(72, ChronoUnit.HOURS)));
+        FileReferenceProvider metadataProvider = Mockito.mock(FileReferenceProvider.class);
+        when(metadataProvider.referencedFileNames()).thenReturn(java.util.Set.of("infected.txt"));
+        UploadProperties props = new UploadProperties();
+        props.setBasePath(baseDir.toString());
+        props.setCleanupSafetyHours(24);
+        FileCleanupServiceImpl metadataAware = new FileCleanupServiceImpl(props, List.of(metadataProvider));
+
+        assertEquals(0, metadataAware.cleanupOrphanFiles());
+        assertTrue(Files.exists(file));
+    }
+
+    @Test
     void cleanupOrphanFiles_ディレクトリが存在しない場合は何もしない() {
         UploadProperties props = new UploadProperties();
         props.setBasePath(baseDir.resolve("does-not-exist").toString());

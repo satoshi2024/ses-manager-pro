@@ -23,12 +23,12 @@
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | 0 | `multi-company-tenant-isolation` | T001〜T007 | T001 `COMPLETED`（発注者受領）、T002〜T007 `DEFERRED` | 独立DBを正式採用。V59は作成せず、V60以降適用後に補写しない。共有DB再承認時は当時latest+1で再計画 | — | — | T001は再Review対象外。R01は将来T002〜T007再開時だけ使用 | current-mode Gateを満たした記録を保持 |
 | 2 | 0 | `organization-management-accounting` | T008〜T013 | `PASS` | R02最終merge後独立Review完了。desktop/390px実ブラウザDemoは本番前hard gateとして継続管理 | S02 organization-management-accounting 修正対話 | Base `4015785` → Head `f6f0027`（`main` / `origin/main`） | P0=0/P1=0。全量904/0/0/1、Node/JS 0 skipped、Docker MySQL smoke全5系統0 skipped。`organization-management-accounting-R21-P1-01` VERIFIED_CLOSED | PASS維持。desktop/390pxを本番リリース前に完了 |
-| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `FIX/REVIEW` | T014〜T019完了。B1 action permissionとB2 quarantine/ClamAV/fail-closedを実装し、T020 L4は971/0/0/1、Node/JS 42/0、Docker MySQL全4系統成功。OWASP依存スキャン、実Entra/browser、break-glass復旧訓練は未実施 | S03 enterprise-identity-security 実装対話 | Base `f6f0027` / current working tree（T019・L4済み） | S02 Head `f6f0027`をR02が独立ReviewしP0=0/P1=0/PASS | 外部gate完了と独立Review P0=0/P1=0/PASSまでS03を完了扱いにしない |
+| 3 | 0 | `enterprise-identity-security` | T014〜T020 | `FIX/REVIEW` | Head `fc509f4`の独立Review R10はCONDITIONAL PASS（P0=0/P1=0/P2=1）。コード指摘全解消、R08台帳記述誤記（S03-R10-P2-01）を実態へ訂正、git diff --check 成功、L3 132/0/0/0通過。実MySQL、OWASP依存scan、実Entra/ClamAV、実担当者2名訓練等は未実施 | S03 enterprise-identity-security 再Review対応 | Review Base `fc509f49697b544cde456ecf5a1f33589a72b26b` | R09全件CLOSED。`S03-R10-P2-01`はFIXED_PENDING_REVIEW | T020 L4/外部gateと独立Review P0=0/P1=0/PASSまでS03を完了扱いにしない |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `NOT READY` | identity PASS、G2決定後S04 |  |  |  | R04 PASS |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |
 | 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP/CRM PASS、G7方針記録後S07 |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V66→V67順merge |  |  |  | R08 PASS |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V69→V70順merge |  |  |  | R08 PASS |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
@@ -42,6 +42,19 @@
 ## 2.1 第十八次Review対応の最新実績（2026-07-29）
 
 最新ReviewのBaseは`origin/main=fb91943`（PR #42 merge済み）。P1-1〜P1-4のキャッシュ競合、manager組織scope漏れ、混在組織請求書、NULL業務通知を`90f50c0`で修正し、manager/notification/invoiceの実行級回帰を追加した。定向・全量は883/0/0/1（唯一skipはCJKフォントなし）、Node/JS syntaxは実行済み、Flyway fresh・legacy V60・repair・V62 closed fixture・migration integrity・ConcurrentUpdateは0 skippedで実行済み、`git diff --check` exit 0。`90f50c0`は未mergeのため、S02はFIX/REVIEW、S03はNOT READYとする。desktop/390px Demoは本番前硬门禁として未実施のまま保持する。
+
+## 2.2 S02/S03実装差分の独立バグ検査（2026-07-30）
+
+merge前branchのS02実装とS03 F1〜B2に対する追加検査で、P0×1・P1×4・P2×3・P3×1を検出し修正した。
+最重要はaction permission層の後方互換破り（営業/HR/要員が業務APIで403）と、V64がrole-managerへ
+全権限wildcardをseedしていた点である。詳細と修正内容は
+`enterprise-identity-security/review-ledger.md`の「追加修正（2026-07-30 …）」を正とする。
+
+- 追加migration: **V66**（action permissionのbaseline付与と拒否指定）。V63〜V65は変更していない。
+- 採番影響: 後続spec#4〜#17の予約をV67〜V80へ繰り上げ、README予約表と全design/tasksを同一差分で更新済み。
+- test: 全量 1027/0/0/6。skip 6件は全てDocker必須のTestcontainers。
+- **release gate（未達）**: proxyがDocker Hub blob CDNを遮断するため`mysql:8.0`を取得できず、V66は実MySQLで
+  未実行。Docker利用可能なCIでFlyway smoke 5件を実行するまでS03をPASSへ進めない。
 
 ## 3. 1specの状態遷移
 

@@ -34,6 +34,15 @@ app:
       break-glass-login-enabled: ${BREAK_GLASS_LOGIN_ENABLED:true}
       require-mfa-assurance: ${OIDC_REQUIRE_MFA_ASSURANCE:true}
       break-glass-usernames: ${BREAK_GLASS_USERNAMES:}
+      issuer-uri: ${OIDC_ISSUER_URI:}
+      authorization-uri: ${OIDC_AUTHORIZATION_URI:}
+      token-uri: ${OIDC_TOKEN_URI:}
+      jwk-set-uri: ${OIDC_JWK_SET_URI:}
+      user-info-uri: ${OIDC_USER_INFO_URI:}
+      client-id: ${OIDC_CLIENT_ID:}
+      client-secret: ${OIDC_CLIENT_SECRET:}
+      connect-timeout-millis: ${OIDC_CONNECT_TIMEOUT_MILLIS:2000}
+      read-timeout-millis: ${OIDC_READ_TIMEOUT_MILLIS:5000}
     mfa:
       enabled: ${MFA_ENABLED:true}
       required-for-break-glass: ${MFA_REQUIRED_FOR_BREAK_GLASS:true}

@@ -1,13 +1,394 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
-## 現行判定（T018/T019完了、T020外部gate待ち）
+## 2026-07-30 Head `fc509f4` 独立Review R10 CONDITIONAL PASS対応（P1=0, P2=1）
 
-- spec状態: `IN PROGRESS`。T014〜T019の実装とL0〜L3、T020のL4全量・Node/JS・Docker migration回帰まで完了した。
-- T018状態: **実装・L3検証完了、独立Review待ち**。legacy role→既定group seed、group優先認可、action enforcement、自己権限変更拒否、同一transaction監査、role変更時group/session更新、契約原価field maskingを実装した。
-- T019状態: **実装・L3検証完了、独立Review待ち**。magic byte/MIME検証、quarantine→scan→published、ClamAV INSTREAM prod adapter、非prod EICAR fake、scanner unavailable、再scan、未知file/download拒否、file拒否監査を実装した。
-- T020 L4結果: Maven全量 **971 tests / 0 failures / 0 errors / 1 skipped**（skipは既存の`QuotationPdfServiceImplTest` CJK font環境依存）、Node/JS syntax **42 files / 0 failures**、`git diff --check` exit 0。Docker上でfresh V1〜V63、legacy V60、repair runbook、V62 closed-historyを全て実行し、skipなしで成功した。
-- T020未完了gate: OWASP依存スキャン相当の仕組みはrepository未設定のため未実施。実Entra tenantでのOIDC login/logout・MFA assurance、実browser、login→権限変更→session失効、2名break-glass復旧訓練も外部環境未提供のため未実施。`M. セキュリティ回帰`は完了扱いにしない。
-- release判定: B1/B2は完了、S03全体は`FIX/REVIEW`相当。外部gateと独立ReviewのP0=0/P1=0/PASSまで`PASS`へ進めない。
+- Reviewの正式base: `fc509f49697b544cde456ecf5a1f33589a72b26b`。
+- 独立Review結論: **CONDITIONAL PASS（P0=0、P1=0、P2=1）**。前回 R09 全件（`S03-R09-P1-01`, `S03-R09-P2-01`, `S03-R09-P2-02`）はコードレベルで **CLOSED / VERIFIED_CLOSED**。
+- 今回の修正scope: R10で指摘された台帳誤記訂正（`S03-R10-P2-01`）およびコード末尾の空白除去（`git diff --check` clean）、PersistentSessionFilter のコメント追加。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R08-P1-01, P1-02, P2-01〜07 | P1/P2 | VERIFIED_CLOSED | R09〜R10 Reviewにて全9件の修正・閉鎖が確認完了 |
+| S03-R09-P1-01 | P1 | VERIFIED_CLOSED | R10 Reviewにて`ContractDocumentBackfillRunner`スキャナー不在時の`UNAVAILABLE`＋`QUARANTINED`登録および単体テストが検証完了し閉鎖 |
+| S03-R09-P2-02 | P2 | VERIFIED_CLOSED | R10 Reviewにて`p.put("recipientName", name)`の完全revertおよびテンプレート生入力流入遮断が検証完了し閉鎖 |
+| S03-R10-P2-01 | P2 | FIXED_PENDING_REVIEW | `review-ledger.md`のR08セクション記述（`recipientName`表記補正、バックフィルスキャナー不在時の挙動補正、S03-R08-P2-01の`R09-P1-01で解消・VERIFIED_CLOSED`明記）を実態に合わせて正確に訂正 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R09閉鎖、R10 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass 3画面到達・403ヘッダー・セッション維持テスト | BreakGlassService, PersistentSessionFilter, BreakGlassFilterChainIntegrationTest | 実担当者2名、multi-instance、実IdP | shared security/layout境界。次はT020 |
+| T018 | L3。DENY_SCOPE 503 fail-closed分岐、4言語bundle parity | PersistentSessionFilterTest, MessageBundleConsistencyTest | 実browser role matrix | shared authorization/i18n境界。次はT020 |
+| T019 | L3。backfill runner scanner不在fail-closed、recipientName revert | ContractDocumentServiceImpl, ContractDocumentBackfillRunner, ContractDocumentServiceImplTest | 実ClamAV | file/schema昇格条件。L3全通過 |
+
+### 実行結果
+
+- 対象20 suite全実行: **132 tests / 0 failures / 0 errors / 0 skipped, BUILD SUCCESS**。
+- `git diff --check`: **exit 0** （trailing whitespace全消去）
+
+## 2026-07-30 Head `fc509f4` 独立Review R09 FAIL対応（P1×1, P2×2）
+
+- Reviewの正式base: `fc509f49697b544cde456ecf5a1f33589a72b26b`。
+- 独立Review結論: **FAIL（P0=0、P1=1、P2=2）**。前回 R08 8件（`S03-R08-P1-01`, `S03-R08-P1-02`, `S03-R08-P2-02`〜`P2-07`）は **VERIFIED_CLOSED**。
+- 今回の修正scope: R09で指摘された残存 P1×1, P2×2 完全対応。独立再Reviewが完了するまでspec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R08-P1-01, P1-02, P2-02〜07 | P1/P2 | VERIFIED_CLOSED | R09 Reviewにて全8件の検証が完了し閉鎖 |
+| S03-R09-P1-01 | P1 | FIXED_PENDING_REVIEW | `ContractDocumentBackfillRunner.java`にて`scanner == null`時のバックフィル結果を`FileScanResult.unavailable("scanner is not configured")`に修正し、無検査ファイルの`QUARANTINED`＋`UNAVAILABLE`登録を強制 |
+| S03-R09-P2-01 | P2 | FIXED_PENDING_REVIEW | 台帳記述を実態に合わせて補正（`recipientName`のrevert反映、バックフィルスキャナー不在時の`UNAVAILABLE`＋`QUARANTINED`挙動明記、20 suite / 132 tests の全件成功記録） |
+| S03-R09-P2-02 | P2 | FIXED_PENDING_REVIEW | `ContractDocumentServiceImpl.java`にて範囲外の `p.put("recipientName", name)` を完全revertし、未エスケープ生入力のテンプレート流入を遮断 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R08閉鎖、R09 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass 3画面到達・403ヘッダー・セッション維持テスト | BreakGlassService, PersistentSessionFilter, BreakGlassFilterChainIntegrationTest | 実担当者2名、multi-instance、実IdP | shared security/layout境界。次はT020 |
+| T018 | L3。DENY_SCOPE 503 fail-closed分岐、4言語bundle parity | PersistentSessionFilterTest, MessageBundleConsistencyTest | 実browser role matrix | shared authorization/i18n境界。次はT020 |
+| T019 | L3。backfill runner scanner不在fail-closed、recipientName revert | ContractDocumentServiceImpl, ContractDocumentBackfillRunner, ContractDocumentServiceImplTest | 実ClamAV | file/schema昇格条件。L3全通過 |
+
+### 実行結果
+
+- 対象20 suite全実行: **132 tests / 0 failures / 0 errors / 0 skipped, BUILD SUCCESS**。
+- `ContractDocumentServiceImplTest`:
+  - `scannerBean不在時は外部署名PDF同期でscanRejectedとなりQUARANTINED登録される`: PASS
+  - `backfillRunnerはscanner不在時にUNAVAILABLEかつQUARANTINEDでバックフィル登録する`: PASS
+- `BreakGlassFilterChainIntegrationTest`: `/engineer/list`, `/contract/list`, `/project/list` への到達と受動API 403ヘッダー・セッション維持を実証（6 tests PASS）。
+- `PersistentSessionFilterTest`: 監査サービス不在・記録例外時の 503 返却と `verify(chain, never()).doFilter(...)` を実証（3 tests PASS）。
+
+## 2026-07-30 Head `fc509f4` 独立Review R08 FAIL対応（P1×2, P2×7）
+
+- Reviewの正式base: `fc509f49697b544cde456ecf5a1f33589a72b26b`。
+- 独立Review結論: **FAIL（P0=0、P1=2、P2=7）**。前回 R07 Decision 1〜6（`S03-R07-P1-01`, `S03-R07-P2-01`〜`P2-06`）は **VERIFIED_CLOSED**。
+- 今回の修正scope: R08で指摘された新規 P1×2、P2×7 完全対応。独立再Reviewが完了するまでspec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R07-P1-01 | P1 | VERIFIED_CLOSED | R08 Reviewにて3値契約・403返却・無失効・チェーン停止・トースト抑止が検証完了し閉鎖 |
+| S03-R07-P2-01〜06 | P2 | VERIFIED_CLOSED | R08 Reviewにて全6件（tenant ID default化、seed assert、prod validator、静的タッチskip、Utils集約、JSDoc修正）の正確な実装が検証完了し閉鎖 |
+| S03-R08-P1-01 | P1 | FIXED_PENDING_REVIEW | `ContractDocumentServiceImpl.scanAndRecordExternalFile`にて`scanner == null`（`FILE_SCANNER_ENABLED=false`時）を`FileScanResult.unavailable("scanner is not configured")`へ倒し、`QUARANTINED`＋`UNAVAILABLE`登録のfail-closed（`error.file.scanRejected`）を強制 |
+| S03-R08-P1-02 | P1 | VERIFIED_CLOSED | `ContractDocumentServiceImpl`の範囲外4ハンクをrevert。`sanitize()`に外部リソース参照（http/https/file）遮断ガードを復元し、`invalidState`メッセージキーへ復帰。`create()`の `p.put("recipientName", name)` も R09 にて完全revert完了し閉鎖 |
+| S03-R08-P2-01 | P2 | VERIFIED_CLOSED | R09-P1-01 にてスキャナー不在時の `FileScanResult.unavailable`＋`QUARANTINED` 倒しが完了し、`FileScanner` による実検査と合わせて検証完了し閉鎖 |
+| S03-R08-P2-02 | P2 | FIXED_PENDING_REVIEW | `ContractDocumentBackfillRunner`にフィーチャーフラグ`@ConditionalOnProperty(name="app.upload.contract-backfill-enabled")`および`ownerId`抽出を追加 |
+| S03-R08-P2-03 | P2 | FIXED_PENDING_REVIEW | ハードコードされていた`created_by = 1L`を`SecurityUtils.currentUserId()`呼び出しに変更 |
+| S03-R08-P2-04 | P2 | FIXED_PENDING_REVIEW | `error.breakGlass.scopeViolation`を4言語メッセージバンドルに追加し、`PersistentSessionFilter`で`X-SES-Error-Code: BREAK_GLASS_SCOPE_VIOLATION`ヘッダーおよびJSON`data`を返却。`common.js`はレスポンスヘッダー/機械可読キーで識別 |
+| S03-R08-P2-05 | P2 | FIXED_PENDING_REVIEW | `BreakGlassFilterChainIntegrationTest`に`/contract/list`および`/project/list`の到達、受動API 403、セッション維持のテストメソッドを追加 |
+| S03-R08-P2-06 | P2 | FIXED_PENDING_REVIEW | `PersistentSessionFilterTest`に`DENY_SCOPE`時の監査サービス不在503、監査ログ記録例外503、およびフィルターチェーン未実行（`verify(never())`）の検証テストを追加 |
+| S03-R08-P2-07 | P2 | FIXED_PENDING_REVIEW | `ContractDocumentServiceImpl`の`create()`・`sync()`に`@Transactional`を付与し、`metadataMapper.insert/updateById`の戻り値!=1チェックを追加。【運用Note: INFECTED契約ファイルはCloudSign再同期または運用管理者による手動クリーンアップで復旧】 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R07閉鎖、R08 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass 403ヘッダー/JSON data化、3リスト画面通過テスト | BreakGlassService, PersistentSessionFilter, BreakGlassFilterChainIntegrationTest | 実担当者2名、multi-instance、実IdP | shared security/layout境界。次はT020 |
+| T018 | L3。DENY_SCOPE 503 fail-closed分岐テスト、4言語bundle parity | PersistentSessionFilterTest, MessageBundleConsistencyTest | 実browser role matrix | shared authorization/i18n境界。次はT020 |
+| T019 | L3。scanner不在fail-closed、外部resourceガード、backfill scan | ContractDocumentServiceImpl, ContractDocumentBackfillRunner, ContractDocumentServiceImplTest | 実ClamAV | file/schema昇格条件。L3全通過 |
+
+### 実行結果
+
+- 対象18 suite全実行: **124 tests / 0 failures / 0 errors / 0 skipped, BUILD SUCCESS**。
+- `ContractDocumentServiceImplTest`: scanner bean不在時の`error.file.scanRejected`＋`QUARANTINED`＋`UNAVAILABLE`登録を検証。
+- `PersistentSessionFilterTest`: `DENY_SCOPE`時の監査サービス不在/例外における 503 返却とフィルターチェーン停止を検証。
+- `MessageBundleConsistencyTest`: `error.breakGlass.scopeViolation`の4言語メッセージバンドル整合性を検証。
+- `BreakGlassFilterChainIntegrationTest`: `/engineer/list`, `/contract/list`, `/project/list` の到達と受動API/通知API 403ヘッダー検証を通過。
+
+### 補足仕様変更記録
+- `MfaEnforcementFilter`: `isErrorDispatch(request)`の適用により、直接の `GET /error`（REQUESTディスパッチ）はMFA免除対象外とし、fail-closedを維持。
+- 未知ページのアクセス: break-glassセッション失効から 403 Forbidden 返却（セッション維持）へ挙動統一。
+- `OidcSecurityIntegrationTest`: テスト用プロパティを `tenant-id: default` に統一。
+
+- Reviewの正式base: `c839a2ebe709334d4b60dd5295779619d601bfa3`。
+- Reviewの正式Head: `fc509f49697b544cde456ecf5a1f33589a72b26b`（`PR #45 merge`, `= origin/main`）。
+- 独立Review結論: **FAIL（P0=0、P1=1、P2=6）**。前回`S03-R06-P1-01`は`VERIFIED_CLOSED`とする。
+- 今回の修正scope: 同Headをbaseとする合意済み修正commit（Decision 1〜6完全対応）。独立再Reviewが完了するまでspec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R07-P1-01 | P1 | FIXED_PENDING_REVIEW | `BreakGlassService`を3値契約（`ALLOW`, `DENY_SCOPE`, `REVOKE`）へ変更。`DENY_SCOPE`時はsessionを失効させず、`PersistentSessionFilter`で必備監査（`recordRequired`）＋403返却＋filter chain停止を実施。`common.js`で403時のtoast蓄積を抑止 |
+| S03-R07-P2-01 | P2 | FIXED_PENDING_REVIEW | `application-test.yml`の`tenant-id`を`default`へ変更しH2 seedと一致。`ActionPermissionMatrixTest`へ`t_permission_group_action`直接assertを追加 |
+| S03-R07-P2-02 | P2 | FIXED_PENDING_REVIEW | `ProductionSecurityConfigurationValidator`へ起動時5つのdefault permission group存在チェックを追加し fail-closed 化 |
+| S03-R07-P2-03 | P2 | FIXED_PENDING_REVIEW | `SecurityInfrastructureUtils.isStaticResource`により静的リソースに対する`PersistentSessionFilter.validateAndTouch` DBタッチをスキップ |
+| S03-R07-P2-04 | P2 | FIXED_PENDING_REVIEW | `ContractDocumentServiceImpl`で外部署名PDF/証明書のウイルススキャン＋`FileSecurityMetadata`記録、`download()`時のPUBLISHED+CLEAN判定を実施。自前生成PDFは直近CLEAN記録。起動時`ContractDocumentBackfillRunner`で既存契約ファイルのmetadataバックフィルを追加 |
+| S03-R07-P2-05 | P2 | FIXED_PENDING_REVIEW | `com.ses.common.util.SecurityInfrastructureUtils`に`isStaticResource`・`isErrorDispatch`を集約し、`ApiAuditFilter`・`MfaEnforcementFilter`・`PersistentSessionFilter`で一元利用 |
+| S03-R07-P2-06 | P2 | FIXED_PENDING_REVIEW | `FileScopeValidationService`のクラスコメントを未知reference＝fail-closed（`error.file.unknownReference`）の実態に合わせて修正 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R06閉鎖、R07 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass 3値判定、DENY_SCOPE 403+必備監査、静的タッチskip | BreakGlassService, PersistentSessionFilter, SecurityInfrastructureUtils, ApiAuditFilter | 実担当者2名、multi-instance、実IdP | shared security/layout境界。次はT020 |
+| T018 | L3。test tenant ID一致、seed直接assert、prod validator check | AuthorizationService, ActionPermissionMatrixTest, ProductionSecurityConfigurationValidator | 実browser role matrix | shared authorization境界。次はT020 |
+| T019 | L3。契約PDFスキャン/メタデータ、バックフィル、gating | ContractDocumentServiceImpl, ContractDocumentBackfillRunner, ContractDocumentServiceImplTest | 実ClamAV | file/schema昇格条件。外部スキャンのみ追加のためL3留め |
+
+### 実行結果
+
+- 対象17 suite全実行: **114 tests / 0 failures / 0 errors / 0 skipped, BUILD SUCCESS**。
+- `BreakGlassFilterChainIntegrationTest`: `/engineer/list`, `/contract/list`, `/project/list` の到達、受動API・通知API要求に対する403返却とsession維持（`revokeCurrent`非呼び出し）、`BREAK_GLASS_SCOPE_VIOLATION`必備監査記録を確認。
+- `ActionPermissionMatrixTest`: permission group seedの内容直接assert（非管理者*無し、admin baseline1件、sales/manager deny 5件ずつ）を通過。
+- `ContractDocumentServiceImplTest`: 自前生成PDFのメタデータ記録、外部署名PDFのスキャン・メタデータ登録、未登録/UNCLEANファイルのダウンロード拒否を確認。
+
+## 2026-07-30 Head `c839a2e` 再独立Review FAIL対応
+
+- Reviewの正式base: `3f1ac695a56ac680aacd72e5b23569a581fc52a0`。
+- Reviewの正式Head: `c839a2ebe709334d4b60dd5295779619d601bfa3`。Review開始時点で
+  `HEAD = origin/main`、working tree cleanであることが確認された。
+- 独立Review結論: **FAIL（P0=0、P1=1、P2=0）**。
+  前回`S03-R05-P2-01`〜`03`は`VERIFIED_CLOSED`とする。
+- 今回の修正scope: Review Headをbaseとするfixed commit
+  `f68708b15bd287e6a3a3f9afd827d177f1431994`。独立再Reviewが完了するまで
+  spec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、
+  desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、
+  multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R06-P1-01 | P1 | FIXED_PENDING_REVIEW | active incidentを毎request再検証した後、GET/HEADの`/css/**`・`/js/**`・`/lib/**`・`/img/**`・`/favicon.ico`と内部`ERROR /error`だけbusiness scope対象外とした。安全でないmethod、直接`/error`、未知API/page、scope外actionはfail-closedを維持。break-glass sessionでは通知componentを描画せず、`common.js`から通知APIを発行しない |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、R05閉鎖、R06 Issue登録 | requirements/design/tasks/review ledger | Maven/Node/Docker。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provider login/logout | 実Entra/CA。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。static/error scope、MFA→dashboard request列、session失効、通知抑止 | BreakGlassService、PersistentSessionFilter、Menu/監査/MFA filter、MFA API、共有layout/common.js | 実担当者2名、multi-instance、実IdP。環境/担当者なし | shared security/layout境界。次はT020 |
+| T018 | L2/L3同梱。未知API/page、scope外通知action、action matrix | resolver、AuthorizationService、MenuPermissionFilter | 実browser role matrix。今回permission model差分なし | 未知経路のfail-closedをL3で確認。次はT020 |
+| T019 | L0。file upload/download/scanner差分なしを確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- L1再現: `BreakGlassServiceImplTest` **14 tests / 2 failures / 0 errors / 0 skipped**。
+  `GET /css/common.css`と内部`ERROR /error`がscope違反で失効することを再現した。
+- 修正後L1: 同suite **14 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 完全filter chain: MFA page→静的resource→MFA status API→dashboardを同一sessionで通し、
+  通知component非描画、直接通知APIの失効、未知API 403、未知page session失効を確認。
+  **3 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- L3 direct consumer: security 12 suiteに上記filter chain、OIDC/MFA integration、共有layout回帰を加え、
+  **98 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 実browser drill: in-app browserと隔離H2/test profileを使用し、双承認済みACTIVE incident fixture、
+  break-glass login、MFA setup/enable、dashboard遷移を実行した。MFA画面で13 asset
+  （`/css/common.css`、`/lib/**`、`/js/common.js`、`/js/modules/mfa.js`を含む）のloadを確認し、
+  dashboardでも`#notification-list`は0件、server auditに`/api/notifications`はなく、session失効なし。
+  dashboard data API 2件は最小fixture不足で500となったため業務dashboardのbrowser PASS証拠には使用しない。
+  またfixture上の承認者IDであり、実担当者2名の訓練完了とは扱わない。
+- 本patchではL4を実行していない。Maven全量、Node/JS、必要なDocker/MySQL/security/browser/provider gateは
+  test policyに従いT020へ集約する。
+
+## 2026-07-30 Head `3f1ac69` CONDITIONAL PASS後P2対応
+
+- Reviewの正式base: `f06b01d426176d295a46fa3bfad0e2a1769161f1`。
+- Reviewの正式Head: `3f1ac695a56ac680aacd72e5b23569a581fc52a0`。Review開始時点で
+  `HEAD = origin/main`、working tree cleanであることが確認された。
+- 独立Review結論: **CONDITIONAL PASS（P0=0、P1=0、P2=3）**。
+  `S03-R04-P1-01`と`S03-R04-P1-02`は`VERIFIED_CLOSED`とする。
+- 今回の修正scope: 同Headをbaseとする本修正commit。commit・push後も独立再Reviewが完了するまで
+  spec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、
+  desktop/390px browser、実ClamAV、2名break-glass訓練、multi-instance session失効は未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R05-P2-01 | P2 | VERIFIED_CLOSED | `mfa.reset`を`ADMIN_ONLY_ACTIONS`へ追加し、全permission group判定より前に非管理者を拒否。管理者は許可し、静的`@PreAuthorize`とaction層を一致 |
+| S03-R05-P2-02 | P2 | VERIFIED_CLOSED | 認証基盤allowlistを`POST /logout`、`GET /mfa/setup`、`GET /mfa/challenge`へmethod込みで固定。未知/null actionもbreak-glass scope違反としてfail-closed |
+| S03-R05-P2-03 | P2 | VERIFIED_CLOSED | 正式Base/Head、R04 CONDITIONAL PASS、P1閉鎖、本P2修正commitを本台帳と中央台帳へ同期 |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。正式Base/Head、Review結論、Issue状態、台帳scope | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。文書consumerのみ | なし。次はT020 |
+| T015 | L0。schema/migration差分なしを確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning差分なしを確認 | OIDC config、provision service、login/logout provider | 実Entra/CA/provider logout。対象差分なし | provider昇格条件なし。次はT020 |
+| T017 | L3。認証基盤method allowlist、null action fail-closed、break-glass session失効 | resolver、BreakGlassService、login/session/MFA API・service・filter、audit | 実2名訓練、multi-instance、実IdP。外部環境なし | shared security境界だが通常Taskのため、次はT020 |
+| T018 | L3。`mfa.reset` admin-only、legacy/group/action matrix、Menu filter | AuthorizationService、resolver、action matrix、MenuPermissionFilter | 実browser role matrix。UI差分なし | shared authorization境界だが通常Taskのため、次はT020 |
+| T019 | L0。file upload/download/scanner差分なしを確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- 最初のL1再現: 26 tests / 0 failures / **1 error** / 0 skipped。
+  methodを収束したことで未知/null actionの`Set.contains(null)`が顕在化したため、scope違反としてfail-closedへ修正した。
+- 修正後L1: resolver、AuthorizationService、BreakGlassServiceの3 suiteを実行し、
+  **26 tests / 0 failures / 0 errors / 0 skipped**。Surefire report完了後にJava processも終了したが、
+  外側commandは120秒timeoutとなったためBUILD SUCCESSとは記録しない。
+- L3 direct consumer: resolver、AuthorizationService、action matrix、Menu filter、audit、break-glass、
+  login、persistent session、MFA API/service/attemptの12 suiteを実行し、
+  **67 tests / 0 failures / 0 errors / 0 skipped、BUILD SUCCESS**。
+- 本patchではL4を実行していない。test policyに従い通常Taskの共有security変更はL3で直接consumerを固定し、
+  Maven全量、Node/JS、必要なDocker/MySQL/security/browser/provider gateはT020へ集約する。
+
+## 2026-07-30 fixed Head `f06b01d` 再独立Review FAIL対応
+
+- Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
+- Reviewの正式Head: `f06b01d426176d295a46fa3bfad0e2a1769161f1`。Review開始時点で
+  `main = origin/main`、working tree cleanであることが確認された。
+- 今回の修正scope: 同Head上の未commit working-tree patch。次のfixed Headはまだ存在しないため、
+  判定は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
+- 前回R03の6件は正式Headの再Reviewで閉鎖が確認された。本節では、その後に検出された
+  export/download suffixの未知API迂回、break-glassのMFA管理API迂回、台帳Head不整合を別Issueとして追跡する。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。本修正patchをfixed Headへcommitした後も、
+  独立Review P0=0/P1=0/PASSと外部gate完了まではS03を完了扱いにしない。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R04-P1-01 | P1 | VERIFIED_CLOSED | resource inventory判定をexport/download suffix判定より先に実施。未知の通常API、`/export`、`/download`、拡張子download、未知security APIをactionへ昇格させず403 |
+| S03-R04-P1-02 | P1 | VERIFIED_CLOSED | 認証基盤の除外をmethod+exact URI allowlistへ限定。管理者向けMFA resetを独立`mfa.reset` actionとして解決し、break-glass事件のexact scope外では即時失効 |
+| S03-R04-P2-01 | P2 | VERIFIED_CLOSED | 正式Review Headを`f06b01d`として記録し、本修正は`3f1ac69`としてcommit・push済み |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review本文、正式Base/Head、新Issue ID、台帳scope | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。production差分なし | なし。次はT020 |
+| T015 | L0。schema/migration変更なしを差分確認 | Flyway history、H2 schema inventory | Flyway/Docker/MySQL。DDL・Entity差分なし | schema昇格条件なし。次はT020 |
+| T016 | L0。OIDC/provisioning変更なしを差分確認 | OIDC config、provision service、login/logout | 実Entra/Conditional Access。対象差分なし | identity provider昇格条件なし。次はT020 |
+| T017 | L3。break-glass exact scope、`mfa.reset`、認証基盤exact allowlist | resolver、BreakGlassService、MenuPermissionFilter、MFA/session API・service・filter | 実2名訓練、multi-instance、実IdP。外部環境なし | shared security境界に該当するが既存中間L4を重複せず、次はT020 |
+| T018 | L3。inventory-before-suffix、未知通常/security API、action matrix | resolver、AuthorizationService、MenuPermissionFilter | 実browser role matrix。UI差分なし | shared security境界に該当するが既存中間L4を重複せず、次はT020 |
+| T019 | L0。file upload/download/scanner変更なしを差分確認 | FileStorage、metadata、download/rescan | file/ClamAV回帰。対象差分なし | file/schema昇格条件なし。次はT020 |
+
+### 実行結果
+
+- L1 direct: `ActionPermissionResolverTest`、`BreakGlassServiceImplTest`、`MenuPermissionFilterTest`、
+  `SecuritySessionApiControllerTest`を実行し、**26 tests / 0 failures / 0 errors / 0 skipped**。
+- L3 direct consumer: resolver/action matrix/authorization/menu/audit/break-glass/login/session/MFAの12 suiteを実行し、
+  **60 tests / 0 failures / 0 errors / 0 skipped**。
+- exact allowlist確定後の最終直接回帰: resolver/menu/break-glassの3 suiteを実行し、
+  **28 tests / 0 failures / 0 errors / 0 skipped**。
+- 本ReviewではL4を再実行していない。`f06b01d`には前回の条件式中間L4
+  **1036 tests / 0 failures / 0 errors / 7 skipped**の証拠があるが、これは本未commit patchのL4証拠ではない。
+  test policyに従い独立Reviewのみを理由とする重複全量は行わず、次のL4 checkpointをT020とする。
+- JS/UI/schema/file差分なしのため、Node/browser/Docker/MySQL/ClamAVは本checkpointから除外した。
+
+## 2026-07-30 merge Head `b36922a` 再Review FAIL対応
+
+- Reviewの正式base: `b36922ae6287a4bc68681e577d9be1ba3180ed72`。
+- 修正scope: 同Head上の未commit working-tree patch。固定fix Headではないため、独立再Reviewが完了するまで判定は`FIX/REVIEW`とする。
+- migration: 公開済みV66を変更せず、後続予約V67を維持できるよう **V66.1**
+  (`V66_1__close_security_review_boundaries.sql`) を追加した。
+- T020 `M. セキュリティ回帰`は未checkのまま維持する。実Entra、実browser、2名break-glass訓練、依存scan、実MySQLは未完了である。
+
+### Issue Register
+
+| Issue | 深刻度 | 状態 | 修正・再現境界 |
+|---|---|---|---|
+| S03-R03-P1-01 | P1 | VERIFIED_CLOSED | 非管理者の全局`*`をV66.1で削除し、既知resourceへ展開。未知APIと未実装portalをfilterで403、legacy fallbackもinventory外actionを拒否 |
+| S03-R03-P1-02 | P1 | VERIFIED_CLOSED | break-glass事件へexact `allowed_actions`を追加。sessionを事件へ固定し、各requestで状態・期限・scopeを再検証してpersistent sessionを即時失効。参照/exportを含む全操作を事前必須監査し、ACTIVE時に申請者・承認者へ即時通知 |
+| S03-R03-P1-03 | P1 | VERIFIED_CLOSED | legacy移行とrescanでmax size・magic/構造検証をscanner前に実施。偽装PDF・上限超過はclean scannerでもquarantine |
+| S03-R03-P1-04 | P1 | VERIFIED_CLOSED | page URIをmatched menuのAPI prefixから同じview actionへ解決し、restrictive groupのpage直達を403 |
+| S03-R03-P2-01 | P2 | VERIFIED_CLOSED | prod validatorでissuer/authorization/token/JWK/user-infoをuserinfoなしの有効なHTTPS URLに限定 |
+| S03-R03-P2-02 | P2 | VERIFIED_CLOSED | 台帳baseを`b36922a`へ更新し本Issue Registerを追加。修正は`f06b01d`としてcommit・push済み |
+
+### TEST SCOPE DECISION（T014〜T019）
+
+| Task | selected level / test対象 | 直接consumer | 除外suite | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review本文、issue ID、Head、migration採番、台帳整合 | requirements/design/tasks/review ledger | Maven/Node/Docker/browser。文書inventoryのみ | なし。次はT020 |
+| T015 | L3。V66.1 integrity、H2 schema/seed、fresh/V63 upgrade smoke定義 | Flyway history、permission seed、break-glass entity/mapper | 実MySQLはDocker daemon不在で2件skip | schema変更のため条件式中間L4を1回実施。次はT020 |
+| T016 | L3。prod HTTPS metadata、OIDC registration/login/security integration | prod validator、client registration、login/logout、identity API | 実Entra/Conditional Accessはcredentialなし | security変更。次はT020 |
+| T017 | L3。事件scope/session期限/監査/通知/ログイン、persistent session consumer | LoginSuccessHandler、ApiAuditFilter、PersistentSessionFilter、session API | 実2名訓練・multi-instanceは環境なし | security/session変更。次はT020 |
+| T018 | L3。未知API/portal、role×action、page/API parity、permission/user consumer | resolver、AuthorizationService、MenuPermissionFilter、sidebar、permission/user API | 実browser role matrixはUI変更なし・外部gate | security/cache境界。次はT020 |
+| T019 | L3。legacy max/magic、clean/infected/unavailable、rescan/load | LegacyUploadMigration、FileStorage、metadata、download | 実ClamAVはsandboxなし | shared FileStorage変更。次はT020 |
+
+### 実行結果
+
+- L1/L2定向: 65 tests / 0 failures / 0 errors / 0 skipped。
+- L3 subsystem: 124 tests / 0 failures / 0 errors / 2 skipped。skipはDocker必須の
+  `FlywayMigrationSmokeTest`と`FlywayV63UpgradeMigrationSmokeTest`。
+- 最終差分の直接再確認: 39 tests / 0 failures / 0 errors / 0 skipped。
+- 条件式中間L4: 共有security/schema/session/FileStorage変更のため1回だけ実行し、
+  **1036 tests / 0 failures / 0 errors / 7 skipped**。skipはDocker必須6件とCJK font必須1件。
+- `git diff --check`: exit 0。JS/UI変更なしのためNode/browserは本checkpointから除外。
+- 未成立証拠: Docker daemon不在のためV66.1のfresh/V63-upgrade実MySQL証拠なし。固定fix commitと独立再Reviewも未完了。
+
+## 追加修正（2026-07-30 S02/S03実装差分の独立バグ検査対応）
+
+merge前のbranch実装（S02 organization-management-accounting、S03 F1〜B2）に対する追加検査で、
+Reviewでも回帰testでも検出されていなかった欠陥を修正した。V63〜V65は変更せず、**V66を新規追加**した。
+
+| # | 深刻度 | 欠陥 | 原因 | 修正 |
+|---|---|---|---|---|
+| B-01 | P0 | 営業/HR/要員がdashboard・analytics・quotation・work-record・sales-performance・monthly-closing等の`/api/**`で403 | `ActionPermissionResolver`はURI rootからaction keyを機械生成するのに対し、V64 seedと`legacyRoleAllows`が許可listの列挙だった。未列挙keyが全て拒否され、R3.1の後方互換に反した | V66でbaseline `*`＋拒否指定へ変更。`AuthorizationServiceImpl`は拒否をbaselineより優先評価。`legacyRoleAllows`も同じ規則へ書き換え |
+| B-02 | P1 | マネージャーがaction層で`user.*`/`permission.manage`/`payroll.view`/`audit.security.view`/`file.scan.retry`を素通し | V64が`role-manager`へ全権限wildcard `'*'` をseedしたうえ、拒否の仕組みが無かった（`role-admin`はaction 0件）。SecurityConfigのhasRole('管理者')とmenu権限だけが実害を止めていた | V66でrole-adminへbaselineを付与し、role-managerには機密actionの拒否指定を追加。baseline自体は後方互換のため維持する |
+| B-03 | P1 | 営業/HRが`engineer.delete`/`customer.delete`/`contract.delete`を失う | V64 seedに`.delete`が無く、wildcardも`engineer.*`ではなく単一keyだった | V66のbaselineで回復 |
+| B-04 | P1 | 既存アップロード済みファイル（スキルシート・要員写真・取込原本）が升级後に全て403 | `FileStorageServiceImpl#load`が`t_file_security_metadata`の`PUBLISHED`+`CLEAN`と`uploads/published/`配下を要求するが、V63はbackfillせず実体も移動しない | `LegacyUploadMigrationService`＋`LegacyUploadMigrationRunner`を追加。起動時にscanし、CLEANのみpublishedへ移す。INFECTED/UNAVAILABLEはquarantine保持で再scan可能 |
+| B-05 | P1 | V64適用後に作成したユーザーはgroup未割当のままでlegacy fallback判定になる | `UserApiController#save`がdefault group割当を行っていなかった（role変更経路だけ実装済み） | 作成時も`replaceAssignments(id, Set.of(), auth)`で割当。V66でbackfillも再実行 |
+| B-06 | P2 | 同時loginで遷移先が混ざる | `LoginSuccessHandler`（singleton）が`setDefaultTargetUrl`/`setAlwaysUseDefaultTargetUrl`でフィールドを書き換えていた | requestごとのlocal変数＋`getRedirectStrategy().sendRedirect`へ変更 |
+| B-07 | P2 | `MfaEnforcementFilter`/`PersistentSessionFilter`がServletコンテナへ二重登録される | `MenuPermissionFilter`/`ApiAuditFilter`にはある`FilterRegistrationBean(enabled=false)`が未作成だった。既定の順序ではchain内が先に走るため実害は出ないが、順序仮定に依存していた | 両filterへ同じ無効化Beanを追加 |
+| B-08 | P2 | 予算CSV取込が負数・欠損を受け付ける | `@Valid`は`@RequestBody`にしか効かず、CSV経路は手組みでrecordを生成していた（コメントは「負数を受け付けない」と記載） | `jakarta.validation.Validator`で1行ごとに同じ制約を評価 |
+| B-09 | P3 | `defaultGroupId`でroleがnullだとNPE | switch式にnullガードが無かった | 400 `error.permission.invalidGroup`へ |
+
+### 追加修正 TEST SCOPE DECISION
+
+- selected level: **L4**（全量）。共有security境界・schema・file storageに跨るため。
+- exact result: 全量Maven **1027 tests / 0 failures / 0 errors / 6 skipped**。skip 6件は全てDocker必須のTestcontainers
+  （`FlywayMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、
+  `FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`ConcurrentUpdateTest`）。
+- 追加したtest: `ActionPermissionMatrixTest`（role×action matrixをH2上のseed状態で検証。8件）、
+  `LegacyUploadMigrationServiceTest`（6件）、`AuthorizationServiceImplTest`の拒否優先1件、
+  `UserApiControllerTest`のdefault group割当1件、`ManagementAccountingApiControllerTest`のCSV負数拒否1件、
+  `FlywayMigrationSmokeTest`へV66 seed assertion（deny_flag列、baseline 4件、manager拒否5件、要員my.*）。
+- **未実施の重要gate**: 本環境ではDocker daemonは起動できたが、proxyがDocker Hubのblob CDNを403で遮断するため
+  `mysql:8.0` imageを取得できず、**V66のMySQL方言・seedは実MySQLで一度も実行されていない**。
+  V66が使う構文は`ALTER TABLE ... ADD COLUMN ... COMMENT`と`INSERT IGNORE ... SELECT ... UNION ALL`の2種だけで、
+  後者はV64と同一形であり実MySQLで実証済みである（当初入れていたmulti-table `DELETE a FROM ... JOIN`は、
+  直後のbaseline INSERTで同じ行を戻すだけの無意味な操作だったため削除した）。それでも
+  **merge前にDockerのあるCIで上記5 smokeを実行すること**をrelease gateとして残す。
+- 未実施（既存の外部gateを継続）: OWASP依存スキャン、実Entra login/logout・MFA assurance、
+  desktop/390px実ブラウザDemo、2名break-glass復旧訓練。
+- migration採番: V66を消費したため、後続spec（#4〜#17）の予約をV67〜V80へ繰り上げ、
+  `README.md`予約表・各spec design/tasks・中央conversation資料を同一差分で更新した。
+
+
+## 現行判定（2026-07-30 再独立Review FAIL対応）
+
+- 証拠scope: repository Headは`5cd1dd3e1dcbe894f967b87737fa237f27771d3e`、修正は未commit working-tree patchである。正式Review Headまたは固定fix Headの証拠ではなく、最終PASSには使用しない。
+- P0: 公開済みV63を`710eecc`時点の内容へ復元し、seed/backfillをV64、break-glass制御DDLをV65へ追加した。`FlywayV63UpgradeMigrationSmokeTest`は旧V63適用後にrepairなしでV64/V65へupgradeし、`FlywayMigrationSmokeTest`は空MySQLからV65まで成功した（各1/0/0/0）。
+- P1: API/action inventoryとgroup優先認可/sidebar、OOXML構造・画像decode・polyglot拒否、quarantine metadata保護、固定OIDC metadataとtimeout、incident/IdP障害確認/申請者と異なる2名承認、account/session/source別MFA rate limit、critical audit fail-closed、prod MFA enrollment検証を実装した。
+- P2: logout時のpersistent session失効、外部identity duplicate-keyのidempotent/409化、台帳の証拠scope修正を実装した。`M. セキュリティ回帰`は外部gate未完了のため未checkのまま保持する。
+- L1〜L3: 統合定向回帰111 tests / 0 failures / 0 errors / 0 skipped。追加のbreak-glass/MFA回帰11/0/0/0、MFA scope回帰3/0/0/0、4言語message key 36件、Node/JS 42 files / 0 failures、`git diff --check` exit 0。
+- T020 L4: 1回だけ実行し、外側30分timeoutまでに168 reports / 1008 tests / 6 failures / 0 errors / 1 skippedを出力した。6 failuresはanonymous filter、candidate/profile/autocomplete legacy整合、break-glass entity列mappingの4 consumerに限定され、修正後の該当6 suitesは101 tests / 0 failures / 0 errors / 0 skipped。方針に従い全量L4は無条件再実行せず、したがって最終treeのL4全緑証拠は未成立と記録する。
+- 未完了gate: repositoryにOWASP dependency-check相当の設定がない。実Entra login/logout・MFA assurance、desktop/390px browser、login→権限変更→session失効、2名break-glass復旧訓練は環境/credential未提供で未実施。release判定は`FIX/REVIEW`、独立Review P0=0/P1=0/PASSと外部gate完了まで`PASS`へ進めない。
+
+### 再Review対応 TEST SCOPE DECISION（T014〜T019）
+
+| Task | level / 対象 | 直接consumer | 除外suite / 理由 | 昇格条件 / 次L4 checkpoint |
+|---|---|---|---|---|
+| T014 | L0。Review、inventory、policy、台帳scope | requirements/design/tasks/identity inventory | Maven、Docker、browserはproduction差分なし | なし。次はT020 |
+| T015 | L3。V63 checksum静的検査、旧V63→V65、空DB→V65 | Flyway history、V64 seed/backfill、V65 DDL、H2 schema | legacy V60/repair/V62 fixtureは今回P0の直接consumer外 | schema変更あり。T020でL4を1回実行 |
+| T016 | L3。固定OIDC metadata、unreachable provider起動、prod context、identity競合 | ClientRegistration、token client、SecurityConfig、provision service | 実Entra/CA/logoutは外部tenantなし | 共有security変更あり。T020でL4を1回実行 |
+| T017 | L3。incident二者承認、IdP障害限定、MFA rate limit/critical audit、session logout、prod enrollment | login success、MFA API、audit、persistent session、prod validator | 実2名訓練/多instanceは外部環境なし | security/session/transaction/schema変更あり。T020でL4を1回実行 |
+| T018 | L3。全business API resolver、restrictive group、sidebar、legacy seed | MenuPermissionFilter、AuthorizationService、GlobalControllerAdvice、candidate/profile/autocomplete | 実browserの権限matrixは外部gate | cache/security/schema変更あり。T020でL4を1回実行 |
+| T019 | L3。ZIP/OOXML/MIME/画像/PDF、polyglot、quarantine cleanup | FileStorage、FileKind、cleanup/reference provider、download/rescan | 実ClamAV長時間timeoutはsandboxなし | shared file/security変更あり。T020でL4を1回実行 |
 
 ## 旧判定（T014完了、T015開始前）
 
@@ -132,7 +513,9 @@ S03の開始前レビューで検出された前提実装のP1を修正中。V61
 - Demo: EICAR fixtureはINFECTEDとしてquarantineへ残りdownload不可、scanner接続不能はUNAVAILABLEとして公開不可、CLEAN再scanだけpublishedへ移ることを再現済み。
 - rollback: upload受付を停止するか`FILE_SCANNER_ENABLED=false`で全uploadをfail-closed拒否する。published/quarantine metadataとV63履歴は削除・改変せず、バックアップ復元を使用する。
 
-## T020 TEST SCOPE DECISION（外部gate待ち）
+## 旧T020 TEST SCOPE DECISION（2026-07-30のproduction差分により失効）
+
+> 以下は修正前treeの履歴証拠であり、現行working treeのPASS根拠には使用しない。現行結果は冒頭の判定を正とする。
 
 - task / commit: T020 M / `f6f0027` base + T019完了時working tree。L4後の差分はcomment・台帳文書のみで、production contract変更なし。
 - changed contracts: T014〜T019のOIDC、MFA、persistent session、action permission、file quarantine/ClamAV、監査、V63 schemaを統合したspec全体。

@@ -52,6 +52,10 @@ public class SecurityConfig {
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PersistentSessionFilter persistentSessionFilter;
     private final com.ses.service.AuditLogService auditLogService;
+    private final com.ses.service.security.PersistentSessionService persistentSessionService;
+    private final ObjectProvider<org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
+            org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest>>
+            oidcTokenResponseClientProvider;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -71,6 +75,29 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<ApiAuditFilter> disableAuditAutoRegistration(ApiAuditFilter filter) {
         FilterRegistrationBean<ApiAuditFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * MfaEnforcementFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<MfaEnforcementFilter> disableMfaAutoRegistration(MfaEnforcementFilter filter) {
+        FilterRegistrationBean<MfaEnforcementFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * PersistentSessionFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<PersistentSessionFilter> disableSessionAutoRegistration(
+            PersistentSessionFilter filter) {
+        FilterRegistrationBean<PersistentSessionFilter> registrationBean = new FilterRegistrationBean<>(filter);
         registrationBean.setEnabled(false);
         return registrationBean;
     }
@@ -161,6 +188,14 @@ public class SecurityConfig {
                 .loginPage("/login")
                 .successHandler(loginSuccessHandler)
                 .failureHandler(oidcAuthenticationFailureHandler)
+                .tokenEndpoint(token -> {
+                    org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
+                            org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest>
+                            client = oidcTokenResponseClientProvider.getIfAvailable();
+                    if (client != null) {
+                        token.accessTokenResponseClient(client);
+                    }
+                })
                 .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcLoginUserService))
                 .permitAll());
         }
@@ -169,6 +204,8 @@ public class SecurityConfig {
         http.logout(logout -> {
             // POST 限定: GET /logout による外部サイトからの強制ログアウト（A7-27）を防ぐ。
             logout.logoutRequestMatcher(new AntPathRequestMatcher("/logout", "POST"))
+                .addLogoutHandler((request, response, authentication) ->
+                    persistentSessionService.revokeCurrent(request, authentication, "LOGOUT"))
                 .invalidateHttpSession(true)
                 .deleteCookies("JSESSIONID")
                 .permitAll();

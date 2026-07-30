@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -48,44 +49,38 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String uri = request.getRequestURI();
 
-        if (authentication == null || !authentication.isAuthenticated() || !isMenuControlledPath(uri)) {
+        if (authentication == null || authentication instanceof AnonymousAuthenticationToken
+                || !authentication.isAuthenticated() || !isMenuControlledPath(uri)) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // action権限はmenu cacheの有無に依存させない。cache未構築・障害中でも、
-        // 既知の更新/機密APIが権限なしで通過することを防ぐ。
+        // Portalは専用SecurityFilterChainと権限modelが入るまで既存内部roleへ流さない。
+        if (uri.equals("/portal") || uri.startsWith("/portal/")
+                || uri.equals("/api/portal") || uri.startsWith("/api/portal/")) {
+            deny(request, response);
+            return;
+        }
+
         AuthorizationService authorizationService = authorizationServiceProvider.getIfAvailable();
         String actionKey = ActionPermissionResolver.resolve(request.getMethod(), uri);
-        if (actionKey != null && authorizationService != null) {
-            try {
-                if (!authorizationService.isAllowed(authentication, actionKey)) {
-                    deny(request, response);
-                    return;
-                }
-            } catch (RuntimeException e) {
-                log.warn("action権限の判定に失敗したためアクセスを拒否します: uri={}, action={}",
-                        uri, actionKey, e);
-                deny(request, response);
-                return;
-            }
+        if (uri.startsWith("/api/") && actionKey == null
+                && !ActionPermissionResolver.isAuthenticationInfrastructure(request.getMethod(), uri)
+                && !isAuthenticationEndpoint(uri)) {
+            deny(request, response);
+            return;
         }
 
         com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
         if (menuCacheService == null) {
-            // テストslice等でメニューDBが存在しない場合は、action判定済みの要求だけ通す。
+            if (!authorize(authentication, actionKey, authorizationService, request, response)) {
+                return;
+            }
             filterChain.doFilter(request, response);
             return;
         }
 
         String role = currentRole(authentication);
-        // 管理者は全メニューにアクセス可能。メニュー権限設定で誤って自ロールの
-        // メニューを外しても管理画面から締め出されないよう、必ず素通しする。
-        if (ADMIN_ROLE.equals(role)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         Optional<Menu> matchedMenu;
         List<String> allowedMenuKeys;
         try {
@@ -95,15 +90,36 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
                     .filter(menu -> matchedPrefixLength(menu, uri) > 0)
                     .max((a, b) -> Integer.compare(matchedPrefixLength(a, uri), matchedPrefixLength(b, uri)));
 
-            if (matchedMenu.isEmpty()) {
-                filterChain.doFilter(request, response);
-                return;
-            }
-
             allowedMenuKeys = role == null ? List.of() : menuCacheService.getMenuKeysByRole(role);
         } catch (Exception e) {
             log.warn("メニュー権限の判定に失敗したためアクセスを拒否します: uri={}", uri, e);
             deny(request, response);
+            return;
+        }
+
+        // page直達もmatched menuのAPI prefixから同じview actionを導出する。
+        if (actionKey == null && matchedMenu.isPresent() && !uri.startsWith("/api/")) {
+            actionKey = ActionPermissionResolver.resolve("GET", matchedMenu.get().getApiPrefix());
+            if (actionKey == null) {
+                deny(request, response);
+                return;
+            }
+        }
+        if (actionKey != null) {
+            request.setAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE, actionKey);
+        }
+        if (!authorize(authentication, actionKey, authorizationService, request, response)) {
+            return;
+        }
+
+        // 管理者は既知actionに限りmenu設定による自己lockoutを受けない。
+        if (ADMIN_ROLE.equals(role)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        if (matchedMenu.isEmpty()) {
+            filterChain.doFilter(request, response);
             return;
         }
 
@@ -122,6 +138,23 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
     private void deny(HttpServletRequest request, HttpServletResponse response) throws IOException {
         com.ses.service.AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        boolean breakGlass = session != null
+                && session.getAttribute(com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE) != null;
+        if (breakGlass) {
+            if (auditLogService == null) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+            try {
+                auditLogService.recordRequired(com.ses.common.util.SecurityUtils.currentUsername(),
+                        request.getMethod(), request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
+                        "BREAK_GLASS_PERMISSION_DENIED", false);
+            } catch (RuntimeException e) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+        }
         if (auditLogService != null) {
             auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), request.getMethod(),
                     request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
@@ -141,6 +174,28 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             return false;
         }
         return !uri.equals("/logout") && !uri.equals("/") && (uri.startsWith("/api/") || !uri.contains("."));
+    }
+
+    private boolean isAuthenticationEndpoint(String uri) {
+        return uri.equals("/api/auth") || uri.startsWith("/api/auth/");
+    }
+
+    private boolean authorize(Authentication authentication, String actionKey,
+                              AuthorizationService authorizationService,
+                              HttpServletRequest request, HttpServletResponse response) throws IOException {
+        if (actionKey == null || authorizationService == null) {
+            return true;
+        }
+        try {
+            if (authorizationService.isAllowed(authentication, actionKey)) {
+                return true;
+            }
+        } catch (RuntimeException e) {
+            log.warn("action権限の判定に失敗したためアクセスを拒否します: uri={}, action={}",
+                    request.getRequestURI(), actionKey, e);
+        }
+        deny(request, response);
+        return false;
     }
 
     /**
