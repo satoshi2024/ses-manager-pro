@@ -8,7 +8,9 @@ import com.ses.entity.Engineer;
 import com.ses.entity.ProjectIngestion;
 import com.ses.entity.Proposal;
 import com.ses.entity.ResumeIngestion;
+import com.ses.entity.DocumentVersion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
@@ -36,6 +38,7 @@ public class FileScopeValidationService {
     private final ProposalMapper proposalMapper;
     private final ProjectIngestionMapper projectIngestionMapper;
     private final BpAvailabilityIngestionMapper bpAvailabilityIngestionMapper;
+    private final ObjectProvider<DocumentVersionMapper> documentVersionMapperProvider;
     private final DataScopeService dataScopeService;
     /** ObjectProvider 経由。テストスライスで未配線でも生成に失敗させない（その場合は管理者以外を拒否）。 */
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
@@ -81,6 +84,21 @@ public class FileScopeValidationService {
                 new QueryWrapper<BpAvailabilityIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
         if (bpIngestion != null) {
             assertMenuAllowed("bp-availability-ingestion");
+            return;
+        }
+
+        // 6. t_document_version の法定文書台帳ファイル
+        DocumentVersion documentVersion = documentVersionMapperProvider.getIfAvailable() != null
+                ? documentVersionMapperProvider.getIfAvailable().selectOne(
+                    new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"))
+                : null;
+        if (documentVersion != null) {
+            // scan未完了・拒否はfail-closedで拒否
+            String scanStatus = documentVersion.getScanStatus();
+            if (scanStatus == null || "PENDING".equals(scanStatus) || "REJECTED".equals(scanStatus)) {
+                throw BusinessException.of(403, "error.file.scanNotReady");
+            }
+            assertMenuAllowed("document-archive");
             return;
         }
 

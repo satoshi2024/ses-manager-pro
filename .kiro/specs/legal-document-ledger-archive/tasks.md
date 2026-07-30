@@ -10,7 +10,7 @@
 > **Migration**: 本specの予約番号は **V67**。着手時にmerge済み`db/migration`の最新を再確認し、
 > 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
-- [ ] 0. G2法務確認と既存file inventory
+- [x] 0. G2法務確認と既存file inventory
   - **Objective**: 文書種別ごとの保存年数・起算日・法的hold可否が表として確定し、既存fileの所在・参照元・件数・容量が
     棚卸しされている。以降のtaskが「どの文書をarchiveへ移すか」を推測せずに決められる状態にする。
   - **成果物**: 文書種別、起算日、保存年、法的hold、既存path/参照元/件数/容量。
@@ -20,7 +20,7 @@
   - **テスト要件**: L0。inventoryの件数がFileReferenceProvider実装数と一致すること、
     保存年数の根拠URLが全種別に付いていること、`git diff --check` exit 0。
 
-- [ ] F1. 文書DDLとDocumentService
+- [x] F1. 文書DDLとDocumentService
   - **Objective**: 受領したPDFを登録すると、文書種別・相手先・取引日・金額・SHA-256が台帳に記録され、
     同じ操作を再実行しても2件目が作られない。原本確定後は通常UIから上書き・物理削除ができない。
   - **実装ガイダンス**: **V67**/V1/H2(`sql/schema-document-archive-h2.sql`)/MySQL smoke、version/link/access/disposal。
@@ -30,7 +30,7 @@
     legal hold中の廃棄拒否、`version`楽観ロック競合、`retention_until IS NULL`が廃棄候補に**入らない**こと。
   - **Demo**: 受領PDFを登録しmetadataとhash表示。同じPDFをもう一度登録して件数が増えないことを確認。
 
-- [ ] F2. Storage adapterとstream download
+- [x] F2. Storage adapterとstream download
   - **Objective**: 業務コードがstorage pathを直接扱わずにfileを保存・取得でき、local/S3を設定だけで切り替えられる。
     scan未完了・未知のfileはdownloadできない。大きいfileでもheapが増えない。
   - **実装ガイダンス**: local/S3 interface、quarantine→scan→hash→DB tx→promoteの順（design §2）、

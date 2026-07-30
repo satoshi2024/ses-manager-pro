@@ -577,6 +577,127 @@ CREATE TABLE t_monthly_accounting_dimension (
 
 
 -- ============================================================
+-- 法定文書台帳 (V67 legal-document-ledger-archive)
+-- ============================================================
+DROP TABLE IF EXISTS t_document_disposal_request;
+DROP TABLE IF EXISTS t_document_access_log;
+DROP TABLE IF EXISTS t_document_link;
+DROP TABLE IF EXISTS t_document_version;
+DROP TABLE IF EXISTS t_document;
+DROP TABLE IF EXISTS m_document_type;
+
+CREATE TABLE m_document_type (
+  id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  code                   VARCHAR(50)   NOT NULL COMMENT '種別コード',
+  name                   VARCHAR(100)  NOT NULL COMMENT '種別名',
+  direction              VARCHAR(10)   NOT NULL COMMENT '方向: OUTGOING/INCOMING/INTERNAL',
+  retention_years        INT           NOT NULL COMMENT '法定保存年数',
+  retention_start_rule   VARCHAR(50)   NOT NULL COMMENT '起算日ルール',
+  legal_hold_supported   TINYINT       NOT NULL DEFAULT 1 COMMENT '法的hold可否',
+  created_at             DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag           TINYINT       NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_type_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書種別マスタ';
+
+CREATE TABLE t_document (
+  id                       BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id                VARCHAR(100)  NOT NULL DEFAULT 'default',
+  legal_entity_id          VARCHAR(100),
+  document_type            VARCHAR(50)   NOT NULL COMMENT '文書種別コード',
+  document_no              VARCHAR(100),
+  title                    VARCHAR(500),
+  counterparty_type        VARCHAR(50),
+  counterparty_id          BIGINT,
+  counterparty_name_snapshot VARCHAR(200),
+  transaction_date         DATE,
+  amount                   DECIMAL(15,0),
+  currency                 CHAR(3)       NOT NULL DEFAULT 'JPY',
+  direction                VARCHAR(10)   NOT NULL,
+  status                   VARCHAR(20)   NOT NULL DEFAULT 'DRAFT',
+  retention_until          DATE,
+  legal_hold_flag          TINYINT       NOT NULL DEFAULT 0,
+  `version`                BIGINT        NOT NULL DEFAULT 1,
+  created_by               BIGINT,
+  created_at               DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag             TINYINT       NOT NULL DEFAULT 0,
+  INDEX idx_document_type      (document_type),
+  INDEX idx_document_transaction_date (transaction_date),
+  INDEX idx_document_amount    (amount),
+  INDEX idx_document_counterparty (counterparty_type, counterparty_id),
+  INDEX idx_document_status    (status),
+  INDEX idx_document_retention (retention_until),
+  INDEX idx_document_tenant    (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書台帳';
+
+CREATE TABLE t_document_version (
+  id               BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  document_id      BIGINT        NOT NULL,
+  version_no       INT           NOT NULL,
+  storage_key      VARCHAR(500)  NOT NULL,
+  original_name    VARCHAR(500)  NOT NULL,
+  content_type     VARCHAR(100),
+  size_bytes       BIGINT,
+  sha256           CHAR(64)      NOT NULL,
+  source_type      VARCHAR(50)   NOT NULL,
+  business_key     VARCHAR(200),
+  version_discriminator VARCHAR(100),
+  external_id      VARCHAR(200),
+  scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
+  change_reason    VARCHAR(500),
+  created_by       BIGINT        NOT NULL,
+  created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag     TINYINT       NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_version_no (document_id, version_no),
+  UNIQUE KEY uk_document_idempotency (source_type, business_key, version_discriminator),
+  INDEX idx_dv_document   (document_id),
+  INDEX idx_dv_sha256     (sha256),
+  INDEX idx_dv_external   (external_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書版';
+
+CREATE TABLE t_document_link (
+  id           BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id  BIGINT       NOT NULL,
+  target_type  VARCHAR(50)  NOT NULL,
+  target_id    BIGINT       NOT NULL,
+  created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag TINYINT      NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_link (document_id, target_type, target_id),
+  INDEX idx_dl_target    (target_type, target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書業務リンク';
+
+CREATE TABLE t_document_access_log (
+  id          BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id BIGINT       NOT NULL,
+  version_id  BIGINT,
+  action      VARCHAR(30)  NOT NULL,
+  user_id     BIGINT       NOT NULL,
+  ip_hash     VARCHAR(64),
+  occurred_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_dal_document   (document_id),
+  INDEX idx_dal_user       (user_id),
+  INDEX idx_dal_occurred   (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書アクセス監査ログ';
+
+CREATE TABLE t_document_disposal_request (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id   BIGINT       NOT NULL,
+  requested_by  BIGINT       NOT NULL,
+  approved_by   BIGINT,
+  status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+  reason        VARCHAR(1000) NOT NULL,
+  disposed_at   DATETIME,
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT      NOT NULL DEFAULT 0,
+  INDEX idx_ddr_document (document_id),
+  INDEX idx_ddr_status   (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書廃棄申請';
+
+-- ============================================================
 -- DDL完了
 -- ============================================================
 ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)

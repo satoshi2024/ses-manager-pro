@@ -70,7 +70,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             Files.createDirectories(dir);
             Path pdf = dir.resolve("document-" + System.currentTimeMillis() + ".pdf");
             
-            Document doc = new Document();
+            com.lowagie.text.Document doc = new com.lowagie.text.Document();
             PdfWriter.getInstance(doc, Files.newOutputStream(pdf));
             doc.open();
             
