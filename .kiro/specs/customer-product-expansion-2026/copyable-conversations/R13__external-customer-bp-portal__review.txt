@@ -19,12 +19,17 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M
+- 本specは `platform-invariants.md` §2（認可母集団）の既定解が適用できない**唯一のspec**である。
+  portal userは `sys_user` ではなくDataScope・組織scope・menu権限を持たないため、
+  「既存scope serviceを使っていない」ことを指摘にしない。母集団が `portal_org` →
+  `customer_id`/`bp_company_id` から独立に導出され、query boundaryで検証されているかを確認する。
 
 【最初に完全に読むもの】
 - AGENTS.md
 - .kiro/specs/customer-product-expansion-2026/README.md
 - .kiro/specs/customer-product-expansion-2026/decision-log.md
 - .kiro/specs/customer-product-expansion-2026/gate-decisions-g1-g6.md
+- .kiro/specs/customer-product-expansion-2026/execution-review-handbook.md
 - .kiro/specs/customer-product-expansion-2026/shared-standards.md
 - .kiro/specs/customer-product-expansion-2026/platform-invariants.md
 - .kiro/specs/customer-product-expansion-2026/dependency-matrix.md
@@ -47,12 +52,37 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - `test-execution-policy-s03-s17.md` に従い、同一Headの有効なL4全量証拠を理由なく再実行しない。再ReviewはOPEN issue、修正diff、direct regressionのL1〜L3を既定とし、昇格条件がある場合だけL4を要求する。
 - MのDemoが顧客効果と既存回帰を証明し、未実行環境が明記されているか確認する。
 
+【既定解と決定表の照合】
+- `platform-invariants.md` は既定解の表である。実装が既定解から外れている箇所は、design.mdに
+  「逸脱と根拠」が書かれているかを確認する。根拠なき逸脱はP1候補とする。
+- 本specの `design.md` の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）を逐項照合する。
+  表の1行ごとに対応する実装とtestがあるかを確認する。
+- **決定表に無い判断が実装に入っていたら、それは実装中に決めた設計であり指摘対象とする。**
+- 特に次のS02再発パターンを重点確認する。
+  - 明示NULLと履歴不存在を `COALESCE` で混同していないか（`CASE WHEN h.id IS NULL` になっているか）
+  - 認可母集団がSQL境界で適用されているか（取得後のJava filterでないか）
+  - 許可集合が空のときDB側で0件になるか（空集合が全件に化けていないか）
+  - cache失効がafterCommitか、rollbackで新状態へ進んでいないか
+  - 期間操作に同日/未来/有限終了/部分重複/隣接のfixtureがあるか
+  - DDLがfresh/legacy両方で検証されているか（fresh成功だけで合格にしていないか）
+  - 二重実行防止がversion CAS / 状態CAS / DB UNIQUEのいずれかで明示されているか
+
+【指摘形式と収束規則】
+- 全指摘は `execution-review-handbook.md` §10の形式に従う。issue ID（<spec>-R<round>-P<severity>-<number>）、
+  violated requirement/acceptance、file:line、再現条件（data/role/time）、expected/actual、影響、証拠、
+  最小修正範囲、direct regression scope、discovered in（original head / fix delta）を必ず含める。
+- 要件ID・再現可能性・影響のいずれも無い指摘はP0/P1にしない。P2/NOTEで次specを止めない。
+- 再Reviewは§11に従いOPEN issue、修正diff、direct regression、変更public contractのconsumer、
+  新規P0/P1だけを見る。全repo再監査をしない。同じ根本原因を別番号で再起票しない。
+- Round 4以降は通常Reviewを停止し、spec/決定表/test matrixの改訂を先に要求する。
+- Review Packet（§9）が不足して対象を固定できない場合は、推測せず NOT REVIEWABLE とする。
+
 【出力】
 1. P0/P1/P2問題。各問題にfile:line、再現条件、影響、最小修正範囲を記載。
 2. task別 Requirements→実装→test→Demo→判定表。
 3. migration/scope/security/外部障害/性能の横断判定。
 4. 未検証環境と本番前条件。
-5. spec総合判定: PASS / CONDITIONAL PASS / FAIL。
+5. spec総合判定: PASS / CONDITIONAL PASS / FAIL / NOT REVIEWABLE。
 6. 次specまたは次Waveを開始してよいか。
 7. review-ledgerと中央ledgerへ転記する短い結論。
 問題がない場合は根拠を示してPASSとし、不要なrefactorを提案しないでください。

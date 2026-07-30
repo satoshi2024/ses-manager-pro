@@ -259,8 +259,20 @@ class SpecDispatchConsistencyTest {
 
             Path review = EXPANSION.resolve("copyable-conversations")
                     .resolve(conversation.replace('S', 'R') + "__" + spec + "__review.txt");
-            if (!read(review).contains("platform-invariants.md")) {
-                missing.add(review.getFileName() + " に「platform-invariants.md」がありません");
+            String reviewText = read(review);
+            for (String required : List.of(
+                    "platform-invariants.md",
+                    "execution-review-handbook.md",
+                    "test-execution-policy-s03-s17.md",
+                    // 決定表を逐項照合させる。これが無いと「実装中に決めた設計」を見逃す
+                    "既定解と決定表の照合",
+                    // issue ID・再現条件・discovered in を必須にし、Round 4で収束させる
+                    "指摘形式と収束規則",
+                    // Review Packet不足時に推測でReviewしない
+                    "NOT REVIEWABLE")) {
+                if (!reviewText.contains(required)) {
+                    missing.add(review.getFileName() + " に「" + required + "」がありません");
+                }
             }
         }
         assertTrue(missing.isEmpty(),
@@ -285,6 +297,17 @@ class SpecDispatchConsistencyTest {
                 "S11の開始条件が社労士確認を本番gateとして明記していません。開工条件に書くと着手できなくなります");
         assertTrue(text.contains("1メソッド1ルール"),
                 "S11にcalculatorの構造制約（1メソッド1ルール）がありません");
+
+        // Review側も同じ扱いにする。合否条件にすると未確認だけでFAILが出る
+        Path review = EXPANSION.resolve("copyable-conversations")
+                .resolve("R11__attendance-leave-overtime-compliance__review.txt");
+        String reviewText = read(review);
+        assertTrue(reviewText.contains("本番releaseのgate"),
+                "R11が社労士確認を本番gateとして扱っていません。合否条件にすると未確認だけでFAILになります");
+        assertTrue(reviewText.contains("月100時間だけが"),
+                "R11に境界の重点確認（月100時間だけが >= 判定）がありません。ここがoff-by-oneの本命です");
+        assertTrue(reviewText.contains("overtime-rules.md"),
+                "R11がovertime-rules.mdを照合の正として指示していません");
     }
 
     /**
@@ -294,11 +317,14 @@ class SpecDispatchConsistencyTest {
      */
     @Test
     void S13が認可母集団の例外であることを明示すること() throws Exception {
-        Path start = EXPANSION.resolve("copyable-conversations")
-                .resolve("S13__external-customer-bp-portal__start.txt");
-        String text = read(start);
-        assertTrue(text.contains("唯一のspec"),
-                "S13がplatform-invariants §2の例外であることを明示していません"
-                        + "（portal userはDataScope・組織scope・menu権限を持たない）");
+        for (String file : List.of(
+                "S13__external-customer-bp-portal__start.txt",
+                "R13__external-customer-bp-portal__review.txt")) {
+            Path path = EXPANSION.resolve("copyable-conversations").resolve(file);
+            assertTrue(read(path).contains("唯一のspec"),
+                    file + " がplatform-invariants §2の例外であることを明示していません"
+                            + "（portal userはDataScope・組織scope・menu権限を持たない。"
+                            + "Review側に無いと『既存scope serviceを使っていない』が誤指摘になります）");
+        }
     }
 }
