@@ -118,6 +118,7 @@ CREATE TABLE t_permission_group_action (
   tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   group_id BIGINT NOT NULL,
   action_key VARCHAR(160) NOT NULL,
+  deny_flag TINYINT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,

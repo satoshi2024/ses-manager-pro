@@ -28,7 +28,7 @@
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `NOT READY` | archive PASS後S05 |  |  |  | R05 PASSでWave 0完了 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |
 | 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP/CRM PASS、G7方針記録後S07 |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V64→V65順merge |  |  |  | R08 PASS |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V69→V70順merge |  |  |  | R08 PASS |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
@@ -42,6 +42,19 @@
 ## 2.1 第十八次Review対応の最新実績（2026-07-29）
 
 最新ReviewのBaseは`origin/main=fb91943`（PR #42 merge済み）。P1-1〜P1-4のキャッシュ競合、manager組織scope漏れ、混在組織請求書、NULL業務通知を`90f50c0`で修正し、manager/notification/invoiceの実行級回帰を追加した。定向・全量は883/0/0/1（唯一skipはCJKフォントなし）、Node/JS syntaxは実行済み、Flyway fresh・legacy V60・repair・V62 closed fixture・migration integrity・ConcurrentUpdateは0 skippedで実行済み、`git diff --check` exit 0。`90f50c0`は未mergeのため、S02はFIX/REVIEW、S03はNOT READYとする。desktop/390px Demoは本番前硬门禁として未実施のまま保持する。
+
+## 2.2 S02/S03実装差分の独立バグ検査（2026-07-30）
+
+merge前branchのS02実装とS03 F1〜B2に対する追加検査で、P0×1・P1×4・P2×3・P3×1を検出し修正した。
+最重要はaction permission層の後方互換破り（営業/HR/要員が業務APIで403）と、V64がrole-managerへ
+全権限wildcardをseedしていた点である。詳細と修正内容は
+`enterprise-identity-security/review-ledger.md`の「追加修正（2026-07-30 …）」を正とする。
+
+- 追加migration: **V66**（action permissionのbaseline付与と拒否指定）。V63〜V65は変更していない。
+- 採番影響: 後続spec#4〜#17の予約をV67〜V80へ繰り上げ、README予約表と全design/tasksを同一差分で更新済み。
+- test: 全量 1027/0/0/6。skip 6件は全てDocker必須のTestcontainers。
+- **release gate（未達）**: proxyがDocker Hub blob CDNを遮断するため`mysql:8.0`を取得できず、V66は実MySQLで
+  未実行。Docker利用可能なCIでFlyway smoke 5件を実行するまでS03をPASSへ進めない。
 
 ## 3. 1specの状態遷移
 

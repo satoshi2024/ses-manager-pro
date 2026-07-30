@@ -12,7 +12,7 @@
 
 - [ ] F1. workplace/profile/finding/delivery DDL
   - **Objective**: F1. workplace/profile/finding/delivery DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V68/V1/H2/smoke、snapshot/permission。
+  - **実装ガイダンス**: V73/V1/H2/smoke、snapshot/permission。
   - **テスト要件**: FK/期間/PII scope。
   - **Demo**: F1. workplace/profile/finding/delivery DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

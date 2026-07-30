@@ -80,6 +80,29 @@ public class SecurityConfig {
     }
 
     /**
+     * MfaEnforcementFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<MfaEnforcementFilter> disableMfaAutoRegistration(MfaEnforcementFilter filter) {
+        FilterRegistrationBean<MfaEnforcementFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * PersistentSessionFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<PersistentSessionFilter> disableSessionAutoRegistration(
+            PersistentSessionFilter filter) {
+        FilterRegistrationBean<PersistentSessionFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
      * セキュリティフィルタチェーンの設定
      * アクセス制御、フォームログイン、ログアウト、CSRF設定を定義する
      *

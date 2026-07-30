@@ -12,7 +12,7 @@
 
 - [ ] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: F1. version/run/item/feedback/outcome/evaluation DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V75/V1/H2/smoke、legacy移行方針。
+  - **実装ガイダンス**: V80/V1/H2/smoke、legacy移行方針。
   - **テスト要件**: active一意、trace、tenant、保存期限。
   - **Demo**: F1. version/run/item/feedback/outcome/evaluation DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

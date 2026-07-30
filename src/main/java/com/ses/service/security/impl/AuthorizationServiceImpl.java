@@ -23,6 +23,15 @@ import java.util.Set;
 @Slf4j
 public class AuthorizationServiceImpl implements AuthorizationService {
 
+    private static final String ROLE_ADMIN = "管理者";
+    private static final String ROLE_HR = "HR";
+    private static final String ROLE_MEMBER = "要員";
+    /** baseline（旧menu相当の全action）を持つrole。 */
+    private static final Set<String> BASELINE_ROLES = Set.of("営業", ROLE_HR, "マネージャー");
+    /** roleに関係なく管理者だけが実行できるaction。SecurityConfigでも重ねて制限している。 */
+    private static final Set<String> ADMIN_ONLY_ACTIONS =
+            Set.of("permission.manage", "audit.security.view", "file.scan.retry");
+
     private final UserPermissionGroupMapper userPermissionGroupMapper;
     private final PermissionGroupActionMapper permissionGroupActionMapper;
     private final com.ses.mapper.PermissionGroupMapper permissionGroupMapper;
@@ -34,7 +43,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return false;
         }
         String role = SecurityUtils.currentRole();
-        if ("管理者".equals(role)) {
+        if (ROLE_ADMIN.equals(role)) {
             return true;
         }
         if (actionKey.startsWith("profile.")) {
@@ -58,12 +67,13 @@ public class AuthorizationServiceImpl implements AuthorizationService {
                     if (enabledGroupIds.isEmpty()) {
                         return false;
                     }
-                    int separator = actionKey.indexOf('.');
-                    String resourceWildcard = separator > 0 ? actionKey.substring(0, separator + 1) + "*" : actionKey;
-                    return permissionGroupActionMapper.selectCount(new LambdaQueryWrapper<PermissionGroupAction>()
-                            .eq(PermissionGroupAction::getTenantId, tenantId())
-                            .in(PermissionGroupAction::getGroupId, enabledGroupIds)
-                            .in(PermissionGroupAction::getActionKey, actionKey, resourceWildcard, "*")) > 0;
+                    Set<String> candidates = candidateKeys(actionKey);
+                    // 明示拒否はbaseline許可（action_key='*'）より優先する。先に評価しないと
+                    // baselineを与えたroleから機密actionを外せない。
+                    if (matches(enabledGroupIds, candidates, 1)) {
+                        return false;
+                    }
+                    return matches(enabledGroupIds, candidates, 0);
                 }
             }
             return legacyRoleAllows(role, actionKey);
@@ -73,38 +83,69 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         }
     }
 
+    /**
+     * group未割当ユーザーのfallback。V66のseedと同じ「baseline＋拒否」規則で判定する。
+     *
+     * <p>許可listの列挙にしてはいけない。action keyは
+     * {@link com.ses.service.security.ActionPermissionResolver}が
+     * URI rootから機械生成するため、列挙式にすると{@code dashboard.view}・{@code analytics.view}・
+     * {@code quotation.view}・{@code my.view}のような未列挙keyが全て拒否され、
+     * R3.1の後方互換（旧menu権限で到達できた範囲を維持する）を破る。
+     * 新しいAPI rootを追加したときにここへ追記しなくても壊れないことが要件である。
+     */
     private boolean legacyRoleAllows(String role, String actionKey) {
         if (role == null) {
             return false;
         }
-        if ("管理者".equals(role)) {
+        if (ROLE_ADMIN.equals(role)) {
             return true;
         }
-        if (actionKey.startsWith("user.") || actionKey.equals("permission.manage")
-                || actionKey.equals("payroll.view") || actionKey.equals("file.scan.retry")) {
+        // 要員はSecurityConfigのanyRequest().hasAnyRole(...)から除外されており、
+        // 到達できる経路自体が本人向けに限定されている。baselineは与えず許可listで表す。
+        if (ROLE_MEMBER.equals(role)) {
+            return actionKey.equals("file.download") || actionKey.startsWith("profile.")
+                    || actionKey.startsWith("my.") || actionKey.startsWith("notifications.");
+        }
+        if (!BASELINE_ROLES.contains(role)) {
             return false;
         }
-        if ("HR".equals(role)) {
-            return actionKey.startsWith("engineer.") || actionKey.startsWith("candidate.")
-                    || actionKey.startsWith("file.") || actionKey.equals("export.execute")
-                    || actionKey.equals("autocomplete.view");
+        if (actionKey.startsWith("user.") || ADMIN_ONLY_ACTIONS.contains(actionKey)) {
+            return false;
         }
-        if ("営業".equals(role)) {
-            return actionKey.startsWith("engineer.") || actionKey.startsWith("customer.")
-                    || actionKey.startsWith("project.") || actionKey.startsWith("proposal.")
-                    || actionKey.startsWith("contract.") || actionKey.startsWith("candidate.")
-                    || actionKey.equals("export.execute") || actionKey.equals("autocomplete.view")
-                    || actionKey.equals("file.download")
-                    || actionKey.equals("file.upload");
+        // payroll menuはV21で管理者とHRにだけ付与されている。
+        if (actionKey.equals("payroll.view")) {
+            return ROLE_HR.equals(role);
         }
-        if ("マネージャー".equals(role)) {
-            return !actionKey.startsWith("user.") && !actionKey.equals("permission.manage")
-                    && !actionKey.equals("payroll.view");
+        // R3.3の原価マスキング。HRは原価を参照しない。
+        if (actionKey.equals("contract.cost.view")) {
+            return !ROLE_HR.equals(role);
         }
-        if ("要員".equals(role)) {
-            return actionKey.equals("file.download");
+        return true;
+    }
+
+    /**
+     * actionKey本体・resource wildcard・baselineの3種を1回のSQLで突き合わせる。
+     *
+     * <p>ドットを含まないkeyではwildcardがactionKey自身と一致するため、
+     * {@code Set.of}（重複で例外）ではなく重複を許す集合で組み立てる。
+     */
+    private Set<String> candidateKeys(String actionKey) {
+        int separator = actionKey.indexOf('.');
+        Set<String> candidates = new java.util.LinkedHashSet<>();
+        candidates.add(actionKey);
+        if (separator > 0) {
+            candidates.add(actionKey.substring(0, separator + 1) + "*");
         }
-        return false;
+        candidates.add("*");
+        return candidates;
+    }
+
+    private boolean matches(Set<Long> enabledGroupIds, Set<String> candidates, int denyFlag) {
+        return permissionGroupActionMapper.selectCount(new LambdaQueryWrapper<PermissionGroupAction>()
+                .eq(PermissionGroupAction::getTenantId, tenantId())
+                .in(PermissionGroupAction::getGroupId, enabledGroupIds)
+                .eq(PermissionGroupAction::getDenyFlag, denyFlag)
+                .in(PermissionGroupAction::getActionKey, candidates)) > 0;
     }
 
     private String tenantId() {

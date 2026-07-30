@@ -12,7 +12,7 @@
 
 - [ ] F1. BP master/terms/contact/bank DDL
   - **Objective**: F1. BP master/terms/contact/bank DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V64/V1/H2/smoke、暗号化/masking、service。
+  - **実装ガイダンス**: V69/V1/H2/smoke、暗号化/masking、service。
   - **テスト要件**: unique、期間、bank非露出、状態。
   - **Demo**: BP法人と個人事業主を登録。
 

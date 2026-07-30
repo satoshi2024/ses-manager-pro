@@ -12,7 +12,7 @@
 
 - [ ] F1. connection/mapping/job DDLと既存connection移行
   - **Objective**: F1. connection/mapping/job DDLと既存connection移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V73/V1/H2/smoke、暗号/token race/outbox。
+  - **実装ガイダンス**: V78/V1/H2/smoke、暗号/token race/outbox。
   - **テスト要件**: unique/rotation/claim/CAS/tenant。
   - **Demo**: F1. connection/mapping/job DDLと既存connection移行 の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

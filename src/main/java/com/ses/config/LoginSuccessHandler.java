@@ -50,21 +50,22 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         }
         accountLockService.onLoginSuccess(authentication.getName());
         persistentSessionService.register(request, authentication);
+        // 遷移先はrequestごとのlocal変数で決める。setDefaultTargetUrl等はこのhandler
+        // （singleton）のフィールドを書き換えるため、同時loginで遷移先が混ざる。
+        String targetUrl = "/";
         if (authentication instanceof UsernamePasswordAuthenticationToken && mfaService.isRequired(authentication)) {
             jakarta.servlet.http.HttpSession session = request.getSession(true);
             session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
             session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE);
-            setDefaultTargetUrl(mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
-                    ? "/mfa/challenge" : "/mfa/setup");
-        } else {
-            setDefaultTargetUrl("/");
+            targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
+                    ? "/mfa/challenge" : "/mfa/setup";
         }
         // session発行まで完了した認証だけを成功として監査する。
         if (!breakGlass && auditLogService != null) {
             auditLogService.record(authentication.getName(), "AUTH", "/login", 200, "LOGIN_SUCCESS", true);
         }
-        setAlwaysUseDefaultTargetUrl(true);
-        super.onAuthenticationSuccess(request, response, authentication);
+        clearAuthenticationAttributes(request);
+        getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
 
     private void rejectBreakGlass(HttpServletRequest request, String message) throws ServletException {

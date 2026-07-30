@@ -5,7 +5,7 @@
 
 - [ ] F1. 注文/明細/検収DDL
   - **Objective**: F1. 注文/明細/検収DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V67/V1/H2/smoke、entity/mapper/number/状態。
+  - **実装ガイダンス**: V72/V1/H2/smoke、entity/mapper/number/状態。
   - **テスト要件**: unique、金額、状態、複数明細。
   - **Demo**: F1. 注文/明細/検収DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

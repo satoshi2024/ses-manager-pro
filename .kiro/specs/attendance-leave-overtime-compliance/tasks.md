@@ -12,7 +12,7 @@
 
 - [ ] F1. calendar/attendance/month/leave/agreement DDL
   - **Objective**: F1. calendar/attendance/month/leave/agreement DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V69/V1/H2/smoke、minute model、scope。
+  - **実装ガイダンス**: V74/V1/H2/smoke、minute model、scope。
   - **テスト要件**: period/unique/closing/leave。
   - **Demo**: F1. calendar/attendance/month/leave/agreement DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

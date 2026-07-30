@@ -13,7 +13,7 @@
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V71
+- Migration: V74
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G6（雇用勤怠の正）、36協定、就業規則が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

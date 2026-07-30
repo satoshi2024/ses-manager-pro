@@ -47,6 +47,11 @@ public class ManagementAccountingApiController {
     private final ManagementBudgetMapper budgetMapper;
     private final MonthlyAccountingDimensionMapper dimensionMapper;
     private final OrganizationScopeService organizationScopeService;
+    /**
+     * CSV取込は{@code @Valid}が効かない（{@code @RequestBody}ではなく手組みでrecordを作る）ため、
+     * JSON経路と同じ制約をここで明示的に評価する。無いと負数や欠損がCSVだけ通ってしまう。
+     */
+    private final jakarta.validation.Validator validator;
 
     /** CSV一括取込の最大行数（ヘッダー除く）。 */
     private static final int MAX_CSV_ROWS = 200;
@@ -159,6 +164,7 @@ public class ManagementAccountingApiController {
                         Long.valueOf(columns[0].trim()), nullableLong(columns[1]), LocalDate.parse(columns[2].trim()),
                         new BigDecimal(columns[3].trim()), new BigDecimal(columns[4].trim()),
                         Integer.valueOf(columns[5].trim()), Integer.valueOf(columns[6].trim()), nullableInteger(columns[7]));
+                validateRow(request);
                 organizationScopeService.assertAllowedOrganization(request.organizationId());
                 ManagementBudget budget = ManagementBudget.builder()
                         .organizationId(request.organizationId()).costCenterId(request.costCenterId())
@@ -184,6 +190,13 @@ public class ManagementAccountingApiController {
                 .orderByAsc(MonthlyAccountingDimension::getId);
         organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, month);
         return ApiResult.success(dimensionMapper.selectList(query));
+    }
+
+    /** JSON経路の{@code @Valid}と同じ制約（必須・負数禁止）をCSVの1行へ適用する。 */
+    private void validateRow(BudgetSaveRequest request) {
+        if (!validator.validate(request).isEmpty()) {
+            throw BusinessException.of("error.organization.budget.csvInvalid");
+        }
     }
 
     private Long nullableLong(String value) {

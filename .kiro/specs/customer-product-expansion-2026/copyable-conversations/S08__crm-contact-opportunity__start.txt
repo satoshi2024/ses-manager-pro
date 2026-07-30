@@ -11,8 +11,8 @@
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V67
-- 先行条件: Wave 0完了。BPと並行開始できるがV66 merge後にV67をmerge。
+- Migration: V70
+- 先行条件: Wave 0完了。BPと並行開始できるがV69 merge後にV70をmerge。
 - Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 

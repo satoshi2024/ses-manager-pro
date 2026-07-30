@@ -154,4 +154,21 @@ class ManagementAccountingApiControllerTest {
                 .andExpect(jsonPath("$.code").value(400));
         verify(budgetService, times(2)).upsert(any(ManagementBudget.class), nullable(Integer.class));
     }
+
+    /**
+     * CSV経路は{@code @Valid}が効かないため、JSON経路と同じ制約をcontroller内で評価する。
+     * 評価しないと負数の売上・粗利がCSVだけ通り、予実差が反転した状態で保存される。
+     */
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    void budgetCsv_負数はJSON経路と同じく拒否する() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "budget.csv", "text/csv",
+                ("organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version\n"
+                        + "1,,2026-07-01,-100,30,2,1,\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/management-accounting/budgets/csv").file(file).with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+        verify(budgetService, times(0)).upsert(any(ManagementBudget.class), nullable(Integer.class));
+    }
 }

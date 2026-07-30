@@ -21,6 +21,12 @@ public class UploadProperties {
     /** falseの場合はscanner unavailableとして全uploadを拒否する。 */
     private boolean scannerEnabled = true;
 
+    /**
+     * 起動時にquarantine/published導入前の既存ファイルをscan・metadata登録して移行するか。
+     * 移行済みの環境では何もしないため通常は有効のままにする。
+     */
+    private boolean legacyMigrationEnabled = true;
+
     /** ClamAV daemonの接続先。prod profileで使用する。 */
     private String scannerHost = "localhost";
 

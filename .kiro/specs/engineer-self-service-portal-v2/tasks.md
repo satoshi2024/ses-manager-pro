@@ -5,7 +5,7 @@
 
 - [ ] F1. change/expense/1on1/survey DDL
   - **Objective**: F1. change/expense/1on1/survey DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V72/V1/H2/smoke、本人scope、field allowlist。
+  - **実装ガイダンス**: V77/V1/H2/smoke、本人scope、field allowlist。
   - **テスト要件**: A/B、JSON不正、状態、version競合。
   - **Demo**: F1. change/expense/1on1/survey DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

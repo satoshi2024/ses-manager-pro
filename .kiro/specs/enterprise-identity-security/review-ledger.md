@@ -1,5 +1,44 @@
 # Review Ledger — 企業認証・セキュリティ（S03）
 
+## 追加修正（2026-07-30 S02/S03実装差分の独立バグ検査対応）
+
+merge前のbranch実装（S02 organization-management-accounting、S03 F1〜B2）に対する追加検査で、
+Reviewでも回帰testでも検出されていなかった欠陥を修正した。V63〜V65は変更せず、**V66を新規追加**した。
+
+| # | 深刻度 | 欠陥 | 原因 | 修正 |
+|---|---|---|---|---|
+| B-01 | P0 | 営業/HR/要員がdashboard・analytics・quotation・work-record・sales-performance・monthly-closing等の`/api/**`で403 | `ActionPermissionResolver`はURI rootからaction keyを機械生成するのに対し、V64 seedと`legacyRoleAllows`が許可listの列挙だった。未列挙keyが全て拒否され、R3.1の後方互換に反した | V66でbaseline `*`＋拒否指定へ変更。`AuthorizationServiceImpl`は拒否をbaselineより優先評価。`legacyRoleAllows`も同じ規則へ書き換え |
+| B-02 | P1 | マネージャーがaction層で`user.*`/`permission.manage`/`payroll.view`/`audit.security.view`/`file.scan.retry`を素通し | V64が`role-manager`へ全権限wildcard `'*'` をseedしたうえ、拒否の仕組みが無かった（`role-admin`はaction 0件）。SecurityConfigのhasRole('管理者')とmenu権限だけが実害を止めていた | V66でrole-adminへbaselineを付与し、role-managerには機密actionの拒否指定を追加。baseline自体は後方互換のため維持する |
+| B-03 | P1 | 営業/HRが`engineer.delete`/`customer.delete`/`contract.delete`を失う | V64 seedに`.delete`が無く、wildcardも`engineer.*`ではなく単一keyだった | V66のbaselineで回復 |
+| B-04 | P1 | 既存アップロード済みファイル（スキルシート・要員写真・取込原本）が升级後に全て403 | `FileStorageServiceImpl#load`が`t_file_security_metadata`の`PUBLISHED`+`CLEAN`と`uploads/published/`配下を要求するが、V63はbackfillせず実体も移動しない | `LegacyUploadMigrationService`＋`LegacyUploadMigrationRunner`を追加。起動時にscanし、CLEANのみpublishedへ移す。INFECTED/UNAVAILABLEはquarantine保持で再scan可能 |
+| B-05 | P1 | V64適用後に作成したユーザーはgroup未割当のままでlegacy fallback判定になる | `UserApiController#save`がdefault group割当を行っていなかった（role変更経路だけ実装済み） | 作成時も`replaceAssignments(id, Set.of(), auth)`で割当。V66でbackfillも再実行 |
+| B-06 | P2 | 同時loginで遷移先が混ざる | `LoginSuccessHandler`（singleton）が`setDefaultTargetUrl`/`setAlwaysUseDefaultTargetUrl`でフィールドを書き換えていた | requestごとのlocal変数＋`getRedirectStrategy().sendRedirect`へ変更 |
+| B-07 | P2 | `MfaEnforcementFilter`/`PersistentSessionFilter`がServletコンテナへ二重登録される | `MenuPermissionFilter`/`ApiAuditFilter`にはある`FilterRegistrationBean(enabled=false)`が未作成だった。既定の順序ではchain内が先に走るため実害は出ないが、順序仮定に依存していた | 両filterへ同じ無効化Beanを追加 |
+| B-08 | P2 | 予算CSV取込が負数・欠損を受け付ける | `@Valid`は`@RequestBody`にしか効かず、CSV経路は手組みでrecordを生成していた（コメントは「負数を受け付けない」と記載） | `jakarta.validation.Validator`で1行ごとに同じ制約を評価 |
+| B-09 | P3 | `defaultGroupId`でroleがnullだとNPE | switch式にnullガードが無かった | 400 `error.permission.invalidGroup`へ |
+
+### 追加修正 TEST SCOPE DECISION
+
+- selected level: **L4**（全量）。共有security境界・schema・file storageに跨るため。
+- exact result: 全量Maven **1027 tests / 0 failures / 0 errors / 6 skipped**。skip 6件は全てDocker必須のTestcontainers
+  （`FlywayMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、
+  `FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`ConcurrentUpdateTest`）。
+- 追加したtest: `ActionPermissionMatrixTest`（role×action matrixをH2上のseed状態で検証。8件）、
+  `LegacyUploadMigrationServiceTest`（6件）、`AuthorizationServiceImplTest`の拒否優先1件、
+  `UserApiControllerTest`のdefault group割当1件、`ManagementAccountingApiControllerTest`のCSV負数拒否1件、
+  `FlywayMigrationSmokeTest`へV66 seed assertion（deny_flag列、baseline 4件、manager拒否5件、要員my.*）。
+- **未実施の重要gate**: 本環境ではDocker daemonは起動できたが、proxyがDocker Hubのblob CDNを403で遮断するため
+  `mysql:8.0` imageを取得できず、**V66のMySQL方言・seedは実MySQLで一度も実行されていない**。
+  V66が使う構文は`ALTER TABLE ... ADD COLUMN ... COMMENT`と`INSERT IGNORE ... SELECT ... UNION ALL`の2種だけで、
+  後者はV64と同一形であり実MySQLで実証済みである（当初入れていたmulti-table `DELETE a FROM ... JOIN`は、
+  直後のbaseline INSERTで同じ行を戻すだけの無意味な操作だったため削除した）。それでも
+  **merge前にDockerのあるCIで上記5 smokeを実行すること**をrelease gateとして残す。
+- 未実施（既存の外部gateを継続）: OWASP依存スキャン、実Entra login/logout・MFA assurance、
+  desktop/390px実ブラウザDemo、2名break-glass復旧訓練。
+- migration採番: V66を消費したため、後続spec（#4〜#17）の予約をV67〜V80へ繰り上げ、
+  `README.md`予約表・各spec design/tasks・中央conversation資料を同一差分で更新した。
+
+
 ## 現行判定（2026-07-30 再独立Review FAIL対応）
 
 - 証拠scope: repository Headは`5cd1dd3e1dcbe894f967b87737fa237f27771d3e`、修正は未commit working-tree patchである。正式Review Headまたは固定fix Headの証拠ではなく、最終PASSには使用しない。
