@@ -5,7 +5,7 @@
 
 - [ ] F1. position/allocation/scenario DDL
   - **Objective**: F1. position/allocation/scenario DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V70/V1/H2/smoke、状態/区間/競合service。
+  - **実装ガイダンス**: V75/V1/H2/smoke、状態/区間/競合service。
   - **テスト要件**: 50+50/60+50、期間、scenario isolation。
   - **Demo**: F1. position/allocation/scenario DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

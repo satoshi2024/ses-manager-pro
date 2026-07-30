@@ -42,27 +42,30 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 |---|---|---|---|---|---|
 | 1 | `multi-company-tenant-isolation` | SaaS/複数法人のデータ境界 | XXL | V59（永久欠番） | 独立DBモード完了、共有DB実装延期、現在の実装taskなし |
 | 2 | `organization-management-accounting` | 部門・上長・原価部門・予算 | XL | V60 | 仕様済 |
-| 3 | `enterprise-identity-security` | OIDC/MFA/権限/セッション統制 | XL | V63 | 仕様済・G1決定済 |
-| 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V64 | 仕様済 |
-| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V65 | 仕様済 |
-| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V66 | 仕様済・G2開発方針決定済 |
-| 7 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V67 | 仕様済 |
-| 8 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V68 | 仕様済 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V69 | 仕様済 |
-| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V70 | 仕様済・G2開発方針決定済 |
-| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V71 | 仕様済・G6決定済 |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | V72 | 仕様済 |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | V73 | 仕様済・G3決定済 |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | V74 | 仕様済 |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | V75 | 仕様済・G4決定済 |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | V76 | 仕様済・G5決定済 |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | V77 | 仕様済 |
+| 3 | `enterprise-identity-security` | OIDC/MFA/権限/セッション統制 | XL | V63〜V66 | 仕様済・G1決定済 |
+| 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済 |
+| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68 | 仕様済 |
+| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V69 | 仕様済・G2開発方針決定済 |
+| 7 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V70 | 仕様済 |
+| 8 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V71 | 仕様済 |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V72 | 仕様済 |
+| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V73 | 仕様済・G2開発方針決定済 |
+| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V74 | 仕様済・G6決定済 |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | V75 | 仕様済 |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | V76 | 仕様済・G3決定済 |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | V77 | 仕様済 |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | V78 | 仕様済・G4決定済 |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | V79 | 仕様済・G5決定済 |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | V80 | 仕様済 |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
-V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用したため、
-これより後続のspec全ての予約番号を`latest + 1`から2つ後ろへ繰り上げた（本書とこの下の全designを
-同一更新で反映済み）。V59は作成せず、永久欠番として保持する。実装依存順はV66 BP→V67 CRM→V68 approval
-として計画しているが、これらは実装前の計画値である。
+V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
+`enterprise-identity-security` がV63（identity/MFA/session/permission/file DDL）、V64（legacy role→
+permission group seed）、V65（break-glass二者承認とMFA試行制限）、V66（action permissionのbaseline付与と
+拒否指定）を使用した。そのため後続spec全ての予約番号を、その時点のFlyway最新番号`latest + 1`から
+振り直している（本書とこの下の全designを同一更新で反映済み）。**現在適用済みの最新はV66であり、
+後続specの予約はV67から始まる。** V59は作成せず、永久欠番として保持する。
+実装依存順はV69 BP→V70 CRM→V71 approvalとして計画しているが、これらは実装前の計画値である。
 実装開始までに別migrationが追加された場合、V59を補完・再利用せず、予約表全体をその時点のFlyway最新番号`latest + 1`から連番で振り直し、本書と全designを先に更新する。V60以降が適用済みの場合もV59を追加してはならず、過去migrationの編集やout-of-order適用は禁止する。
 
 ## 4. 実行Wave

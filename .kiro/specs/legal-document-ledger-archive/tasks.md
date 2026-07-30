@@ -12,7 +12,7 @@
 
 - [ ] F1. 文書DDLとDocumentService
   - **Objective**: F1. 文書DDLとDocumentService を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V62/V1/H2/smoke、version/link/access/disposal。
+  - **実装ガイダンス**: V67/V1/H2/smoke、version/link/access/disposal。
   - **テスト要件**: hash/version/冪等/hold/楽観ロック。
   - **Demo**: 受領PDFを登録しmetadataとhash表示。
 

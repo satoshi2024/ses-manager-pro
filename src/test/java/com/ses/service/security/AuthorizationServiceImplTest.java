@@ -92,11 +92,29 @@ class AuthorizationServiceImplTest {
         group.setId(10L);
         group.setEnabled(1);
         when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
-        when(permissionGroupActionMapper.selectCount(any())).thenReturn(1L, 0L);
+        // 1 actionあたり「拒否 → 許可」の2回問い合わせる。
+        // invoice.view: 拒否0・許可1 → 許可。organization.view: 拒否0・許可0 → 拒否。
+        when(permissionGroupActionMapper.selectCount(any())).thenReturn(0L, 1L, 0L, 0L);
 
         AuthorizationServiceImpl service = service();
         assertTrue(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "invoice.view"));
         assertFalse(service.isAllowed(SecurityContextHolder.getContext().getAuthentication(), "organization.view"));
+    }
+
+    @Test
+    void 明示拒否はbaseline許可より優先される() {
+        authenticate(7L, "営業");
+        UserPermissionGroup assignment = new UserPermissionGroup();
+        assignment.setGroupId(10L);
+        when(userPermissionGroupMapper.selectList(any())).thenReturn(List.of(assignment));
+        PermissionGroup group = new PermissionGroup();
+        group.setId(10L);
+        group.setEnabled(1);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group));
+        // 拒否1件がヒットした時点で許可問い合わせへ進まない。
+        when(permissionGroupActionMapper.selectCount(any())).thenReturn(1L);
+
+        assertFalse(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "payroll.view"));
     }
 
     @Test

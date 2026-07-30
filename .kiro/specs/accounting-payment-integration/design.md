@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V75）
+## 1. DDL（予約V78）
 
 - `m_integration_connection(id, tenant_id, legal_entity_id, provider, product, external_company_id,
   encrypted_tokens, expires_at, status, version)`。既存`t_freee_connection`を段階移行。

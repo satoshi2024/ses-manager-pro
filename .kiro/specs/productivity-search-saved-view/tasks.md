@@ -5,7 +5,7 @@
 
 - [ ] F1. task/saved view基盤
   - **Objective**: F1. task/saved view基盤 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V63/V1/H2/smoke、schema registry、状態機械。
+  - **実装ガイダンス**: V68/V1/H2/smoke、schema registry、状態機械。
   - **テスト要件**: task遷移、view allowlist/owner/tenant。
   - **Demo**: task登録→担当変更→完了。
 

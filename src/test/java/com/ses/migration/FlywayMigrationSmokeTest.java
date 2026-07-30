@@ -265,6 +265,37 @@ class FlywayMigrationSmokeTest {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 2,
                         "既存営業roleの原価閲覧・export後方互換actionがseedされるはず");
             }
+            assertColumnExists(st, "t_permission_group_action", "deny_flag");
+            // V66: 営業/HR/マネージャーはbaseline '*' を持ち、旧menu相当の業務actionを維持する。
+            // これが無いとdashboard.view等の未列挙actionが全て拒否される（V64の回帰）。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key IN ('role-admin','role-sales','role-hr','role-manager') "
+                            + "AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 4,
+                        "管理者/営業/HR/マネージャーへbaseline actionがseedされるはず");
+            }
+            // V66: role-managerのbaselineは後方互換のため維持し、機密actionは拒否指定で外す。
+            // V64はこの拒否が無く、action層がuser.*やpayroll.viewまで素通しだった。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key = 'role-manager' AND a.deny_flag = 1 "
+                            + "AND a.action_key IN ('user.*','permission.manage','payroll.view',"
+                            + "'audit.security.view','file.scan.retry') AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 5,
+                        "マネージャーの機密actionが拒否指定されるはず");
+            }
+            // V66: 要員は本人向け経路のmy.*を持つ（V64のseedに無く、勤怠が403になっていた）。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key = 'role-member' AND a.action_key = 'my.*' "
+                            + "AND a.deny_flag = 0 AND a.deleted_flag = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 1,
+                        "要員へmy.*がseedされるはず");
+            }
 
             // 契約一覧の担当営業join(su.real_name)が実MySQLで実行可能なこと(full_name誤りの回帰)
             try (ResultSet rs = st.executeQuery(

@@ -102,6 +102,9 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
     }
 
     private Long defaultGroupId(String role) {
+        if (!StringUtils.hasText(role)) {
+            throw BusinessException.of(400, "error.permission.invalidGroup");
+        }
         String groupKey = switch (role) {
             case "管理者" -> "role-admin";
             case "営業" -> "role-sales";

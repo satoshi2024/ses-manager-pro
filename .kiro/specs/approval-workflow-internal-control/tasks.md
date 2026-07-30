@@ -12,7 +12,7 @@
 
 - [ ] F1. route/request/action/delegation DDL
   - **Objective**: F1. route/request/action/delegation DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V66/V1/H2/smoke、engine core/CAS。
+  - **実装ガイダンス**: V71/V1/H2/smoke、engine core/CAS。
   - **テスト要件**: route/自己承認/並列/代理/競合。
   - **Demo**: F1. route/request/action/delegation DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

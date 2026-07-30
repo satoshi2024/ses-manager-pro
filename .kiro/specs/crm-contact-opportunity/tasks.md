@@ -5,7 +5,7 @@
 
 - [ ] F1. contact/lead/opportunity DDLと移行
   - **Objective**: F1. contact/lead/opportunity DDLと移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V65/V1/H2/smoke、既存contact→初回contact。
+  - **実装ガイダンス**: V70/V1/H2/smoke、既存contact→初回contact。
   - **テスト要件**: 件数、primary、PII scope、移行値一致。
   - **Demo**: 既存顧客の担当者がdetailに表示。
 

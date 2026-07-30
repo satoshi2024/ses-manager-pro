@@ -211,7 +211,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V64
+- Migration: V67
 - 先行条件: enterprise-identity-security完了・merge済み。
 - Decision gate: G2の法務監修者、保存期間、訂正削除方針が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -270,7 +270,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 0
-- Migration: V65
+- Migration: V68
 - 先行条件: legal-document-ledger-archive完了・merge済み。
 - Decision gate: blocking decisionなし。共通検索・scope・大量処理標準を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -330,8 +330,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V66
-- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV66→V67順にmerge。
+- Migration: V69
+- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV69→V70順にmerge。
 - Decision gate: G2の法務監修と対象法令・帳票項目が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -390,8 +390,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V68
-- 先行条件: BP master V66とCRM V67が完了・merge済み。
+- Migration: V71
+- 先行条件: BP master V69とCRM V70が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -449,8 +449,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V67
-- 先行条件: Wave 0完了。BPと並行開始できるがV66 merge後にV67をmerge。
+- Migration: V70
+- 先行条件: Wave 0完了。BPと並行開始できるがV69 merge後にV70をmerge。
 - Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -508,7 +508,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V69
+- Migration: V72
 - 先行条件: approval-workflow-internal-control完了・merge済み。
 - Decision gate: 承認状態機械と帳票archive interfaceが固定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -568,7 +568,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V70
+- Migration: V73
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2の公式様式field mappingと法務受入責任者が確定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -629,7 +629,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V71
+- Migration: V74
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G6（雇用勤怠の正）、36協定、就業規則が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -688,7 +688,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V72
+- Migration: V75
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -748,7 +748,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V73
+- Migration: V76
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -807,7 +807,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V74
+- Migration: V77
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -868,7 +868,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V75
+- Migration: V78
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -928,7 +928,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V76
+- Migration: V79
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -988,7 +988,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 4
-- Migration: V77
+- Migration: V80
 - 先行条件: CRM、proposal、staffing、outcome sourceが完了・merge済み。
 - Decision gate: G10はmock/rule継続または実provider/DPA/PII許可を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

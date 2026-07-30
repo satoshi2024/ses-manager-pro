@@ -12,7 +12,7 @@
 
 - [ ] F1. participant/digital invoice/event DDL
   - **Objective**: F1. participant/digital invoice/event DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V74/V1/H2/smoke、state/idempotency。
+  - **実装ガイダンス**: V79/V1/H2/smoke、state/idempotency。
   - **テスト要件**: unique/status/event order。
   - **Demo**: F1. participant/digital invoice/event DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

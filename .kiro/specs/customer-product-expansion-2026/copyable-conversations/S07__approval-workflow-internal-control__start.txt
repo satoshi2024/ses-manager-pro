@@ -12,8 +12,8 @@
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V68
-- 先行条件: BP master V66とCRM V67が完了・merge済み。
+- Migration: V71
+- 先行条件: BP master V69とCRM V70が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 

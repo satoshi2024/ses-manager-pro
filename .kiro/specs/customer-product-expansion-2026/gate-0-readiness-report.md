@@ -15,7 +15,7 @@
 - G7〜G10 は blocking ではない。調査時点では decision-log の推奨既定値を採用して先行設計へ進められるが、正式な状態更新は発注者の指示後に行う。
 - 現行システムは単一 MySQL データベース、グローバル username、MyBatis-Plus の通常 interceptor のみであり、tenant context、tenant interceptor、tenant-aware な非HTTP経路は存在しない。
 - `multi-company-tenant-isolation` はT001だけを完了した。T002/F1、DDL、V59作成、Flyway追加、V1変更、H2 schema変更は未着手であり、共有DB方式の正式再開まで延期する。
-- V59は作成せず永久欠番として保持する。V60〜V77は実装前の計画値に過ぎず、現時点の最大番号はV58である（その後の実装でV61・V62は`organization-management-accounting`が使用済みであり、V63〜V77は後続specの予約値として順次繰り上げ済み。詳細は`README.md`の予約表を参照）。将来共有DBを再開する場合もV59を補完・再利用せず、その時点のFlyway最新番号`latest + 1`から再計画する。
+- V59は作成せず永久欠番として保持する。V60〜V77は実装前の計画値に過ぎず、本報告書作成時点の最大番号はV58である（その後の実装でV61・V62は`organization-management-accounting`、V63〜V66は`enterprise-identity-security`が使用済みであり、後続specの予約はV67以降へ順次繰り上げ済み。詳細は`README.md`の予約表を参照）。将来共有DBを再開する場合もV59を補完・再利用せず、その時点のFlyway最新番号`latest + 1`から再計画する。
 
 ## 2. G0〜G10 決定準備表
 
@@ -273,7 +273,7 @@ MyBatis-Plus wrapperによる主なカスタム query の入口は、`CustomerAp
 
 ## 4. 依存・採番・実行順の問題
 
-1. **採番の現状**: 本報告書作成時点（2026-07-26）の現行migrationはV1〜V58のうち19、23、41、47を欠番として持ち、V59以降は未作成であった。V59は永久欠番とし、V60〜V77の計画値も実装前に当時のFlyway最新番号`latest + 1`から振り直す方針とした。V59の補完・再利用、過去migrationの編集・out-of-order適用は禁止する。（その後`organization-management-accounting`がV61・V62を実装済みで、V63〜V77は後続specの予約値として繰り上げ済み。現在の正は`README.md`の予約表。）
+1. **採番の現状**: 本報告書作成時点（2026-07-26）の現行migrationはV1〜V58のうち19、23、41、47を欠番として持ち、V59以降は未作成であった。V59は永久欠番とし、V60〜V77の計画値も実装前に当時のFlyway最新番号`latest + 1`から振り直す方針とした。V59の補完・再利用、過去migrationの編集・out-of-order適用は禁止する。（その後`organization-management-accounting`がV61・V62、`enterprise-identity-security`がV63〜V66を実装済みで、後続specの予約はV67以降へ繰り上げ済み。現在の正は`README.md`の予約表。）
 2. **実行順の文書表記**: 旧版READMEの一覧表示にあったapprovalとCRMの順序問題は、当時CRM → approvalへ修正した。`parallel-execution-plan.md` と `dependency-matrix.md` を含め、BP → CRM → approvalの順序で一致している。番号自体は実装前の計画値であり、実際の採番はV59永久欠番を除外した当時のlatest+1規則に従う（現在の具体的な予約番号はBP=V66、CRM=V67、approval=V68。`README.md`の予約表が正）。
 3. **V1説明の不一致**: `V1__create_tables.sql:5` の「全14テーブル」と実際の16表が一致しない。DDLを今変更せず、Gate 0後にコメントまたは棚卸し資料だけを同期する。
 4. **V1/H2/Flywayの三系統**: `application-test.yml:11-38` はV1/V2/V4/V22/V5〜V9と複数H2 schemaを直接replayし、`application-test.yml:46-49` でFlywayを無効化する。一方 `FlywayMigrationSmokeTest.java:15-46` は実MySQLの空DBへ全migrationを通す。共有DBのDDL変更時はこの三系統とentityを同一taskで同期する必要がある。

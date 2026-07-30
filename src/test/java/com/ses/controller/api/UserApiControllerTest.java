@@ -99,6 +99,32 @@ class UserApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
     }
 
+    /**
+     * 新規ユーザーはrole相当のdefault groupへ割当てる。割当が無いとlegacy fallback判定に
+     * なり、permission group画面で権限を編集しても効かないユーザーが増える。
+     */
+    @Test
+    @WithMockUser
+    void save_新規ユーザーへdefaultPermissionGroupを割当てる() throws Exception {
+        when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
+        when(passwordEncoder.encode(anyString())).thenReturn("ENC");
+        when(sysUserService.save(any())).thenAnswer(invocation -> {
+            ((SysUser) invocation.getArgument(0)).setId(4321L);
+            return true;
+        });
+
+        SysUser u = SysUser.builder().username("tester").password("pass1234").role("営業").build();
+        mockMvc.perform(post("/api/users").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(u)))
+                .andExpect(status().isOk());
+
+        verify(permissionGroupManagementService).replaceAssignments(
+                org.mockito.ArgumentMatchers.eq(4321L),
+                org.mockito.ArgumentMatchers.eq(java.util.Set.of()),
+                any());
+    }
+
     @Test
     @WithMockUser
     void save_ユーザー名が短いと400() throws Exception {

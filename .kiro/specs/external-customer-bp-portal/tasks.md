@@ -12,7 +12,7 @@
 
 - [ ] F1. portal org/user/invite/consent DDL
   - **Objective**: F1. portal org/user/invite/consent DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V71/V1/H2/smoke、token/hash/session/permission。
+  - **実装ガイダンス**: V76/V1/H2/smoke、token/hash/session/permission。
   - **テスト要件**: token/reuse/expiry/email/tenant/停止。
   - **Demo**: F1. portal org/user/invite/consent DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
