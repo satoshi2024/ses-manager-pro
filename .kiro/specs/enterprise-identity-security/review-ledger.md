@@ -7,7 +7,8 @@
   `HEAD = origin/main`、working tree cleanであることが確認された。
 - 独立Review結論: **FAIL（P0=0、P1=1、P2=0）**。
   前回`S03-R05-P2-01`〜`03`は`VERIFIED_CLOSED`とする。
-- 今回の修正scope: 同Head上の未commit working-tree patch。独立再Reviewが完了するまで
+- 今回の修正scope: Review Headをbaseとするfixed commit
+  `f68708b15bd287e6a3a3f9afd827d177f1431994`。独立再Reviewが完了するまで
   spec状態は`FIX/REVIEW`を維持し、S04 `legal-document-ledger-archive`へ進めない。
 - T020 `M. セキュリティ回帰`は未checkのまま維持する。実MySQL、実Entra、OWASP依存scan、
   desktop/390px browser matrix、実ClamAV、実担当者2名によるbreak-glass訓練、
