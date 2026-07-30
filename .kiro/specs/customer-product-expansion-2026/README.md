@@ -16,6 +16,8 @@
 通常の実装・Reviewは、次の3資料を使用する。
 
 - `gate-decisions-g1-g6.md`: G1〜G6の正式なarchitecture decisionと本番release gate
+- `platform-invariants.md`: **既定解の表**（S04以降必須）。S02が21ラウンドで到達した時間モデル・認可母集団・
+  cache/transaction・期間代数・Migration fixture・金額/CSVの結論を全specの既定として固定したもの
 - `spec-execution-ledger.md`: 17specの現在状態、blocker、実装/Review対話、次action
 - `spec-start-conversations.md`: 17個の主実装AI用コピー対話。各spec内の原子taskを全て包含
 - `spec-review-conversations.md`: 17個の独立Review用コピー対話
@@ -139,3 +141,5 @@ permission group seed）、V65（break-glass二者承認とMFA試行制限）、
 5. ページ/API/通知リンク/エクスポート/ファイルダウンロードに同じ認可母集団を適用する。
 6. 各通常Taskは定向/直接回帰を完了し、各specのM taskで`mvn test`全量、必要なMySQL smoke、主要browser Demoを行う。
 7. `.kiro/specs/README.md` と本書の状態を更新する。
+8. （S04以降）`design.md`の「決定表」3表（時間・asOf / 主体×操作×可見母集団 / 状態機械と競合）が埋まり、
+   `platform-invariants.md` からの逸脱がある場合は「逸脱と根拠」として明記されている。
