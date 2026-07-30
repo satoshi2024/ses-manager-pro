@@ -1,9 +1,7 @@
 package com.ses.config;
 
 import com.ses.service.storage.DocumentStorage;
-import com.ses.service.storage.impl.LocalDocumentStorage;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,14 +13,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Storage Adapter 設定クラス（F2: Storage adapterとstream download）。
- * {@code app.storage.type=s3} の場合は S3 用のモック/アダプタ Bean を生成し、
- * それ以外（既定: local）の場合は LocalDocumentStorage をプライマリとして有効化する。
+ * {@code app.storage.type=s3} の場合に S3Storage Bean を有効化する。
  */
 @Slf4j
 @Configuration
 public class DocumentStorageConfig {
 
-    @Bean
+    @Bean(name = "s3DocumentStorage")
     @ConditionalOnProperty(name = "app.storage.type", havingValue = "s3")
     public DocumentStorage s3DocumentStorage() {
         log.info("[DocumentStorageConfig] S3 Storage Adapter が有効化されました");
@@ -32,6 +29,15 @@ public class DocumentStorageConfig {
     /** S3Fake/Mock Storage 実装 */
     private static class S3MockDocumentStorage implements DocumentStorage {
         private final ConcurrentHashMap<String, byte[]> s3Bucket = new ConcurrentHashMap<>();
+
+        @Override
+        public void put(String key, InputStream content, boolean quarantine) {
+            try {
+                put(key, content.readAllBytes(), quarantine);
+            } catch (IOException e) {
+                throw new RuntimeException("S3 Storage stream read error", e);
+            }
+        }
 
         @Override
         public void put(String key, byte[] content, boolean quarantine) {

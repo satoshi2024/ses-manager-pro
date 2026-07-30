@@ -6,7 +6,7 @@
 -- ============================================================
 -- 1. m_document_type — 文書種別マスタ
 -- ============================================================
-CREATE TABLE m_document_type (
+CREATE TABLE IF NOT EXISTS m_document_type (
   id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   code                   VARCHAR(50)   NOT NULL COMMENT '種別コード (例: CONTRACT, INVOICE_OUT)',
   name                   VARCHAR(100)  NOT NULL COMMENT '種別名',
@@ -23,7 +23,7 @@ CREATE TABLE m_document_type (
 -- ============================================================
 -- 2. t_document — 文書台帳
 -- ============================================================
-CREATE TABLE t_document (
+CREATE TABLE IF NOT EXISTS t_document (
   id                       BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   tenant_id                VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
   legal_entity_id          VARCHAR(100)  COMMENT '法人ID（将来multi-entity用）',
@@ -59,28 +59,29 @@ CREATE TABLE t_document (
 -- ============================================================
 -- 3. t_document_version — 文書版（append-only）
 -- ============================================================
-CREATE TABLE t_document_version (
+CREATE TABLE IF NOT EXISTS t_document_version (
   id               BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id        VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
   document_id      BIGINT        NOT NULL COMMENT '文書ID',
   version_no       INT           NOT NULL COMMENT '版番号（1始まり、単調増加）',
-  storage_key      VARCHAR(500)  NOT NULL COMMENT 'Storageオブジェクトキー（パスに元ファイル名を使わない）',
-  original_name    VARCHAR(500)  NOT NULL COMMENT '元ファイル名（表示・manifest用）',
+  storage_key      VARCHAR(500)  NOT NULL COMMENT 'Storageオブジェクトキー',
+  original_name    VARCHAR(500)  NOT NULL COMMENT '元ファイル名',
   content_type     VARCHAR(100)  COMMENT 'MIMEタイプ',
-  size_bytes       BIGINT        COMMENT 'ファイルサイズ（バイト）',
-  sha256           CHAR(64)      NOT NULL COMMENT 'SHA-256ハッシュ値（hex小文字）',
-  source_type      VARCHAR(50)   NOT NULL COMMENT '取得経路: GENERATED/RECEIVED/CLOUDSIGN_SIGNED/CLOUDSIGN_CERT/MANUAL',
-  business_key     VARCHAR(200)  COMMENT '業務一意キー（source_type+business_key+version_discriminatorで冪等制御）',
-  version_discriminator VARCHAR(100) COMMENT '版識別子（同一business_keyでの複数版区別）',
-  external_id      VARCHAR(200)  COMMENT '外部文書ID（CloudSign document_id等）',
-  scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING' COMMENT 'scanステータス: PENDING/CLEAN/REJECTED/SKIPPED。NULLは未scan扱い（閲覧不可）',
-  change_reason    VARCHAR(500)  COMMENT '差替理由（旧版との差分説明）',
+  size_bytes       BIGINT        COMMENT 'ファイルサイズ',
+  sha256           CHAR(64)      NOT NULL COMMENT 'SHA-256ハッシュ値',
+  source_type      VARCHAR(50)   NOT NULL COMMENT '取得経路',
+  business_key     VARCHAR(200)  NOT NULL COMMENT '業務一意キー',
+  version_discriminator VARCHAR(100) NOT NULL COMMENT '版識別子',
+  external_id      VARCHAR(200)  COMMENT '外部文書ID',
+  scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING' COMMENT 'scanステータス',
+  change_reason    VARCHAR(500)  COMMENT '差替理由',
   created_by       BIGINT        NOT NULL COMMENT '登録ユーザーID',
   created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '登録日時',
   updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
   deleted_flag     TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
 
   UNIQUE KEY uk_document_version_no (document_id, version_no),
-  UNIQUE KEY uk_document_idempotency (source_type, business_key, version_discriminator),
+  UNIQUE KEY uk_document_idempotency (tenant_id, source_type, business_key, version_discriminator),
   INDEX idx_dv_document   (document_id),
   INDEX idx_dv_sha256     (sha256),
   INDEX idx_dv_external   (external_id),
@@ -90,10 +91,10 @@ CREATE TABLE t_document_version (
 -- ============================================================
 -- 4. t_document_link — 文書と業務エンティティの関連
 -- ============================================================
-CREATE TABLE t_document_link (
+CREATE TABLE IF NOT EXISTS t_document_link (
   id           BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   document_id  BIGINT       NOT NULL COMMENT '文書ID',
-  target_type  VARCHAR(50)  NOT NULL COMMENT 'リンク先種別: CUSTOMER/PROJECT/CONTRACT/INVOICE/etc.',
+  target_type  VARCHAR(50)  NOT NULL COMMENT 'リンク先種別',
   target_id    BIGINT       NOT NULL COMMENT 'リンク先エンティティID',
   created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
   updated_at   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
@@ -107,13 +108,13 @@ CREATE TABLE t_document_link (
 -- ============================================================
 -- 5. t_document_access_log — 文書アクセス監査ログ
 -- ============================================================
-CREATE TABLE t_document_access_log (
+CREATE TABLE IF NOT EXISTS t_document_access_log (
   id          BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   document_id BIGINT       NOT NULL COMMENT '文書ID',
-  version_id  BIGINT       COMMENT '文書版ID（特定版操作の場合）',
-  action      VARCHAR(30)  NOT NULL COMMENT 'アクション: VIEW/DOWNLOAD/EXPORT/REGISTER/AMEND/DISPOSE',
+  version_id  BIGINT       COMMENT '文書版ID',
+  action      VARCHAR(30)  NOT NULL COMMENT 'アクション',
   user_id     BIGINT       NOT NULL COMMENT '操作ユーザーID',
-  ip_hash     VARCHAR(64)  COMMENT 'IPアドレスのSHA-256ハッシュ（生IPは保存しない）',
+  ip_hash     VARCHAR(64)  COMMENT 'IPアドレスハッシュ',
   occurred_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作日時',
 
   INDEX idx_dal_document   (document_id),
@@ -124,12 +125,12 @@ CREATE TABLE t_document_access_log (
 -- ============================================================
 -- 6. t_document_disposal_request — 廃棄申請
 -- ============================================================
-CREATE TABLE t_document_disposal_request (
+CREATE TABLE IF NOT EXISTS t_document_disposal_request (
   id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   document_id   BIGINT       NOT NULL COMMENT '文書ID',
-  requested_by  BIGINT       NOT NULL COMMENT '廃棄申請者ユーザーID（管理者のみ）',
-  approved_by   BIGINT       COMMENT '廃棄承認者ユーザーID（申請者と別の管理者）',
-  status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '状態: PENDING/APPROVED/REJECTED/DISPOSED/FAILED',
+  requested_by  BIGINT       NOT NULL COMMENT '廃棄申請者ユーザーID',
+  approved_by   BIGINT       COMMENT '廃棄承認者ユーザーID',
+  status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '状態',
   reason        VARCHAR(1000) NOT NULL COMMENT '廃棄理由',
   disposed_at   DATETIME     COMMENT '廃棄実施日時',
   created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '申請日時',
@@ -143,7 +144,7 @@ CREATE TABLE t_document_disposal_request (
 -- ============================================================
 -- シードデータ: 文書種別マスタ（provisional mapping準拠）
 -- ============================================================
-INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported) VALUES
+INSERT IGNORE INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported) VALUES
   ('CONTRACT',         '契約書',           'OUTGOING', 10, 'CLOSED_AT',        1),
   ('INVOICE_OUT',      '請求書（発行）',   'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('INVOICE_IN',       '請求書（受領）',   'INCOMING', 10, 'TRANSACTION_DATE', 1),
@@ -152,3 +153,19 @@ INSERT INTO m_document_type (code, name, direction, retention_years, retention_s
   ('SIGNED_PDF',       '署名済PDF',        'OUTGOING', 10, 'SIGNED_AT',        1),
   ('ESIGN_CERT',       '合意締結証明書',   'INCOMING', 10, 'SIGNED_AT',        1),
   ('DISPATCH_LEDGER',  '派遣元管理台帳',   'INTERNAL',  3, 'DISPATCH_END',     1);
+
+-- ============================================================
+-- メニュー権限マッピング (m_menu / t_role_menu)
+-- ============================================================
+INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
+  ('document-archive', '法定文書保存', '/document', '/api/documents', 90);
+
+-- 管理者・営業・HR・マネージャーに権限を付与
+INSERT IGNORE INTO t_role_menu (role, menu_id)
+SELECT '管理者', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT '営業', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT 'HR', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'document-archive';

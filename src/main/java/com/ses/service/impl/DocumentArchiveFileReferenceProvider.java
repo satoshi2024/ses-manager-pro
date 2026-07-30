@@ -1,19 +1,18 @@
 package com.ses.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.entity.DocumentVersion;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.FileReferenceProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
- * 文書台帳版のstorage keyを孤児清理から保護するプロバイダー。
- * t_document_version.storage_key を FileCleanupService の参照集合に加える。
- *
- * <p>新機能がファイルを追加した際の FileReferenceProvider 登録忘れは、
- * 正当なファイルが孤児とみなされ削除される危険がある（FileScopeValidationService のコメント参照）。</p>
+ * 文書台帳版の storage key を孤児清理から保護するプロバイダー（P2-03）。
  */
 @Service
 @RequiredArgsConstructor
@@ -24,12 +23,19 @@ public class DocumentArchiveFileReferenceProvider implements FileReferenceProvid
     @Override
     public Set<String> referencedFileNames() {
         Set<String> refs = new HashSet<>();
-        // storage_key は推測困難なUUIDベースのパス。削除保護のためset全件を返す。
-        documentVersionMapper.selectList(null).forEach(v -> {
-            if (v.getStorageKey() != null) {
+        // 全カラムではなく storage_key のみを取得して保護集合へ追加
+        List<DocumentVersion> list = documentVersionMapper.selectList(
+                new LambdaQueryWrapper<DocumentVersion>().select(DocumentVersion::getStorageKey));
+        for (DocumentVersion v : list) {
+            if (v.getStorageKey() != null && !v.getStorageKey().isBlank()) {
                 refs.add(v.getStorageKey());
+                // パス切り離し名（ファイル名のみ）も念のため追加
+                int idx = v.getStorageKey().lastIndexOf('/');
+                if (idx >= 0) {
+                    refs.add(v.getStorageKey().substring(idx + 1));
+                }
             }
-        });
+        }
         return refs;
     }
 }

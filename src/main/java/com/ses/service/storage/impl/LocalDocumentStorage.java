@@ -13,76 +13,102 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ローカルファイルシステムを使ったDocumentStorage実装（開発・テスト用）。
- * T023でS3/ローカル切替可能なStorageAdapterを実装する。
- * production profileではS3実装が優先されるため、このBeanは {@code @ConditionalOnMissingBean} とする。
- *
- * <p>隔離（quarantine）はサブディレクトリ {@code .quarantine/} で代替する。</p>
+ * ローカルファイルシステムを使ったDocumentStorage実装（R5.1）。
+ * 実ファイルシステム上の `documents/quarantine` および `documents/published` に保存・昇格を行う。
  */
 @Slf4j
 @Service
 @ConditionalOnMissingBean(name = "s3DocumentStorage")
 public class LocalDocumentStorage implements DocumentStorage {
 
-    private final Path basePath;
-    /** テスト用: メモリストア（in-memory fallback）。T023でファイルシステムのみに変更予定 */
-    private final ConcurrentHashMap<String, byte[]> memStore = new ConcurrentHashMap<>();
+    private final Path quarantinePath;
+    private final Path publishedPath;
 
-    public LocalDocumentStorage(@Value("${app.upload.base-path:./uploads/documents}") String basePath) {
-        this.basePath = Paths.get(basePath);
+    public LocalDocumentStorage(@Value("${app.upload.base-path:./uploads}") String basePath) {
+        Path base = Paths.get(basePath, "documents");
+        this.quarantinePath = base.resolve("quarantine");
+        this.publishedPath = base.resolve("published");
+        try {
+            Files.createDirectories(quarantinePath);
+            Files.createDirectories(publishedPath);
+        } catch (IOException e) {
+            log.error("[LocalDocumentStorage] ディレクトリ作成失敗: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    public void put(String key, InputStream content, boolean quarantine) {
+        Path target = resolvePath(key, quarantine);
+        try {
+            Files.createDirectories(target.getParent());
+            Files.copy(content, target, StandardCopyOption.REPLACE_EXISTING);
+            log.debug("[LocalDocumentStorage] put stream: quarantine={} target={}", quarantine, target);
+        } catch (IOException e) {
+            throw new RuntimeException("Storage書き込み失敗: " + key, e);
+        }
     }
 
     @Override
     public void put(String key, byte[] content, boolean quarantine) {
-        // テスト環境: memoryに保存（ファイルシステム不要）
-        memStore.put(quarantine ? "q:" + key : key, content);
-        log.debug("[LocalDocumentStorage] put: quarantine={} key={} size={}B", quarantine, key, content.length);
+        put(key, new ByteArrayInputStream(content), quarantine);
     }
 
     @Override
     public void promote(String key) {
-        byte[] content = memStore.remove("q:" + key);
-        if (content != null) {
-            memStore.put(key, content);
+        Path src = resolvePath(key, true);
+        Path dest = resolvePath(key, false);
+        try {
+            if (Files.exists(src)) {
+                Files.createDirectories(dest.getParent());
+                Files.move(src, dest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                log.debug("[LocalDocumentStorage] promote: src={} -> dest={}", src, dest);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Storage昇格失敗: " + key, e);
         }
-        // ファイルシステムへの永続化はT023で実装
-        log.debug("[LocalDocumentStorage] promote: key={}", key);
     }
 
     @Override
     public InputStream open(String key) {
-        byte[] content = memStore.get(key);
-        if (content == null) {
-            // ファイルシステムから読む（永続化後）
-            try {
-                content = Files.readAllBytes(basePath.resolve(key.replace("/", "_")));
-            } catch (IOException e) {
-                throw new RuntimeException("storage読込失敗: " + key, e);
-            }
+        Path target = resolvePath(key, false);
+        if (!Files.exists(target)) {
+            throw new RuntimeException("Storageファイルが存在しません: " + key);
         }
-        return new ByteArrayInputStream(content);
+        try {
+            return Files.newInputStream(target);
+        } catch (IOException e) {
+            throw new RuntimeException("Storageオープン失敗: " + key, e);
+        }
     }
 
     @Override
     public byte[] readAll(String key) throws IOException {
-        byte[] content = memStore.get(key);
-        if (content == null) {
-            try {
-                content = Files.readAllBytes(basePath.resolve(key.replace("/", "_")));
-            } catch (IOException e) {
-                throw new IOException("storage読込失敗: " + key, e);
-            }
+        Path target = resolvePath(key, false);
+        if (!Files.exists(target)) {
+            throw new IOException("Storageファイルが存在しません: " + key);
         }
-        return content;
+        return Files.readAllBytes(target);
     }
 
     @Override
     public void delete(String key) {
-        memStore.remove(key);
-        memStore.remove("q:" + key);
-        log.debug("[LocalDocumentStorage] delete: key={}", key);
+        Path qFile = resolvePath(key, true);
+        Path pFile = resolvePath(key, false);
+        try {
+            Files.deleteIfExists(qFile);
+            Files.deleteIfExists(pFile);
+            log.debug("[LocalDocumentStorage] delete: key={}", key);
+        } catch (IOException e) {
+            log.warn("[LocalDocumentStorage] delete失敗: key={} error={}", key, e.getMessage());
+        }
+    }
+
+    private Path resolvePath(String key, boolean quarantine) {
+        // セキュリティのためディレクトリトラバーサル防止
+        String safeKey = key.replace("..", "").replace("\\", "/");
+        Path base = quarantine ? quarantinePath : publishedPath;
+        return base.resolve(safeKey);
     }
 }

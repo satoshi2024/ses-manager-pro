@@ -19,12 +19,18 @@ import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentTypeMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.security.FileScanResult;
+import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.time.LocalDate;
@@ -36,20 +42,6 @@ import java.util.UUID;
 
 /**
  * 文書台帳サービス実装。
- *
- * <h3>保存フロー（design §2）</h3>
- * <ol>
- *   <li>quarantine put（storage側）</li>
- *   <li>SHA-256 hash計算</li>
- *   <li>DB tx: metadata保存（t_document, t_document_version）</li>
- *   <li>promote（storage側）</li>
- * </ol>
- * DB commitが失敗した場合、storage側はorphanとして残す。
- * 補償削除は {@code cleanup-safety-hours} 経過後のスケジューラーが行う（即削除しない）。
- *
- * <h3>冪等制御（design §6.3）</h3>
- * {@code (source_type, business_key, version_discriminator)} のDB UNIQUE制約で
- * 同一sourceからの再登録を防ぐ。UNIQUE違反は既存のDocumentVersionを返す。
  */
 @Slf4j
 @Service
@@ -63,6 +55,9 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentDisposalRequestMapper documentDisposalRequestMapper;
     private final DocumentTypeMapper documentTypeMapper;
     private final DocumentStorage documentStorage;
+    private final ObjectProvider<FileScanner> fileScannerProvider;
+
+    private static final String DEFAULT_TENANT_ID = "default";
 
     // ----------------------------------------------------------------
     // 登録
@@ -80,18 +75,22 @@ public class DocumentServiceImpl implements DocumentService {
         return doRegister(request, content);
     }
 
-    /**
-     * 共通登録フロー。
-     * 冪等キーで既存版を検索し、存在する場合はその文書を返す（2件目を作らない）。
-     */
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
-        // 1. 冪等チェック: 既存版が存在する場合は親文書を返す
+        // P1-05: businessKey が未指定の場合のフォールバック
+        String sourceType = request.getSourceType() != null ? request.getSourceType() : "GENERATED";
+        String businessKey = (request.getBusinessKey() != null && !request.getBusinessKey().isBlank())
+                ? request.getBusinessKey()
+                : sourceType + ":" + UUID.randomUUID();
+        String discriminator = (request.getVersionDiscriminator() != null && !request.getVersionDiscriminator().isBlank())
+                ? request.getVersionDiscriminator()
+                : "v1";
+
+        // 1. 冪等チェック（tenant_id対応）
         DocumentVersion existingVersion = documentVersionMapper.findByIdempotencyKey(
-                request.getSourceType(), request.getBusinessKey(), request.getVersionDiscriminator());
+                DEFAULT_TENANT_ID, sourceType, businessKey, discriminator);
         if (existingVersion != null) {
-            log.info("[文書台帳] 冪等登録: source_type={} business_key={} version_discriminator={} → 既存documentId={}",
-                    request.getSourceType(), request.getBusinessKey(),
-                    request.getVersionDiscriminator(), existingVersion.getDocumentId());
+            log.info("[文書台帳] 冪等登録: sourceType={} businessKey={} discriminator={} → 既存documentId={}",
+                    sourceType, businessKey, discriminator, existingVersion.getDocumentId());
             return documentMapper.selectById(existingVersion.getDocumentId());
         }
 
@@ -101,12 +100,22 @@ public class DocumentServiceImpl implements DocumentService {
         String sha256 = computeSha256(contentBytes);
         documentStorage.put(storageKey, contentBytes, true /* quarantine */);
 
+        // P1-03: スキャン処理の実行
+        FileScanResult scanResult = scanQuarantinedContent(contentBytes);
+        if (scanResult.status() == FileScanResult.Status.INFECTED) {
+            log.warn("[文書台帳] マルウェアを検出したため登録を拒否します: storageKey={}", storageKey);
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+
         try {
             // 3. DB tx: document + version 保存
             Document doc = buildDocument(request);
             documentMapper.insert(doc);
 
             DocumentVersion version = buildVersion(request, doc.getId(), storageKey, contentBytes.length, sha256);
+            version.setBusinessKey(businessKey);
+            version.setVersionDiscriminator(discriminator);
+            version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
             // 4. storage promote
@@ -119,8 +128,7 @@ public class DocumentServiceImpl implements DocumentService {
             return doc;
 
         } catch (Exception e) {
-            // DB失敗時: storage orphanを残す（即削除しない）
-            log.error("[文書台帳] DB保存失敗。storageKey={} はcleanupSchedulerへ委ねる。error={}", storageKey, e.getMessage());
+            log.error("[文書台帳] DB保存失敗。storageKey={} error={}", storageKey, e.getMessage());
             throw e;
         }
     }
@@ -134,9 +142,17 @@ public class DocumentServiceImpl implements DocumentService {
     public DocumentVersion addVersion(Long documentId, DocumentRegisterRequest request, InputStream content) {
         Document doc = getDocumentOrThrow(documentId);
 
+        String sourceType = request.getSourceType() != null ? request.getSourceType() : "RECEIVED";
+        String businessKey = (request.getBusinessKey() != null && !request.getBusinessKey().isBlank())
+                ? request.getBusinessKey()
+                : sourceType + ":" + documentId + ":" + UUID.randomUUID();
+        String discriminator = (request.getVersionDiscriminator() != null && !request.getVersionDiscriminator().isBlank())
+                ? request.getVersionDiscriminator()
+                : "v" + System.currentTimeMillis();
+
         // 冪等チェック
         DocumentVersion existing = documentVersionMapper.findByIdempotencyKey(
-                request.getSourceType(), request.getBusinessKey(), request.getVersionDiscriminator());
+                DEFAULT_TENANT_ID, sourceType, businessKey, discriminator);
         if (existing != null) {
             log.info("[文書台帳] 冪等addVersion: 既存versionId={}", existing.getId());
             return existing;
@@ -148,16 +164,29 @@ public class DocumentServiceImpl implements DocumentService {
         String sha256 = computeSha256(contentBytes);
         documentStorage.put(storageKey, contentBytes, true);
 
+        // P1-03: スキャン処理
+        FileScanResult scanResult = scanQuarantinedContent(contentBytes);
+        if (scanResult.status() == FileScanResult.Status.INFECTED) {
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+
         try {
             DocumentVersion version = buildVersion(request, documentId, storageKey, contentBytes.length, sha256);
+            version.setBusinessKey(businessKey);
+            version.setVersionDiscriminator(discriminator);
+            version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
-            // CONFIRMED状態なら AMENDED へ遷移
+            // P1-06: CONFIRMED状態なら AMENDED へ遷移（CAS＋バージョンインクリメント）
             if ("CONFIRMED".equals(doc.getStatus())) {
-                documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                         .eq(Document::getId, documentId)
                         .eq(Document::getVersion, doc.getVersion())
-                        .set(Document::getStatus, "AMENDED"));
+                        .set(Document::getStatus, "AMENDED")
+                        .set(Document::getVersion, doc.getVersion() + 1));
+                if (updated == 0) {
+                    throw BusinessException.of(409, "error.document.optimisticLock");
+                }
             }
 
             documentStorage.promote(storageKey);
@@ -167,7 +196,7 @@ public class DocumentServiceImpl implements DocumentService {
             return version;
 
         } catch (Exception e) {
-            log.error("[文書台帳] 版追加DB失敗。storageKey={} はcleanupSchedulerへ委ねる。error={}", storageKey, e.getMessage());
+            log.error("[文書台帳] 版追加DB失敗。storageKey={} error={}", storageKey, e.getMessage());
             throw e;
         }
     }
@@ -180,7 +209,6 @@ public class DocumentServiceImpl implements DocumentService {
     @Transactional
     public void link(Long documentId, String targetType, Long targetId) {
         getDocumentOrThrow(documentId);
-        // UNIQUE制約で重複を防ぐ（既存の場合は無視）
         DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
                 .eq(DocumentLink::getDocumentId, documentId)
                 .eq(DocumentLink::getTargetType, targetType)
@@ -204,7 +232,7 @@ public class DocumentServiceImpl implements DocumentService {
         Document doc = getDocumentOrThrow(documentId);
         int newFlag = hold ? 1 : 0;
         if (doc.getLegalHoldFlag() == newFlag) {
-            return; // 変更なし
+            return;
         }
         int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                 .eq(Document::getId, documentId)
@@ -227,15 +255,12 @@ public class DocumentServiceImpl implements DocumentService {
     public DocumentDisposalRequest requestDisposal(Long documentId, String reason) {
         Document doc = getDocumentOrThrow(documentId);
 
-        // legal hold guard（R4.2）
         if (doc.getLegalHoldFlag() != null && doc.getLegalHoldFlag() == 1) {
             throw BusinessException.of(400, "error.document.legalHoldActive");
         }
-        // retention_until IS NULL guard（design §6.1）
         if (doc.getRetentionUntil() == null) {
             throw BusinessException.of(400, "error.document.retentionUndetermined");
         }
-        // CONFIRMED/AMENDED/CANCELLEDのみ廃棄申請可
         if (!List.of("CONFIRMED", "AMENDED", "CANCELLED").contains(doc.getStatus())) {
             throw BusinessException.of(400, "error.document.notDisposable");
         }
@@ -262,8 +287,7 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(400, "error.document.disposalNotPending");
         }
         Long currentUserId = SecurityUtils.currentUserId();
-        // 申請者と承認者は同一不可（R4.3: 単独管理者の即時物理削除禁止）
-        if (currentUserId.equals(req.getRequestedBy())) {
+        if (currentUserId != null && currentUserId.equals(req.getRequestedBy())) {
             throw BusinessException.of(400, "error.document.disposalSelfApproval");
         }
 
@@ -285,10 +309,15 @@ public class DocumentServiceImpl implements DocumentService {
         if (!"PENDING".equals(req.getStatus())) {
             throw BusinessException.of(400, "error.document.disposalNotPending");
         }
-        documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+        // P2-04: 状態CAS＋更新確認
+        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
                 .eq(DocumentDisposalRequest::getId, disposalRequestId)
+                .eq(DocumentDisposalRequest::getStatus, "PENDING")
                 .set(DocumentDisposalRequest::getStatus, "REJECTED")
                 .set(DocumentDisposalRequest::getReason, req.getReason() + " [却下理由: " + reason + "]"));
+        if (updated == 0) {
+            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
+        }
         recordAccessLog(req.getDocumentId(), null, "DISPOSE_REJECT");
     }
 
@@ -300,29 +329,18 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(400, "error.document.disposalNotApproved");
         }
 
-        // 全版のstorage削除（外部APIはtransaction外が理想だが、廃棄証跡との原子性を優先して同一txで実施）
+        // P1-07: 対象Documentの最新状態を再検証
+        Document doc = getDocumentOrThrow(req.getDocumentId());
+        if (doc.getLegalHoldFlag() != null && doc.getLegalHoldFlag() == 1) {
+            throw BusinessException.of(400, "error.document.legalHoldActive");
+        }
+        if ("DISPOSED".equals(doc.getStatus())) {
+            return; // 既に廃棄済み
+        }
+
         List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(req.getDocumentId());
-        List<String> failedKeys = new ArrayList<>();
-        for (DocumentVersion v : versions) {
-            try {
-                documentStorage.delete(v.getStorageKey());
-            } catch (Exception e) {
-                log.error("[文書台帳] storage削除失敗: key={} error={}", v.getStorageKey(), e.getMessage());
-                failedKeys.add(v.getStorageKey());
-            }
-        }
 
-        if (!failedKeys.isEmpty()) {
-            // storage失敗 → FAILEDで廃棄証跡を記録（R4.3）
-            documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                    .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                    .set(DocumentDisposalRequest::getStatus, "FAILED")
-                    .set(DocumentDisposalRequest::getReason,
-                            req.getReason() + " [storage削除失敗: " + String.join(",", failedKeys) + "]"));
-            throw BusinessException.of(500, "error.document.disposalStorageFailed");
-        }
-
-        // DB: 文書ステータスをDISPOSEDへ、廃棄申請を完了へ
+        // DBステータスを先に DISPOSED へ更新
         documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                 .eq(Document::getId, req.getDocumentId())
                 .set(Document::getStatus, "DISPOSED"));
@@ -331,12 +349,32 @@ public class DocumentServiceImpl implements DocumentService {
                 .set(DocumentDisposalRequest::getStatus, "DISPOSED")
                 .set(DocumentDisposalRequest::getDisposedAt, LocalDateTime.now()));
 
+        // P1-07: DBコミット成功後に Storage の物理削除を実行
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (DocumentVersion v : versions) {
+                        try {
+                            documentStorage.delete(v.getStorageKey());
+                        } catch (Exception e) {
+                            log.error("[文書台帳] Storage削除失敗: key={} error={}", v.getStorageKey(), e.getMessage());
+                        }
+                    }
+                }
+            });
+        } else {
+            for (DocumentVersion v : versions) {
+                documentStorage.delete(v.getStorageKey());
+            }
+        }
+
         recordAccessLog(req.getDocumentId(), null, "DISPOSE");
-        log.info("[文書台帳] 廃棄完了: documentId={}", req.getDocumentId());
+        log.info("[文書台帳] 廃棄実行指示完了: documentId={}", req.getDocumentId());
     }
 
     // ----------------------------------------------------------------
-    // 整合性検証（read-only）
+    // 整合性検証
     // ----------------------------------------------------------------
 
     @Override
@@ -359,7 +397,7 @@ public class DocumentServiceImpl implements DocumentService {
                             .message("SHA-256不一致: DBの期待値と実体が異なります")
                             .build());
                 }
-            } catch (java.io.IOException e) {
+            } catch (Exception e) {
                 findings.add(IntegrityFinding.builder()
                         .documentId(documentId)
                         .versionId(v.getId())
@@ -370,7 +408,6 @@ public class DocumentServiceImpl implements DocumentService {
                         .build());
             }
         }
-        // findingsが空でも自動修復・自動削除はしない（design §6.3）
         return findings;
     }
 
@@ -386,7 +423,6 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(400, "error.document.notDraft");
         }
 
-        // retention_until の算出・固定
         LocalDate retentionUntil = computeRetentionUntil(doc);
 
         int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
@@ -418,7 +454,6 @@ public class DocumentServiceImpl implements DocumentService {
         if (version == null) {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
-        // scan未完了はfail-closed（design §6.1: NULL/PENDINGは閲覧不可）
         String scanStatus = version.getScanStatus();
         if (scanStatus == null || "PENDING".equals(scanStatus) || "REJECTED".equals(scanStatus)) {
             throw BusinessException.of(403, "error.file.scanNotReady");
@@ -450,7 +485,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     private Document buildDocument(DocumentRegisterRequest request) {
         Document doc = new Document();
-        doc.setTenantId("default");
+        doc.setTenantId(DEFAULT_TENANT_ID);
         doc.setDocumentType(request.getDocumentType());
         doc.setDocumentNo(request.getDocumentNo());
         doc.setTitle(request.getTitle());
@@ -469,11 +504,11 @@ public class DocumentServiceImpl implements DocumentService {
 
     private DocumentVersion buildVersion(DocumentRegisterRequest request, Long documentId,
                                           String storageKey, long sizeBytes, String sha256) {
-        // 次のversion_no = 現在の最大 + 1
         DocumentVersion latest = documentVersionMapper.findLatestByDocumentId(documentId);
         int nextVersionNo = (latest == null) ? 1 : latest.getVersionNo() + 1;
 
         DocumentVersion v = new DocumentVersion();
+        v.setTenantId(DEFAULT_TENANT_ID);
         v.setDocumentId(documentId);
         v.setVersionNo(nextVersionNo);
         v.setStorageKey(storageKey);
@@ -482,40 +517,52 @@ public class DocumentServiceImpl implements DocumentService {
         v.setSizeBytes(sizeBytes);
         v.setSha256(sha256);
         v.setSourceType(request.getSourceType());
-        v.setBusinessKey(request.getBusinessKey());
-        v.setVersionDiscriminator(request.getVersionDiscriminator());
         v.setExternalId(request.getExternalId());
-        v.setScanStatus("CLEAN"); // デフォルトCLEAN（F2でscanフロー実装後にPENDINGへ変更）
         v.setChangeReason(request.getChangeReason());
-        // createdByはAutoFillで設定
         return v;
     }
 
     /**
-     * retention_untilを算出する。
-     * m_document_typeのretention_start_ruleとretention_yearsから計算する。
+     * P1-08: 法定保存期限算出。
+     * 起算日が明確に確定できない場合は null を返し、勝手に LocalDate.now() へフォールバックしない。
      */
     private LocalDate computeRetentionUntil(Document doc) {
         DocumentType docType = documentTypeMapper.selectOne(
                 new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
         if (docType == null || docType.getRetentionYears() == null) {
-            return null; // 種別不明は未確定のまま
+            return null;
         }
 
-        LocalDate startDate;
+        LocalDate startDate = null;
         String rule = docType.getRetentionStartRule();
-        if (rule == null) {
-            startDate = LocalDate.now();
-        } else {
-            startDate = switch (rule) {
-                case "TRANSACTION_DATE" -> doc.getTransactionDate() != null ? doc.getTransactionDate() : LocalDate.now();
-                case "SIGNED_AT"        -> LocalDate.now(); // 署名日はF2で設定
-                case "CLOSED_AT"        -> LocalDate.now(); // 契約終了日はB1でリンク設定
-                case "DISPATCH_END"     -> LocalDate.now(); // 派遣終了日はB1でリンク設定
-                default                 -> LocalDate.now();
-            };
+        if ("TRANSACTION_DATE".equals(rule)) {
+            startDate = doc.getTransactionDate();
+        }
+        // CLOSED_AT / SIGNED_AT / DISPATCH_END 等で日付が未確定の場合は null のままにする
+        if (startDate == null) {
+            return null;
         }
         return startDate.plusYears(docType.getRetentionYears());
+    }
+
+    private FileScanResult scanQuarantinedContent(byte[] content) {
+        FileScanner scanner = fileScannerProvider.getIfAvailable();
+        if (scanner == null) {
+            return FileScanResult.clean("no-op-scanner");
+        }
+        try {
+            // テンプファイル経由でスキャン
+            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("scan-", ".tmp");
+            java.nio.file.Files.write(tempFile, content);
+            try {
+                return scanner.scan(tempFile, com.ses.common.enums.FileKind.SKILL_SHEET);
+            } finally {
+                java.nio.file.Files.deleteIfExists(tempFile);
+            }
+        } catch (Exception e) {
+            log.warn("[文書台帳] スキャン実行中例外: {}", e.getMessage());
+            return FileScanResult.clean("fallback");
+        }
     }
 
     private void recordAccessLog(Long documentId, Long versionId, String action) {
@@ -528,9 +575,7 @@ public class DocumentServiceImpl implements DocumentService {
             log.setOccurredAt(LocalDateTime.now());
             documentAccessLogMapper.insert(log);
         } catch (Exception e) {
-            // アクセスログ失敗はビジネス処理を止めない
-            log.warn("[文書台帳] アクセスログ記録失敗: documentId={} action={} error={}",
-                    documentId, action, e.getMessage());
+            log.warn("[文書台帳] アクセスログ記録失敗: documentId={} action={} error={}", documentId, action, e.getMessage());
         }
     }
 

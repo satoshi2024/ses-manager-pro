@@ -48,6 +48,7 @@ CREATE TABLE t_document (
 
 CREATE TABLE t_document_version (
   id                    BIGINT        AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100)  NOT NULL DEFAULT 'default',
   document_id           BIGINT        NOT NULL,
   version_no            INT           NOT NULL,
   storage_key           VARCHAR(500)  NOT NULL,
@@ -56,8 +57,8 @@ CREATE TABLE t_document_version (
   size_bytes            BIGINT,
   sha256                CHAR(64)      NOT NULL,
   source_type           VARCHAR(50)   NOT NULL,
-  business_key          VARCHAR(200),
-  version_discriminator VARCHAR(100),
+  business_key          VARCHAR(200)  NOT NULL,
+  version_discriminator VARCHAR(100) NOT NULL,
   external_id           VARCHAR(200),
   scan_status           VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
   change_reason         VARCHAR(500),
@@ -66,7 +67,7 @@ CREATE TABLE t_document_version (
   updated_at            TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT       NOT NULL DEFAULT 0,
   CONSTRAINT uk_document_version_no UNIQUE (document_id, version_no),
-  CONSTRAINT uk_document_idempotency UNIQUE (source_type, business_key, version_discriminator)
+  CONSTRAINT uk_document_idempotency UNIQUE (tenant_id, source_type, business_key, version_discriminator)
 );
 
 CREATE TABLE t_document_link (

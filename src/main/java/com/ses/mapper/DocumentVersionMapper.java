@@ -27,18 +27,19 @@ public interface DocumentVersionMapper extends BaseMapper<DocumentVersion> {
     DocumentVersion findLatestByDocumentId(@Param("documentId") Long documentId);
 
     /**
-     * 冪等キーで既存版を検索する。
-     * (source_type, business_key, version_discriminator) のUNIQUEで制御（design §6.3）。
+     * 冪等キーで既存版を検索する（tenant_id対応）。
      */
     @Select("""
         SELECT * FROM t_document_version
-        WHERE source_type = #{sourceType}
+        WHERE tenant_id = #{tenantId}
+          AND source_type = #{sourceType}
           AND business_key = #{businessKey}
           AND version_discriminator = #{versionDiscriminator}
           AND deleted_flag = 0
         LIMIT 1
         """)
     DocumentVersion findByIdempotencyKey(
+            @Param("tenantId") String tenantId,
             @Param("sourceType") String sourceType,
             @Param("businessKey") String businessKey,
             @Param("versionDiscriminator") String versionDiscriminator);

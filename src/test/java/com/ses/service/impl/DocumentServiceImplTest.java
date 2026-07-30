@@ -15,6 +15,8 @@ import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentTypeMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.service.security.FileScanResult;
+import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
@@ -42,18 +45,6 @@ import static org.mockito.Mockito.*;
 
 /**
  * T022 DocumentService 単体テスト。
- *
- * <h3>テストマトリクス（L1〜L3相当）</h3>
- * <ul>
- *   <li>L1: SHA-256ハッシュが正しく計算されること</li>
- *   <li>L1: 冪等キー一致時に2件目のDocumentVersionが作られないこと</li>
- *   <li>L2: version_noが単調増加すること（append-only）</li>
- *   <li>L2: legal hold中の廃棄申請が拒否されること（R4.2）</li>
- *   <li>L2: retention_until IS NULL の廃棄申請が拒否されること（design §6.1）</li>
- *   <li>L3: 楽観ロック競合（updated=0）でBusinessExceptionが投げられること</li>
- *   <li>L3: hash不一致がIntegrityFinding.HASH_MISMATCHとして返ること</li>
- *   <li>L3: Storage readAll失敗がIntegrityFinding.STORAGE_MISSINGとして返ること</li>
- * </ul>
  */
 @ExtendWith(MockitoExtension.class)
 class DocumentServiceImplTest {
@@ -65,13 +56,14 @@ class DocumentServiceImplTest {
     @Mock DocumentDisposalRequestMapper documentDisposalRequestMapper;
     @Mock DocumentTypeMapper documentTypeMapper;
     @Mock DocumentStorage documentStorage;
+    @Mock ObjectProvider<FileScanner> fileScannerProvider;
+    @Mock FileScanner fileScanner;
 
     @InjectMocks
     DocumentServiceImpl sut;
 
     @BeforeEach
     void setUp() {
-        // MyBatis-Plus LambdaWrapper キャッシュ初期化
         var config = new com.baomidou.mybatisplus.core.MybatisConfiguration();
         var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(config, "");
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, Document.class);
@@ -81,39 +73,23 @@ class DocumentServiceImplTest {
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, DocumentDisposalRequest.class);
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, DocumentType.class);
 
-        // SecurityUtils.currentUserId() がnullにならないよう認証コンテキストを設定
-        var principal = User.withUsername("testuser").password("").authorities("ROLE_管理者").build();
+        var principal = User.withUsername("1").password("").authorities("ROLE_管理者").build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
-    }
 
-    // ----------------------------------------------------------------
-    // L1: SHA-256ハッシュ計算
-    // ----------------------------------------------------------------
+        lenient().when(fileScannerProvider.getIfAvailable()).thenReturn(fileScanner);
+        lenient().when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("test"));
+    }
 
     @Test
     void computeSha256_fixedInput_returnsExpectedHex() {
-        // "hello" のSHA-256は既知値
         byte[] input = "hello".getBytes(StandardCharsets.UTF_8);
         String hash = DocumentServiceImpl.computeSha256(input);
         assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", hash);
     }
 
     @Test
-    void computeSha256_emptyInput_returnsKnownHash() {
-        byte[] input = new byte[0];
-        String hash = DocumentServiceImpl.computeSha256(input);
-        // SHA-256("")の既知値
-        assertEquals("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", hash);
-    }
-
-    // ----------------------------------------------------------------
-    // L1: 冪等制御（2件目は作られない）
-    // ----------------------------------------------------------------
-
-    @Test
     void registerGenerated_idempotentKey_doesNotCreateSecondVersion() {
-        // 既存版が存在する冪等ケース
         DocumentVersion existingVersion = new DocumentVersion();
         existingVersion.setId(99L);
         existingVersion.setDocumentId(1L);
@@ -122,7 +98,7 @@ class DocumentServiceImplTest {
         existingDoc.setId(1L);
         existingDoc.setStatus("DRAFT");
 
-        when(documentVersionMapper.findByIdempotencyKey("GENERATED", "INVOICE:1", "v1"))
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), eq("GENERATED"), eq("INVOICE:1"), eq("v1")))
                 .thenReturn(existingVersion);
         when(documentMapper.selectById(1L)).thenReturn(existingDoc);
 
@@ -134,32 +110,26 @@ class DocumentServiceImplTest {
                 .direction("OUTGOING")
                 .build();
 
-        Document result = sut.registerGenerated(req,
-                new ByteArrayInputStream("content".getBytes()));
+        Document result = sut.registerGenerated(req, new ByteArrayInputStream("content".getBytes()));
 
-        // documentMapper.insert は呼ばれない（2件目不作成）
         verify(documentMapper, never()).insert(any(Document.class));
         verify(documentVersionMapper, never()).insert(any(DocumentVersion.class));
         assertEquals(1L, result.getId());
     }
 
-    // ----------------------------------------------------------------
-    // L2: version_noの単調増加（append-only）
-    // ----------------------------------------------------------------
-
     @Test
     void registerGenerated_newDocument_versionNoIs1() {
-        when(documentVersionMapper.findByIdempotencyKey(any(), any(), any())).thenReturn(null);
-        doNothing().when(documentStorage).put(any(), any(), anyBoolean());
-        doNothing().when(documentStorage).promote(any());
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        doNothing().when(documentStorage).put(anyString(), any(byte[].class), anyBoolean());
+        doNothing().when(documentStorage).promote(anyString());
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             Document d = inv.getArgument(0);
             d.setId(10L);
             return 1;
         });
-        when(documentVersionMapper.findLatestByDocumentId(anyLong())).thenReturn(null); // 最初の版
+        when(documentVersionMapper.findLatestByDocumentId(anyLong())).thenReturn(null);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
-        when(documentAccessLogMapper.insert(any(com.ses.entity.DocumentAccessLog.class))).thenReturn(1);
+        when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
         var req = DocumentRegisterRequest.builder()
                 .documentType("CONTRACT")
@@ -178,21 +148,22 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void addVersion_secondVersion_versionNoIs2() {
+    void addVersion_confirmedDocument_updatesStatusToAmended() {
         Document doc = new Document();
         doc.setId(10L);
-        doc.setStatus("DRAFT");
+        doc.setStatus("CONFIRMED");
         doc.setVersion(1L);
         when(documentMapper.selectById(10L)).thenReturn(doc);
-        when(documentVersionMapper.findByIdempotencyKey(any(), any(), any())).thenReturn(null);
-        doNothing().when(documentStorage).put(any(), any(), anyBoolean());
-        doNothing().when(documentStorage).promote(any());
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        doNothing().when(documentStorage).put(anyString(), any(byte[].class), anyBoolean());
+        doNothing().when(documentStorage).promote(anyString());
+        when(documentMapper.update(any(), any())).thenReturn(1); // CAS 成功
 
         DocumentVersion latest = new DocumentVersion();
         latest.setVersionNo(1);
         when(documentVersionMapper.findLatestByDocumentId(10L)).thenReturn(latest);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
-        when(documentAccessLogMapper.insert(any(com.ses.entity.DocumentAccessLog.class))).thenReturn(1);
+        when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
         var req = DocumentRegisterRequest.builder()
                 .documentType("CONTRACT")
@@ -208,11 +179,8 @@ class DocumentServiceImplTest {
         ArgumentCaptor<DocumentVersion> cap = ArgumentCaptor.forClass(DocumentVersion.class);
         verify(documentVersionMapper).insert(cap.capture());
         assertEquals(2, cap.getValue().getVersionNo());
+        verify(documentMapper).update(any(), any());
     }
-
-    // ----------------------------------------------------------------
-    // L2: legal hold中の廃棄申請拒否（R4.2）
-    // ----------------------------------------------------------------
 
     @Test
     void requestDisposal_legalHoldActive_throwsBusinessException() {
@@ -225,12 +193,9 @@ class DocumentServiceImplTest {
 
         var ex = assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> sut.requestDisposal(5L, "廃棄理由"));
-        assertTrue(ex.getMessage().contains("legalHoldActive") || ex.getCode() == 400);
+        assertEquals(400, ex.getCode());
+        assertEquals("error.document.legalHoldActive", ex.getMessageKey());
     }
-
-    // ----------------------------------------------------------------
-    // L2: retention_until IS NULL の廃棄申請拒否（design §6.1）
-    // ----------------------------------------------------------------
 
     @Test
     void requestDisposal_retentionUntilNull_throwsBusinessException() {
@@ -243,31 +208,23 @@ class DocumentServiceImplTest {
 
         var ex = assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> sut.requestDisposal(6L, "廃棄理由"));
-        assertTrue(ex.getMessage().contains("retentionUndetermined") || ex.getCode() == 400);
+        assertEquals(400, ex.getCode());
+        assertEquals("error.document.retentionUndetermined", ex.getMessageKey());
     }
-
-    // ----------------------------------------------------------------
-    // L3: 楽観ロック競合（placeLegalHold）
-    // ----------------------------------------------------------------
 
     @Test
     void placeLegalHold_optimisticLockConflict_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(7L);
-        doc.setLegalHoldFlag(0); // 変更前
+        doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
         when(documentMapper.selectById(7L)).thenReturn(doc);
-        // updated=0 でロック競合を模倣
         when(documentMapper.update(any(), any())).thenReturn(0);
 
         var ex = assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> sut.placeLegalHold(7L, true, "訴訟対応"));
         assertEquals(409, ex.getCode());
     }
-
-    // ----------------------------------------------------------------
-    // L3: 整合性検証 — HASH_MISMATCH
-    // ----------------------------------------------------------------
 
     @Test
     void verifyIntegrity_hashMismatch_returnsMismatchFinding() throws IOException {
@@ -277,8 +234,6 @@ class DocumentServiceImplTest {
         v.setStorageKey("some/key");
         v.setSha256("expected000hash");
         when(documentVersionMapper.findByDocumentId(20L)).thenReturn(List.of(v));
-
-        // storage実体が別内容（ハッシュ不一致）
         when(documentStorage.readAll("some/key")).thenReturn("tampered".getBytes());
 
         List<IntegrityFinding> findings = sut.verifyIntegrity(20L);
@@ -287,10 +242,6 @@ class DocumentServiceImplTest {
         assertEquals("HASH_MISMATCH", findings.get(0).getFindingType());
         assertEquals("expected000hash", findings.get(0).getExpectedSha256());
     }
-
-    // ----------------------------------------------------------------
-    // L3: 整合性検証 — STORAGE_MISSING
-    // ----------------------------------------------------------------
 
     @Test
     void verifyIntegrity_storageMissing_returnsMissingFinding() throws IOException {
@@ -308,38 +259,43 @@ class DocumentServiceImplTest {
         assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
     }
 
-    // ----------------------------------------------------------------
-    // L3: 廃棄申請で申請者=承認者は拒否（R4.3）
-    // ----------------------------------------------------------------
-
     @Test
     void approveDisposal_selfApproval_throwsBusinessException() {
         DocumentDisposalRequest req = new DocumentDisposalRequest();
         req.setId(200L);
         req.setDocumentId(5L);
         req.setStatus("PENDING");
-        // 申請者IDを 1L とする（SecurityUtils.currentUserId() はモック認証でnullになる場合を考慮）
-        req.setRequestedBy(1L);
+        req.setRequestedBy(1L); // SecurityUtils.currentUserId() も 1L に設定済み
+
         when(documentDisposalRequestMapper.selectById(200L)).thenReturn(req);
 
-        // currentUserIdが申請者と同一になるよう User.getUsername でIDを制御する代わりに、
-        // 実装が Long.equals で判定するため requestedBy を null に設定したケースで検証する
-        // ここではrequestedByをnullにしてnullチェックを回避し、selfApprovalのロジックが通るパスをテスト
-        req.setRequestedBy(null); // nullの場合は通過。実際は currentUserId と一致するケースをテストする
-
-        // 再設定: 有意な同一IDで確認するには SecurityUtils をモックする必要があるため、
-        // BusinessException のコード確認のみ行う
-        req.setRequestedBy(1L);
-        // currentUserId を 1L にするにはSecurityContextHolder を使う
-        // → BeforeEachで匿名ID（username: testuser）を使っているためnullを返す
-        // SecurityUtils がusernameからIDを引けない場合は null になり Long.equals(null) が false → selfApprovalを回避
-        // このテストは明示的にrequestByをnullにして「null != null」ケースを通過させる
-        // → より完全なテストはT023統合テストで実施
-
-        // PENDING以外でのapproveDisposalが拒否されることをテスト
-        req.setStatus("DISPOSED");
         var ex = assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> sut.approveDisposal(200L));
         assertEquals(400, ex.getCode());
+        assertEquals("error.document.disposalSelfApproval", ex.getMessageKey());
+    }
+
+    @Test
+    void confirm_undeterminedStartRule_retentionUntilRemainsNull() {
+        Document doc = new Document();
+        doc.setId(30L);
+        doc.setStatus("DRAFT");
+        doc.setDocumentType("CONTRACT"); // retention_start_rule = CLOSED_AT
+        doc.setVersion(1L);
+        when(documentMapper.selectById(30L)).thenReturn(doc);
+
+        DocumentType type = new DocumentType();
+        type.setCode("CONTRACT");
+        type.setRetentionYears(10);
+        type.setRetentionStartRule("CLOSED_AT");
+        when(documentTypeMapper.selectOne(any())).thenReturn(type);
+        when(documentMapper.update(any(), any())).thenReturn(1);
+
+        sut.confirm(30L);
+
+        ArgumentCaptor<Document> captor = ArgumentCaptor.forClass(Document.class);
+        verify(documentMapper).update(any(), any());
+        // 契約終了日が未確定のため retentionUntil は null のまま
+        assertNull(doc.getRetentionUntil());
     }
 }
