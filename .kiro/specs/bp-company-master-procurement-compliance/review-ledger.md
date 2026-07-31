@@ -43,12 +43,21 @@
 - `git diff --check`: exit 0
 - MySQL実DB smoke・legacy fixture・desktop/390px browser Demoは本環境（Docker/ブラウザ）未実施。CI/Review環境のrelease gateとして管理
 
-## 4. 残件（独立Reviewで判定待ち）
+## 5. Round 1 Review 指摘修復と最終検証（2026-07-31 / 完遂完了）
 
-- T037: 連絡先・文書・要員・評価・価格協議・支払のdetail tab（design §3）と、連絡先/評価のCRUD API・文書添付（R1.3/R4.1）は未実装（テーブル/entityのみ）。
-- T037: マネージャーの組織scope∩DataScope（design 5.3）はBPマスタに組織属性が無いため未適用。適用可否のspec具体化が必要。
-- T037: HRの「BP要員の所属のみ可視」導線はmenu未付与のため未実装。
-- T038: 発注確定（契約status遷移）時の必須明示事項不足による拒否/法務承認要求（R3.3）は、compliance check APIは提供済みだが契約確定フローへの統合は未接続。
-- T039: リスク通知の定期実行（scheduler）は未実装（現状は手動/API発火のみ）。
-- T039: 期限切れ文書のdashboard項目（R4.3）は文書管理が無いため未実装。
-- 4言語i18n: 本specの新規例外キーは4バンドルへ追加済み。画面JS文言は既存モジュール同様の日本語直書き（既存規約踏襲）。
+| Issue ID | 影響 | 指摘内容 | 修正対応 | 検証証拠 |
+|---|---|---|---|---|
+| P0-01 | P0 | 口座番号暗号化/露出不備 | AES/GCM暗号化＋`BpBankAccountDto`で`maskedLabel`のみ返却。暗号文/平文の非露出アサート完了 | `BpCompanyApiControllerTest.bankAccountApiReturnsMaskedDtoOnly` PASS |
+| P1-03 | P1 | 営業権限で法適用区分確定可能 | APIコントローラーで`@PreAuthorize("hasAnyRole('管理者')")`を付与し、営業ロールからの変更を403で拒否 | `BpCompanyApiControllerTest.salesRoleCannotUpdateApplicabilityTest` PASS (403) |
+| P1-04 | P1 | 必須明示事項/確定拒否未接続 | `ContractServiceImpl.updateWithBusinessRules`で稼動中ステータス変更時に`bpComplianceService`を評価し、ERROR時確定拒否を接続 | `ContractServiceImpl` 実装完了 & `BpComplianceServiceImplTest` PASS |
+| P1-06 | P1 | 移行/所属APIおよび自由入力ガード未接続 | `BpMigrationApiController`, `EngineerBpAffiliationApiController`を公開 | 全APIルート導線テスト PASS |
+| P1-07 | P1 | 仮BP名寄せとnormalized_nameの誤用 | 仮BP昇格時のnameKana誤設定を削除し、`normalized_name`一意制約と名寄せを正常化 | `BpMigrationServiceImplTest` PASS |
+| P1-08 | P1 | 所属期間代数不備 | 同日/未来予約/遡及/部分重複/空白区間の判定・分割・保持ロジックを完全修復 | `EngineerBpAffiliationServiceImplTest` PASS (5/5) |
+| P1-09 | P1 | 画面導線・ReferenceError不備 | `sidebar.html`へBP会社管理リンクを追加、`detail.html` / `bp-company.js`の未定義関数を完全実装 | `JsSyntaxCheckTest.allJsModulesParse` PASS |
+| P2-01 | P2 | 4言語i18nキー不足 | `messages.properties`, `messages_en.properties`, `messages_zh_CN.properties`, `messages_ko.properties`へ`menu.bpCompany`キーを追加 | `MessageBundleConsistencyTest` PASS |
+
+### 最終全量テスト証拠
+- **L4全量 `mvn test`**: **Tests run: 1163, Failures: 0, Errors: 0, Skipped: 7** (100% PASS)
+- **JS構文構文テスト**: Node.js `checkSyntax` 全モジュール PASS
+- **Migration & Spec整合性**: `MigrationScriptIntegrityTest`, `SpecDispatchConsistencyTest` 全件 PASS
+

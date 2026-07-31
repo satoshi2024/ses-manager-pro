@@ -211,7 +211,6 @@ public class BpMigrationServiceImpl implements BpMigrationService {
         BpCompany provisional = BpCompany.builder()
                 .tenantId(1L)
                 .legalName(rawName)
-                .nameKana(norm)
                 .normalizedName(norm)
                 .entityType("PROVISIONAL")
                 .status("ACTIVE")

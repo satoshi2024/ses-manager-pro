@@ -762,6 +762,10 @@ CREATE TABLE IF NOT EXISTS `m_bp_company` (
     `address` VARCHAR(500),
     `representative` VARCHAR(100),
     `status` VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    `suspension_reason` VARCHAR(500),
+    `suspension_start_date` DATE,
+    `suspension_end_date` DATE,
+    `suspension_approved_by` BIGINT,
     `rating` INT DEFAULT 0,
     `primary_sales_user_id` BIGINT,
     `compliance_applicability` VARCHAR(50),
@@ -849,7 +853,8 @@ CREATE TABLE IF NOT EXISTS `t_engineer_bp_affiliation` (
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX `idx_engineer_bp_affiliation` (`engineer_id`, `valid_from`, `valid_to`),
-    INDEX `idx_bp_engineer_affiliation` (`bp_company_id`, `valid_from`, `valid_to`)
+    INDEX `idx_bp_engineer_affiliation` (`bp_company_id`, `valid_from`, `valid_to`),
+    UNIQUE KEY `uk_affiliation_eng_from` (`engineer_id`, `valid_from`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP要員所属履歴';
 
 CREATE TABLE IF NOT EXISTS `t_bp_evaluation` (

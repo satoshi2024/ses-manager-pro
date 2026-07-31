@@ -6,14 +6,18 @@ import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.bpcompany.BpBankAccountDto;
 import com.ses.dto.bpcompany.BpCompanyDto;
+import com.ses.dto.bpcompany.BpCompanySaveDto;
 import com.ses.dto.bpcompany.BpTermsDto;
-import com.ses.entity.BpBankAccount;
 import com.ses.entity.BpCompany;
 import com.ses.entity.BpTerms;
 import com.ses.service.BpCompanyService;
+import com.ses.service.BpComplianceService;
+import com.ses.service.BpPriceNegotiationService;
+import com.ses.service.BpRiskDashboardService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -25,9 +29,9 @@ import java.util.List;
 public class BpCompanyApiController {
 
     private final BpCompanyService bpCompanyService;
-    private final com.ses.service.BpComplianceService bpComplianceService;
-    private final com.ses.service.BpPriceNegotiationService bpPriceNegotiationService;
-    private final com.ses.service.BpRiskDashboardService bpRiskDashboardService;
+    private final BpComplianceService bpComplianceService;
+    private final BpPriceNegotiationService bpPriceNegotiationService;
+    private final BpRiskDashboardService bpRiskDashboardService;
 
     @GetMapping
     public ApiResult<Page<BpCompanyDto>> list(
@@ -42,6 +46,7 @@ public class BpCompanyApiController {
 
     @GetMapping("/autocomplete")
     public ApiResult<List<BpCompanyDto>> autocomplete(@RequestParam(required = false) String q) {
+        // 取引停止 (SUSPENDED) 状態はSQLレベルで候補から自動除外される ("ACTIVE"限定)
         Page<BpCompanyDto> pageResult = bpCompanyService.searchBpCompanies(q, null, "ACTIVE", 1, 50);
         return ApiResult.success(pageResult.getRecords());
     }
@@ -52,26 +57,83 @@ public class BpCompanyApiController {
     }
 
     @PostMapping
-    public ApiResult<BpCompany> create(@RequestBody BpCompany bpCompany) {
+    public ApiResult<BpCompany> create(@RequestBody BpCompanySaveDto req) {
+        BpCompany bpCompany = BpCompany.builder()
+                .legalName(req.getLegalName())
+                .nameKana(req.getNameKana())
+                .entityType(req.getEntityType())
+                .corporateNumber(req.getCorporateNumber())
+                .invoiceRegistrationNumber(req.getInvoiceRegistrationNumber())
+                .capitalBand(req.getCapitalBand())
+                .employeeBand(req.getEmployeeBand())
+                .address(req.getAddress())
+                .representative(req.getRepresentative())
+                .primarySalesUserId(req.getPrimarySalesUserId())
+                .applicabilityNote(req.getApplicabilityNote())
+                .status("ACTIVE")
+                .tenantId(1L)
+                .build();
         return ApiResult.success(bpCompanyService.createBpCompany(bpCompany));
     }
 
     @PutMapping("/{id}")
-    public ApiResult<BpCompany> update(@PathVariable Long id, @RequestBody BpCompany bpCompany) {
+    public ApiResult<BpCompany> update(@PathVariable Long id, @RequestBody BpCompanySaveDto req) {
+        BpCompany bpCompany = BpCompany.builder()
+                .legalName(req.getLegalName())
+                .nameKana(req.getNameKana())
+                .entityType(req.getEntityType())
+                .corporateNumber(req.getCorporateNumber())
+                .invoiceRegistrationNumber(req.getInvoiceRegistrationNumber())
+                .capitalBand(req.getCapitalBand())
+                .employeeBand(req.getEmployeeBand())
+                .address(req.getAddress())
+                .representative(req.getRepresentative())
+                .primarySalesUserId(req.getPrimarySalesUserId())
+                .applicabilityNote(req.getApplicabilityNote())
+                .build();
         bpCompany.setId(id);
         return ApiResult.success(bpCompanyService.updateBpCompany(bpCompany));
     }
 
     @PutMapping("/{id}/compliance-applicability")
+    @PreAuthorize("hasAnyRole('管理者')")
     public ApiResult<Void> updateApplicability(
             @PathVariable Long id,
             @RequestBody ApplicabilityReq req) {
         requireAdmin();
-        bpCompanyService.updateComplianceApplicability(id, req.getApplicability(), req.getNote(), SecurityUtils.currentUserId());
+        Long currentUserId = SecurityUtils.currentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        bpCompanyService.updateComplianceApplicability(id, req.getApplicability(), req.getNote(), currentUserId);
         return ApiResult.success(null);
     }
 
+    @PutMapping("/{id}/status")
+    @PreAuthorize("hasAnyRole('管理者')")
+    public ApiResult<BpCompany> updateStatus(@PathVariable Long id, @RequestBody StatusUpdateReq req) {
+        requireAdmin();
+        BpCompany bpCompany = bpCompanyService.getById(id);
+        if (bpCompany == null) {
+            throw new BusinessException(404, "BP会社が見つかりません");
+        }
+        bpCompany.setStatus(req.getStatus());
+        if ("SUSPENDED".equalsIgnoreCase(req.getStatus())) {
+            bpCompany.setSuspensionReason(req.getReason());
+            bpCompany.setSuspensionStartDate(req.getStartDate());
+            bpCompany.setSuspensionEndDate(req.getEndDate());
+            bpCompany.setSuspensionApprovedBy(SecurityUtils.currentUserId());
+        } else {
+            bpCompany.setSuspensionReason(null);
+            bpCompany.setSuspensionStartDate(null);
+            bpCompany.setSuspensionEndDate(null);
+            bpCompany.setSuspensionApprovedBy(null);
+        }
+        return ApiResult.success(bpCompanyService.updateBpCompany(bpCompany));
+    }
+
     @PostMapping("/{id}/bank-accounts")
+    @PreAuthorize("hasAnyRole('管理者')")
     public ApiResult<BpBankAccountDto> addBankAccount(
             @PathVariable Long id,
             @RequestBody BankAccountReq req) {
@@ -83,6 +145,7 @@ public class BpCompanyApiController {
     }
 
     @PutMapping("/{id}/bank-accounts/{accountId}/approval")
+    @PreAuthorize("hasAnyRole('管理者')")
     public ApiResult<Void> updateBankAccountApproval(
             @PathVariable Long id,
             @PathVariable Long accountId,
@@ -146,6 +209,14 @@ public class BpCompanyApiController {
     public static class ApplicabilityReq {
         private String applicability;
         private String note;
+    }
+
+    @Data
+    public static class StatusUpdateReq {
+        private String status;
+        private String reason;
+        private LocalDate startDate;
+        private LocalDate endDate;
     }
 
     @Data

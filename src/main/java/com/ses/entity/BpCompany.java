@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -23,7 +24,7 @@ public class BpCompany extends BaseEntity {
     private Long tenantId;
     private String legalName;
     private String nameKana;
-    /** 仮BP冪等生成用の正規化名称（PROVISIONALのみ設定。正式化時にNULL化）。 */
+    /** 仮BP冪等生成用の正規化名称。 */
     private String normalizedName;
     private String entityType; // CORPORATE / INDIVIDUAL / FREELANCE / PROVISIONAL
     private String corporateNumber;
@@ -33,6 +34,10 @@ public class BpCompany extends BaseEntity {
     private String address;
     private String representative;
     private String status; // ACTIVE / INACTIVE / SUSPENDED / MERGED
+    private String suspensionReason;
+    private LocalDate suspensionStartDate;
+    private LocalDate suspensionEndDate;
+    private Long suspensionApprovedBy;
     private Integer rating;
     private Long primarySalesUserId;
     private String complianceApplicability; // FREELANCE_ACT / SUBCOMMITTEE_ACT / EXEMPT / NULL(UNCHECKED)

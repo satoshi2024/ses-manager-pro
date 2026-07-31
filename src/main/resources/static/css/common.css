@@ -402,6 +402,18 @@ a:hover {
     color: var(--text-muted);
 }
 
+/* Date Input normalization for Chrome/Safari/Edge to prevent different font sizes for year vs month/day */
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="date"]::-webkit-datetime-edit-year-field,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-text {
+    font-family: inherit !important;
+    font-size: inherit !important;
+}
+
+
 /* Buttons */
 .btn {
     font-weight: 500;
@@ -544,6 +556,32 @@ a:hover {
     flex: 0 0 auto;
     color: var(--text-secondary);
     transition: transform 0.2s ease;
+}
+
+/* Custom Pagination Styles to ensure high contrast and readability in both themes */
+.pagination .page-link {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-secondary) !important;
+    transition: var(--transition-base);
+}
+
+.pagination .page-link:hover {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+.pagination .page-item.active .page-link {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+    color: #ffffff !important;
+}
+
+.pagination .page-item.disabled .page-link {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-muted) !important;
+    opacity: 0.6 !important;
 }
 
 @media (max-width: 992px) {

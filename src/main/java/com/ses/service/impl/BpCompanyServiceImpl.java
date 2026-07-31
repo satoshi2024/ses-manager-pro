@@ -38,11 +38,18 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany> implements BpCompanyService {
+
+    private static final Map<String, Set<String>> ALLOWED_STATUS_TRANSITIONS = Map.of(
+            "ACTIVE", Set.of("SUSPENDED", "INACTIVE"),
+            "SUSPENDED", Set.of("ACTIVE", "INACTIVE"),
+            "INACTIVE", Set.of("ACTIVE")
+    );
 
     private final BpBankAccountMapper bankAccountMapper;
     private final BpTermsMapper termsMapper;
@@ -153,8 +160,17 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         if (existing == null) {
             throw new BusinessException(404, "更新対象のBP会社が見つかりません");
         }
+        if (bpCompany.getStatus() != null && !bpCompany.getStatus().equals(existing.getStatus())) {
+            Set<String> allowedNext = ALLOWED_STATUS_TRANSITIONS.getOrDefault(existing.getStatus(), Set.of());
+            if (!allowedNext.contains(bpCompany.getStatus())) {
+                throw new BusinessException(400, "ステータス遷移が許可されていません: " + existing.getStatus() + " -> " + bpCompany.getStatus());
+            }
+        }
         applyNonNullFields(existing, bpCompany);
-        this.updateById(existing);
+        boolean updated = this.updateById(existing);
+        if (!updated) {
+            throw new BusinessException(409, "他のユーザーによって更新されました。画面を再読み込みしてください。");
+        }
         // 仮BPの正式化時は正規化名を外し、同名別法人の重複登録（R1.5警告・非block）を可能にする。
         if ("PROVISIONAL".equalsIgnoreCase(existing.getEntityType())
                 && bpCompany.getEntityType() != null

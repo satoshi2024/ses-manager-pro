@@ -1,7 +1,9 @@
 /**
  * BP会社管理 JS モジュール
  */
-$(document.ready ? $(document).ready(initBpCompany) : $(initBpCompany));
+$(document).ready(function() {
+    initBpCompany();
+});
 
 function initBpCompany() {
     if ($('#bpCompanyTableBody').length) {
@@ -148,6 +150,36 @@ function loadBpCompanyDetail(id) {
     });
 }
 
+function toggleBpStatus(targetStatus) {
+    const id = $('#bpCompanyId').val();
+    if (!id) return;
+
+    Swal.fire({
+        title: 'ステータス更新',
+        text: `取引状況を [${targetStatus}] に変更しますか？`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '実行',
+        cancelButtonText: 'キャンセル'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            $.ajax({
+                url: `/api/bp-companies/${id}/status`,
+                type: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({ status: targetStatus, reason: '画面からの変更操作' }),
+                headers: { 'X-XSRF-TOKEN': getCsrfToken() },
+                success: function(res) {
+                    if (res.code === 200) {
+                        if (window.Toast) Toast.show('ステータスを更新しました', 'success');
+                        loadBpCompanyDetail(id);
+                    }
+                }
+            });
+        }
+    });
+}
+
 function loadBankAccounts() {
     const id = $('#bpCompanyId').val();
     if (!id) return;
@@ -180,6 +212,64 @@ function loadBankAccounts() {
     });
 }
 
+function openAddBankModal() {
+    Swal.fire({
+        title: '口座情報の追加',
+        html:
+            '<input id="swalBankName" class="swal2-input" placeholder="金融機関名">' +
+            '<input id="swalBranchName" class="swal2-input" placeholder="支店名">' +
+            '<input id="swalAccountNumber" class="swal2-input" placeholder="口座番号">' +
+            '<input id="swalAccountHolder" class="swal2-input" placeholder="口座名義">',
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: '登録',
+        preConfirm: () => {
+            return {
+                bankName: $('#swalBankName').val(),
+                branchName: $('#swalBranchName').val(),
+                accountNumber: $('#swalAccountNumber').val(),
+                accountHolder: $('#swalAccountHolder').val()
+            };
+        }
+    }).then((result) => {
+        if (result.isConfirmed && result.value) {
+            const id = $('#bpCompanyId').val();
+            $.ajax({
+                url: `/api/bp-companies/${id}/bank-accounts`,
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(result.value),
+                headers: { 'X-XSRF-TOKEN': getCsrfToken() },
+                success: function(res) {
+                    if (res.code === 200) {
+                        if (window.Toast) Toast.show('口座を登録しました', 'success');
+                        loadBankAccounts();
+                    }
+                }
+            });
+        }
+    });
+}
+
+function loadTerms() {
+    const id = $('#bpCompanyId').val();
+    if (!id) return;
+
+    $.ajax({
+        url: `/api/bp-companies/${id}/terms/active`,
+        type: 'GET',
+        success: function (res) {
+            if (res.code === 200 && res.data) {
+                const t = res.data;
+                $('#termsClosingDay').text(t.closingDay === 31 ? '末日' : `${t.closingDay}日`);
+                $('#termsPaymentMonth').text(t.paymentMonthOffset === 1 ? '翌月' : `${t.paymentMonthOffset}ヶ月後`);
+                $('#termsPaymentDay').text(t.paymentDay === 30 ? '末日' : `${t.paymentDay}日`);
+                $('#termsFeeBearer').text(t.feeBearer === 'PAYEE' ? '受注者(BP)負担' : '発注者負担');
+            }
+        }
+    });
+}
+
 function saveComplianceApplicability() {
     const id = $('#bpCompanyId').val();
     const data = {
@@ -207,6 +297,9 @@ function resetSearch() {
 }
 
 function getCsrfToken() {
+    if (window.SES && window.SES.csrf && window.SES.csrf.token) {
+        return window.SES.csrf.token();
+    }
     const match = document.cookie.match(new RegExp('(^| )XSRF-TOKEN=([^;]+)'));
     return match ? match[2] : '';
 }

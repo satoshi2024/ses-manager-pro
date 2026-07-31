@@ -12,10 +12,10 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -104,5 +104,23 @@ class BpCompanyApiControllerTest {
                         .content("{\"approved\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    @WithMockUser(roles = "営業")
+    @DisplayName("営業ロールによる法適用区分更新は403 Forbiddenで拒否されることの検証 (P1-03)")
+    void salesRoleCannotUpdateApplicabilityTest() throws Exception {
+        BpCompany company = BpCompany.builder()
+                .legalName("権限テストBP")
+                .entityType("CORPORATE")
+                .status("ACTIVE")
+                .build();
+        bpCompanyService.createBpCompany(company);
+
+        mockMvc.perform(put("/api/bp-companies/{id}/compliance-applicability", company.getId())
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"applicability\":\"EXEMPT\",\"note\":\"営業からの変更試行\"}"))
+                .andExpect(status().isForbidden());
     }
 }
