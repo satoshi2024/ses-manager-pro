@@ -306,6 +306,108 @@ class MigrationScriptIntegrityTest {
     }
 
     /** 判定対象はDDLだけ。理由を書いた `--` コメントの語句で誤検知しないよう除去する。 */
+    @Test
+    void V1で定義されたカラムや制約が後続マイグレーションで裸のADDで重複定義されていないこと() throws Exception {
+        String v1Sql = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V1__create_tables.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        // V1 内の CREATE TABLE からテーブルごとの定義カラム/制約をパースする簡易チェック
+        Map<String, List<String>> v1TableColumns = new LinkedHashMap<>();
+        String currentTable = null;
+        for (String line : v1Sql.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("CREATE TABLE")) {
+                Matcher m = Pattern.compile("CREATE TABLE (?:IF NOT EXISTS )?`?([a-zA-Z0-9_]+)`?").matcher(trimmed);
+                if (m.find()) {
+                    currentTable = m.group(1);
+                    v1TableColumns.put(currentTable, new ArrayList<>());
+                }
+            } else if (currentTable != null && (trimmed.startsWith(")") || trimmed.startsWith(");"))) {
+                currentTable = null;
+            } else if (currentTable != null && !trimmed.startsWith("--")) {
+                Matcher colMatcher = Pattern.compile("^`?([a-zA-Z0-9_]+)`?\\s+[A-Z]+").matcher(trimmed);
+                if (colMatcher.find()) {
+                    String col = colMatcher.group(1);
+                    if (!col.equalsIgnoreCase("KEY") && !col.equalsIgnoreCase("INDEX") && !col.equalsIgnoreCase("CONSTRAINT") && !col.equalsIgnoreCase("UNIQUE")) {
+                        v1TableColumns.get(currentTable).add(col);
+                    }
+                }
+            }
+        }
+
+        // 後続マイグレーション（V2〜）で、動的プロシージャやIF NOT EXISTS無しの裸の ALTER TABLE ... ADD COLUMN が V1と重複していないか検査
+        List<String> violations = new ArrayList<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver().getResources("classpath:db/migration/V*.sql")) {
+            String filename = resource.getFilename();
+            if ("V1__create_tables.sql".equals(filename)) continue;
+
+            String content = resource.getContentAsString(StandardCharsets.UTF_8);
+            // プロシージャ等で information_schema チェックが含まれている場合は safe とみなす
+            if (content.contains("information_schema") || content.contains("IF NOT EXISTS")) {
+                continue;
+            }
+
+            for (Map.Entry<String, List<String>> entry : v1TableColumns.entrySet()) {
+                String table = entry.getKey();
+                for (String col : entry.getValue()) {
+                    Pattern addColPattern = Pattern.compile("ALTER\\s+TABLE\\s+`?" + table + "`?\\s+ADD\\s+(?:COLUMN\\s+)?`?" + col + "`?\\b", Pattern.CASE_INSENSITIVE);
+                    if (addColPattern.matcher(content).find()) {
+                        violations.add(filename + ": " + table + "." + col + " は既に V1__create_tables.sql で定義されているため裸の ADD COLUMN は衝突します");
+                    }
+                }
+            }
+        }
+
+        assertTrue(violations.isEmpty(), "V1で作成済みのカラムを後続マイグレーションで重複ADD COLUMNしています: " + violations);
+    }
+
+    @Test
+    void Entityの全テーブルフィールドに対応するDBカラムがマイグレーションSQL内に存在すること() throws Exception {
+        List<Class<?>> entityClasses = List.of(
+                com.ses.entity.Contract.class,
+                com.ses.entity.BpCompany.class,
+                com.ses.entity.BpTerms.class,
+                com.ses.entity.EngineerBpAffiliation.class
+        );
+
+        List<String> allMigrationSqls = new ArrayList<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver().getResources("classpath:db/migration/*.sql")) {
+            allMigrationSqls.add(resource.getContentAsString(StandardCharsets.UTF_8).toLowerCase(java.util.Locale.ROOT));
+        }
+        String combinedSql = String.join("\n", allMigrationSqls);
+
+        List<String> missingFields = new ArrayList<>();
+        for (Class<?> clazz : entityClasses) {
+            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                com.baomidou.mybatisplus.annotation.TableField tf = field.getAnnotation(com.baomidou.mybatisplus.annotation.TableField.class);
+                if (tf != null && !tf.exist()) continue;
+
+                String fieldName = field.getName();
+                String colName = camelToSnake(fieldName);
+                if (!combinedSql.contains(colName)) {
+                    missingFields.add(clazz.getSimpleName() + "." + fieldName + " (" + colName + ")");
+                }
+            }
+        }
+
+        assertTrue(missingFields.isEmpty(), "Entityに定義されているがdb/migration/*.sqlのいずれにも存在しないDBカラムがあります: " + missingFields);
+    }
+
+    private static String camelToSnake(String str) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < str.length(); i++) {
+            char c = str.charAt(i);
+            if (Character.isUpperCase(c)) {
+                result.append('_').append(Character.toLowerCase(c));
+            } else {
+                result.append(c);
+            }
+        }
+        return result.toString();
+    }
+
     private String withoutComments(String sql) {
         return sql.lines()
                 .map(line -> {
@@ -322,3 +424,4 @@ class MigrationScriptIntegrityTest {
                 .getContentAsString(StandardCharsets.UTF_8);
     }
 }
+

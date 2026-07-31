@@ -2,20 +2,26 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V70）
+## 1. DDL（予約V70, V71）
 
-- **Migration**: 予約V70 (`db/migration/V70__bp_company_master_and_compliance.sql`)
-- `m_bp_company(id, tenant_id, legal_name, name_kana, entity_type, corporate_number,
+- **Migration**: 予約V70 (`db/migration/V70__bp_company_master_and_compliance.sql`), V71 (`db/migration/V71__bp_company_fix_and_procurement.sql`)
+- **Migration 分割・べき等性設計方針**:
+  - **State A (新規DB/空DB)**: `V1__create_tables.sql` に consolidative baseline として全テーブル・追加カラム (`t_contract` の発注コンプライアンス 6 列 `contract_date`, `job_description`, `work_location`, `inspection_due_date`, `payment_due_date`, `payment_method` 等) およびインデックスが含まれる。
+  - **State B (既存DB/原V70適用済みDB)**: `V71` 内で MySQL の `information_schema` 判定付きストアドプロシージャを定義し、不足しているカラム、インデックス (`uk_bp_company_normalized`, `uk_affiliation_eng_from`)、および `m_system_config` の seed を安全に「無ければ追加（If Not Exists）」する。
+  - **State C (復元済みV70)**: `V70` はコミット `a36b8cd` のチェックサムをそのまま維持する。
+- `m_bp_company(id, tenant_id, legal_name, name_kana, normalized_name, entity_type, corporate_number,
   invoice_registration_number, capital_band, employee_band, address, representative, status,
+  suspension_reason, suspension_start_date, suspension_end_date, suspension_approved_by, rating,
   primary_sales_user_id, compliance_applicability, applicability_checked_by/at, applicability_note, version)`。
 - `t_bp_contact(bp_company_id, name, department, role, email, phone, primary_flag)`。
 - `t_bp_bank_account(bp_company_id, encrypted_bank/branch/account, masked_label, valid_from/to, approval_status)`。
 - `t_bp_terms(bp_company_id, effective_from/to, closing_day, payment_month_offset, payment_day,
-  fee_bearer, payment_method, max_payment_days, version)`。
+  fee_bearer, payment_method, fee_bearer_exception_reason, fee_bearer_approved_by/at, max_payment_days, version)`。
 - `t_engineer_bp_affiliation(engineer_id, bp_company_id, valid_from/to)`。
 - `t_bp_evaluation(bp_company_id, period, scores..., comment, evaluated_by)`。
 - `t_bp_price_negotiation(bp_company_id, requested_at, responded_at, status, requested_amount,
   agreed_amount, summary, document_id)`。
+- `t_contract(contract_date, job_description, work_location, inspection_due_date, payment_due_date, payment_method)`。
 - `BpAvailability.bp_company_id`, `BpPayment.bp_company_id`、表示snapshot列。
 
 ## 2. 移行
