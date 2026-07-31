@@ -72,8 +72,8 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM `m_system_config` WHERE `config_key` = 'procurement.payment-max-days'
     ) THEN
-        INSERT INTO `m_system_config` (`config_key`, `config_value`, `category`, `description`) 
-        VALUES ('procurement.payment-max-days', '60', 'procurement', '発注コンプライアンス支払期日上限（日）');
+        INSERT INTO `m_system_config` (`config_key`, `config_value`, `description`) 
+        VALUES ('procurement.payment-max-days', '60', '発注コンプライアンス支払期日上限（日）');
     END IF;
 END $$
 

@@ -9,6 +9,12 @@
   - **State A (新規DB/空DB)**: `V1__create_tables.sql` に consolidative baseline として全テーブル・追加カラム (`t_contract` の発注コンプライアンス 6 列 `contract_date`, `job_description`, `work_location`, `inspection_due_date`, `payment_due_date`, `payment_method` 等) およびインデックスが含まれる。
   - **State B (既存DB/原V70適用済みDB)**: `V71` 内で MySQL の `information_schema` 判定付きストアドプロシージャを定義し、不足しているカラム、インデックス (`uk_bp_company_normalized`, `uk_affiliation_eng_from`)、および `m_system_config` の seed を安全に「無ければ追加（If Not Exists）」する。
   - **State C (復元済みV70)**: `V70` はコミット `a36b8cd` のチェックサムをそのまま維持する。
+- **DB 権限・Migration 運用要件 (R4-P2-04 / R4-P2-05)**:
+  - `V71` で動的ストアドプロシージャを作成・削除するため、DB Migration 実行ユーザーには `CREATE ROUTINE`, `ALTER ROUTINE`, `DROP ROUTINE` 権限が必要です。
+  - MySQL DDL は非トランザクションのため、仮に Migration 途中で構文エラー等が発生して中断した場合は、`flyway_schema_history` に `success=0` の失敗レコードが残ります。この場合のリカバリルート:
+    1. 不整合の原因（SQL文等）を修正
+    2. `mvn flyway:repair` (または `./mvnw flyway:repair`) を実行して失敗レコードを消去
+    3. アプリケーションを再起動して `V71` を正常再適用させる。
 - `m_bp_company(id, tenant_id, legal_name, name_kana, normalized_name, entity_type, corporate_number,
   invoice_registration_number, capital_band, employee_band, address, representative, status,
   suspension_reason, suspension_start_date, suspension_end_date, suspension_approved_by, rating,
