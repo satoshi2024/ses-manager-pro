@@ -88,10 +88,34 @@
 | R4-P2-02 | P2 | Entity↔Migration列のテーブル束縛 | Entity フィールドと Migration DDL の検証をテーブル名束縛に改修 | `MigrationScriptIntegrityTest` PASS |
 | R4-P2-03 | P2 | INSERT列の静的定義検証新設 | `INSERT INTO <table> (<columns>)` 内のカラムが DDL 定義に存在することをチェックする新テストを追加 | `MigrationScriptIntegrityTest.INSERT文で指定されたカラムがテーブル定義内に存在すること` PASS |
 
-### 最終全量テストおよびHead固定証拠
-- **最終Head**: **`0d3e183`** (working tree clean, `origin/main` へ git push 完了)
+
+## 9. Round 5 Review 完遂判定（2026-07-31 / CONDITIONAL PASS 達成）
+
+| 項目 | 値 / 判定 |
+|---|---|
+| **現行判定** | **CONDITIONAL PASS** (P0=0 / P1=0 / P2=13 / release gates=G-1〜G-5) |
+| **最終Head** | **`4d34212`** (working tree clean, `origin/main` に送信完了) |
+| **P0 / P1** | **P0=0 / P1=0** (P1 4ラウンド連続0件、P0 完治) |
+
+### OPEN Issue 処置状況
+- **R4-P0-01 (`m_system_config` 存在しない `category` 列誤指定)**: **`VERIFIED_CLOSED`** (`V71:75-76` を `config_key, config_value, description` の 3 列指定に修正)
+- **R4-P2-01 (`MigrationScriptIntegrityTest` 文単位解体)**: **`VERIFIED_CLOSED`** (17/17 PASS)
+- **R4-P2-02 (Entity↔Migration 列検査のテーブル名束縛化)**: **`VERIFIED_CLOSED`** (17/17 PASS)
+- **R4-P2-03 (INSERT 列リスト静的検証新設)**: **`VERIFIED_CLOSED`** (17/17 PASS)
+- **R4-P2-04/05 (CREATE ROUTINE 権限要件・failed migration リカバリ)**: **`VERIFIED_CLOSED`** (`design.md:12-17` に明記)
+
+### Release Gates (本番リリース前の hard gate となる環境・実機検証)
+- **G-1**: fresh 実 MySQL smoke (`V1`→`V71` 全適用、0 skipped、assert 通過)
+- **G-2**: legacy 実 MySQL smoke (原 `V70` 適用済み fixture から `V71` を適用、データ保持)
+- **G-3**: `V71` の DELIMITER / ストアドプロシージャ実行検証
+- **G-4**: desktop / 390px browser Demo
+- **G-5**: G2 外部専門家（弁護士/社労士）Review
+
+### 最終全量テスト証拠
 - **L4全量 `mvn test`**: **Tests run: 1169, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
-- **Migration & Spec整合性**: `MigrationScriptIntegrityTest` (17 run PASS), `SpecDispatchConsistencyTest` (8 run PASS)
+- **Migration & Spec 整合性**: `MigrationScriptIntegrityTest` (17 run PASS), `SpecDispatchConsistencyTest` (8 run PASS)
+- **次 Action**: **S08 `crm-contact-opportunity` (V73) の着手解禁**
+
 
 
 
