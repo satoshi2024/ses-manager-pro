@@ -51,6 +51,7 @@ class DocumentExportServiceImplTest {
 
         DocumentVersion version = new DocumentVersion();
         version.setDocumentId(100L);
+        version.setVersionNo(1);
         version.setStorageKey("key-100");
         version.setOriginalName("contract.pdf");
         version.setSha256("sha256-dummy-hash");
@@ -79,7 +80,7 @@ class DocumentExportServiceImplTest {
 
         ZipEntry entry2 = zis.getNextEntry();
         assertNotNull(entry2);
-        assertEquals("files/100_contract.pdf", entry2.getName());
+        assertEquals("files/100_v1_contract.pdf", entry2.getName());
 
         String fileContent = new String(zis.readAllBytes());
         assertEquals("PDF content", fileContent);
