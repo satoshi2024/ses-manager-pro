@@ -58,6 +58,7 @@ function renderTaskTable(tasks) {
                 <td>${dueText}</td>
                 <td class="text-end pe-4">
                     ${!isTerminal ? `
+                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(${t.id}, ${t.assigneeUserId}, '${t.dueDate || ''}')" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
                         ${t.status === 'NOT_STARTED' ? `<button class="btn btn-sm btn-outline-info me-1" onclick="updateTaskStatus(${t.id}, 'IN_PROGRESS')">進行中へ</button>` : ''}
                         ${t.status === 'IN_PROGRESS' ? `<button class="btn btn-sm btn-success me-1" onclick="updateTaskStatus(${t.id}, 'COMPLETED')">完了</button>` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateTaskStatus(${t.id}, 'CANCELLED')">取消</button>
@@ -73,6 +74,23 @@ function openNewTaskModal() {
     document.getElementById('taskForm').reset();
     document.getElementById('task-id').value = '';
     loadUserOptions();
+}
+
+function openEditTaskModal(id, assigneeUserId, dueDate) {
+    document.getElementById('taskForm').reset();
+    document.getElementById('task-id').value = id;
+    if (dueDate) {
+        document.getElementById('task-due-date').value = dueDate;
+    }
+    loadUserOptions();
+    setTimeout(() => {
+        if (assigneeUserId) {
+            $('#task-assignee-user-id').val(assigneeUserId);
+        }
+    }, 200);
+    const modalEl = document.getElementById('taskModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
 }
 
 function loadUserOptions() {
@@ -97,8 +115,9 @@ function loadUserOptions() {
 }
 
 async function saveTask() {
+    const taskId = document.getElementById('task-id').value;
     const title = document.getElementById('task-title').value.trim();
-    if (!title) {
+    if (!title && !taskId) {
         Toast.error('タスク件名を入力してください');
         return;
     }
@@ -112,29 +131,44 @@ async function saveTask() {
     const dueDate = document.getElementById('task-due-date').value || null;
 
     try {
-        const res = await $.ajax({
-            url: '/api/tasks',
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify({
-                title: title,
-                assigneeUserId: parseInt(assigneeUserId),
-                description: description,
-                priority: priority,
-                dueDate: dueDate
-            })
-        });
+        let res;
+        if (taskId) {
+            // タスク詳細（担当者・期限）の変更
+            res = await $.ajax({
+                url: `/api/tasks/${taskId}/details`,
+                type: 'PUT',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    assigneeUserId: parseInt(assigneeUserId),
+                    dueDate: dueDate
+                })
+            });
+        } else {
+            // 新規タスク登録
+            res = await $.ajax({
+                url: '/api/tasks',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    title: title,
+                    assigneeUserId: parseInt(assigneeUserId),
+                    description: description,
+                    priority: priority,
+                    dueDate: dueDate
+                })
+            });
+        }
         if (res && res.code === 200) {
-            Toast.success('タスクを登録しました');
+            Toast.success(taskId ? 'タスク詳細を更新しました' : 'タスクを登録しました');
             const modalEl = document.getElementById('taskModal');
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if (modalInstance) modalInstance.hide();
             loadTasks();
         } else {
-            Toast.error(res.message || 'タスクの登録に失敗しました');
+            Toast.error(res.message || 'タスクの保存に失敗しました');
         }
     } catch (e) {
-        let msg = 'タスクの登録に失敗しました';
+        let msg = 'タスクの保存に失敗しました';
         try {
             if (e.responseJSON && e.responseJSON.message) msg = e.responseJSON.message;
         } catch(err) {}

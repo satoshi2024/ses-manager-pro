@@ -66,7 +66,7 @@
 
             html += `
                         <li><hr class="dropdown-divider border-secondary"></li>
-                        <li><a class="dropdown-item text-primary" href="#" onclick="event.preventDefault(); SES.savedView.openSaveModal();"><i class="bi bi-plus-circle me-1"></i>現在の条件・列・ソートを保存...</a></li>
+                        <li><a class="dropdown-item text-primary" href="#" onclick="event.preventDefault(); SES.savedView.openSaveModal();"><i class="bi bi-plus-circle me-1"></i>現在の検索条件を保存...</a></li>
                     </ul>
                 </div>
             `;

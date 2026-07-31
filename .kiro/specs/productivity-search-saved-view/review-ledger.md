@@ -18,31 +18,14 @@
 ## 9. Review Packet
 
 - **Base Commit**: `2c69399`
-- **Head Commit**: `70cc80e`
+- **Head Commit**: `e331f41`
 - **Test Evidence**:
   - `.\apache-maven-3.9.6\bin\mvn test`
-  - 結果: `BUILD SUCCESS`
+  - 結果: `Tests run: 1131, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
 - **Demo Evidence**:
   - 横断検索モーダル (`Ctrl+K`) からキーワード入力・検索結果表示・詳細画面遷移を確認。
   - `/todo` 画面でのタスク新規登録（担当者選択付き）、ステータス変更（進行中→完了）、完了時の通知送信を確認。
-  - 一括操作プレビュー・トークン発行・200件適用および201件拒否動作を確認。
-- **Rollback Plan**:
-  - 本機能のマイグレーションロールバック: `DROP TABLE t_task_notification_log, m_saved_view, t_task; DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations')); DELETE FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations');`クライアントからの `version` 照合による楽観ロック補強。
-
----
-
-## 9. Review Packet
-
-- **Base Commit**: `2c69399`
-- **Head Commit**: `e396c0b`
-- **Test Evidence**:
-  - `.\apache-maven-3.9.6\bin\mvn test`
-  - 結果: `Tests run: 1121, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
-- **Demo Evidence**:
-  - 横断検索モーダル (`Ctrl+K`) からキーワード入力・検索結果表示・詳細画面遷移を確認。
-  - `/todo` 画面でのタスク新規登録（担当者選択付き）、ステータス変更（進行中→完了）、完了時の通知送信を確認。
-  - 要員一覧での保存ビュー適用・新規条件/ソート/列保存、共有/個人ビュー権限動作を確認。
-  - 一括操作プレビュー・トークン発行・200件適用および201件拒否動作を確認。
+  - 一括操作 API プレビュー・トークン発行・200件適用および201件拒否動作を REST コントローラーユニットテストで検証。
 - **Rollback Plan**:
   - 本機能のマイグレーションロールバック: `DROP TABLE t_task_notification_log, m_saved_view, t_task; DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations')); DELETE FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations');`
 

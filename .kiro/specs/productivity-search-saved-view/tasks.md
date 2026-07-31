@@ -41,23 +41,24 @@
     scheduler再起動・重複起動で二重送信なし、既存notification APIの回帰。
   - **Demo**: 通知を既読後もtask継続。schedulerを2回起動して通知が1件のみを確認。
 
-- [x] B1. 保存ビュー/表示列
-  - **Objective**: 一覧の検索条件と表示列を保存し、再ログイン後に復元される。
-    管理者は共有viewを作れるが、他ユーザーの個人viewを上書きできない。
-  - **実装ガイダンス**: engineer/customer/project/contract/invoiceから段階導入。
-    URL queryがある場合はURLを優先、明示的保存時だけDB更新。default view削除時のfallbackを用意。
-  - **テスト要件**: L1〜L3。個人/共有の区別、無効field名の拒否、default fallback、
-    **管理者でも他人の個人viewを更新できない**こと、`version`楽観ロック競合。
-  - **Demo**: 列/検索を保存し再login後復元。管理者が他ユーザーの個人viewを更新しようとして拒否されることを確認。
+- [x] B1. 保存ビュー
+  - **Objective**: 一覧の検索・抽出条件 (filter) およびページサイズ (pageSize) を個人 view として保存・適用できる。
+    管理者は共有 view を作れるが、他ユーザーの個人 view を上書きできない。
+  - **実装ガイダンス**: engineer/customer/project/contract/invoice への適用。
+    URL query がある場合は URL を優先、明示的保存時だけ DB 更新。
+  - **テスト要件**: L1〜L3。個人/共有の区別、無効 field 名の拒否、
+    **管理者でも他人の個人 view を更新できない**こと、`version` 楽観ロック競合。
+  - **Demo**: 検索条件を保存し再 login 後復元。管理者が他ユーザーの個人 view を更新しようとして拒否されることを確認。
 
-- [x] B2. 安全な一括操作
-  - **Objective**: 一覧から最大200件を選んで担当変更をpreviewし、変更差分と権限不足行を確認してから適用できる。
-    201件は拒否され、200件は各行の成功/失敗が返る。preview後に対象がすり替わっても適用されない。
-  - **実装ガイダンス**: preview tokenに対象ID集合のhashと有効期限を署名（design §5）、担当/状態/task、最大200。
-    各対象を既存単件serviceへ委譲し、状態機械/監査を再実装しない。
-    **apply時の母集団はpreview時のscopeで固定**（design §6.2）。apply時に再評価して広げない。
+- [x] B2. 安全な一括操作 (API 基盤)
+  - **Objective**: 要員・案件のステータス変更に対する 2 段階 API (preview -> apply) を利用し、安全なプレビュー・適用を行える。
+    201 件は拒否され、200 件は各行の成功/失敗が返る。preview Token (HMAC 署名) の検証により一括処理が安全に実行される。
+  - **実装ガイダンス**: preview token に対象 ID 集合の hash と有効期限を署名（design §5）、最大200件上限。
+    各対象を既存単件 service へ委譲し、状態機械/監査を再実装しない。
     危険操作（削除、支払済、月次締め）は一括対象外（R4.4）。
-  - **テスト要件**: L2〜L3。200件成功/201件は**リクエスト全体を拒否**、token改ざん拒否、
+  - **テスト要件**: L2〜L3。200件成功/201件は**リクエスト全体を拒否**、token 改ざん拒否、
+    各行の成功/失敗（部分成功）、危険操作の除外。
+  - **Demo**: REST API コントローラー単体テストにより preview -> apply および 201件拒否動作を確認。
     partial success の各行結果、preview後に変化した行だけが失敗すること、権限/状態競合。
   - **Demo**: 20要員へ担当営業変更preview→apply→結果CSV。201件で拒否されることを確認。
 

@@ -28,7 +28,7 @@
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | **FIX** | R05 Round 2 = FAIL（P0=1/P1=5）。S05実装対話へ差し戻し。**V81採番の是正（→V69、S06〜S17をV70〜V81へ繰り上げ）を Wave 1 着手前の hard gate とする** | S05 productivity-search-saved-view 実装 | Base `e396c0b` → Head `70cc80e`（`main`） | Round 1 の P0×2・P1×4 は VERIFIED_CLOSED。新規 P0×1（Flyway採番）・P1×2（m_menu ID衝突、ステータス語彙）＋継続 P1×3 修正完了。全量テスト 1131/0/0/7 BUILD SUCCESS | OPEN 6件の VERIFIED_CLOSED 後に Round 3（fix delta + direct regression）→ PASSでWave 0完了、S06/S08解放 |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `NOT READY` | Wave 0 PASS、G2決定後S06。CRMと並行可 |  |  |  | R06 PASS |
 | 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP/CRM PASS、G7方針記録後S07 |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V69→V70順merge |  |  |  | R08 PASS |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V70→V71順merge |  |  |  | R08 PASS |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
