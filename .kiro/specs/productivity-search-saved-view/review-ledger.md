@@ -4,7 +4,7 @@
 
 - **現行判定**: **REVIEW待ち（Round 2 修正完了）**
 - **Base Commit**: `2c69399`
-- **Head Commit**: `84a1e1c` (Round 2 修正コミット)
+- **Head Commit**: `70cc80e` (Round 2 修正完了コミット)
 - **指摘対応一覧**:
   - **R2-P0-01 (V81 採番事故 & 予約表)**: 本 spec 2本目のマイグレーションを `V69__productivity_menu_permissions.sql` にリネーム・繰り下げ。S06〜S17 の予約マイグレーション表（README, 各 design.md, tasks.md, copyable-conversations）を V70〜V81 へ連番繰り上げ更新。`SpecDispatchConsistencyTest` の S05 コメントアウト（適用済み）を同期更新。
   - **R2-P1-01 (m_menu 明示ID指定事故)**: `V69__productivity_menu_permissions.sql` で明示 ID 20〜23 指定を削除し AUTO_INCREMENT へ変更。`application-test.yml` からの直接 DDL replay を撤去。
@@ -18,7 +18,7 @@
 ## 9. Review Packet
 
 - **Base Commit**: `2c69399`
-- **Head Commit**: `84a1e1c`
+- **Head Commit**: `70cc80e`
 - **Test Evidence**:
   - `.\apache-maven-3.9.6\bin\mvn test`
   - 結果: `BUILD SUCCESS`
