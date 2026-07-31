@@ -124,7 +124,8 @@ public class TaskApiControllerTest {
                         .contentType("application/json")
                         .content("{\"clearDueDate\":true}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.dueDate").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

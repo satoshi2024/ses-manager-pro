@@ -153,9 +153,10 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         }
         // R2.4: 期限変更通知
         if (!Objects.equals(oldDueDate, task.getDueDate()) && task.getAssigneeUserId() != null) {
+            String dueStr = task.getDueDate() != null ? task.getDueDate().toString() : "期限なし";
             sendNotification(task.getAssigneeUserId(), "TASK_DUE_CHANGED",
-                    "タスク期限が変更されました", "タスク「" + task.getTitle() + "」の期限が " + task.getDueDate() + " に変更されました",
-                    "/todo", "task_due_changed_" + task.getId() + "_" + task.getDueDate());
+                    "タスク期限が変更されました", "タスク「" + task.getTitle() + "」の期限が " + dueStr + " に変更されました",
+                    "/todo", "task_due_changed_" + task.getId() + "_" + dueStr);
         }
 
         return task;

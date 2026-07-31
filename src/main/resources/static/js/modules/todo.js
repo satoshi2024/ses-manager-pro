@@ -58,7 +58,7 @@ function renderTaskTable(tasks) {
                 <td>${dueText}</td>
                 <td class="text-end pe-4">
                     ${!isTerminal ? `
-                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(${t.id}, ${t.assigneeUserId}, '${t.dueDate || ''}', '${SES.escapeHtml(t.title || '')}', '${SES.escapeHtml(t.description || '')}', '${t.priority || 'MEDIUM'}')" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
+                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(this)" data-id="${t.id}" data-assignee="${t.assigneeUserId}" data-due-date="${t.dueDate || ''}" data-title="${SES.escapeHtml(t.title || '')}" data-description="${SES.escapeHtml(t.description || '')}" data-priority="${t.priority || 'MEDIUM'}" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
                         ${t.status === 'NOT_STARTED' ? `<button class="btn btn-sm btn-outline-info me-1" onclick="updateTaskStatus(${t.id}, 'IN_PROGRESS')">進行中へ</button>` : ''}
                         ${t.status === 'IN_PROGRESS' ? `<button class="btn btn-sm btn-success me-1" onclick="updateTaskStatus(${t.id}, 'COMPLETED')">完了</button>` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateTaskStatus(${t.id}, 'CANCELLED')">取消</button>
@@ -78,9 +78,17 @@ function openNewTaskModal() {
     loadUserOptions();
 }
 
-async function openEditTaskModal(id, assigneeUserId, dueDate, title, description, priority) {
+async function openEditTaskModal(el) {
     document.getElementById('taskForm').reset();
-    document.getElementById('task-id').value = id;
+    const ds = el ? (el.dataset || el) : {};
+    const id = ds.id || ds.taskId;
+    const assigneeUserId = ds.assignee || ds.assigneeUserId;
+    const dueDate = ds.dueDate || ds.due;
+    const title = ds.title;
+    const description = ds.description;
+    const priority = ds.priority;
+
+    document.getElementById('task-id').value = id || '';
     const label = document.getElementById('taskModalLabel');
     if (label) label.textContent = 'タスク詳細変更';
 
