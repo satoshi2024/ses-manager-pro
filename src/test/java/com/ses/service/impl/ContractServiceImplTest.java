@@ -56,6 +56,12 @@ class ContractServiceImplTest {
     @Mock
     private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
 
+    @Mock
+    private com.ses.service.BpComplianceService bpComplianceService;
+
+    @Mock
+    private com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
+
     @InjectMocks
     private ContractServiceImpl contractService;
 
@@ -828,5 +834,54 @@ class ContractServiceImplTest {
         contractService.saveWithBusinessRules(contract);
 
         verify(scopeChangeInvalidator, times(1)).invalidate();
+    }
+
+    @Test
+    void updateWithBusinessRules_customerContract_activatesSuccessfullyWithoutBpCompliance() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setEngineerId(10L);
+        old.setStatus("準備中");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setCustomerId(100L); // 顧客IDあり
+        update.setEngineerId(10L);
+        update.setStatus("稼動中");
+
+        // 要員はBP所属なし
+        when(engineerBpAffiliationService.getActiveAffiliationAsOf(eq(10L), any(LocalDate.class))).thenReturn(null);
+
+        contractService.updateWithBusinessRules(update);
+
+        verify(contractMapper).updateById(any(Contract.class));
+        verify(engineerStatusService).onContractActive(10L);
+        verifyNoInteractions(bpComplianceService);
+    }
+
+    @Test
+    void updateWithBusinessRules_bpContract_rejectsWhenComplianceHasError() {
+        Contract old = new Contract();
+        old.setId(2L);
+        old.setEngineerId(20L);
+        old.setStatus("準備中");
+        when(contractMapper.selectByIdForUpdate(2L)).thenReturn(old);
+
+        Contract update = new Contract();
+        update.setId(2L);
+        update.setEngineerId(20L);
+        update.setStatus("稼動中");
+
+        com.ses.entity.EngineerBpAffiliation affiliation = new com.ses.entity.EngineerBpAffiliation();
+        affiliation.setBpCompanyId(500L);
+        when(engineerBpAffiliationService.getActiveAffiliationAsOf(eq(20L), any(LocalDate.class))).thenReturn(affiliation);
+
+        com.ses.dto.compliance.ProcurementComplianceFinding finding = new com.ses.dto.compliance.ProcurementComplianceFinding(
+                "MISSING_CONTRACT_DATE", "ERROR", "委託日未設定", "発注年月日がありません", "/api/contracts/2");
+        when(bpComplianceService.evaluateContractCompliance(eq(500L), any(Contract.class), any())).thenReturn(java.util.List.of(finding));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> contractService.updateWithBusinessRules(update));
+        assertTrue(ex.getMessage().contains("発注コンプライアンス不合格"));
     }
 }

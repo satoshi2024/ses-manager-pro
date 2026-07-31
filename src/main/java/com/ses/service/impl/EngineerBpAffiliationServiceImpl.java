@@ -81,11 +81,11 @@ public class EngineerBpAffiliationServiceImpl extends ServiceImpl<EngineerBpAffi
                 LocalDate originalEnd = existing.getValidTo();
                 existing.setValidTo(validFrom.minusDays(1));
                 this.updateById(existing);
-                // 右側の未被覆区間（新区間の終了後に残る尻尾）を別行として維持する
-                if (effectiveEnd != null
-                        && (originalEnd == null || originalEnd.isAfter(effectiveEnd))) {
+                // 右側の未被覆区間（呼び出し側で有効期限 validTo が明示された場合に残る尻尾）を別行として維持する
+                if (validTo != null
+                        && (originalEnd == null || originalEnd.isAfter(validTo))) {
                     saveAffiliation(existing.getEngineerId(), existing.getBpCompanyId(),
-                            effectiveEnd.plusDays(1), originalEnd);
+                            validTo.plusDays(1), originalEnd);
                 }
             } else {
                 // 新区間の中に開始する既存行: 未被覆の尻尾だけを残す

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @RequestMapping("/bp-company")
 public class BpCompanyPageController {
 
-    @GetMapping
+    @GetMapping({"", "/list"})
     public String list() {
         return "bp-company/list";
     }

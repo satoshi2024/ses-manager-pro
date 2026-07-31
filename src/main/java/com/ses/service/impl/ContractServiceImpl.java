@@ -52,6 +52,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
     private final com.ses.service.AuditLogService auditLogService;
     private final com.ses.service.BpComplianceService bpComplianceService;
+    private final com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
 
     /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -208,10 +209,19 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             engineerStatusService.releaseIfIdle(oldEngineerId);
         }
         if ("稼動中".equals(newStatus)) {
+            // エンジニアの所属BP会社を解決 (BP案件・発注の場合のみコンプライアンス評価を実行)
+            Long bpCompanyId = null;
+            if (newEngineerId != null && engineerBpAffiliationService != null) {
+                com.ses.entity.EngineerBpAffiliation affiliation =
+                        engineerBpAffiliationService.getActiveAffiliationAsOf(newEngineerId, LocalDate.now());
+                if (affiliation != null) {
+                    bpCompanyId = affiliation.getBpCompanyId();
+                }
+            }
             // 発注コンプライアンス必須明示項目等の判定 (ERRORがあれば確定拒否)
-            if (bpComplianceService != null && contract.getCustomerId() != null) {
+            if (bpComplianceService != null && bpCompanyId != null) {
                 List<com.ses.dto.compliance.ProcurementComplianceFinding> findings =
-                        bpComplianceService.evaluateContractCompliance(contract.getCustomerId(), contract, null);
+                        bpComplianceService.evaluateContractCompliance(bpCompanyId, contract, null);
                 boolean hasError = findings.stream().anyMatch(f -> "ERROR".equalsIgnoreCase(f.getSeverity()));
                 if (hasError) {
                     String errorMsg = findings.stream()

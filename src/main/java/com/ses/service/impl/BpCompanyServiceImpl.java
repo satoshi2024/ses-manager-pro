@@ -317,6 +317,10 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         if (source.getAddress() != null) target.setAddress(source.getAddress());
         if (source.getRepresentative() != null) target.setRepresentative(source.getRepresentative());
         if (source.getStatus() != null) target.setStatus(source.getStatus());
+        if (source.getSuspensionReason() != null) target.setSuspensionReason(source.getSuspensionReason());
+        if (source.getSuspensionStartDate() != null) target.setSuspensionStartDate(source.getSuspensionStartDate());
+        if (source.getSuspensionEndDate() != null) target.setSuspensionEndDate(source.getSuspensionEndDate());
+        if (source.getSuspensionApprovedBy() != null) target.setSuspensionApprovedBy(source.getSuspensionApprovedBy());
         if (source.getRating() != null) target.setRating(source.getRating());
         if (source.getPrimarySalesUserId() != null) target.setPrimarySalesUserId(source.getPrimarySalesUserId());
     }

@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V76）
+## 1. DDL（予約V77）
 
 - `t_project_position(id, project_id, position_no, role_name, required_count, skills_json,
   unit_price_min/max, start/end_date, location, allocation_percent, priority, status, version)`。

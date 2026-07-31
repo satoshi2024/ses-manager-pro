@@ -163,7 +163,18 @@ public class BpCompanyApiController {
     }
 
     @PostMapping("/{id}/terms")
-    public ApiResult<BpTerms> addTerms(@PathVariable Long id, @RequestBody BpTerms terms) {
+    public ApiResult<BpTerms> addTerms(@PathVariable Long id, @RequestBody com.ses.dto.bpcompany.BpTermsSaveDto dto) {
+        BpTerms terms = new BpTerms();
+        terms.setEffectiveFrom(dto.getEffectiveFrom());
+        terms.setEffectiveTo(dto.getEffectiveTo());
+        if (dto.getClosingDay() != null) terms.setClosingDay(dto.getClosingDay());
+        if (dto.getPaymentMonthOffset() != null) terms.setPaymentMonthOffset(dto.getPaymentMonthOffset());
+        if (dto.getPaymentDay() != null) terms.setPaymentDay(dto.getPaymentDay());
+        if (dto.getFeeBearer() != null) terms.setFeeBearer(dto.getFeeBearer());
+        if (dto.getPaymentMethod() != null) terms.setPaymentMethod(dto.getPaymentMethod());
+        terms.setFeeBearerExceptionReason(dto.getFeeBearerExceptionReason());
+        if (dto.getMaxPaymentDays() != null) terms.setMaxPaymentDays(dto.getMaxPaymentDays());
+        // feeBearerApprovedBy / feeBearerApprovedAt は入力 DTO から除外し、安全性を確保
         return ApiResult.success(bpCompanyService.addTerms(id, terms));
     }
 

@@ -160,4 +160,43 @@ class EngineerBpAffiliationServiceImplTest {
                 com.ses.common.exception.BusinessException.class,
                 () -> affiliationService.assignBpAffiliation(engineerId, companyB, LocalDate.of(2026, 4, 10), LocalDate.of(2026, 4, 9)));
     }
+
+    @Test
+    @DisplayName("未来予約行が存在する状態での遡及登録（複合ケースでvalid_from重複が発生しないこと）")
+    void testFutureReservationAndRetroactiveCombined() {
+        Long engineerId = 995L;
+        Long companyA = 100L;
+        Long companyB = 200L;
+        Long companyC = 300L;
+
+        // Step 1: 2026-01-01 から A社 (無期限)
+        affiliationService.assignBpAffiliation(engineerId, companyA, LocalDate.of(2026, 1, 1), null);
+
+        // Step 2: 2026-09-01 から B社 (未来予約)
+        affiliationService.assignBpAffiliation(engineerId, companyB, LocalDate.of(2026, 9, 1), null);
+
+        // Step 3: 2026-05-01 から C社 (遡及登録)
+        affiliationService.assignBpAffiliation(engineerId, companyC, LocalDate.of(2026, 5, 1), null);
+
+        List<EngineerBpAffiliation> history = affiliationService.getAffiliationHistory(engineerId);
+
+        // validFrom の重複がないこと
+        long uniqueValidFromCount = history.stream().map(EngineerBpAffiliation::getValidFrom).distinct().count();
+        assertEquals(history.size(), uniqueValidFromCount, "validFrom に重複が存在しないこと");
+
+        // A社は 2026-01-01 ～ 2026-04-30
+        EngineerBpAffiliation affA = history.stream().filter(a -> a.getBpCompanyId().equals(companyA)).findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 1, 1), affA.getValidFrom());
+        assertEquals(LocalDate.of(2026, 4, 30), affA.getValidTo());
+
+        // C社は 2026-05-01 ～ 2026-08-31
+        EngineerBpAffiliation affC = history.stream().filter(a -> a.getBpCompanyId().equals(companyC)).findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 5, 1), affC.getValidFrom());
+        assertEquals(LocalDate.of(2026, 8, 31), affC.getValidTo());
+
+        // B社は 2026-09-01 ～ 無期限
+        EngineerBpAffiliation affB = history.stream().filter(a -> a.getBpCompanyId().equals(companyB)).findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 9, 1), affB.getValidFrom());
+        assertNull(affB.getValidTo());
+    }
 }

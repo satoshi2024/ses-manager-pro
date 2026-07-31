@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS `m_bp_company` (
     `created_by` BIGINT,
     `deleted_flag` INT NOT NULL DEFAULT 0,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_bp_company_normalized` (`tenant_id`, `normalized_name`)
 );
 
 CREATE TABLE IF NOT EXISTS `t_bp_contact` (
@@ -96,7 +97,8 @@ CREATE TABLE IF NOT EXISTS `t_engineer_bp_affiliation` (
     `valid_to` DATE,
     `deleted_flag` INT NOT NULL DEFAULT 0,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_affiliation_eng_from` (`engineer_id`, `valid_from`)
 );
 
 CREATE TABLE IF NOT EXISTS `t_bp_evaluation` (
@@ -136,3 +138,9 @@ ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS bp_company_id BIGINT;
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS bp_company_name_snapshot VARCHAR(255);
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS terms_snapshot_json TEXT;
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS cost_center_id BIGINT;
+
+MERGE INTO `m_system_config` (`config_key`, `config_value`, `description`)
+KEY (`config_key`) VALUES ('procurement.payment-max-days', '60', '発注支払期日の法務設定上限（受領日からの日数）');
+
+MERGE INTO `m_menu` (`menu_key`, `menu_name`, `path_prefix`, `api_prefix`, `sort_order`)
+KEY (`menu_key`) VALUES ('bp-company', 'BP会社管理', '/bp-company', '/api/bp-companies', 45);
