@@ -37,7 +37,7 @@ public class DocumentDetailDTO {
     private Long version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
+
     private List<DocumentVersionDTO> versions;
     private List<DocumentLinkDTO> links;
 }

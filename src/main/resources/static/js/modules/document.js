@@ -56,8 +56,8 @@ function renderTable(pageData) {
     $.each(pageData.records, function (_, doc) {
         const typeBadge = '<span class="badge bg-secondary">' + (doc.documentTypeName || doc.documentType) + '</span>';
         const statusBadge = getStatusBadge(doc.status);
-        const holdBadge = doc.legalHoldFlag === 1 
-            ? '<span class="badge bg-warning text-dark"><i class="bi bi-shield-lock me-1"></i>Hold中</span>' 
+        const holdBadge = doc.legalHoldFlag === 1
+            ? '<span class="badge bg-warning text-dark"><i class="bi bi-shield-lock me-1"></i>Hold中</span>'
             : '<span class="badge bg-light text-dark">なし</span>';
 
         const amountFormatted = doc.amount ? '¥' + Number(doc.amount).toLocaleString() : '-';
@@ -105,7 +105,7 @@ function renderPagination(pageData) {
     if (pageData.pages <= 1) return;
 
     let $ul = $('<ul class="pagination pagination-sm mb-0"></ul>');
-    
+
     // 前へ
     let prevDisabled = pageData.current === 1 ? 'disabled' : '';
     $ul.append(`<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="loadDocuments(${pageData.current - 1}); return false;">前へ</a></li>`);

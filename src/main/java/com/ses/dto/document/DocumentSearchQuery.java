@@ -13,19 +13,19 @@ import java.time.LocalDate;
 public class DocumentSearchQuery {
     private String documentType;
     private String counterpartyName;
-    
+
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
     private LocalDate startDate;
-    
+
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
     private LocalDate endDate;
-    
+
     private BigDecimal minAmount;
     private BigDecimal maxAmount;
     private String direction;
     private String status;
     private Integer legalHoldFlag;
-    
+
     private Integer page = 1;
     private Integer pageSize = 20;
 }
