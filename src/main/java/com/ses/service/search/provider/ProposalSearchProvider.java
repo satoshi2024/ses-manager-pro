@@ -29,6 +29,11 @@ public class ProposalSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "proposal.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedProposalIds();
@@ -38,8 +43,7 @@ public class ProposalSearchProvider implements GlobalSearchProvider {
         }
 
         LambdaQueryWrapper<Proposal> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.like(Proposal::getRemarks, query)
-                .or().like(Proposal::getProposalEmailText, query));
+        wrapper.like(Proposal::getRemarks, query);
 
         if (dataScopeService.isScoped()) {
             wrapper.in(Proposal::getId, dataScopeService.allowedProposalIds());
@@ -52,7 +56,7 @@ public class ProposalSearchProvider implements GlobalSearchProvider {
                 .type(getType())
                 .id(p.getId())
                 .title("提案 ID:" + p.getId())
-                .subtitle(p.getRemarks())
+                .subtitle(p.getRemarks() != null ? p.getRemarks() : "提案")
                 .status(p.getStatus())
                 .url("/proposal/kanban")
                 .updatedAt(p.getUpdatedAt())

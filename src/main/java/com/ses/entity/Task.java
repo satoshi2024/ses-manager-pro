@@ -25,6 +25,8 @@ public class Task {
     private String description;
     private Long assigneeUserId;
     private Long requesterUserId;
+
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private LocalDate dueDate;
     private String priority;
     private String status;

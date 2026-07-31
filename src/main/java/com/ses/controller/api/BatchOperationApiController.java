@@ -3,7 +3,9 @@ package com.ses.controller.api;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.batch.BatchApplyRequestDTO;
 import com.ses.dto.batch.BatchOperationResultDTO;
+import com.ses.dto.batch.BatchPreviewResultDTO;
 import com.ses.dto.batch.BatchStatusUpdateRequestDTO;
 import com.ses.service.BatchOperationService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +22,34 @@ public class BatchOperationApiController {
     private BatchOperationService batchOperationService;
 
     /**
-     * 要員ステータスの一括更新
+     * 要員ステータス一括更新 プレビュー
+     */
+    @PostMapping("/engineers/preview")
+    public ApiResult<BatchPreviewResultDTO> previewEngineerStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        BatchPreviewResultDTO result = batchOperationService.previewEngineerStatusUpdate(
+                request.getIds(), request.getStatus(), userId);
+        return ApiResult.success(result);
+    }
+
+    /**
+     * 要員ステータス一括更新 適用
+     */
+    @PostMapping("/engineers/apply")
+    public ApiResult<BatchOperationResultDTO> applyEngineerStatusBatch(@RequestBody BatchApplyRequestDTO request) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        BatchOperationResultDTO result = batchOperationService.applyEngineerStatusUpdate(request, userId);
+        return ApiResult.success(result);
+    }
+
+    /**
+     * 要員ステータスの一括更新（旧互換用。プレビューTokenなしの直接適用もプレビューToken自動発行で許可）
      */
     @PostMapping("/engineers/status")
     public ApiResult<BatchOperationResultDTO> updateEngineerStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
@@ -28,13 +57,46 @@ public class BatchOperationApiController {
         if (userId == null) {
             throw new BusinessException(401, "認証が必要です");
         }
-        BatchOperationResultDTO result = batchOperationService.batchUpdateEngineerStatus(
+        BatchPreviewResultDTO preview = batchOperationService.previewEngineerStatusUpdate(
+                request.getIds(), request.getStatus(), userId);
+        BatchApplyRequestDTO applyReq = new BatchApplyRequestDTO();
+        applyReq.setIds(request.getIds());
+        applyReq.setStatus(request.getStatus());
+        applyReq.setPreviewToken(preview.getPreviewToken());
+
+        BatchOperationResultDTO result = batchOperationService.applyEngineerStatusUpdate(applyReq, userId);
+        return ApiResult.success(result);
+    }
+
+    /**
+     * 案件ステータス一括更新 プレビュー
+     */
+    @PostMapping("/projects/preview")
+    public ApiResult<BatchPreviewResultDTO> previewProjectStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        BatchPreviewResultDTO result = batchOperationService.previewProjectStatusUpdate(
                 request.getIds(), request.getStatus(), userId);
         return ApiResult.success(result);
     }
 
     /**
-     * 案件ステータスの一括更新
+     * 案件ステータス一括更新 適用
+     */
+    @PostMapping("/projects/apply")
+    public ApiResult<BatchOperationResultDTO> applyProjectStatusBatch(@RequestBody BatchApplyRequestDTO request) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        BatchOperationResultDTO result = batchOperationService.applyProjectStatusUpdate(request, userId);
+        return ApiResult.success(result);
+    }
+
+    /**
+     * 案件ステータスの一括更新（旧互換用）
      */
     @PostMapping("/projects/status")
     public ApiResult<BatchOperationResultDTO> updateProjectStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
@@ -42,8 +104,14 @@ public class BatchOperationApiController {
         if (userId == null) {
             throw new BusinessException(401, "認証が必要です");
         }
-        BatchOperationResultDTO result = batchOperationService.batchUpdateProjectStatus(
+        BatchPreviewResultDTO preview = batchOperationService.previewProjectStatusUpdate(
                 request.getIds(), request.getStatus(), userId);
+        BatchApplyRequestDTO applyReq = new BatchApplyRequestDTO();
+        applyReq.setIds(request.getIds());
+        applyReq.setStatus(request.getStatus());
+        applyReq.setPreviewToken(preview.getPreviewToken());
+
+        BatchOperationResultDTO result = batchOperationService.applyProjectStatusUpdate(applyReq, userId);
         return ApiResult.success(result);
     }
 }

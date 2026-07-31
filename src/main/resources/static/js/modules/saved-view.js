@@ -66,7 +66,7 @@
 
             html += `
                         <li><hr class="dropdown-divider border-secondary"></li>
-                        <li><a class="dropdown-item text-primary" href="#" onclick="event.preventDefault(); SES.savedView.openSaveModal();"><i class="bi bi-plus-circle me-1"></i>現在の条件を保存...</a></li>
+                        <li><a class="dropdown-item text-primary" href="#" onclick="event.preventDefault(); SES.savedView.openSaveModal();"><i class="bi bi-plus-circle me-1"></i>現在の条件・列・ソートを保存...</a></li>
                     </ul>
                 </div>
             `;
@@ -77,8 +77,16 @@
         selectView: function(viewId) {
             const view = this.currentViews.find(v => v.id === viewId);
             if (view && typeof this.applyCallback === 'function') {
-                this.applyCallback(view);
-                SES.toast.success(`ビュー「${view.name}」を適用しました`);
+                try {
+                    let filter = view.filterJson ? JSON.parse(view.filterJson) : {};
+                    let sort = view.sortJson ? JSON.parse(view.sortJson) : null;
+                    let columns = view.columnsJson ? JSON.parse(view.columnsJson) : null;
+                    let pageSize = view.pageSize || 20;
+                    this.applyCallback({ filter: filter, sort: sort, columns: columns, pageSize: pageSize, view: view });
+                    SES.toast.success(`ビュー「${view.name}」を適用しました`);
+                } catch (e) {
+                    SES.toast.error('ビューデータの適用に失敗しました');
+                }
             }
         },
 
@@ -96,7 +104,7 @@
                                 <div class="modal-body">
                                     <div class="mb-3">
                                         <label for="saved-view-name" class="form-label">ビュー名 <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control bg-dark text-white border-secondary" id="saved-view-name" placeholder="例: 稼動中案件一覧" required>
+                                        <input type="text" class="form-control bg-dark text-white border-secondary" id="saved-view-name" placeholder="例: 東京勤務・稼動中一覧" required>
                                     </div>
                                     <div class="mb-3 form-check">
                                         <input type="checkbox" class="form-check-input" id="saved-view-shared">
@@ -127,12 +135,20 @@
                 return;
             }
             const isShared = $('#saved-view-shared').is(':checked');
-            const currentFilters = typeof this.getFiltersCallback === 'function' ? this.getFiltersCallback() : {};
+            const state = typeof this.getFiltersCallback === 'function' ? this.getFiltersCallback() : {};
+
+            const filterObj = state.filter || state;
+            const sortObj = state.sort || null;
+            const columnsArr = state.columns || null;
+            const pageSizeVal = state.pageSize || 20;
 
             const payload = {
                 pageKey: this.pageKey,
                 name: name,
-                filterJson: JSON.stringify(currentFilters),
+                filterJson: JSON.stringify(filterObj),
+                sortJson: sortObj ? JSON.stringify(sortObj) : null,
+                columnsJson: columnsArr ? JSON.stringify(columnsArr) : null,
+                pageSize: pageSizeVal,
                 sharedFlag: isShared ? 1 : 0,
                 ownerUserId: isShared ? null : undefined
             };
@@ -166,18 +182,37 @@
 
         deleteView: function(viewId) {
             const self = this;
-            if (!confirm('この保存ビューを削除してもよろしいですか？')) return;
-
-            $.ajax({
-                url: `/api/saved-views/${viewId}`,
-                type: 'DELETE',
-                success: function(res) {
-                    if (res && res.code === 200) {
-                        SES.toast.success('保存ビューを削除しました');
-                        self.loadViews();
-                    } else {
-                        SES.toast.error(res.message || '削除に失敗しました');
-                    }
+            Swal.fire({
+                title: '保存ビュー削除の確認',
+                text: 'この保存ビューを削除してもよろしいですか？',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: '削除',
+                cancelButtonText: 'キャンセル'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    $.ajax({
+                        url: `/api/saved-views/${viewId}`,
+                        type: 'DELETE',
+                        success: function(res) {
+                            if (res && res.code === 200) {
+                                SES.toast.success('保存ビューを削除しました');
+                                self.loadViews();
+                            } else {
+                                SES.toast.error(res.message || '削除に失敗しました');
+                            }
+                        },
+                        error: function(xhr) {
+                            let msg = '削除に失敗しました';
+                            try {
+                                const json = JSON.parse(xhr.responseText);
+                                if (json.message) msg = json.message;
+                            } catch(e) {}
+                            SES.toast.error(msg);
+                        }
+                    });
                 }
             });
         }

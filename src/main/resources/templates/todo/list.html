@@ -149,6 +149,12 @@
                         </div>
                         <div class="row">
                             <div class="col-md-6 mb-3">
+                                <label for="task-assignee-user-id" class="form-label">担当者 <span class="text-danger">*</span></label>
+                                <select class="form-select bg-dark text-white border-secondary" id="task-assignee-user-id" required>
+                                    <option value="">読み込み中...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
                                 <label for="task-priority" class="form-label">優先度</label>
                                 <select class="form-select bg-dark text-white border-secondary" id="task-priority">
                                     <option value="HIGH">高 (HIGH)</option>
@@ -156,10 +162,10 @@
                                     <option value="LOW">低 (LOW)</option>
                                 </select>
                             </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="task-due-date" class="form-label">期限 (未設定は期限なし)</label>
-                                <input type="date" class="form-control bg-dark text-white border-secondary" id="task-due-date">
-                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="task-due-date" class="form-label">期限 (未設定は期限なし)</label>
+                            <input type="date" class="form-control bg-dark text-white border-secondary" id="task-due-date">
                         </div>
                     </form>
                 </div>

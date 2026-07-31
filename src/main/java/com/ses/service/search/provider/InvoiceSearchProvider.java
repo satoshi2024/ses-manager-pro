@@ -29,6 +29,11 @@ public class InvoiceSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "invoice.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
@@ -51,7 +56,7 @@ public class InvoiceSearchProvider implements GlobalSearchProvider {
                 .type(getType())
                 .id(inv.getId())
                 .title(inv.getInvoiceNo())
-                .subtitle(inv.getBillingMonth()) // 金額 (total/subtotal) は subtitle へ出さない (design §2)
+                .subtitle(inv.getBillingMonth())
                 .status(inv.getStatus())
                 .url("/invoice/list?id=" + inv.getId())
                 .updatedAt(inv.getUpdatedAt())

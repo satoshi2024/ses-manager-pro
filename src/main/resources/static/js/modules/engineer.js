@@ -30,9 +30,9 @@ $(document).ready(function() {
     loadEngineers();
 
     if (window.SES && window.SES.savedView) {
-        SES.savedView.init('engineer_list', function(view) {
+        SES.savedView.init('engineer_list', function(viewData) {
             try {
-                const filters = JSON.parse(view.filterJson || '{}');
+                const filters = viewData.filter || {};
                 $('#searchName').val(filters.fullName || '');
                 $('#searchStatus').val(filters.status || '');
                 $('#searchEmpType').val(filters.employmentType || '');
@@ -43,12 +43,15 @@ $(document).ready(function() {
             } catch(e) { console.error(e); }
         }, function() {
             return {
-                fullName: $('#searchName').val(),
-                status: $('#searchStatus').val(),
-                employmentType: $('#searchEmpType').val(),
-                skillId: $('#searchSkill').val(),
-                salesUserId: $('#searchSalesUser').val(),
-                riskLevel: $('#searchRiskLevel').val()
+                filter: {
+                    fullName: $('#searchName').val(),
+                    status: $('#searchStatus').val(),
+                    employmentType: $('#searchEmpType').val(),
+                    skillId: $('#searchSkill').val(),
+                    salesUserId: $('#searchSalesUser').val(),
+                    riskLevel: $('#searchRiskLevel').val()
+                },
+                pageSize: 10
             };
         });
     }

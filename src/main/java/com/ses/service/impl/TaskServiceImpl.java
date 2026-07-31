@@ -3,9 +3,13 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
 import com.ses.entity.Task;
 import com.ses.mapper.TaskMapper;
+import com.ses.service.NotificationService;
 import com.ses.service.TaskService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -13,9 +17,11 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
+@RequiredArgsConstructor
 public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements TaskService {
 
     private static final String STATUS_NOT_STARTED = "NOT_STARTED";
@@ -24,6 +30,8 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     private static final String STATUS_CANCELLED = "CANCELLED";
 
     private static final Set<String> TERMINAL_STATUSES = Set.of(STATUS_COMPLETED, STATUS_CANCELLED);
+
+    private final ObjectProvider<NotificationService> notificationServiceProvider;
 
     @Override
     @Transactional
@@ -41,6 +49,13 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         task.setStatus(STATUS_NOT_STARTED);
         task.setCompletedAt(null);
         save(task);
+
+        // 新規担当者へ通知
+        if (!Objects.equals(task.getAssigneeUserId(), requesterUserId)) {
+            sendNotification(task.getAssigneeUserId(), "TASK_ASSIGNED",
+                    "タスクが割り当てられました", "タスク: " + task.getTitle(),
+                    "/todo", "task_created_" + task.getId());
+        }
         return task;
     }
 
@@ -51,6 +66,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (task == null) {
             throw new BusinessException(404, "タスクが見つかりません: " + taskId);
         }
+        assertTaskOwnerOrAdmin(task, operatorUserId);
 
         String currentStatus = task.getStatus();
 
@@ -79,6 +95,15 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (!updated) {
             throw new BusinessException(409, "タスクの更新に失敗しました（同時更新の可能性があります）");
         }
+
+        // R2.4: 完了/ステータス変更時に通知を発行
+        if (STATUS_COMPLETED.equals(newStatus)) {
+            if (!Objects.equals(task.getRequesterUserId(), operatorUserId)) {
+                sendNotification(task.getRequesterUserId(), "TASK_COMPLETED",
+                        "タスクが完了しました", "タスク「" + task.getTitle() + "」が完了しました",
+                        "/todo", "task_completed_" + task.getId());
+            }
+        }
         return task;
     }
 
@@ -89,13 +114,18 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (task == null) {
             throw new BusinessException(404, "タスクが見つかりません: " + taskId);
         }
+        assertTaskOwnerOrAdmin(task, operatorUserId);
+
         if (TERMINAL_STATUSES.contains(task.getStatus())) {
             throw new BusinessException(400, "完了または取消済みのタスクは変更できません");
         }
+
+        Long oldAssignee = task.getAssigneeUserId();
+        LocalDate oldDueDate = task.getDueDate();
+
         if (newAssigneeUserId != null) {
             task.setAssigneeUserId(newAssigneeUserId);
         }
-        // due_date IS NULL を明示的に設定することを許容
         task.setDueDate(newDueDate);
         if (StringUtils.hasText(newPriority)) {
             task.setPriority(newPriority);
@@ -104,6 +134,20 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (!updated) {
             throw new BusinessException(409, "タスクの更新に失敗しました（同時更新の可能性があります）");
         }
+
+        // R2.4: 担当者変更通知
+        if (newAssigneeUserId != null && !Objects.equals(oldAssignee, newAssigneeUserId)) {
+            sendNotification(newAssigneeUserId, "TASK_ASSIGNED",
+                    "タスク担当者に指定されました", "タスク「" + task.getTitle() + "」の担当者に指定されました",
+                    "/todo", "task_reassigned_" + task.getId() + "_" + newAssigneeUserId);
+        }
+        // R2.4: 期限変更通知
+        if (!Objects.equals(oldDueDate, newDueDate) && task.getAssigneeUserId() != null) {
+            sendNotification(task.getAssigneeUserId(), "TASK_DUE_CHANGED",
+                    "タスク期限が変更されました", "タスク「" + task.getTitle() + "」の期限が " + newDueDate + " に変更されました",
+                    "/todo", "task_due_changed_" + task.getId() + "_" + newDueDate);
+        }
+
         return task;
     }
 
@@ -124,13 +168,38 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
             return List.of();
         }
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
-        // due_date IS NOT NULL かつ due_date < asOfDate
-        // due_date IS NULL は期限超過判定から明示的に除外
         wrapper.eq(Task::getAssigneeUserId, userId)
                 .in(Task::getStatus, List.of(STATUS_NOT_STARTED, STATUS_IN_PROGRESS))
                 .isNotNull(Task::getDueDate)
                 .lt(Task::getDueDate, asOfDate)
                 .orderByAsc(Task::getDueDate);
         return list(wrapper);
+    }
+
+    private void assertTaskOwnerOrAdmin(Task task, Long operatorUserId) {
+        if (operatorUserId == null) {
+            throw new BusinessException(403, "操作ユーザー情報が不正です");
+        }
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return;
+        }
+        boolean isAssignee = Objects.equals(task.getAssigneeUserId(), operatorUserId);
+        boolean isRequester = Objects.equals(task.getRequesterUserId(), operatorUserId);
+        if (!isAssignee && !isRequester) {
+            throw new BusinessException(404, "タスクが見つかりません: " + task.getId());
+        }
+    }
+
+    private void sendNotification(Long userId, String type, String title, String message, String linkUrl, String dedupeKey) {
+        if (notificationServiceProvider == null) return;
+        NotificationService ns = notificationServiceProvider.getIfAvailable();
+        if (ns != null && userId != null) {
+            try {
+                ns.publishToUser(userId, type, title, message, linkUrl, dedupeKey);
+            } catch (Exception e) {
+                // 通知失敗が本体更新処理を直接失敗させない
+            }
+        }
     }
 }

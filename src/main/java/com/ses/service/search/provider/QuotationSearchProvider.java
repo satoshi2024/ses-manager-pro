@@ -10,6 +10,7 @@ import com.ses.service.security.DataScopeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -29,10 +30,19 @@ public class QuotationSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "quotation.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
+        Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+        Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
+
         if (dataScopeService.isScoped()) {
-            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
-            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
+            boolean hasCustomers = allowedCustomerIds != null && !allowedCustomerIds.isEmpty();
+            boolean hasEngineers = allowedEngineerIds != null && !allowedEngineerIds.isEmpty();
+            if (!hasCustomers && !hasEngineers) {
                 return List.of();
             }
         }
@@ -42,7 +52,14 @@ public class QuotationSearchProvider implements GlobalSearchProvider {
                 .or().like(Quotation::getTitle, query));
 
         if (dataScopeService.isScoped()) {
-            wrapper.in(Quotation::getCustomerId, dataScopeService.allowedCustomerIds());
+            wrapper.and(w -> {
+                if (allowedCustomerIds != null && !allowedCustomerIds.isEmpty()) {
+                    w.in(Quotation::getCustomerId, allowedCustomerIds);
+                }
+                if (allowedEngineerIds != null && !allowedEngineerIds.isEmpty()) {
+                    w.or().in(Quotation::getEngineerId, allowedEngineerIds);
+                }
+            });
         }
 
         wrapper.orderByDesc(Quotation::getUpdatedAt);

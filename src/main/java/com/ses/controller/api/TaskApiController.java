@@ -114,6 +114,12 @@ public class TaskApiController {
         if (notification == null) {
             throw new BusinessException(404, "対象の通知が見つかりません: " + notificationId);
         }
+        if (notification.getRecipientUserId() != null && !java.util.Objects.equals(notification.getRecipientUserId(), userId)) {
+            String role = SecurityUtils.currentRole();
+            if (!"管理者".equals(role)) {
+                throw new BusinessException(404, "対象の通知が見つかりません: " + notificationId);
+            }
+        }
 
         Task task = new Task();
         task.setTitle(notification.getTitle() != null ? notification.getTitle() : "通知関連タスク");

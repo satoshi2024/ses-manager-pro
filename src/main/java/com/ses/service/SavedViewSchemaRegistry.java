@@ -24,27 +24,45 @@ public class SavedViewSchemaRegistry {
     private static final Map<String, Set<String>> ALLOWED_FIELDS_BY_PAGE = new HashMap<>();
 
     static {
-        Set<String> commonFields = Set.of("id", "name", "status", "createdAt", "updatedAt", "deletedFlag");
-        
+        Set<String> commonFields = Set.of(
+                "id", "name", "status", "createdAt", "updatedAt", "deletedFlag",
+                "pageKey", "pageSize", "sortField", "sortOrder", "keyword"
+        );
+
         Set<String> engineerFields = new HashSet<>(commonFields);
-        engineerFields.addAll(List.of("prefecture", "station", "salesUserId", "skill", "unitPrice", "contractStatus", "availabilityDate"));
-        ALLOWED_FIELDS_BY_PAGE.put("engineer", Collections.unmodifiableSet(engineerFields));
+        engineerFields.addAll(List.of(
+                "fullName", "fullNameKana", "initialName", "gender", "employmentType",
+                "expectedUnitPrice", "experienceYears", "prefecture", "railwayCompany",
+                "salesUserId", "skill", "unitPrice", "contractStatus", "availabilityDate",
+                "costCenterId", "organizationId", "skills", "remarks", "riskLevel", "skillId"
+        ));
+        Set<String> unmodifiableEngineer = Collections.unmodifiableSet(engineerFields);
+        ALLOWED_FIELDS_BY_PAGE.put("engineer", unmodifiableEngineer);
+        ALLOWED_FIELDS_BY_PAGE.put("engineer_list", unmodifiableEngineer);
 
         Set<String> customerFields = new HashSet<>(commonFields);
-        customerFields.addAll(List.of("customerCode", "companyName", "industry", "prefecture", "salesUserId"));
-        ALLOWED_FIELDS_BY_PAGE.put("customer", Collections.unmodifiableSet(customerFields));
+        customerFields.addAll(List.of("customerCode", "companyName", "industry", "prefecture", "salesUserId", "commercialFlow", "trustLevel"));
+        Set<String> unmodifiableCustomer = Collections.unmodifiableSet(customerFields);
+        ALLOWED_FIELDS_BY_PAGE.put("customer", unmodifiableCustomer);
+        ALLOWED_FIELDS_BY_PAGE.put("customer_list", unmodifiableCustomer);
 
         Set<String> projectFields = new HashSet<>(commonFields);
-        projectFields.addAll(List.of("projectCode", "projectName", "customerId", "minUnitPrice", "maxUnitPrice"));
-        ALLOWED_FIELDS_BY_PAGE.put("project", Collections.unmodifiableSet(projectFields));
+        projectFields.addAll(List.of("projectCode", "projectName", "customerId", "minUnitPrice", "maxUnitPrice", "unitPriceMin", "unitPriceMax", "commercialFlow", "remoteType"));
+        Set<String> unmodifiableProject = Collections.unmodifiableSet(projectFields);
+        ALLOWED_FIELDS_BY_PAGE.put("project", unmodifiableProject);
+        ALLOWED_FIELDS_BY_PAGE.put("project_list", unmodifiableProject);
 
         Set<String> contractFields = new HashSet<>(commonFields);
-        contractFields.addAll(List.of("contractCode", "engineerId", "customerId", "salesUserId", "startDate", "endDate", "billingAmount"));
-        ALLOWED_FIELDS_BY_PAGE.put("contract", Collections.unmodifiableSet(contractFields));
+        contractFields.addAll(List.of("contractNo", "contractCode", "engineerId", "customerId", "salesUserId", "startDate", "endDate", "sellingPrice", "costPrice", "billingAmount"));
+        Set<String> unmodifiableContract = Collections.unmodifiableSet(contractFields);
+        ALLOWED_FIELDS_BY_PAGE.put("contract", unmodifiableContract);
+        ALLOWED_FIELDS_BY_PAGE.put("contract_list", unmodifiableContract);
 
         Set<String> invoiceFields = new HashSet<>(commonFields);
-        invoiceFields.addAll(List.of("invoiceNo", "customerId", "issueDate", "dueDate", "totalAmount", "taxRate"));
-        ALLOWED_FIELDS_BY_PAGE.put("invoice", Collections.unmodifiableSet(invoiceFields));
+        invoiceFields.addAll(List.of("invoiceNo", "customerId", "billingMonth", "issuedDate", "dueDate", "totalAmount", "subtotal", "tax", "taxRate"));
+        Set<String> unmodifiableInvoice = Collections.unmodifiableSet(invoiceFields);
+        ALLOWED_FIELDS_BY_PAGE.put("invoice", unmodifiableInvoice);
+        ALLOWED_FIELDS_BY_PAGE.put("invoice_list", unmodifiableInvoice);
     }
 
     /**
@@ -63,12 +81,19 @@ public class SavedViewSchemaRegistry {
      * JSON文字列内のキー・フィールド名を構造的に検証
      */
     public void validateJsonContent(String pageKey, String jsonContent) {
+        if (!StringUtils.hasText(pageKey)) {
+            throw new BusinessException(400, "pageKeyは必須です");
+        }
+        Set<String> allowedFields = ALLOWED_FIELDS_BY_PAGE.get(pageKey);
+        if (allowedFields == null) {
+            throw new BusinessException(400, "未登録のpageKeyです: " + pageKey);
+        }
         if (!StringUtils.hasText(jsonContent)) {
             return;
         }
         try {
             JsonNode root = objectMapper.readTree(jsonContent);
-            validateJsonNode(root);
+            validateJsonNode(root, allowedFields);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -76,25 +101,26 @@ public class SavedViewSchemaRegistry {
         }
     }
 
-    private void validateJsonNode(JsonNode node) {
+    private void validateJsonNode(JsonNode node, Set<String> allowedFields) {
         if (node.isObject()) {
             Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> entry = fields.next();
-                validateFieldName(entry.getKey());
-                validateJsonNode(entry.getValue());
+                String key = entry.getKey();
+                validateFieldName(key);
+                if (!allowedFields.contains(key)) {
+                    throw new BusinessException(400, "許可されていないフィールド名が含まれています: " + key);
+                }
+                validateJsonNode(entry.getValue(), allowedFields);
             }
         } else if (node.isArray()) {
             for (JsonNode elem : node) {
-                validateJsonNode(elem);
+                validateJsonNode(elem, allowedFields);
             }
         } else if (node.isTextual()) {
             String val = node.asText();
-            // 配列の要素がフィールド名（表示列一覧等）として送られる場合があるため簡易チェック
-            if (val.startsWith("col_") || SAFE_FIELD_PATTERN.matcher(val).matches()) {
-                // OK
-            } else if (val.contains(";") || val.contains("'") || val.contains("--") || val.contains("<")) {
-                throw new BusinessException(400, "無効な文字列が含まれています: " + val);
+            if (val.contains(";") || val.contains("'") || val.contains("--") || val.contains("<") || val.contains("*")) {
+                throw new BusinessException(400, "無効な文字が含まれています: " + val);
             }
         }
     }

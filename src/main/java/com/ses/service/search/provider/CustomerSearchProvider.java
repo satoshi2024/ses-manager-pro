@@ -29,6 +29,11 @@ public class CustomerSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "customer.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedCustomerIds();

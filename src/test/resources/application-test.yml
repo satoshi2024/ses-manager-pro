@@ -40,6 +40,8 @@ spring:
         - classpath:sql/schema-enterprise-identity-h2.sql
         - classpath:sql/schema-document-archive-h2.sql
         - classpath:sql/schema-productivity-h2.sql
+        - classpath:db/migration/V68__productivity_task_and_saved_view.sql
+        - classpath:db/migration/V81__productivity_menu_permissions.sql
       data-locations:
         - classpath:sql/dummy.sql
 

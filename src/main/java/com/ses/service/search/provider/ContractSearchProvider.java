@@ -29,6 +29,11 @@ public class ContractSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "contract.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedContractIds();
@@ -51,7 +56,7 @@ public class ContractSearchProvider implements GlobalSearchProvider {
                 .type(getType())
                 .id(c.getId())
                 .title(c.getContractNo())
-                .subtitle(c.getContractType()) // 単価・原価は subtitle へ出さない (design §2)
+                .subtitle(c.getContractType())
                 .status(c.getStatus())
                 .url("/contract/list?id=" + c.getId())
                 .updatedAt(c.getUpdatedAt())

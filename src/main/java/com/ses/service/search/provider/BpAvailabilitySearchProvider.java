@@ -6,6 +6,7 @@ import com.ses.dto.search.GlobalSearchResultDTO;
 import com.ses.entity.BpAvailability;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.service.search.GlobalSearchProvider;
+import com.ses.service.security.DataScopeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -18,17 +19,28 @@ public class BpAvailabilitySearchProvider implements GlobalSearchProvider {
     @Autowired
     private BpAvailabilityMapper bpAvailabilityMapper;
 
+    @Autowired
+    private DataScopeService dataScopeService;
+
     @Override
     public String getType() {
         return "BP_COMPANY";
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "bp-availability.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
+        if (dataScopeService.isScoped() && dataScopeService.allowedCustomerIds() != null && dataScopeService.allowedCustomerIds().isEmpty()) {
+            return List.of();
+        }
+
         LambdaQueryWrapper<BpAvailability> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.like(BpAvailability::getBpCompany, query)
-                .or().like(BpAvailability::getInitialName, query)
-                .or().like(BpAvailability::getSkillsJson, query));
+                .or().like(BpAvailability::getInitialName, query));
 
         wrapper.orderByDesc(BpAvailability::getUpdatedAt);
 
@@ -37,7 +49,7 @@ public class BpAvailabilitySearchProvider implements GlobalSearchProvider {
                 .type(getType())
                 .id(b.getId())
                 .title(b.getBpCompany() + " (" + (b.getInitialName() != null ? b.getInitialName() : "") + ")")
-                .subtitle(b.getSkillsJson())
+                .subtitle(b.getSkillsJson() != null ? b.getSkillsJson() : "BP要員情報")
                 .status(b.getStatus())
                 .url("/bp-availability/list")
                 .updatedAt(b.getUpdatedAt())

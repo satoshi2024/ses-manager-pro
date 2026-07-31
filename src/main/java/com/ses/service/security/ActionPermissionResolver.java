@@ -50,7 +50,11 @@ public final class ActionPermissionResolver {
             Map.entry("skillsheet-templates", "skillsheet-template"),
             Map.entry("system-configs", "system-config"),
             Map.entry("users", "user"),
-            Map.entry("work-records", "work-record")
+            Map.entry("work-records", "work-record"),
+            Map.entry("search", "search"),
+            Map.entry("tasks", "task"),
+            Map.entry("saved-views", "saved-view"),
+            Map.entry("batch-operations", "batch-operation")
     );
 
     private ActionPermissionResolver() {
@@ -142,6 +146,18 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/work-records")
                 && (uri.endsWith("/approve") || uri.endsWith("/reject"))) {
             return "work-record.approve";
+        }
+        if (matchesPrefix(uri, "/api/search")) {
+            return "search.view";
+        }
+        if (matchesPrefix(uri, "/api/tasks")) {
+            return action("task", method);
+        }
+        if (matchesPrefix(uri, "/api/saved-views")) {
+            return action("saved-view", method);
+        }
+        if (matchesPrefix(uri, "/api/batch-operations")) {
+            return action("batch-operation", method);
         }
         return action(resource, method);
     }

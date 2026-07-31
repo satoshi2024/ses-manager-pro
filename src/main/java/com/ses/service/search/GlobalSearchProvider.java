@@ -15,6 +15,11 @@ public interface GlobalSearchProvider {
     String getType();
 
     /**
+     * 認可に必要な Action Key (例: engineer.view, invoice.view)
+     */
+    String getRequiredActionKey();
+
+    /**
      * 権限スコープ内でクエリにマッチする検索結果を取得
      */
     List<GlobalSearchResultDTO> search(String query, int maxResults);

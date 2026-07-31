@@ -29,6 +29,11 @@ public class ProjectSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "project.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedProjectIds();
@@ -38,8 +43,7 @@ public class ProjectSearchProvider implements GlobalSearchProvider {
         }
 
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.like(Project::getProjectName, query)
-                .or().like(Project::getDescription, query));
+        wrapper.and(w -> w.like(Project::getProjectName, query));
 
         if (dataScopeService.isScoped()) {
             wrapper.in(Project::getId, dataScopeService.allowedProjectIds());

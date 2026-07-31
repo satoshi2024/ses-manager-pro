@@ -29,6 +29,11 @@ public class EngineerSearchProvider implements GlobalSearchProvider {
     }
 
     @Override
+    public String getRequiredActionKey() {
+        return "engineer.view";
+    }
+
+    @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedEngineerIds();
@@ -39,8 +44,7 @@ public class EngineerSearchProvider implements GlobalSearchProvider {
 
         LambdaQueryWrapper<Engineer> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.like(Engineer::getFullName, query)
-                .or().like(Engineer::getFullNameKana, query)
-                .or().like(Engineer::getResumeSummary, query));
+                .or().like(Engineer::getFullNameKana, query));
 
         if (dataScopeService.isScoped()) {
             wrapper.in(Engineer::getId, dataScopeService.allowedEngineerIds());
@@ -53,7 +57,7 @@ public class EngineerSearchProvider implements GlobalSearchProvider {
                 .type(getType())
                 .id(e.getId())
                 .title(e.getFullName())
-                .subtitle(e.getResumeSummary())
+                .subtitle(e.getEmploymentType() != null ? e.getEmploymentType() : "要員")
                 .status(e.getStatus())
                 .url("/engineer/detail?id=" + e.getId())
                 .updatedAt(e.getUpdatedAt())

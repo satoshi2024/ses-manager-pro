@@ -349,6 +349,12 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_task", "due_date");
             assertColumnExists(st, "m_saved_view", "page_key");
             assertColumnExists(st, "m_saved_view", "owner_user_id");
+
+            // V81: 生産性向上機能 メニュー・権限マスタ
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='search'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='tasks'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='saved-views'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='batch-operations'");
         }
     }
 

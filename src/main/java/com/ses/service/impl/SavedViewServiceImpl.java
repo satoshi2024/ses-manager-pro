@@ -69,6 +69,9 @@ public class SavedViewServiceImpl extends ServiceImpl<SavedViewMapper, SavedView
                 throw new BusinessException(403, "他ユーザーの個人ビューを上書き・更新することはできません");
             }
         }
+        if (view.getVersion() != null && !view.getVersion().equals(existing.getVersion())) {
+            throw new BusinessException(409, "保存ビューの更新に失敗しました（バージョン競合）");
+        }
 
         existing.setName(view.getName());
         existing.setFilterJson(view.getFilterJson());

@@ -72,12 +72,39 @@ function renderTaskTable(tasks) {
 function openNewTaskModal() {
     document.getElementById('taskForm').reset();
     document.getElementById('task-id').value = '';
+    loadUserOptions();
+}
+
+function loadUserOptions() {
+    const $select = $('#task-assignee-user-id');
+    if (!$select.length) return;
+    $.ajax({
+        url: '/api/autocomplete/users',
+        type: 'GET',
+        success: function(res) {
+            if (res && res.code === 200 && res.data) {
+                let html = '';
+                res.data.forEach(u => {
+                    html += `<option value="${u.id}">${SES.escapeHtml(u.realName || u.username)}</option>`;
+                });
+                $select.html(html);
+            }
+        },
+        error: function() {
+            $select.html('<option value="">読み込み失敗</option>');
+        }
+    });
 }
 
 async function saveTask() {
     const title = document.getElementById('task-title').value.trim();
     if (!title) {
         Toast.error('タスク件名を入力してください');
+        return;
+    }
+    const assigneeUserId = document.getElementById('task-assignee-user-id').value;
+    if (!assigneeUserId) {
+        Toast.error('担当者を選択してください');
         return;
     }
     const description = document.getElementById('task-description').value.trim();
@@ -91,6 +118,7 @@ async function saveTask() {
             contentType: 'application/json',
             data: JSON.stringify({
                 title: title,
+                assigneeUserId: parseInt(assigneeUserId),
                 description: description,
                 priority: priority,
                 dueDate: dueDate
@@ -102,9 +130,15 @@ async function saveTask() {
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if (modalInstance) modalInstance.hide();
             loadTasks();
+        } else {
+            Toast.error(res.message || 'タスクの登録に失敗しました');
         }
     } catch (e) {
-        console.error(e);
+        let msg = 'タスクの登録に失敗しました';
+        try {
+            if (e.responseJSON && e.responseJSON.message) msg = e.responseJSON.message;
+        } catch(err) {}
+        Toast.error(msg);
     }
 }
 
@@ -117,9 +151,15 @@ async function updateTaskStatus(taskId, status) {
         if (res && res.code === 200) {
             Toast.success('タスクを更新しました');
             loadTasks();
+        } else {
+            Toast.error(res.message || 'タスクの更新に失敗しました');
         }
     } catch (e) {
-        console.error(e);
+        let msg = 'タスクの更新に失敗しました';
+        try {
+            if (e.responseJSON && e.responseJSON.message) msg = e.responseJSON.message;
+        } catch(err) {}
+        Toast.error(msg);
     }
 }
 
@@ -133,9 +173,15 @@ async function convertNotificationToTask(event, notificationId) {
         if (res && res.code === 200) {
             Toast.success('通知からタスクを作成しました');
             loadTasks();
+        } else {
+            Toast.error(res.message || 'タスクの作成に失敗しました');
         }
     } catch (e) {
-        console.error(e);
+        let msg = 'タスクの作成に失敗しました';
+        try {
+            if (e.responseJSON && e.responseJSON.message) msg = e.responseJSON.message;
+        } catch(err) {}
+        Toast.error(msg);
     }
 }
 
