@@ -6,6 +6,7 @@ import com.ses.dto.bpcompany.BpTermsDto;
 import com.ses.entity.BpBankAccount;
 import com.ses.entity.BpCompany;
 import com.ses.entity.BpTerms;
+import com.ses.mapper.BpBankAccountMapper;
 import com.ses.service.BpCompanyService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,9 @@ class BpCompanyServiceImplTest {
 
     @Autowired
     private BpCompanyService bpCompanyService;
+
+    @Autowired
+    private BpBankAccountMapper bpBankAccountMapper;
 
     @Test
     @DisplayName("BP会社の作成・取得とcomplianceApplicabilityがnullの時『未確認』であることの検証")
@@ -66,7 +70,7 @@ class BpCompanyServiceImplTest {
                 .build();
         bpCompanyService.createBpCompany(company);
 
-        BpBankAccount account = bpCompanyService.addBankAccount(
+        BpBankAccountDto account = bpCompanyService.addBankAccount(
                 company.getId(),
                 "三菱UFJ銀行",
                 "本店営業部",
@@ -85,6 +89,21 @@ class BpCompanyServiceImplTest {
         BpBankAccountDto dto = bankAccounts.get(0);
         assertEquals("****4567", dto.getMaskedLabel());
         assertEquals("三菱UFJ銀行", dto.getBankName());
+
+        // 保存値は平文・Base64ではなくAES暗号文であること（復号値は通常APIで返さない）
+        BpBankAccount stored = bpBankAccountMapper.selectById(account.getId());
+        assertNotNull(stored.getEncryptedAccountNumber());
+        assertNotEquals("1234567", stored.getEncryptedAccountNumber());
+        assertFalse(stored.getEncryptedAccountNumber().contains("1234567"));
+        assertEquals("PENDING", stored.getApprovalStatus());
+
+        // 承認状態CAS: PENDING -> APPROVED は成功し、2回目（二重承認）は拒否される
+        bpCompanyService.updateBankAccountApproval(account.getId(), "APPROVED", 10L);
+        BpBankAccount approved = bpBankAccountMapper.selectById(account.getId());
+        assertEquals("APPROVED", approved.getApprovalStatus());
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> bpCompanyService.updateBankAccountApproval(account.getId(), "REJECTED", 10L));
     }
 
     @Test

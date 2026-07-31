@@ -23,6 +23,8 @@ public class BpCompany extends BaseEntity {
     private Long tenantId;
     private String legalName;
     private String nameKana;
+    /** 仮BP冪等生成用の正規化名称（PROVISIONALのみ設定。正式化時にNULL化）。 */
+    private String normalizedName;
     private String entityType; // CORPORATE / INDIVIDUAL / FREELANCE / PROVISIONAL
     private String corporateNumber;
     private String invoiceRegistrationNumber;

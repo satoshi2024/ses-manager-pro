@@ -200,6 +200,12 @@ CREATE TABLE t_contract (
   fraction_rule           VARCHAR(50),
   auto_renew              TINYINT DEFAULT 0,
   status                  VARCHAR(20) DEFAULT '稼動中',
+  contract_date           DATE,
+  job_description         VARCHAR(2000),
+  work_location           VARCHAR(500),
+  inspection_due_date     DATE,
+  payment_due_date        DATE,
+  payment_method          VARCHAR(50),
   remarks                 TEXT,
   direct_command_flag     TINYINT NOT NULL DEFAULT 0,
   sales_user_id           BIGINT,
@@ -617,6 +623,7 @@ CREATE TABLE m_bp_company (
     tenant_id BIGINT NOT NULL DEFAULT 1,
     legal_name VARCHAR(255) NOT NULL,
     name_kana VARCHAR(255),
+    normalized_name VARCHAR(255),
     entity_type VARCHAR(50) NOT NULL,
     corporate_number VARCHAR(13),
     invoice_registration_number VARCHAR(14),
@@ -635,7 +642,8 @@ CREATE TABLE m_bp_company (
     created_by BIGINT,
     deleted_flag INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, normalized_name)
 );
 
 DROP TABLE IF EXISTS t_bp_contact CASCADE;
@@ -687,6 +695,9 @@ CREATE TABLE t_bp_terms (
     payment_day INT NOT NULL DEFAULT 30,
     fee_bearer VARCHAR(20) NOT NULL DEFAULT 'PAYEE',
     payment_method VARCHAR(50) NOT NULL DEFAULT 'BANK_TRANSFER',
+    fee_bearer_exception_reason VARCHAR(500),
+    fee_bearer_approved_by BIGINT,
+    fee_bearer_approved_at DATETIME,
     max_payment_days INT NOT NULL DEFAULT 60,
     version INT NOT NULL DEFAULT 1,
     deleted_flag INT NOT NULL DEFAULT 0,

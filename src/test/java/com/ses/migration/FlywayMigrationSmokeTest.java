@@ -156,6 +156,37 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability'");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability-ingestion'");
 
+            // BP会社マスタ・発注コンプライアンス(V70 / bp-company-master-procurement-compliance)
+            assertTableExists(st, "m_bp_company");
+            assertTableExists(st, "t_bp_contact");
+            assertTableExists(st, "t_bp_bank_account");
+            assertTableExists(st, "t_bp_terms");
+            assertTableExists(st, "t_engineer_bp_affiliation");
+            assertTableExists(st, "t_bp_evaluation");
+            assertTableExists(st, "t_bp_price_negotiation");
+            assertColumnExists(st, "m_bp_company", "normalized_name");
+            assertColumnExists(st, "m_bp_company", "compliance_applicability");
+            assertColumnExists(st, "m_bp_company", "version");
+            assertColumnExists(st, "t_bp_bank_account", "encrypted_account_number");
+            assertColumnExists(st, "t_bp_bank_account", "masked_label");
+            assertColumnExists(st, "t_bp_terms", "fee_bearer_exception_reason");
+            assertColumnExists(st, "t_bp_terms", "fee_bearer_approved_by");
+            assertColumnExists(st, "t_bp_availability", "bp_company_id");
+            assertColumnExists(st, "t_bp_payment", "bp_company_id");
+            assertColumnExists(st, "t_bp_payment", "bp_company_name_snapshot");
+            assertColumnExists(st, "t_bp_payment", "terms_snapshot_json");
+            assertColumnExists(st, "t_contract", "contract_date");
+            assertColumnExists(st, "t_contract", "job_description");
+            assertColumnExists(st, "t_contract", "work_location");
+            assertColumnExists(st, "t_contract", "inspection_due_date");
+            assertColumnExists(st, "t_contract", "payment_due_date");
+            assertColumnExists(st, "t_contract", "payment_method");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-company'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='管理者' AND m.menu_key='bp-company'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='procurement.payment-max-days'");
+            assertIndexExists(st, "m_bp_company", "uk_bp_company_normalized");
+
             // 資金繰り予測(V46, V48, V49) と スキルシートテンプレート(V55)
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.opening-balance'");
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.bp-payment-site-months'");

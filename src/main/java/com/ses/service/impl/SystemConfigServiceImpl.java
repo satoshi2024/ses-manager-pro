@@ -85,6 +85,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("retention.risk.bench-warn-days", ConfigSchema.integer(0, null));
         SCHEMAS.put("retention.risk.followup-interval-days", ConfigSchema.integer(0, null));
         SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
+        SCHEMAS.put("procurement.payment-max-days", ConfigSchema.integer(1, null));
     }
 
     private void ensureLoaded() {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
 import com.ses.dto.bpcompany.BpBankAccountDto;
 import com.ses.dto.bpcompany.BpCompanyDto;
 import com.ses.dto.bpcompany.BpTermsDto;
@@ -17,12 +18,20 @@ import com.ses.mapper.BpTermsMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.BpCompanyService;
 import com.ses.service.BpTermsResolver;
+import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Base64;
@@ -39,6 +48,22 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     private final BpTermsMapper termsMapper;
     private final BpTermsResolver termsResolver;
     private final SysUserMapper sysUserMapper;
+    private final DataScopeService dataScopeService;
+
+    @Value("${bp.bank-account-encryption-key:dev-only-change-this-bank-key}")
+    private String bankAccountEncryptionKey;
+
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    @EventListener(ApplicationReadyEvent.class)
+    void validateBankKeyConfig() {
+        if (activeProfile.contains("prod") && bankAccountEncryptionKey.startsWith("dev-only")) {
+            throw new IllegalStateException("bp.bank-account-encryption-key must be configured in prod");
+        }
+    }
 
     @Override
     public Page<BpCompanyDto> searchBpCompanies(String keyword, String entityType, String status, long current, long size) {
@@ -57,6 +82,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         if (StringUtils.hasText(status)) {
             wrapper.eq(BpCompany::getStatus, status);
         }
+        applySalesDataScope(wrapper);
         wrapper.orderByDesc(BpCompany::getId);
 
         Page<BpCompany> pageResult = this.page(pageParam, wrapper);
@@ -91,6 +117,12 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         if (entity == null) {
             throw new BusinessException(404, "BP会社が見つかりません: " + id);
         }
+        if (dataScopeService.isSalesDataScoped()) {
+            Long currentUserId = SecurityUtils.currentUserId();
+            if (currentUserId == null || !Objects.equals(entity.getPrimarySalesUserId(), currentUserId)) {
+                throw new BusinessException(404, "BP会社が見つかりません: " + id);
+            }
+        }
         BpCompanyDto dto = convertToDto(entity);
         if (entity.getPrimarySalesUserId() != null) {
             SysUser user = sysUserMapper.selectById(entity.getPrimarySalesUserId());
@@ -121,7 +153,16 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         if (existing == null) {
             throw new BusinessException(404, "更新対象のBP会社が見つかりません");
         }
-        this.updateById(bpCompany);
+        applyNonNullFields(existing, bpCompany);
+        this.updateById(existing);
+        // 仮BPの正式化時は正規化名を外し、同名別法人の重複登録（R1.5警告・非block）を可能にする。
+        if ("PROVISIONAL".equalsIgnoreCase(existing.getEntityType())
+                && bpCompany.getEntityType() != null
+                && !"PROVISIONAL".equalsIgnoreCase(bpCompany.getEntityType())) {
+            this.update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpCompany>()
+                    .eq(BpCompany::getId, existing.getId())
+                    .set(BpCompany::getNormalizedName, null));
+        }
         return this.getById(bpCompany.getId());
     }
 
@@ -141,12 +182,13 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
 
     @Override
     @Transactional
-    public BpBankAccount addBankAccount(Long bpCompanyId, String bankName, String branchName, String accountType, String accountNumber, String accountHolder, LocalDate validFrom, LocalDate validTo) {
+    public BpBankAccountDto addBankAccount(Long bpCompanyId, String bankName, String branchName, String accountType, String accountNumber, String accountHolder, LocalDate validFrom, LocalDate validTo) {
         if (!StringUtils.hasText(accountNumber)) {
             throw new BusinessException(400, "口座番号は必須です");
         }
-        String masked = "****" + (accountNumber.length() >= 4 ? accountNumber.substring(accountNumber.length() - 4) : accountNumber);
-        String encrypted = Base64.getEncoder().encodeToString(accountNumber.getBytes(StandardCharsets.UTF_8));
+        String lastFour = accountNumber.length() >= 4 ? accountNumber.substring(accountNumber.length() - 4) : "";
+        String masked = "****" + lastFour;
+        String encrypted = encryptAccountNumber(accountNumber);
 
         BpBankAccount bankAccount = BpBankAccount.builder()
                 .tenantId(1L)
@@ -163,7 +205,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
                 .build();
 
         bankAccountMapper.insert(bankAccount);
-        return bankAccount;
+        return convertToBankDto(bankAccount);
     }
 
     @Override
@@ -178,15 +220,18 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
 
     @Override
     @Transactional
-    public void approveBankAccount(Long bankAccountId, Long operatorUserId) {
-        BpBankAccount account = bankAccountMapper.selectById(bankAccountId);
-        if (account == null) {
-            throw new BusinessException(404, "口座情報が見つかりません");
+    public void updateBankAccountApproval(Long bankAccountId, String approvalStatus, Long operatorUserId) {
+        String nextStatus = "APPROVED".equalsIgnoreCase(approvalStatus) ? "APPROVED" : "REJECTED";
+        int updated = bankAccountMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpBankAccount>()
+                        .eq(BpBankAccount::getId, bankAccountId)
+                        .eq(BpBankAccount::getApprovalStatus, "PENDING")
+                        .set(BpBankAccount::getApprovalStatus, nextStatus)
+                        .set(BpBankAccount::getApprovedBy, operatorUserId)
+                        .set(BpBankAccount::getApprovedAt, LocalDateTime.now()));
+        if (updated == 0) {
+            throw new BusinessException(409, "口座は申請中状態でないため承認/却下できません");
         }
-        account.setApprovalStatus("APPROVED");
-        account.setApprovedBy(operatorUserId);
-        account.setApprovedAt(LocalDateTime.now());
-        bankAccountMapper.updateById(account);
     }
 
     @Override
@@ -196,6 +241,16 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
         terms.setBpCompanyId(bpCompanyId);
         if (terms.getEffectiveFrom() == null) {
             terms.setEffectiveFrom(LocalDate.now());
+        }
+        if (terms.getEffectiveTo() != null && terms.getEffectiveFrom().isAfter(terms.getEffectiveTo())) {
+            throw new BusinessException(400, "条件の有効期間が不正です（開始日は終了日以前）");
+        }
+        LambdaQueryWrapper<BpTerms> overlapWrapper = new LambdaQueryWrapper<>();
+        overlapWrapper.eq(BpTerms::getBpCompanyId, bpCompanyId)
+                .le(BpTerms::getEffectiveFrom, terms.getEffectiveTo() != null ? terms.getEffectiveTo() : LocalDate.MAX)
+                .and(w -> w.isNull(BpTerms::getEffectiveTo).or().ge(BpTerms::getEffectiveTo, terms.getEffectiveFrom()));
+        if (termsMapper.selectCount(overlapWrapper) > 0) {
+            throw new BusinessException(409, "同一BP会社に重複する有効期間の支払条件が存在します");
         }
         termsMapper.insert(terms);
         return terms;
@@ -220,6 +275,52 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
                 .maxPaymentDays(terms.getMaxPaymentDays())
                 .version(terms.getVersion())
                 .build();
+    }
+
+    private void applySalesDataScope(LambdaQueryWrapper<BpCompany> wrapper) {
+        if (!dataScopeService.isSalesDataScoped()) {
+            return;
+        }
+        Long currentUserId = SecurityUtils.currentUserId();
+        if (currentUserId == null) {
+            // 許可集合が空のときはDB側で0件にする（空集合＝全件に化けない）。
+            wrapper.eq(BpCompany::getId, -1L);
+        } else {
+            wrapper.eq(BpCompany::getPrimarySalesUserId, currentUserId);
+        }
+    }
+
+    private void applyNonNullFields(BpCompany target, BpCompany source) {
+        if (source.getLegalName() != null) target.setLegalName(source.getLegalName());
+        if (source.getNameKana() != null) target.setNameKana(source.getNameKana());
+        if (source.getEntityType() != null) target.setEntityType(source.getEntityType());
+        if (source.getCorporateNumber() != null) target.setCorporateNumber(source.getCorporateNumber());
+        if (source.getInvoiceRegistrationNumber() != null) target.setInvoiceRegistrationNumber(source.getInvoiceRegistrationNumber());
+        if (source.getCapitalBand() != null) target.setCapitalBand(source.getCapitalBand());
+        if (source.getEmployeeBand() != null) target.setEmployeeBand(source.getEmployeeBand());
+        if (source.getAddress() != null) target.setAddress(source.getAddress());
+        if (source.getRepresentative() != null) target.setRepresentative(source.getRepresentative());
+        if (source.getStatus() != null) target.setStatus(source.getStatus());
+        if (source.getRating() != null) target.setRating(source.getRating());
+        if (source.getPrimarySalesUserId() != null) target.setPrimarySalesUserId(source.getPrimarySalesUserId());
+    }
+
+    private String encryptAccountNumber(String plain) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            byte[] iv = new byte[12];
+            SECURE_RANDOM.nextBytes(iv);
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(
+                    java.util.Arrays.copyOf(bankAccountEncryptionKey.getBytes(StandardCharsets.UTF_8), 32), "AES"),
+                    new GCMParameterSpec(128, iv));
+            byte[] encrypted = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+            byte[] combined = new byte[iv.length + encrypted.length];
+            System.arraycopy(iv, 0, combined, 0, iv.length);
+            System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+            return Base64.getEncoder().encodeToString(combined);
+        } catch (Exception e) {
+            throw new BusinessException(500, "口座番号の暗号化に失敗しました");
+        }
     }
 
     private BpCompanyDto convertToDto(BpCompany c) {

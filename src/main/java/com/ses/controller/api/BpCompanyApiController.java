@@ -1,7 +1,9 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.SecurityUtils;
 import com.ses.dto.bpcompany.BpBankAccountDto;
 import com.ses.dto.bpcompany.BpCompanyDto;
 import com.ses.dto.bpcompany.BpTermsDto;
@@ -64,18 +66,32 @@ public class BpCompanyApiController {
     public ApiResult<Void> updateApplicability(
             @PathVariable Long id,
             @RequestBody ApplicabilityReq req) {
-        bpCompanyService.updateComplianceApplicability(id, req.getApplicability(), req.getNote(), 1L);
+        requireAdmin();
+        bpCompanyService.updateComplianceApplicability(id, req.getApplicability(), req.getNote(), SecurityUtils.currentUserId());
         return ApiResult.success(null);
     }
 
     @PostMapping("/{id}/bank-accounts")
-    public ApiResult<BpBankAccount> addBankAccount(
+    public ApiResult<BpBankAccountDto> addBankAccount(
             @PathVariable Long id,
             @RequestBody BankAccountReq req) {
-        BpBankAccount account = bpCompanyService.addBankAccount(
+        requireAdmin();
+        BpBankAccountDto account = bpCompanyService.addBankAccount(
                 id, req.getBankName(), req.getBranchName(), req.getAccountType(),
                 req.getAccountNumber(), req.getAccountHolder(), req.getValidFrom(), req.getValidTo());
         return ApiResult.success(account);
+    }
+
+    @PutMapping("/{id}/bank-accounts/{accountId}/approval")
+    public ApiResult<Void> updateBankAccountApproval(
+            @PathVariable Long id,
+            @PathVariable Long accountId,
+            @RequestBody BankAccountApprovalReq req) {
+        requireAdmin();
+        bpCompanyService.updateBankAccountApproval(accountId,
+                Boolean.TRUE.equals(req.getApproved()) ? "APPROVED" : "REJECTED",
+                SecurityUtils.currentUserId());
+        return ApiResult.success(null);
     }
 
     @GetMapping("/{id}/bank-accounts")
@@ -144,9 +160,20 @@ public class BpCompanyApiController {
     }
 
     @Data
+    public static class BankAccountApprovalReq {
+        private Boolean approved;
+    }
+
+    @Data
     public static class PriceNegotiationReq {
         private java.math.BigDecimal requestedAmount;
         private String summary;
         private Long documentId;
+    }
+
+    private void requireAdmin() {
+        if (!"管理者".equals(SecurityUtils.currentRole())) {
+            throw new BusinessException(403, "この操作は管理者のみ実行できます");
+        }
     }
 }

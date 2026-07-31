@@ -47,17 +47,32 @@ public class BpPriceNegotiationServiceImpl extends ServiceImpl<BpPriceNegotiatio
             throw new BusinessException(404, "対象の価格協議記録が見つかりません");
         }
 
-        neg.setStatus(status != null ? status : "AGREED");
-        neg.setRespondedAt(LocalDate.now());
-        if (agreedAmount != null) {
-            neg.setAgreedAmount(agreedAmount);
+        String nextStatus = status != null ? status : "AGREED";
+        if (!List.of("RESPONDED", "AGREED", "REJECTED").contains(nextStatus)) {
+            throw new BusinessException(400, "価格協議の回答状態が不正です");
         }
-        if (summary != null) {
-            neg.setSummary(summary);
+        boolean allowed = "REQUESTED".equals(neg.getStatus()) || "RESPONDED".equals(neg.getStatus());
+        if (!allowed) {
+            throw new BusinessException(409, "この価格協議は回答済みのため更新できません");
         }
 
-        this.updateById(neg);
-        return neg;
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpPriceNegotiation> update =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        update.eq(BpPriceNegotiation::getId, negotiationId)
+                .eq(BpPriceNegotiation::getStatus, neg.getStatus())
+                .set(BpPriceNegotiation::getStatus, nextStatus)
+                .set(BpPriceNegotiation::getRespondedAt, LocalDate.now());
+        if (agreedAmount != null) {
+            update.set(BpPriceNegotiation::getAgreedAmount, agreedAmount);
+        }
+        if (summary != null) {
+            update.set(BpPriceNegotiation::getSummary, summary);
+        }
+        boolean updated = this.update(update);
+        if (!updated) {
+            throw new BusinessException(409, "価格協議の状態が変更されています。再読み込みしてください");
+        }
+        return this.getById(negotiationId);
     }
 
     @Override

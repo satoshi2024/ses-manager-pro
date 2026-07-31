@@ -173,10 +173,14 @@ public class BpAvailabilityIngestionServiceImpl
         if (dto == null || dto.getInitialName() == null || dto.getInitialName().isBlank()) {
             throw BusinessException.of("error.bpAvailability.nameRequired");
         }
+        if (dto.getBpCompany() != null && !dto.getBpCompany().isBlank() && dto.getBpCompanyId() == null) {
+            throw BusinessException.of(400, "error.bpAvailability.bpCompanyRequired");
+        }
 
         BpAvailability availability = new BpAvailability();
         availability.setInitialName(dto.getInitialName());
         availability.setBpCompany(dto.getBpCompany());
+        availability.setBpCompanyId(dto.getBpCompanyId());
         
         try {
             availability.setSkillsJson(objectMapper.writeValueAsString(dto.getSkills()));

@@ -13,6 +13,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -54,5 +57,52 @@ class BpCompanyApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data[?(@.legalName == 'アクティブパートナー株式会社')]").exists())
                 .andExpect(jsonPath("$.data[?(@.legalName == '取引停止パートナー株式会社')]").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("口座登録APIはマスク済みDTOのみを返し、復号値・暗号文をレスポンスに含めない")
+    void bankAccountApiReturnsMaskedDtoOnly() throws Exception {
+        BpCompany company = BpCompany.builder()
+                .legalName("口座APIテストBP")
+                .entityType("CORPORATE")
+                .status("ACTIVE")
+                .build();
+        bpCompanyService.createBpCompany(company);
+
+        mockMvc.perform(post("/api/bp-companies/{id}/bank-accounts", company.getId())
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"bankName\":\"三井住友銀行\",\"branchName\":\"本店\",\"accountType\":\"ORDINARY\","
+                                + "\"accountNumber\":\"9876543210\",\"accountHolder\":\"テストタロウ\","
+                                + "\"validFrom\":\"2026-01-01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.maskedLabel").value("****3210"))
+                .andExpect(jsonPath("$.data.approvalStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.encryptedAccountNumber").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    @DisplayName("口座承認APIはPENDINGからの状態CAS遷移で承認できる")
+    void bankAccountApprovalApi() throws Exception {
+        BpCompany company = BpCompany.builder()
+                .legalName("口座承認テストBP")
+                .entityType("CORPORATE")
+                .status("ACTIVE")
+                .build();
+        bpCompanyService.createBpCompany(company);
+        com.ses.dto.bpcompany.BpBankAccountDto account = bpCompanyService.addBankAccount(
+                company.getId(), "みずほ銀行", "本店", "ORDINARY", "1234567890", "テストタロウ",
+                java.time.LocalDate.of(2026, 1, 1), null);
+
+        mockMvc.perform(put("/api/bp-companies/{id}/bank-accounts/{accountId}/approval",
+                        company.getId(), account.getId())
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"approved\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
     }
 }

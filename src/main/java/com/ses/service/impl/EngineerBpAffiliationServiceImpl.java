@@ -23,33 +23,86 @@ public class EngineerBpAffiliationServiceImpl extends ServiceImpl<EngineerBpAffi
         if (engineerId == null || validFrom == null) {
             throw new BusinessException(400, "要員IDおよび開始日付は必須です");
         }
+        if (bpCompanyId == null) {
+            throw new BusinessException(400, "BP会社IDは必須です");
+        }
         if (validTo != null && validFrom.isAfter(validTo)) {
             throw new BusinessException(400, "開始日は終了日以前を指定してください");
         }
 
-        // 重複・開いている現在の所属を取得
-        LambdaQueryWrapper<EngineerBpAffiliation> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(EngineerBpAffiliation::getEngineerId, engineerId)
-                .and(w -> w.isNull(EngineerBpAffiliation::getValidTo).or().ge(EngineerBpAffiliation::getValidTo, validFrom))
-                .orderByDesc(EngineerBpAffiliation::getValidFrom);
+        LocalDate today = LocalDate.now();
+        boolean futureReservation = validFrom.isAfter(today);
 
-        List<EngineerBpAffiliation> overlapping = this.list(wrapper);
+        // 同一日開始: 原地更新（過去へ分割しない）
+        LambdaQueryWrapper<EngineerBpAffiliation> sameStartWrapper = new LambdaQueryWrapper<>();
+        sameStartWrapper.eq(EngineerBpAffiliation::getEngineerId, engineerId)
+                .eq(EngineerBpAffiliation::getValidFrom, validFrom);
+        EngineerBpAffiliation sameStart = this.getOne(sameStartWrapper, false);
+        if (sameStart != null) {
+            sameStart.setBpCompanyId(bpCompanyId);
+            sameStart.setValidTo(validTo);
+            this.updateById(sameStart);
+            return sameStart;
+        }
 
-        for (EngineerBpAffiliation existing : overlapping) {
-            if (existing.getValidFrom().isEqual(validFrom)) {
-                // 同日開始の場合は上書き更新
-                existing.setBpCompanyId(bpCompanyId);
-                existing.setValidTo(validTo);
-                this.updateById(existing);
-                return existing;
-            } else if (existing.getValidFrom().isBefore(validFrom)) {
-                // 前日閉鎖: 旧区間の終了日を (validFrom - 1日) に切り詰める
-                existing.setValidTo(validFrom.minusDays(1));
-                this.updateById(existing);
+        // 未来の乗換予約: 現在の所属を切らず、未来行を追加
+        if (futureReservation) {
+            return saveAffiliation(engineerId, bpCompanyId, validFrom, validTo);
+        }
+
+        // 遡及・即時登録: 既存区間を分割し、重複区間を作らない
+        // 無期限の新規区間は、後続の既存所属が始まる前日までで打ち切る。
+        LocalDate effectiveEnd = validTo;
+        if (effectiveEnd == null) {
+            LambdaQueryWrapper<EngineerBpAffiliation> laterWrapper = new LambdaQueryWrapper<>();
+            laterWrapper.eq(EngineerBpAffiliation::getEngineerId, engineerId)
+                    .gt(EngineerBpAffiliation::getValidFrom, validFrom)
+                    .orderByAsc(EngineerBpAffiliation::getValidFrom)
+                    .last("LIMIT 1");
+            EngineerBpAffiliation later = this.getOne(laterWrapper, false);
+            if (later != null) {
+                effectiveEnd = later.getValidFrom().minusDays(1);
             }
         }
 
-        // 新しい所属を挿入
+        LambdaQueryWrapper<EngineerBpAffiliation> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(EngineerBpAffiliation::getEngineerId, engineerId)
+                .and(w -> w.isNull(EngineerBpAffiliation::getValidTo)
+                        .or().ge(EngineerBpAffiliation::getValidTo, validFrom));
+        if (effectiveEnd != null) {
+            wrapper.le(EngineerBpAffiliation::getValidFrom, effectiveEnd);
+        }
+        wrapper.orderByAsc(EngineerBpAffiliation::getValidFrom);
+        List<EngineerBpAffiliation> overlapping = this.list(wrapper);
+
+        for (EngineerBpAffiliation existing : overlapping) {
+            if (existing.getValidFrom().isBefore(validFrom)) {
+                // 左側の未被覆区間だけを残して旧区間を閉じる
+                LocalDate originalEnd = existing.getValidTo();
+                existing.setValidTo(validFrom.minusDays(1));
+                this.updateById(existing);
+                // 右側の未被覆区間（新区間の終了後に残る尻尾）を別行として維持する
+                if (effectiveEnd != null
+                        && (originalEnd == null || originalEnd.isAfter(effectiveEnd))) {
+                    saveAffiliation(existing.getEngineerId(), existing.getBpCompanyId(),
+                            effectiveEnd.plusDays(1), originalEnd);
+                }
+            } else {
+                // 新区間の中に開始する既存行: 未被覆の尻尾だけを残す
+                if (effectiveEnd != null && existing.getValidTo() != null
+                        && existing.getValidTo().isAfter(effectiveEnd)) {
+                    existing.setValidFrom(effectiveEnd.plusDays(1));
+                    this.updateById(existing);
+                }
+                // 完全に被覆される既存行はそのまま残す（後続区間がasOf解決時に優先される）
+            }
+        }
+
+        LocalDate finalEnd = validTo != null ? validTo : effectiveEnd;
+        return saveAffiliation(engineerId, bpCompanyId, validFrom, finalEnd);
+    }
+
+    private EngineerBpAffiliation saveAffiliation(Long engineerId, Long bpCompanyId, LocalDate validFrom, LocalDate validTo) {
         EngineerBpAffiliation newAffiliation = EngineerBpAffiliation.builder()
                 .tenantId(1L)
                 .engineerId(engineerId)

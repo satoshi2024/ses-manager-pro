@@ -753,6 +753,7 @@ CREATE TABLE IF NOT EXISTS `m_bp_company` (
     `tenant_id` BIGINT NOT NULL DEFAULT 1,
     `legal_name` VARCHAR(255) NOT NULL,
     `name_kana` VARCHAR(255),
+    `normalized_name` VARCHAR(255),
     `entity_type` VARCHAR(50) NOT NULL COMMENT 'CORPORATE / INDIVIDUAL / FREELANCE / PROVISIONAL',
     `corporate_number` VARCHAR(13),
     `invoice_registration_number` VARCHAR(14),
@@ -774,7 +775,8 @@ CREATE TABLE IF NOT EXISTS `m_bp_company` (
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX `idx_bp_company_tenant_status` (`tenant_id`, `status`),
     INDEX `idx_bp_company_corporate_num` (`corporate_number`),
-    INDEX `idx_bp_company_invoice_num` (`invoice_registration_number`)
+    INDEX `idx_bp_company_invoice_num` (`invoice_registration_number`),
+    UNIQUE KEY `uk_bp_company_normalized` (`tenant_id`, `normalized_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP会社マスタ';
 
 CREATE TABLE IF NOT EXISTS `t_bp_contact` (
@@ -825,6 +827,9 @@ CREATE TABLE IF NOT EXISTS `t_bp_terms` (
     `payment_day` INT NOT NULL DEFAULT 30,
     `fee_bearer` VARCHAR(20) NOT NULL DEFAULT 'PAYEE',
     `payment_method` VARCHAR(50) NOT NULL DEFAULT 'BANK_TRANSFER',
+    `fee_bearer_exception_reason` VARCHAR(500),
+    `fee_bearer_approved_by` BIGINT,
+    `fee_bearer_approved_at` DATETIME,
     `max_payment_days` INT NOT NULL DEFAULT 60,
     `version` INT NOT NULL DEFAULT 1,
     `deleted_flag` INT NOT NULL DEFAULT 0,

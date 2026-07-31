@@ -60,4 +60,104 @@ class EngineerBpAffiliationServiceImplTest {
         List<EngineerBpAffiliation> history = affiliationService.getAffiliationHistory(engineerId);
         assertEquals(2, history.size());
     }
+
+    @Test
+    @DisplayName("未来の乗換予約は現在の所属を切らず未来行を追加する")
+    void testFutureReservationKeepsCurrentAffiliation() {
+        Long engineerId = 998L;
+        Long companyA = 100L;
+        Long companyB = 200L;
+
+        affiliationService.assignBpAffiliation(engineerId, companyA, LocalDate.now().minusMonths(6), null);
+        LocalDate futureStart = LocalDate.now().plusMonths(1);
+        EngineerBpAffiliation future = affiliationService.assignBpAffiliation(
+                engineerId, companyB, futureStart, null);
+
+        assertEquals(futureStart, future.getValidFrom());
+        List<EngineerBpAffiliation> history = affiliationService.getAffiliationHistory(engineerId);
+        EngineerBpAffiliation current = history.stream()
+                .filter(a -> a.getBpCompanyId().equals(companyA))
+                .findFirst().orElseThrow();
+        assertNull(current.getValidTo(), "未来予約では現在の所属を閉じない");
+        assertEquals(companyA, affiliationService.getActiveAffiliationAsOf(engineerId, LocalDate.now()).getBpCompanyId());
+        assertEquals(companyB, affiliationService.getActiveAffiliationAsOf(engineerId, futureStart).getBpCompanyId());
+    }
+
+    @Test
+    @DisplayName("遡及登録は既存区間を分割し、重複区間を作らない")
+    void testRetroactiveRegistrationSplitsExistingInterval() {
+        Long engineerId = 997L;
+        Long companyA = 100L;
+        Long companyB = 200L;
+
+        EngineerBpAffiliation existing = affiliationService.assignBpAffiliation(
+                engineerId, companyA, LocalDate.of(2026, 1, 1), null);
+        LocalDate retroStart = LocalDate.of(2025, 6, 1);
+        affiliationService.assignBpAffiliation(engineerId, companyB, retroStart, null);
+
+        List<EngineerBpAffiliation> history = affiliationService.getAffiliationHistory(engineerId);
+        EngineerBpAffiliation retro = history.stream()
+                .filter(a -> a.getBpCompanyId().equals(companyB))
+                .findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2025, 12, 31), retro.getValidTo(),
+                "遡及区間は後続の既存所属開始前日までで打ち切る");
+        EngineerBpAffiliation kept = history.stream()
+                .filter(a -> a.getId().equals(existing.getId()))
+                .findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 1, 1), kept.getValidFrom());
+        assertNull(kept.getValidTo());
+
+        // 重複区間が無いこと（境界日はちょうど1件ずつ）
+        assertEquals(companyB, affiliationService.getActiveAffiliationAsOf(engineerId, LocalDate.of(2025, 12, 31)).getBpCompanyId());
+        assertEquals(companyA, affiliationService.getActiveAffiliationAsOf(engineerId, LocalDate.of(2026, 1, 1)).getBpCompanyId());
+    }
+
+    @Test
+    @DisplayName("部分重複は未被覆区間だけを移し、隣接は別区間として保持する")
+    void testPartialOverlapAndAdjacency() {
+        Long engineerId = 996L;
+        Long companyA = 100L;
+        Long companyB = 200L;
+
+        EngineerBpAffiliation a = affiliationService.assignBpAffiliation(
+                engineerId, companyA, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31));
+        affiliationService.assignBpAffiliation(engineerId, companyB, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 2, 28));
+
+        List<EngineerBpAffiliation> history = affiliationService.getAffiliationHistory(engineerId);
+        assertEquals(3, history.size(), "旧区間の閉鎖・B区間・Aの尻尾の3件");
+        EngineerBpAffiliation aHead = history.stream()
+                .filter(h -> h.getId().equals(a.getId()))
+                .findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 1, 31), aHead.getValidTo());
+        EngineerBpAffiliation aTail = history.stream()
+                .filter(h -> h.getBpCompanyId().equals(companyA) && !h.getId().equals(a.getId()))
+                .findFirst().orElseThrow();
+        assertEquals(LocalDate.of(2026, 3, 1), aTail.getValidFrom());
+        assertEquals(LocalDate.of(2026, 3, 31), aTail.getValidTo());
+
+        // 隣接: Aの尻尾の終了翌日からCを追加しても既存区間を変更しない
+        EngineerBpAffiliation c = affiliationService.assignBpAffiliation(
+                engineerId, companyB, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
+        assertEquals(LocalDate.of(2026, 4, 1), c.getValidFrom());
+        assertEquals(4, affiliationService.getAffiliationHistory(engineerId).size());
+    }
+
+    @Test
+    @DisplayName("所属なし期間は直前の所属へfallbackせず、空区間は拒否する")
+    void testGapIsAllowedAndEmptyIntervalRejected() {
+        Long engineerId = 995L;
+        Long companyA = 100L;
+        Long companyB = 200L;
+
+        affiliationService.assignBpAffiliation(engineerId, companyA, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31));
+        affiliationService.assignBpAffiliation(engineerId, companyB, LocalDate.of(2026, 3, 1), null);
+
+        assertNull(affiliationService.getActiveAffiliationAsOf(engineerId, LocalDate.of(2026, 2, 15)),
+                "所属なし期間はNULLのまま");
+        assertNotNull(affiliationService.getActiveAffiliationAsOf(engineerId, LocalDate.of(2026, 3, 15)));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> affiliationService.assignBpAffiliation(engineerId, companyB, LocalDate.of(2026, 4, 10), LocalDate.of(2026, 4, 9)));
+    }
 }

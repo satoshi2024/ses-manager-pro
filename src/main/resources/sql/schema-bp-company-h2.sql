@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS m_bp_company (
     tenant_id BIGINT NOT NULL DEFAULT 1,
     legal_name VARCHAR(255) NOT NULL,
     name_kana VARCHAR(255),
+    normalized_name VARCHAR(255),
     entity_type VARCHAR(50) NOT NULL,
     corporate_number VARCHAR(13),
     invoice_registration_number VARCHAR(14),
@@ -23,7 +24,8 @@ CREATE TABLE IF NOT EXISTS m_bp_company (
     created_by BIGINT,
     deleted_flag INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, normalized_name)
 );
 
 CREATE TABLE IF NOT EXISTS t_bp_contact (
@@ -72,6 +74,9 @@ CREATE TABLE IF NOT EXISTS t_bp_terms (
     payment_day INT NOT NULL DEFAULT 30,
     fee_bearer VARCHAR(20) NOT NULL DEFAULT 'PAYEE',
     payment_method VARCHAR(50) NOT NULL DEFAULT 'BANK_TRANSFER',
+    fee_bearer_exception_reason VARCHAR(500),
+    fee_bearer_approved_by BIGINT,
+    fee_bearer_approved_at TIMESTAMP,
     max_payment_days INT NOT NULL DEFAULT 60,
     version INT NOT NULL DEFAULT 1,
     deleted_flag INT NOT NULL DEFAULT 0,
@@ -129,6 +134,13 @@ ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS bp_company_id BIGINT;
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS bp_company_name_snapshot VARCHAR(255);
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS terms_snapshot_json TEXT;
 
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS contract_date DATE;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS job_description VARCHAR(2000);
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS work_location VARCHAR(500);
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS inspection_due_date DATE;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS payment_due_date DATE;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
+
 MERGE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) KEY(menu_key)
 VALUES ('bp-company', 'BP会社管理', '/bp-company', '/api/bp-companies', 45);
 
@@ -143,3 +155,6 @@ ON DUPLICATE KEY UPDATE role = VALUES(role);
 INSERT INTO t_role_menu (role, menu_id)
 SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'bp-company'
 ON DUPLICATE KEY UPDATE role = VALUES(role);
+
+MERGE INTO m_system_config (config_key, config_value, description) KEY(config_key)
+VALUES ('procurement.payment-max-days', '60', '発注支払期日の法務設定上限（受領日からの日数）');

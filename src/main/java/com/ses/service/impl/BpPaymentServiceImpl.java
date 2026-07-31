@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
+import com.ses.entity.BpCompany;
 import com.ses.entity.WorkRecord;
+import com.ses.mapper.BpCompanyMapper;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpPaymentService;
@@ -31,6 +33,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     private final BpPaymentMapper bpPaymentMapper;
     private final WorkRecordMapper workRecordMapper;
     private final MonthlyClosingService monthlyClosingService;
+    private final BpCompanyMapper bpCompanyMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private WorkRecordService workRecordService;
 
@@ -107,6 +110,19 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     @Override
     @Transactional
     public BpPayment addLayer(BpPayment bpPayment) {
+        // 会社名の自由入力廃止（R2.4）: 支払先名を文字列で新規登録する場合はBP IDが必須
+        if (org.springframework.util.StringUtils.hasText(bpPayment.getPayeeCompanyName())
+                && bpPayment.getBpCompanyId() == null) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
+        }
+        if (bpPayment.getBpCompanyId() != null
+                && !org.springframework.util.StringUtils.hasText(bpPayment.getBpCompanyNameSnapshot())) {
+            BpCompany company = bpCompanyMapper.selectById(bpPayment.getBpCompanyId());
+            if (company == null) {
+                throw BusinessException.of(400, "error.bpPayment.bpCompanyInvalid");
+            }
+            bpPayment.setBpCompanyNameSnapshot(company.getLegalName());
+        }
         if (bpPayment.getWorkRecordId() != null) {
             assertWorkRecordAllowed(bpPayment.getWorkRecordId());
             WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());

@@ -25,11 +25,12 @@ public interface BpCompanyService extends IService<BpCompany> {
     void updateComplianceApplicability(Long id, String applicability, String note, Long operatorUserId);
 
     // 口座管理
-    BpBankAccount addBankAccount(Long bpCompanyId, String bankName, String branchName, String accountType, String accountNumber, String accountHolder, LocalDate validFrom, LocalDate validTo);
+    BpBankAccountDto addBankAccount(Long bpCompanyId, String bankName, String branchName, String accountType, String accountNumber, String accountHolder, LocalDate validFrom, LocalDate validTo);
 
     List<BpBankAccountDto> getBankAccounts(Long bpCompanyId);
 
-    void approveBankAccount(Long bankAccountId, Long operatorUserId);
+    /** 口座申請の承認/却下。PENDING以外からの遷移は状態CASで拒否する。 */
+    void updateBankAccountApproval(Long bankAccountId, String approvalStatus, Long operatorUserId);
 
     // 条件管理
     BpTerms addTerms(Long bpCompanyId, BpTerms terms);
