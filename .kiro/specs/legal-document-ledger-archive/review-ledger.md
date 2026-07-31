@@ -11,7 +11,7 @@
 
 ## 独立Review R04 Round 8（最終） 修正対応 — 2026-07-31
 
-- Base `9330796` → Head `c572a8f` (`main` / `origin/main`)
+- Base `9330796` → Head `02a8f2e` (`main` / `origin/main`)
 - 判定: **CONDITIONAL PASS** (P0=0 / P1=0 / P2=10 / release gates=G-1〜G-5)
 - 対応完了項目:
   1. **指摘A (中央ledger Head Hash の実在値同期)**:
