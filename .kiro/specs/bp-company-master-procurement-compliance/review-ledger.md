@@ -56,8 +56,21 @@
 | P1-09 | P1 | 画面導線・ReferenceError不備 | `sidebar.html`へBP会社管理リンクを追加、`detail.html` / `bp-company.js`の未定義関数を完全実装 | `JsSyntaxCheckTest.allJsModulesParse` PASS |
 | P2-01 | P2 | 4言語i18nキー不足 | `messages.properties`, `messages_en.properties`, `messages_zh_CN.properties`, `messages_ko.properties`へ`menu.bpCompany`キーを追加 | `MessageBundleConsistencyTest` PASS |
 
-### 最終全量テスト証拠
-- **L4全量 `mvn test`**: **Tests run: 1163, Failures: 0, Errors: 0, Skipped: 7** (100% PASS)
-- **JS構文構文テスト**: Node.js `checkSyntax` 全モジュール PASS
+
+## 6. Round 2 Review 指摘修復と最終Head固定（2026-07-31 / 完了）
+
+| Issue ID | 影響 | 指摘内容 | 修正対応 | 検証証拠 |
+|---|---|---|---|---|
+| R2-P0-01 | P0 | 契約確定の顧客契約回帰 | `ContractServiceImpl` で `customer_id` を `bpCompanyId` として誤評価していたバグを修正。所属BP会社IDを解体接続し顧客契約をスキップ | `ContractServiceImplTest.updateWithBusinessRules_customerContract_activatesSuccessfullyWithoutBpCompliance` PASS |
+| R2-P1-01 | P1 | V70復元・V71新規分離・S08〜S17繰り上げ | `V70` を Head `a36b8cd` に復元、`V71` を新設分離、S08〜S17 の予約マイグレーション番号を一元スライド繰り上げ | `SpecDispatchConsistencyTest`, `MigrationScriptIntegrityTest` PASS |
+| R2-P1-02 | P1 | H2スキーマ単一化 | 重複していた `src/main/resources/sql/schema-bp-company-h2.sql` を削除し `src/test/resources/sql/` に一本化 | `Bp*Test` 全件 PASS |
+| R2-P1-03 | P1 | 画面ルーティング修復 | `BpCompanyPageController` に `@GetMapping({"", "/list"})` を追加し 400 エラー解体 | `BpCompanyPageController` 導線確認 PASS |
+| R2-P1-04 | P1 | 取引停止 4 列コピー化 | `BpCompanyServiceImpl.applyNonNullFields` に取引停止 4 列を追加 | `BpCompanyServiceImplTest` PASS |
+| R2-P1-05 | P1 | Terms DTO 導入 | `BpTermsSaveDto` を導入し `feeBearerApprovedBy/At` の自己更新を保護 | `BpCompanyApiControllerTest` PASS |
+| R2-P1-06 | P1 | 所属期間代数修正 | 遡及登録の右側未被覆復元条件を `validTo != null` に補正し未来予約行＋遡及の `valid_from` 重複を防止 | `EngineerBpAffiliationServiceImplTest.testFutureReservationAndRetroactiveCombined` PASS |
+
+### 最終全量テストおよびHead固定証拠
+- **最終Head**: **`edeaf76`** (working tree clean, origin/main へ git push 完了)
+- **L4全量 `mvn test`**: **Tests run: 1166, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
 - **Migration & Spec整合性**: `MigrationScriptIntegrityTest`, `SpecDispatchConsistencyTest` 全件 PASS
 
