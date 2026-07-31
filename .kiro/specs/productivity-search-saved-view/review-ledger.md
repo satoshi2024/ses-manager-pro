@@ -4,7 +4,7 @@
 
 - **現行判定**: **REVIEW待ち（Round 4 修正完了）**
 - **Base Commit**: `2c69399`
-- **Head Commit**: 修正完了コミット (Round 4)
+- **Head Commit**: `f7e5711` (Round 4 修正完了コミット)
 - **指摘対応一覧**:
   - **R4-P1-01 (タスク詳細更新 API バインド & sparse update 修正)**: `TaskApiController` の `@PutMapping("/{id}/details")` に `@RequestBody TaskDetailsUpdateRequest` を導入し JSON body をバインド。`TaskServiceImpl` で `clearDueDate` フラグ制御を追加し、`dueDate` 未指定時に既存期限が `null` で上書き消失する現象を解消。`TaskApiControllerTest` に MockMvc テスト 4 本を追加し検証完了。
   - **R1-P1-02 (一括操作スコープ縮小)**: 初期一括操作を要員・案件のステータス一括変更 (2段階 API `/preview` -> `/apply`) に特化し、`requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ記録。
@@ -16,10 +16,10 @@
 ## 9. Review Packet
 
 - **Base Commit**: `2c69399`
-- **Head Commit**: `d10aed8`
+- **Head Commit**: `f7e5711`
 - **Test Evidence**:
   - `.\apache-maven-3.9.6\bin\mvn test`
-  - 結果: `Tests run: 1131, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
+  - 結果: `Tests run: 1135, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
 - **Demo Evidence**:
   - 横断検索モーダル (`Ctrl+K`) からキーワード入力・検索結果表示・詳細画面遷移を確認。
   - `/todo` 画面でのタスク新規登録（担当者選択付き）、ステータス変更（進行中→完了）、完了時の通知送信を確認。
