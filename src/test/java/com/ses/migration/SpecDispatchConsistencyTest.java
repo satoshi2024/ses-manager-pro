@@ -40,11 +40,10 @@ class SpecDispatchConsistencyTest {
 
     private static final Path EXPANSION = SPECS.resolve("customer-product-expansion-2026");
 
-    /** 実装対象の spec（S04〜S17）。S01は採番未定、S02/S03は適用済みのため対象外。 */
+    /** 実装対象の spec（S05〜S17）。S01は採番未定、S02/S03/S04は適用済みのため対象外。 */
     private static final Map<String, String> SPEC_BY_CONVERSATION = new LinkedHashMap<>();
 
     static {
-        SPEC_BY_CONVERSATION.put("S04", "legal-document-ledger-archive");
         SPEC_BY_CONVERSATION.put("S05", "productivity-search-saved-view");
         SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
         SPEC_BY_CONVERSATION.put("S07", "approval-workflow-internal-control");

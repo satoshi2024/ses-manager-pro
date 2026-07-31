@@ -73,7 +73,7 @@ class DocumentExportServiceImplTest {
         assertEquals("manifest.csv", entry1.getName());
 
         String manifestContent = new String(zis.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        assertTrue(manifestContent.contains("document_id,document_type"));
+        assertTrue(manifestContent.contains("document_id,version_no,document_type"));
         assertTrue(manifestContent.contains("100"));
         assertTrue(manifestContent.contains("株式会社テスト顧客"));
 

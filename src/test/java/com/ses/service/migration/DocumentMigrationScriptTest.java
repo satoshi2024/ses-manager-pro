@@ -57,7 +57,7 @@ class DocumentMigrationScriptTest {
         r.setOriginalFileName("山田太郎_職務経歴書.pdf");
         r.setStatus("未変換");
 
-        when(resumeIngestionMapper.selectList(any())).thenReturn(List.of(r));
+        org.mockito.Mockito.lenient().when(resumeIngestionMapper.selectList(any())).thenReturn(List.of(r));
 
         int count = migrationScript.migrateResumes();
         assertEquals(0, count);

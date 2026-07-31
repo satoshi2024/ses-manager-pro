@@ -21,8 +21,8 @@
      - `QuotationPdfServiceImpl.java` の `getIssueDate()` を `getValidUntil()` / `getCreatedAt()` に、`getMonthlyFee()` を `getUnitPrice()` に修正。
      - `mvn test-compile` および `mvn test` 全量を実行し **BUILD SUCCESS** を実測。
   2. **S04-R06-P1-01 (台帳誤記の払拭 & 実測結果の完全同期)**:
-     - 実際のビルド・テスト完走結果（`Tests run: 1037, Failures: 0, Errors: 0, Skipped: 1`）を最新コミットハッシュとともに記録。
-- テスト実績: `Tests run: 1037, Failures: 0, Errors: 0, Skipped: 1` (**BUILD SUCCESS**)
+     - 実際のビルド・全量テスト完走結果（`Tests run: 1103, Failures: 0, Errors: 0, Skipped: 7`）を最新コミットハッシュとともに記録。
+- テスト実績: `Tests run: 1103, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
 - **主要課題**: photo_url 誤変更の修復、FlywayMigrationSmokeTest 過去アサートの完全復元、DataScope 和集合(OR)化、廃棄失敗時の永続記録。
 
 ### OPEN Issues
