@@ -69,8 +69,18 @@
 | R2-P1-05 | P1 | Terms DTO 導入 | `BpTermsSaveDto` を導入し `feeBearerApprovedBy/At` の自己更新を保護 | `BpCompanyApiControllerTest` PASS |
 | R2-P1-06 | P1 | 所属期間代数修正 | 遡及登録の右側未被覆復元条件を `validTo != null` に補正し未来予約行＋遡及の `valid_from` 重複を防止 | `EngineerBpAffiliationServiceImplTest.testFutureReservationAndRetroactiveCombined` PASS |
 
+
+## 7. Round 3 Review 指摘修復と最終Head固定（2026-07-31 / 完遂完了）
+
+| Issue ID | 影響 | 指摘内容 | 修正対応 | 検証証拠 |
+|---|---|---|---|---|
+| R3-P0-01 | P0 | V71 Migration内容不足・重複ADD | `V1`に`t_contract`コンプライアンス6列を追加し consolidative baseline を完成。`V71` に`information_schema`判定付きストアドプロシージャを導入し、State A/B/C 全DB環境で安全・べき等に適用されるよう修正 | `MigrationScriptIntegrityTest` 新規追加テスト PASS |
+| R3-P2-01 | P2 | README予約表未更新 | `.kiro/specs/customer-product-expansion-2026/README.md` の予約表を V72〜V82 へ繰り上げ更新 | `SpecDispatchConsistencyTest` PASS |
+| - | - | Docker不要の静的検査追加 | `MigrationScriptIntegrityTest` に「V1重複ADD検出」および「EntityフィールドのMigration存在検証」の2つの静的テストを追加 | `MigrationScriptIntegrityTest` 16/16 PASS (0 skipped) |
+
 ### 最終全量テストおよびHead固定証拠
-- **最終Head**: **`edeaf76`** (working tree clean, origin/main へ git push 完了)
-- **L4全量 `mvn test`**: **Tests run: 1166, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
-- **Migration & Spec整合性**: `MigrationScriptIntegrityTest`, `SpecDispatchConsistencyTest` 全件 PASS
+- **最終Head**: **`ce27794`** (working tree clean, `origin/main` へ git push 完了)
+- **L4全量 `mvn test`**: **Tests run: 1168, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
+- **Migration & Spec整合性**: `MigrationScriptIntegrityTest` (16 run / 0 skipped PASS), `SpecDispatchConsistencyTest` (8 run PASS)
+
 
