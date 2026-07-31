@@ -1,22 +1,23 @@
 # 横断検索・実ToDo・保存ビュー・一括操作（productivity-search-saved-view）要件・設計整合性レビュー記録
 
-## 修正・検証ステータス (Round 4 指摘事項修正完了)
+## 修正・検証ステータス (Round 5 指摘事項修正完了)
 
-- **現行判定**: **REVIEW待ち（Round 4 修正完了）**
+- **現行判定**: **REVIEW待ち（Round 5 修正完了）**
 - **Base Commit**: `2c69399`
-- **Head Commit**: `f7e5711` (Round 4 修正完了コミット)
+- **Head Commit**: `b96d6e9` (Round 5 修正完了コミット)
 - **指摘対応一覧**:
-  - **R4-P1-01 (タスク詳細更新 API バインド & sparse update 修正)**: `TaskApiController` の `@PutMapping("/{id}/details")` に `@RequestBody TaskDetailsUpdateRequest` を導入し JSON body をバインド。`TaskServiceImpl` で `clearDueDate` フラグ制御を追加し、`dueDate` 未指定時に既存期限が `null` で上書き消失する現象を解消。`TaskApiControllerTest` に MockMvc テスト 4 本を追加し検証完了。
-  - **R1-P1-02 (一括操作スコープ縮小)**: 初期一括操作を要員・案件のステータス一括変更 (2段階 API `/preview` -> `/apply`) に特化し、`requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ記録。
-  - **R1-P1-03 (保存ビュー構造整理)**: 保存ビューを filter と pageSize に限定し、`saved-view.js` のドロップダウンラベルを整音。`requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ記録。
-  - **R4-P2-01〜07**: `tasks.md` B1/B2 重複記述の削除、`todo.js` での非同期選択レースコンディション解消、編集モーダルへの全情報補填、`decision-log.md` への決定根拠追記を完了。
+  - **R5-P1-01 (todo.js 編集ボタンの JS 文字列直埋め破綻解消)**: `todo.js` L61 の編集ボタンのデータ渡しを既存作法である `data-*` 属性 (`data-id`, `data-assignee`, `data-due-date`, `data-title`, `data-description`, `data-priority`) 方式に修復。`openEditTaskModal(this)` で `dataset` から安全に復号取得するように変更し、改行やアポストロフィを含む本文での SyntaxError・無反応化を根本解決。
+  - **R5-P2-01 (単体テストのアサート強化)**: `TaskApiControllerTest.testUpdateDetails_clearDueDate_setsDueDateNull` に `.andExpect(jsonPath("$.data.dueDate").value(nullValue()))` の明示アサートを追加。
+  - **R5-P2-03 (通知文言修復)**: `TaskServiceImpl` で期限クリア時の通知文章を「期限なし」と正しくフォーマット。
+  - **R4-P1-01 (タスク詳細更新 API バインド & sparse update 修正)**: `@RequestBody TaskDetailsUpdateRequest` を導入し JSON body をバインド。`clearDueDate` フラグ制御で既存期限の消失を抑止。
+  - **R1-P1-02 / R1-P1-03 (スコープ縮小記録)**: `requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ一括操作・保存ビューの適用範囲を整音記録。
 
 ---
 
 ## 9. Review Packet
 
 - **Base Commit**: `2c69399`
-- **Head Commit**: `f7e5711`
+- **Head Commit**: `b96d6e9`
 - **Test Evidence**:
   - `.\apache-maven-3.9.6\bin\mvn test`
   - 結果: `Tests run: 1135, Failures: 0, Errors: 0, Skipped: 7` (**BUILD SUCCESS**)
