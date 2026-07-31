@@ -37,7 +37,7 @@
 | 下流連動 | `SettlementCalculator` による精算、BP支払の生成・同期、請求済チェック、月次締めロック（`assertOpenForUpdate`）、確定時の組織・原価部門の凍結、通知 |
 | 権限 | V32 で `m_menu('my-timesheet','/my','/api/my')` を seed し `t_role_menu` に `要員` を付与済み |
 
-### 2.1 「何も無い」ように見える最有力の原因
+### 2.1 「何も無い」ように見える直接の原因
 
 `MyTimesheetApiController.currentEngineerId()` は先頭で
 `linkService.findEngineerIdByUserId(...)` を引き、**未紐付けなら即 403 `error.my.notLinked`** を返す。
@@ -45,7 +45,31 @@
 要員アカウントの紐付けは `EngineerAccountLinkApiController`（`/api/engineers/{id}/account-link`、
 `@PreAuthorize("hasAnyRole('管理者','HR')")`、要員詳細画面のカード）でしか作れない。
 **この紐付けを行っていない場合、機能は完成しているのに要員側では常に空**になる。
-コード追加の前に、まずこの運用状態を確認すること（Phase 0-1）。
+
+### 2.2 その紐付けカードが発見できなかった原因（2026-07-31 修正済み）
+
+実機確認の結果、管理者で要員詳細を開いてもカードに辿り着けなかった。原因は権限でも
+`sec:authorize` でもなく、**レイアウトの欠陥**だった。
+
+`templates/engineer/detail.html` の左列（`col-md-4`）には4枚のカードがある。
+
+1. プロフィール ← **`h-100` が付いていた**
+2. 担当営業
+3. フォロー履歴
+4. ログインアカウント（`sec:authorize="hasAnyRole('管理者','HR')"`）
+
+Bootstrap の `.row` は既定で `align-items: stretch` のため、`col-md-4` の高さは右列
+（`col-md-8` の `h-100` カード）に合わせて引き伸ばされる。そこへ先頭カードが `h-100` を
+持つと、**1枚目だけで列の全高を占有**し、2〜4枚目がファーストビューの遥か下へ押し出される。
+権限のある管理者にも「カードが存在しない」ようにしか見えず、要員の紐付けという
+**セルフサービス勤怠の必須初期設定が、事実上到達不能**になっていた。
+
+対処: 先頭カードから `h-100` を除去し、意図をコメントで残した。カードが1枚だけの右列は
+`h-100` のままでよい（列の高さを埋めるという本来の用途）。
+
+教訓として、**カードが複数積まれる列の先頭要素に `h-100` を付けない**。
+`MessageBundleConsistencyTest` / `StaticAssetLocalityTest` / `MobileResponsiveLayoutTest`
+（計27件）で回帰なしを確認済み。
 
 ---
 
@@ -80,7 +104,10 @@ spec の最重要境界を再掲する:
 
 | # | 内容 | 変更候補 |
 |---|---|---|
-| 0-1 | 要員ユーザーと `account-link` の紐付け状況を確認する。未紐付けなら運用手順として確定し、必要なら要員詳細のカードから導線を明示する | 運用確認（コード変更が不要な可能性が高い） |
+| 0-1 | **実施済み（2026-07-31）**。要員詳細の「ログインアカウント」カードが事実上発見できない原因を特定して修正した。§2.2 を参照 | `templates/engineer/detail.html` |
+| 0-1b | 未紐付けの発見性。要員一覧／ユーザー一覧に「未紐付け」の表示・絞り込みが無く、管理者は要員詳細を1件ずつ開く以外に気づく手段が無い。`/user/list` で `要員` ユーザーを作っても紐付けが必要である旨の示唆が出ない | `templates/engineer/list.html`、`templates/user/list.html` ほか |
+| 0-1c | 要員側の行き止まり。403 の文言だけが画面全体で、次の行動（管理者へ連絡）が示されない。新規要員が初日に必ず見る画面である | `templates/my-timesheet/index.html`、`static/js/modules/my-timesheet.js` |
+| 0-1d | 候補ドロップダウンが無言で空になる。`candidates` は `role='要員'` かつ `status=1` かつ未紐付けのみを返すため、役割違いのアカウントは理由不明のまま現れない | `EngineerAccountLinkApiController`、`engineer-account-link.js` |
 | 0-2 | 未提出リマインドを追加する。**新しい scheduler を作らず** `NotificationGenerateService.generateAll()` にジェネレータを1つ足す（既存の8つと同じ dedupe_key 方式）。締め日前は本人（`NotificationLinks.MY_TIMESHEET`）、締め日超過は上長へ | `NotificationGenerateService`、`m_system_config`（締め日・警告日数） |
 | 0-3 | `/my/timesheet` の情報不足を補う。現在 `index.html` は27行で対象月と契約一覧だけ。提出期限、月合計、承認状況を出す | `templates/my-timesheet/index.html`、`static/js/modules/my-timesheet.js`、messages 4バンドル |
 | 0-4 | 承認側の一括承認 | `WorkRecordApiController`、`work-record.js` |
