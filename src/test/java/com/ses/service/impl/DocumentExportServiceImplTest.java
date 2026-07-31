@@ -77,6 +77,7 @@ class DocumentExportServiceImplTest {
         assertTrue(manifestContent.contains("document_id,version_no,document_type"));
         assertTrue(manifestContent.contains("100"));
         assertTrue(manifestContent.contains("株式会社テスト顧客"));
+        assertTrue(manifestContent.contains("MATCH"), "manifestContent に hash 検証結果 'MATCH' が含まれていません");
 
         ZipEntry entry2 = zis.getNextEntry();
         assertNotNull(entry2);
@@ -84,5 +85,19 @@ class DocumentExportServiceImplTest {
 
         String fileContent = new String(zis.readAllBytes());
         assertEquals("PDF content", fileContent);
+    }
+
+    @Test
+    void exportTaxZip_exceedsLimit_throwsBusinessException() {
+        List<Document> list = java.util.Collections.nCopies(10001, new Document());
+        when(documentMapper.selectList(any())).thenReturn(list);
+        org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> exportService.exportTaxZip(new DocumentSearchQuery(), baos)
+        );
+        assertEquals("error.export.limitExceeded", ex.getMessageKey());
     }
 }

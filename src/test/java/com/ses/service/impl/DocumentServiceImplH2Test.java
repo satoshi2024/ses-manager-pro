@@ -41,6 +41,11 @@ class DocumentServiceImplH2Test {
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void H2DB_registerAndIdempotentCheck_persistsAndReuses() {
         var req = DocumentRegisterRequest.builder()

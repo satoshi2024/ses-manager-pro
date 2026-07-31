@@ -45,6 +45,11 @@ class DocumentApiControllerTest {
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void list_returns200AndPageResult() throws Exception {
         DocumentListDTO dto = DocumentListDTO.builder()
