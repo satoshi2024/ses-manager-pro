@@ -4,6 +4,7 @@
 
 ## 1. DDL（予約V70）
 
+- **Migration**: 予約V70 (`db/migration/V70__bp_company_master_and_compliance.sql`)
 - `m_bp_company(id, tenant_id, legal_name, name_kana, entity_type, corporate_number,
   invoice_registration_number, capital_band, employee_band, address, representative, status,
   primary_sales_user_id, compliance_applicability, applicability_checked_by/at, applicability_note, version)`。

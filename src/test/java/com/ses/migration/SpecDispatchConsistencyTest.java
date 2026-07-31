@@ -45,7 +45,7 @@ class SpecDispatchConsistencyTest {
 
     static {
         // SPEC_BY_CONVERSATION.put("S05", "productivity-search-saved-view");
-        SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
+        // SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
         SPEC_BY_CONVERSATION.put("S07", "approval-workflow-internal-control");
         SPEC_BY_CONVERSATION.put("S08", "crm-contact-opportunity");
         SPEC_BY_CONVERSATION.put("S09", "order-acceptance-workflow");

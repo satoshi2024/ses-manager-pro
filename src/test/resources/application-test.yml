@@ -40,6 +40,7 @@ spring:
         - classpath:sql/schema-enterprise-identity-h2.sql
         - classpath:sql/schema-document-archive-h2.sql
         - classpath:sql/schema-productivity-h2.sql
+        - classpath:sql/schema-bp-company-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

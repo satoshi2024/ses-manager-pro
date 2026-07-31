@@ -237,8 +237,6 @@ CREATE TABLE t_quotation (
 
 DROP TABLE IF EXISTS t_proposal CASCADE;
 
--- Proposal エンティティのマッピング（proposed_unit_price / proposed_by 等）と一致させること。
--- t_proposal に created_at 列は無い（作成日時は proposed_at。エンティティ側も exist=false）。
 CREATE TABLE t_proposal (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   project_id          BIGINT NOT NULL,
@@ -338,6 +336,9 @@ CREATE TABLE t_bp_payment (
   work_record_id     BIGINT NOT NULL,
   layer_order        INT NOT NULL DEFAULT 1,
   payee_company_name VARCHAR(200),
+  bp_company_id      BIGINT,
+  bp_company_name_snapshot VARCHAR(255),
+  terms_snapshot_json TEXT,
   parent_payment_id  BIGINT,
   amount             DECIMAL(12,0) NOT NULL,
   cost_center_id     BIGINT,
@@ -398,9 +399,6 @@ CREATE TABLE t_candidate_activity (
   CONSTRAINT fk_candidate_activity_candidate FOREIGN KEY (candidate_id) REFERENCES t_candidate(id)
 );
 
--- Menu エンティティは path_prefix/api_prefix/created_at/updated_at にマッピングされる
--- （旧 path/parent_id 定義は実体と不一致で MenuMapper.selectList() が
---   「Unknown column」で失敗する潜在バグだったため実スキーマに合わせて修正）。
 DROP TABLE IF EXISTS m_menu CASCADE;
 CREATE TABLE m_menu (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -420,7 +418,6 @@ CREATE TABLE t_role_menu (
   menu_id  BIGINT NOT NULL
 );
 
--- SysUser エンティティ（BaseEntity継承 + failed_count/locked_until）
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -437,13 +434,9 @@ CREATE TABLE sys_user (
   deleted_flag  TINYINT DEFAULT 0
 );
 
--- グローバルスキーマ初期化(V2)のadminシードと同一内容を再投入する。
--- このスクリプトはsys_userを再作成するため、他テストクラスと同一H2インスタンスを
--- 共有する実行順序次第でadminユーザーが失われる問題を防ぐ。
 INSERT INTO sys_user (username, password, real_name, role, email, status)
 VALUES ('admin', 'admin123', 'システム管理者', '管理者', 'admin@ses.local', 1);
 
--- SystemConfig エンティティ（文字列PK、BaseEntity非継承）
 DROP TABLE IF EXISTS m_system_config CASCADE;
 CREATE TABLE m_system_config (
   config_key   VARCHAR(100) PRIMARY KEY,
@@ -451,7 +444,6 @@ CREATE TABLE m_system_config (
   description  VARCHAR(200)
 );
 
--- AiLog エンティティ（updated_at/deleted_flagはexist=falseで対象外）
 DROP TABLE IF EXISTS t_ai_log CASCADE;
 CREATE TABLE t_ai_log (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -464,7 +456,6 @@ CREATE TABLE t_ai_log (
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- EmailTemplate エンティティ（deleted_flagはexist=falseで対象外）
 DROP TABLE IF EXISTS m_email_template CASCADE;
 CREATE TABLE m_email_template (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -476,7 +467,6 @@ CREATE TABLE m_email_template (
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- AuditLog エンティティ（監査ログ、P8フォローアップ）
 DROP TABLE IF EXISTS t_audit_log CASCADE;
 CREATE TABLE t_audit_log (
   id         BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -489,7 +479,6 @@ CREATE TABLE t_audit_log (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- freee 給与連携（給与明細自体は保存しない）
 DROP TABLE IF EXISTS t_freee_connection CASCADE;
 CREATE TABLE t_freee_connection (
  id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id BIGINT, company_name VARCHAR(200),
@@ -504,7 +493,6 @@ CREATE TABLE t_freee_employee_link (
  deleted_flag TINYINT DEFAULT 0, UNIQUE(engineer_id), UNIQUE(freee_employee_id)
 );
 
--- 要員セルフサービス勤怠（engineer-self-service-timesheet / V32）
 DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
 CREATE TABLE t_engineer_account_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -529,7 +517,6 @@ CREATE TABLE t_work_record_daily (
   UNIQUE KEY uq_wr_daily (work_record_id, work_date)
 );
 
--- 契約単価改定履歴（contract-price-history / V33）
 DROP TABLE IF EXISTS t_contract_price_history CASCADE;
 CREATE TABLE t_contract_price_history (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -550,7 +537,7 @@ CREATE TABLE t_resume_ingestion (
   original_file_name    VARCHAR(255) NOT NULL,
   stored_file_name      VARCHAR(120) NOT NULL,
   file_ext              VARCHAR(10)  NOT NULL,
-  status                VARCHAR(20)  NOT NULL DEFAULT '\u53d6\u8fbc\u5f85\u3061',
+  status                VARCHAR(20)  NOT NULL DEFAULT '取込待ち',
   extracted_text        LONGTEXT,
   parsed_json           LONGTEXT,
   ai_provider           VARCHAR(30),
@@ -590,6 +577,7 @@ CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
+  bp_company_id      BIGINT,
   skills_json        LONGTEXT,
   unit_price         BIGINT,
   available_from     DATE,
@@ -623,7 +611,137 @@ CREATE TABLE t_bp_availability_ingestion (
   created_by            BIGINT
 );
 
--- 銀行入金明細（入金消込の半自動化 / FR-09 / V50）
+DROP TABLE IF EXISTS m_bp_company CASCADE;
+CREATE TABLE m_bp_company (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    legal_name VARCHAR(255) NOT NULL,
+    name_kana VARCHAR(255),
+    entity_type VARCHAR(50) NOT NULL,
+    corporate_number VARCHAR(13),
+    invoice_registration_number VARCHAR(14),
+    capital_band VARCHAR(50),
+    employee_band VARCHAR(50),
+    address VARCHAR(500),
+    representative VARCHAR(100),
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    rating INT DEFAULT 0,
+    primary_sales_user_id BIGINT,
+    compliance_applicability VARCHAR(50),
+    applicability_checked_by BIGINT,
+    applicability_checked_at DATETIME,
+    applicability_note TEXT,
+    version INT NOT NULL DEFAULT 1,
+    created_by BIGINT,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_bp_contact CASCADE;
+CREATE TABLE t_bp_contact (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    bp_company_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    department VARCHAR(100),
+    role VARCHAR(100),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    primary_flag INT NOT NULL DEFAULT 0,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_bp_bank_account CASCADE;
+CREATE TABLE t_bp_bank_account (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    bp_company_id BIGINT NOT NULL,
+    bank_name VARCHAR(100),
+    branch_name VARCHAR(100),
+    account_type VARCHAR(20) DEFAULT 'ORDINARY',
+    encrypted_account_number VARCHAR(500),
+    account_holder VARCHAR(100),
+    masked_label VARCHAR(100) NOT NULL,
+    valid_from DATE NOT NULL,
+    valid_to DATE,
+    approval_status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    approved_by BIGINT,
+    approved_at DATETIME,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_bp_terms CASCADE;
+CREATE TABLE t_bp_terms (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    bp_company_id BIGINT NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    closing_day INT NOT NULL DEFAULT 31,
+    payment_month_offset INT NOT NULL DEFAULT 1,
+    payment_day INT NOT NULL DEFAULT 30,
+    fee_bearer VARCHAR(20) NOT NULL DEFAULT 'PAYEE',
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'BANK_TRANSFER',
+    max_payment_days INT NOT NULL DEFAULT 60,
+    version INT NOT NULL DEFAULT 1,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_engineer_bp_affiliation CASCADE;
+CREATE TABLE t_engineer_bp_affiliation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    engineer_id BIGINT NOT NULL,
+    bp_company_id BIGINT NOT NULL,
+    valid_from DATE NOT NULL,
+    valid_to DATE,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_bp_evaluation CASCADE;
+CREATE TABLE t_bp_evaluation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    bp_company_id BIGINT NOT NULL,
+    period VARCHAR(20) NOT NULL,
+    quality_score INT DEFAULT 0,
+    response_score INT DEFAULT 0,
+    retention_score INT DEFAULT 0,
+    compliance_score INT DEFAULT 0,
+    billing_accuracy_score INT DEFAULT 0,
+    comment TEXT,
+    evaluated_by BIGINT,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DROP TABLE IF EXISTS t_bp_price_negotiation CASCADE;
+CREATE TABLE t_bp_price_negotiation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    bp_company_id BIGINT NOT NULL,
+    requested_at DATE NOT NULL,
+    responded_at DATE,
+    status VARCHAR(50) NOT NULL DEFAULT 'REQUESTED',
+    requested_amount DECIMAL(15, 2),
+    agreed_amount DECIMAL(15, 2),
+    summary TEXT,
+    document_id BIGINT,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 DROP TABLE IF EXISTS t_bank_deposit;
 CREATE TABLE t_bank_deposit (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -649,7 +767,6 @@ CREATE TABLE shedlock (
   PRIMARY KEY (name)
 );
 
--- 組織・管理会計基盤（V60 / F1）
 DROP TABLE IF EXISTS t_engineer_accounting_history CASCADE;
 DROP TABLE IF EXISTS t_organization_relation_history CASCADE;
 DROP TABLE IF EXISTS t_monthly_accounting_dimension CASCADE;
@@ -658,8 +775,6 @@ DROP TABLE IF EXISTS t_user_organization CASCADE;
 DROP TABLE IF EXISTS m_cost_center CASCADE;
 DROP TABLE IF EXISTS m_organization_unit CASCADE;
 
--- V61: 組織の親子・状態履歴と要員の会計属性履歴。
--- asOf解決の版元。無いと過去日のツリー・待機原価が現在値で解決されてしまう。
 CREATE TABLE t_organization_relation_history (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   organization_id BIGINT NOT NULL,
@@ -802,13 +917,28 @@ CREATE TABLE t_mfa_attempt_guard (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   user_id BIGINT NOT NULL,
-  session_key_hash CHAR(64) NOT NULL,
-  source_hash CHAR(64) NOT NULL,
+  session_key_hash VARCHAR(128),
+  source_hash VARCHAR(128),
   failed_count INT NOT NULL DEFAULT 0,
   window_started_at DATETIME,
   locked_until DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,
-  UNIQUE (tenant_id, user_id, session_key_hash, source_hash)
+  UNIQUE (user_id)
+);
+
+DROP TABLE IF EXISTS t_persistent_session CASCADE;
+CREATE TABLE t_persistent_session (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  session_id VARCHAR(64) NOT NULL,
+  user_id BIGINT NOT NULL,
+  auth_type VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  revoked_at DATETIME,
+  revoked_by BIGINT,
+  revoke_reason VARCHAR(200),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  UNIQUE (session_id)
 );

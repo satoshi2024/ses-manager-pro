@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>BP会社詳細 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <input type="hidden" id="bpCompanyId" th:value="${bpCompanyId}">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <a href="/bp-company" class="btn btn-outline-secondary btn-sm mb-2"><i class="bi bi-arrow-left me-1"></i>一覧へ戻る</a>
+            <h4 class="mb-1 fw-bold text-white" id="headerLegalName">Loading...</h4>
+            <span class="badge bg-primary" id="headerEntityType">--</span>
+            <span class="badge bg-success" id="headerStatus">--</span>
+        </div>
+        <div>
+            <button class="btn btn-outline-danger btn-sm me-2" onclick="toggleBpStatus('SUSPENDED')">
+                <i class="bi bi-slash-circle me-1"></i>取引停止に設定
+            </button>
+        </div>
+    </div>
+
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs border-secondary mb-4" id="bpDetailTab" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active text-light" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic" type="button">基本情報</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link text-light" id="bank-tab" data-bs-toggle="tab" data-bs-target="#bank" type="button" onclick="loadBankAccounts()">銀行口座</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link text-light" id="terms-tab" data-bs-toggle="tab" data-bs-target="#terms" type="button" onclick="loadTerms()">取引条件</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link text-light" id="compliance-tab" data-bs-toggle="tab" data-bs-target="#compliance" type="button">コンプライアンス法適用</button>
+        </li>
+    </ul>
+
+    <!-- Tab Contents -->
+    <div class="tab-content">
+        <!-- 基本情報 -->
+        <div class="tab-pane fade show active" id="basic">
+            <div class="card bg-dark border-secondary">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-muted small">正式名称</label>
+                            <p class="fw-bold text-white mb-0" id="detailLegalName">-</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">カナ</label>
+                            <p class="fw-bold text-white mb-0" id="detailNameKana">-</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">法人番号</label>
+                            <p class="fw-bold text-white mb-0" id="detailCorporateNumber">-</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">適格請求書発行事業者登録番号</label>
+                            <p class="fw-bold text-white mb-0" id="detailInvoiceRegistrationNumber">-</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">代表者名</label>
+                            <p class="fw-bold text-white mb-0" id="detailRepresentative">-</p>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-muted small">住所</label>
+                            <p class="fw-bold text-white mb-0" id="detailAddress">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 銀行口座 -->
+        <div class="tab-pane fade" id="bank">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-dark border-secondary d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 text-white"><i class="bi bi-bank me-2"></i>振込先口座情報 (安全表示)</h6>
+                    <button class="btn btn-primary btn-sm" onclick="openAddBankModal()"><i class="bi bi-plus-lg me-1"></i>口座追加</button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark mb-0 align-middle">
+                            <thead>
+                            <tr class="text-muted small border-secondary">
+                                <th>金融機関名 / 支店名</th>
+                                <th>口座種別</th>
+                                <th>口座名義</th>
+                                <th>口座番号 (マスク表示)</th>
+                                <th>有効期間</th>
+                                <th>承認状態</th>
+                            </tr>
+                            </thead>
+                            <tbody id="bankTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 取引条件 -->
+        <div class="tab-pane fade" id="terms">
+            <div class="card bg-dark border-secondary">
+                <div class="card-header bg-dark border-secondary">
+                    <h6 class="mb-0 text-white"><i class="bi bi-file-earmark-text me-2"></i>支払条件設定</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="text-muted small">締め日</label>
+                            <p class="fw-bold text-white mb-0" id="termsClosingDay">-</p>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="text-muted small">支払月</label>
+                            <p class="fw-bold text-white mb-0" id="termsPaymentMonth">-</p>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="text-muted small">支払日</label>
+                            <p class="fw-bold text-white mb-0" id="termsPaymentDay">-</p>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="text-muted small">振込手数料負担</label>
+                            <p class="fw-bold text-white mb-0" id="termsFeeBearer">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 法務コンプライアンス適用 -->
+        <div class="tab-pane fade" id="compliance">
+            <div class="card bg-dark border-secondary">
+                <div class="card-body">
+                    <h6 class="mb-3 text-white"><i class="bi bi-shield-check me-2"></i>取引適正化法・フリーランス保護法 適用判定</h6>
+                    <div class="mb-3">
+                        <label class="form-label text-light small">法適用区分</label>
+                        <select class="form-select form-bg-dark text-light border-secondary" id="complianceApplicabilitySelect">
+                            <option value="">未確認 (要判定)</option>
+                            <option value="FREELANCE_ACT">フリーランス法 適用対象</option>
+                            <option value="SUBCOMMITTEE_ACT">取適法 (下請法) 適用対象</option>
+                            <option value="EXEMPT">適用対象外</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-light small">確認メモ・根拠</label>
+                        <textarea class="form-control form-bg-dark text-light border-secondary" id="complianceNote" rows="3"></textarea>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="saveComplianceApplicability()">確認内容を更新</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/bp-company.js"></script>
+</th:block>
+</body>
+</html>

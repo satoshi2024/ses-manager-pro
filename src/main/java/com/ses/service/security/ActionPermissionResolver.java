@@ -16,6 +16,7 @@ public final class ActionPermissionResolver {
             Map.entry("autocomplete", "autocomplete"),
             Map.entry("audit-logs", "audit"),
             Map.entry("bp-availabilities", "bp-availability"),
+            Map.entry("bp-companies", "bp-company"),
             Map.entry("bp-availability-ingestions", "bp-availability-ingestion"),
             Map.entry("candidates", "candidate"),
             Map.entry("cashflow", "cashflow"),
