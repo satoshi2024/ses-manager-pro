@@ -1,17 +1,15 @@
 # 横断検索・実ToDo・保存ビュー・一括操作（productivity-search-saved-view）要件・設計整合性レビュー記録
 
-## 修正・検証ステータス (Round 2 指摘事項修正完了)
+## 修正・検証ステータス (Round 4 指摘事項修正完了)
 
-- **現行判定**: **REVIEW待ち（Round 2 修正完了）**
+- **現行判定**: **REVIEW待ち（Round 4 修正完了）**
 - **Base Commit**: `2c69399`
-- **Head Commit**: `d10aed8` (Round 3 spec改訂・UI補修コミット)
+- **Head Commit**: 修正完了コミット (Round 4)
 - **指摘対応一覧**:
-  - **R2-P0-01 (V81 採番事故 & 予約表)**: 本 spec 2本目のマイグレーションを `V69__productivity_menu_permissions.sql` にリネーム・繰り下げ。S06〜S17 の予約マイグレーション表（README, 各 design.md, tasks.md, copyable-conversations）を V70〜V81 へ連番繰り上げ更新。`SpecDispatchConsistencyTest` の S05 コメントアウト（適用済み）を同期更新。
-  - **R2-P1-01 (m_menu 明示ID指定事故)**: `V69__productivity_menu_permissions.sql` で明示 ID 20〜23 指定を削除し AUTO_INCREMENT へ変更。`application-test.yml` からの直接 DDL replay を撤去。
-  - **R2-P1-02 (一括操作ステータス語彙不一致)**: `BatchOperationServiceImpl.java` で要員（「稼動中」「提案中」「退場予定」「Bench」「待機」）および案件（「募集中」「選考中」「充足」「クローズ」）の実在定義ステータスを全許可に補修。
-  - **R1-P1-02 (preview 迂回経路削除)**: `BatchOperationApiController` から `/engineers/status`, `/projects/status` を完全削除し、`/preview` -> `/apply` の 2段階実行を強制。
-  - **R1-P1-04 (非管理者タスク登録 403)**: `todo.js` で `loadUserOptions()` の呼び出し先を `/api/autocomplete/assignable-users` へ変更。全ロールでタスク登録が可能に。
-  - **git diff --check**: 全ファイルの末尾空白を解消し exit 0 を達成。
+  - **R4-P1-01 (タスク詳細更新 API バインド & sparse update 修正)**: `TaskApiController` の `@PutMapping("/{id}/details")` に `@RequestBody TaskDetailsUpdateRequest` を導入し JSON body をバインド。`TaskServiceImpl` で `clearDueDate` フラグ制御を追加し、`dueDate` 未指定時に既存期限が `null` で上書き消失する現象を解消。`TaskApiControllerTest` に MockMvc テスト 4 本を追加し検証完了。
+  - **R1-P1-02 (一括操作スコープ縮小)**: 初期一括操作を要員・案件のステータス一括変更 (2段階 API `/preview` -> `/apply`) に特化し、`requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ記録。
+  - **R1-P1-03 (保存ビュー構造整理)**: 保存ビューを filter と pageSize に限定し、`saved-view.js` のドロップダウンラベルを整音。`requirements.md`, `design.md`, `tasks.md`, `decision-log.md` へ記録。
+  - **R4-P2-01〜07**: `tasks.md` B1/B2 重複記述の削除、`todo.js` での非同期選択レースコンディション解消、編集モーダルへの全情報補填、`decision-log.md` への決定根拠追記を完了。
 
 ---
 

@@ -58,7 +58,7 @@ function renderTaskTable(tasks) {
                 <td>${dueText}</td>
                 <td class="text-end pe-4">
                     ${!isTerminal ? `
-                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(${t.id}, ${t.assigneeUserId}, '${t.dueDate || ''}')" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
+                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(${t.id}, ${t.assigneeUserId}, '${t.dueDate || ''}', '${SES.escapeHtml(t.title || '')}', '${SES.escapeHtml(t.description || '')}', '${t.priority || 'MEDIUM'}')" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
                         ${t.status === 'NOT_STARTED' ? `<button class="btn btn-sm btn-outline-info me-1" onclick="updateTaskStatus(${t.id}, 'IN_PROGRESS')">進行中へ</button>` : ''}
                         ${t.status === 'IN_PROGRESS' ? `<button class="btn btn-sm btn-success me-1" onclick="updateTaskStatus(${t.id}, 'COMPLETED')">完了</button>` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateTaskStatus(${t.id}, 'CANCELLED')">取消</button>
@@ -73,44 +73,49 @@ function renderTaskTable(tasks) {
 function openNewTaskModal() {
     document.getElementById('taskForm').reset();
     document.getElementById('task-id').value = '';
+    const label = document.getElementById('taskModalLabel');
+    if (label) label.textContent = '新規タスク登録';
     loadUserOptions();
 }
 
-function openEditTaskModal(id, assigneeUserId, dueDate) {
+async function openEditTaskModal(id, assigneeUserId, dueDate, title, description, priority) {
     document.getElementById('taskForm').reset();
     document.getElementById('task-id').value = id;
-    if (dueDate) {
-        document.getElementById('task-due-date').value = dueDate;
-    }
-    loadUserOptions();
-    setTimeout(() => {
-        if (assigneeUserId) {
-            $('#task-assignee-user-id').val(assigneeUserId);
-        }
-    }, 200);
+    const label = document.getElementById('taskModalLabel');
+    if (label) label.textContent = 'タスク詳細変更';
+
+    if (title) document.getElementById('task-title').value = title;
+    if (description) document.getElementById('task-description').value = description;
+    if (priority) document.getElementById('task-priority').value = priority;
+    if (dueDate) document.getElementById('task-due-date').value = dueDate;
+
+    await loadUserOptions(assigneeUserId);
+
     const modalEl = document.getElementById('taskModal');
     const modal = new bootstrap.Modal(modalEl);
     modal.show();
 }
 
-function loadUserOptions() {
+function loadUserOptions(selectedUserId) {
     const $select = $('#task-assignee-user-id');
-    if (!$select.length) return;
-    $.ajax({
+    if (!$select.length) return Promise.resolve();
+    return $.ajax({
         url: '/api/autocomplete/assignable-users',
-        type: 'GET',
-        success: function(res) {
-            if (res && res.code === 200 && res.data) {
-                let html = '';
-                res.data.forEach(u => {
-                    html += `<option value="${u.id}">${SES.escapeHtml(u.realName || u.username)}</option>`;
-                });
-                $select.html(html);
+        type: 'GET'
+    }).then(function(res) {
+        if (res && res.code === 200 && res.data) {
+            let html = '';
+            res.data.forEach(u => {
+                const selected = (selectedUserId && parseInt(selectedUserId) === u.id) ? 'selected' : '';
+                html += `<option value="${u.id}" ${selected}>${SES.escapeHtml(u.realName || u.username)}</option>`;
+            });
+            $select.html(html);
+            if (selectedUserId) {
+                $select.val(selectedUserId);
             }
-        },
-        error: function() {
-            $select.html('<option value="">読み込み失敗</option>');
         }
+    }).catch(function() {
+        $select.html('<option value="">読み込み失敗</option>');
     });
 }
 
@@ -128,19 +133,23 @@ async function saveTask() {
     }
     const description = document.getElementById('task-description').value.trim();
     const priority = document.getElementById('task-priority').value;
-    const dueDate = document.getElementById('task-due-date').value || null;
+    const dueDateVal = document.getElementById('task-due-date').value;
+    const dueDate = dueDateVal ? dueDateVal : null;
+    const clearDueDate = taskId && !dueDateVal;
 
     try {
         let res;
         if (taskId) {
-            // タスク詳細（担当者・期限）の変更
+            // タスク詳細（担当者・期限・優先度）の変更
             res = await $.ajax({
                 url: `/api/tasks/${taskId}/details`,
                 type: 'PUT',
                 contentType: 'application/json',
                 data: JSON.stringify({
                     assigneeUserId: parseInt(assigneeUserId),
-                    dueDate: dueDate
+                    dueDate: dueDate,
+                    clearDueDate: clearDueDate,
+                    priority: priority
                 })
             });
         } else {

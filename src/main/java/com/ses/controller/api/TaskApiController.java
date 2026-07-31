@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.task.TaskDetailsUpdateRequest;
 import com.ses.entity.Notification;
 import com.ses.entity.Task;
 import com.ses.mapper.NotificationMapper;
@@ -87,14 +88,21 @@ public class TaskApiController {
     @PutMapping("/{id}/details")
     public ApiResult<Task> updateDetails(
             @PathVariable("id") Long taskId,
-            @RequestParam(name = "assigneeUserId", required = false) Long assigneeUserId,
-            @RequestParam(name = "dueDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueDate,
-            @RequestParam(name = "priority", required = false) String priority) {
+            @RequestBody TaskDetailsUpdateRequest req) {
         Long userId = SecurityUtils.currentUserId();
         if (userId == null) {
             throw new BusinessException(401, "認証が必要です");
         }
-        Task updated = taskService.updateTaskDetails(taskId, assigneeUserId, dueDate, priority, userId);
+        if (req == null) {
+            throw new BusinessException(400, "リクエストボディが必要です");
+        }
+        Task updated = taskService.updateTaskDetails(
+                taskId,
+                req.getAssigneeUserId(),
+                req.getDueDate(),
+                req.getClearDueDate(),
+                req.getPriority(),
+                userId);
         return ApiResult.success(updated);
     }
 

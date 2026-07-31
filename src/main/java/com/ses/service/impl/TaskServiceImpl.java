@@ -110,6 +110,12 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     @Override
     @Transactional
     public Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, String newPriority, Long operatorUserId) {
+        return updateTaskDetails(taskId, newAssigneeUserId, newDueDate, false, newPriority, operatorUserId);
+    }
+
+    @Override
+    @Transactional
+    public Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, Boolean clearDueDate, String newPriority, Long operatorUserId) {
         Task task = getById(taskId);
         if (task == null) {
             throw new BusinessException(404, "タスクが見つかりません: " + taskId);
@@ -126,7 +132,11 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (newAssigneeUserId != null) {
             task.setAssigneeUserId(newAssigneeUserId);
         }
-        task.setDueDate(newDueDate);
+        if (Boolean.TRUE.equals(clearDueDate)) {
+            task.setDueDate(null);
+        } else if (newDueDate != null) {
+            task.setDueDate(newDueDate);
+        }
         if (StringUtils.hasText(newPriority)) {
             task.setPriority(newPriority);
         }
@@ -142,10 +152,10 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
                     "/todo", "task_reassigned_" + task.getId() + "_" + newAssigneeUserId);
         }
         // R2.4: 期限変更通知
-        if (!Objects.equals(oldDueDate, newDueDate) && task.getAssigneeUserId() != null) {
+        if (!Objects.equals(oldDueDate, task.getDueDate()) && task.getAssigneeUserId() != null) {
             sendNotification(task.getAssigneeUserId(), "TASK_DUE_CHANGED",
-                    "タスク期限が変更されました", "タスク「" + task.getTitle() + "」の期限が " + newDueDate + " に変更されました",
-                    "/todo", "task_due_changed_" + task.getId() + "_" + newDueDate);
+                    "タスク期限が変更されました", "タスク「" + task.getTitle() + "」の期限が " + task.getDueDate() + " に変更されました",
+                    "/todo", "task_due_changed_" + task.getId() + "_" + task.getDueDate());
         }
 
         return task;

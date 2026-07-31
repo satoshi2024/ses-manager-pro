@@ -19,6 +19,11 @@ public interface TaskService extends IService<Task> {
     Task updateStatus(Long taskId, String newStatus, Long operatorUserId);
 
     /**
+     * 担当者・期限・優先度の変更（clearDueDate=true で期限を明示クリア）
+     */
+    Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, Boolean clearDueDate, String newPriority, Long operatorUserId);
+
+    /**
      * 担当者・期限・優先度の変更
      */
     Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, String newPriority, Long operatorUserId);
