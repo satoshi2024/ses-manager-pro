@@ -42,7 +42,6 @@ class QuotationPdfServiceImplTest {
         Customer c = new Customer();
         c.setCompanyName("株式会社テスト商事");
         when(cm.selectById(1L)).thenReturn(c);
-
         EngineerMapper em = Mockito.mock(EngineerMapper.class);
         Engineer e = new Engineer();
         e.setFullName("山田太郎");
@@ -50,7 +49,8 @@ class QuotationPdfServiceImplTest {
         when(em.selectById(2L)).thenReturn(e);
 
         PdfProperties pdfProps = new PdfProperties();
-        return new QuotationPdfServiceImpl(cfg, cm, em, new com.ses.common.util.PdfFontUtils(pdfProps));
+        org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> provider = Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        return new QuotationPdfServiceImpl(cfg, cm, em, new com.ses.common.util.PdfFontUtils(pdfProps), provider);
     }
 
     @Test
