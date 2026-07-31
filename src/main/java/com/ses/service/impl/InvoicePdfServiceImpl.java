@@ -37,6 +37,7 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
 
     private final SystemConfigService systemConfigService;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
 
     @Override
     public byte[] generate(InvoiceDetailDto detail) {
@@ -114,7 +115,7 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
                     .documentNo(detail.getInvoiceNo())
                     .counterpartyType("CUSTOMER")
                     .counterpartyId(detail.getCustomerId())
-                    .transactionDate(detail.getIssueDate())
+                    .transactionDate(detail.getIssuedDate())
                     .amount(detail.getTotal())
                     .direction("OUTGOING")
                     .originalName("invoice_" + nz(detail.getInvoiceNo()) + ".pdf")

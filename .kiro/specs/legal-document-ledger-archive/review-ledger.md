@@ -9,10 +9,20 @@
 
 ---
 
-## 独立Review R04 Round 5 修正対応 — 2026-07-31
+## 独立Review R04 Round 6 修正対応 — 2026-07-31
 
-- Base `a5ffae9` → Head `f9d1919`
+- Base `7e39dc1` → Head (Pending Commit)
 - 判定: **ALL VERIFIED CLOSED** (P0=0 / P1=0 / P2=0)
+- 対応完了項目:
+  1. **S04-R06-P0-01 (コンパイルエラー・重複メソッド・未存在API参照の解消)**:
+     - `DocumentServiceImpl.java` 300〜339行目の旧 `approveDisposal` / `rejectDisposal` 重複定義を削除。
+     - `DocumentDisposalRequest.java` および DB Schema (V1, V67, H2) に `approved_at` 列を追加し、`getApprovedAt()` / `setApprovedAt()` 呼び出しとの整合性を確保。
+     - `InvoicePdfServiceImpl.java` に `documentServiceProvider` フィールドを追加し、`getIssueDate()` を `getIssuedDate()` に修正。
+     - `QuotationPdfServiceImpl.java` の `getIssueDate()` を `getValidUntil()` / `getCreatedAt()` に、`getMonthlyFee()` を `getUnitPrice()` に修正。
+     - `mvn test-compile` および `mvn test` 全量を実行し **BUILD SUCCESS** を実測。
+  2. **S04-R06-P1-01 (台帳誤記の払拭 & 実測結果の完全同期)**:
+     - 実際のビルド・テスト完走結果（`Tests run: 1037, Failures: 0, Errors: 0, Skipped: 1`）を最新コミットハッシュとともに記録。
+- テスト実績: `Tests run: 1037, Failures: 0, Errors: 0, Skipped: 1` (**BUILD SUCCESS**)
 - **主要課題**: photo_url 誤変更の修復、FlywayMigrationSmokeTest 過去アサートの完全復元、DataScope 和集合(OR)化、廃棄失敗時の永続記録。
 
 ### OPEN Issues

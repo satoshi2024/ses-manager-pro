@@ -45,6 +45,9 @@ public class DocumentDisposalRequest extends BaseEntity {
     /** 廃棄理由 */
     private String reason;
 
+    /** 廃棄承認日時 */
+    private LocalDateTime approvedAt;
+
     /** 廃棄実施日時（storage削除完了時に設定） */
     private LocalDateTime disposedAt;
 }

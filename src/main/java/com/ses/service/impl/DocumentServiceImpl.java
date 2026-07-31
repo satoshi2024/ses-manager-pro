@@ -297,47 +297,6 @@ public class DocumentServiceImpl implements DocumentService {
         return req;
     }
 
-    @Override
-    @Transactional
-    public void approveDisposal(Long disposalRequestId) {
-        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
-        if (!"PENDING".equals(req.getStatus())) {
-            throw BusinessException.of(400, "error.document.disposalNotPending");
-        }
-        Long currentUserId = SecurityUtils.currentUserId();
-        if (currentUserId != null && currentUserId.equals(req.getRequestedBy())) {
-            throw BusinessException.of(400, "error.document.disposalSelfApproval");
-        }
-
-        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                .eq(DocumentDisposalRequest::getStatus, "PENDING")
-                .set(DocumentDisposalRequest::getStatus, "APPROVED")
-                .set(DocumentDisposalRequest::getApprovedBy, currentUserId));
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
-        }
-        recordAccessLog(req.getDocumentId(), null, "DISPOSE_APPROVE");
-    }
-
-    @Override
-    @Transactional
-    public void rejectDisposal(Long disposalRequestId, String reason) {
-        DocumentDisposalRequest req = getDisposalRequestOrThrow(disposalRequestId);
-        if (!"PENDING".equals(req.getStatus())) {
-            throw BusinessException.of(400, "error.document.disposalNotPending");
-        }
-        int updated = documentDisposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
-                .eq(DocumentDisposalRequest::getId, disposalRequestId)
-                .eq(DocumentDisposalRequest::getStatus, "PENDING")
-                .set(DocumentDisposalRequest::getStatus, "REJECTED")
-                .set(DocumentDisposalRequest::getReason, req.getReason() + " [却下理由: " + reason + "]"));
-        if (updated == 0) {
-            throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
-        }
-        recordAccessLog(req.getDocumentId(), null, "DISPOSE_REJECT");
-    }
-
     private void assertAdminUser() {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
@@ -356,7 +315,7 @@ public class DocumentServiceImpl implements DocumentService {
         }
 
         Long currentUserId = SecurityUtils.currentUserId();
-        if (currentUserId.equals(req.getRequestedBy())) {
+        if (currentUserId != null && currentUserId.equals(req.getRequestedBy())) {
             throw BusinessException.of(400, "error.document.disposalSelfApproval");
         }
 
@@ -371,6 +330,7 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
         }
 
+        recordAccessLog(req.getDocumentId(), null, "DISPOSE_APPROVE");
         log.info("[文書台帳] 廃棄申請を承認しました: requestId={} approvedBy={}", disposalRequestId, currentUserId);
     }
 
@@ -396,6 +356,7 @@ public class DocumentServiceImpl implements DocumentService {
             throw BusinessException.of(409, "error.document.disposalConcurrentUpdate");
         }
 
+        recordAccessLog(req.getDocumentId(), null, "DISPOSE_REJECT");
         log.info("[文書台帳] 廃棄申請を却下しました: requestId={} rejectedBy={}", disposalRequestId, currentUserId);
     }
 

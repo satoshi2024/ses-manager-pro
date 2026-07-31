@@ -689,6 +689,7 @@ CREATE TABLE t_document_disposal_request (
   document_id   BIGINT       NOT NULL,
   requested_by  BIGINT       NOT NULL,
   approved_by   BIGINT,
+  approved_at   DATETIME,
   status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
   reason        VARCHAR(1000) NOT NULL,
   disposed_at   DATETIME,

@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS t_document_disposal_request (
   document_id   BIGINT       NOT NULL COMMENT '文書ID',
   requested_by  BIGINT       NOT NULL COMMENT '廃棄申請者ユーザーID',
   approved_by   BIGINT       COMMENT '廃棄承認者ユーザーID',
+  approved_at   DATETIME     COMMENT '廃棄承認日時',
   status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '状態',
   reason        VARCHAR(1000) NOT NULL COMMENT '廃棄理由',
   disposed_at   DATETIME     COMMENT '廃棄実施日時',
