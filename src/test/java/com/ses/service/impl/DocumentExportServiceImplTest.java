@@ -56,7 +56,7 @@ class DocumentExportServiceImplTest {
         version.setSha256("sha256-dummy-hash");
 
         when(documentMapper.selectList(any())).thenReturn(List.of(doc));
-        when(documentVersionMapper.findLatestByDocumentId(100L)).thenReturn(version);
+        when(documentVersionMapper.findByDocumentId(100L)).thenReturn(List.of(version));
         when(documentStorage.open("key-100")).thenReturn(new ByteArrayInputStream("PDF content".getBytes()));
         org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
 
