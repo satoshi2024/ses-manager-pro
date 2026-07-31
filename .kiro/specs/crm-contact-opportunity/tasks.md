@@ -6,13 +6,13 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V70**。BP master(V69)と並行実装可だが、DDLのmergeは番号順。
+> **Migration**: 本specの予約番号は **V71**。BP master(V69)と並行実装可だが、DDLのmergeは番号順。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] F1. contact/lead/opportunity DDLと移行
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
-  - **実装ガイダンス**: **V70**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
+  - **実装ガイダンス**: **V71**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
     `primary_flag`は「1顧客につき有効期間内に1件」。**0件も許容**し、先頭担当者へ暗黙fallbackしない（design §6.1）。
     既存単一contact fieldはmigration後read compatibility、write禁止。
   - **テスト要件**: L1〜L3。移行件数と値の一致、primary一意（0件許容）、

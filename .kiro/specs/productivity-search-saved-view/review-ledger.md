@@ -1,22 +1,33 @@
 # 横断検索・実ToDo・保存ビュー・一括操作（productivity-search-saved-view）要件・設計整合性レビュー記録
 
-## 修正・検証ステータス (Round 2 対応完了)
+## 修正・検証ステータス (Round 2 指摘事項修正完了)
 
-- **現行判定**: **PASS (Round 2 対応完了)**
+- **現行判定**: **REVIEW待ち（Round 2 修正完了）**
 - **Base Commit**: `2c69399`
-- **Head Commit**: `e396c0b` (Round 1), 修正完了コミット (Round 2)
+- **Head Commit**: `84a1e1c` (Round 2 修正コミット)
 - **指摘対応一覧**:
-  - **P0-01**: `ActionPermissionResolver` に `search`, `tasks`, `saved-views`, `batch-operations` を登録。新規 DDL `V81__productivity_menu_permissions.sql` を作成し、6系統同期を実施。4 コントローラーの MockMvc テスト (`SearchApiControllerTest`, `TaskApiControllerTest`, `SavedViewApiControllerTest`, `BatchOperationApiControllerTest`) を新設。
-  - **P0-02**: `TaskServiceImpl` で `updateStatus` / `updateTaskDetails` に `assertTaskOwnerOrAdmin` による所有者・管理者認可チェックを挿入し IDOR を遮断（不一致は 404 存在秘匿）。`TaskApiController` で `createTaskFromNotification` に `recipientUserId` チェックを追加。
-  - **P1-01**: `SavedViewSchemaRegistry` で `pageKey` (`engineer_list` 等) に基づく strict allowlist チェックを実装。不許可フィールド・キーを 400 で即時拒否。`SavedViewServiceH2Test` で検証。
-  - **P1-02**: 一括操作を上限 200 件（201件以上は 400 拒否）にし、`preview` / `apply` エンドポイントおよび HMAC-SHA256 署名付き `previewToken` を導入。ループ外での ID 集合一括取得で P2-07 性能問題を改善。
-  - **P1-03**: `saved-view.js` 及び `engineer.js` で `filter`, `sort`, `columns`, `pageSize` を連携・保存・復元。削除時の確認を SweetAlert2 (`Swal.fire`) へ統一 (P2-09)。
-  - **P1-04**: `todo/list.html` モーダルに担当者プルダウンを追加。`todo.js` で `loadUserOptions()` と `assigneeUserId` 送信、通信エラーの `Toast.error` フィードバックを実装。
-  - **P1-05**: `TaskServiceImpl` で担当変更・期限変更・完了時に `NotificationService.publishToUser` による通知発行を追加。
-  - **P1-06**: 横断検索全 8 プロバイダで `getRequiredActionKey()` を実装し、`GlobalSearchServiceImpl` で `authService.isAllowed(...)` をチェック。アクセス権のない種別は 0 件非開示。
-  - **P1-07**: `GlobalSearchServiceImpl` に 3,000ms (3秒) 超過時の全体タイムアウト処理および例外時の `log.warn` ログ記録を導入。
-  - **P2-01**: `Task.dueDate` に `@TableField(updateStrategy = FieldStrategy.ALWAYS)` を付与。
-  - **P2-02**: `SavedViewServiceImpl.updateView` でクライアントからの `version` 照合による楽観ロック補強。
+  - **R2-P0-01 (V81 採番事故 & 予約表)**: 本 spec 2本目のマイグレーションを `V69__productivity_menu_permissions.sql` にリネーム・繰り下げ。S06〜S17 の予約マイグレーション表（README, 各 design.md, tasks.md, copyable-conversations）を V70〜V81 へ連番繰り上げ更新。`SpecDispatchConsistencyTest` の S05 コメントアウト（適用済み）を同期更新。
+  - **R2-P1-01 (m_menu 明示ID指定事故)**: `V69__productivity_menu_permissions.sql` で明示 ID 20〜23 指定を削除し AUTO_INCREMENT へ変更。`application-test.yml` からの直接 DDL replay を撤去。
+  - **R2-P1-02 (一括操作ステータス語彙不一致)**: `BatchOperationServiceImpl.java` で要員（「稼動中」「提案中」「退場予定」「Bench」「待機」）および案件（「募集中」「選考中」「充足」「クローズ」）の実在定義ステータスを全許可に補修。
+  - **R1-P1-02 (preview 迂回経路削除)**: `BatchOperationApiController` から `/engineers/status`, `/projects/status` を完全削除し、`/preview` -> `/apply` の 2段階実行を強制。
+  - **R1-P1-04 (非管理者タスク登録 403)**: `todo.js` で `loadUserOptions()` の呼び出し先を `/api/autocomplete/assignable-users` へ変更。全ロールでタスク登録が可能に。
+  - **git diff --check**: 全ファイルの末尾空白を解消し exit 0 を達成。
+
+---
+
+## 9. Review Packet
+
+- **Base Commit**: `2c69399`
+- **Head Commit**: `84a1e1c`
+- **Test Evidence**:
+  - `.\apache-maven-3.9.6\bin\mvn test`
+  - 結果: `BUILD SUCCESS`
+- **Demo Evidence**:
+  - 横断検索モーダル (`Ctrl+K`) からキーワード入力・検索結果表示・詳細画面遷移を確認。
+  - `/todo` 画面でのタスク新規登録（担当者選択付き）、ステータス変更（進行中→完了）、完了時の通知送信を確認。
+  - 一括操作プレビュー・トークン発行・200件適用および201件拒否動作を確認。
+- **Rollback Plan**:
+  - 本機能のマイグレーションロールバック: `DROP TABLE t_task_notification_log, m_saved_view, t_task; DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations')); DELETE FROM m_menu WHERE menu_key IN ('search','tasks','saved-views','batch-operations');`クライアントからの `version` 照合による楽観ロック補強。
 
 ---
 

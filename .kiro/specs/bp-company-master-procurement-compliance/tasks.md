@@ -6,7 +6,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V69**。着手時にmerge済み`db/migration`の最新を再確認し、
+> **Migration**: 本specの予約番号は **V70**。着手時にmerge済み`db/migration`の最新を再確認し、
 > 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
 - [ ] 0. G2法務確認/既存自由入力profiling
@@ -23,7 +23,7 @@
 - [ ] F1. BP master/terms/contact/bank DDL
   - **Objective**: BPを法人/個人事業主/フリーランスで登録でき、法人番号・適格請求書番号・支払条件・
     連絡先・口座を管理できる。口座は一覧・詳細・exportのいずれでもマスク表示され、復号値が出ない。
-  - **実装ガイダンス**: **V69**/V1/H2(`sql/schema-bp-company-h2.sql`)/MySQL smoke、暗号化/masking、service。
+  - **実装ガイダンス**: **V70**/V1/H2(`sql/schema-bp-company-h2.sql`)/MySQL smoke、暗号化/masking、service。
     `compliance_applicability IS NULL`は**未確認**であり「非該当」ではない（design §5.1）。
     `t_bp_terms`の版切替は`effective_from`基準で、**支払確定日**で解決する。
   - **テスト要件**: L1〜L3。法人番号/登録番号のunique、terms期間の重複、

@@ -79,7 +79,7 @@ function loadUserOptions() {
     const $select = $('#task-assignee-user-id');
     if (!$select.length) return;
     $.ajax({
-        url: '/api/autocomplete/users',
+        url: '/api/autocomplete/assignable-users',
         type: 'GET',
         success: function(res) {
             if (res && res.code === 200 && res.data) {
@@ -233,8 +233,8 @@ function renderTable(records) {
         const colorClass = iconColorMap[item.type] || 'text-accent-blue';
         const isRead = item.isRead;
         const rowClass = !isRead ? 'fw-bold bg-secondary bg-opacity-10' : '';
-        const badgeHtml = isRead 
-            ? `<span class="badge bg-secondary">既読</span>` 
+        const badgeHtml = isRead
+            ? `<span class="badge bg-secondary">既読</span>`
             : `<span class="badge bg-accent-red">未読</span>`;
 
         const safeUrl = SES.escapeHtml(item.linkUrl || '#');

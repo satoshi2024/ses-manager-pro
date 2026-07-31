@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V72）
+## 1. DDL（予約V73）
 
 - `t_sales_order(id, tenant_id, legal_entity_id, order_no, customer_po_no, customer_id, contact_id,
   quotation_id, order_date, start/end_date, status, total_amount_snapshot, payment_terms_snapshot,
@@ -81,10 +81,10 @@
 | 差戻し | →提出済（再提出） | 状態CAS | — | — |
 | 検収済 | →取消（**承認必須**、R3.4） | 状態CAS | 請求生成との競合 | 取消はapproval経由 |
 
-- **契約化の冪等**: `t_contract.order_line_id`に`UNIQUE`。二重clickでも1明細→1契約（R5）。
+- **予約V73**: DDLマイグレーション`t_contract.order_line_id`に`UNIQUE`。二重clickでも1明細→1契約（R5）。
   CAS＋UNIQUEの二重防御。
 - **PO重複**: `customer_po_no`は`(tenant_id, customer_id)`内で**重複警告**（拒否ではない）。
-  同一原本hashの二重登録は**拒否**（R2.4）。警告と拒否を混同しない。
+  同一原本hash ofの二重登録は**拒否**（R2.4）。警告と拒否を混同しない。
 - **請求guardはSQLで**（R3.3）: invoice生成queryに
   `acceptance_required = FALSE OR EXISTS(検収済のacceptance)` を**WHERE句として**足す。
   取得後のJava filterにしない（§2.2）。

@@ -46,19 +46,19 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 2 | `organization-management-accounting` | 部門・上長・原価部門・予算 | XL | V60 | 仕様済 |
 | 3 | `enterprise-identity-security` | OIDC/MFA/権限/セッション統制 | XL | V63〜V66 | 仕様済・G1決定済 |
 | 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済 |
-| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68 | 仕様済 |
-| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V69 | 仕様済・G2開発方針決定済 |
-| 7 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V70 | 仕様済 |
-| 8 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V71 | 仕様済 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V72 | 仕様済 |
-| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V73 | 仕様済・G2開発方針決定済 |
-| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V74 | 仕様済・G6決定済 |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | V75 | 仕様済 |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | V76 | 仕様済・G3決定済 |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | V77 | 仕様済 |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | V78 | 仕様済・G4決定済 |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | V79 | 仕様済・G5決定済 |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | V80 | 仕様済 |
+| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68, V69 | 仕様済 |
+| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70 | 仕様済・G2開発方針決定済 |
+| 7 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V71 | 仕様済 |
+| 8 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V72 | 仕様済 |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V73 | 仕様済 |
+| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V74 | 仕様済・G2開発方針決定済 |
+| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V75 | 仕様済・G6決定済 |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | V76 | 仕様済 |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | V77 | 仕様済・G3決定済 |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | V78 | 仕様済 |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | V79 | 仕様済・G4決定済 |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | V80 | 仕様済・G5決定済 |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | V81 | 仕様済 |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、

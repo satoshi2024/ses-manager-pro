@@ -34,8 +34,8 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     private static final String SECRET_KEY = "SES_MANAGER_BATCH_TOKEN_SECRET";
     private static final long TOKEN_EXPIRATION_MS = 15 * 60 * 1000L; // 15分
 
-    private static final Set<String> VALID_ENGINEER_STATUSES = Set.of("稼動中", "退場予定", "Bench", "提案中");
-    private static final Set<String> VALID_PROJECT_STATUSES = Set.of("募集中", "選考中", "成約", "終了");
+    private static final Set<String> VALID_ENGINEER_STATUSES = Set.of("稼動中", "提案中", "退場予定", "Bench", "待機");
+    private static final Set<String> VALID_PROJECT_STATUSES = Set.of("募集中", "選考中", "充足", "クローズ");
 
     @Override
     public BatchPreviewResultDTO previewEngineerStatusUpdate(List<Long> ids, String targetStatus, Long currentUserId) {

@@ -12,7 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * 一括操作 REST API コントローラー
+ * 一括操作 REST API コントローラー (2段階 preview / apply 必須化)
  */
 @RestController
 @RequestMapping("/api/batch-operations")
@@ -49,26 +49,6 @@ public class BatchOperationApiController {
     }
 
     /**
-     * 要員ステータスの一括更新（旧互換用。プレビューTokenなしの直接適用もプレビューToken自動発行で許可）
-     */
-    @PostMapping("/engineers/status")
-    public ApiResult<BatchOperationResultDTO> updateEngineerStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
-        Long userId = SecurityUtils.currentUserId();
-        if (userId == null) {
-            throw new BusinessException(401, "認証が必要です");
-        }
-        BatchPreviewResultDTO preview = batchOperationService.previewEngineerStatusUpdate(
-                request.getIds(), request.getStatus(), userId);
-        BatchApplyRequestDTO applyReq = new BatchApplyRequestDTO();
-        applyReq.setIds(request.getIds());
-        applyReq.setStatus(request.getStatus());
-        applyReq.setPreviewToken(preview.getPreviewToken());
-
-        BatchOperationResultDTO result = batchOperationService.applyEngineerStatusUpdate(applyReq, userId);
-        return ApiResult.success(result);
-    }
-
-    /**
      * 案件ステータス一括更新 プレビュー
      */
     @PostMapping("/projects/preview")
@@ -92,26 +72,6 @@ public class BatchOperationApiController {
             throw new BusinessException(401, "認証が必要です");
         }
         BatchOperationResultDTO result = batchOperationService.applyProjectStatusUpdate(request, userId);
-        return ApiResult.success(result);
-    }
-
-    /**
-     * 案件ステータスの一括更新（旧互換用）
-     */
-    @PostMapping("/projects/status")
-    public ApiResult<BatchOperationResultDTO> updateProjectStatusBatch(@RequestBody BatchStatusUpdateRequestDTO request) {
-        Long userId = SecurityUtils.currentUserId();
-        if (userId == null) {
-            throw new BusinessException(401, "認証が必要です");
-        }
-        BatchPreviewResultDTO preview = batchOperationService.previewProjectStatusUpdate(
-                request.getIds(), request.getStatus(), userId);
-        BatchApplyRequestDTO applyReq = new BatchApplyRequestDTO();
-        applyReq.setIds(request.getIds());
-        applyReq.setStatus(request.getStatus());
-        applyReq.setPreviewToken(preview.getPreviewToken());
-
-        BatchOperationResultDTO result = batchOperationService.applyProjectStatusUpdate(applyReq, userId);
         return ApiResult.success(result);
     }
 }
