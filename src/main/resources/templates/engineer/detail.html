@@ -132,7 +132,9 @@
                     <div id="account-link-current" class="mb-2 text-light small"></div>
                     <div id="account-link-form" class="d-none">
                         <select id="account-link-select" class="form-select form-select-sm mb-2"></select>
-                        <button class="btn btn-sm btn-primary" onclick="linkAccount()" th:text="#{engineer.accountLink.link}">紐付け</button>
+                        <!-- 候補0件のときに理由を出す。空のセレクトだけを見せて黙って失敗させない。 -->
+                        <div id="account-link-hint" class="alert alert-warning py-2 px-2 small mb-2 d-none"></div>
+                        <button id="account-link-button" class="btn btn-sm btn-primary" onclick="linkAccount()" th:text="#{engineer.accountLink.link}">紐付け</button>
                     </div>
                     <button id="account-link-unlink" class="btn btn-sm btn-outline-danger d-none" onclick="unlinkAccount()" th:text="#{engineer.accountLink.unlink}">解除</button>
                 </div>

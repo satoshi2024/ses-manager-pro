@@ -23,6 +23,7 @@ public class EngineerApiController {
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.ProposalService proposalService;
     private final com.ses.service.RetentionRiskService retentionRiskService;
+    private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
 
     /**
      * エンジニア一覧（ページネーション）
@@ -36,7 +37,8 @@ public class EngineerApiController {
             @RequestParam(required = false) String employmentType,
             @RequestParam(required = false) java.util.List<Long> skillIds,
             @RequestParam(required = false) Long salesUserId,
-            @RequestParam(required = false) String riskLevel) {
+            @RequestParam(required = false) String riskLevel,
+            @RequestParam(required = false) Boolean accountLinked) {
 
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<Engineer> page = PageUtils.safePage(current, size, 1000L);
@@ -71,7 +73,18 @@ public class EngineerApiController {
             queryWrapper.inSql(Engineer::getId,
                 "SELECT engineer_id FROM t_engineer_sales WHERE sales_user_id = " + salesUserId + " AND released_at IS NULL AND deleted_flag = 0");
         }
-        
+        if (accountLinked != null) {
+            // 要員セルフサービス勤怠の初期設定漏れ（＝ログインアカウント未紐付け）を探すための絞り込み。
+            // engineer_id IS NOT NULL を明示するのは、NULL が1件でも混ざると NOT IN が
+            // 全行 UNKNOWN になり結果が黙って空になるため。
+            String subQuery = "SELECT engineer_id FROM t_engineer_account_link WHERE engineer_id IS NOT NULL";
+            if (accountLinked) {
+                queryWrapper.inSql(Engineer::getId, subQuery);
+            } else {
+                queryWrapper.notInSql(Engineer::getId, subQuery);
+            }
+        }
+
         queryWrapper.orderByDesc(Engineer::getId);
 
         boolean highRiskOnly = "high".equalsIgnoreCase(riskLevel);
@@ -112,6 +125,8 @@ public class EngineerApiController {
         // 同じ行の読み直し(selectBatchIds)を1クエリ分省く。
         java.util.Map<Long, com.ses.dto.engineerfollowup.RetentionRiskDto> riskMap =
                 retentionRiskService.scoreBatchFor(engineers);
+        // 紐付けも一括で引く（1件ずつ findByEngineerId を呼ぶとN+1）。
+        java.util.Set<Long> linkedEngineerIds = engineerAccountLinkService.findLinkedEngineerIds(engineerIds);
 
         for (Engineer eng : engineers) {
             com.ses.dto.engineer.EngineerListDto dto = new com.ses.dto.engineer.EngineerListDto();
@@ -128,6 +143,8 @@ public class EngineerApiController {
                 dto.setRetentionRiskScore(risk.getScore());
                 dto.setRetentionHighRisk(risk.isHighRisk());
             }
+
+            dto.setAccountLinked(linkedEngineerIds.contains(eng.getId()));
 
             dtoList.add(dto);
         }

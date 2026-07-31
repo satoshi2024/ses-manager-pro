@@ -48,6 +48,9 @@ class EngineerApiControllerValidationTest {
     @MockBean
     private com.ses.service.RetentionRiskService retentionRiskService;
 
+    @MockBean
+    private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);

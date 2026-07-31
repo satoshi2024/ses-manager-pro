@@ -71,6 +71,49 @@ Bootstrap の `.row` は既定で `align-items: stretch` のため、`col-md-4` 
 `MessageBundleConsistencyTest` / `StaticAssetLocalityTest` / `MobileResponsiveLayoutTest`
 （計27件）で回帰なしを確認済み。
 
+### 2.3 紐付け導線の残る3つの穴（2026-07-31 修正済み）
+
+カードへ到達できても、紐付けという初期設定は依然として「知っている人だけが辿り着ける」状態だった。
+
+**(a) 未紐付けの発見性がゼロだった（0-1b）**
+
+管理者が未紐付けの要員を探す手段が無く、要員詳細を1件ずつ開くしかなかった。
+
+- 要員一覧に絞り込み「ログインアカウント = すべて/紐付け済/未紐付け」を追加した
+  （`EngineerApiController#page` の `accountLinked`、`EngineerListDto.accountLinked`）。
+  一覧に警告バッジは**出さない**。BP要員などセルフサービスを使わない要員も多く、
+  未紐付けは必ずしも不備ではないため、全行に警告を出すとノイズになる。
+- 一方**ユーザー一覧では `role=要員` かつ未紐付けの行にバッジを出す**。こちらは曖昧さが無い
+  ―― 紐付けの無い要員アカウントはログインしても何もできないので、常に不備である。
+  `SysUserListDto.engineerLinked` は要員ロールの行だけ設定し、他ロールは null のままにする
+  （false と null を区別しないと全ユーザーへ不要な警告が並ぶ）。
+- 一覧のN+1を避けるため、判定は `findLinkedEngineerIds` / `findLinkedUserIds` の一括版で行う。
+
+**(b) 要員側が行き止まりだった（0-1c）**
+
+403 の文言だけが画面に置かれ、次に何をすればよいか示されていなかった。新規要員が初日に
+必ず見る画面である。403 のときは「管理者またはHRへ紐付けを依頼する」旨の案内を併記する。
+
+**(c) 候補ドロップダウンが無言で空になっていた（0-1d）**
+
+`candidates` は `role='要員'` かつ `status=1` かつ未紐付けの3条件を満たすユーザーだけを返す。
+どれで落ちても結果は同じ「空のセレクト」で、理由が分からなかった。API が `emptyReason`
+（`NO_ENGINEER_ROLE_USER` / `ALL_INACTIVE` / `ALL_LINKED`）を返し、画面が条件ごとに
+具体的な案内を出すようにした。候補0件のときはセレクトと紐付けボタンを隠す。
+
+**(d) ついでに見つかった i18n の欠落**
+
+`EnumMappings` の `userRole` に `要員` が無く、`SES.i18n.e` の未マッピングは dbValue を
+そのまま返すため、**EN/KO/ZH 利用者のユーザー一覧にだけ日本語の「要員」が出ていた**。
+ロール列のすぐ隣にバッジを足す変更だったので併せて修正した（`enum.userRole.engineer` を4バンドルへ）。
+
+なお `EnumMappingsCoverageTest` は **`V1__create_tables.sql` だけ**を走査する。`要員` は V32 の
+`ALTER TABLE sys_user MODIFY role ENUM(...)` で追加されたため、この欠落を検出できなかった。
+同じ穴に後発migrationのENUM値13件（`入力中`/`提出済`/`確定`/`差戻し`、請求・見積系の状態など）が
+入っており、走査範囲を全migrationへ広げると一斉に落ちる。**別タスクとして扱う**
+（それらが `enum.*` ではなく `workRecord.status.*` 等の別キー体系で翻訳されている可能性が高く、
+機械的にマッピングを足すと二重定義になる）。
+
 ---
 
 ## 3. 欠落の実体 — 雇用勤怠（未着手）
@@ -105,9 +148,9 @@ spec の最重要境界を再掲する:
 | # | 内容 | 変更候補 |
 |---|---|---|
 | 0-1 | **実施済み（2026-07-31）**。要員詳細の「ログインアカウント」カードが事実上発見できない原因を特定して修正した。§2.2 を参照 | `templates/engineer/detail.html` |
-| 0-1b | 未紐付けの発見性。要員一覧／ユーザー一覧に「未紐付け」の表示・絞り込みが無く、管理者は要員詳細を1件ずつ開く以外に気づく手段が無い。`/user/list` で `要員` ユーザーを作っても紐付けが必要である旨の示唆が出ない | `templates/engineer/list.html`、`templates/user/list.html` ほか |
-| 0-1c | 要員側の行き止まり。403 の文言だけが画面全体で、次の行動（管理者へ連絡）が示されない。新規要員が初日に必ず見る画面である | `templates/my-timesheet/index.html`、`static/js/modules/my-timesheet.js` |
-| 0-1d | 候補ドロップダウンが無言で空になる。`candidates` は `role='要員'` かつ `status=1` かつ未紐付けのみを返すため、役割違いのアカウントは理由不明のまま現れない | `EngineerAccountLinkApiController`、`engineer-account-link.js` |
+| 0-1b | **実施済み（2026-07-31）**。未紐付けの発見性。§2.3 を参照 | 要員一覧の絞り込み、ユーザー一覧のバッジ |
+| 0-1c | **実施済み（2026-07-31）**。要員側の行き止まり。§2.3 を参照 | `static/js/modules/my-timesheet.js` |
+| 0-1d | **実施済み（2026-07-31）**。候補ドロップダウンの無言の空。§2.3 を参照 | `EngineerAccountLinkApiController`、`engineer-account-link.js` |
 | 0-2 | 未提出リマインドを追加する。**新しい scheduler を作らず** `NotificationGenerateService.generateAll()` にジェネレータを1つ足す（既存の8つと同じ dedupe_key 方式）。締め日前は本人（`NotificationLinks.MY_TIMESHEET`）、締め日超過は上長へ | `NotificationGenerateService`、`m_system_config`（締め日・警告日数） |
 | 0-3 | `/my/timesheet` の情報不足を補う。現在 `index.html` は27行で対象月と契約一覧だけ。提出期限、月合計、承認状況を出す | `templates/my-timesheet/index.html`、`static/js/modules/my-timesheet.js`、messages 4バンドル |
 | 0-4 | 承認側の一括承認 | `WorkRecordApiController`、`work-record.js` |
@@ -204,6 +247,12 @@ H2 側の同期も忘れない: `sql/schema-attendance-h2.sql` の追加、`appl
 1. 要員ロールのユーザーで `/my/timesheet` に到達でき、日次入力から提出までが通る
 2. 未提出の要員へ締め日前に本人通知が飛び、同日に二重発行されない（dedupe_key）
 3. 4バンドル（ja/en/zh_CN/ko）にキーが揃い、`MessageBundleConsistencyTest` が緑
+4. （0-1 済）要員詳細で「ログインアカウント」カードがスクロールなしの通常フローに現れる
+5. （0-1b 済）要員一覧で「未紐付け」に絞り込める。**紐付けが1件も存在しない環境でも
+   未紐付け検索が全件を返す**（空集合に対する `NOT IN` の取り違えを固定）。
+   ユーザー一覧で `role=要員` かつ未紐付けの行にだけバッジが出て、他ロールには出ない
+6. （0-1c 済）未紐付けの要員がログインすると、エラー文に加えて次の行動が示される
+7. （0-1d 済）候補0件のとき、3条件のどれで落ちたかが画面に表示される
 
 **Phase 2**
 

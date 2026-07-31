@@ -21,4 +21,10 @@ public interface EngineerAccountLinkService {
 
     /** 指定ユーザーが要員として紐付け中か。 */
     boolean isUserLinked(Long sysUserId);
+
+    /** 紐付け済みの要員IDを一括で返す。一覧画面のN+1を避けるための一括版。 */
+    java.util.Set<Long> findLinkedEngineerIds(java.util.Collection<Long> engineerIds);
+
+    /** 紐付け済みのログインユーザーIDを一括で返す。一覧画面のN+1を避けるための一括版。 */
+    java.util.Set<Long> findLinkedUserIds(java.util.Collection<Long> sysUserIds);
 }

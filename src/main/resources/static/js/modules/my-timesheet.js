@@ -15,9 +15,34 @@ function loadMyTimesheet() {
     myMonthValue = document.getElementById('myMonth').value;
     fetch('/api/my/timesheet?month=' + encodeURIComponent(myMonthValue))
         .then(res => res.json()).then(data => {
-            if (data.code !== 200) { document.getElementById('myContracts').textContent = data.message || ''; return; }
+            if (data.code !== 200) { renderMyError(data); return; }
             renderMy(data.data.rows || [], data.data.engineerName);
         });
+}
+
+/**
+ * エラー時の表示。特に未紐付け(403)は新規要員が初日に必ず見る画面なので、
+ * エラー文だけを置いて行き止まりにせず、次に何をすればよいかを示す。
+ */
+function renderMyError(data) {
+    const container = document.getElementById('myContracts');
+    container.innerHTML = '';
+    const box = document.createElement('div');
+    if (data.code === 403) {
+        box.className = 'alert alert-warning';
+        const title = document.createElement('div');
+        title.className = 'fw-bold mb-1';
+        title.textContent = data.message || SES.i18n.t('error.my.notLinked');
+        const guide = document.createElement('div');
+        guide.className = 'small';
+        guide.textContent = SES.i18n.t('my.timesheet.notLinked.guide');
+        box.appendChild(title);
+        box.appendChild(guide);
+    } else {
+        box.className = 'alert alert-danger';
+        box.textContent = data.message || '';
+    }
+    container.appendChild(box);
 }
 
 function renderMy(rows, engineerName) {

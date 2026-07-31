@@ -31,13 +31,31 @@
             .then(res => res.json()).then(data => {
                 if (data.code !== 200) return;
                 const sel = document.getElementById('account-link-select');
+                const hint = document.getElementById('account-link-hint');
+                const linkBtn = document.getElementById('account-link-button');
+                const candidates = (data.data && data.data.candidates) || [];
                 sel.innerHTML = '';
-                data.data.forEach(u => {
+                candidates.forEach(u => {
                     const opt = document.createElement('option');
                     opt.value = u.id;
                     opt.textContent = u.username + (u.realName ? ' (' + u.realName + ')' : '');
                     sel.appendChild(opt);
                 });
+
+                // 候補0件のとき、以前は空のセレクトだけが残り理由が分からなかった。
+                // サーバーが返す emptyReason を具体的な案内文へ対応付ける。
+                const empty = candidates.length === 0;
+                sel.classList.toggle('d-none', empty);
+                if (linkBtn) linkBtn.classList.toggle('d-none', empty);
+                if (!hint) return;
+                if (!empty) {
+                    hint.classList.add('d-none');
+                    hint.textContent = '';
+                    return;
+                }
+                const reason = (data.data && data.data.emptyReason) || 'ALL_LINKED';
+                hint.textContent = SES.i18n.t('engineer.accountLink.empty.' + reason);
+                hint.classList.remove('d-none');
             });
     }
 
