@@ -75,7 +75,7 @@ class MobileResponsiveLayoutTest {
     }
 
     private String readCss(String path) throws IOException {
-        return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
+        return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
     }
 
     @ParameterizedTest(name = "{0} はモバイル用の共通レイアウト部品を含む")
