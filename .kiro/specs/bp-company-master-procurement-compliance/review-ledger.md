@@ -78,9 +78,20 @@
 | R3-P2-01 | P2 | README予約表未更新 | `.kiro/specs/customer-product-expansion-2026/README.md` の予約表を V72〜V82 へ繰り上げ更新 | `SpecDispatchConsistencyTest` PASS |
 | - | - | Docker不要の静的検査追加 | `MigrationScriptIntegrityTest` に「V1重複ADD検出」および「EntityフィールドのMigration存在検証」の2つの静的テストを追加 | `MigrationScriptIntegrityTest` 16/16 PASS (0 skipped) |
 
+
+## 8. Round 4 Review 指摘修復と最終Head固定（2026-07-31 / 完遂完了）
+
+| Issue ID | 影響 | 指摘内容 | 修正対応 | 検証証拠 |
+|---|---|---|---|---|
+| R4-P0-01 | P0 | V71 m_system_config INSERT 4列誤指定 | `V71` step 7 の `m_system_config` への INSERT で存在しない `category` 列を除外し、`(config_key, config_value, description)` の 3 列指定に正しく修正 | `MigrationScriptIntegrityTest.INSERT文で指定されたカラムがテーブル定義内に存在すること` PASS |
+| R4-P2-01 | P2 | V1重複ADD検出の文単位解体 | `MigrationScriptIntegrityTest` の V1 重複検出をファイル単位から SQL ステートメント文単位に解体・精密化 | `MigrationScriptIntegrityTest` 17/17 PASS |
+| R4-P2-02 | P2 | Entity↔Migration列のテーブル束縛 | Entity フィールドと Migration DDL の検証をテーブル名束縛に改修 | `MigrationScriptIntegrityTest` PASS |
+| R4-P2-03 | P2 | INSERT列の静的定義検証新設 | `INSERT INTO <table> (<columns>)` 内のカラムが DDL 定義に存在することをチェックする新テストを追加 | `MigrationScriptIntegrityTest.INSERT文で指定されたカラムがテーブル定義内に存在すること` PASS |
+
 ### 最終全量テストおよびHead固定証拠
-- **最終Head**: **`ce27794`** (working tree clean, `origin/main` へ git push 完了)
-- **L4全量 `mvn test`**: **Tests run: 1168, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
-- **Migration & Spec整合性**: `MigrationScriptIntegrityTest` (16 run / 0 skipped PASS), `SpecDispatchConsistencyTest` (8 run PASS)
+- **最終Head**: **`0d3e183`** (working tree clean, `origin/main` へ git push 完了)
+- **L4全量 `mvn test`**: **Tests run: 1169, Failures: 0, Errors: 0, Skipped: 7** (BUILD SUCCESS)
+- **Migration & Spec整合性**: `MigrationScriptIntegrityTest` (17 run PASS), `SpecDispatchConsistencyTest` (8 run PASS)
+
 
 
