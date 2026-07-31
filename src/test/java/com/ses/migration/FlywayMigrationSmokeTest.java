@@ -340,6 +340,15 @@ class FlywayMigrationSmokeTest {
                         cols,
                         "uk_document_idempotency は tenant_id を含む4列インデックスでなければならない");
             }
+
+            // V68: 横断検索・実ToDo・保存ビュー・一括操作 (productivity-search-saved-view)
+            assertTableExists(st, "t_task");
+            assertTableExists(st, "m_saved_view");
+            assertTableExists(st, "t_task_notification_log");
+            assertColumnExists(st, "t_task", "assignee_user_id");
+            assertColumnExists(st, "t_task", "due_date");
+            assertColumnExists(st, "m_saved_view", "page_key");
+            assertColumnExists(st, "m_saved_view", "owner_user_id");
         }
     }
 

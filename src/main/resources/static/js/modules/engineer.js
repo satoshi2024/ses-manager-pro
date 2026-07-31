@@ -29,6 +29,30 @@ $(document).ready(function() {
     // Load engineers on page load
     loadEngineers();
 
+    if (window.SES && window.SES.savedView) {
+        SES.savedView.init('engineer_list', function(view) {
+            try {
+                const filters = JSON.parse(view.filterJson || '{}');
+                $('#searchName').val(filters.fullName || '');
+                $('#searchStatus').val(filters.status || '');
+                $('#searchEmpType').val(filters.employmentType || '');
+                $('#searchSkill').val(filters.skillId || '');
+                $('#searchSalesUser').val(filters.salesUserId || '');
+                $('#searchRiskLevel').val(filters.riskLevel || '');
+                loadEngineers(1);
+            } catch(e) { console.error(e); }
+        }, function() {
+            return {
+                fullName: $('#searchName').val(),
+                status: $('#searchStatus').val(),
+                employmentType: $('#searchEmpType').val(),
+                skillId: $('#searchSkill').val(),
+                salesUserId: $('#searchSalesUser').val(),
+                riskLevel: $('#searchRiskLevel').val()
+            };
+        });
+    }
+
     // Load station names lazily when the modal is opened
     $('#engineerModal').on('show.bs.modal', function () {
         if (!window.stationsLoaded) {

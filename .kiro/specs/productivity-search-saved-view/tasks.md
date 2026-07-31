@@ -9,7 +9,7 @@
 > **Migration**: 本specの予約番号は **V68**。着手時にmerge済み`db/migration`の最新を再確認し、
 > 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
-- [ ] F1. task/saved view基盤
+- [x] F1. task/saved view基盤
   - **Objective**: 通知とは独立したtaskを登録して担当・期限・状態を管理でき、
     一覧のfilter/sort/列を個人viewとして保存できる。不正なview JSONは保存時に拒否される。
   - **実装ガイダンス**: **V68**/V1/H2(`sql/schema-productivity-h2.sql`)/MySQL smoke、
@@ -20,7 +20,7 @@
     view allowlist（未許可field名の拒否）、owner/共有の区別、`due_date IS NULL`が期限超過に**含まれない**こと。
   - **Demo**: task登録→担当変更→完了。期限なしtaskが期限超過一覧に出ないことを確認。
 
-- [ ] A1. 横断検索
+- [x] A1. 横断検索
   - **Objective**: 検索窓に顧客名を入れると顧客・案件・契約・請求が種別ごとに返り、
     そこから各画面へ遷移できる。営業Aの検索結果に営業B専用データが**件数を含めて**現れない。
   - **実装ガイダンス**: entity種別ごとの`GlobalSearchProvider`、header UI、scope付き上限。
@@ -31,7 +31,7 @@
     2文字未満の拒否、種別ごと最大件数、全体timeout。
   - **Demo**: 顧客名から顧客/案件/契約/請求へ移動。営業Bで同じ語を検索し担当外が0件を確認。
 
-- [ ] A2. ToDo/通知分離
+- [x] A2. ToDo/通知分離
   - **Objective**: 通知を既読にしてもtaskは残り、taskを完了しても通知履歴は残る。
     通知からtaskを作成でき、期限通知が1日1回だけ届く。
   - **実装ガイダンス**: todo画面をタスク/通知tabへ分離、関連link、期限scheduler、通知→task。
@@ -41,7 +41,7 @@
     scheduler再起動・重複起動で二重送信なし、既存notification APIの回帰。
   - **Demo**: 通知を既読後もtask継続。schedulerを2回起動して通知が1件のみを確認。
 
-- [ ] B1. 保存ビュー/表示列
+- [x] B1. 保存ビュー/表示列
   - **Objective**: 一覧の検索条件と表示列を保存し、再ログイン後に復元される。
     管理者は共有viewを作れるが、他ユーザーの個人viewを上書きできない。
   - **実装ガイダンス**: engineer/customer/project/contract/invoiceから段階導入。
@@ -50,7 +50,7 @@
     **管理者でも他人の個人viewを更新できない**こと、`version`楽観ロック競合。
   - **Demo**: 列/検索を保存し再login後復元。管理者が他ユーザーの個人viewを更新しようとして拒否されることを確認。
 
-- [ ] B2. 安全な一括操作
+- [x] B2. 安全な一括操作
   - **Objective**: 一覧から最大200件を選んで担当変更をpreviewし、変更差分と権限不足行を確認してから適用できる。
     201件は拒否され、200件は各行の成功/失敗が返る。preview後に対象がすり替わっても適用されない。
   - **実装ガイダンス**: preview tokenに対象ID集合のhashと有効期限を署名（design §5）、担当/状態/task、最大200。
@@ -61,7 +61,7 @@
     partial success の各行結果、preview後に変化した行だけが失敗すること、権限/状態競合。
   - **Demo**: 20要員へ担当営業変更preview→apply→結果CSV。201件で拒否されることを確認。
 
-- [ ] M. 回帰/負荷
+- [x] M. 回帰/負荷
   - **Objective**: 検索→saved view→bulk→taskの一連が実データ量で動き、検索p95が実測される。
     既存の通知・一覧機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、MySQLで検索p95実測、Node/JS syntax、

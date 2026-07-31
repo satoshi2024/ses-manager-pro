@@ -27,6 +27,11 @@
                 2026年07月10日 (金) 19:00
             </div>
 
+            <!-- Global Search Button / Trigger -->
+            <button class="btn btn-outline-secondary btn-sm text-light rounded-pill border-secondary px-3 py-1 me-2 no-print" type="button" id="global-search-btn" data-bs-toggle="modal" data-bs-target="#globalSearchModal" title="横断検索 (Ctrl+K)">
+                <i class="bi bi-search me-1"></i><span class="d-none d-md-inline">横断検索...</span> <kbd class="bg-dark text-muted border-0 d-none d-lg-inline-block small" style="font-size: 0.7rem;">Ctrl+K</kbd>
+            </button>
+
             <!-- Language Switch -->
             <div class="dropdown">
                 <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="languageDropdown" data-bs-toggle="dropdown" aria-expanded="false" th:title="#{common.language.switch}">
@@ -101,5 +106,26 @@
 
         </div>
     </header>
+
+    <!-- 横断検索 (Command Palette) モーダル -->
+    <div class="modal fade" id="globalSearchModal" tabindex="-1" aria-labelledby="globalSearchModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content bg-secondary text-white border-dark">
+                <div class="modal-header border-dark py-2">
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark text-muted border-secondary"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control bg-dark text-white border-secondary" id="global-search-input" placeholder="要員、顧客、案件、契約、請求、提案、見積を検索... (2文字以上)" autocomplete="off">
+                    </div>
+                    <button type="button" class="btn-close btn-close-white ms-2" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-3" id="global-search-results" style="min-height: 250px;">
+                    <div class="text-center text-muted py-5" id="global-search-placeholder">
+                        <i class="bi bi-search fs-1 mb-2 d-block opacity-50"></i>
+                        キーワードを2文字以上入力してください
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
