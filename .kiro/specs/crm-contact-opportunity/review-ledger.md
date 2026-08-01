@@ -5,7 +5,7 @@
 | Task | 状態 | 備考 |
 |---|---|---|
 | T048 / F1 | 実装完了・**Demo未実施** | DDL/移行/entity/定向testは完了。F1のDemo「顧客detailに表示」はT050(A1)の画面が必要なため未成立。よって `tasks.md` は `- [ ]` のまま |
-| T049 / F2 | **着手可（未着手）** | Round 2 CONDITIONAL PASS で開放。冒頭で CRM-R2-P1-01 を閉じる条件付きだったため、**本更新で先に閉じた** |
+| T049 / F2 | **実装完了** | 状態CAS/楽観ロック、終端更新拒否、受注→案件/見積の冪等変換、forecast排他を実装。定向7件＋H2統合2件PASS。Docker MySQL smokeはM/release gate |
 | T050 / A1 | 未着手 | |
 | T051 / A2 | 未着手 | |
 | T052 / B1 | 未着手 | |
@@ -274,3 +274,15 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 - 移行で作られた `t_customer_contact` の行は上記3で消えるが、**元データ `m_customer.contact_*` は
   V73が一切書き換えていない**ため、rollbackでの情報欠損は無い。
 - コード側（entity / mapper / test）は他から参照されていないため、revertのみで影響しない。
+
+## T049: F2. opportunity状態/変換/forecast排他（task別完了記録）
+
+| Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
+|---|---|---|---|---|---|
+| T049 / F2 | R2.3/R2.4、R4.2、design §6.3。`OpportunityService`/impl、状態・変換API、conversion DTO/request、Opportunity/Project/Quotation mapper、4言語message bundle | L1/L2: `OpportunityServiceImplTest` 7/7。L3: `OpportunityServiceIntegrationTest` 2/2（H2実DB）。`mvn compile` PASS。MySQL fresh/legacyはM/release gate | H2統合実行で交渉→受注→案件/見積を変換し、再変換後も同一ID・案件/見積各1件、converted商機はforecast母集団から除外 | 未commit（T053までの統合commitで確定） | 既存案件status enumへ`募集中`を使用。新migrationなし。rollbackは本taskのコード/テスト/message差分をrevertし、V73/V74や既存DBデータは変更しない |
+
+### T049の実装契約と境界
+
+- stage変更は`OpportunityMapper.selectByIdForUpdate`で行ロックし、`@Version`のCAS失敗を409へ変換する。汎用`updateById`はstage遷移と終端状態を迂回できない。
+- 受注遷移と案件・見積作成は同一transaction。`source_opportunity_id`の既存UNIQUEを使い、再実行時は既存行を返す。新しい外部APIやmigrationは追加していない。
+- forecastは`converted_quotation_id IS NULL AND stage NOT IN (受注, 失注)`をSQL母集団として固定し、営業の顧客DataScopeが有効な場合は顧客ID条件をDBへ渡す。

@@ -15,4 +15,8 @@ public interface QuotationMapper extends BaseMapper<Quotation> {
 
     @Select("SELECT * FROM t_quotation WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Quotation selectByIdForUpdate(@Param("id") Long id);
+
+    /** 商機変換の冪等判定用。論理削除済みも含めてsourceを一意に解決する。 */
+    @Select("SELECT * FROM t_quotation WHERE source_opportunity_id = #{opportunityId} LIMIT 1")
+    Quotation selectBySourceOpportunityIdIncludingDeleted(@Param("opportunityId") Long opportunityId);
 }

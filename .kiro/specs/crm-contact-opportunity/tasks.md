@@ -24,7 +24,10 @@
     PII scope（**exportにも同じmask**）、期間重複の拒否。
   - **Demo**: 既存顧客の担当者がdetailに表示。移行前後で担当者名/emailが一致することを提示。
 
-- [ ] F2. opportunity状態/変換/forecast排他
+- [x] F2. opportunity状態/変換/forecast排他
+  - **状態**: 完了。状態CAS/楽観ロック、終端更新拒否、受注時の案件・見積変換、source UNIQUEによる冪等変換、forecast排他を実装・検証済み。
+  - **実測**: `OpportunityServiceImplTest` 7/7、`OpportunityServiceIntegrationTest` 2/2（H2実DBで2回変換して案件/見積各1件、受注済み商機をforecastから除外）。
+  - **Demo**: H2統合テストで商機→受注→案件/見積変換を実行し、再変換後も同一ID・各1件、forecast母集団に未変換openだけが残ることを確認。
   - **Objective**: 商機をstageで進め、受注時にproject/quotationへ変換できる。
     受注操作を2回実行してもproject/quotationは1件しか作られない。
     提案へ変換済みの商機がforecastで二重計上されない。

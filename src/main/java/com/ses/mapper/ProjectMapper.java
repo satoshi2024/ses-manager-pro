@@ -16,6 +16,10 @@ import java.util.Collection;
  */
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
+
+    /** 商機変換の冪等判定用。論理削除済みも含めてsourceを一意に解決する。 */
+    @Select("SELECT * FROM t_project WHERE source_opportunity_id = #{opportunityId} LIMIT 1")
+    Project selectBySourceOpportunityIdIncludingDeleted(@Param("opportunityId") Long opportunityId);
     
     @Select("""
         <script>
