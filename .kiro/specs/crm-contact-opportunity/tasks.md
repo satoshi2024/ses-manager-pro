@@ -9,7 +9,7 @@
 > **Migration**: 本specの予約番号は **V73**。BP master(V69)と並行実装可だが、DDLのmergeは番号順。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] F1. contact/lead/opportunity DDLと移行
+- [x] F1. contact/lead/opportunity DDLと移行
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
   - **実装ガイダンス**: **V73**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。

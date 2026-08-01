@@ -17,6 +17,10 @@ import java.time.LocalDate;
 public class SalesActivity extends BaseEntity {
 
     private Long customerId;
+
+    private Long contactId;
+
+    private Long opportunityId;
     
     private String activityType;
     
@@ -29,6 +33,8 @@ public class SalesActivity extends BaseEntity {
     private LocalDate nextActionDate;
     
     private Integer completedFlag;
+
+    private Long assigneeUserId;
 
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;

@@ -15,6 +15,9 @@ DROP TABLE IF EXISTS t_monthly_accounting_dimension;
 DROP TABLE IF EXISTS t_management_budget;
 DROP TABLE IF EXISTS t_user_organization;
 DROP TABLE IF EXISTS t_sales_activity;
+DROP TABLE IF EXISTS t_customer_contact;
+DROP TABLE IF EXISTS t_opportunity;
+DROP TABLE IF EXISTS t_lead;
 DROP TABLE IF EXISTS t_role_menu;
 DROP TABLE IF EXISTS m_menu;
 DROP TABLE IF EXISTS m_system_config;
@@ -198,6 +201,7 @@ CREATE TABLE t_project (
   status          ENUM('募集中','選考中','充足','クローズ') DEFAULT '募集中' COMMENT 'ステータス',
   priority        ENUM('通常','急募','高利益') DEFAULT '通常' COMMENT '優先度',
   remarks         TEXT                                    COMMENT '備考',
+  source_opportunity_id BIGINT                             COMMENT '商機からの変換元ID',
   created_by      BIGINT                                  COMMENT '登録者ID',
   created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
   updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
@@ -208,6 +212,7 @@ CREATE TABLE t_project (
   INDEX idx_project_priority    (priority),
   INDEX idx_project_start_date  (start_date),
   INDEX idx_project_created_by  (created_by),
+  UNIQUE INDEX uk_project_source_opportunity (source_opportunity_id),
 
   CONSTRAINT fk_project_customer
     FOREIGN KEY (customer_id) REFERENCES m_customer(id)
@@ -907,3 +912,90 @@ ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_organization FOREIGN KEY (orga
   ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE t_contract ADD CONSTRAINT fk_contract_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
   ON UPDATE CASCADE ON DELETE SET NULL;
+
+-- ============================================================
+-- CRM: t_customer_contact (顧客担当者) — V73
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_customer_contact (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  customer_id   BIGINT       NOT NULL                   COMMENT '顧客ID',
+  name          VARCHAR(100) NOT NULL                   COMMENT '担当者名',
+  name_kana     VARCHAR(100)                            COMMENT '担当者名カナ',
+  department    VARCHAR(100)                            COMMENT '部署',
+  position      VARCHAR(100)                            COMMENT '役職',
+  roles_json    JSON                                    COMMENT '役割(JSON配列)',
+  email         VARCHAR(255)                            COMMENT 'メールアドレス',
+  phone         VARCHAR(50)                             COMMENT '電話番号',
+  primary_flag  TINYINT      DEFAULT 0                  COMMENT '主担当フラグ(1:主担当)',
+  valid_from    DATE         NOT NULL                   COMMENT '有効開始日(inclusive)',
+  valid_to      DATE                                    COMMENT '有効終了日(inclusive, NULL=無期限)',
+  status        VARCHAR(20)  NOT NULL DEFAULT '有効'     COMMENT 'ステータス(有効/退職/異動)',
+  version       INT          NOT NULL DEFAULT 1         COMMENT '楽観ロックバージョン',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag  TINYINT      DEFAULT 0                  COMMENT '論理削除フラグ',
+  INDEX idx_customer_contact_customer (customer_id),
+  INDEX idx_customer_contact_email (email),
+  INDEX idx_customer_contact_status (status),
+  INDEX idx_customer_contact_valid (customer_id, valid_from, valid_to),
+  CONSTRAINT fk_customer_contact_customer
+    FOREIGN KEY (customer_id) REFERENCES m_customer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顧客担当者';
+
+-- ============================================================
+-- CRM: t_lead (リード) — V73
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_lead (
+  id                       BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  company_name             VARCHAR(200) NOT NULL                   COMMENT '会社名',
+  contact_name             VARCHAR(100)                            COMMENT '担当者名',
+  contact_email            VARCHAR(255)                            COMMENT '担当者メール',
+  contact_phone            VARCHAR(50)                             COMMENT '担当者電話',
+  source                   VARCHAR(100)                            COMMENT 'リードソース',
+  owner_user_id            BIGINT                                  COMMENT '担当営業ID',
+  status                   VARCHAR(20)  NOT NULL DEFAULT '未対応'   COMMENT 'ステータス(未対応/対応中/転換済/破棄)',
+  converted_customer_id    BIGINT                                  COMMENT '転換先顧客ID',
+  converted_opportunity_id BIGINT                                  COMMENT '転換先商機ID',
+  version                  INT          NOT NULL DEFAULT 1         COMMENT '楽観ロックバージョン',
+  created_at               DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at               DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag             TINYINT      DEFAULT 0                  COMMENT '論理削除フラグ',
+  INDEX idx_lead_owner (owner_user_id),
+  INDEX idx_lead_status (status),
+  INDEX idx_lead_company (company_name),
+  INDEX idx_lead_email (contact_email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='リード';
+
+-- ============================================================
+-- CRM: t_opportunity (商機) — V73
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_opportunity (
+  id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  customer_id            BIGINT        NOT NULL                   COMMENT '顧客ID',
+  title                  VARCHAR(200)  NOT NULL                   COMMENT '商機名',
+  stage                  VARCHAR(30)   NOT NULL DEFAULT '見込'     COMMENT 'ステージ',
+  expected_start_month   VARCHAR(7)                               COMMENT '開始予定月(YYYY-MM)',
+  duration_months        INT                                      COMMENT '想定期間(月)',
+  required_count         INT           DEFAULT 1                  COMMENT '募集人数',
+  unit_price             DECIMAL(12,0)                            COMMENT '想定単価(円)',
+  expected_amount        DECIMAL(14,0)                            COMMENT '見込金額(円)',
+  probability            INT                                      COMMENT '確度(%)',
+  owner_user_id          BIGINT                                   COMMENT '担当営業ID',
+  next_action_date       DATE                                     COMMENT '次回アクション予定日',
+  competitor             VARCHAR(500)                             COMMENT '競合情報',
+  lost_reason            VARCHAR(500)                             COMMENT '失注理由',
+  converted_project_id   BIGINT                                   COMMENT '変換先案件ID',
+  converted_quotation_id BIGINT                                   COMMENT '変換先見積ID',
+  version                INT           NOT NULL DEFAULT 1         COMMENT '楽観ロックバージョン',
+  created_at             DATETIME      DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at             DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag           TINYINT       DEFAULT 0                  COMMENT '論理削除フラグ',
+  INDEX idx_opportunity_customer (customer_id),
+  INDEX idx_opportunity_stage (stage),
+  INDEX idx_opportunity_owner (owner_user_id),
+  INDEX idx_opportunity_next_action (next_action_date),
+  CONSTRAINT fk_opportunity_customer
+    FOREIGN KEY (customer_id) REFERENCES m_customer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商機';

@@ -50,6 +50,9 @@ public class Quotation {
 
     private String remarks;
 
+    /** 商機からの変換元ID */
+    private Long sourceOpportunityId;
+
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
     private LocalDateTime createdAt;
