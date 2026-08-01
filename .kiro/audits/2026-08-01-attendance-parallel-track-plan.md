@@ -226,12 +226,14 @@ A1〜A3は相互に重複しないため**同時並行可**。
    `test-execution-policy-s03-s17.md` に準じる。
 
 ---
-
 ## 8. 開工対話
 
-各トラックにつき1対話・1担当へ渡す。文面はそのままコピーして使用する。
+各トラックにつき1対話・1担当へ渡す。**以下は全て単体で完結しており、そのままコピーして使用する**
+（共通部分は各文面へ展開済み。組み立て作業は不要）。
 
-### 8.1 共通ヘッダ（全トラックの先頭に付ける）
+branchは `origin/main` から切る。PR #47 のbranchから派生させない。
+
+### 8.1 A1 — マイ勤怠UI補完
 
 ```text
 あなたはSES Manager Proの並行トラック担当です。実行基線は次の文書です。
@@ -249,12 +251,10 @@ A1〜A3は相互に重複しないため**同時並行可**。
 
 migrationファイル（src/main/resources/db/migration/V*.sql）を新規作成してはいけません。
 DDLが必要だと判断した時点で、それはトラックCの作業なので停止して報告してください。
-```
 
-### 8.2 A1 — マイ勤怠UI補完
+branchは origin/main から `claude/attendance-track-a1` を切ってください。
 
-```text
-【共通ヘッダを先頭に貼る】
+---
 
 担当: トラックA1「マイ勤怠UIの情報補完」
 
@@ -274,6 +274,7 @@ SecurityConfig、m_menu関連、layout配下、migration。
 - 既存の描画関数 renderMy() の構造と data-* 属性方式を踏襲する（インラインhandlerへ値を埋めない）。
 - 状態表示は既存の workRecord.status.* キーを再利用し、新しい状態名を発明しない。
 - 4bundleへ同じkeyを揃え、他言語へ日本語をコピーしない（必ず翻訳する）。
+- 新規keyは各ファイルの末尾へ追加する（conflictを1箇所へ寄せるため）。
 
 テスト要件: L1〜L2。MessageBundleConsistencyTest、StaticAssetLocalityTest、
 MobileResponsiveLayoutTest、および node --check による構文確認。390px幅の表示崩れが無いこと。
@@ -281,10 +282,28 @@ MobileResponsiveLayoutTest、および node --check による構文確認。390p
 Demo: 要員アカウントでログインし、提出期限・当月合計・承認状況が表示されることを確認する。
 ```
 
-### 8.3 A2 — 勤怠未提出リマインド
+### 8.2 A2 — 勤怠未提出リマインド
 
 ```text
-【共通ヘッダを先頭に貼る】
+あなたはSES Manager Proの並行トラック担当です。実行基線は次の文書です。
+- .kiro/audits/2026-08-01-attendance-parallel-track-plan.md（本トラックの正本）
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md §1
+- .kiro/specs/customer-product-expansion-2026/test-execution-policy-s03-s17.md
+
+最初に必ず本計画書 §1 の検証手順を実行し、§2 の表を実測値と突き合わせて報告してください。
+.kiro/ 配下は必ず `git show origin/main:<path>` で読み、作業treeの同ファイルを読まないでください
+（作業branchの .kiro は分岐時点で凍結されており古い）。
+
+検証で矛盾を見つけたら、着手せず矛盾内容を報告して停止してください。
+本計画書 §5 の開始条件を1つでも満たさない場合も着手しないでください。
+作業中に §6 の停止条件へ該当したら、その時点で停止し報告してください。
+
+migrationファイル（src/main/resources/db/migration/V*.sql）を新規作成してはいけません。
+DDLが必要だと判断した時点で、それはトラックCの作業なので停止して報告してください。
+
+branchは origin/main から `claude/attendance-track-a2` を切ってください。
+
+---
 
 担当: トラックA2「勤怠未提出リマインド」
 
@@ -307,6 +326,8 @@ Demo: 要員アカウントでログインし、提出期限・当月合計・�
 - 冪等性: 既存generatorと同じく dedupe_key を必ず付ける（例: 同日二重発行を防ぐ）。
 - 宛先: 締め日前は本人（NotificationLinks.MY_TIMESHEET）。要員↔アカウント紐付けが無い場合は
   全体配信へフォールバックせず、warnログに留める（他要員への漏洩防止。既存 reject 通知と同じ方針）。
+- 対象の抽出は既存の勤怠グリッドと同じ条件に揃える（契約期間内・status が 稼動中/終了）。
+  勤怠レコードが存在しない契約＝未提出であることに注意する。
 
 テスト要件: L1〜L2。generatorの定向test（対象抽出、dedupe_keyの冪等、未紐付け時に配信しないこと）
 ＋ MessageBundleConsistencyTest。
@@ -315,10 +336,28 @@ Demo: 未提出の要員が居る状態で generateAll() を実行し、本人�
 同日2回実行しても通知が増えないことを確認する。
 ```
 
-### 8.4 A3 — 承認滞留の可視化（読み取り専用）
+### 8.3 A3 — 承認滞留の可視化（読み取り専用）
 
 ```text
-【共通ヘッダを先頭に貼る】
+あなたはSES Manager Proの並行トラック担当です。実行基線は次の文書です。
+- .kiro/audits/2026-08-01-attendance-parallel-track-plan.md（本トラックの正本）
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md §1
+- .kiro/specs/customer-product-expansion-2026/test-execution-policy-s03-s17.md
+
+最初に必ず本計画書 §1 の検証手順を実行し、§2 の表を実測値と突き合わせて報告してください。
+.kiro/ 配下は必ず `git show origin/main:<path>` で読み、作業treeの同ファイルを読まないでください
+（作業branchの .kiro は分岐時点で凍結されており古い）。
+
+検証で矛盾を見つけたら、着手せず矛盾内容を報告して停止してください。
+本計画書 §5 の開始条件を1つでも満たさない場合も着手しないでください。
+作業中に §6 の停止条件へ該当したら、その時点で停止し報告してください。
+
+migrationファイル（src/main/resources/db/migration/V*.sql）を新規作成してはいけません。
+DDLが必要だと判断した時点で、それはトラックCの作業なので停止して報告してください。
+
+branchは origin/main から `claude/attendance-track-a3` を切ってください。
+
+---
 
 担当: トラックA3「承認滞留の可視化」
 
@@ -334,12 +373,17 @@ S09 には「勤怠確定→検収差戻し→再提出→検収済」があり�
 - src/main/resources/static/js/modules/work-record.js
 - src/main/resources/templates/work-record/list.html
 - 読み取り専用の集計が必要な場合のみ、既存controllerへGETメソッドを1つ追加
-- messages×4（末尾へ追加）
+- src/main/resources/messages{,_en,_ko,_zh_CN}.properties（末尾へ追加）
 
 触ってはいけないファイル: WorkRecordServiceImpl（1行も変更しない）、状態遷移まわり、migration。
 
 停止条件（本タスク固有）: 既存の状態遷移メソッド（submit/approve/reject/confirmMonth/reopenMonth）
 に変更が必要だと判断したら、その時点で停止して報告してください。
+
+実装ガイダンス:
+- 集計は既存の monthlyGrid の結果から導出できないか先に検討する。新しいクエリを足す場合も
+  組織scope（OrganizationScopeService）の絞り込みを既存経路と同一に保つこと。
+- 一覧系のためページサイズは PageUtils.safePage を通す。
 
 テスト要件: L1〜L2。集計の定向test＋既存 WorkRecordServiceImplTest の回帰が無傷であること。
 
@@ -347,10 +391,28 @@ Demo: 提出済みの勤怠がある状態で /work-record を開き、件数と
 承認・差戻しの既存動作が変わっていないこと。
 ```
 
-### 8.5 B1 — source matrixと36協定の棚卸し
+### 8.4 B1 — source matrixと36協定の棚卸し
 
 ```text
-【共通ヘッダを先頭に貼る】
+あなたはSES Manager Proの並行トラック担当です。実行基線は次の文書です。
+- .kiro/audits/2026-08-01-attendance-parallel-track-plan.md（本トラックの正本）
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md §1
+- .kiro/specs/customer-product-expansion-2026/test-execution-policy-s03-s17.md
+
+最初に必ず本計画書 §1 の検証手順を実行し、§2 の表を実測値と突き合わせて報告してください。
+.kiro/ 配下は必ず `git show origin/main:<path>` で読み、作業treeの同ファイルを読まないでください
+（作業branchの .kiro は分岐時点で凍結されており古い）。
+
+検証で矛盾を見つけたら、着手せず矛盾内容を報告して停止してください。
+本計画書 §5 の開始条件を1つでも満たさない場合も着手しないでください。
+作業中に §6 の停止条件へ該当したら、その時点で停止し報告してください。
+
+migrationファイル（src/main/resources/db/migration/V*.sql）を新規作成してはいけません。
+DDLが必要だと判断した時点で、それはトラックCの作業なので停止して報告してください。
+
+branchは origin/main から `claude/attendance-track-b1` を切ってください。
+
+---
 
 担当: トラックB1「source matrixと法人別36協定の棚卸し」
 
@@ -380,17 +442,39 @@ F1が m_overtime_agreement へ登録すべき行を、推測せずに決めら�
 テスト要件: L0。法人ごとに協定の有無と入手状況が記録されていること、法定休日の曜日が
 全法人分そろっているか未確認と明記されていること、source matrixが既存work recordとの境界を
 含むこと、git diff --check exit 0。
+
+Demo: 本システムを正とするsource matrixのHR確認と、法人別36協定の棚卸し結果の提示。
 ```
 
-### 8.6 B2 — 時間外calculatorと境界fixture
+### 8.5 B2 — 時間外calculatorと境界fixture
 
 ```text
-【共通ヘッダを先頭に貼る】
+あなたはSES Manager Proの並行トラック担当です。実行基線は次の文書です。
+- .kiro/audits/2026-08-01-attendance-parallel-track-plan.md（本トラックの正本）
+- .kiro/specs/customer-product-expansion-2026/parallel-execution-plan.md §1
+- .kiro/specs/customer-product-expansion-2026/test-execution-policy-s03-s17.md
+
+最初に必ず本計画書 §1 の検証手順を実行し、§2 の表を実測値と突き合わせて報告してください。
+.kiro/ 配下は必ず `git show origin/main:<path>` で読み、作業treeの同ファイルを読まないでください
+（作業branchの .kiro は分岐時点で凍結されており古い）。
+
+検証で矛盾を見つけたら、着手せず矛盾内容を報告して停止してください。
+本計画書 §5 の開始条件を1つでも満たさない場合も着手しないでください。
+作業中に §6 の停止条件へ該当したら、その時点で停止し報告してください。
+
+migrationファイル（src/main/resources/db/migration/V*.sql）を新規作成してはいけません。
+DDLが必要だと判断した時点で、それはトラックCの作業なので停止して報告してください。
+
+branchは origin/main から `claude/attendance-track-b2` を切ってください。
+
+---
 
 担当: トラックB2「OvertimeComplianceCalculatorと境界fixture」
 
 出所: attendance-leave-overtime-compliance の F2 前半。
-**中央台帳への登録が必要なタスクです。** 未登録なら着手前に統合担当へ登録を依頼してください。
+**中央台帳への登録が必要なタスクです。** 未登録なら着手前に統合担当へ登録を依頼し、
+登録されるまで着手しないでください（未登録のまま進めると影子実装になり、
+S11担当が同じものを再実装します）。
 
 事前に必ず読む（overtime-rules.md が値の唯一の正本）:
 - git show origin/main:.kiro/specs/attendance-leave-overtime-compliance/overtime-rules.md
@@ -405,6 +489,7 @@ F1が m_overtime_agreement へ登録すべき行を、推測せずに決めら�
   **本タスクでは第2段(m_system_config)と第3段(定数)だけを実装し、第1段はinterfaceのまま残す。**
   第1段はF1のDDL(V78)が入った後に接続する。
 - 「休日労働を含むか」の分岐は、calculatorへ渡す入力の選択1箇所に閉じる。ルール内へ条件を持ち込まない。
+- 時間は分の整数で扱う。浮動小数を使わない。
 - 境界fixtureを src/test/resources/fixtures/overtime/ へJSONで置く。
   fixtureはconfig値を読んで limit±1 を生成し、境界の向きだけ明示的に書く。
 
@@ -417,16 +502,18 @@ F1が m_overtime_agreement へ登録すべき行を、推測せずに決めら�
 ちょうどが違反、他のルールは「以内」なので上限ちょうどは適合。limit-1 / limit / limit+1 の
 3点fixtureで必ず固定すること。
 
+協定行が無い法人は「適合」ではなく**判定不能のfinding**にすること。既定値で適合にしない。
+
 テスト要件: L1〜L3。overtime-rules.md §5 の推奨fixture最小セット全件。特に
 ルール4がlimitちょうどで違反・他は適合、休日労働のみ超過時のルール1/2/3適合とルール4/5違反、
 所定休日労働がルール1へ算入されること、n月分データ不足時のskip（0扱いにしない）、
-協定年度またぎ（ルール2/3/6はリセット、ルール5はまたぐ）、適用除外者の全ルール非判定。
+協定年度またぎ（ルール2/3/6はリセット、ルール5はまたぐ）、適用除外者の全ルール非判定、
+協定行が無い法人が「適合」にならないこと。
 
 Demo: fixture結果を提示し、45h/360h/80h平均それぞれの境界値ちょうどで判定が変わることを確認する。
 ```
 
 ---
-
 ## 9. 進捗記録
 
 本トラックの進捗は本書に記録する。S02〜S17のtasks.mdは変更しない。
