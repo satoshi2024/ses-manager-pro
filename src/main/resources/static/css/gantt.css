@@ -26,10 +26,17 @@
 .gantt .bar-progress {
     fill: rgba(0, 0, 0, 0.2) !important;
 }
-.gantt .bar-label {
+/* .big はバー幅が狭くラベルがバー外(ページ背景)に描画されるケース。
+   frappe-gantt.css 側の暗色ラベルをそのまま使うため、ここでは対象外にする。 */
+.gantt .bar-label:not(.big) {
     fill: #ffffff !important;
     font-size: 12px;
     font-weight: 500;
+}
+/* 警告バーは黄色(#ffc107)地のため、白文字だとコントラスト比が不足する(WCAG AA未達)。
+   このバーだけ濃色文字にして読めるようにする。 */
+.gantt .bar-wrapper.status-warning .bar-label:not(.big) {
+    fill: #212529 !important;
 }
 .gantt .bar-wrapper:hover .bar {
     fill: #1aa179 !important;

@@ -366,15 +366,20 @@ function viewProposalDetail(id) {
 }
 
 function saveProposal() {
+    const $btn = $('#btn-save-proposal');
+    if ($btn.prop('disabled')) return; // 重複クリックによる二重の重複チェック→保存を防ぐ
+
     const id = $('#prop-id').val();
     const engineerId = $('#prop-engineerId').val();
     const projectId = $('#prop-projectId').val();
-    
+
     if (!engineerId || !projectId) {
         Toast.error(SES.i18n.t('js.kanban.error.engineer_project'));
         return;
     }
-    
+
+    $btn.prop('disabled', true);
+
     const data = {
         engineerId: parseInt(engineerId),
         projectId: parseInt(projectId),
@@ -414,6 +419,8 @@ function saveProposal() {
                 }).then((result) => {
                     if (result.isConfirmed) {
                         doSaveProposal(url, method, data);
+                    } else {
+                        $btn.prop('disabled', false);
                     }
                 });
             } else {
@@ -428,6 +435,7 @@ function saveProposal() {
 }
 
 function doSaveProposal(url, method, data) {
+    const $btn = $('#btn-save-proposal');
     $.ajax({
         url: url,
         method: method,
@@ -447,6 +455,9 @@ function doSaveProposal(url, method, data) {
         error: function(err) {
             console.error(err);
             Toast.error(SES.i18n.t('js.common.error_network'));
+        },
+        complete: function() {
+            $btn.prop('disabled', false);
         }
     });
 }

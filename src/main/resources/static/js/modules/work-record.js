@@ -202,6 +202,7 @@ function saveHours(element) {
                 row.find('.billing-amount-' + contractId).text(rec.billingAmount ? '¥' + rec.billingAmount.toLocaleString() : '-');
                 row.find('.payment-amount-' + contractId).text(rec.paymentAmount ? '¥' + rec.paymentAmount.toLocaleString() : '-');
                 row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
+                if (rec.id != null) delete dailyCache[rec.id]; // 日次明細を再取得させ、古い内訳の表示を防ぐ
                 Toast.success(SES.i18n.t('common.msg.saveSuccess'));
             } else {
                 // 確定済み月の編集など業務エラーをユーザーに表示する

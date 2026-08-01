@@ -66,7 +66,7 @@
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project-ingestion')}">
                     <a th:href="@{/project-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-envelope-open me-2"></i>
-                        <span>案件メール取込</span>
+                        <span th:text="#{menu.projectIngestion}">案件メール取込</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('candidate')}">
@@ -125,7 +125,7 @@
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract-document')}">
                     <a th:href="@{/contract-document}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract-document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
-                        <i class="bi bi-file-earmark-check me-2"></i><span>契約書・電子署名</span>
+                        <i class="bi bi-file-earmark-check me-2"></i><span th:text="#{menu.contractDocument}">契約書・電子署名</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('document-archive')}">
@@ -267,6 +267,7 @@
                 </div>
             </div>
             <form th:action="@{/logout}" method="post" class="mt-2">
+                <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
                 <button type="submit" class="btn btn-sm btn-outline-secondary w-100 border-0 text-start text-muted hover-text-white hover-bg-tertiary rounded-md">
                     <i class="bi bi-box-arrow-right me-2"></i><span th:text="#{menu.logout}">ログアウト</span>
                 </button>

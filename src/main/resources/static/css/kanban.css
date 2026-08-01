@@ -112,6 +112,13 @@
     margin-bottom: 8px;
     display: flex;
     align-items: center;
+    /* flexアイテムの初期min-widthはautoのため、text-truncateのellipsisが効かず
+       長い氏名/顧客名がカード幅をはみ出す。子要素が縮められるようにする。 */
+    min-width: 0;
+}
+
+.kanban-card-subtitle > span {
+    min-width: 0;
 }
 
 .kanban-card-meta {

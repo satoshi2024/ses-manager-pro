@@ -28,8 +28,8 @@
             </div>
 
             <!-- Global Search Button / Trigger -->
-            <button class="btn btn-outline-secondary btn-sm text-light rounded-pill border-secondary px-3 py-1 me-2 no-print" type="button" id="global-search-btn" data-bs-toggle="modal" data-bs-target="#globalSearchModal" title="横断検索 (Ctrl+K)">
-                <i class="bi bi-search me-1"></i><span class="d-none d-md-inline">横断検索...</span> <kbd class="bg-dark text-muted border-0 d-none d-lg-inline-block small" style="font-size: 0.7rem;">Ctrl+K</kbd>
+            <button class="btn btn-outline-secondary btn-sm text-light rounded-pill border-secondary px-3 py-1 me-2 no-print" type="button" id="global-search-btn" data-bs-toggle="modal" data-bs-target="#globalSearchModal" th:title="#{header.globalSearch.title}">
+                <i class="bi bi-search me-1"></i><span class="d-none d-md-inline" th:text="#{header.globalSearch.label}">横断検索...</span> <kbd class="bg-dark text-muted border-0 d-none d-lg-inline-block small" style="font-size: 0.7rem;">Ctrl+K</kbd>
             </button>
 
             <!-- Language Switch -->

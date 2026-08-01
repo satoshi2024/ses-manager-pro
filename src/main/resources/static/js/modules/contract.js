@@ -44,14 +44,14 @@ function loadContracts() {
 
     const salesVal = $('#search-salesUserId').val();
     const params = {
-        status: $('#search-form [name="status"]').val(),
+        status: $('#searchForm [name="status"]').val(),
         customerId: $('#search-customerId').val(),
         // 'none' = 担当営業未設定(sales_user_id IS NULL)での絞り込み
         salesUserId: salesVal === 'none' ? null : salesVal,
         salesUnassigned: salesVal === 'none' ? true : null,
-        contractNo: $('#search-form [name="contractNo"]').val(),
-        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
-        endDateTo: $('#search-form [name="endDateTo"]').val()
+        contractNo: $('#searchForm [name="contractNo"]').val(),
+        endDateFrom: $('#searchForm [name="endDateFrom"]').val(),
+        endDateTo: $('#searchForm [name="endDateTo"]').val()
     };
 
     $.ajax({
@@ -430,15 +430,15 @@ function postStatusChange(id, newStatus, cancelDate) {
     });
 }
 
-// 現在の検索条件(#search-form)を反映してExcel出力する。
+// 現在の検索条件(#searchForm)を反映してExcel出力する。
 async function exportContracts() {
     const params = {
-        status: $('#search-form [name="status"]').val(),
+        status: $('#searchForm [name="status"]').val(),
         customerId: $('#search-customerId').val(),
         salesUserId: $('#search-salesUserId').val(),
-        contractNo: $('#search-form [name="contractNo"]').val(),
-        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
-        endDateTo: $('#search-form [name="endDateTo"]').val()
+        contractNo: $('#searchForm [name="contractNo"]').val(),
+        endDateFrom: $('#searchForm [name="endDateFrom"]').val(),
+        endDateTo: $('#searchForm [name="endDateTo"]').val()
     };
     await SES.download('/api/contracts/export?' + $.param(params, true), '契約一覧.xlsx');
 }

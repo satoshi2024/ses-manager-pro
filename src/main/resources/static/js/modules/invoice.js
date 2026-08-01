@@ -16,7 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
         new bootstrap.Modal(document.getElementById('generateModal')).show();
     });
 
-    document.getElementById('btnSubmitGenerate').addEventListener('click', () => {
+    document.getElementById('btnSubmitGenerate').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        if (btn.disabled) return;
         const customerId = document.querySelector('#generateForm [name="customerId"]').value;
         const billingMonth = document.querySelector('#generateForm [name="billingMonth"]').value;
 
@@ -25,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        btn.disabled = true;
         fetch('/api/invoices/generate', {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
@@ -37,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 alert(data.message || SES.i18n.t('invoice.alert.generateFail'));
             }
-        });
+        }).finally(() => { btn.disabled = false; });
     });
 
     document.getElementById('billingMonth').addEventListener('change', loadInvoices);
@@ -309,6 +312,8 @@ function loadPayments() {
 }
 
 function submitPayment() {
+    const btnPay = document.getElementById('btnSubmitPayment');
+    if (btnPay && btnPay.disabled) return;
     const amount = parseFloat(document.querySelector('#paymentForm [name="amount"]').value);
     const fee = parseFloat(document.querySelector('#paymentForm [name="fee"]').value) || 0;
     const paidDate = document.querySelector('#paymentForm [name="paidDate"]').value;
@@ -317,6 +322,7 @@ function submitPayment() {
         alert(SES.i18n.t('invoice.alert.inputRequired', '入力してください'));
         return;
     }
+    if (btnPay) btnPay.disabled = true;
     fetch(`/api/invoices/${currentPaymentInvoiceId}/payments`, {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
@@ -331,7 +337,7 @@ function submitPayment() {
         } else {
             alert(data.message);
         }
-    });
+    }).finally(() => { if (btnPay) btnPay.disabled = false; });
 }
 
 function deletePayment(paymentId) {

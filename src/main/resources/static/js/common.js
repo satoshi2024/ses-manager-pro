@@ -775,31 +775,36 @@ SES.globalSearch = {
         $input.on('input', function() {
             const query = $(this).val().trim();
             clearTimeout(SES.globalSearch.timer);
+            SES.globalSearch.requestId = (SES.globalSearch.requestId || 0) + 1;
             if (query.length < 2) {
-                $results.html('<div class="text-center text-muted py-5"><i class="bi bi-search fs-1 mb-2 d-block opacity-50"></i>キーワードを2文字以上入力してください</div>');
+                $results.html('<div class="text-center text-muted py-5"><i class="bi bi-search fs-1 mb-2 d-block opacity-50"></i>' + SES.escapeHtml(SES.i18n.t('header.globalSearch.hint')) + '</div>');
                 return;
             }
             SES.globalSearch.timer = setTimeout(function() {
-                SES.globalSearch.execute(query);
+                SES.globalSearch.execute(query, SES.globalSearch.requestId);
             }, 300);
         });
     },
-    execute: function(query) {
+    requestId: 0,
+    execute: function(query, requestId) {
         const $results = $('#global-search-results');
-        $results.html('<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>検索中...</div>');
+        $results.html('<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>' + SES.escapeHtml(SES.i18n.t('header.globalSearch.searching')) + '</div>');
         $.ajax({
             url: '/api/search',
             type: 'GET',
             data: { q: query },
             success: function(res) {
+                // 入力中に後続のリクエストが発行されていたら、古い応答は破棄して結果の逆転を防ぐ
+                if (requestId !== SES.globalSearch.requestId) return;
                 if (res.code === 200) {
                     SES.globalSearch.renderResults(res.data);
                 } else {
-                    $results.html('<div class="text-center text-danger py-4">' + (res.message || '検索エラーが発生しました') + '</div>');
+                    $results.html('<div class="text-center text-danger py-4">' + SES.escapeHtml(res.message || SES.i18n.t('header.globalSearch.error')) + '</div>');
                 }
             },
             error: function() {
-                $results.html('<div class="text-center text-danger py-4">検索エラーが発生しました</div>');
+                if (requestId !== SES.globalSearch.requestId) return;
+                $results.html('<div class="text-center text-danger py-4">' + SES.escapeHtml(SES.i18n.t('header.globalSearch.error')) + '</div>');
             }
         });
     },
@@ -809,14 +814,14 @@ SES.globalSearch = {
         let totalCount = 0;
 
         const typeLabels = {
-            'ENGINEER': { label: '要員', icon: 'bi-person', color: 'text-primary' },
-            'CUSTOMER': { label: '顧客', icon: 'bi-building', color: 'text-info' },
-            'PROJECT': { label: '案件', icon: 'bi-briefcase', color: 'text-success' },
-            'CONTRACT': { label: '契約', icon: 'bi-file-earmark-text', color: 'text-warning' },
-            'INVOICE': { label: '請求', icon: 'bi-receipt', color: 'text-danger' },
-            'PROPOSAL': { label: '提案', icon: 'bi-kanban', color: 'text-purple' },
-            'QUOTATION': { label: '見積', icon: 'bi-calculator', color: 'text-cyan' },
-            'BP_COMPANY': { label: 'BP会社・外部要員', icon: 'bi-people', color: 'text-secondary' }
+            'ENGINEER': { label: SES.i18n.t('search.type.engineer'), icon: 'bi-person', color: 'text-primary' },
+            'CUSTOMER': { label: SES.i18n.t('search.type.customer'), icon: 'bi-building', color: 'text-info' },
+            'PROJECT': { label: SES.i18n.t('search.type.project'), icon: 'bi-briefcase', color: 'text-success' },
+            'CONTRACT': { label: SES.i18n.t('search.type.contract'), icon: 'bi-file-earmark-text', color: 'text-warning' },
+            'INVOICE': { label: SES.i18n.t('search.type.invoice'), icon: 'bi-receipt', color: 'text-danger' },
+            'PROPOSAL': { label: SES.i18n.t('search.type.proposal'), icon: 'bi-kanban', color: 'text-purple' },
+            'QUOTATION': { label: SES.i18n.t('search.type.quotation'), icon: 'bi-calculator', color: 'text-cyan' },
+            'BP_COMPANY': { label: SES.i18n.t('search.type.bpCompany'), icon: 'bi-people', color: 'text-secondary' }
         };
 
         for (const typeKey in dataMap) {
@@ -825,10 +830,10 @@ SES.globalSearch = {
             totalCount += list.length;
             const meta = typeLabels[typeKey] || { label: typeKey, icon: 'bi-tag', color: 'text-light' };
 
-            html += '<div class="mb-3"><h6 class="text-muted border-bottom border-dark pb-1 mb-2 small"><i class="bi ' + meta.icon + ' me-1 ' + meta.color + '"></i>' + meta.label + ' (' + list.length + ')</h6>';
+            html += '<div class="mb-3"><h6 class="text-muted border-bottom border-dark pb-1 mb-2 small"><i class="bi ' + meta.icon + ' me-1 ' + meta.color + '"></i>' + SES.escapeHtml(meta.label) + ' (' + list.length + ')</h6>';
             html += '<div class="list-group list-group-flush bg-transparent">';
             list.forEach(function(item) {
-                html += '<a href="' + (item.url || '#') + '" class="list-group-item list-group-item-action bg-dark text-white border-secondary rounded mb-1 py-2 px-3 hover-bg-secondary">';
+                html += '<a href="' + SES.escapeHtml(item.url || '#') + '" class="list-group-item list-group-item-action bg-dark text-white border-secondary rounded mb-1 py-2 px-3 hover-bg-secondary">';
                 html += '<div class="d-flex w-100 justify-content-between align-items-center">';
                 html += '<div><span class="fw-bold me-2">' + SES.escapeHtml(item.title || '') + '</span>';
                 if (item.subtitle) {

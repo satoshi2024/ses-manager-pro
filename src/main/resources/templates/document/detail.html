@@ -16,7 +16,7 @@
                     <li class="breadcrumb-item active" th:text="#{document.detail.title}">文書詳細</li>
                 </ol>
             </nav>
-            <h1 class="h3 mb-0 text-gray-800" id="docTitleHeader" th:text="#{document.detail.title}">文書詳細</h1>
+            <h1 class="h3 mb-0" id="docTitleHeader" th:text="#{document.detail.title}">文書詳細</h1>
         </div>
         <div>
             <button class="btn btn-outline-secondary btn-sm me-2" onclick="history.back()"><i class="bi bi-arrow-left me-1"></i><span th:text="#{document.button.back}">戻る</span></button>
@@ -31,8 +31,8 @@
         <!-- 左側: メタデータカード -->
         <div class="col-lg-5">
             <div class="card shadow-sm border-0 mb-4">
-                <div class="card-header bg-white py-3">
-                    <h6 class="m-0 font-weight-bold text-primary"><i class="bi bi-info-circle me-1"></i><span th:text="#{document.detail.metadata}">基本メタデータ</span></h6>
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-info-circle me-1"></i><span th:text="#{document.detail.metadata}">基本メタデータ</span></h6>
                 </div>
                 <div class="card-body">
                     <table class="table table-borderless table-sm mb-0">
@@ -84,8 +84,8 @@
 
             <!-- 関連リンクカード -->
             <div class="card shadow-sm border-0">
-                <div class="card-header bg-white py-3">
-                    <h6 class="m-0 font-weight-bold text-primary"><i class="bi bi-link-45deg me-1"></i><span th:text="#{document.detail.links}">業務エンティティ紐付け</span></h6>
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-link-45deg me-1"></i><span th:text="#{document.detail.links}">業務エンティティ紐付け</span></h6>
                 </div>
                 <div class="card-body">
                     <ul class="list-group list-group-flush" id="linkList">
@@ -98,8 +98,8 @@
         <!-- 右側: バージョン履歴カード -->
         <div class="col-lg-7">
             <div class="card shadow-sm border-0">
-                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="m-0 font-weight-bold text-primary"><i class="bi bi-clock-history me-1"></i><span th:text="#{document.detail.versionHistory}">版履歴 (Append-Only)</span></h6>
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-clock-history me-1"></i><span th:text="#{document.detail.versionHistory}">版履歴 (Append-Only)</span></h6>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">

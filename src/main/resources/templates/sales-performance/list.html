@@ -15,10 +15,10 @@
 
     <div class="card bg-secondary border-dark mb-4 shadow-sm">
         <div class="card-body">
-            <div class="row align-items-end">
+            <form id="searchForm" class="row align-items-end" onsubmit="event.preventDefault();">
                 <div class="col-md-3">
                     <label for="monthFilter" class="form-label text-light small fw-bold" th:text="#{salesPerf.month}">対象月</label>
-                    <input type="month" id="monthFilter" class="form-control bg-dark text-white border-secondary">
+                    <input type="month" id="monthFilter" name="month" class="form-control bg-dark text-white border-secondary">
                 </div>
                 <div class="col-md-9 text-end">
                     <div class="text-muted small">
@@ -30,7 +30,7 @@
                         <span th:text="#{salesPerf.scopeNote}">成約件数は契約口径、成約率は提案口径です</span>
                     </div>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
