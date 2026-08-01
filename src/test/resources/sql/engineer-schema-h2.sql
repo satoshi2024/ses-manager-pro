@@ -175,11 +175,13 @@ CREATE TABLE t_project (
   start_date        DATE,
   end_date          DATE,
   remarks           TEXT,
+  source_opportunity_id BIGINT,
   created_by        BIGINT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag      TINYINT DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(source_opportunity_id);
 
 DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
@@ -235,11 +237,13 @@ CREATE TABLE t_quotation (
   valid_until           DATE,
   status                VARCHAR(20) NOT NULL DEFAULT '下書き',
   remarks               VARCHAR(500),
+  source_opportunity_id BIGINT,
   created_by            BIGINT,
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_quotation_source_opportunity ON t_quotation(source_opportunity_id);
 
 DROP TABLE IF EXISTS t_proposal CASCADE;
 
@@ -362,16 +366,93 @@ DROP TABLE IF EXISTS t_sales_activity CASCADE;
 CREATE TABLE t_sales_activity (
   id               BIGINT AUTO_INCREMENT PRIMARY KEY,
   customer_id      BIGINT NOT NULL,
+  contact_id       BIGINT,
+  opportunity_id   BIGINT,
   activity_type    VARCHAR(20) NOT NULL,
   activity_date    DATE NOT NULL,
   title            VARCHAR(200) NOT NULL,
   content          TEXT,
   next_action_date DATE,
   completed_flag   TINYINT DEFAULT 0,
+  assignee_user_id BIGINT,
   created_by       BIGINT,
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag     TINYINT DEFAULT 0
+);
+
+-- ============================================================
+-- CRM: 顧客担当者 / リード / 商機 (V73)
+-- 本ファイルは他テーブル同様にFKを張らない方針のため、CRMもFK無しで揃える。
+-- 主担当一意(uk_customer_contact_active_primary)は業務不変条件なので生成列ごと再現する。
+-- ============================================================
+DROP TABLE IF EXISTS t_opportunity CASCADE;
+DROP TABLE IF EXISTS t_lead CASCADE;
+DROP TABLE IF EXISTS t_customer_contact CASCADE;
+
+CREATE TABLE t_customer_contact (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  customer_id   BIGINT NOT NULL,
+  name          VARCHAR(100) NOT NULL,
+  name_kana     VARCHAR(100),
+  department    VARCHAR(100),
+  position      VARCHAR(100),
+  roles_json    CLOB,
+  email         VARCHAR(255),
+  phone         VARCHAR(50),
+  primary_flag  TINYINT DEFAULT 0,
+  valid_from    DATE NOT NULL,
+  valid_to      DATE,
+  status        VARCHAR(20) NOT NULL DEFAULT '有効',
+  version       INT NOT NULL DEFAULT 1,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT DEFAULT 0,
+  active_primary_customer_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN primary_flag = 1 AND valid_to IS NULL AND status = '有効' AND deleted_flag = 0
+         THEN customer_id ELSE NULL END
+  ),
+  CONSTRAINT uk_customer_contact_active_primary UNIQUE (active_primary_customer_id)
+);
+
+CREATE TABLE t_lead (
+  id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  company_name             VARCHAR(200) NOT NULL,
+  contact_name             VARCHAR(100),
+  contact_email            VARCHAR(255),
+  contact_phone            VARCHAR(50),
+  source                   VARCHAR(100),
+  owner_user_id            BIGINT,
+  status                   VARCHAR(20) NOT NULL DEFAULT '未対応',
+  converted_customer_id    BIGINT,
+  converted_opportunity_id BIGINT,
+  version                  INT NOT NULL DEFAULT 1,
+  created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag             TINYINT DEFAULT 0
+);
+
+CREATE TABLE t_opportunity (
+  id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+  customer_id            BIGINT NOT NULL,
+  title                  VARCHAR(200) NOT NULL,
+  stage                  VARCHAR(30) NOT NULL DEFAULT '見込',
+  expected_start_month   VARCHAR(7),
+  duration_months        INT,
+  required_count         INT DEFAULT 1,
+  unit_price             DECIMAL(12,0),
+  expected_amount        DECIMAL(14,0),
+  probability            INT,
+  owner_user_id          BIGINT,
+  next_action_date       DATE,
+  competitor             VARCHAR(500),
+  lost_reason            VARCHAR(500),
+  converted_project_id   BIGINT,
+  converted_quotation_id BIGINT,
+  version                INT NOT NULL DEFAULT 1,
+  created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag           TINYINT DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_candidate_activity CASCADE;

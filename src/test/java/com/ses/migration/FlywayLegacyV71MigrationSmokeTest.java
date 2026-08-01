@@ -1,0 +1,188 @@
+package com.ses.migration;
+
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * 公開済みlatest（V71 = BP master/発注コンプライアンス）まで適用済みの既存DBへ、
+ * V73（CRM複数担当者・商機管理）だけを追加適用できることを検証する legacy smoke。
+ *
+ * <p>platform-invariants §4.2 の「freshの成功をlegacyの合格とみなさない」に対応する。
+ * V73はCRMの定義をV1統合baselineへ書き戻さない設計なので、
+ * 「V1が作る（fresh）」「V73が作る（legacy）」の分岐が無く、両経路が同一スキーマへ収束する。
+ * 本testはlegacy側で実際にV73だけが作れることと、既存contactのbackfillが効くことを固定する。
+ *
+ * <p>Dockerが無い環境ではTestcontainersの規約によりskipする。
+ */
+@Testcontainers(disabledWithoutDocker = true)
+class FlywayLegacyV71MigrationSmokeTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_legacy_v71")
+            .withUsername("ses")
+            .withPassword("ses");
+
+    @Test
+    void V71適用済みDBへV73だけを追加適用できCRMスキーマと移行が揃う() throws Exception {
+        // 1) 公開済みlatest（V71）までの既存DBを作る
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("71")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // V73適用前はCRMの一切が存在しない（＝V1へ書き戻していないことの裏取り）
+            assertTableAbsent(statement, "t_customer_contact");
+            assertTableAbsent(statement, "t_lead");
+            assertTableAbsent(statement, "t_opportunity");
+            assertColumnAbsent(statement, "t_sales_activity", "contact_id");
+            assertColumnAbsent(statement, "t_project", "source_opportunity_id");
+            assertColumnAbsent(statement, "t_quotation", "source_opportunity_id");
+        }
+
+        // 2) V73を追加適用する
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertTableExists(statement, "t_customer_contact");
+            assertTableExists(statement, "t_lead");
+            assertTableExists(statement, "t_opportunity");
+
+            assertColumnExists(statement, "t_sales_activity", "contact_id");
+            assertColumnExists(statement, "t_sales_activity", "opportunity_id");
+            assertColumnExists(statement, "t_sales_activity", "assignee_user_id");
+            assertColumnExists(statement, "t_project", "source_opportunity_id");
+            assertColumnExists(statement, "t_quotation", "source_opportunity_id");
+
+            // FK集合が fresh と一致すること（Round 1 の CRM-R1-P1-02）
+            assertConstraintExists(statement, "t_customer_contact", "fk_customer_contact_customer");
+            assertConstraintExists(statement, "t_lead", "fk_lead_owner");
+            assertConstraintExists(statement, "t_lead", "fk_lead_converted_customer");
+            assertConstraintExists(statement, "t_opportunity", "fk_opportunity_customer");
+            assertConstraintExists(statement, "t_opportunity", "fk_opportunity_owner");
+            assertConstraintExists(statement, "t_opportunity", "fk_opportunity_project");
+            assertConstraintExists(statement, "t_opportunity", "fk_opportunity_quotation");
+            assertConstraintExists(statement, "t_sales_activity", "fk_activity_contact");
+            assertConstraintExists(statement, "t_sales_activity", "fk_activity_opportunity");
+            assertConstraintExists(statement, "t_sales_activity", "fk_activity_assignee");
+            assertConstraintExists(statement, "t_project", "fk_project_source_opportunity");
+            assertConstraintExists(statement, "t_quotation", "fk_quotation_source_opportunity");
+
+            assertIndexExists(statement, "t_project", "uk_project_source_opportunity");
+            assertIndexExists(statement, "t_quotation", "uk_quotation_source_opportunity");
+            assertIndexExists(statement, "t_customer_contact", "uk_customer_contact_active_primary");
+
+            // backfill: 既存顧客の担当者が件数・値とも一致して移行される
+            assertEquals(countCustomersWithContact(statement), countMigratedContacts(statement),
+                    "contact_personを持つ顧客の件数と移行されたcontactの件数が一致するはず");
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM t_customer_contact cc JOIN m_customer c ON c.id = cc.customer_id"
+                            + " WHERE cc.name <> c.contact_person"
+                            + " OR NOT (cc.email <=> c.contact_email)"
+                            + " OR NOT (cc.phone <=> c.contact_phone)")) {
+                assertTrue(rs.next() && rs.getLong(1) == 0, "移行後の名称/email/電話が移行前と一致するはず");
+            }
+            // valid_from は顧客の登録日起点（移行実行日にしない）
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM t_customer_contact WHERE valid_from > CURDATE()")) {
+                assertTrue(rs.next() && rs.getLong(1) == 0, "移行行のvalid_fromが未来日になってはいけない");
+            }
+
+            // メニュー登録（design §6.2: 管理者/マネージャー/営業のみ）
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('crm-lead','crm-opportunity')")) {
+                assertTrue(rs.next() && rs.getLong(1) == 6, "CRMメニュー2件 × 営業系3ロール = 6行");
+            }
+        }
+
+        // 3) 再適用しても壊れない（Flywayは再実行しないが、V73自体が冪等であることの確認）
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .validate();
+    }
+
+    private long countCustomersWithContact(Statement statement) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT COUNT(*) FROM m_customer WHERE contact_person IS NOT NULL"
+                        + " AND contact_person <> '' AND deleted_flag = 0")) {
+            assertTrue(rs.next());
+            return rs.getLong(1);
+        }
+    }
+
+    private long countMigratedContacts(Statement statement) throws Exception {
+        try (ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM t_customer_contact")) {
+            assertTrue(rs.next());
+            return rs.getLong(1);
+        }
+    }
+
+    private void assertTableExists(Statement statement, String table) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "'")) {
+            assertTrue(rs.next(), table + " が存在するはず");
+        }
+    }
+
+    private void assertTableAbsent(Statement statement, String table) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "'")) {
+            assertTrue(!rs.next(), table + " はV73適用前には存在しないはず");
+        }
+    }
+
+    private void assertColumnExists(Statement statement, String table, String column) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " が存在するはず");
+        }
+    }
+
+    private void assertColumnAbsent(Statement statement, String table, String column) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND column_name='" + column + "'")) {
+            assertTrue(!rs.next(), table + "." + column + " はV73適用前には存在しないはず");
+        }
+    }
+
+    private void assertConstraintExists(Statement statement, String table, String constraint) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.table_constraints WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND constraint_name='" + constraint + "'")) {
+            assertTrue(rs.next(), table + "." + constraint + " が存在するはず");
+        }
+    }
+
+    private void assertIndexExists(Statement statement, String table, String index) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
+                        + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
+            assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+}

@@ -448,6 +448,211 @@ class MigrationScriptIntegrityTest {
         assertTrue(invalidInserts.isEmpty(), "INSERT文で存在しないカラムが指定されています: " + invalidInserts);
     }
 
+    /**
+     * マイグレーションが参照するテーブルは、いずれかのマイグレーションで作られていなければならない。
+     *
+     * <p>V73(CRM)の初版は権限seedを {@code FROM m_role r … r.role_code IN ('admin',…)} と書いていたが、
+     * 本リポジトリに {@code m_role} は存在せず（ロールは {@code sys_user.role} の日本語literalで、
+     * 権限は {@code t_role_menu(role, menu_id)}）、fresh / legacy を問わず
+     * {@code ERROR 1146 Table 'm_role' doesn't exist} で全環境が起動不能になる。
+     * 列名の誤りは既存の別testが拾うが、テーブル名の誤りは誰も拾っていなかったため追加する。
+     */
+    @Test
+    void マイグレーションが参照するテーブルが定義済みであること() throws Exception {
+        Map<String, List<String>> createdTables = createTableOccurrences();
+
+        // UPDATE は対象外。`ON UPDATE CASCADE` / `ON DUPLICATE KEY UPDATE <col>` を
+        // テーブル参照と誤検知するため、テーブル名が確実に来る位置だけを見る。
+        Pattern referenced = Pattern.compile(
+                "\\b(?:INSERT\\s+(?:IGNORE\\s+)?INTO|FROM|JOIN)\\s+`?([a-zA-Z_][a-zA-Z0-9_]*)`?",
+                Pattern.CASE_INSENSITIVE);
+
+        List<String> unknown = new ArrayList<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql")) {
+            String fileName = String.valueOf(resource.getFilename());
+            String sql = stripComments(resource.getContentAsString(StandardCharsets.UTF_8));
+            Matcher m = referenced.matcher(sql);
+            while (m.find()) {
+                String table = m.group(1).toLowerCase(java.util.Locale.ROOT);
+                if (NON_TABLE_TOKENS.contains(table) || createdTables.containsKey(table)) {
+                    continue;
+                }
+                unknown.add(fileName + ": " + table);
+            }
+        }
+
+        assertTrue(unknown.isEmpty(),
+                "db/migration のどこでも CREATE TABLE されていないテーブルを参照しています"
+                        + "（実MySQLで ERROR 1146 になります）: " + unknown);
+    }
+
+    /**
+     * 同じテーブルを2本のマイグレーションが作る場合、後から走る側は必ず
+     * {@code IF NOT EXISTS} を持たなければならない。持たないと、V1統合baselineを適用する
+     * 空DBだけが {@code ERROR 1050 Table already exists} で起動不能になる。
+     *
+     * <p>V1(素のCREATE) → V60/V67(IF NOT EXISTS) という既存の形は正しい。
+     * V73の初版は逆にV1側もV73側もCRM 3テーブルを定義しており、この検査で落ちる。
+     */
+    @Test
+    void 同一テーブルを再CREATEする後発マイグレーションはIF_NOT_EXISTSを持つこと() throws Exception {
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : createTableOccurrences().entrySet()) {
+            List<String> occurrences = entry.getValue();
+            if (occurrences.size() <= 1) {
+                continue;
+            }
+            // 先頭(=最も若いバージョン)以外はすべてガードが必要
+            for (String later : occurrences.subList(1, occurrences.size())) {
+                if (!later.endsWith("(guarded)")) {
+                    violations.add(entry.getKey() + " -> " + occurrences);
+                    break;
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+                "先に作られたテーブルを後発マイグレーションが保護無しでCREATEしています"
+                        + "（空DBだけが ERROR 1050 で起動不能になります）: " + violations);
+    }
+
+    /**
+     * V73(CRM)は「V73だけが正」で fresh / legacy を同一スキーマへ収束させる設計。
+     * V1へ同じ定義を書き戻すと空DBで衝突するため、V1側にCRMの定義が無いことを固定する。
+     */
+    @Test
+    void V73のCRM定義はV1統合baselineへ二重に書かないこと() throws Exception {
+        String v1 = stripComments(new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V1__create_tables.sql")
+                .getContentAsString(StandardCharsets.UTF_8));
+
+        for (String forbidden : List.of(
+                "t_customer_contact", "t_lead", "t_opportunity", "source_opportunity_id")) {
+            assertFalse(v1.contains(forbidden),
+                    "V1へ " + forbidden + " を書くとV73と重複し空DBが起動しません（V73だけを正にしてください）");
+        }
+
+        String v6 = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V6__create_sales_activity.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+        for (String forbidden : List.of("contact_id", "opportunity_id", "assignee_user_id")) {
+            assertFalse(stripComments(v6).contains(forbidden),
+                    "適用済みのV6を編集するとchecksumが壊れます。t_sales_activityの拡張列はV73で追加してください: "
+                            + forbidden);
+        }
+    }
+
+    /**
+     * V73は「テーブル作成 → 参照する列の追加 → 移行backfill → メニューseed」の順でなければ、
+     * 実MySQLで FK 先が未作成／列が未追加のまま参照して落ちる。
+     */
+    @Test
+    void V73はテーブル作成の後に参照列追加とbackfillを行うこと() throws Exception {
+        String sql = stripComments(v73());
+
+        int createContact = sql.indexOf("CREATE TABLE IF NOT EXISTS t_customer_contact");
+        int createOpportunity = sql.indexOf("CREATE TABLE IF NOT EXISTS t_opportunity");
+        int alterActivity = sql.indexOf("ALTER TABLE t_sales_activity");
+        int alterProject = sql.indexOf("ALTER TABLE t_project");
+        int backfill = sql.indexOf("INSERT INTO t_customer_contact");
+        int menuSeed = sql.indexOf("INSERT IGNORE INTO m_menu");
+
+        assertTrue(createContact >= 0 && createOpportunity >= 0, "V73にCRMテーブルの作成がありません");
+        assertTrue(alterActivity > createOpportunity,
+                "t_sales_activityのFKはt_customer_contact/t_opportunityを作ってから張ってください");
+        assertTrue(alterProject > createOpportunity,
+                "t_project.source_opportunity_idのFKはt_opportunityを作ってから張ってください");
+        assertTrue(backfill > createContact, "移行backfillはt_customer_contactを作ってから実行してください");
+        assertTrue(menuSeed > 0, "V73にCRMメニューのseedがありません");
+        assertFalse(sql.contains("STORED"),
+                "V73の生成列もVIRTUALに揃えてください（既存DBのALTERがERROR 1215になります）");
+    }
+
+    /**
+     * V73のメニュー権限は design §6.2 のとおり 管理者 / マネージャー / 営業 のみ。
+     * HR・要員へ広げると顧客の商機情報が本来見えない主体へ露出する。
+     */
+    @Test
+    void V73のCRMメニューは営業系3ロールにだけ付与すること() throws Exception {
+        String sql = stripComments(v73());
+
+        assertTrue(sql.contains("'crm-lead'") && sql.contains("'crm-opportunity'"),
+                "V73にCRMメニューのmenu_keyがありません");
+        assertTrue(sql.contains("'/crm/leads'") && sql.contains("'/api/crm/leads'"),
+                "m_menuにはpath_prefix/api_prefixの両方が必要です（MenuPermissionFilterが両方を見ます）");
+
+        int roleSeed = sql.indexOf("INSERT IGNORE INTO t_role_menu");
+        assertTrue(roleSeed >= 0, "V73にt_role_menuのseedがありません");
+        String roleSection = sql.substring(roleSeed);
+        assertTrue(roleSection.contains("'管理者'") && roleSection.contains("'マネージャー'")
+                        && roleSection.contains("'営業'"),
+                "CRMメニューは管理者/マネージャー/営業へ付与してください");
+        assertFalse(roleSection.contains("'HR'") || roleSection.contains("'要員'"),
+                "design §6.2によりHR/要員へCRMメニューを付与してはいけません");
+    }
+
+    /** {@code FROM}/{@code JOIN} の直後に現れうる、テーブル名ではない語。 */
+    private static final java.util.Set<String> NON_TABLE_TOKENS = java.util.Set.of(
+            "information_schema", "dual", "select", "if", "not", "exists");
+
+    /**
+     * db/migration 全体の {@code CREATE TABLE} を「テーブル名 -> 出現箇所」で集める。
+     * {@code IF NOT EXISTS} 付きの出現は末尾に {@code (guarded)} を付ける。
+     */
+    private Map<String, List<String>> createTableOccurrences() throws Exception {
+        Pattern create = Pattern.compile(
+                "CREATE\\s+TABLE\\s+(IF\\s+NOT\\s+EXISTS\\s+)?`?([a-zA-Z_][a-zA-Z0-9_]*)`?",
+                Pattern.CASE_INSENSITIVE);
+
+        // ファイル名の辞書順ではなくFlywayの適用順（バージョン昇順）で走査する。
+        // 「先に作った側」「後から再CREATEする側」の判定がファイル名順だと逆転する（V6 < V60 は辞書順で逆）。
+        List<Resource> ordered = new ArrayList<>(List.of(new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql")));
+        ordered.sort(java.util.Comparator.comparingDouble(MigrationScriptIntegrityTest::versionOf));
+
+        Map<String, List<String>> tables = new LinkedHashMap<>();
+        for (Resource resource : ordered) {
+            String fileName = String.valueOf(resource.getFilename());
+            String sql = stripComments(resource.getContentAsString(StandardCharsets.UTF_8));
+            Matcher m = create.matcher(sql);
+            while (m.find()) {
+                String table = m.group(2).toLowerCase(java.util.Locale.ROOT);
+                String occurrence = fileName + (m.group(1) != null ? " (guarded)" : "");
+                tables.computeIfAbsent(table, k -> new ArrayList<>()).add(occurrence);
+            }
+        }
+        return tables;
+    }
+
+    /** ファイル名からFlywayバージョンを取り出す（Repeatable等は末尾扱い）。 */
+    private static double versionOf(Resource resource) {
+        Matcher m = VERSIONED.matcher(String.valueOf(resource.getFilename()));
+        if (!m.matches()) {
+            return Double.MAX_VALUE;
+        }
+        try {
+            return Double.parseDouble(m.group(1).replace('_', '.'));
+        } catch (NumberFormatException e) {
+            return Double.MAX_VALUE;
+        }
+    }
+
+    /** {@code --} 行コメントを落とす（大文字化はしない）。 */
+    private String stripComments(String sql) {
+        return sql.lines()
+                .map(line -> {
+                    int comment = line.indexOf("--");
+                    return comment < 0 ? line : line.substring(0, comment);
+                })
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    private String v73() throws Exception {
+        return new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V73__crm_contact_lead_opportunity.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+    }
+
     private static String camelToSnake(String str) {
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < str.length(); i++) {

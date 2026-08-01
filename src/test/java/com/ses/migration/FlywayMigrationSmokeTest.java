@@ -386,6 +386,61 @@ class FlywayMigrationSmokeTest {
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='tasks'");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='saved-views'");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='batch-operations'");
+
+            // V73: CRM複数担当者・商機管理 (crm-contact-opportunity)
+            assertTableExists(st, "t_customer_contact");
+            assertTableExists(st, "t_lead");
+            assertTableExists(st, "t_opportunity");
+            assertColumnExists(st, "t_customer_contact", "roles_json");
+            assertColumnExists(st, "t_customer_contact", "valid_from");
+            assertColumnExists(st, "t_customer_contact", "valid_to");
+            assertColumnExists(st, "t_customer_contact", "active_primary_customer_id");
+            assertColumnExists(st, "t_opportunity", "converted_project_id");
+            assertColumnExists(st, "t_opportunity", "converted_quotation_id");
+            assertColumnExists(st, "t_lead", "converted_opportunity_id");
+            // t_sales_activity拡張はV6を編集せずV73のALTERで入る（fresh/legacy共通経路）
+            assertColumnExists(st, "t_sales_activity", "contact_id");
+            assertColumnExists(st, "t_sales_activity", "opportunity_id");
+            assertColumnExists(st, "t_sales_activity", "assignee_user_id");
+            // 冪等変換のUNIQUE（design §6.3）
+            assertColumnExists(st, "t_project", "source_opportunity_id");
+            assertColumnExists(st, "t_quotation", "source_opportunity_id");
+            assertIndexExists(st, "t_project", "uk_project_source_opportunity");
+            assertIndexExists(st, "t_quotation", "uk_quotation_source_opportunity");
+            // 主担当一意（生成列＋UNIQUE）。VIRTUALであること。
+            assertIndexExists(st, "t_customer_contact", "uk_customer_contact_active_primary");
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_customer_contact' AND column_name='active_primary_customer_id'"
+                    + " AND extra LIKE '%VIRTUAL GENERATED%'");
+            // メニューは 管理者/マネージャー/営業 の3ロールだけ（design §6.2）
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='crm-lead'"
+                    + " AND path_prefix='/crm/leads' AND api_prefix='/api/crm/leads'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='crm-opportunity'"
+                    + " AND path_prefix='/crm/opportunities' AND api_prefix='/api/crm/opportunities'");
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('crm-lead','crm-opportunity')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 6,
+                        "CRMメニュー2件 × 営業系3ロール = 6行が付与されているはず");
+            }
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('crm-lead','crm-opportunity')"
+                            + " AND rm.role IN ('HR','要員')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
+                        "HR/要員へCRMメニューを付与してはいけない（design §6.2）");
+            }
+            // 既存contactの移行: V2のseed顧客3件が初回contactへ移り、名称/emailが一致する
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM m_customer c JOIN t_customer_contact cc ON cc.customer_id = c.id"
+                            + " WHERE c.contact_person IS NOT NULL AND c.contact_person <> ''"
+                            + " AND c.deleted_flag = 0"
+                            + " AND cc.name = c.contact_person"
+                            + " AND (cc.email <=> c.contact_email)"
+                            + " AND cc.primary_flag = 1 AND cc.valid_to IS NULL")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 3,
+                        "V2のseed顧客3件が名称/emailを保ったまま初回contactへ移行されているはず");
+            }
         }
     }
 
