@@ -155,32 +155,26 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 }
                 throw BusinessException.of(404, "error.workRecord.notFound2");
             }
-            // UNKNOWN/未配賦の履歴は推測補完しない。既知のNULL履歴だけlegacy fallbackを許可する。
-            if (!"UNKNOWN".equals(history.getOrganizationHistoryStatus())
-                    && isHistoricalAccountLinkAllowed(contract, asOf)) {
-                return;
-            }
+            // 履歴行が存在する場合は、NULL/UNKNOWNを現在のaccount-linkへ補完しない。
+            // 明示NULLも履歴値そのものとして扱い、推測による過去月の可視化を防ぐ。
             throw BusinessException.of(404, "error.workRecord.notFound2");
         }
 
-        // 履歴がまだ作成されていない場合でも、直属組織が既知ならその組織を優先する。
-        // 直属組織がscope外なら、account-linkを経由した迂回許可は行わない。
-        com.ses.entity.Engineer engineer = engineerMapper == null ? null
-                : engineerMapper.selectById(contract.getEngineerId());
-        if (engineer != null && engineer.getOrganizationId() != null) {
-            if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
-                return;
-            }
-            throw BusinessException.of(404, "error.workRecord.notFound2");
-        }
-
-        // 直属組織が未配賦の場合のみ、当月は新規入力の直属上長scopeを使う。
+        // 履歴が未作成の過去月へ現在の Engineer 所属を補完しない。
+        // 現在値は当月の新規入力に限って利用し、過去月は明示された履歴または
+        // platform-invariantsで定めた既知の直属account-linkだけを参照する。
         if (YearMonth.from(asOf).equals(YearMonth.now())) {
+            com.ses.entity.Engineer engineer = engineerMapper == null ? null
+                    : engineerMapper.selectById(contract.getEngineerId());
+            if (engineer != null && engineer.getOrganizationId() != null) {
+                if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
+                    return;
+                }
+                throw BusinessException.of(404, "error.workRecord.notFound2");
+            }
             if (isDirectUserAllowed(contract, asOf)) {
                 return;
             }
-        } else if (history == null && isHistoricalAccountLinkAllowed(contract, asOf)) {
-            return;
         }
 
         throw BusinessException.of(404, "error.workRecord.notFound2");
@@ -193,14 +187,6 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
         Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
         return link != null && directUserIds != null && directUserIds.contains(link.getSysUserId());
-    }
-
-    private boolean isHistoricalAccountLinkAllowed(Contract contract, LocalDate asOf) {
-        if (engineerAccountLinkMapper == null) {
-            return false;
-        }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
-        return link != null && organizationScopeService.isAllowedUser(link.getSysUserId(), asOf);
     }
 
     @Override

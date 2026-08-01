@@ -67,6 +67,10 @@ public class Opportunity extends BaseEntity {
      */
     private Integer probability;
 
+    private String probabilityOverrideReason;
+
+    private java.time.LocalDateTime stageChangedAt;
+
     /**
      * 担当営業ID
      */

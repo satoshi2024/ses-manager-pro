@@ -47,6 +47,16 @@
                         <span th:text="#{menu.customer}">顧客管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('crm-lead')}">
+                    <a th:href="@{/crm/leads}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/crm/leads') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-person-vcard me-2"></i><span th:text="#{menu.crm.lead}">リード管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('crm-opportunity')}">
+                    <a th:href="@{/crm/opportunities}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/crm/opportunities') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-kanban me-2"></i><span th:text="#{menu.crm.opportunity}">商機管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
                     <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project') and !#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-briefcase me-2"></i>

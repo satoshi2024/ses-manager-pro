@@ -16,6 +16,8 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.CrmKpiService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -49,6 +51,8 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     private final SysUserMapper sysUserMapper;
     private final DataScopeService dataScopeService;
     private final SystemConfigService systemConfigService;
+    @Autowired(required = false)
+    private CrmScopeService crmScopeService;
 
     @Override
     public CrmKpiDto summarize(Long requestedOwnerId, String requestedStage) {
@@ -75,12 +79,16 @@ public class CrmKpiServiceImpl implements CrmKpiService {
             if (current == null) query.isNull(Opportunity::getOwnerUserId);
             else query.and(w -> w.eq(Opportunity::getOwnerUserId, current).or().isNull(Opportunity::getOwnerUserId));
         }
-        if (dataScopeService.isScoped()) {
+        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
+            Set<Long> allowed = crmScopeService.allowedCustomerIds(LocalDate.now());
+            if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
+            query.in(Opportunity::getCustomerId, allowed);
+        } else if (crmScopeService == null && dataScopeService.isScoped()) {
             Set<Long> allowed = dataScopeService.allowedCustomerIds();
             if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
             query.in(Opportunity::getCustomerId, allowed);
         }
-        return opportunityMapper.selectList(query.orderByAsc(Opportunity::getStage).orderByDesc(Opportunity::getId));
+        return opportunityMapper.selectList(query.orderByAsc(Opportunity::getStage).orderByDesc(Opportunity::getId).last("LIMIT 1000"));
     }
 
     private List<Lead> visibleLeads(Long ownerId) {
@@ -91,7 +99,20 @@ public class CrmKpiServiceImpl implements CrmKpiService {
             if (current == null) query.isNull(Lead::getOwnerUserId);
             else query.and(w -> w.eq(Lead::getOwnerUserId, current).or().isNull(Lead::getOwnerUserId));
         }
-        return leadMapper.selectList(query.orderByDesc(Lead::getId));
+        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
+            Set<Long> allowedCustomers = crmScopeService.allowedCustomerIds(LocalDate.now());
+            Set<Long> allowedOwners = crmScopeService.allowedOwnerIds(LocalDate.now());
+            if (allowedCustomers.isEmpty() && allowedOwners.isEmpty() && !"営業".equals(SecurityUtils.currentRole())) {
+                return Collections.emptyList();
+            }
+            query.and(w -> {
+                boolean branch = false;
+                if (!allowedCustomers.isEmpty()) { w.in(Lead::getConvertedCustomerId, allowedCustomers); branch = true; }
+                if (!allowedOwners.isEmpty()) { if (branch) w.or(); w.in(Lead::getOwnerUserId, allowedOwners); branch = true; }
+                if ("営業".equals(SecurityUtils.currentRole())) { if (branch) w.or(); w.isNull(Lead::getOwnerUserId); }
+            });
+        }
+        return leadMapper.selectList(query.orderByDesc(Lead::getId).last("LIMIT 1000"));
     }
 
     private List<CrmKpiDto.StageKpi> buildStages(List<Opportunity> opportunities,
@@ -152,6 +173,10 @@ public class CrmKpiServiceImpl implements CrmKpiService {
             String source = lead.getSource() == null || lead.getSource().isBlank() ? "不明" : lead.getSource();
             CrmKpiDto.SourceRoiKpi item = map.computeIfAbsent(source, key -> { CrmKpiDto.SourceRoiKpi v = new CrmKpiDto.SourceRoiKpi(); v.setSource(key); v.setPipelineAmount(BigDecimal.ZERO); v.setWonAmount(BigDecimal.ZERO); return v; });
             item.setLeadCount(item.getLeadCount() + 1);
+            if (lead.getSourceCost() != null) {
+                item.setSourceCost((item.getSourceCost() == null ? BigDecimal.ZERO : item.getSourceCost())
+                        .add(lead.getSourceCost()));
+            }
             if ("転換済".equals(lead.getStatus())) item.setConvertedLeadCount(item.getConvertedLeadCount() + 1);
             Opportunity opportunity = byId.get(lead.getConvertedOpportunityId());
             if (opportunity != null) {
@@ -159,7 +184,12 @@ public class CrmKpiServiceImpl implements CrmKpiService {
                 if ("受注".equals(opportunity.getStage())) { item.setWonCount(item.getWonCount() + 1); item.setWonAmount(item.getWonAmount().add(amount(opportunity))); }
             }
         });
-        map.values().forEach(item -> item.setRoiRate(rate(item.getWonAmount(), item.getPipelineAmount())));
+        map.values().forEach(item -> {
+            BigDecimal cost = item.getSourceCost();
+            item.setRoiRate(cost == null || cost.signum() == 0 ? null
+                    : item.getWonAmount().subtract(cost).multiply(BigDecimal.valueOf(100))
+                    .divide(cost, 1, RoundingMode.HALF_UP));
+        });
         return new ArrayList<>(map.values());
     }
 
@@ -168,7 +198,9 @@ public class CrmKpiServiceImpl implements CrmKpiService {
         BigDecimal opportunityAmount = opportunities.stream().filter(this::isOpenUnconverted).map(this::weightedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         forecast.setOpportunityAmount(opportunityAmount);
         forecast.setOpportunityCount(opportunities.stream().filter(this::isOpenUnconverted).count());
-        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>().in(Proposal::getStatus, PROPOSAL_OPEN);
+        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>()
+                .in(Proposal::getStatus, PROPOSAL_OPEN)
+                .isNull(Proposal::getSourceOpportunityId);
         if (dataScopeService.isScoped()) {
             Set<Long> allowed = dataScopeService.allowedProposalIds();
             if (allowed == null || allowed.isEmpty()) { forecast.setProposalAmount(BigDecimal.ZERO); forecast.setProposalCount(0); return forecast; }
@@ -212,7 +244,9 @@ public class CrmKpiServiceImpl implements CrmKpiService {
 
     private long averageDays(List<Opportunity> rows, LocalDate today, boolean stageUpdated) {
         if (rows.isEmpty()) return 0;
-        return Math.round(rows.stream().mapToLong(o -> daysSince(stageUpdated ? (o.getUpdatedAt() != null ? o.getUpdatedAt() : o.getCreatedAt()) : o.getCreatedAt(), today)).average().orElse(0));
+        return Math.round(rows.stream().mapToLong(o -> daysSince(stageUpdated
+                ? (o.getStageChangedAt() != null ? o.getStageChangedAt() : o.getCreatedAt())
+                : o.getCreatedAt(), today)).average().orElse(0));
     }
 
     private long averageNoActivityDays(List<Opportunity> rows, Map<Long, List<SalesActivity>> activities, LocalDate today) {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.*;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
+import java.math.BigDecimal;
 
 /**
  * リードエンティティ
@@ -41,6 +42,9 @@ public class Lead extends BaseEntity {
      * リードソース
      */
     private String source;
+
+    /** ROI算定用の獲得原価。NULLは原価未計測としてROIを表示しない。 */
+    private BigDecimal sourceCost;
 
     /**
      * 担当営業ID

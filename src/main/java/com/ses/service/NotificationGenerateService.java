@@ -12,6 +12,7 @@ import com.ses.entity.Proposal;
 import com.ses.entity.SalesActivity;
 import com.ses.entity.SysUser;
 import com.ses.entity.Invoice;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
@@ -22,9 +23,13 @@ import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.EngineerSales;
 import com.ses.entity.EngineerFollowup;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -34,6 +39,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationGenerateService {
@@ -48,6 +54,8 @@ public class NotificationGenerateService {
     private final EngineerSalesMapper engineerSalesMapper;
     private final EngineerFollowupMapper engineerFollowupMapper;
     private final SysUserMapper sysUserMapper;
+    private final WorkRecordMapper workRecordMapper;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final com.ses.service.billing.CashFlowForecastService cashFlowForecastService;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
@@ -61,6 +69,62 @@ public class NotificationGenerateService {
         invoiceOverdue();
         followupOverdue();
         cashflowAlert();
+        attendanceUnsubmitted();
+    }
+
+    /**
+     * トラックA2: 対象月の勤怠が未提出の要員本人へリマインドする。
+     *
+     * <p>対象抽出は既存の勤怠グリッド（{@link WorkRecordMapper#selectMonthlyGrid}）と同一条件
+     * （契約期間内・status が 稼動中/終了）に揃える。LEFT JOIN のため勤怠レコードが存在しない
+     * 契約も status=null の行として返ってくるので、これも未提出として扱う。
+     *
+     * <p>締め日（{@code attendance.submission-closing-day}、コード既定値のみで migration は
+     * 作らない）を過ぎた分は本タスクの対象外（本人への事前リマインドのみに縮小）。
+     *
+     * <p>宛先は要員本人のみ。要員↔アカウント未紐付けは他要員への漏洩防止のため全体配信へ
+     * フォールバックせず、warnログに留める（{@code WorkRecordServiceImpl} の差戻し通知と同じ方針）。
+     *
+     * <p>冪等性: dedupe_key = ATTENDANCE_UNSUBMITTED:{contractId}:{workMonth}
+     * （対象月が変わらない限り一度だけ発行し、提出されればグリッドから外れて再発行されない）。
+     */
+    public void attendanceUnsubmitted() {
+        int closingDay = systemConfigService.getInt("attendance.submission-closing-day", 5);
+        LocalDate today = LocalDate.now();
+        if (today.getDayOfMonth() > closingDay) {
+            return;
+        }
+
+        YearMonth targetMonth = YearMonth.from(today).minusMonths(1);
+        String workMonth = targetMonth.toString();
+        String monthEnd = targetMonth.atEndOfMonth().toString();
+        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGrid(workMonth, monthEnd);
+        for (WorkRecordGridDto row : rows) {
+            if (isSubmitted(row.getStatus())) {
+                continue;
+            }
+            Contract contract = contractMapper.selectById(row.getContractId());
+            if (contract == null || contract.getEngineerId() == null) {
+                continue;
+            }
+            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+            if (link == null || link.getSysUserId() == null) {
+                log.warn("勤怠未提出リマインドの宛先要員アカウントが解決できません: contractId={}, engineerId={}",
+                        row.getContractId(), contract.getEngineerId());
+                continue;
+            }
+            String dedupeKey = "ATTENDANCE_UNSUBMITTED:" + row.getContractId() + ":" + workMonth;
+            String message = "[\"notification.msg.ATTENDANCE_UNSUBMITTED\", \"" + workMonth + "\"]";
+            // menuKeyを明示指定する。省略するとNotificationServiceImpl.menuKeyForTypeが未知の
+            // typeをnullへ解決し、n.menu_key IS NULLの通知は非管理者から不可視になる
+            // （NotificationMapperの可視性条件）。TIMESHEET_REJECTEDと同じ"my-timesheet"を使う。
+            notificationService.publishToUser(link.getSysUserId(), "ATTENDANCE_UNSUBMITTED", "勤怠未提出のお知らせ",
+                    message, NotificationLinks.MY_TIMESHEET, dedupeKey, "my-timesheet");
+        }
+    }
+
+    private boolean isSubmitted(String status) {
+        return "提出済".equals(status) || "確定".equals(status);
     }
 
     /**

@@ -9,7 +9,7 @@ function loadLeads() {
 
 function openLeadModal(lead) {
     $('#lead-form')[0].reset(); $('#lead-id').val(lead ? lead.id : ''); $('#lead-version').val(lead ? lead.version : '');
-    if (lead) { $('#lead-company').val(lead.companyName); $('#lead-contact-name').val(lead.contactName); $('#lead-email').val(lead.contactEmail); $('#lead-phone').val(lead.contactPhone); $('#lead-source').val(lead.source); }
+    if (lead) { $('#lead-company').val(lead.companyName); $('#lead-contact-name').val(lead.contactName); $('#lead-email').val(lead.contactEmail); $('#lead-phone').val(lead.contactPhone); $('#lead-source').val(lead.source); $('#lead-source-cost').val(lead.sourceCost); $('#lead-status').val(lead.status); }
     $('#lead-duplicate-warning').addClass('d-none'); bootstrap.Modal.getOrCreateInstance(document.getElementById('leadModal')).show();
 }
 
@@ -17,7 +17,7 @@ function editLead(id) { $.get(`/api/crm/leads/${id}`, res => { if (res.code === 
 
 function saveLead() {
     const id = $('#lead-id').val();
-    const data = { companyName: $('#lead-company').val(), contactName: $('#lead-contact-name').val(), contactEmail: $('#lead-email').val(), contactPhone: $('#lead-phone').val(), source: $('#lead-source').val(), version: $('#lead-version').val() ? Number($('#lead-version').val()) : null };
+    const data = { companyName: $('#lead-company').val(), contactName: $('#lead-contact-name').val(), contactEmail: $('#lead-email').val(), contactPhone: $('#lead-phone').val(), source: $('#lead-source').val(), sourceCost: $('#lead-source-cost').val() ? Number($('#lead-source-cost').val()) : null, status: $('#lead-status').val(), version: $('#lead-version').val() ? Number($('#lead-version').val()) : null };
     const save = () => $.ajax({ url: id ? `/api/crm/leads/${id}` : '/api/crm/leads', method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { Toast.success('リードを保存しました'); bootstrap.Modal.getInstance(document.getElementById('leadModal')).hide(); loadLeads(); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || '保存に失敗しました'));
     const checkAndSave = (res) => {
         if (res.code === 200 && (res.data || []).length) {

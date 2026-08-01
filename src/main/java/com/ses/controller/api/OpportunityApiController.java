@@ -11,6 +11,7 @@ import com.ses.entity.Opportunity;
 import com.ses.service.OpportunityService;
 import com.ses.service.CrmKpiService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -22,7 +23,7 @@ import org.springframework.web.bind.annotation.*;
 public class OpportunityApiController {
 
     private final OpportunityService opportunityService;
-    private final DataScopeService dataScopeService;
+    private final CrmScopeService crmScopeService;
     private final CrmKpiService crmKpiService;
 
     @PutMapping("/{id}/stage")
@@ -67,7 +68,7 @@ public class OpportunityApiController {
         if (opportunity == null) {
             throw BusinessException.of(404, "error.opportunity.notFound");
         }
-        dataScopeService.assertAllowedCustomer(opportunity.getCustomerId());
+        crmScopeService.assertAllowedCustomer(opportunity.getCustomerId(), java.time.LocalDate.now());
         return ApiResult.success(opportunity);
     }
 }

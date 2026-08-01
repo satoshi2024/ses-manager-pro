@@ -8,7 +8,7 @@ import com.ses.entity.SalesActivity;
 import com.ses.mapper.OpportunityMapper;
 import com.ses.service.CustomerContactService;
 import com.ses.service.SalesActivityService;
-import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,11 +27,11 @@ public class CustomerTimelineApiController {
     private final CustomerContactService customerContactService;
     private final SalesActivityService salesActivityService;
     private final OpportunityMapper opportunityMapper;
-    private final DataScopeService dataScopeService;
+    private final CrmScopeService crmScopeService;
 
     @GetMapping("/{customerId}/timeline")
     public ApiResult<?> timeline(@PathVariable Long customerId) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
         List<CustomerContactDto> contacts = customerContactService.list(customerId, LocalDate.now());
         List<SalesActivity> activities = salesActivityService.list(new LambdaQueryWrapper<SalesActivity>()
                 .eq(SalesActivity::getCustomerId, customerId)

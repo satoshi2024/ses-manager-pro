@@ -44,7 +44,8 @@ class CrmKpiServiceIntegrationTest {
         customer.setCompanyName("T052 KPI顧客");
         customerService.save(customer);
 
-        Lead converted = Lead.builder().companyName("T052 KPI顧客").source("展示会").ownerUserId(1L)
+        Lead converted = Lead.builder().companyName("T052 KPI顧客").source("展示会").sourceCost(new BigDecimal("500000"))
+                .ownerUserId(1L)
                 .status("転換済").version(1).build();
         leadMapper.insert(converted);
 

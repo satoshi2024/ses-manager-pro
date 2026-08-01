@@ -8,6 +8,7 @@ import com.ses.mapper.MailDeliveryMapper;
 import com.ses.service.EmailTemplateService;
 import com.ses.service.MailService;
 import com.ses.service.NotificationService;
+import com.ses.service.integration.EmailProviderAdapter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +36,8 @@ public class MailServiceImpl implements MailService {
     private final MailDeliveryMapper mailDeliveryMapper;
     private final String host;
     private final String from;
+    @Autowired(required = false)
+    private EmailProviderAdapter emailProviderAdapter;
 
     @Autowired
     @org.springframework.context.annotation.Lazy
@@ -80,6 +83,12 @@ public class MailServiceImpl implements MailService {
 
     @Override
     public MailDispatchResult send(String to, String subject, String body, Long invoiceId) {
+        return send(to, subject, body, invoiceId, null, null);
+    }
+
+    @Override
+    public MailDispatchResult send(String to, String subject, String body, Long invoiceId,
+                                   Long contactId, Long opportunityId) {
         MailDelivery delivery = new MailDelivery();
         delivery.setRecipient(to);
         delivery.setSubject(subject == null ? "" : subject);
@@ -88,6 +97,8 @@ public class MailServiceImpl implements MailService {
         delivery.setAttemptCount(0);
         delivery.setQueuedAt(java.time.LocalDateTime.now());
         delivery.setInvoiceId(invoiceId);
+        delivery.setContactId(contactId);
+        delivery.setOpportunityId(opportunityId);
         if (mailDeliveryMapper != null) {
             mailDeliveryMapper.insert(delivery);
         }
@@ -112,13 +123,17 @@ public class MailServiceImpl implements MailService {
             return;
         }
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(from);
-            message.setTo(delivery.getRecipient());
-            message.setSubject(delivery.getSubject());
-            message.setText(delivery.getBody());
             delivery.setAttemptCount(1);
-            sender.send(message);
+            if (emailProviderAdapter != null) {
+                emailProviderAdapter.send(delivery.getRecipient(), delivery.getSubject(), delivery.getBody());
+            } else {
+                SimpleMailMessage message = new SimpleMailMessage();
+                message.setFrom(from);
+                message.setTo(delivery.getRecipient());
+                message.setSubject(delivery.getSubject());
+                message.setText(delivery.getBody());
+                sender.send(message);
+            }
             delivery.setStatus("SENT");
             delivery.setSentAt(java.time.LocalDateTime.now());
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);

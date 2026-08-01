@@ -127,6 +127,11 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/engineers")) {
             return action("engineer", method);
         }
+        // 顧客配下でもCRMの接点・活動・タイムラインは顧客マスタ権限ではなく
+        // CRM権限で保護する。一般顧客APIの分岐より先に解決すること。
+        if (isCrmCustomerPath(uri)) {
+            return action("crm", method);
+        }
         if (matchesPrefix(uri, "/api/customers")) {
             return action("customer", method);
         }
@@ -219,6 +224,11 @@ public final class ActionPermissionResolver {
     private static boolean isDownloadPath(String uri) {
         return uri.endsWith("/download") || uri.contains("/download/")
                 || uri.endsWith(".pdf") || uri.endsWith(".xlsx") || uri.endsWith(".csv");
+    }
+
+    private static boolean isCrmCustomerPath(String uri) {
+        return uri.matches("/api/customers/\\d+/(contacts|timeline)(/.*)?")
+                || uri.matches("/api/customers/\\d+/activities(/.*)?");
     }
 
     private static String action(String resource, String method) {

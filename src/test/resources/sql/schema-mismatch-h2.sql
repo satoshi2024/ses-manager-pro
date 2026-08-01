@@ -34,6 +34,7 @@ CREATE TABLE t_proposal (
   match_reason        TEXT,
   remarks             TEXT,
   proposed_by         BIGINT,
+  source_opportunity_id BIGINT,
   proposed_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
   closed_at           DATETIME,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
