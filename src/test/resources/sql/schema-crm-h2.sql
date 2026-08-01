@@ -15,6 +15,12 @@
 -- ============================================================
 -- 1. t_customer_contact (顧客担当者)
 -- ============================================================
+-- DB_CLOSE_DELAY=-1 の共有H2で別テストが engineer-schema-h2.sql を先に適用していても、
+-- CRM replayが常に同じ定義へ戻るようCRM 3表だけ再生成する。
+DROP TABLE IF EXISTS t_customer_contact CASCADE;
+DROP TABLE IF EXISTS t_lead CASCADE;
+DROP TABLE IF EXISTS t_opportunity CASCADE;
+
 CREATE TABLE IF NOT EXISTS t_customer_contact (
   id            BIGINT       AUTO_INCREMENT PRIMARY KEY,
   customer_id   BIGINT       NOT NULL,

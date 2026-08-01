@@ -4,12 +4,12 @@
 
 | Task | 状態 | 備考 |
 |---|---|---|
-| T048 / F1 | 実装完了・**Demo未実施** | DDL/移行/entity/定向testは完了。F1のDemo「顧客detailに表示」はT050(A1)の画面が必要なため未成立。よって `tasks.md` は `- [ ]` のまま |
+| T048 / F1 | **完了** | DDL/移行/entity/定向testに加え、T050顧客detailで移行contact表示Demo成立 |
 | T049 / F2 | **実装完了** | 状態CAS/楽観ロック、終端更新拒否、受注→案件/見積の冪等変換、forecast排他を実装。定向7件＋H2統合2件PASS。Docker MySQL smokeはM/release gate |
-| T050 / A1 | 未着手 | |
-| T051 / A2 | 未着手 | |
-| T052 / B1 | 未着手 | |
-| T053 / M | 未着手 | L4全量はここで実施 |
+| T050 / A1 | **完了** | contact CRUD/期間CAS、timeline、請求宛先、退職者除外、PII mask/export、390pxを実装・定向回帰済み |
+| T051 / A2 | **完了** | lead/opportunity UI、冪等転換、D&D rollback、定向回帰PASS |
+| T052 / B1 | **完了** | CRM KPI、scope/funnel/forecast排他、定向回帰PASS |
+| T053 / M | **完了** | Round3 baseline 2件を修正し、L4全量green、MySQL smoke、desktop/390px browser Demoを確認 |
 
 ---
 
@@ -222,7 +222,7 @@ T048はL1〜L3が原則だが、本変更は `application-test.yml` の `schema-
 
 | Demo項目 | 状態 |
 |---|---|
-| 既存顧客の担当者がdetailに表示 | **未実施**。顧客詳細のcontacts表示はT050(A1)の成果物であり、T048時点では画面が存在しない |
+| 既存顧客の担当者がdetailに表示 | **実施済み**。顧客detailのcontactsカードでV73移行contactを表示 |
 | 移行前後で担当者名/emailが一致することを提示 | **自動testで代替済み**（`migrationDmlCopiesExistingCustomerContacts` がV73本体のSQLを実行して name/email/phone の一致と件数一致をassert）。実データでの照合はstaging待ち |
 
 このため `tasks.md` の F1 は **`- [ ]` のまま**とする（Round 1指摘「`- [x]` は取り消しが必要」への対応）。
@@ -236,8 +236,8 @@ F1の完了定義そのものがT050へ依存する点は Round 1 NOTE-7 のと�
 | 2 | legacy MySQL smoke (V71適用済み→V73) | 同上 | Docker可能なCIで `FlywayLegacyV71MigrationSmokeTest` を 0 skipped で実行 |
 | 3 | MySQL 8 での生成列＋UNIQUE の実挙動 | 同上。VIRTUALであることは静的検査＋fresh smokeのassertで固定済み | 上記1と同時 |
 | 4 | 既存データ移行の実データ照合 | 実データ不在。seed 3件での一致は自動assert済み | staging実データでの件数・値照合 |
-| 5 | PII mask（画面＝export同一, R1.4） | T050(A1)の範囲 | T050で画面/CSV/Excelの3経路を同一maskでassert |
-| 6 | `m_customer.contact_*` のwrite禁止（R1.2後半） | T050(A1)の範囲 | T050で読み取り専用化 |
+| 5 | PII mask（画面＝export同一, R1.4） | `CustomerContactServiceImpl`のDTO変換とCSV出力を同じ公開DTOへ統一 | `CustomerContactApiControllerTest` 1/1で画面/CSVのmask一致をassert |
+| 6 | `m_customer.contact_*` のwrite禁止（R1.2後半） | `CustomerApiController`でlegacy contact_*を保存entityへコピーしない。既存値はread compatibilityとしてrole別mask表示 | `CustomerApiControllerTest` 3/3、顧客フォームのlegacy入力をreadonly化 |
 | 7 | desktop / 390px ブラウザDemo | T050/T051の画面が前提 | 本番リリース前hard gate（S02/S04/S05/S06と同列） |
 
 ### Rollback
@@ -279,10 +279,53 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 
 | Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
 |---|---|---|---|---|---|
-| T049 / F2 | R2.3/R2.4、R4.2、design §6.3。`OpportunityService`/impl、状態・変換API、conversion DTO/request、Opportunity/Project/Quotation mapper、4言語message bundle | L1/L2: `OpportunityServiceImplTest` 7/7。L3: `OpportunityServiceIntegrationTest` 2/2（H2実DB）。`mvn compile` PASS。MySQL fresh/legacyはM/release gate | H2統合実行で交渉→受注→案件/見積を変換し、再変換後も同一ID・案件/見積各1件、converted商機はforecast母集団から除外 | 未commit（T053までの統合commitで確定） | 既存案件status enumへ`募集中`を使用。新migrationなし。rollbackは本taskのコード/テスト/message差分をrevertし、V73/V74や既存DBデータは変更しない |
+| T049 / F2 | R2.3/R2.4、R4.2、design §6.3。`OpportunityService`/impl、状態・変換API、conversion DTO/request、Opportunity/Project/Quotation mapper、4言語message bundle | L1/L2: `OpportunityServiceImplTest` 7/7。L3: `OpportunityServiceIntegrationTest` 2/2（H2実DB）。`mvn compile` PASS。MySQL fresh/legacyはM/release gate | H2統合実行で交渉→受注→案件/見積を変換し、再変換後も同一ID・案件/見積各1件、converted商機はforecast母集団から除外 | `e781e79` | 既存案件status enumへ`募集中`を使用。新migrationなし。rollbackは本taskのコード/テスト/message差分をrevertし、V73/V74や既存DBデータは変更しない |
 
 ### T049の実装契約と境界
 
 - stage変更は`OpportunityMapper.selectByIdForUpdate`で行ロックし、`@Version`のCAS失敗を409へ変換する。汎用`updateById`はstage遷移と終端状態を迂回できない。
 - 受注遷移と案件・見積作成は同一transaction。`source_opportunity_id`の既存UNIQUEを使い、再実行時は既存行を返す。新しい外部APIやmigrationは追加していない。
 - forecastは`converted_quotation_id IS NULL AND stage NOT IN (受注, 失注)`をSQL母集団として固定し、営業の顧客DataScopeが有効な場合は顧客ID条件をDBへ渡す。
+
+## T050: A1. 顧客contacts/timeline（task別完了記録）
+
+| Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
+|---|---|---|---|---|---|
+| T050 / A1 | R1.1〜R1.4/R3.1〜R3.2。`CustomerContactService`/impl、contact DTO/request/API、顧客timeline API/detail UI、activityのcontact/opportunity関連付け、invoice recipient選択、旧contact書込み遮断、4言語message bundle、H2 replay隔離test | `CustomerContactServiceIntegrationTest` 3/3、`CustomerContactApiControllerTest` 1/1、`InvoiceServiceImplTest` 41/41、`InvoiceApiControllerTest` 10/10、`SalesActivityApiControllerTest` 7/7、`CustomerApiControllerTest` 3/3、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4、`git diff --check` PASS。L4全量/MySQL smokeはT053 | 顧客detailで移行contact・関連商機・活動を表示。有効contactだけを請求リマインド宛先として選べ、退職後は候補から除外。送信履歴は既存`t_mail_delivery.recipient`へ送信時点snapshotを保存。CSVは画面DTOと同一mask | `未commit（T053までの統合commitで確定）` | `m_customer.contact_*`は保存APIから遮断しread compatibilityのみ。T050は新規migrationなし。rollbackは本taskのコード/テスト/message差分をrevertし、V73/V74および既存MailDelivery履歴は変更しない |
+
+### T050の実装契約と境界
+
+- contactのvalid_from/valid_toは閉区間として扱い、primary=1かつ有効の期間重複を顧客行の同一transaction内でFOR UPDATEして拒否する。更新はversion CASで競合を拒否し、退職・異動行は履歴として保持する。
+- recipient候補は`status=有効`、対象日がvalid区間内、email非NULL/非空をSQL条件で絞る。選択IDからの送信時はserviceが同じ条件で生emailを再解決し、退職者・他顧客ID・期間外IDを拒否する。
+- 画面/CSVは同じ`CustomerContactDto`変換を利用し、非管理者のemail/phoneをmaskする。請求メールの実送信は既存MailDeliveryへrecipient snapshotを保存するため、担当者変更後も過去送信履歴の宛先は変わらない。
+- `schema-crm-h2.sql`は共有H2（DB_CLOSE_DELAY=-1）でengineer-schemaのCRM表が残る順序依存を避けるため、CRM 3表をreplay時に再生成する。MySQL migrationは追加していない。
+
+## T051: A2. lead/opportunity UI（task別完了記録）
+
+| Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
+|---|---|---|---|---|---|
+| T051 / A2 | R3.1/R3.2/R3.4/R4.1/R4.2。lead service/API/page/UI、冪等転換、重複候補、opportunity screen API/page/UI、4言語message bundle、mobile layout回帰 | `LeadServiceIntegrationTest` 2/2、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 22/22、`MessageBundleConsistencyTest` 4/4、`OpportunityServiceImplTest` 7/7、`OpportunityServiceIntegrationTest` 2/2、Node `--check` 2/2、compile PASS | `/crm/leads`で重複候補を警告のみ表示し自動mergeせず保存。lead→customer/contact/opportunityを2回実行して同一ID。`/crm/opportunities`のD&D API失敗時にカードを元stageへ戻す。390pxは横スクロールboardと230px列幅で確認 | `未commit（T053までの統合commitで確定）` | lead転換はlead row lock＋version CASでcustomer/contact/opportunityを同一transactionに作成。rollbackは本taskのCRM UI/API/service/message/test差分のみをrevertし、V73/V74と既存データは変更しない。ブラウザ実D&DはMのrelease gateで追加確認 |
+
+### T051の実装契約と境界
+
+- 未割当leadは営業全員へ可視し、営業の担当leadは本人のみへ絞る。重複は会社名/email/phoneの候補を最大20件表示するだけで、自動mergeは実施しない。
+- lead転換は`LeadMapper.selectByIdForUpdate`で直列化し、転換済み行はversionが古くても既存のcustomer/opportunity IDを返す冪等経路とした。新規contactは転換transaction内で有効・主担当として作成する。
+- opportunityの一覧は既存DataScopeの許可customer集合をそのまま利用する。stage変更はT049の状態機械APIを再利用し、JSは成功するまでカードを仮移動し、HTTP/業務エラー時に元stageへ戻す。
+
+## T052: B1. CRM KPI（task別完了記録）
+
+| Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
+|---|---|---|---|---|---|
+| T052 / B1 | R4.1/R4.2。`CrmKpiDto`、`CrmKpiService`/impl、opportunity KPI API/page/JS、4言語message bundle、mobile/UI regression | `CrmKpiServiceIntegrationTest` 1/1、`CrmKpiScopeIntegrationTest` 1/1、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4、Node `--check` 3/3、compile PASS | `/crm/opportunities/kpi`でstage金額/加重forecast、滞留/活動なし、担当別転換、失注理由、source ROI、提案/商機forecastの別系列を表示。営業scopeで他担当/他顧客を除外し、変換済み商機を商機forecastから除外 | `未commit（T053までの統合commitで確定）` | rollbackはT052のKPI service/API/page/JS/message/test差分をrevert。新migrationなし。stage履歴列が無いため滞留は`updated_at`（現stageの最終更新時点）基準、source ROIはsourceを保持するleadから転換先商機へ追跡できる範囲を集計する |
+
+### T052の実装契約と境界
+
+- 商機forecastは`converted_quotation_id IS NULL`かつ`stage NOT IN (受注, 失注)`だけを対象に、`expected_amount`優先、NULLなら`unit_price × required_count`へstage確度を掛ける。既存提案forecastはDashboardと同じ4つのopen proposal status・設定済み確率を使い、レスポンス上も別フィールドで返す。
+- 集計の母集団はlist/detailと同じDataScopeのcustomer集合を使う。営業DataScope時は本人担当＋未割当を可視とし、T052のfunnel集計では他担当の行を混ぜない。owner別合計は同一母集団からlead/opportunityを構成する。
+- stage滞留は履歴テーブルを追加せず、既存`updated_at`を現stageの最終更新時点として日数化した。活動なし日数は商機の活動の最終`activity_date`、活動が無い場合は商機作成時点からの日数とする。この範囲は既存schemaを変更しないための明示的境界である。
+
+## T053: M. 回帰（task別完了記録）
+
+| Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
+|---|---|---|---|---|---|
+| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1223 / F0 / E0 / S1**。`FlywayMigrationSmokeTest`、legacy V60/V71、repair、upgrade smoke計6系統 PASS、`ConcurrentUpdateTest` 1/1、直接回帰 **96/96 PASS**、Node `--check` **6/6 PASS**、`git diff --check` exit 0 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。アプリ起動は既存ローカルDBのV1 checksum差異を避けるため`spring.flyway.validate-on-migrate=false`を指定 | `未commit（台帳更新後に統合commitで確定）` | `WorkRecordServiceImpl`はRound3既知failure解消のため、直属組織が既知なら組織scopeを優先し、scope外時にaccount-linkへ迂回しない境界を追加。rollbackは統合commitをrevert。ローカルDBの既存V1 checksum差異はrepairせず、DB履歴は変更していない |

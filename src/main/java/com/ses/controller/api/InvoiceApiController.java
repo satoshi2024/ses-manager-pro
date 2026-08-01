@@ -16,6 +16,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
 import com.ses.service.EmailTemplateService;
+import com.ses.service.CustomerContactService;
 import com.ses.service.export.ExcelExportService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -50,6 +51,9 @@ public class InvoiceApiController {
 
     @Autowired
     private ExcelExportService excelExportService;
+
+    @Autowired
+    private CustomerContactService customerContactService;
 
     @Autowired
     private com.ses.service.security.DataScopeService dataScopeService;
@@ -197,12 +201,20 @@ public class InvoiceApiController {
         return ApiResult.success(emailTemplateService.list());
     }
 
+    /** 請求書の顧客に対する、基準日時点で有効な督促宛先候補。 */
+    @GetMapping("/{id}/recipient-candidates")
+    public ApiResult<?> recipientCandidates(@PathVariable Long id) {
+        assertInvoiceVisible(id);
+        Invoice invoice = invoiceService.getById(id);
+        return ApiResult.success(customerContactService.recipientCandidates(invoice.getCustomerId(), LocalDate.now()));
+    }
+
 
 
     @PostMapping("/{id}/reminder")
     public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
         assertInvoiceVisible(id);
-        return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
+        return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId(), request.getContactId()));
     }
 
     /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
@@ -240,8 +252,11 @@ public class InvoiceApiController {
 
     public static class ReminderRequest {
         private Long templateId;
+        private Long contactId;
         public Long getTemplateId() { return templateId; }
         public void setTemplateId(Long templateId) { this.templateId = templateId; }
+        public Long getContactId() { return contactId; }
+        public void setContactId(Long contactId) { this.contactId = contactId; }
     }
 
     @GetMapping("/bp-payments")

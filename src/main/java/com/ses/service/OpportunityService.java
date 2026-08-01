@@ -2,6 +2,8 @@ package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.crm.OpportunityConversionDto;
+import com.ses.dto.crm.OpportunityListDto;
+import com.ses.dto.crm.OpportunitySaveRequest;
 import com.ses.entity.Opportunity;
 
 import java.util.List;
@@ -17,4 +19,10 @@ public interface OpportunityService extends IService<Opportunity> {
 
     /** 既存提案forecastへ移った商機を除いた、商機forecastの母集団を取得する。 */
     List<Opportunity> listForecastCandidates();
+
+    List<OpportunityListDto> listForScreen(String stage, Long ownerUserId);
+
+    Opportunity createBasic(OpportunitySaveRequest request);
+
+    Opportunity updateBasic(Long id, OpportunitySaveRequest request);
 }

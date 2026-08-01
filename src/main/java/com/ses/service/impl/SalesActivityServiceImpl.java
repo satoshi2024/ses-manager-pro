@@ -6,7 +6,12 @@ import com.ses.dto.salesactivity.SalesActivityCreateRequest;
 import com.ses.dto.salesactivity.SalesActivityUpdateRequest;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.CustomerContactMapper;
+import com.ses.mapper.OpportunityMapper;
+import com.ses.entity.CustomerContact;
+import com.ses.entity.Opportunity;
 import com.ses.service.SalesActivityService;
+import com.ses.service.security.DataScopeService;
 import com.ses.common.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,13 +20,23 @@ import org.springframework.stereotype.Service;
 @Service
 public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, SalesActivity> implements SalesActivityService {
     private final CustomerMapper customerMapper;
+    private final CustomerContactMapper customerContactMapper;
+    private final OpportunityMapper opportunityMapper;
+    private final DataScopeService dataScopeService;
 
-    public SalesActivityServiceImpl(CustomerMapper customerMapper) {
+    public SalesActivityServiceImpl(CustomerMapper customerMapper,
+                                    CustomerContactMapper customerContactMapper,
+                                    OpportunityMapper opportunityMapper,
+                                    DataScopeService dataScopeService) {
         this.customerMapper = customerMapper;
+        this.customerContactMapper = customerContactMapper;
+        this.opportunityMapper = opportunityMapper;
+        this.dataScopeService = dataScopeService;
     }
 
     @Override
     public void assertCustomerExists(Long customerId) {
+        dataScopeService.assertAllowedCustomer(customerId);
         if (customerMapper.selectById(customerId) == null) {
             throw BusinessException.of(404, "error.customer.notFound");
         }
@@ -42,10 +57,13 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public SalesActivity create(Long customerId, SalesActivityCreateRequest request) {
+        dataScopeService.assertAllowedCustomer(customerId);
         assertCustomerExists(customerId);
         SalesActivity activity = new SalesActivity();
         activity.setCustomerId(customerId);
+        applyRelations(activity, customerId, request.getContactId(), request.getOpportunityId());
         activity.setActivityType(request.getActivityType());
+        applyRelations(activity, customerId, request.getContactId(), request.getOpportunityId());
         activity.setActivityDate(request.getActivityDate());
         activity.setTitle(request.getTitle());
         activity.setContent(request.getContent());
@@ -58,6 +76,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public SalesActivity update(Long customerId, Long activityId, SalesActivityUpdateRequest request) {
+        dataScopeService.assertAllowedCustomer(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
         activity.setActivityType(request.getActivityType());
         activity.setActivityDate(request.getActivityDate());
@@ -77,6 +96,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public void complete(Long customerId, Long activityId) {
+        dataScopeService.assertAllowedCustomer(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
         activity.setCompletedFlag(1);
         updateById(activity);
@@ -85,7 +105,25 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public void delete(Long customerId, Long activityId) {
+        dataScopeService.assertAllowedCustomer(customerId);
         getOwnedOrThrow(customerId, activityId);
         removeById(activityId);
+    }
+
+    private void applyRelations(SalesActivity activity, Long customerId, Long contactId, Long opportunityId) {
+        if (contactId != null) {
+            CustomerContact contact = customerContactMapper.selectOne(new LambdaQueryWrapper<CustomerContact>()
+                    .eq(CustomerContact::getId, contactId)
+                    .eq(CustomerContact::getCustomerId, customerId));
+            if (contact == null) throw BusinessException.of("error.crm.contactNotFound");
+        }
+        if (opportunityId != null) {
+            Opportunity opportunity = opportunityMapper.selectOne(new LambdaQueryWrapper<Opportunity>()
+                    .eq(Opportunity::getId, opportunityId)
+                    .eq(Opportunity::getCustomerId, customerId));
+            if (opportunity == null) throw BusinessException.of("error.crm.opportunityNotFound");
+        }
+        activity.setContactId(contactId);
+        activity.setOpportunityId(opportunityId);
     }
 }

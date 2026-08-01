@@ -5,6 +5,10 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.crm.OpportunityConversionDto;
+import com.ses.dto.crm.OpportunityListDto;
+import com.ses.dto.crm.OpportunitySaveRequest;
+import com.ses.entity.Customer;
+import com.ses.mapper.CustomerMapper;
 import com.ses.entity.Opportunity;
 import com.ses.entity.Project;
 import com.ses.entity.Quotation;
@@ -53,6 +57,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private final QuotationMapper quotationMapper;
     private final QuotationService quotationService;
     private final DataScopeService dataScopeService;
+    private final CustomerMapper customerMapper;
 
     /**
      * 汎用CRUD経路から状態機械を迂回させない。stage変更はchangeStageだけが許可し、
@@ -134,6 +139,76 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
             query.in("customer_id", allowedCustomerIds);
         }
         return list(query);
+    }
+
+    @Override
+    public List<OpportunityListDto> listForScreen(String stage, Long ownerUserId) {
+        QueryWrapper<Opportunity> query = new QueryWrapper<>();
+        if (StringUtils.hasText(stage)) query.eq("stage", stage);
+        if (ownerUserId != null) query.eq("owner_user_id", ownerUserId);
+        if (dataScopeService.isScoped()) {
+            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
+            query.in("customer_id", allowedCustomerIds);
+        }
+        query.orderByAsc("stage").orderByDesc("id");
+        return list(query).stream().map(o -> {
+            Customer customer = customerMapper.selectById(o.getCustomerId());
+            return OpportunityListDto.from(o, customer == null ? null : customer.getCompanyName());
+        }).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Opportunity createBasic(OpportunitySaveRequest request) {
+        dataScopeService.assertAllowedCustomer(request.getCustomerId());
+        Opportunity opportunity = new Opportunity();
+        applyBasic(opportunity, request);
+        opportunity.setStage(STAGE_PROSPECT);
+        if (opportunity.getRequiredCount() == null) opportunity.setRequiredCount(1);
+        if (opportunity.getProbability() == null) opportunity.setProbability(20);
+        opportunity.setVersion(1);
+        save(opportunity);
+        return getById(opportunity.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Opportunity updateBasic(Long id, OpportunitySaveRequest request) {
+        Opportunity current = loadVisibleForUpdate(id);
+        if (request.getCustomerId() != null && !Objects.equals(current.getCustomerId(), request.getCustomerId())) {
+            dataScopeService.assertAllowedCustomer(request.getCustomerId());
+        }
+        Opportunity update = new Opportunity();
+        update.setId(id);
+        update.setCustomerId(request.getCustomerId());
+        update.setTitle(request.getTitle());
+        update.setExpectedStartMonth(request.getExpectedStartMonth());
+        update.setDurationMonths(request.getDurationMonths());
+        update.setRequiredCount(request.getRequiredCount());
+        update.setUnitPrice(request.getUnitPrice());
+        update.setExpectedAmount(request.getExpectedAmount());
+        update.setProbability(request.getProbability());
+        update.setOwnerUserId(request.getOwnerUserId());
+        update.setNextActionDate(request.getNextActionDate());
+        update.setCompetitor(request.getCompetitor());
+        update.setVersion(request.getVersion());
+        updateById(update);
+        return getById(id);
+    }
+
+    private void applyBasic(Opportunity target, OpportunitySaveRequest request) {
+        target.setCustomerId(request.getCustomerId());
+        target.setTitle(request.getTitle());
+        target.setExpectedStartMonth(request.getExpectedStartMonth());
+        target.setDurationMonths(request.getDurationMonths());
+        target.setRequiredCount(request.getRequiredCount());
+        target.setUnitPrice(request.getUnitPrice());
+        target.setExpectedAmount(request.getExpectedAmount());
+        target.setProbability(request.getProbability());
+        target.setOwnerUserId(request.getOwnerUserId());
+        target.setNextActionDate(request.getNextActionDate());
+        target.setCompetitor(request.getCompetitor());
     }
 
     private Opportunity loadVisibleForUpdate(Long id) {

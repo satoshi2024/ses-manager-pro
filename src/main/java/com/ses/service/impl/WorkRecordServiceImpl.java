@@ -163,15 +163,19 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             throw BusinessException.of(404, "error.workRecord.notFound2");
         }
 
-        // 履歴がまだ作成されない当月だけは、現行直属組織を新規入力の基準にできる。
-        // 過去月では現行 organization_id を履歴の代用にしない。
-        if (YearMonth.from(asOf).equals(YearMonth.now())) {
-            com.ses.entity.Engineer engineer = engineerMapper == null ? null
-                    : engineerMapper.selectById(contract.getEngineerId());
-            if (engineer != null && engineer.getOrganizationId() != null
-                    && allowedOrganizationIds.contains(engineer.getOrganizationId())) {
+        // 履歴がまだ作成されていない場合でも、直属組織が既知ならその組織を優先する。
+        // 直属組織がscope外なら、account-linkを経由した迂回許可は行わない。
+        com.ses.entity.Engineer engineer = engineerMapper == null ? null
+                : engineerMapper.selectById(contract.getEngineerId());
+        if (engineer != null && engineer.getOrganizationId() != null) {
+            if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
                 return;
             }
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
+
+        // 直属組織が未配賦の場合のみ、当月は新規入力の直属上長scopeを使う。
+        if (YearMonth.from(asOf).equals(YearMonth.now())) {
             if (isDirectUserAllowed(contract, asOf)) {
                 return;
             }

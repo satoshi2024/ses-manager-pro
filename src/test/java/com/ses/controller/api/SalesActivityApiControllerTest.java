@@ -25,12 +25,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.annotation.DirtiesContext;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class SalesActivityApiControllerTest {
 
     @Autowired

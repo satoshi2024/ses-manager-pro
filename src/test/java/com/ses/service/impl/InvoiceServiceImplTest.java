@@ -66,6 +66,9 @@ public class InvoiceServiceImplTest {
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
 
     @Mock
+    private com.ses.service.CustomerContactService customerContactService;
+
+    @Mock
     private com.ses.mapper.BankDepositMapper bankDepositMapper;
 
     @InjectMocks
@@ -577,6 +580,30 @@ public class InvoiceServiceImplTest {
         var result = invoiceService.sendReminder(invoiceId, 7L);
         assertEquals("QUEUED", result.getStatus());
         verify(mailService, times(1)).sendWithTemplate(eq(7L), any(), eq("ap@example.com"), eq(1L));
+    }
+
+    @Test
+    void testSendReminder_UsesSelectedActiveContact() {
+        Long invoiceId = 2L;
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setStatus("送付済");
+        invoice.setCustomerId(5L);
+        invoice.setInvoiceNo("INV-202607-0002");
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setDueDate(LocalDate.now().minusDays(10));
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
+        when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
+                .companyName("客A").contactEmail("legacy@example.com").build());
+        when(customerContactService.resolveRecipientEmail(5L, 88L, LocalDate.now()))
+                .thenReturn("current@example.com");
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+        when(mailService.sendWithTemplate(any(), any(), any(), any()))
+                .thenReturn(new com.ses.dto.mail.MailDispatchResult(2L, "QUEUED"));
+
+        var result = invoiceService.sendReminder(invoiceId, 7L, 88L);
+        assertEquals("QUEUED", result.getStatus());
+        verify(mailService).sendWithTemplate(eq(7L), any(), eq("current@example.com"), eq(invoiceId));
     }
 
     @Test

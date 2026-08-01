@@ -455,6 +455,21 @@ function openReminderModal(invoiceId, invoiceNo) {
         }
     });
 
+    const recipient = document.getElementById('reminderRecipient');
+    if (recipient) {
+        recipient.innerHTML = `<option value="">${SES.i18n.t('invoice.reminder.legacyRecipient', '顧客の旧連絡先を使用')}</option>`;
+        fetch(`/api/invoices/${invoiceId}/recipient-candidates`).then(res => res.json()).then(data => {
+            if (data.code === 200) {
+                data.data.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = `${c.name} (${c.email || '-'})${c.primaryFlag === 1 ? ' ★' : ''}`;
+                    recipient.appendChild(opt);
+                });
+            }
+        });
+    }
+
     fetch(`/api/invoices/${invoiceId}/reminders`).then(res => res.json()).then(data => {
         if (data.code === 200) {
             const tbody = document.querySelector('#reminderHistoryTable tbody');
@@ -517,10 +532,11 @@ function submitReminder() {
         return;
     }
 
+    const contactId = document.getElementById('reminderRecipient')?.value || null;
     fetch(`/api/invoices/${currentReminderInvoiceId}/reminder`, {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
-        body: JSON.stringify({ templateId: Number(templateId) })
+        body: JSON.stringify({ templateId: Number(templateId), contactId: contactId ? Number(contactId) : null })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
             bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();

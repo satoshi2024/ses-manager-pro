@@ -11,10 +11,8 @@
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 > approvalの予約V72は未使用のまま残るが、本specがV72を代わりに使ってはならない（欠番は埋めない）。
 
-- [ ] F1. contact/lead/opportunity DDLと移行
-  - **状態**: DDL(V73) / 移行 / entity / 定向test は完了（`review-ledger.md` 参照）。
-    ただし Demo「既存顧客の担当者がdetailに表示」は顧客詳細画面がT050(A1)の成果物のため未成立。
-    Demo成立まで `- [x]` にしない（Round 1指摘 CRM-R1-P1-03 / NOTE-7）。
+- [x] F1. contact/lead/opportunity DDLと移行
+  - **状態**: 完了。DDL(V73) / 移行 / entity / 定向testに加え、T050の顧客detailで移行contactの表示を確認。
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
   - **実装ガイダンス**: **V73**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
@@ -22,7 +20,7 @@
     既存単一contact fieldはmigration後read compatibility、write禁止。
   - **テスト要件**: L1〜L3。移行件数と値の一致、primary一意（0件許容）、
     PII scope（**exportにも同じmask**）、期間重複の拒否。
-  - **Demo**: 既存顧客の担当者がdetailに表示。移行前後で担当者名/emailが一致することを提示。
+  - **Demo**: 顧客detailのcontactsカードへ移行contactを表示。V73本体の移行testで移行前後のname/email/phone一致も確認済み。
 
 - [x] F2. opportunity状態/変換/forecast排他
   - **状態**: 完了。状態CAS/楽観ロック、終端更新拒否、受注時の案件・見積変換、source UNIQUEによる冪等変換、forecast排他を実装・検証済み。
@@ -39,7 +37,10 @@
     opportunity forecastと既存提案forecastの**二重加算なし**、失注時の`lost_reason`必須。
   - **Demo**: 商機→見積/案件変換を2回実行し1件。変換後にforecast合計が増えないことを確認。
 
-- [ ] A1. 顧客contacts/timeline
+- [x] A1. 顧客contacts/timeline
+  - **状態**: 完了。顧客detailのcontacts/opportunities/activities、請求宛先選択、退職者除外、PII mask/exportを実装・検証済み。
+  - **実測**: `CustomerContactServiceIntegrationTest` 3/3、`CustomerContactApiControllerTest` 1/1、`InvoiceServiceImplTest` 41/41、`InvoiceApiControllerTest` 10/10、`SalesActivityApiControllerTest` 7/7、`CustomerApiControllerTest` 3/3、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4 PASS。
+  - **Demo**: 顧客detailで移行contactと関連商機を表示し、請求書リマインドの有効contact候補を選択。退職処理後は候補から消え、`t_mail_delivery.recipient` に送信時点の宛先snapshotが残る。CSVは画面と同じmask。
   - **Objective**: 顧客詳細でcontacts・opportunities・activitiesが1つのtimelineで見え、
     請求書送付時に「請求担当」を宛先として選べる。退職した担当者は新規宛先候補に出ない。
   - **実装ガイダンス**: 複数担当、役割、activity/mail/document link。
@@ -48,7 +49,10 @@
     PII mask（画面とexportで同一）、mobile 390px。
   - **Demo**: 請求担当を請求書送付先に選択。担当者を退職にして新規宛先候補から消え、過去帳票は変わらないことを確認。
 
-- [ ] A2. lead/opportunity UI
+- [x] A2. lead/opportunity UI
+  - **状態**: 完了。lead登録・重複候補警告・顧客/商機転換、opportunity kanban、失敗時D&D rollbackを実装・検証済み。
+  - **実測**: `LeadServiceIntegrationTest` 2/2、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 22/22、`MessageBundleConsistencyTest` 4/4、`OpportunityServiceImplTest` 7/7、`OpportunityServiceIntegrationTest` 2/2 PASS。Node `--check` 2ファイル PASS。
+  - **Demo**: `/crm/leads`で重複候補を警告し自動統合せず保存、lead→顧客/商機を2回実行して同一IDを返す。`/crm/opportunities`のカードD&DでAPI失敗時に元stageへ復元するUI契約を確認。390px向け横スクロールとカード幅を確認済み。
   - **Objective**: leadを登録して顧客/商機へ転換でき、商機をkanbanでstage移動できる。
     転換を2回実行しても顧客/商機が重複しない。D&Dが失敗したら元の位置へ戻る。
   - **実装ガイダンス**: lead list、opportunity kanban/list、next actionからtask作成。
@@ -57,7 +61,10 @@
     lead転換の冪等、重複lead候補が警告のみで自動mergeしないこと。
   - **Demo**: lead→顧客/商機→見積。D&D中にAPIを失敗させカードが元に戻ることを確認。
 
-- [ ] B1. CRM KPI
+- [x] B1. CRM KPI
+  - **状態**: 完了。stage別金額/加重forecast、滞留日数、活動なし日数、担当別lead転換率/商機受注率、失注理由、source ROI、提案/商機forecast別系列を実装・検証済み。
+  - **実測**: `CrmKpiServiceIntegrationTest` 1/1、`CrmKpiScopeIntegrationTest` 1/1、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4 PASS。Node `--check` 3ファイル PASS。
+  - **Demo**: `/crm/opportunities/kpi`でstage別表・担当別funnel・失注理由・source ROI・forecast別系列を表示。営業scopeでは許可customerかつ本人担当の商機/leadだけを集計し、変換済み商機をopportunity forecastから除外。
   - **Objective**: stage別金額・滞留日数・活動なし日数・担当別転換率・失注理由・source ROIが表示され、
     担当別funnelからdrilldownできる。営業Aには自分の担当分だけが集計される。
   - **実装ガイダンス**: stage金額/滞留/転換/失注/source ROI。
@@ -66,7 +73,10 @@
     forecast二重計上なし。
   - **Demo**: 担当別funnel drilldown。全社合計と担当別合計が一致することを提示。
 
-- [ ] M. 回帰
+- [x] M. 回帰
+  - **状態**: 完了。Round3で残っていた`WorkRecordServiceImplTest` 2件を直属組織scope優先・account-link迂回禁止へ修正し、L4全量greenを確認。
+  - **実測**: `mvn test` 1223件 / failures 0 / errors 0 / skipped 1。fresh/legacy Flyway smoke 6系統、`ConcurrentUpdateTest` 1/1、直接回帰96/96、Node `--check` 6/6、`git diff --check` exit 0。
+  - **ブラウザDemo**: 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を確認。KPIは390px幅で主要見出し、Forecast、担当別、失注理由を確認。
   - **Objective**: 新規leadから受注までが一気通貫で動き、既存のcustomer/proposal/quotation機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     customer/proposal/quotation回帰、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。

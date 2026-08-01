@@ -8,6 +8,7 @@ $(document).ready(function() {
     if (customerId && !isNaN(customerId)) {
         loadCustomerInfo();
         loadCustomerSummary();
+        loadCrmContext();
         loadActivities(1);
     }
 });
@@ -36,6 +37,45 @@ function loadCustomerInfo() {
             }
         }
     });
+}
+
+function loadCrmContext() {
+    $('#contact-export').attr('href', '/api/customers/' + customerId + '/contacts/export');
+    $.ajax({
+        url: '/api/customers/' + customerId + '/timeline',
+        method: 'GET',
+        success: function(res) {
+            if (res.code !== 200 || !res.data) return;
+            renderContacts(res.data.contacts || []);
+            renderOpportunities(res.data.opportunities || []);
+        }
+    });
+}
+
+function renderContacts(contacts) {
+    const tbody = $('#customer-contact-table tbody');
+    if (!contacts.length) {
+        tbody.html('<tr><td colspan="4" class="text-center text-muted py-3">' + SES.i18n.t('customer.contacts.empty', '担当者情報がありません') + '</td></tr>');
+        return;
+    }
+    tbody.html(contacts.map(c => `<tr>
+        <td>${SES.escapeHtml(c.name || '-')} ${c.primaryFlag === 1 ? '<span class="badge bg-info text-dark ms-1">主</span>' : ''}</td>
+        <td>${SES.escapeHtml([c.department, c.position].filter(Boolean).join(' / ') || '-')}</td>
+        <td class="font-monospace">${SES.escapeHtml(c.email || '-')}<br><span class="text-muted small">${SES.escapeHtml(c.phone || '')}</span></td>
+        <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(c.status || '-')}</span></td>
+    </tr>`).join(''));
+}
+
+function renderOpportunities(opportunities) {
+    const container = $('#customer-opportunity-list');
+    if (!opportunities.length) {
+        container.html('<div class="text-muted">' + SES.i18n.t('customer.opportunities.empty', '関連商機がありません') + '</div>');
+        return;
+    }
+    container.html(opportunities.map(o => `<div class="border-bottom border-secondary pb-2 mb-2">
+        <div class="fw-bold text-light">${SES.escapeHtml(o.title || '-')}</div>
+        <div class="small text-muted">${SES.escapeHtml(o.stage || '-')} · ${SES.escapeHtml(o.expectedStartMonth || '-')}</div>
+    </div>`).join(''));
 }
 
 function loadCustomerSummary() {
