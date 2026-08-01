@@ -18,6 +18,8 @@ import com.ses.mapper.QuotationMapper;
 import com.ses.service.OpportunityService;
 import com.ses.service.QuotationService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -58,6 +60,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private final QuotationService quotationService;
     private final DataScopeService dataScopeService;
     private final CustomerMapper customerMapper;
+    @Autowired(required = false)
+    private CrmScopeService crmScopeService;
 
     /**
      * 汎用CRUD経路から状態機械を迂回させない。stage変更はchangeStageだけが許可し、
@@ -97,6 +101,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         }
 
         current.setStage(newStage);
+        current.setStageChangedAt(java.time.LocalDateTime.now());
         if (STAGE_LOST.equals(newStage)) {
             current.setLostReason(lostReason.trim());
         }
@@ -131,11 +136,15 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
                 .notIn("stage", STAGE_WON, STAGE_LOST)
                 .orderByAsc("expected_start_month")
                 .orderByAsc("id");
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
+            Set<Long> allowedCustomerIds = crmScopeService.allowedCustomerIds(LocalDate.now());
             if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
                 return java.util.Collections.emptyList();
             }
+            query.in("customer_id", allowedCustomerIds);
+        } else if (crmScopeService == null && dataScopeService.isScoped()) {
+            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
             query.in("customer_id", allowedCustomerIds);
         }
         return list(query);
@@ -146,14 +155,23 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         QueryWrapper<Opportunity> query = new QueryWrapper<>();
         if (StringUtils.hasText(stage)) query.eq("stage", stage);
         if (ownerUserId != null) query.eq("owner_user_id", ownerUserId);
-        if (dataScopeService.isScoped()) {
+        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
+            Set<Long> allowedCustomerIds = crmScopeService.allowedCustomerIds(LocalDate.now());
+            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
+            query.in("customer_id", allowedCustomerIds);
+        } else if (crmScopeService == null && dataScopeService.isScoped()) {
             Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
             if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
             query.in("customer_id", allowedCustomerIds);
         }
-        query.orderByAsc("stage").orderByDesc("id");
-        return list(query).stream().map(o -> {
-            Customer customer = customerMapper.selectById(o.getCustomerId());
+        query.orderByAsc("stage").orderByDesc("id").last("LIMIT 200");
+        List<Opportunity> rows = list(query);
+        Set<Long> customerIds = rows.stream().map(Opportunity::getCustomerId)
+                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        Map<Long, Customer> customers = customerIds.isEmpty() ? Map.of() : customerMapper.selectBatchIds(customerIds)
+                .stream().collect(java.util.stream.Collectors.toMap(Customer::getId, c -> c, (a, b) -> a));
+        return rows.stream().map(o -> {
+            Customer customer = customers.get(o.getCustomerId());
             return OpportunityListDto.from(o, customer == null ? null : customer.getCompanyName());
         }).toList();
     }
@@ -161,7 +179,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Opportunity createBasic(OpportunitySaveRequest request) {
-        dataScopeService.assertAllowedCustomer(request.getCustomerId());
+        assertCustomerScope(request.getCustomerId());
+        validateProbability(request);
         Opportunity opportunity = new Opportunity();
         applyBasic(opportunity, request);
         opportunity.setStage(STAGE_PROSPECT);
@@ -176,24 +195,35 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     @Transactional(rollbackFor = Exception.class)
     public Opportunity updateBasic(Long id, OpportunitySaveRequest request) {
         Opportunity current = loadVisibleForUpdate(id);
-        if (request.getCustomerId() != null && !Objects.equals(current.getCustomerId(), request.getCustomerId())) {
-            dataScopeService.assertAllowedCustomer(request.getCustomerId());
+        if (STAGE_WON.equals(current.getStage()) || STAGE_LOST.equals(current.getStage())) {
+            throw BusinessException.of(400, "error.opportunity.terminalUpdate");
         }
-        Opportunity update = new Opportunity();
-        update.setId(id);
-        update.setCustomerId(request.getCustomerId());
-        update.setTitle(request.getTitle());
-        update.setExpectedStartMonth(request.getExpectedStartMonth());
-        update.setDurationMonths(request.getDurationMonths());
-        update.setRequiredCount(request.getRequiredCount());
-        update.setUnitPrice(request.getUnitPrice());
-        update.setExpectedAmount(request.getExpectedAmount());
-        update.setProbability(request.getProbability());
-        update.setOwnerUserId(request.getOwnerUserId());
-        update.setNextActionDate(request.getNextActionDate());
-        update.setCompetitor(request.getCompetitor());
-        update.setVersion(request.getVersion());
-        updateById(update);
+        if (request.getVersion() == null || !Objects.equals(current.getVersion(), request.getVersion())) {
+            throw BusinessException.of(409, "error.opportunity.versionConflict");
+        }
+        validateProbability(request);
+        if (request.getCustomerId() != null && !Objects.equals(current.getCustomerId(), request.getCustomerId())) {
+            assertCustomerScope(request.getCustomerId());
+        }
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity> update =
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity>()
+                .eq("id", id).eq("version", current.getVersion())
+                .set("customer_id", request.getCustomerId())
+                .set("title", request.getTitle())
+                .set("expected_start_month", request.getExpectedStartMonth())
+                .set("duration_months", request.getDurationMonths())
+                .set("required_count", request.getRequiredCount())
+                .set("unit_price", request.getUnitPrice())
+                .set("expected_amount", request.getExpectedAmount())
+                .set("probability", request.getProbability())
+                .set("probability_override_reason", request.getProbabilityOverrideReason())
+                .set("owner_user_id", request.getOwnerUserId())
+                .set("next_action_date", request.getNextActionDate())
+                .set("competitor", request.getCompetitor())
+                .set("version", current.getVersion() + 1);
+        if (baseMapper.update(null, update) != 1) {
+            throw BusinessException.of(409, "error.opportunity.versionConflict");
+        }
         return getById(id);
     }
 
@@ -206,6 +236,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         target.setUnitPrice(request.getUnitPrice());
         target.setExpectedAmount(request.getExpectedAmount());
         target.setProbability(request.getProbability());
+        target.setProbabilityOverrideReason(request.getProbabilityOverrideReason());
         target.setOwnerUserId(request.getOwnerUserId());
         target.setNextActionDate(request.getNextActionDate());
         target.setCompetitor(request.getCompetitor());
@@ -216,13 +247,28 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (current == null) {
             throw BusinessException.of(404, "error.opportunity.notFound");
         }
-        dataScopeService.assertAllowedCustomer(current.getCustomerId());
+        assertCustomerScope(current.getCustomerId());
         return current;
     }
 
     private void assertExpectedVersion(Opportunity current, Integer expectedVersion) {
-        if (expectedVersion != null && !expectedVersion.equals(current.getVersion())) {
+        if (expectedVersion == null || !expectedVersion.equals(current.getVersion())) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
+        }
+    }
+
+    private void assertCustomerScope(Long customerId) {
+        if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
+        else dataScopeService.assertAllowedCustomer(customerId);
+    }
+
+    private void validateProbability(OpportunitySaveRequest request) {
+        if (request.getProbability() != null && (request.getProbability() < 0 || request.getProbability() > 100)) {
+            throw BusinessException.of(400, "error.opportunity.probabilityInvalid");
+        }
+        if (request.getProbability() != null && request.getProbability() != 20
+                && !StringUtils.hasText(request.getProbabilityOverrideReason())) {
+            throw BusinessException.of(400, "error.opportunity.probabilityOverrideReasonRequired");
         }
     }
 

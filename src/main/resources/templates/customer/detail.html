@@ -83,11 +83,11 @@
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header border-dark bg-dark d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 text-light"><i class="bi bi-person-lines-fill me-2"></i><th:block th:text="#{customer.contacts.title}">顧客担当者</th:block></h5>
-                    <a class="btn btn-sm btn-outline-info" id="contact-export" href="#"><i class="bi bi-download me-1"></i><th:block th:text="#{customer.contacts.export}">CSV出力</th:block></a>
+                    <div><button class="btn btn-sm btn-info me-1" type="button" onclick="openContactModal()"><i class="bi bi-plus-lg me-1"></i><th:block th:text="#{customer.contacts.add}">担当者追加</th:block></button><a class="btn btn-sm btn-outline-info" id="contact-export" href="#"><i class="bi bi-download me-1"></i><th:block th:text="#{customer.contacts.export}">CSV出力</th:block></a></div>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-dark table-sm table-hover mb-0" id="customer-contact-table">
-                        <thead><tr><th th:text="#{customer.contacts.name}">氏名</th><th th:text="#{customer.contacts.department}">部署・役職</th><th th:text="#{customer.contacts.email}">メール</th><th th:text="#{customer.contacts.status}">状態</th></tr></thead>
+                        <thead><tr><th th:text="#{customer.contacts.name}">氏名</th><th th:text="#{customer.contacts.department}">部署・役職</th><th th:text="#{customer.contacts.email}">メール</th><th th:text="#{customer.contacts.status}">状態</th><th></th></tr></thead>
                         <tbody><tr><td colspan="4" class="text-center text-muted py-3" th:text="#{common.loading}">読み込み中...</td></tr></tbody>
                     </table>
                 </div>
@@ -99,6 +99,15 @@
                 <div class="card-body" id="customer-opportunity-list"><div class="text-muted" th:text="#{common.loading}">読み込み中...</div></div>
             </div>
         </div>
+    </div>
+
+    <div class="modal fade" id="contactModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content bg-card text-light border-dark">
+            <div class="modal-header border-dark"><h5 class="modal-title" th:text="#{customer.contacts.form.title}">担当者</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><form id="contact-form"><input type="hidden" id="contact-id"><input type="hidden" id="contact-version">
+                <div class="row g-3"><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.name}">氏名</label><input id="contact-name" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.nameKana}">氏名カナ</label><input id="contact-name-kana" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.department}">部署</label><input id="contact-department" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.position}">役職</label><input id="contact-position" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.email}">メール</label><input id="contact-email" type="email" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.phone}">電話</label><input id="contact-phone" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validFrom}">有効開始日</label><input id="contact-valid-from" type="date" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validTo}">有効終了日</label><input id="contact-valid-to" type="date" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4 form-check mt-5 ms-2"><input id="contact-primary" type="checkbox" class="form-check-input"><label class="form-check-label" for="contact-primary" th:text="#{customer.contacts.primary}">主担当</label></div></div>
+            </form></div><div class="modal-footer border-dark"><button class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button class="btn btn-info" onclick="saveContact()" th:text="#{common.save}">保存</button></div>
+        </div></div>
     </div>
 
     <!-- 活動タイムライン -->

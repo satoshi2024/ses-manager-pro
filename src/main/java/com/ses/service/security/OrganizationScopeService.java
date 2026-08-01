@@ -42,6 +42,9 @@ public interface OrganizationScopeService {
     /** 管理者直属として個別に扱うユーザーID。組織全体へは拡張しない。 */
     default Set<Long> allowedDirectUserIds(LocalDate asOf) { return Set.of(); }
 
+    /** 組織scope配下のユーザーID。リード等、顧客をまだ持たない行のowner条件に使う。 */
+    default Set<Long> allowedUserIds(LocalDate asOf) { return Set.of(); }
+
     /** 指定ユーザーの勤怠・承認対象が現在ユーザーの組織scope内か。 */
     default boolean isAllowedUser(Long userId, LocalDate asOf) { return hasFullAccess(); }
 

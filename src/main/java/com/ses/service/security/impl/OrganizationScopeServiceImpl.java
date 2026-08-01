@@ -270,6 +270,23 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
     }
 
     @Override
+    public Set<Long> allowedUserIds(LocalDate asOf) {
+        if (hasFullAccess()) return Set.of();
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        Set<Long> organizationIds = allowedOrganizationIds(date);
+        Set<Long> result = new HashSet<>(allowedDirectUserIds(date));
+        if (!organizationIds.isEmpty()) {
+            result.addAll(userOrganizationMapper.selectList(new LambdaQueryWrapper<UserOrganization>()
+                    .select(UserOrganization::getUserId)
+                    .in(UserOrganization::getOrganizationId, organizationIds)
+                    .le(UserOrganization::getValidFrom, date)
+                    .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, date)))
+                    .stream().map(UserOrganization::getUserId).filter(Objects::nonNull).toList());
+        }
+        return Set.copyOf(result);
+    }
+
+    @Override
     public boolean isAllowedUser(Long targetUserId, LocalDate asOf) {
         if (hasFullAccess()) {
             return true;

@@ -10,6 +10,8 @@ import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.service.CustomerContactService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,8 @@ import java.util.stream.Collectors;
 public class CustomerContactServiceImpl implements CustomerContactService {
     private final CustomerContactMapper mapper;
     private final DataScopeService dataScopeService;
+    @Autowired(required = false)
+    private CrmScopeService crmScopeService;
 
     public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService) {
         this.mapper = mapper;
@@ -214,7 +218,11 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     private void assertCustomerScope(Long customerId) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        if (crmScopeService != null) {
+            crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
+        } else {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
     }
 
     private CustomerContactDto toDto(CustomerContact contact) {

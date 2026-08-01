@@ -16,6 +16,8 @@ import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
 import com.ses.service.LeadService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +25,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.text.Normalizer;
 
 /** リードサービス実装。未割当leadは営業全員へ公開する。 */
 @Service
@@ -32,20 +35,26 @@ public class LeadServiceImpl implements LeadService {
     private static final String STATUS_IN_PROGRESS = "対応中";
     private static final String STATUS_CONVERTED = "転換済";
     private static final String STATUS_DISCARDED = "破棄";
+    private static final java.util.Map<String, java.util.Set<String>> STATUS_TRANSITIONS = java.util.Map.of(
+            STATUS_NEW, java.util.Set.of(STATUS_IN_PROGRESS, STATUS_DISCARDED),
+            STATUS_IN_PROGRESS, java.util.Set.of(STATUS_CONVERTED, STATUS_DISCARDED),
+            STATUS_CONVERTED, java.util.Set.of(), STATUS_DISCARDED, java.util.Set.of());
 
     private final LeadMapper leadMapper;
     private final CustomerMapper customerMapper;
     private final CustomerContactMapper customerContactMapper;
     private final OpportunityMapper opportunityMapper;
     private final DataScopeService dataScopeService;
+    @Autowired(required = false)
+    private CrmScopeService crmScopeService;
 
     @Override
     public List<Lead> list(String status, String companyName) {
         QueryWrapper<Lead> query = new QueryWrapper<>();
         if (StringUtils.hasText(status)) query.eq("status", status);
         if (StringUtils.hasText(companyName)) query.like("company_name", companyName.trim());
-        applyOwnerScope(query);
-        return leadMapper.selectList(query.orderByDesc("id"));
+        applyCrmScope(query);
+        return leadMapper.selectList(query.orderByDesc("id").last("LIMIT 200"));
     }
 
     @Override
@@ -61,6 +70,7 @@ public class LeadServiceImpl implements LeadService {
         Lead lead = new Lead();
         apply(lead, request);
         if (!StringUtils.hasText(lead.getStatus())) lead.setStatus(STATUS_NEW);
+        assertKnownStatus(lead.getStatus());
         if (leadMapper.insert(lead) != 1) throw BusinessException.of("error.crm.leadSaveFailed");
         return leadMapper.selectById(lead.getId());
     }
@@ -74,8 +84,10 @@ public class LeadServiceImpl implements LeadService {
             throw BusinessException.of(400, "error.crm.leadTerminalUpdate");
         }
         assertVersion(current, request.getVersion());
+        if (request.getStatus() != null && !java.util.Objects.equals(current.getStatus(), request.getStatus())) {
+            assertStatusTransition(current.getStatus(), request.getStatus());
+        }
         apply(current, request);
-        if (!StringUtils.hasText(current.getStatus())) current.setStatus(STATUS_IN_PROGRESS);
         UpdateWrapper<Lead> update = new UpdateWrapper<Lead>()
                 .eq("id", id).eq("version", current.getVersion())
                 .set("company_name", current.getCompanyName())
@@ -83,6 +95,7 @@ public class LeadServiceImpl implements LeadService {
                 .set("contact_email", current.getContactEmail())
                 .set("contact_phone", current.getContactPhone())
                 .set("source", current.getSource())
+                .set("source_cost", current.getSourceCost())
                 .set("owner_user_id", current.getOwnerUserId())
                 .set("status", current.getStatus())
                 .set("version", current.getVersion() + 1);
@@ -98,17 +111,44 @@ public class LeadServiceImpl implements LeadService {
         boolean hasPhone = StringUtils.hasText(contactPhone);
         if (hasCompany || hasEmail || hasPhone) {
             query.and(w -> {
-                if (hasCompany) w.eq("company_name", companyName.trim());
-                if (hasEmail) w.or().eq("contact_email", contactEmail.trim());
-                if (hasPhone) w.or().eq("contact_phone", contactPhone.trim());
+                // SQLでは候補母集団だけを取得し、表記揺れの正規化はJava側で確定する。
+                boolean branch = false;
+                if (hasCompany) {
+                    w.like("company_name", companyName.trim().substring(0, Math.min(3, companyName.trim().length())));
+                    branch = true;
+                }
+                if (hasEmail) {
+                    if (branch) w.or();
+                    w.like("contact_email", contactEmail.trim().substring(0, Math.min(5, contactEmail.trim().length())));
+                    branch = true;
+                }
+                if (hasPhone) {
+                    if (branch) w.or();
+                    w.like("contact_phone", contactPhone.trim().substring(0, Math.min(4, contactPhone.trim().length())));
+                }
             });
         } else {
             query.eq("id", -1L);
         }
         if (excludeId != null) query.ne("id", excludeId);
-        applyOwnerScope(query);
-        query.last("LIMIT 20");
-        return leadMapper.selectList(query.orderByDesc("id"));
+        applyCrmScope(query);
+        query.last("LIMIT 100");
+        return leadMapper.selectList(query.orderByDesc("id")).stream()
+                .filter(candidate -> sameNormalized(companyName, candidate.getCompanyName(), true)
+                        || sameNormalized(contactEmail, candidate.getContactEmail(), false)
+                        || sameNormalized(contactPhone, candidate.getContactPhone(), false))
+                .limit(20)
+                .toList();
+    }
+
+    private boolean sameNormalized(String left, String right, boolean company) {
+        if (!StringUtils.hasText(left) || !StringUtils.hasText(right)) return false;
+        String a = Normalizer.normalize(left, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
+        String b = Normalizer.normalize(right, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
+        if (company) {
+            return a.replaceAll("\\s+", "").equals(b.replaceAll("\\s+", ""));
+        }
+        return a.replaceAll("[^a-z0-9+@.]", "").equals(b.replaceAll("[^a-z0-9+@.]", ""));
     }
 
     @Override
@@ -167,23 +207,77 @@ public class LeadServiceImpl implements LeadService {
         lead.setContactEmail(request.getContactEmail());
         lead.setContactPhone(request.getContactPhone());
         lead.setSource(request.getSource());
+        lead.setSourceCost(request.getSourceCost());
         lead.setOwnerUserId(request.getOwnerUserId());
         if (request.getStatus() != null) lead.setStatus(request.getStatus());
     }
 
     private void assertVersion(Lead current, Integer expected) {
-        if (expected != null && !expected.equals(current.getVersion())) {
+        if (expected == null || !expected.equals(current.getVersion())) {
             throw BusinessException.of(409, "error.crm.leadVersionConflict");
         }
     }
 
+    private void assertKnownStatus(String status) {
+        if (!STATUS_TRANSITIONS.containsKey(status)) {
+            throw BusinessException.of(400, "error.crm.leadStatusInvalid");
+        }
+    }
+
+    private void assertStatusTransition(String current, String next) {
+        assertKnownStatus(next);
+        if (!STATUS_TRANSITIONS.getOrDefault(current, java.util.Set.of()).contains(next)) {
+            throw BusinessException.of(400, "error.crm.leadStatusTransitionInvalid", current, next);
+        }
+    }
+
     private boolean isVisible(Lead lead) {
+        if (crmScopeService != null) {
+            if (!crmScopeService.canUseCrm()) return false;
+            if (crmScopeService.hasFullAccess()) return true;
+            if (lead.getConvertedCustomerId() != null
+                    && crmScopeService.isCustomerAllowed(lead.getConvertedCustomerId(), LocalDate.now())) return true;
+            Long owner = lead.getOwnerUserId();
+            return owner != null && crmScopeService.allowedOwnerIds(LocalDate.now()).contains(owner);
+        }
         if (!dataScopeService.isSalesDataScoped()) return true;
         Long userId = SecurityUtils.currentUserId();
         return lead.getOwnerUserId() == null || (userId != null && userId.equals(lead.getOwnerUserId()));
     }
 
-    private void applyOwnerScope(QueryWrapper<Lead> query) {
+    private void applyCrmScope(QueryWrapper<Lead> query) {
+        if (crmScopeService != null) {
+            if (!crmScopeService.canUseCrm()) {
+                query.eq("id", -1L);
+                return;
+            }
+            if (crmScopeService.hasFullAccess()) return;
+            java.util.Set<Long> customers = crmScopeService.allowedCustomerIds(LocalDate.now());
+            java.util.Set<Long> owners = crmScopeService.allowedOwnerIds(LocalDate.now());
+            Long current = SecurityUtils.currentUserId();
+            boolean unassignedVisible = "営業".equals(SecurityUtils.currentRole());
+            if (customers.isEmpty() && owners.isEmpty() && !unassignedVisible) {
+                query.eq("id", -1L);
+                return;
+            }
+            query.and(w -> {
+                boolean hasBranch = false;
+                if (!customers.isEmpty()) {
+                    w.in("converted_customer_id", customers);
+                    hasBranch = true;
+                }
+                if (!owners.isEmpty()) {
+                    if (hasBranch) w.or();
+                    w.in("owner_user_id", owners);
+                    hasBranch = true;
+                }
+                if (unassignedVisible) {
+                    if (hasBranch) w.or();
+                    w.isNull("owner_user_id");
+                }
+            });
+            return;
+        }
         if (!dataScopeService.isSalesDataScoped()) return;
         Long userId = SecurityUtils.currentUserId();
         if (userId == null) query.isNull("owner_user_id");

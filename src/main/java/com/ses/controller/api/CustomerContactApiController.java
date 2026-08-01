@@ -4,6 +4,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.dto.customer.CustomerContactDto;
 import com.ses.dto.customer.CustomerContactSaveRequest;
 import com.ses.service.CustomerContactService;
+import com.ses.common.util.CsvUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -66,18 +67,12 @@ public class CustomerContactApiController {
             @PathVariable Long customerId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
         List<CustomerContactDto> contacts = customerContactService.list(customerId, asOf);
-        StringBuilder csv = new StringBuilder("\uFEFFid,name,department,position,email,phone,primary,valid_from,valid_to,status\n");
+        StringBuilder csv = new StringBuilder(CsvUtils.UTF8_BOM);
+        CsvUtils.appendLine(csv, "id", "name", "department", "position", "email", "phone", "primary", "valid_from", "valid_to", "status");
         for (CustomerContactDto c : contacts) {
-            csv.append(csv(c.getId())).append(',')
-                    .append(csv(c.getName())).append(',')
-                    .append(csv(c.getDepartment())).append(',')
-                    .append(csv(c.getPosition())).append(',')
-                    .append(csv(c.getEmail())).append(',')
-                    .append(csv(c.getPhone())).append(',')
-                    .append(csv(c.getPrimaryFlag())).append(',')
-                    .append(csv(c.getValidFrom())).append(',')
-                    .append(csv(c.getValidTo())).append(',')
-                    .append(csv(c.getStatus())).append('\n');
+            CsvUtils.appendLine(csv, value(c.getId()), c.getName(), c.getDepartment(), c.getPosition(),
+                    c.getEmail(), c.getPhone(), value(c.getPrimaryFlag()), value(c.getValidFrom()),
+                    value(c.getValidTo()), c.getStatus());
         }
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
@@ -86,9 +81,8 @@ public class CustomerContactApiController {
                 .body(csv.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private String csv(Object value) {
-        if (value == null) return "";
-        String s = String.valueOf(value);
-        return "\"" + s.replace("\"", "\"\"") + "\"";
+    private String value(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
+
 }

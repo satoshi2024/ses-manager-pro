@@ -17,6 +17,8 @@ public class OpportunityListDto {
     private java.math.BigDecimal unitPrice;
     private java.math.BigDecimal expectedAmount;
     private Integer probability;
+    private String probabilityOverrideReason;
+    private String competitor;
     private Long ownerUserId;
     private java.time.LocalDate nextActionDate;
     private String lostReason;
@@ -37,6 +39,8 @@ public class OpportunityListDto {
         dto.unitPrice = source.getUnitPrice();
         dto.expectedAmount = source.getExpectedAmount();
         dto.probability = source.getProbability();
+        dto.probabilityOverrideReason = source.getProbabilityOverrideReason();
+        dto.competitor = source.getCompetitor();
         dto.ownerUserId = source.getOwnerUserId();
         dto.nextActionDate = source.getNextActionDate();
         dto.lostReason = source.getLostReason();

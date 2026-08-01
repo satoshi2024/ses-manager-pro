@@ -12,10 +12,13 @@ import com.ses.entity.CustomerContact;
 import com.ses.entity.Opportunity;
 import com.ses.service.SalesActivityService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CrmScopeService;
 import com.ses.common.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
 @Service
 public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, SalesActivity> implements SalesActivityService {
@@ -23,6 +26,8 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     private final CustomerContactMapper customerContactMapper;
     private final OpportunityMapper opportunityMapper;
     private final DataScopeService dataScopeService;
+    @Autowired(required = false)
+    private CrmScopeService crmScopeService;
 
     public SalesActivityServiceImpl(CustomerMapper customerMapper,
                                     CustomerContactMapper customerContactMapper,
@@ -36,7 +41,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
 
     @Override
     public void assertCustomerExists(Long customerId) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertCustomerScope(customerId);
         if (customerMapper.selectById(customerId) == null) {
             throw BusinessException.of(404, "error.customer.notFound");
         }
@@ -57,17 +62,17 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public SalesActivity create(Long customerId, SalesActivityCreateRequest request) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertCustomerScope(customerId);
         assertCustomerExists(customerId);
         SalesActivity activity = new SalesActivity();
         activity.setCustomerId(customerId);
         applyRelations(activity, customerId, request.getContactId(), request.getOpportunityId());
         activity.setActivityType(request.getActivityType());
-        applyRelations(activity, customerId, request.getContactId(), request.getOpportunityId());
         activity.setActivityDate(request.getActivityDate());
         activity.setTitle(request.getTitle());
         activity.setContent(request.getContent());
         activity.setNextActionDate(request.getNextActionDate());
+        activity.setAssigneeUserId(request.getAssigneeUserId());
         activity.setCompletedFlag(0);
         save(activity);
         return activity;
@@ -76,27 +81,40 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public SalesActivity update(Long customerId, Long activityId, SalesActivityUpdateRequest request) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
         activity.setActivityType(request.getActivityType());
         activity.setActivityDate(request.getActivityDate());
         activity.setTitle(request.getTitle());
         activity.setContent(request.getContent());
         activity.setNextActionDate(request.getNextActionDate());
+        applyRelations(activity, customerId, request.getContactId(), request.getOpportunityId());
+        activity.setAssigneeUserId(request.getAssigneeUserId());
         if (request.getCompletedFlag() != null) {
             if (request.getCompletedFlag() != 0 && request.getCompletedFlag() != 1) {
                 throw BusinessException.of(400, "error.salesActivity.completedFlagInvalid");
             }
             activity.setCompletedFlag(request.getCompletedFlag());
         }
-        updateById(activity);
+        UpdateWrapper<SalesActivity> update = new UpdateWrapper<SalesActivity>()
+                .eq("id", activityId).eq("customer_id", customerId)
+                .set("contact_id", activity.getContactId())
+                .set("opportunity_id", activity.getOpportunityId())
+                .set("activity_type", activity.getActivityType())
+                .set("activity_date", activity.getActivityDate())
+                .set("title", activity.getTitle())
+                .set("content", activity.getContent())
+                .set("next_action_date", activity.getNextActionDate())
+                .set("assignee_user_id", activity.getAssigneeUserId());
+        if (request.getCompletedFlag() != null) update.set("completed_flag", activity.getCompletedFlag());
+        if (!update(update)) throw BusinessException.of(409, "error.salesActivity.concurrentModified");
         return activity;
     }
 
     @Override
     @Transactional
     public void complete(Long customerId, Long activityId) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
         activity.setCompletedFlag(1);
         updateById(activity);
@@ -105,7 +123,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     @Override
     @Transactional
     public void delete(Long customerId, Long activityId) {
-        dataScopeService.assertAllowedCustomer(customerId);
+        assertCustomerScope(customerId);
         getOwnedOrThrow(customerId, activityId);
         removeById(activityId);
     }
@@ -125,5 +143,10 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
         }
         activity.setContactId(contactId);
         activity.setOpportunityId(opportunityId);
+    }
+
+    private void assertCustomerScope(Long customerId) {
+        if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, java.time.LocalDate.now());
+        else dataScopeService.assertAllowedCustomer(customerId);
     }
 }

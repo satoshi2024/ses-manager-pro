@@ -35,8 +35,9 @@ class FlywayRepairRunbookTest {
 
         // 2. 旧prod V10を手動で履歴に書き込む（旧V10は異なるchecksumで、実スキーマはV10のインデックスを持たない状態を再現）
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
+            st.execute("SET @next_installed_rank = (SELECT COALESCE(MAX(installed_rank), 0) + 1 FROM flyway_schema_history)");
             st.execute("INSERT INTO flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) " +
-                    "VALUES (10, '10', 'update admin password bcrypt', 'SQL', 'V10__update_admin_password_bcrypt.sql', 123456789, 'ses', 10, 1)");
+                    "VALUES (@next_installed_rank, '10', 'update admin password bcrypt', 'SQL', 'V10__update_admin_password_bcrypt.sql', 123456789, 'ses', 10, 1)");
             
             // Baseline 9 相当のレガシー状態を再現するため、V5 の CREATE TABLE に折り込まれた
             // 多段階BP用のカラムと自己参照FKを削除する。

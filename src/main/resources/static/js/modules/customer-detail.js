@@ -53,9 +53,10 @@ function loadCrmContext() {
 }
 
 function renderContacts(contacts) {
+    window._crmContacts = contacts || [];
     const tbody = $('#customer-contact-table tbody');
     if (!contacts.length) {
-        tbody.html('<tr><td colspan="4" class="text-center text-muted py-3">' + SES.i18n.t('customer.contacts.empty', '担当者情報がありません') + '</td></tr>');
+        tbody.html('<tr><td colspan="5" class="text-center text-muted py-3">' + SES.i18n.t('customer.contacts.empty', '担当者情報がありません') + '</td></tr>');
         return;
     }
     tbody.html(contacts.map(c => `<tr>
@@ -63,7 +64,27 @@ function renderContacts(contacts) {
         <td>${SES.escapeHtml([c.department, c.position].filter(Boolean).join(' / ') || '-')}</td>
         <td class="font-monospace">${SES.escapeHtml(c.email || '-')}<br><span class="text-muted small">${SES.escapeHtml(c.phone || '')}</span></td>
         <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(c.status || '-')}</span></td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-info" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>${c.status === '有効' ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="retireContact(${c.id}, ${c.version || 1})"><i class="bi bi-person-dash"></i></button>` : ''}</td>
     </tr>`).join(''));
+}
+
+function openContactModal(id) {
+    const contacts = window._crmContacts || [];
+    const c = id ? contacts.find(x => x.id === id) : null;
+    $('#contact-form')[0].reset(); $('#contact-id').val(c ? c.id : ''); $('#contact-version').val(c ? c.version : '');
+    $('#contact-valid-from').val(c && c.validFrom ? c.validFrom : SES.util.getLocalDateString());
+    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('contactModal')).show();
+}
+
+function saveContact() {
+    const id = $('#contact-id').val();
+    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
+    $.ajax({ url: `/api/customers/${customerId}/contacts${id ? '/' + id : ''}`, method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide(); loadCrmContext(); Toast.success(SES.i18n.t('success.save')); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed')));
+}
+
+function retireContact(id, version) {
+    Swal.fire({ title: SES.i18n.t('common.deleteConfirmTitle'), text: SES.i18n.t('customer.contacts.retireConfirm'), icon: 'warning', showCancelButton: true, confirmButtonText: SES.i18n.t('customer.contacts.retire'), cancelButtonText: SES.i18n.t('common.cancel') }).then(r => { if (!r.isConfirmed) return; $.ajax({ url: `/api/customers/${customerId}/contacts/${id}/retire`, method: 'PUT', data: { version } }).done(res => { if (res.code === 200) loadCrmContext(); else Toast.error(res.message); }); });
 }
 
 function renderOpportunities(opportunities) {

@@ -27,6 +27,12 @@ public interface MailService {
      */
     MailDispatchResult send(String to, String subject, String body, Long invoiceId);
 
+    /** CRM接点・商機を紐づけた送信経路。IDは永続化するが、外部送信はtransaction外で行う。 */
+    default MailDispatchResult send(String to, String subject, String body, Long invoiceId,
+                                    Long contactId, Long opportunityId) {
+        return send(to, subject, body, invoiceId);
+    }
+
     default MailDispatchResult send(String to, String subject, String body) {
         return send(to, subject, body, null);
     }

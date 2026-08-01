@@ -316,16 +316,28 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 
 | Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
 |---|---|---|---|---|---|
-| T052 / B1 | R4.1/R4.2。`CrmKpiDto`、`CrmKpiService`/impl、opportunity KPI API/page/JS、4言語message bundle、mobile/UI regression | `CrmKpiServiceIntegrationTest` 1/1、`CrmKpiScopeIntegrationTest` 1/1、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4、Node `--check` 3/3、compile PASS | `/crm/opportunities/kpi`でstage金額/加重forecast、滞留/活動なし、担当別転換、失注理由、source ROI、提案/商機forecastの別系列を表示。営業scopeで他担当/他顧客を除外し、変換済み商機を商機forecastから除外 | `c46e78b` | rollbackはT052のKPI service/API/page/JS/message/test差分をrevert。新migrationなし。stage履歴列が無いため滞留は`updated_at`（現stageの最終更新時点）基準、source ROIはsourceを保持するleadから転換先商機へ追跡できる範囲を集計する |
+| T052 / B1 | R4.1/R4.2。`CrmKpiDto`、`CrmKpiService`/impl、opportunity KPI API/page/JS、4言語message bundle、mobile/UI regression | `CrmKpiServiceIntegrationTest` 1/1、`CrmKpiScopeIntegrationTest` 1/1、`CrmUiRegressionTest` 1/1、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4、Node `--check` 3/3、compile PASS | `/crm/opportunities/kpi`でstage金額/加重forecast、滞留/活動なし、担当別転換、失注理由、source ROI、提案/商機forecastの別系列を表示。営業scopeで他担当/他顧客を除外し、変換済み商機を商機forecastから除外 | `c46e78b` | rollbackはT052のKPI service/API/page/JS/message/test差分をrevert。新migrationなし。stage滞留は`stage_changed_at`、source ROIはleadの`source_cost`を根拠に算出し、原価不明はnullとする |
 
 ### T052の実装契約と境界
 
 - 商機forecastは`converted_quotation_id IS NULL`かつ`stage NOT IN (受注, 失注)`だけを対象に、`expected_amount`優先、NULLなら`unit_price × required_count`へstage確度を掛ける。既存提案forecastはDashboardと同じ4つのopen proposal status・設定済み確率を使い、レスポンス上も別フィールドで返す。
 - 集計の母集団はlist/detailと同じDataScopeのcustomer集合を使う。営業DataScope時は本人担当＋未割当を可視とし、T052のfunnel集計では他担当の行を混ぜない。owner別合計は同一母集団からlead/opportunityを構成する。
-- stage滞留は履歴テーブルを追加せず、既存`updated_at`を現stageの最終更新時点として日数化した。活動なし日数は商機の活動の最終`activity_date`、活動が無い場合は商機作成時点からの日数とする。この範囲は既存schemaを変更しないための明示的境界である。
+- stage滞留は履歴テーブルを追加せず、商機の`stage_changed_at`を現stageの開始日時として日数化する。旧行でNULLの場合は`updated_at`へフォールバックする。活動なし日数は商機の活動の最終`activity_date`、活動が無い場合は商機作成時点からの日数とする。
 
 ## T053: M. 回帰（task別完了記録）
 
 | Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
 |---|---|---|---|---|---|
-| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1223 / F0 / E0 / S1**。`FlywayMigrationSmokeTest`、legacy V60/V71、repair、upgrade smoke計6系統 PASS、`ConcurrentUpdateTest` 1/1、直接回帰 **96/96 PASS**、Node `--check` **6/6 PASS**、`git diff --check` exit 0 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。アプリ起動は既存ローカルDBのV1 checksum差異を避けるため`spring.flyway.validate-on-migrate=false`を指定 | `c46e78b` | `WorkRecordServiceImpl`はRound3既知failure解消のため、直属組織が既知なら組織scopeを優先し、scope外時にaccount-linkへ迂回しない境界を追加。rollbackは統合commitをrevert。ローカルDBの既存V1 checksum差異はrepairせず、DB履歴は変更していない |
+| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1224 / F0 / E0 / S1**。CRM定向回帰、Flyway fresh/legacy V60/V71、V73部分修復fixture、repair、upgrade smoke、Node/JS、`git diff --check`を実測 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。DB変更はV73/V1を編集せずrepeatable/runbook経路を使用 | pending（本レビュー修正commit） | `WorkRecordServiceImpl`は過去月に現行Engineer/直属組織を履歴代替として使わず、履歴snapshotが無い場合は拒否。rollbackは本レビュー修正commitをrevertし、V73/V1は変更しない |
+
+## Round 3 独立Review FAIL 対応（2026-08-02）
+
+Base `f582f9e`（CRM既存完了記録）から、Round 3のP0/P1/P2指摘を本レビュー修正として実装した。V73/V1は適用済みのため編集せず、既存DBにはrepeatable reconciliation、部分適用DBには明示runbookを用いる。
+
+| Review ID / Task | 対応file・内容 | Test / Demo | 状態・risk / rollback |
+|---|---|---|---|
+| CRM-R3-P0-01 / T050-T052 | `CrmScopeService`を新設し、営業・マネージャー・管理者のCRM customer/owner母集団を統一。customer contact/timeline/activity/lead/opportunity/KPIへ同一scopeを適用し、HR/要員を拒否 | `ActionPermissionMatrixTest`、CRM定向回帰、L4全量。営業scope・manager組織scopeは既存scope fixtureで確認 | CLOSED。認可母集団はCRM serviceへ集約。rollbackは本修正commitのscope関連fileをrevert |
+| CRM-R3-P0-02 / T053 | `WorkRecordServiceImpl`で過去月の現在Engineer/現行直属組織/account-linkを履歴snapshotの代替にしない。履歴なし・未知組織はfail-closed | `WorkRecordServiceImplTest` 43件、L4全量 | CLOSED。過去実績の参照可能性が狭くなるため、履歴snapshot投入が再開条件 |
+| CRM-R3-P0-03 / T048-T053 | `R__crm_contact_reconciliation.sql`をV71以下でno-op、V73後の列/backfillをidempotentに実行。`sql/runbook/v73-crm-partial-repair.sql`は列/index/FK/移行contactを段階復旧し、MySQL fixtureで欠落状態を再現 | `FlywayMigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`FlywayRepairRunbookTest` PASS。V73は未編集 | CLOSED。適用済み履歴はrepairせず、実行前dump・validate・許可リスト確認が必要 |
+| CRM-R3-P1 / T048-T052 | stage/probability/version/primary/null更新、activity relation/assignee、mail provider adapter、lead duplicate normalization、CSV formula injection、bounded list/batch customer load、4言語UIを補強 | CRM定向回帰、schema/entity regression、Node `--check`、L4全量。顧客detail/contact CRUD・lead/opportunity/KPIのDemo確認 | CLOSED。contact非管理者PII maskは編集画面で再送信しない運用確認を残す |
+| CRM-R3-P2 / T051-T053 | opportunityカードのkeyboard操作、一覧上限、stage_changed_at、asOf/履歴・ROI口径を反映 | `CrmUiRegressionTest`、`MobileResponsiveLayoutTest`、L4全量 | CLOSED。実ブラウザでの全role操作、drag/reload/backはrelease前に再確認 |

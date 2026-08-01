@@ -52,6 +52,7 @@ public class CrmKpiDto {
         private long wonCount;
         private BigDecimal pipelineAmount;
         private BigDecimal wonAmount;
+        private BigDecimal sourceCost;
         private BigDecimal roiRate;
     }
 

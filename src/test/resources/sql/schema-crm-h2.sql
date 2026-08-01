@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS t_lead (
   contact_email            VARCHAR(255),
   contact_phone            VARCHAR(50),
   source                   VARCHAR(100),
+  source_cost              DECIMAL(14,0),
   owner_user_id            BIGINT,
   status                   VARCHAR(20)  NOT NULL DEFAULT '未対応',
   converted_customer_id    BIGINT,
@@ -91,6 +92,8 @@ CREATE TABLE IF NOT EXISTS t_opportunity (
   unit_price             DECIMAL(12,0),
   expected_amount        DECIMAL(14,0),
   probability            INT,
+  probability_override_reason VARCHAR(500),
+  stage_changed_at       DATETIME,
   owner_user_id          BIGINT,
   next_action_date       DATE,
   competitor             VARCHAR(500),
@@ -126,3 +129,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(sou
 
 ALTER TABLE t_quotation ADD COLUMN IF NOT EXISTS source_opportunity_id BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_quotation_source_opportunity ON t_quotation(source_opportunity_id);
+
+-- t_proposal: 商機起点の提案をforecastから除外するための変換元。
+ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS source_opportunity_id BIGINT;

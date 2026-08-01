@@ -21,6 +21,8 @@ public class MailDelivery {
     private Integer attemptCount;
     private String errorMessage;
     private Long invoiceId;
+    private Long contactId;
+    private Long opportunityId;
     private LocalDateTime queuedAt;
     private LocalDateTime sentAt;
     private LocalDateTime failedAt;

@@ -4,6 +4,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import java.math.BigDecimal;
+import jakarta.validation.constraints.DecimalMin;
 
 /** リード登録・更新リクエスト。 */
 @Data
@@ -20,6 +22,8 @@ public class LeadSaveRequest {
     private String contactPhone;
     @Size(max = 100)
     private String source;
+    @DecimalMin("0")
+    private BigDecimal sourceCost;
     private Long ownerUserId;
     private String status;
     private Integer version;

@@ -11,6 +11,7 @@ import java.time.LocalDate;
 public class SalesActivityUpdateRequest {
     private Long contactId;
     private Long opportunityId;
+    private Long assigneeUserId;
 
     @NotBlank(message = "活動種別は必須です")
     @Size(max = 20, message = "活動種別は20文字以内で入力してください")

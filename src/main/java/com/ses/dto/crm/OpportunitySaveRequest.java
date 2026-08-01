@@ -3,6 +3,8 @@ package com.ses.dto.crm;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -22,7 +24,10 @@ public class OpportunitySaveRequest {
     private Integer requiredCount;
     private BigDecimal unitPrice;
     private BigDecimal expectedAmount;
+    @Min(0)
+    @Max(100)
     private Integer probability;
+    private String probabilityOverrideReason;
     private Long ownerUserId;
     private LocalDate nextActionDate;
     private String competitor;
