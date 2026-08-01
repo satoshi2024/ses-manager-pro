@@ -39,6 +39,7 @@ $(document).ready(function() {
                 $('#searchSkill').val(filters.skillId || '');
                 $('#searchSalesUser').val(filters.salesUserId || '');
                 $('#searchRiskLevel').val(filters.riskLevel || '');
+                $('#searchAccountLink').val(filters.accountLinked || '');
                 loadEngineers(1);
             } catch(e) { console.error(e); }
         }, function() {
@@ -49,7 +50,8 @@ $(document).ready(function() {
                     employmentType: $('#searchEmpType').val(),
                     skillId: $('#searchSkill').val(),
                     salesUserId: $('#searchSalesUser').val(),
-                    riskLevel: $('#searchRiskLevel').val()
+                    riskLevel: $('#searchRiskLevel').val(),
+                    accountLinked: $('#searchAccountLink').val()
                 },
                 pageSize: 10
             };
@@ -257,6 +259,7 @@ function loadEngineers(page = 1) {
         employmentType: $('#searchEmpType').val(),
         salesUserId: $('#searchSalesUser').val(),
         riskLevel: $('#searchRiskLevel').val(),
+        accountLinked: $('#searchAccountLink').val(),
         skillIds: selectedSkills // jQuery ajax will format this as skillIds[]=1&skillIds[]=2 or we can set traditional: true
     };
 

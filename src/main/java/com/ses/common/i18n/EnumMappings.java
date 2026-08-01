@@ -12,6 +12,9 @@ public class EnumMappings {
         userRole.put("営業", "sales");
         userRole.put("HR", "hr");
         userRole.put("マネージャー", "manager");
+        // 要員ロールの欠落は SES.i18n.e のフォールバックで素通りし、EN/KO/ZH 利用者にだけ
+        // 日本語の「要員」が出ていた（未マッピングは dbValue をそのまま返す）。
+        userRole.put("要員", "engineer");
         GROUPS.put("userRole", userRole);
 
         Map<String, String> customerTrustLevel = new HashMap<>();

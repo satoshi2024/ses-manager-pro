@@ -106,6 +106,14 @@
                     </select>
                 </div>
                 <div class="col-md-2">
+                    <label for="searchAccountLink" class="form-label text-muted small" th:text="#{engineer.accountLink.filter}">ログインアカウント</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchAccountLink" name="accountLinked">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="true" th:text="#{engineer.accountLink.filter.linked}">紐付け済</option>
+                        <option value="false" th:text="#{engineer.accountLink.filter.unlinked}">未紐付け</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100">
                         <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
                     </button>

@@ -32,7 +32,10 @@
     <div class="row g-4">
         <!-- Profile Card -->
         <div class="col-md-4">
-            <div class="card bg-card border-dark shadow-sm h-100">
+            <!-- h-100 は付けない。この列にはプロフィールの下に担当営業・フォロー履歴・
+                 ログインアカウントの3カードが続くため、先頭カードを列全体の高さへ伸ばすと
+                 後続カードがファーストビューの外へ押し出され、事実上発見できなくなる。 -->
+            <div class="card bg-card border-dark shadow-sm">
                 <div class="card-body p-4 text-center">
                     <div id="det-avatar" class="avatar bg-gradient-blue text-white rounded-circle d-flex justify-content-center align-items-center mx-auto mb-2 shadow overflow-hidden" style="width: 100px; height: 100px; font-size: 2.5rem;">
                         T.T
@@ -129,7 +132,9 @@
                     <div id="account-link-current" class="mb-2 text-light small"></div>
                     <div id="account-link-form" class="d-none">
                         <select id="account-link-select" class="form-select form-select-sm mb-2"></select>
-                        <button class="btn btn-sm btn-primary" onclick="linkAccount()" th:text="#{engineer.accountLink.link}">紐付け</button>
+                        <!-- 候補0件のときに理由を出す。空のセレクトだけを見せて黙って失敗させない。 -->
+                        <div id="account-link-hint" class="alert alert-warning py-2 px-2 small mb-2 d-none"></div>
+                        <button id="account-link-button" class="btn btn-sm btn-primary" onclick="linkAccount()" th:text="#{engineer.accountLink.link}">紐付け</button>
                     </div>
                     <button id="account-link-unlink" class="btn btn-sm btn-outline-danger d-none" onclick="unlinkAccount()" th:text="#{engineer.accountLink.unlink}">解除</button>
                 </div>
