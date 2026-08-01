@@ -298,10 +298,14 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.attendanceUnsubmitted();
 
         String expectedMonth = YearMonth.now().minusMonths(1).toString();
+        // menuKeyを明示指定しないとNotificationServiceImpl.menuKeyForTypeが未知typeをnullへ解決し、
+        // n.menu_key IS NULLの通知は非管理者ロールから不可視になる（NotificationMapperの可視性条件）。
+        // TIMESHEET_REJECTEDと同じ"my-timesheet"を渡す7引数オーバーロードで呼ばれていることを検証する。
         verify(notificationService, times(1)).publishToUser(
                 eq(999L), eq("ATTENDANCE_UNSUBMITTED"), any(), contains(expectedMonth),
                 eq(com.ses.common.constant.NotificationLinks.MY_TIMESHEET),
-                eq("ATTENDANCE_UNSUBMITTED:100:" + expectedMonth));
+                eq("ATTENDANCE_UNSUBMITTED:100:" + expectedMonth),
+                eq("my-timesheet"));
     }
 
     @Test
@@ -313,7 +317,8 @@ class NotificationGenerateServiceTest {
 
         notificationGenerateService.attendanceUnsubmitted();
 
-        verify(notificationService, never()).publishToUser(any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(
+                any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
         verify(contractMapper, never()).selectById(any());
     }
 
@@ -328,6 +333,7 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.attendanceUnsubmitted();
 
         verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any(), any());
         verify(notificationService, never()).publishToOrganization(any(), any(), any(), any(), any(), any());
     }
 
@@ -340,7 +346,8 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.attendanceUnsubmitted();
 
         verify(workRecordMapper, never()).selectMonthlyGrid(any(), any());
-        verify(notificationService, never()).publishToUser(any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(
+                any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -360,6 +367,6 @@ class NotificationGenerateServiceTest {
         // dedupe_keyは日付を含まず対象月とcontractIdだけで決まるため、2回実行しても同一キーになる
         // （実際の重複排除はNotificationServiceImplのユニーク制約側の責務）。
         verify(notificationService, times(2)).publishToUser(
-                eq(888L), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), eq(expectedDedupeKey));
+                eq(888L), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), eq(expectedDedupeKey), eq("my-timesheet"));
     }
 }

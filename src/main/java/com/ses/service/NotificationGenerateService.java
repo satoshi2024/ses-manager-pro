@@ -115,8 +115,11 @@ public class NotificationGenerateService {
             }
             String dedupeKey = "ATTENDANCE_UNSUBMITTED:" + row.getContractId() + ":" + workMonth;
             String message = "[\"notification.msg.ATTENDANCE_UNSUBMITTED\", \"" + workMonth + "\"]";
+            // menuKeyを明示指定する。省略するとNotificationServiceImpl.menuKeyForTypeが未知の
+            // typeをnullへ解決し、n.menu_key IS NULLの通知は非管理者から不可視になる
+            // （NotificationMapperの可視性条件）。TIMESHEET_REJECTEDと同じ"my-timesheet"を使う。
             notificationService.publishToUser(link.getSysUserId(), "ATTENDANCE_UNSUBMITTED", "勤怠未提出のお知らせ",
-                    message, NotificationLinks.MY_TIMESHEET, dedupeKey);
+                    message, NotificationLinks.MY_TIMESHEET, dedupeKey, "my-timesheet");
         }
     }
 
