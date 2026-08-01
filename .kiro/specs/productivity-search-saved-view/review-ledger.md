@@ -1,8 +1,11 @@
 # 横断検索・実ToDo・保存ビュー・一括操作（productivity-search-saved-view）要件・設計整合性レビュー記録
 
-## 修正・検証ステータス (Round 5 指摘事項修正完了)
+## 修正・検証ステータス (Round 5 指摘事項修正完了 / 2026-08-01 PASS認定)
 
-- **現行判定**: **REVIEW待ち（Round 5 修正完了）**
+- **現行判定**: **PASS（CONDITIONAL PASS: P0=0 / P1=0）** — 2026-08-01に中央台帳
+  (`customer-product-expansion-2026/spec-execution-ledger.md` §2.3) でWave 0完了として認定。
+  R5-P1-01は `VERIFIED_CLOSED`。Docker実MySQL smoke / desktop・390px Demo / 検索p95 は
+  本番リリース前のrelease gateとして継続管理し、後続specの開始条件には含めない。
 - **Base Commit**: `2c69399`
 - **Head Commit**: `b96d6e9` (Round 5 修正完了コミット)
 - **指摘対応一覧**:
@@ -76,5 +79,5 @@
 | T032 | `src/main/java/com/ses/service/impl/BatchOperationServiceImpl.java` | 変更 | 一括操作サービス 実装 (200件上限、HMAC 署名 Token、単件サービス委譲) |
 | T032 | `src/main/java/com/ses/controller/api/BatchOperationApiController.java` | 変更 | 一括操作 REST Controller (preview/apply エンドポイント) |
 | T032 | `src/test/java/com/ses/service/impl/BatchOperationServiceH2Test.java` | 変更 | 一括操作テスト (200/201境界、Token 署名検証) |
-| T033 | `src/main/resources/db/migration/V72__productivity_menu_permissions.sql` | 新規 | メニュー・権限追加 Flyway マイグレーション |
+| T033 | `src/main/resources/db/migration/V69__productivity_menu_permissions.sql` | 新規 | メニュー・権限追加 Flyway マイグレーション |
 | T033 | `src/test/java/com/ses/controller/api/*Test.java` | 新規 | 各 API コントローラーの MockMvc テスト (4件) |

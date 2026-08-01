@@ -14,8 +14,8 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 1
-- Migration: V70
-- 先行条件: Wave 0完了。BPと並行開始できるがV69 merge後にV70をmerge。
+- Migration: V73
+- 先行条件: Wave 0完了（2026-08-01にS05 PASSで成就）。BP V70/V71はmerge済みのため、本specのV73をその後にmerge。
 - Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
 - 期待するtask順: F1→F2→(A1 || A2 || B1)→M
 

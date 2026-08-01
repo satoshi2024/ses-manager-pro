@@ -13,7 +13,7 @@
 【開始条件】
 - Wave: Wave 1
 - Migration: V70（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
-- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV69→V70順にmerge。
+- 先行条件: Wave 0完了（2026-08-01にS05 PASSで成就）。CRMと並行開始できるがDDLはV70/V71→V73順にmerge。
 - Decision gate: G2の法務監修と対象法令・帳票項目が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 

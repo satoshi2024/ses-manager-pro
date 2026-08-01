@@ -6,8 +6,10 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V73**。BP master(V69)と並行実装可だが、DDLのmergeは番号順。
+> **Migration**: 本specの予約番号は **V73**（2026-08-01に中央台帳で確定）。BP master(V70/V71)は
+> `origin/main`にmerge済みで、適用済みの最新は**V71**。したがってV73は空き番号であり、そのまま使用する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
+> approvalの予約V72は未使用のまま残るが、本specがV72を代わりに使ってはならない（欠番は埋めない）。
 
 - [ ] F1. contact/lead/opportunity DDLと移行
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、

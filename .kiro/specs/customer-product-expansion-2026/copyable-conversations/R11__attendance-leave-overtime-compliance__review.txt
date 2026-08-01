@@ -16,7 +16,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V74
+- Migration: V76
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G6（雇用勤怠の正＝本システム）が正式決定済み。
 - 時間外計算の値は `overtime-rules.md` で確定済みである。社労士確認と法人別36協定・就業規則の突合は

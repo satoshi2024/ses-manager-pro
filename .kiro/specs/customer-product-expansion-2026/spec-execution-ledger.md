@@ -25,10 +25,10 @@
 | 2 | 0 | `organization-management-accounting` | T008〜T013 | `PASS` | R02最終merge後独立Review完了。desktop/390px実ブラウザDemoは本番前hard gateとして継続管理 | S02 organization-management-accounting 修正対話 | Base `4015785` → Head `f6f0027`（`main` / `origin/main`） | P0=0/P1=0。全量904/0/0/1、Node/JS 0 skipped、Docker MySQL smoke全5系統0 skipped。`organization-management-accounting-R21-P1-01` VERIFIED_CLOSED | PASS維持。desktop/390pxを本番リリース前に完了 |
 | 3 | 0 | `enterprise-identity-security` | T014〜T020 | `PASS` | 独立Review R10（P0=0/P1=0/P2=1）および Docker 実MySQL Flyway smoke test（V1〜V66_1 全62マイグレーション適用 132/0/0/0 PASS）完了。本番前外部gate（実Entra/ClamAV/実訓練）は運用・本番リリース前検証として管理 | S03 enterprise-identity-security 再Review対応 | Review Base `fc509f49697b544cde456ecf5a1f33589a72b26b` | R07〜R10の全コード指摘および台帳記述誤記 VERIFIED_CLOSED。Docker MySQL smoke 100% SUCCESS | S04開放条件成就（S03 PASS完了） |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `PASS` | R04最終独立Review完了（CONDITIONAL PASS: P0=0/P1=0/P2=11/release gates=G-1〜G-5）。V1/V67/H2/entity 4系統同期、isScoped先行＋SQL境界scope、廃棄承認管理者固定、全1104件テスト完走(1104/0/0/7 100% PASS)、git diff --check 警告0件達成 | S04 legal-document-ledger-archive | Base `9330796` → Head `c572a8f` (`main` / `origin/main`) | Tests run: 1104, Failures: 0, Errors: 0, Skipped: 7 (100% PASS)。BUILD SUCCESS実測。本番前Release Gate (G-1〜G-5) を継続管理 | R04 PASS成就。S05 (productivity-search-saved-view) 開放 |
-| 5 | 0 | `productivity-search-saved-view` | T028〜T033 | **FIX** | R05 Round 5 = FAIL（P0=0/P1=1）。R5-P1-01 (todo.js 編集ボタンのインライン JS 直埋め破綻) を既存作法の `data-*` 属性方式へ修復。テストアサート強化および通知文言修復を完了。全量テスト 1135/0/0/7 BUILD SUCCESS | S05 productivity-search-saved-view 実装 | Base `ef488ff` → Head `b96d6e9`（`main`） | R5-P1-01 修正完結、全量 1135/0/0/7 BUILD SUCCESS。未実施: Docker実MySQL smoke / desktop・390px Demo / 検索p95 / Node・JS syntax / F1 Demo完走 | R5-P1-01 の VERIFIED_CLOSED ＋ M task L4 → PASSでWave 0完了、S06/S08解放（発注者判断でS06の条件付き先行着手は可。migrationはV70から採番） |
-| 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `REVIEW` | T034〜T040実装済み・引継ぎ修正完了。独立Review待ち（Base `ce1ccd4` → Head `8a8befb`、`main`） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `8a8befb`（`main` / 未merge） | R06独立ReviewでP0=0/P1=0を取得 | R06 PASSでS07（approval）解放 |
-| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP/CRM PASS、G7方針記録後S07 |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | `NOT READY` | Wave 0 PASS後S08。BPと並行可、V70→V71順merge |  |  |  | R08 PASS |
+| 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `PASS` | **2026-08-01 発注者確認によりPASS（CONDITIONAL PASS: P0=0/P1=0）**。R5-P1-01 (todo.js 編集ボタンのインライン JS 直埋め破綻) を既存作法の `data-*` 属性方式へ修復し `VERIFIED_CLOSED`。M task L4全量 1135/0/0/7 BUILD SUCCESS。migration実績はV68/V69 | S05 productivity-search-saved-view 実装 | Base `ef488ff` → Head `b96d6e9`（`main` / `origin/main` merge済み） | R5-P1-01 VERIFIED_CLOSED、全量 1135/0/0/7 BUILD SUCCESS。本番前release gateとして継続管理: Docker実MySQL smoke / desktop・390px Demo / 検索p95 | **PASS成就によりWave 0完了。S06（実装済み）およびS08を正式解放** |
+| 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `PASS` | R06 Round 5 = **CONDITIONAL PASS（P0=0/P1=0/P2=13）**。R2〜R4の全指摘 `VERIFIED_CLOSED`。migration実績はV70/V71（V71は`information_schema`判定付きストアドプロシージャで State A/B/C 全DB環境へ冪等適用） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `4d34212`（台帳記録`ef8ddd7`まで含めて`main` / `origin/main` merge済み） | L4全量 1169/0/0/7 BUILD SUCCESS。`MigrationScriptIntegrityTest` 17/17、`SpecDispatchConsistencyTest` 8/8。本番前release gate G-1〜G-5（実MySQL fresh/legacy smoke、DELIMITER検証、desktop/390px Demo、G2外部専門家Review）を継続管理 | R06 PASS成就。S07（approval）解放。ただしapprovalはCRM V73 merge後に着手するため、予約V72はV74へ繰り上げる |
+| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP PASS済み。CRM（S08）PASSとG7方針記録後にS07。migrationは予約V72だが、CRM V73が先にmergeされるため**着手時にV74へ繰り上げ**（V72は永久欠番、`out-of-order`は使わない） |  |  |  | R07 PASSでWave 1完了 |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`READY`** | **2026-08-01: Wave 0完了（S05 PASS）とS06 CONDITIONAL PASSにより開始条件成就。migrationは`V73`で確定**（`db/migration`の実適用最新はV71、V72はapproval予約なので使用しない）。T048から着手する |  | Base: `origin/main`の最新（着手時に再確認） |  | R08 PASS |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
@@ -55,6 +55,33 @@ merge前branchのS02実装とS03 F1〜B2に対する追加検査で、P0×1・P1
 - test: 全量 1027/0/0/6。skip 6件は全てDocker必須のTestcontainers。
 - **release gate（未達）**: proxyがDocker Hub blob CDNを遮断するため`mysql:8.0`を取得できず、V66は実MySQLで
   未実行。Docker利用可能なCIでFlyway smoke 5件を実行するまでS03をPASSへ進めない。
+
+## 2.3 Wave 0完了認定とCRM（S08）採番確定（2026-08-01）
+
+S08 `crm-contact-opportunity` の着手前確認で挙がった2件のblockerを、発注者確認のうえ本節で解消する。
+
+1. **Wave 0完了**: S05 `productivity-search-saved-view` は Round 5 の R5-P1-01（`todo.js`のインラインJS直埋め）
+   修正が完結し、L4全量 1135/0/0/7 BUILD SUCCESS、Head `b96d6e9` は `origin/main` にmerge済みである。
+   これをもって **S05 = PASS（CONDITIONAL PASS）＝ Wave 0完了** と認定する。Docker実MySQL smoke、
+   desktop/390px Demo、検索p95 は S02/S04/S06 と同じく **本番リリース前のrelease gate** として継続管理し、
+   後続specの開始条件には含めない。S06も Round 5 CONDITIONAL PASS（P0=0/P1=0、L4全量 1169/0/0/7）で
+   `origin/main` にmerge済みのため、**S08はWave 0 PASS後の正規の開始**であり、条件付き先行着手ではない。
+
+2. **Migration採番**: `db/migration` の実適用済み最新は **V71**（`V70__bp_company_master_and_compliance.sql`、
+   `V71__bp_company_fix_and_procurement.sql`）。**S08 CRMは `V73` で確定**する。
+   採番の正本は `README.md` §3 の予約表であり、`design.md`（予約V73）、`tasks.md`、`spec-start-conversations.md`、
+   `copyable-conversations/S08__…start.txt` の全てが既にV73で一致している（`SpecDispatchConsistencyTest` が固定）。
+   旧番号（BP V69 → CRM V70）が残っていた `parallel-execution-plan.md` / `dispatch-guide.md` /
+   `spec-review-conversations.md` / `copyable-conversations/R06〜R17` / `task-start-conversations.md` は
+   本更新で予約表（V72〜V82）へ揃えた。
+
+   - **V72の扱い**: 予約はS07 approvalだが、着手順はCRM（V73）が先である。Flywayは `out-of-order` を
+     有効化していないため、V73適用済みDBへ後からV72を足すと `FlywayValidateException` になる。
+     したがって **approvalは着手時にV74へ繰り上げ、V72はV59と同じ永久欠番** とする。
+     CRM側がV72へ繰り下げて欠番を埋めることは禁止する。
+
+本節の更新はドキュメントのみで、コード・SQL・各specの`tasks.md`のチェックボックス状態は変更していない。
+S08は `origin/main` の最新をBaseに再取得し、T048から開始する。
 
 ## 3. 1specの状態遷移
 

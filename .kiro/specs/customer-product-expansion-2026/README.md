@@ -48,8 +48,8 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済 |
 | 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68, V69 | 仕様済 |
 | 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済・G2開発方針決定済 |
-| 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V72 | 仕様済 |
-| 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V73 | 仕様済 |
+| 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V72（CRM V73が先にmerge済みならV74へ繰り上げ） | 仕様済 |
+| 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73（2026-08-01確定）** | 仕様済・S08着手可 |
 | 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V74 | 仕様済 |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V75 | 仕様済・G2開発方針決定済 |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V76 | 仕様済・G6決定済 |
@@ -67,7 +67,11 @@ permission group seed）、V65（break-glass二者承認とMFA試行制限）、
 拒否指定）を使用した。そのため後続spec全ての予約番号を、その時点のFlyway最新番号`latest + 1`から
 振り直している（本書とこの下の全designを同一更新で反映済み）。**現在適用済みの最新はV71であり、
 後続specの予約はV72から始まる。** V59は作成せず、永久欠番として保持する。
-実装依存順はV70..V71 BP→V72 approval→V73 CRMとして計画しているが、これらは実装前の計画値である。
+実装依存順はV70..V71 BP→V72 approval→V73 CRMとして計画していたが、実際の着手順はBP（V70/V71、merge済み）
+→**CRM（V73）**→approvalである。**#8 CRMのV73は2026-08-01に確定**し、`design.md`/`tasks.md`/派工対話/
+`copyable-conversations`の全てがV73を指している。approvalの予約V72だけは番号と着手順が逆転しているため、
+CRM V73がmerge済みの状態でapprovalを開始する場合はV74へ繰り上げ、V72はV59と同じ永久欠番として扱う
+（Flywayは`out-of-order`を有効化していないので、V73適用済みDBへ後からV72を足すと`FlywayValidateException`になる）。
 実装開始までに別migrationが追加された場合、V59を補完・再利用せず、予約表全体をその時点のFlyway最新番号`latest + 1`から連番で振り直し、本書と全designを先に更新する。V60以降が適用済みの場合もV59を追加してはならず、過去migrationの編集やout-of-order適用は禁止する。
 
 ## 4. 実行Wave
