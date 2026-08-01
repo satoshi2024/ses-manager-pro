@@ -23,6 +23,10 @@ public final class ActionPermissionResolver {
             Map.entry("compliance", "compliance"),
             Map.entry("contract-documents", "contract-document"),
             Map.entry("contracts", "contract"),
+            // CRM(S08)。ここへ登録しないと resolve() が null を返し、V73が m_menu へ入れた
+            // path_prefix='/crm/leads' に MenuPermissionFilter がヒットした時点で
+            // 管理者bypassより前に deny() される（＝全roleで403）。R08 Round 2 CRM-R2-P1-01。
+            Map.entry("crm", "crm"),
             Map.entry("customers", "customer"),
             Map.entry("dashboard", "dashboard"),
             Map.entry("documents", "document"),

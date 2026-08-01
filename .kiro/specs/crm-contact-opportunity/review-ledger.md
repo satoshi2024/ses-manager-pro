@@ -5,7 +5,7 @@
 | Task | 状態 | 備考 |
 |---|---|---|
 | T048 / F1 | 実装完了・**Demo未実施** | DDL/移行/entity/定向testは完了。F1のDemo「顧客detailに表示」はT050(A1)の画面が必要なため未成立。よって `tasks.md` は `- [ ]` のまま |
-| T049 / F2 | 未着手 | Round 2合格まで着手しない |
+| T049 / F2 | **着手可（未着手）** | Round 2 CONDITIONAL PASS で開放。冒頭で CRM-R2-P1-01 を閉じる条件付きだったため、**本更新で先に閉じた** |
 | T050 / A1 | 未着手 | |
 | T051 / A2 | 未着手 | |
 | T052 / B1 | 未着手 | |
@@ -45,6 +45,93 @@ Round 1（Base `5bdfb34` → Head `d9a1d02`, branch `feature/crm-contact-opportu
 | SELF-02 | `SpecDispatchConsistencyTest.予約Migration番号が実在スクリプトと衝突しないこと` が、V73が実在した瞬間にS08で失敗する（予約→実在への移行が未反映） | S05/S06と同じ作法で `SPEC_BY_CONVERSATION` からS08をコメントアウト |
 | SELF-03 | H2側CRMスキーマにFKを張ると、共有インメモリH2の2つ目のcontext初期化でV1の `DROP TABLE IF EXISTS t_project` が参照制約で失敗し、全 `@SpringBootTest` が起動不能になる | 既存のH2 specスキーマ（bp-company/productivity/document-archive）と同じく**FKを張らない**方針へ統一し、理由をファイル冒頭へ明記。FK検証は実MySQL smokeが担当 |
 | SELF-04 | `production-security-users-h2.sql` が `ProductionSecurityConfigurationTest`（`spring.sql.init.data-locations`）と `ProductionSecurityEnrollmentFixtureTest`（`@Sql`）の2経路から同じ共有H2へ素のINSERTを流しており、**testクラスを1つ足しただけでcontext cacheの順序が変わり** `Unique index violation: SYS_USER(USERNAME) 'breakglass2'` で落ちる潜在flake。Base時点では順序の運で通っていた | 投入を `WHERE NOT EXISTS` で冪等化（sys_user 1件・t_user_mfa 2件）。MFAの二重登録も `countEnrolled` が2を返して壊れるため同時に封じた。**本specの範囲外だが、本変更が顕在化させたので同一commitで是正**する（放置すると新規failureを持ち込んだように見える） |
+
+---
+
+## Round 2 独立Review = CONDITIONAL PASS への対応（2026-08-01）
+
+Base `e8b7da6` → Head `3a708a8`（`origin/main` merge済み）。判定は
+**CONDITIONAL PASS（P0=0 / P1=1 / P2=2 / NOTE=3）**。Round 1の
+P0-01 / P0-02 / P1-01 / P1-02 / P1-03 / P2-01 / P2-02 / P2-04 / NOTE-01 は
+Review側の実測で全て `VERIFIED_CLOSED`。P2-03 はT050へ繰越（合意済み）。
+
+対応branchは `claude/crm-contact-opportunity-review-r2`（`origin/main` = `3a708a8` 起点）。
+Round 1のbranch `feature/crm-contact-opportunity`（`d9a1d02`）は系譜のみmergeし、
+tree は取り込んでいない（同branchはRound 1未修正版のままで、V1/V6の重複DDLとm_role参照のV73を
+含むため取り込むと退行する。無害な `.gitignore` の1行だけ採用した）。
+
+### CRM-R2-P1-01 — `/api/crm/*` がaction key解決表に無く全roleで403
+
+Reviewの再現（jshellで `resolve()` が null）を追試し、**指摘どおりであることを確認**した。
+`MenuPermissionFilter` は `/api/**` で actionKey==null なら deny()、page も matchedMenu の
+api_prefix から再解決して null なら deny() し、この deny は**管理者bypassより前**にある。
+
+修正は**2段構え**で、片方だけでは閉じない。
+
+| # | 修正 | 無いとどうなるか |
+|---|---|---|
+| 1 | `ActionPermissionResolver.RESOURCE_NAMES` へ `Map.entry("crm", "crm")` を追加 | `resolve()` が null を返し、**管理者を含む全roleが403** |
+| 2 | **V74** で `crm.*` を `t_permission_group_action` へseed（role-sales / role-manager） | V66_1が非管理者groupから全局 `*` を削除し「既知resource wildcardの列挙」へ置換したため、**group割当済みの営業/マネージャーが403** |
+
+Reviewの最小修正は1だけだったが、2が無いと営業/マネージャーは依然403のままで、
+「正しい期待値を書いたtest」を追加できない（実態に合わせた誤ったtestを書くのは Round 1 で
+問題になったパターン）。したがって2も同時に入れて閉じた。
+
+**V73のコメント訂正について**: Reviewは「V73:200-203のコメントを訂正する」としているが、
+**V73は`main`にmerge済みで適用済みのためchecksumを壊せない**（本specがRound 1で最も強く指摘された規約）。
+訂正はV74の冒頭コメントへ「V73のどの記述がなぜ誤りか」を明記する形で残した。
+
+### 本対応で発見した既存の穴（S05 / S06）
+
+上記2と同じ理由で、**V68/V69の `search` / `task` / `saved-view` / `batch-operation` と
+V70の `bp-company` も権限seedが無く**、group割当済みの営業/HR/マネージャーは
+**出荷済み機能で403**になる（V67の `document.*` だけが正しくseedしていた）。
+発注者確認のうえ、同じ1行機構で **V74で併せて補完**した。付与先は各specのmenu付与に一致させている。
+
+| resource | 付与先group | 根拠 |
+|---|---|---|
+| `crm.*` | role-sales / role-manager | V73のmenu付与（管理者/マネージャー/営業）。design §6.2でHR・要員は不可視 |
+| `search.*` `task.*` `saved-view.*` `batch-operation.*` | role-sales / role-hr / role-manager | V69のmenu付与（全5role）。要員はSecurityConfigの`anyRequest`で`/my/**`以外へ到達できないためgroup付与しない |
+| `bp-company.*` | role-sales / role-manager | V70のmenu付与（管理者/営業/マネージャー） |
+
+### 再発防止（Docker不要の静的検査を2件追加）
+
+Reviewのprocess記録「新規に導入するURI prefixについてもconsumer inventoryを適用する」を
+人手のgrepではなくtestで固定した。**いずれも修正前の状態で実際に失敗することを確認済み**。
+
+| test | 内容 | 修正前の実測 |
+|---|---|---|
+| `migrationが登録するメニューのapi_prefixがaction_keyへ解決できること` | m_menuへ入れる `api_prefix` が `resolve()` で解決できること | `crm` 未登録時に `/api/crm/leads` `/api/crm/opportunities` を検出してFAIL |
+| `メニューを持つresourceには権限seedがあること` | menuを持つresourceに `<resource>.*` のseedがあること（admin専用の user/permission/audit は除外） | V74を外すとFAIL |
+
+### 採番の繰り上げ
+
+V74をCRMが使用したため、`latest + 1`・「後発を上へ繰り上げ、前の欠番は埋めない」の原則どおり
+**S07 approval → V75、#9〜#17 → V76〜V84** へ繰り上げた。詳細と更新対象ファイルは
+中央台帳 `spec-execution-ledger.md` §2.4 を正とする。**V59とV72は永久欠番**。
+
+### Round 2 指摘の対応状況
+
+| ID | 対応 | 状態 |
+|---|---|---|
+| **CRM-R2-P1-01** | `RESOURCE_NAMES` へ `crm` 登録 ＋ V74で `crm.*` seed ＋ 静的検査2件 ＋ filter/matrix回帰 | CLOSED |
+| CRM-R2-P2-01（範囲外） | `main` 既存RED 3件。本specでは修正せず、中央台帳§2.4へbacklogとして記録。T053(M)前に解消が必要 | OPEN（backlog） |
+| NOTE-R2-01 | 閉区間同士のprimary重なりはservice CASで塞ぐ | OPEN → T049/A1 |
+| NOTE-R2-02 | CIのno-skip gateがsmokeを除外している。CI緑を実行証拠にしない | 運用注意として記録 |
+| NOTE-R2-03 | `tasks.md` F1の `- [ ]` 維持は適切 | 対応不要 |
+
+### Round 2対応のテスト（実測）
+
+| test | 結果 |
+|---|---|
+| `MigrationScriptIntegrityTest` | **24/24 PASS**（静的検査を22→24へ拡充） |
+| `ActionPermissionMatrixTest` | **13/13 PASS**（CRM／S05・S06のmatrixを追加） |
+| `MenuPermissionFilterTest` | **14/14 PASS**（`/crm/leads` page・`/api/crm/leads`・HR拒否の3件を追加） |
+| `SpecDispatchConsistencyTest` | **8/8 PASS**（採番繰り上げ後） |
+| `CustomerContactSchemaTest` | 15/15 PASS（Round 1から変更なし） |
+| 全量 `mvn clean test` | **1201 / F2 / E1 / S7**。失敗3件は `main` 既存の CRM-R2-P2-01 と同一で**新規failure 0件**（Round 1時点は1193/2/1/7、Base `e8b7da6` は1169/2/1/6） |
+| `git diff --check` | exit 0 |
+| fresh / legacy MySQL smoke | **未実行**（Docker不在によりskip）。V74のseed assert（付与先groupの一致）を追加済み |
 
 ---
 

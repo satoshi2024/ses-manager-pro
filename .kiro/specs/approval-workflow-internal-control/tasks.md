@@ -8,7 +8,7 @@
 > 本specは「状態機械 × 期間 × 金額 × 権限」の四重交差であり、S02と同じ事故構造を持つ。
 > **design.md §6.2の金額帯境界を実装前に確定すること。実装中に決めない。**
 >
-> **Migration**: 本specの予約番号は **V72**。BP(V69)/CRM(V70)のmerge後に着手する。
+> **Migration**: 本specの予約番号は **V75**。BP(V70/V71)とCRM(V73/V74)のmerge後に着手する。V72は永久欠番。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G7と対象操作inventory
@@ -27,7 +27,7 @@
   - **Objective**: 対象操作が直接確定されず申請draftと差分snapshotになる。
     routeが対象種別・組織・金額帯・申請者roleから1件に決まり、決まらない場合は申請が受け付けられず管理者へ通知される。
     申請者自身は自分の申請を承認できない。
-  - **実装ガイダンス**: **V72**/V1/H2(`sql/schema-approval-h2.sql`)/MySQL smoke、engine core/CAS。
+  - **実装ガイダンス**: **V75**/V1/H2(`sql/schema-approval-h2.sql`)/MySQL smoke、engine core/CAS。
     **route snapshotは申請時に確定し以後不変**（design §6.1）。
     金額帯はmin/max ともに**inclusive**、判定に`amount_snapshot`（税込）を使う。
     `amount_snapshot IS NULL`を0円として金額帯へ当てない。負の金額は**絶対値**で判定（design §6.2）。

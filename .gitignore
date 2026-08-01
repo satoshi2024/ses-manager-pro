@@ -25,3 +25,4 @@ Thumbs.db
 
 # アップロードファイル（ローカル保存先）
 /uploads/
+mise.toml

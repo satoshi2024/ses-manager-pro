@@ -441,6 +441,35 @@ class FlywayMigrationSmokeTest {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 3,
                         "V2のseed顧客3件が名称/emailを保ったまま初回contactへ移行されているはず");
             }
+
+            // V74: action permission。menu層とaction層の母集団が一致していること。
+            // 片方だけだと MenuPermissionFilter が管理者を含む全roleを403にする（R08 Round 2 CRM-R2-P1-01）。
+            // crm(S08) と bp-company(S06) は 営業/マネージャー、
+            // search/task/saved-view/batch-operation(S05) は 営業/HR/マネージャー。
+            assertActionGrantedTo(st, "crm.*", "role-manager", "role-sales");
+            assertActionGrantedTo(st, "bp-company.*", "role-manager", "role-sales");
+            for (String action : new String[]{"search.*", "task.*", "saved-view.*", "batch-operation.*"}) {
+                assertActionGrantedTo(st, action, "role-hr", "role-manager", "role-sales");
+            }
+        }
+    }
+
+    /** 当該actionを許可されている既定groupが、期待どおりの集合に一致すること。 */
+    private void assertActionGrantedTo(Statement st, String actionKey, String... expectedGroupKeys)
+            throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT g.group_key FROM t_permission_group_action a"
+                        + " JOIN m_permission_group g ON g.id = a.group_id"
+                        + " WHERE a.action_key = '" + actionKey + "' AND a.deny_flag = 0"
+                        + " AND g.group_key <> 'role-admin'"
+                        + " ORDER BY g.group_key")) {
+            java.util.List<String> actual = new java.util.ArrayList<>();
+            while (rs.next()) {
+                actual.add(rs.getString(1));
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    java.util.List.of(expectedGroupKeys), actual,
+                    actionKey + " の付与先groupがmenu付与と一致しません");
         }
     }
 

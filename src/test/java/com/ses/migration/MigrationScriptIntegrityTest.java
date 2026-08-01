@@ -591,6 +591,118 @@ class MigrationScriptIntegrityTest {
                 "design §6.2によりHR/要員へCRMメニューを付与してはいけません");
     }
 
+    /**
+     * migrationが {@code m_menu} へ登録する {@code api_prefix} は、必ず
+     * {@link com.ses.service.security.ActionPermissionResolver#resolve} が
+     * action keyを返せるものでなければならない。
+     *
+     * <p>{@code resolve()} は URIから機械導出しているように見えて実際は
+     * {@code RESOURCE_NAMES} への明示登録制で、未登録rootでは null を返す。
+     * null になると {@code MenuPermissionFilter} は
+     * (1) {@code /api/**} をそのまま deny() し、
+     * (2) pageも matchedMenu の api_prefix から再解決して null なら deny() する。
+     * この deny は<b>管理者bypassより前</b>にあるため、menuを登録した瞬間に
+     * <b>管理者を含む全roleが403</b>になる（menuを登録しない方がマシ、という壊れ方をする）。
+     *
+     * <p>V73(CRM)がこれを踏んだ（R08 Round 2 CRM-R2-P1-01）。同じ事故は
+     * 新しいURI prefixを導入するspecごとに再発しうるので、prefixの追加側で静的に固定する。
+     */
+    @Test
+    void migrationが登録するメニューのapi_prefixがaction_keyへ解決できること() throws Exception {
+        // m_menu を対象にしたDML文の中に現れる '/api/...' リテラルを集める
+        Pattern menuStatement = Pattern.compile(
+                "(?:INSERT|REPLACE)\\s+(?:IGNORE\\s+)?INTO\\s+`?m_menu`?[\\s\\S]*?;|"
+                        + "UPDATE\\s+`?m_menu`?[\\s\\S]*?;",
+                Pattern.CASE_INSENSITIVE);
+        Pattern apiLiteral = Pattern.compile("'(/api/[^']*)'");
+
+        Map<String, String> unresolved = new LinkedHashMap<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql")) {
+            String fileName = String.valueOf(resource.getFilename());
+            String sql = stripComments(resource.getContentAsString(StandardCharsets.UTF_8));
+            Matcher stmt = menuStatement.matcher(sql);
+            while (stmt.find()) {
+                Matcher lit = apiLiteral.matcher(stmt.group());
+                while (lit.find()) {
+                    String apiPrefix = lit.group(1);
+                    if (com.ses.service.security.ActionPermissionResolver.resolve("GET", apiPrefix) == null) {
+                        unresolved.put(fileName + ": " + apiPrefix, apiPrefix);
+                    }
+                }
+            }
+        }
+
+        assertTrue(unresolved.isEmpty(),
+                "m_menuへ登録するapi_prefixがActionPermissionResolverで解決できません"
+                        + "（MenuPermissionFilterが管理者を含む全roleを403にします）。"
+                        + "ActionPermissionResolver.RESOURCE_NAMES へrootを登録してください: "
+                        + unresolved.keySet());
+    }
+
+    /**
+     * メニューを足したら、その resource の権限seedも足さなければならない。
+     *
+     * <p>V66_1が非管理者groupから全局 {@code *} を削除して「既知resource wildcardの列挙」へ
+     * 置換したため、権限modelは baseline+deny ではなく<b>許可listの列挙制</b>になっている。
+     * 新しいresource rootを {@code RESOURCE_NAMES} へ登録しても
+     * {@code t_permission_group_action} へ {@code <resource>.*} をseedしなければ、
+     * group割当済みの営業/HR/マネージャーはその機能全体で403になる。
+     *
+     * <p>V67(document)だけがこれを守っており、V68/V69(search/task/saved-view/batch-operation)と
+     * V70(bp-company)は出荷済みなのにseedが無かった（S08 Round 2 で発見、V74で補完）。
+     * 同じ漏れをS07以降で繰り返さないよう静的に固定する。
+     */
+    @Test
+    void メニューを持つresourceには権限seedがあること() throws Exception {
+        // 管理者専用resource。menuはあるが非管理者groupへは意図的に付与しない。
+        java.util.Set<String> adminOnly = java.util.Set.of("user", "permission", "audit");
+
+        List<String> allSql = new ArrayList<>();
+        Map<String, String> resourceOrigin = new LinkedHashMap<>();
+
+        Pattern menuStatement = Pattern.compile(
+                "(?:INSERT|REPLACE)\\s+(?:IGNORE\\s+)?INTO\\s+`?m_menu`?[\\s\\S]*?;",
+                Pattern.CASE_INSENSITIVE);
+        Pattern apiLiteral = Pattern.compile("'(/api/[^']*)'");
+
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql")) {
+            String fileName = String.valueOf(resource.getFilename());
+            String sql = stripComments(resource.getContentAsString(StandardCharsets.UTF_8));
+            allSql.add(sql);
+            Matcher stmt = menuStatement.matcher(sql);
+            while (stmt.find()) {
+                Matcher lit = apiLiteral.matcher(stmt.group());
+                while (lit.find()) {
+                    String actionKey = com.ses.service.security.ActionPermissionResolver
+                            .resolve("GET", lit.group(1));
+                    if (actionKey == null) {
+                        continue; // 別testが検出する
+                    }
+                    String res = actionKey.substring(0, actionKey.indexOf('.'));
+                    resourceOrigin.putIfAbsent(res, fileName + " (" + lit.group(1) + ")");
+                }
+            }
+        }
+        String combined = String.join("\n", allSql);
+
+        List<String> missing = new ArrayList<>();
+        for (Map.Entry<String, String> entry : resourceOrigin.entrySet()) {
+            if (adminOnly.contains(entry.getKey())) {
+                continue;
+            }
+            if (!combined.contains("'" + entry.getKey() + ".*'")) {
+                missing.add(entry.getKey() + " <- " + entry.getValue());
+            }
+        }
+
+        assertTrue(missing.isEmpty(),
+                "m_menuへ登録したresourceの権限seed（t_permission_group_action の '<resource>.*'）が"
+                        + "どのマイグレーションにもありません。group割当済みの非管理者が当該機能全体で403になります: "
+                        + missing);
+    }
+
     /** {@code FROM}/{@code JOIN} の直後に現れうる、テーブル名ではない語。 */
     private static final java.util.Set<String> NON_TABLE_TOKENS = java.util.Set.of(
             "information_schema", "dual", "select", "if", "not", "exists");

@@ -153,6 +153,101 @@ class MenuPermissionFilterTest {
         verify(chain, never()).doFilter(any(), any());
     }
 
+    /**
+     * R08 Round 2 CRM-R2-P1-01 の回帰。
+     *
+     * <p>V73が `/crm/leads` を m_menu へ登録したため matchedMenu は必ずヒットする。
+     * `crm` が {@code ActionPermissionResolver.RESOURCE_NAMES} に無いと
+     * page経路の再解決が null になり、<b>管理者bypassより前</b>の deny() で403になっていた。
+     */
+    @Test
+    void CRMのpage直達は管理者でも403にならない() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        MenuCacheService menuCache = mock(MenuCacheService.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(menuProvider.getIfAvailable()).thenReturn(menuCache);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(menuCache.getAllMenus()).thenReturn(java.util.List.of(crmLeadMenu()));
+        when(menuCache.getMenuKeysByRole("管理者")).thenReturn(java.util.List.of("crm-lead"));
+        when(authorizationService.isAllowed(any(), any())).thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/crm/leads");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq("crm.view"));
+        verify(chain).doFilter(any(), any());
+    }
+
+    @Test
+    void CRMのApiは営業のcrm_viewとして解決されmenu許可があれば通る() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        MenuCacheService menuCache = mock(MenuCacheService.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(menuProvider.getIfAvailable()).thenReturn(menuCache);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(menuCache.getAllMenus()).thenReturn(java.util.List.of(crmLeadMenu()));
+        when(menuCache.getMenuKeysByRole("営業")).thenReturn(java.util.List.of("crm-lead"));
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("crm.view"))).thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "7", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_営業"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/crm/leads");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        verify(chain).doFilter(any(), any());
+    }
+
+    /** design §6.2: HRはCRM不可視。menu未付与で403になること。 */
+    @Test
+    void CRMはmenu未付与のHRから到達できない() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        com.ses.service.AuditLogService auditLogService = mock(com.ses.service.AuditLogService.class);
+        when(auditProvider.getIfAvailable()).thenReturn(auditLogService);
+        MenuCacheService menuCache = mock(MenuCacheService.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(menuProvider.getIfAvailable()).thenReturn(menuCache);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(menuCache.getAllMenus()).thenReturn(java.util.List.of(crmLeadMenu()));
+        when(menuCache.getMenuKeysByRole("HR")).thenReturn(java.util.List.of("engineer"));
+        // action層(V74)でもHRへ crm.* を付与していない
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("crm.view"))).thenReturn(false);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "8", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_HR"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/crm/leads");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    private static Menu crmLeadMenu() {
+        Menu menu = new Menu();
+        menu.setMenuKey("crm-lead");
+        menu.setPathPrefix("/crm/leads");
+        menu.setApiPrefix("/api/crm/leads");
+        return menu;
+    }
+
     @Test
     void portal実行層が未導入の間は管理者も直接到達できない() throws Exception {
         @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);

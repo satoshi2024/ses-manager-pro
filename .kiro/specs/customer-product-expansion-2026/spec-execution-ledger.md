@@ -26,9 +26,9 @@
 | 3 | 0 | `enterprise-identity-security` | T014〜T020 | `PASS` | 独立Review R10（P0=0/P1=0/P2=1）および Docker 実MySQL Flyway smoke test（V1〜V66_1 全62マイグレーション適用 132/0/0/0 PASS）完了。本番前外部gate（実Entra/ClamAV/実訓練）は運用・本番リリース前検証として管理 | S03 enterprise-identity-security 再Review対応 | Review Base `fc509f49697b544cde456ecf5a1f33589a72b26b` | R07〜R10の全コード指摘および台帳記述誤記 VERIFIED_CLOSED。Docker MySQL smoke 100% SUCCESS | S04開放条件成就（S03 PASS完了） |
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `PASS` | R04最終独立Review完了（CONDITIONAL PASS: P0=0/P1=0/P2=11/release gates=G-1〜G-5）。V1/V67/H2/entity 4系統同期、isScoped先行＋SQL境界scope、廃棄承認管理者固定、全1104件テスト完走(1104/0/0/7 100% PASS)、git diff --check 警告0件達成 | S04 legal-document-ledger-archive | Base `9330796` → Head `c572a8f` (`main` / `origin/main`) | Tests run: 1104, Failures: 0, Errors: 0, Skipped: 7 (100% PASS)。BUILD SUCCESS実測。本番前Release Gate (G-1〜G-5) を継続管理 | R04 PASS成就。S05 (productivity-search-saved-view) 開放 |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `PASS` | **2026-08-01 発注者確認によりPASS（CONDITIONAL PASS: P0=0/P1=0）**。R5-P1-01 (todo.js 編集ボタンのインライン JS 直埋め破綻) を既存作法の `data-*` 属性方式へ修復し `VERIFIED_CLOSED`。M task L4全量 1135/0/0/7 BUILD SUCCESS。migration実績はV68/V69 | S05 productivity-search-saved-view 実装 | Base `ef488ff` → Head `b96d6e9`（`main` / `origin/main` merge済み） | R5-P1-01 VERIFIED_CLOSED、全量 1135/0/0/7 BUILD SUCCESS。本番前release gateとして継続管理: Docker実MySQL smoke / desktop・390px Demo / 検索p95 | **PASS成就によりWave 0完了。S06（実装済み）およびS08を正式解放** |
-| 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `PASS` | R06 Round 5 = **CONDITIONAL PASS（P0=0/P1=0/P2=13）**。R2〜R4の全指摘 `VERIFIED_CLOSED`。migration実績はV70/V71（V71は`information_schema`判定付きストアドプロシージャで State A/B/C 全DB環境へ冪等適用） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `4d34212`（台帳記録`ef8ddd7`まで含めて`main` / `origin/main` merge済み） | L4全量 1169/0/0/7 BUILD SUCCESS。`MigrationScriptIntegrityTest` 17/17、`SpecDispatchConsistencyTest` 8/8。本番前release gate G-1〜G-5（実MySQL fresh/legacy smoke、DELIMITER検証、desktop/390px Demo、G2外部専門家Review）を継続管理 | R06 PASS成就。S07（approval）解放。ただしapprovalはCRM V73 merge後に着手するため、予約V72はV74へ繰り上げる |
-| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP PASS済み。CRM（S08）PASSとG7方針記録後にS07。migrationは予約V72だが、CRM V73が先にmergeされるため**着手時にV74へ繰り上げ**（V72は永久欠番、`out-of-order`は使わない） |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`FIX`** | R08 Round 1 = FAIL（P0=2/P1=3/P2=4/NOTE=1）。指摘をすべて修正し **Round 2を要求**。実装済みはT048(F1)のみで、T049〜T053は未着手（Round 2合格まで着手しない）。migrationは`V73`（V1/V6は不変。V73だけがCRM DDLの正） | S08 crm-contact-opportunity 実装（Round 1指摘修正） | Base `e8b7da6`（`origin/main`）→ Head: branch `claude/crm-contact-opportunity-review-r1-xj8daf`。Round 1のHead `d9a1d02` / branch `feature/crm-contact-opportunity` は**破棄**（stale main起点） | Round 1のP0-01/P0-02/P1-01〜03およびP2-01/02/04を `VERIFIED_CLOSED` 相当まで修正。実測: `MigrationScriptIntegrityTest` **22/22**（静的検査5件を新規追加）、`CustomerContactSchemaTest` **15/15**、`SpecDispatchConsistencyTest` 8/8。fresh/legacy MySQL smokeはDocker不在で**未実行** | R08 Round 2 PASS。Docker可能なCIで `FlywayMigrationSmokeTest` / `FlywayLegacyV71MigrationSmokeTest` を0 skippedで実行した証跡が必要 |
+| 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `PASS` | R06 Round 5 = **CONDITIONAL PASS（P0=0/P1=0/P2=13）**。R2〜R4の全指摘 `VERIFIED_CLOSED`。migration実績はV70/V71（V71は`information_schema`判定付きストアドプロシージャで State A/B/C 全DB環境へ冪等適用） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `4d34212`（台帳記録`ef8ddd7`まで含めて`main` / `origin/main` merge済み） | L4全量 1169/0/0/7 BUILD SUCCESS。`MigrationScriptIntegrityTest` 17/17、`SpecDispatchConsistencyTest` 8/8。本番前release gate G-1〜G-5（実MySQL fresh/legacy smoke、DELIMITER検証、desktop/390px Demo、G2外部専門家Review）を継続管理 | R06 PASS成就。S07（approval）解放。approvalの採番はCRMのV73/V74 merge後に**V75**で確定（V72は永久欠番） |
+| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP PASS済み。CRM（S08）のT049〜T053完了とG7方針記録後にS07。migrationは**V75で確定**（CRMがV73＝DDL、V74＝権限seedを使用済み。V72は永久欠番、`out-of-order`は使わない） |  |  |  | R07 PASSでWave 1完了 |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`IN PROGRESS`** | R08 Round 2 = **CONDITIONAL PASS（P0=0/P1=1/P2=2/NOTE=3）**。Round 1のP0×2・P1×3およびP2-01/02/04・NOTE-01は `VERIFIED_CLOSED`。T048(F1)完了・**T049着手可**。migration実績は**V73（DDL）/V74（action permission seed）** | S08 crm-contact-opportunity 実装（Round 2指摘対応） | Base `e8b7da6` → Head `3a708a8`（`main` merge済み）。Round 2対応は branch `claude/crm-contact-opportunity-review-r2` | **CRM-R2-P1-01 を修正**（`ActionPermissionResolver` へ `crm` 登録＋V74で `crm.*` をseed）。実測: `MigrationScriptIntegrityTest` 24/24、`ActionPermissionMatrixTest` 13/13、`MenuPermissionFilterTest` 14/14、`SpecDispatchConsistencyTest` 8/8 | T049〜T053完了とR08 Round 3。T053前にCRM-R2-P2-01（main既存RED 3件）の解消が必要 |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
@@ -73,15 +73,63 @@ S08 `crm-contact-opportunity` の着手前確認で挙がった2件のblockerを
    `copyable-conversations/S08__…start.txt` の全てが既にV73で一致している（`SpecDispatchConsistencyTest` が固定）。
    旧番号（BP V69 → CRM V70）が残っていた `parallel-execution-plan.md` / `dispatch-guide.md` /
    `spec-review-conversations.md` / `copyable-conversations/R06〜R17` / `task-start-conversations.md` は
-   本更新で予約表（V72〜V82）へ揃えた。
+   本更新で予約表（V72〜V82）へ揃えた（§2.4でV75〜V84へ再繰り上げ）。
 
    - **V72の扱い**: 予約はS07 approvalだが、着手順はCRM（V73）が先である。Flywayは `out-of-order` を
      有効化していないため、V73適用済みDBへ後からV72を足すと `FlywayValidateException` になる。
-     したがって **approvalは着手時にV74へ繰り上げ、V72はV59と同じ永久欠番** とする。
-     CRM側がV72へ繰り下げて欠番を埋めることは禁止する。
+     したがって **V72はV59と同じ永久欠番** とする。CRM側がV72へ繰り下げて欠番を埋めることは禁止する。
+     approvalの繰り上げ先は §2.4 のとおり **V75** で確定した（本節作成時点の想定はV74だったが、
+     CRMがV74を権限seedに使用したため1つ後ろへずれた）。
 
 本節の更新はドキュメントのみで、コード・SQL・各specの`tasks.md`のチェックボックス状態は変更していない。
 S08は `origin/main` の最新をBaseに再取得し、T048から開始する。
+
+## 2.4 CRM（S08）Round 2 対応と採番の再繰り上げ（2026-08-01）
+
+R08 Round 2 は **CONDITIONAL PASS**（P0=0 / P1=1 / P2=2 / NOTE=3）。Round 1のP0×2・P1×3は
+Review側の実測で全て `VERIFIED_CLOSED`。新規P1 **CRM-R2-P1-01**（`/api/crm/*` がaction key解決表に無く、
+V73が登録したmenuに `MenuPermissionFilter` がヒットした時点で**管理者を含む全roleが403**）を
+本更新で修正した。
+
+修正は2段構えである。片方だけでは閉じない。
+
+1. `ActionPermissionResolver.RESOURCE_NAMES` へ `crm` を登録する。未登録rootでは `resolve()` が
+   null を返し、`/api/**` も page も**管理者bypassより前**の `deny()` に落ちる。
+2. **V74** で `crm.*` を `t_permission_group_action` へseedする。V66_1が非管理者groupから
+   全局 `*` を削除して「既知resource wildcardの列挙」へ置換したため、rootを登録しただけでは
+   group割当済みの営業/マネージャーが拒否される。
+
+2の調査中に、**同じ理由でS05とS06にも付与漏れ**があることが判明した。V68/V69の
+`search` / `task` / `saved-view` / `batch-operation` とV70の `bp-company` は `RESOURCE_NAMES` に
+登録済みだが権限seedが無く、group割当済みの営業/HR/マネージャーは**出荷済み機能で403**になる
+（V67の `document.*` だけが正しくseedしていた）。同じ1行機構で塞げるため、発注者確認のうえ
+**V74で併せて補完**した。付与先は各specのmenu付与に一致させている。
+
+再発防止として `MigrationScriptIntegrityTest` に静的検査を2件追加した（Docker不要）。
+
+- `migrationが登録するメニューのapi_prefixがaction_keyへ解決できること`
+- `メニューを持つresourceには権限seedがあること`
+
+いずれも修正前の状態で実際に失敗することを確認済みである。
+
+### 採番
+
+**CRMがV74を使用したため、S07 approvalを V75、#9〜#17を V76〜V84 へ繰り上げた。**
+`README.md` §3の予約表、各specの `design.md` / `tasks.md`、`spec-start-conversations.md`、
+`spec-review-conversations.md`、`task-start-conversations.md`、`copyable-conversations/S07〜S17`・
+`R07〜R17`、`parallel-execution-plan.md`、`dispatch-guide.md` を同一差分で更新した
+（`SpecDispatchConsistencyTest` 8/8で固定）。**V59とV72は永久欠番**であり、埋めない。
+
+### 残課題
+
+- **CRM-R2-P2-01（範囲外・backlog）**: `main` が本spec以前からREDである
+  （`WorkRecordServiceImplTest` ×2、`BpPaymentWritePathTest` ×1）。T053(M)は「`mvn test`全量」を
+  要求するため、work-record / BP発注側で解消しない限りS08は構造的にPASSできない。
+  `4d34212`〜`e8b7da6` のbisectが必要。
+- **NOTE-R2-02**: `.github/workflows/ci.yml` のno-skip gateは `Flyway.*SmokeTest` 等を除外している。
+  **CIが緑であることをもって実MySQL smokeが実行された証拠にしない**。当該runのsurefire XMLで
+  `skipped="0"` を直接確認すること。
+- **NOTE-R2-01**: 閉区間同士のprimary重なりは生成列UNIQUEの対象外。T049/A1のservice CASで塞ぐ。
 
 ## 3. 1specの状態遷移
 
