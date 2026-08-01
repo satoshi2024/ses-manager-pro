@@ -46,7 +46,7 @@
 | 本システム（雇用勤怠、F1で新設） | `t_employee_attendance`, `t_attendance_month`（design.md §1、未実装） | **正** | 出退勤・休憩・法定内外時間・休日/深夜・勤務区分・勤務地の唯一の記録先 | — |
 | `t_work_record`（月次実績工数） | `V5__create_work_record_billing.sql:1-16`。`contract_id`単位、`actual_hours`（DECIMAL(5,1)）のみ、出退勤・休憩・深夜/休日区分を持たない | **非正（請求source）** | 契約の月次請求・支払金額算定 | 雇用勤怠と一致しない。差異は`R4`で比較表示するのみで、雇用勤怠を上書きしない |
 | `t_work_record_daily`（日次入力） | `V32__engineer_self_service.sql:23-36`。`work_record_id`（＝契約）に紐づき`engineer_id`列を持たない。`worked_hours`は自動計算値の保存であり出退勤の生ログではない | **非正（請求sourceの内訳）** | マイ勤怠画面での日次入力、月次実績工数の内訳 | 同上。**エンジニア単位ではなく契約単位のレコード**である点も雇用勤怠と構造的に異なる（1エンジニアが複数契約を掛け持つケースを想定していない設計） |
-| freee（給与・勤怠連携） | `t_freee_connection`, `t_freee_employee_link`（`V21__freee_payroll_integration.sql`）。現在は勤怠でなく給与連携のみ | **非正（downstream）** | 給与計算への連携 | design.md §3のB1（freee/provider sync）で本システムの確定済み雇用勤怠をfreeeへ送信する片方向連携になる予定。freee側の値で本システムを上書きしない（design §5.4） |
+| freee（給与・勤怠連携） | `t_freee_connection`, `t_freee_employee_link`（`V21__freee_payroll_integration.sql`）。現在は勤怠でなく給与連携のみ | **非正（downstream）** | 給与計算への連携 | tasks.md B1（freee/provider sync）で本システムの確定済み雇用勤怠をfreeeへ送信する片方向連携になる予定（design.md §3の`AttendanceProvider`基盤を利用）。freee側の値で本システムを上書きしない（design §5.4） |
 
 ### 1.3 なぜ両者が一致しないか（HR確認用の要点）
 
@@ -210,7 +210,7 @@ F1/F2は上記が確定するまで該当法人・該当者を「判定不能」
       これは実データが無いためであり、列自体は法人ごとに記録する構造になっている）
 - [x] 法定休日の曜日が全法人分そろっているか未確認と明記（3章、5.2表）
 - [x] source matrixが既存work recordとの境界を含む（1章）
-- [ ] `git diff --check` exit 0 — 本ファイルのコミット時に実行して確認する
+- [x] `git diff --check` exit 0 — `git add`後の`git diff --cached --check`で確認済み（exit 0）
 
 ---
 
