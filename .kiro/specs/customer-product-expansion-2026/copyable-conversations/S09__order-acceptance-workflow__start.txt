@@ -11,7 +11,7 @@
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V74（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V76（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: approval-workflow-internal-control完了・merge済み。
 - Decision gate: 承認状態機械と帳票archive interfaceが固定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

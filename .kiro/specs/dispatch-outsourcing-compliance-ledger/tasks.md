@@ -6,7 +6,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V75**。order(V72)のmerge後、attendance(V74)と並行可。
+> **Migration**: 本specの予約番号は **V77**。order(V72)のmerge後、attendance(V74)と並行可。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G2公式様式field mapping
@@ -23,7 +23,7 @@
 - [ ] F1. workplace/profile/finding/delivery DDL
   - **Objective**: 契約ごとに就業先・業務内容・就業時間・指揮命令者・責任者・抵触日・待遇方式を登録でき、
     契約時点のsnapshotが保持される。マスタを変更しても過去帳票の内容が変わらない。
-  - **実装ガイダンス**: **V75**/V1/H2(`sql/schema-dispatch-compliance-h2.sql`)/MySQL smoke、snapshot/permission。
+  - **実装ガイダンス**: **V77**/V1/H2(`sql/schema-dispatch-compliance-h2.sql`)/MySQL smoke、snapshot/permission。
     `t_compliance_finding`に`UNIQUE(contract_id, code, condition_fingerprint)`を置く（design §5.4）。
     **`limitation_date IS NULL`は「抵触日なし」ではなく「未算定」**（design §5.1）。findingの対象にする。
   - **テスト要件**: L1〜L3。FK、期間、PII scope（待遇情報がマネージャー/営業からmaskされること）、

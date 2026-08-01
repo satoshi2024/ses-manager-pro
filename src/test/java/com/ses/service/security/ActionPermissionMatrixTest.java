@@ -14,6 +14,7 @@ import org.springframework.test.context.jdbc.Sql;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,6 +64,58 @@ class ActionPermissionMatrixTest {
         for (String action : BUSINESS_ACTIONS) {
             assertTrue(authorizationService.isAllowed(authentication, action), action + " が拒否された");
         }
+    }
+
+    /**
+     * CRM(S08)。V73が `/crm/*` menuを 管理者/マネージャー/営業 へ付与しているので、
+     * action層の母集団もそれに一致していなければならない（design §6.2）。
+     * `crm` を RESOURCE_NAMES へ登録しただけでは足りず、V66_1以降は
+     * 既知resource wildcardの列挙制なので `crm.*` のseed（V74）も要る。
+     */
+    @Test
+    void CRMは営業とマネージャーに許可されHRと要員には許可されない() {
+        for (String action : List.of("crm.view", "crm.create", "crm.update", "crm.delete")) {
+            assertTrue(authorizationService.isAllowed(authenticate(9001L, "営業"), action),
+                    "営業に " + action + " が拒否された");
+            assertTrue(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), action),
+                    "マネージャーに " + action + " が拒否された");
+            assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), action),
+                    "HRに " + action + " が許可された（design §6.2でCRMはHR不可視）");
+            assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), action),
+                    "要員に " + action + " が許可された");
+        }
+    }
+
+    /**
+     * S05(V68/V69)・S06(V70)が m_menu へ足した resource は、`RESOURCE_NAMES` には登録済みだったが
+     * `t_permission_group_action` へのseedが無く、group割当済みの非管理者が出荷済み機能で
+     * 403になっていた（S08 Round 2 で発見。V74で補完）。
+     */
+    @Test
+    void 生産性向上機能とBP会社管理もmenu付与と同じroleで実行できる() {
+        for (String action : List.of("search.view", "task.view", "task.create",
+                "saved-view.view", "batch-operation.create")) {
+            assertTrue(authorizationService.isAllowed(authenticate(9001L, "営業"), action),
+                    "営業に " + action + " が拒否された");
+            assertTrue(authorizationService.isAllowed(authenticate(9002L, "HR"), action),
+                    "HRに " + action + " が拒否された");
+            assertTrue(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), action),
+                    "マネージャーに " + action + " が拒否された");
+        }
+        // V70のmenu付与は 管理者/営業/マネージャー なのでHRは対象外
+        assertTrue(authorizationService.isAllowed(authenticate(9001L, "営業"), "bp-company.view"));
+        assertTrue(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), "bp-company.view"));
+        assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), "bp-company.view"));
+    }
+
+    /** URI→action keyの解決自体が壊れると、上のmatrixは全て素通り(null)になる。 */
+    @Test
+    void CRMのURIがaction_keyへ解決される() {
+        assertEquals("crm.view", ActionPermissionResolver.resolve("GET", "/api/crm/leads"));
+        assertEquals("crm.view", ActionPermissionResolver.resolve("GET", "/api/crm/opportunities"));
+        assertEquals("crm.create", ActionPermissionResolver.resolve("POST", "/api/crm/leads"));
+        assertEquals("crm.update", ActionPermissionResolver.resolve("PUT", "/api/crm/opportunities/1"));
+        assertEquals("crm.delete", ActionPermissionResolver.resolve("DELETE", "/api/crm/leads/1"));
     }
 
     @Test
