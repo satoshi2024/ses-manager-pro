@@ -328,7 +328,7 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 
 | Task | Requirements / 変更file | Test | Demo | Commit | Risk / rollback |
 |---|---|---|---|---|---|
-| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1224 / F0 / E0 / S1**。CRM定向回帰、Flyway fresh/legacy V60/V71、V73部分修復fixture、repair、upgrade smoke、Node/JS、`git diff --check`を実測 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。DB変更はV73/V1を編集せずrepeatable/runbook経路を使用 | `d8cba84` | `WorkRecordServiceImpl`は過去月に現行Engineer/直属組織を履歴代替として使わず、履歴snapshotが無い場合は拒否。rollbackは本レビュー修正commitをrevertし、V73/V1は変更しない |
+| T053 / M | Round3 blocker解消を含む一気通貫CRM回帰、既存customer/proposal/quotation回帰、Node/JS、desktop/390px、MySQL smoke | L4 `mvn test`: **1224 / F0 / E0 / S1**。CRM定向回帰、Flyway fresh/legacy V60/V71、V73部分修復fixture、repair、upgrade smoke、Node/JS、`git diff --check`を実測 | 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を表示。KPIは390px幅で主要見出し・Forecast・担当別・失注理由を確認。DB変更はV73/V1を編集せずrepeatable/runbook経路を使用 | `41d87e1` | `WorkRecordServiceImpl`は過去月に現行Engineer/直属組織を履歴代替として使わず、履歴snapshotが無い場合は拒否。rollbackは本レビュー修正commitをrevertし、V73/V1は変更しない |
 
 ## Round 3 独立Review FAIL 対応（2026-08-02）
 
