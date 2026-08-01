@@ -350,8 +350,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V70（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
-- 先行条件: Wave 0完了。CRMと並行開始できるがDDLはV69→V70順にmerge。
+- Migration: V70, V71（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- 先行条件: Wave 0完了（2026-08-01にS05 PASSで成就）。CRMと並行開始できるがDDLはV70/V71→V73順にmerge。
 - Decision gate: G2の法務監修と対象法令・帳票項目が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -420,8 +420,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V72（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
-- 先行条件: BP master V69とCRM V70が完了・merge済み。
+- Migration: V72（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番。CRM V73が先にmerge済みの場合はV72を使わずV74へ繰り上げる。Flywayは`out-of-order`無効のため、V73適用済みDBへ後からV72を足すと`FlywayValidateException`になる）
+- 先行条件: BP master V70/V71とCRM V73が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -490,7 +490,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 【開始条件】
 - Wave: Wave 1
 - Migration: V73（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
-- 先行条件: Wave 0完了。BPと並行開始できるがV69 merge後にV70をmerge。
+- 先行条件: Wave 0完了（2026-08-01にS05 PASSで成就）。BP V70/V71はmerge済み（`origin/main`）のため、本specのV73をその後にmerge。
 - Decision gate: blocking decisionなし。forecast口径と既存contact移行を先に固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 

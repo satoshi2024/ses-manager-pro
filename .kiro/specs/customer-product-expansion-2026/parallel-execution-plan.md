@@ -57,15 +57,22 @@ Wave 4: AI feedback
 | Wave | 同時実行単位 | 開始条件 | merge順 | 並行禁止理由/注意 |
 |---|---|---|---|---|
 | 0 | なし | G0決定済み、対象specのblocking決定済み | tenantはT001成果物で停止。共有DB再開後に当時のlatest+1から再計画 | BaseEntity、SecurityConfig、sidebar、file、監査を横断変更するため、現行独立DBでは実装しない |
-| 1-A | BP master（T034〜T040）とCRM（T048〜T053） | Wave 0完了 | BP V69→CRM V70 | 実装は並行可だがDDL merge/deployは番号順。approvalは両方待つ |
-| 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V71 | Contract/Invoice/BP payment共通経路を変更 |
-| 2-A | order（T054〜T059）単独 | approval完了 | V72 | 契約・請求状態機械の基礎 |
-| 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order完了、G2/G6確定 | V73→V74 | Contract担当メソッドと雇用勤怠テーブルを分離 |
-| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V75 | proposal/contract/availabilityを統合参照 |
-| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V76→V77 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
-| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V78 | Freee adapter、invoice、BP paymentを変更 |
-| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V79 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
-| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V80 | 学習指標の母集団とPII境界を先に固定 |
+| 1-A | BP master（T034〜T040）とCRM（T048〜T053） | Wave 0完了（2026-08-01成就） | BP V70/V71（merge済み）→CRM V73 | 実装は並行可だがDDL merge/deployは番号順。approvalは両方待つ |
+| 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V72（CRM V73より後にmergeする場合はV74へ繰り上げ） | Contract/Invoice/BP payment共通経路を変更 |
+| 2-A | order（T054〜T059）単独 | approval完了 | V74 | 契約・請求状態機械の基礎 |
+| 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order完了、G2/G6確定 | V75→V76 | Contract担当メソッドと雇用勤怠テーブルを分離 |
+| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V77 | proposal/contract/availabilityを統合参照 |
+| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V78→V79 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
+| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V80 | Freee adapter、invoice、BP paymentを変更 |
+| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V81 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
+| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V82 | 学習指標の母集団とPII境界を先に固定 |
+
+> **採番の正本は `README.md` の予約表**（V72〜V82）であり、実適用済みの最新は **V71**（BP）である。
+> 上表のmerge順は計画値なので、着手時は必ず `db/migration` の実ファイルを再確認する。
+> 1-Bのapprovalだけは番号（V72）と依存順（CRM V73の後）が逆転している。Flywayは
+> `out-of-order` を有効化していないため、V73適用済みDBへ後からV72を足すと
+> `FlywayValidateException` になる。approvalがCRMより後にmergeされる場合は、
+> approvalをV74へ繰り上げ、V72は永久欠番（V59と同じ扱い）とする。
 
 ## 4. spec内の並行グループ
 

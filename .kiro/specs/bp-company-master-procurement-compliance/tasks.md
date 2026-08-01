@@ -7,6 +7,8 @@
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
 > **Migration**: 本specのMigration予約番号は **V70** です（Wave 1 / S06）。
+> 実績はV70に加え、Round 3のR3-P0-01修正で追加した **V71**（`V71__bp_company_fix_and_procurement.sql`）も本specの成果物です。
+> 後続のS08 CRMは **V73**、S07 approvalはV72予約（CRM merge後に着手する場合はV74へ繰り上げ）です。
 DDL / DTO / Service / JS はすべて **V70**/V1/H2 で同期して作成してください。着手時にmerge済み`db/migration`の最新を再確認し、
 衝突していれば後発（本spec）を上へ繰り上げる。前の欠番を埋めない。V59は永久欠番。
 
