@@ -10,7 +10,7 @@ function loadWorkRecords() {
     if (!month) return;
 
     $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('common.msg.loading') + '</td></tr>');
-    
+
     $.ajax({
         url: '/api/work-records/grid',
         method: 'GET',
@@ -29,6 +29,57 @@ function loadWorkRecords() {
             $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.networkError') + '</td></tr>');
         }
     });
+
+    loadPendingApprovalSummary(month);
+}
+
+// 承認滞留の可視化（読み取り専用/トラックA3）: 提出済件数と滞留日数のサマリを表示する。
+function loadPendingApprovalSummary(month) {
+    $.ajax({
+        url: '/api/work-records/pending-approval-summary',
+        method: 'GET',
+        data: { month: month },
+        success: function(res) {
+            if (res.code === 200) {
+                renderPendingApprovalSummary(res.data);
+            } else {
+                $('#pending-approval-card').hide();
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            $('#pending-approval-card').hide();
+        }
+    });
+}
+
+function renderPendingApprovalSummary(summary) {
+    const card = $('#pending-approval-card');
+    const body = $('#pending-approval-table-body');
+    body.empty();
+
+    if (!summary || summary.submittedCount === 0) {
+        card.hide();
+        return;
+    }
+
+    $('#pending-approval-summary').text(SES.i18n.t('workRecord.pending.summary', {
+        count: summary.submittedCount,
+        days: summary.maxPendingDays != null ? summary.maxPendingDays : 0
+    }));
+
+    (summary.items || []).forEach(item => {
+        const tr = `
+            <tr>
+                <td>${SES.escapeHtml(item.engineerName || '-')}</td>
+                <td class="font-monospace text-muted">${SES.escapeHtml(item.contractNo || '-')}</td>
+                <td>${SES.i18n.t('workRecord.pending.daysValue', { days: item.daysPending })}</td>
+            </tr>
+        `;
+        body.append(tr);
+    });
+
+    card.show();
 }
 
 function renderWorkRecords(list) {
