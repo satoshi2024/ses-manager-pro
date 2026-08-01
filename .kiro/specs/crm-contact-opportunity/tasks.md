@@ -12,6 +12,9 @@
 > approvalの予約V72は未使用のまま残るが、本specがV72を代わりに使ってはならない（欠番は埋めない）。
 
 - [ ] F1. contact/lead/opportunity DDLと移行
+  - **状態**: DDL(V73) / 移行 / entity / 定向test は完了（`review-ledger.md` 参照）。
+    ただし Demo「既存顧客の担当者がdetailに表示」は顧客詳細画面がT050(A1)の成果物のため未成立。
+    Demo成立まで `- [x]` にしない（Round 1指摘 CRM-R1-P1-03 / NOTE-7）。
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
   - **実装ガイダンス**: **V73**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。

@@ -98,6 +98,11 @@ public class Project extends BaseEntity {
     private String remarks;
 
     /**
+     * 商機からの変換元ID
+     */
+    private Long sourceOpportunityId;
+
+    /**
      * 登録者ID
      */
     @TableField(fill = FieldFill.INSERT)
