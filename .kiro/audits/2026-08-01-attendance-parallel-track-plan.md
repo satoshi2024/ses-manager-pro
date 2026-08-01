@@ -520,9 +520,26 @@ Demo: fixture結果を提示し、45h/360h/80h平均それぞれの境界値ち�
 
 | ID | 状態 | branch / PR | 備考 |
 |---|---|---|---|
-| 0-1 / 0-1b/c/d | **完了** | PR #47 | 紐付け導線の是正。詳細は `2026-07-31-attendance-gap-analysis-and-plan.md` |
-| A1 | 未着手 | — | |
-| A2 | 未着手 | — | |
-| A3 | 未着手 | — | |
-| B1 | 未着手 | — | 台帳登録不要（文書のみ） |
-| B2 | 未着手 | — | **台帳登録が前提** |
+| 0-1 / 0-1b/c/d | PR review待ち | PR #47 | 紐付け導線の是正。詳細は `2026-07-31-attendance-gap-analysis-and-plan.md` |
+| A1 | **完了** | PR #52 | マイ勤怠UI補完。提出期限・当月合計・承認状況 |
+| A2 | **完了** | PR #53 | 勤怠未提出リマインド。`NotificationGenerateService` へgenerator追加、migration無し |
+| A3 | **完了** | PR #54 | 承認滞留の可視化（読み取り専用）。`WorkRecordServiceImpl` 未変更 |
+| B1 | **完了** | PR #51 | 棚卸し結果は `attendance-leave-overtime-compliance/source-matrix-and-agreement-inventory.md` |
+| B2 | **着手可** | — | 台帳P1行の登録により前提充足（2026-08-01） |
+
+### 9.1 A/B軌の実測（`origin/main` = `c0ad9ee` 時点）
+
+- 4トラックとも §4 の宣言ファイル範囲内に収まった。A3は読み取り専用GETとDTOのみで
+  `WorkRecordServiceImpl` を1行も変更していない。
+- **migrationは1本も作成していない。** 実適用済みの最新は `V74` のままで、attendanceの
+  V78予約は無傷である（§3の「一丁目一番地」を達成）。
+- §6の停止条件は未発火。S07(approval)/S09(order) はいずれも `NOT READY` のままで、
+  A3およびトラックCの前提は動いていない。
+
+### 9.2 B1の findings が B2 を阻害しないことの確認
+
+B1は法定休日の曜日・勤務区分・休暇残数の正本を**全法人「未確認」**と記録した（推測で埋めていない）。
+これらが阻害するのは **F1（カレンダーと協定のseed）であって B2 ではない**。design §5.2 は
+「休日労働を含むか」の分岐を calculator への**入力の選択1箇所**に閉じると定めており、
+法定休日/所定休日の分類は上流のカレンダー側で行われる。calculatorは分類済みの分を受け取るため、
+B1の未確認項目に依存しない。
