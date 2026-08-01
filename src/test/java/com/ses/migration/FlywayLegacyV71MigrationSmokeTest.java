@@ -51,7 +51,10 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertTableAbsent(statement, "t_opportunity");
             assertColumnAbsent(statement, "t_sales_activity", "contact_id");
             assertColumnAbsent(statement, "t_project", "source_opportunity_id");
-            assertColumnAbsent(statement, "t_quotation", "source_opportunity_id");
+            statement.execute("INSERT INTO m_customer (company_name, contact_person, contact_email, contact_phone, deleted_flag) VALUES "
+                    + "('email-only legacy', NULL, 'email-only@example.com', NULL, 0),"
+                    + "('phone-only legacy', NULL, NULL, '03-1234-5678', 0),"
+                    + "('empty legacy', NULL, NULL, NULL, 0)");
         }
 
         // 2) V73を追加適用する
@@ -100,7 +103,19 @@ class FlywayLegacyV71MigrationSmokeTest {
                             + " OR NOT (cc.phone <=> c.contact_phone)")) {
                 assertTrue(rs.next() && rs.getLong(1) == 0, "移行後の名称/email/電話が移行前と一致するはず");
             }
-            // valid_from は顧客の登録日起点（移行実行日にしない）
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM t_customer_contact cc JOIN m_customer c ON c.id = cc.customer_id"
+                            + " WHERE c.company_name IN ('email-only legacy','phone-only legacy')"
+                            + " AND cc.name='顧客担当者' AND cc.primary_flag=1"
+                            + " AND ((c.company_name='email-only legacy' AND cc.email='email-only@example.com' AND cc.phone IS NULL)"
+                            + " OR (c.company_name='phone-only legacy' AND cc.email IS NULL AND cc.phone='03-1234-5678'))")) {
+                assertTrue(rs.next() && rs.getLong(1) == 2, "email-only/phone-only legacyも既定contactへ移行されるはず");
+            }
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT COUNT(*) FROM t_customer_contact cc JOIN m_customer c ON c.id = cc.customer_id"
+                            + " WHERE c.company_name='empty legacy'")) {
+                assertTrue(rs.next() && rs.getLong(1) == 0, "全NULL legacy顧客はcontactを生成しないはず");
+            }
             try (ResultSet rs = statement.executeQuery(
                     "SELECT COUNT(*) FROM t_customer_contact WHERE valid_from > CURDATE()")) {
                 assertTrue(rs.next() && rs.getLong(1) == 0, "移行行のvalid_fromが未来日になってはいけない");

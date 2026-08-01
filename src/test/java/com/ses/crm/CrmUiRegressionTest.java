@@ -23,6 +23,9 @@ class CrmUiRegressionTest {
         assertTrue(leadJs.contains("自動統合は行いません"));
         assertTrue(kpi.contains("kpi-opportunity-forecast") && kpi.contains("kpi-stage-body"));
         assertTrue(kpiJs.contains("/api/crm/opportunities/kpi") && kpiJs.contains("proposalAmount"));
+        assertTrue(leads.contains("lead-owner") && opportunities.contains("opportunity-owner"));
+        assertTrue(read("templates/customer/detail.html").contains("act-contact") && read("templates/customer/detail.html").contains("contact-roles"));
+        assertTrue(kpi.contains("crm.kpi.owner") && kpiJs.contains("/crm/opportunities?stage="));
     }
 
     private String read(String path) throws Exception {

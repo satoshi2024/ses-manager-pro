@@ -10,6 +10,7 @@ import java.util.List;
 public interface CustomerContactService {
     List<CustomerContactDto> list(Long customerId, LocalDate asOf);
     List<CustomerContactDto> recipientCandidates(Long customerId, LocalDate asOf);
+    List<CustomerContactDto> duplicateCandidates(Long customerId, String email, String phone, Long excludeId);
     CustomerContactDto create(Long customerId, CustomerContactSaveRequest request);
     CustomerContactDto update(Long customerId, Long contactId, CustomerContactSaveRequest request);
     CustomerContactDto retire(Long customerId, Long contactId, LocalDate validTo, Integer version);

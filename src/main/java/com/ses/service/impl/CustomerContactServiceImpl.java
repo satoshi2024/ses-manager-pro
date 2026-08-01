@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
@@ -25,11 +26,14 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     private final CustomerContactMapper mapper;
     private final DataScopeService dataScopeService;
     @Autowired(required = false)
+    private Clock clock = Clock.systemDefaultZone();
+    @Autowired(required = false)
     private CrmScopeService crmScopeService;
 
-    public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService) {
+    public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService, Clock clock) {
         this.mapper = mapper;
         this.dataScopeService = dataScopeService;
+        this.clock = clock == null ? Clock.systemDefaultZone() : clock;
     }
 
     @Override
@@ -43,9 +47,25 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     @Override
+    public List<CustomerContactDto> duplicateCandidates(Long customerId, String email, String phone, Long excludeId) {
+        assertCustomerScope(customerId);
+        if (!hasText(email) && !hasText(phone)) return List.of();
+        return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
+                        .eq(CustomerContact::getCustomerId, customerId)
+                        .eq(CustomerContact::getStatus, "有効")
+                        .last("LIMIT 100"))
+                .stream()
+                .filter(c -> !Objects.equals(c.getId(), excludeId)
+                        && (sameEmail(email, c.getEmail()) || samePhone(phone, c.getPhone())))
+                .limit(20)
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public List<CustomerContactDto> recipientCandidates(Long customerId, LocalDate asOf) {
         assertCustomerScope(customerId);
-        LocalDate target = asOf != null ? asOf : LocalDate.now();
+        LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
         return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
                         .eq(CustomerContact::getCustomerId, customerId)
                         .eq(CustomerContact::getStatus, "有効")
@@ -81,6 +101,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     public CustomerContactDto update(Long customerId, Long contactId, CustomerContactSaveRequest request) {
         assertCustomerScope(customerId);
         validatePeriod(request.getValidFrom(), request.getValidTo());
+        lockCustomerContacts(customerId);
         CustomerContact current = lockOwned(customerId, contactId);
         if (request.getVersion() == null || !Objects.equals(request.getVersion(), current.getVersion())) {
             throw BusinessException.of("error.common.optimisticLock");
@@ -97,8 +118,8 @@ public class CustomerContactServiceImpl implements CustomerContactService {
                 .set("department", request.getDepartment())
                 .set("position", request.getPosition())
                 .set("roles_json", request.getRolesJson())
-                .set("email", request.getEmail())
-                .set("phone", request.getPhone())
+                .set("email",preserveMasked(current.getEmail(), request.getEmail(), true))
+                .set("phone",preserveMasked(current.getPhone(), request.getPhone(), false))
                 .set("primary_flag", request.getPrimaryFlag() == null ? 0 : request.getPrimaryFlag())
                 .set("valid_from", request.getValidFrom())
                 .set("valid_to", request.getValidTo())
@@ -116,7 +137,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     public CustomerContactDto retire(Long customerId, Long contactId, LocalDate validTo, Integer version) {
         assertCustomerScope(customerId);
         CustomerContact current = lockOwned(customerId, contactId);
-        LocalDate end = validTo != null ? validTo : LocalDate.now();
+        LocalDate end = validTo != null ? validTo : LocalDate.now(clock);
         if (end.isBefore(current.getValidFrom())) {
             throw BusinessException.of("error.crm.contactPeriodInvalid");
         }
@@ -136,7 +157,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     @Override
     public String resolveRecipientEmail(Long customerId, Long contactId, LocalDate asOf) {
         assertCustomerScope(customerId);
-        LocalDate target = asOf != null ? asOf : LocalDate.now();
+        LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
         CustomerContact contact = mapper.selectOne(new LambdaQueryWrapper<CustomerContact>()
                 .eq(CustomerContact::getId, contactId)
                 .eq(CustomerContact::getCustomerId, customerId)
@@ -172,7 +193,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
 
     private void lockCustomerContacts(Long customerId) {
         mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getCustomerId, customerId).last("FOR UPDATE"));
+                .eq(CustomerContact::getCustomerId, customerId).orderByAsc(CustomerContact::getId).last("FOR UPDATE"));
     }
 
     private void validatePrimaryPeriod(Long customerId, Long excludedId, Integer primaryFlag, String status,
@@ -219,10 +240,34 @@ public class CustomerContactServiceImpl implements CustomerContactService {
 
     private void assertCustomerScope(Long customerId) {
         if (crmScopeService != null) {
-            crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
+            crmScopeService.assertAllowedCustomer(customerId, LocalDate.now(clock));
         } else {
             dataScopeService.assertAllowedCustomer(customerId);
         }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private boolean sameEmail(String left, String right) {
+        return hasText(left) && hasText(right)
+                && left.trim().toLowerCase(java.util.Locale.ROOT)
+                .equals(right.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private boolean samePhone(String left, String right) {
+        if (!hasText(left) || !hasText(right)) return false;
+        String a = left.replaceAll("[^0-9+]", "");
+        String b = right.replaceAll("[^0-9+]", "");
+        return !a.isBlank() && a.equals(b);
+    }
+
+    /** 非管理者の表示マスクを更新値として書き戻さず、明示的な空欄はクリアとして扱う。 */
+    private String preserveMasked(String current, String requested, boolean email) {
+        if ("管理者".equals(SecurityUtils.currentRole()) || current == null) return requested;
+        String masked = maskPii(current, email);
+        return masked.equals(requested) ? current : requested;
     }
 
     private CustomerContactDto toDto(CustomerContact contact) {

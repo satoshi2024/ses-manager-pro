@@ -6,7 +6,9 @@ DROP PROCEDURE IF EXISTS __ses_crm_contact_reconciliation $$
 CREATE PROCEDURE __ses_crm_contact_reconciliation()
 BEGIN
 IF EXISTS (SELECT 1 FROM information_schema.tables
-  WHERE table_schema = DATABASE() AND table_name = 't_opportunity') THEN
+  WHERE table_schema = DATABASE() AND table_name = 't_opportunity')
+   AND EXISTS (SELECT 1 FROM flyway_schema_history
+  WHERE version = '73' AND success = 1) THEN
 SET @crm_stage_changed_exists = (SELECT COUNT(*) FROM information_schema.columns
   WHERE table_schema = DATABASE() AND table_name = 't_opportunity' AND column_name = 'stage_changed_at');
 SET @crm_sql = IF(@crm_stage_changed_exists = 0,
@@ -69,6 +71,7 @@ SET @crm_mail_opp_index = (SELECT COUNT(*) FROM information_schema.statistics
 SET @crm_sql = IF(@crm_mail_opp_index = 0,
   'ALTER TABLE t_mail_delivery ADD INDEX idx_mail_delivery_opportunity (opportunity_id)', 'SELECT 1');
 PREPARE crm_stmt FROM @crm_sql; EXECUTE crm_stmt; DEALLOCATE PREPARE crm_stmt;
+END IF;
 END IF;
 END $$
 CALL __ses_crm_contact_reconciliation() $$

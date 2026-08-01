@@ -1,12 +1,16 @@
 package com.ses.service.security.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.entity.Lead;
+import com.ses.entity.Opportunity;
 import com.ses.service.security.CrmScopeService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.Set;
@@ -16,6 +20,8 @@ import java.util.Set;
 public class CrmScopeServiceImpl implements CrmScopeService {
     private final DataScopeService dataScopeService;
     private final OrganizationScopeService organizationScopeService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private Clock clock = Clock.systemDefaultZone();
 
     public CrmScopeServiceImpl(DataScopeService dataScopeService,
                                OrganizationScopeService organizationScopeService) {
@@ -40,7 +46,7 @@ public class CrmScopeServiceImpl implements CrmScopeService {
     @Override
     public Set<Long> allowedCustomerIds(LocalDate asOf) {
         if (!canUseCrm() || hasFullAccess()) return Set.of();
-        LocalDate target = asOf != null ? asOf : LocalDate.now();
+        LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
         String role = SecurityUtils.currentRole();
         if ("マネージャー".equals(role)) {
             if (organizationScopeService.hasFullAccess()) return Set.of();
@@ -64,6 +70,82 @@ public class CrmScopeServiceImpl implements CrmScopeService {
         }
         Long current = SecurityUtils.currentUserId();
         return current == null ? Set.of() : Set.of(current);
+    }
+
+    @Override
+    public void applyLeadScope(QueryWrapper<Lead> query, LocalDate asOf) {
+        if (!canUseCrm()) {
+            query.eq("id", -1L);
+            return;
+        }
+        if (hasFullAccess()) return;
+        Set<Long> customers = allowedCustomerIds(asOf);
+        Set<Long> owners = allowedOwnerIds(asOf);
+        boolean unassignedVisible = "営業".equals(SecurityUtils.currentRole());
+        if (customers.isEmpty() && owners.isEmpty() && !unassignedVisible) {
+            query.eq("id", -1L);
+            return;
+        }
+        query.and(w -> {
+            boolean branch = false;
+            if (!customers.isEmpty()) {
+                w.in("converted_customer_id", customers);
+                branch = true;
+            }
+            if (!owners.isEmpty()) {
+                if (branch) w.or();
+                w.in("owner_user_id", owners);
+                branch = true;
+            }
+            if (unassignedVisible) {
+                if (branch) w.or();
+                w.isNull("owner_user_id");
+            }
+        });
+    }
+
+    @Override
+    public void applyOpportunityScope(QueryWrapper<Opportunity> query, LocalDate asOf) {
+        if (!canUseCrm()) {
+            query.eq("id", -1L);
+            return;
+        }
+        if (hasFullAccess()) return;
+        Set<Long> customers = allowedCustomerIds(asOf);
+        if (customers.isEmpty()) {
+            query.eq("id", -1L);
+            return;
+        }
+        query.in("customer_id", customers);
+        Set<Long> owners = allowedOwnerIds(asOf);
+        if (!owners.isEmpty()) {
+            query.and(w -> w.in("owner_user_id", owners).or().isNull("owner_user_id"));
+        } else if (!"営業".equals(SecurityUtils.currentRole())) {
+            query.isNull("owner_user_id");
+        }
+    }
+
+    @Override
+    public boolean isOwnerAllowed(Long ownerUserId, LocalDate asOf) {
+        if (!canUseCrm() || hasFullAccess() || ownerUserId == null) return canUseCrm();
+        return allowedOwnerIds(asOf).contains(ownerUserId);
+    }
+
+    @Override
+    public boolean isLeadVisible(Long ownerUserId, Long convertedCustomerId, LocalDate asOf) {
+        if (!canUseCrm()) return false;
+        if (hasFullAccess()) return true;
+        boolean customerVisible = convertedCustomerId != null && isCustomerAllowed(convertedCustomerId, asOf);
+        boolean ownerVisible = ownerUserId != null && isOwnerAllowed(ownerUserId, asOf);
+        boolean unassignedVisible = ownerUserId == null && "営業".equals(SecurityUtils.currentRole());
+        return customerVisible || ownerVisible || unassignedVisible;
+    }
+
+    @Override
+    public boolean isOpportunityVisible(Long customerId, Long ownerUserId, LocalDate asOf) {
+        if (!isCustomerAllowed(customerId, asOf)) return false;
+        if (hasFullAccess()) return true;
+        return ownerUserId == null || isOwnerAllowed(ownerUserId, asOf);
     }
 
     @Override

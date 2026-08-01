@@ -1,5 +1,6 @@
 package com.ses.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.crm.OpportunityConversionDto;
 import com.ses.dto.crm.OpportunityListDto;
@@ -21,6 +22,8 @@ public interface OpportunityService extends IService<Opportunity> {
     List<Opportunity> listForecastCandidates();
 
     List<OpportunityListDto> listForScreen(String stage, Long ownerUserId);
+
+    Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId, long current, long size);
 
     Opportunity createBasic(OpportunitySaveRequest request);
 

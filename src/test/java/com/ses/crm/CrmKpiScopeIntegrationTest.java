@@ -6,6 +6,9 @@ import com.ses.entity.Opportunity;
 import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
 import com.ses.service.CrmKpiService;
+import com.ses.service.LeadService;
+import com.ses.service.OpportunityService;
+import com.ses.service.security.CrmScopeService;
 import com.ses.service.CustomerService;
 import com.ses.service.security.DataScopeService;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +25,8 @@ import java.math.BigDecimal;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
 /** T052 L3: 営業Aは許可customerかつ本人/未割当の商機だけを集計する。 */
@@ -32,6 +37,9 @@ import static org.mockito.Mockito.*;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class CrmKpiScopeIntegrationTest {
     @Autowired private CrmKpiService crmKpiService;
+    @Autowired private LeadService leadService;
+    @Autowired private OpportunityService opportunityService;
+    @Autowired private CrmScopeService crmScopeService;
     @Autowired private CustomerService customerService;
     @Autowired private OpportunityMapper opportunityMapper;
     @Autowired private LeadMapper leadMapper;
@@ -65,16 +73,23 @@ class CrmKpiScopeIntegrationTest {
         opportunityMapper.insert(own);
         Opportunity otherOwner = opportunity(10L, "他担当商機", 2L);
         opportunityMapper.insert(otherOwner);
+        Opportunity unassigned = opportunity(10L, "未割当商機", null);
+        opportunityMapper.insert(unassigned);
         Opportunity otherCustomerOpp = opportunity(11L, "他顧客商機", 1L);
         opportunityMapper.insert(otherCustomerOpp);
         Lead ownLead = Lead.builder().companyName("A").ownerUserId(1L).status("未対応").version(1).build();
         leadMapper.insert(ownLead);
         Lead otherLead = Lead.builder().companyName("B").ownerUserId(2L).status("未対応").version(1).build();
         leadMapper.insert(otherLead);
+        Lead unassignedLead = Lead.builder().companyName("未割当").status("未対応").version(1).build();
+        leadMapper.insert(unassignedLead);
 
         CrmKpiDto dto = crmKpiService.summarize(null, null);
-        assertEquals(1, dto.getForecast().getOpportunityCount());
-        assertEquals(1, dto.getOwners().stream().mapToLong(CrmKpiDto.OwnerKpi::getLeadCount).sum());
+        assertEquals(2, dto.getForecast().getOpportunityCount());
+        assertEquals(2, dto.getOwners().stream().mapToLong(CrmKpiDto.OwnerKpi::getLeadCount).sum());
+        assertEquals(2, opportunityService.listForScreen(null, null).size());
+        assertTrue(crmScopeService.isOpportunityVisible(10L, null, java.time.LocalDate.now()));
+        assertFalse(crmScopeService.isOpportunityVisible(10L, 2L, java.time.LocalDate.now()));
     }
 
     private Opportunity opportunity(Long customerId, String title, Long ownerId) {
