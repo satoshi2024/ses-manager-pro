@@ -16,8 +16,63 @@ function loadMyTimesheet() {
     fetch('/api/my/timesheet?month=' + encodeURIComponent(myMonthValue))
         .then(res => res.json()).then(data => {
             if (data.code !== 200) { renderMyError(data); return; }
+            renderMySummary(data.data.rows || []);
             renderMy(data.data.rows || [], data.data.engineerName);
         });
+}
+
+// 対象月の最終日をYYYY-MM-DD文字列で返す（提出期限の目安。バックエンドに期限設定は無いため月末を採用）。
+function myMonthEndDateString(monthValue) {
+    const [y, m] = monthValue.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
+// 提出期限・当月合計・承認状況の要約バー。状態集計は既存の workRecord.status.* をそのまま使う。
+function renderMySummary(rows) {
+    const el = document.getElementById('myTimesheetSummary');
+    if (!el) return;
+    if (!myMonthValue || rows.length === 0) { el.innerHTML = ''; return; }
+
+    const deadline = myMonthEndDateString(myMonthValue);
+    const today = SES.util.getLocalDateString();
+    const hasUnfinished = rows.some(row => !['提出済', '確定'].includes(row.status));
+    const overdue = hasUnfinished && today > deadline;
+
+    const monthTotal = rows.reduce((sum, row) => sum + (Number(row.actualHours) || 0), 0);
+
+    const statusOrder = ['入力中', '差戻し', '提出済', '確定'];
+    const statusBadgeClass = { '入力中': 'bg-secondary', '差戻し': 'bg-danger', '提出済': 'bg-info', '確定': 'bg-success' };
+    const statusCounts = {};
+    rows.forEach(row => {
+        const status = row.status || '入力中';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+    });
+    const statusBadges = statusOrder
+        .filter(status => statusCounts[status])
+        .map(status => `<span class="badge ${statusBadgeClass[status]} me-1">${SES.escapeHtml(SES.i18n.t('workRecord.status.' + status, status))} (${statusCounts[status]})</span>`)
+        .join('');
+
+    el.innerHTML = `
+        <div class="card">
+            <div class="card-body d-flex flex-wrap gap-4">
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.deadline', '提出期限')}</div>
+                    <div class="fw-bold ${overdue ? 'text-danger' : ''}" data-field="deadline">
+                        ${SES.escapeHtml(SES.util.formatDate(deadline))}
+                        ${overdue ? `<span class="badge bg-danger ms-1">${SES.escapeHtml(SES.i18n.t('my.timesheet.summary.overdue', '期限超過'))}</span>` : ''}
+                    </div>
+                </div>
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.monthTotal', '当月合計')}</div>
+                    <div class="fw-bold" data-field="monthTotal">${SES.escapeHtml(monthTotal.toFixed(1))} h</div>
+                </div>
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.approvalStatus', '承認状況')}</div>
+                    <div data-field="approvalStatus">${statusBadges}</div>
+                </div>
+            </div>
+        </div>`;
 }
 
 /**
@@ -25,6 +80,8 @@ function loadMyTimesheet() {
  * エラー文だけを置いて行き止まりにせず、次に何をすればよいかを示す。
  */
 function renderMyError(data) {
+    const summary = document.getElementById('myTimesheetSummary');
+    if (summary) summary.innerHTML = '';
     const container = document.getElementById('myContracts');
     container.innerHTML = '';
     const box = document.createElement('div');
