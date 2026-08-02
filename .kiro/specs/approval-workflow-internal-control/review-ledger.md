@@ -1,8 +1,92 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-現行判定: **NOT READY（着手不可・STOP）**
+現行判定: **IN PROGRESS（T041/T042完了、実装対話は継続中。独立Review未実施）**
 
-## Readiness Gate 判定（2026-08-02）
+## T042(F1) route/request/action/delegation DDL 完了（2026-08-02）
+
+TASK CONTRACTに基づき実装した。詳細は`tasks.md`のF1エントリと`design.md` §8「F1実装注記」を正とする。
+
+- **requirements ID**: R1.1〜R1.4、R2.1〜R2.2、R2.4、R3.4、R4.1
+- **変更file**:
+  - migration: `V75__approval_workflow.sql`（新規5テーブル + `ActionPermissionResolver`用`approval.*`権限seed）
+  - H2: `sql/schema-approval-h2.sql`（新規）、`application-test.yml`（schema-locations追加）、
+    `sql/permission-group-seed-h2.sql`（`approval.*`のgroup権限seed追加）
+  - entity: `ApprovalRoute`/`ApprovalRouteStep`/`ApprovalRequest`/`ApprovalAction`/`ApprovalDelegation`
+  - mapper: `ApprovalRouteMapper`/`ApprovalRouteStepMapper`/`ApprovalRequestMapper`/`ApprovalActionMapper`/`ApprovalDelegationMapper`
+  - service: `com.ses.service.approval`パッケージ（`ApprovalEngineService`/`ApprovalTargetAdapter`/
+    `RouteResolverService`/DTO群）+ `RouteResolverServiceImpl`/`ApprovalEngineServiceImpl`
+  - controller: `ApprovalApiController`（`/api/approval/requests`配下の汎用engine API）
+  - DTO: `com.ses.dto.approval`パッケージ
+  - `ActionPermissionResolver.java`（`approval`をRESOURCE_NAMESへ登録。CRM-R2-P1-01の再発防止）
+  - `messages{,_en,_ko,_zh_CN}.properties`（`error.approval.*` 5key×4言語）
+  - `FlywayMigrationSmokeTest.java`（V75のtable/column/index/action権限assert追加）
+  - test: `RouteResolverServiceTest`（新規, 8件）、`ApprovalEngineServiceTest`（新規, 12件）
+- **DDL/H2/MySQL同期**: 新規テーブルのみのためV1は無変更（CRM V73と同方針、design冒頭に明記）。
+  H2は`schema-approval-h2.sql`（FK無し、CLOB化、CRM/BPと同じ方針）。MySQL smoke assertは
+  `FlywayMigrationSmokeTest`へ追加したがDocker未導入のため本環境では未実行（release gate継続）。
+- **実行testと件数/結果**:
+  - `RouteResolverServiceTest` 8/8 PASS（金額帯inclusive境界、該当routeなし拒否、負数絶対値、
+    金額なし申請の専用route、自己承認候補ゼロでの拒否、組織具体性/金額帯狭さ/version_no新しさの決定順）
+  - `ApprovalEngineServiceTest` 12/12 PASS（申請直後in_review到達、単一承認者の終端、
+    並列group全員承認での進行、並列group1人却下での即終端、自己承認のみのroute拒否、
+    非承認者からのapprove拒否(403)、代理期間内/期間外、本人と代理の同時解決での先着1件のみ有効、
+    同一slotへの二重clickの冪等性、終端到達後retryの状態不正エラー、versionのCAS(0件更新)確認）
+  - 共有基盤への直接影響範囲の回帰: `MigrationScriptIntegrityTest`・`ActionPermissionMatrixTest`・
+    `ActionPermissionResolverTest`・`MessageBundleConsistencyTest`（4クラス計51件）全PASS
+  - 上記6クラス合計 71件 / failures 0 / errors 0 / skipped 0。`mvn -o compile`・`mvn -o test-compile` BUILD SUCCESS。
+  - `git diff --check` exit 0
+- **Demo**: `RouteResolverServiceTest`の境界fixture群で金額帯境界のroute解決を自動確認。
+  route未設定時の`notifyAdminsOfConfigGap`呼び出しはコードレビューで確認（実通知送信の目視Demoは
+  B1のSLA/通知実装と合わせて実施）。実ブラウザ/curl Demoは対象画面が無いF1段階では実施せず、
+  A1（inbox UI）着手後またはM taskで行う。
+- **未検証事項**:
+  1. MySQL fresh/legacy smokeの実機実行（Docker未導入環境のため）。
+  2. 実通知送信（`NotificationService.publishToUser`呼び出し先の実際の到達）はB1と合わせて確認。
+  3. 本番相当のbrowser Demo（対象画面が無いため、A1/Mへ持ち越し）。
+  4. G7の正式decision-log記録は未実施（推奨既定採用として`operation-inventory.md`へ記録済みだが、
+     `decision-log.md`自体の更新は発注者/統合担当の所掌）。
+- **既知のトレードオフとロールバック**: `design.md` §8に記載の5件の実装注記（二重action防止キーの変更、
+  draft/requested collapse、approver_type範囲限定、resolveApprovers実現方法、target_version/`@Version`の
+  F2持ち越し、escalateのB1持ち越し）はいずれも既存資産の再利用または後続task境界の明確化であり、
+  要件変更ではない。ロールバックは本task分の新規file削除 + `V75__approval_workflow.sql`の取り下げ
+  （適用済みでなければ）で完結する。適用済みの場合は新migrationでDROPする（V75自体は編集しない）。
+- **base/head commit**: 未commit（working tree、ユーザーからのcommit指示があれば別途実施）。
+- **Review開始条件**: 未成就。F2（5 target adapters）着手前、またはA1/A2/B1と合流するタイミングで
+  主担当が独立Reviewへ提出する。現時点でF2以降を自動開始しない。
+
+## Readiness再確認とT041完了（2026-08-02）
+
+前回STOP後、`main`側でCRM(S08)がRound 8独立再ReviewでPASS確定し（`spec-execution-ledger.md` row8、
+Base `94f95083f178b812caa43782a5e00d09a8d6f324` → Head `042bd0cfb8139466eb7199a7d625adfb181c8563`、
+L4全量1,280/0/0/0、MySQL fresh/legacy/partial/repair全4経路成功、desktop/390px全role Demo確認済み）、
+central ledger row7（approval-workflow-internal-control）が`NOT READY`→`READY`へ更新された。
+working treeもclean化された（HEAD `6645644`）。これによりT041(0)の開始条件が成就したため着手した。
+
+```text
+READINESS（再確認）
+- spec/task: approval-workflow-internal-control T041(0)
+- handbook version: v2.0
+- base commit / working tree: main 6645644、clean
+- dependency merge/review evidence: BP(S06) PASS、CRM(S08) PASS（Round 8、central ledger row8）確認
+- migration latest/reserved: 実在latestはV74系列。本specの予約V75は依然空き番号（F1着手時に再確認する）
+- G7: blocking=no、decision-log推奨既定（組織上長→財務/管理者。閾値は設定画面で管理）を採用し、
+  operation-inventory.md §1へ明記。decision-log.md自体の正式decision記録は発注者/統合担当の所掌として
+  別途依頼する（本task 0はinventory担当であり、decision-log更新権限を僭称しない）
+- decision: GO（T041のみ。F1はTASK CONTRACTを別途提示してから着手する）
+```
+
+### T041(0) 成果物・実測
+
+- 成果物: [`operation-inventory.md`](operation-inventory.md)（対象5業務・9操作の現endpoint/service/申請field/route/SLA/職務分離表）。
+- 変更file: `operation-inventory.md`（新規）、`tasks.md`（task 0を`[x]`化）、本ファイル。production code(Java/SQL/JS/HTML)は無変更。
+- 対応requirements ID: R1.1, R1.2, R1.3, R2.1, R2.2, R2.4, R4.1（各行に付与、詳細はoperation-inventory.md §2）。
+- test: L0。`git diff --check` exit 0。表の全9操作にendpoint/service/requirements IDが存在することを目視確認。
+- Demo: 財務/管理者向け提示内容としてoperation-inventory.md §4に記録（実ブラウザ/実会議での提示はF1〜Mのrelease gateへ継続）。
+- 未検証事項: G7の正式decision-log記録（発注者/統合担当待ち）。operation-inventory.md §3の3件の非対称性（月次締めロック未呼び出し、単価改定の状態非依存、BP支払確定のlock方式）はF1のdesign.md決定表反映が必要な申し送りであり、F1着手前に解消する。
+- rollback: 本task分のドキュメント3ファイルをrevertするのみ（production変更なし）。
+- Base/Head: Base `6645644`（変更前）→ 本task分のドキュメント変更のみ、コミットは未実施（ユーザー指示によるcommit要求があれば別途実施）。
+
+## Readiness Gate 判定（2026-08-02、旧・STOP時点の記録として保持）
 
 `execution-review-handbook.md` v2.0 §4 Readiness Gateに従い、T041着手前の確認を実施した結果、
 開始条件が未成就のため production file・SQL・`tasks.md`のcheckboxを一切変更せず停止する。

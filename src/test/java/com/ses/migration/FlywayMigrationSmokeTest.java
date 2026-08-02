@@ -471,6 +471,31 @@ class FlywayMigrationSmokeTest {
             for (String action : new String[]{"search.*", "task.*", "saved-view.*", "batch-operation.*"}) {
                 assertActionGrantedTo(st, action, "role-hr", "role-manager", "role-sales");
             }
+
+            // V75: 承認ワークフロー・内部統制 (approval-workflow-internal-control)
+            assertTableExists(st, "m_approval_route");
+            assertTableExists(st, "m_approval_route_step");
+            assertTableExists(st, "t_approval_request");
+            assertTableExists(st, "t_approval_action");
+            assertTableExists(st, "t_approval_delegation");
+            assertColumnExists(st, "m_approval_route", "min_amount");
+            assertColumnExists(st, "m_approval_route", "max_amount");
+            assertNumericColumn(st, "m_approval_route", "min_amount", 14, 0);
+            assertColumnExists(st, "t_approval_request", "route_snapshot_json");
+            assertColumnExists(st, "t_approval_request", "target_version");
+            assertColumnExists(st, "t_approval_request", "idempotency_key");
+            assertColumnExists(st, "t_approval_action", "approver_slot_user_id");
+            assertIndexExists(st, "m_approval_route", "idx_approval_route_lookup");
+            assertIndexExists(st, "t_approval_request", "idx_approval_request_applicant");
+            assertActionGrantedTo(st, "approval.*", "role-hr", "role-manager", "role-sales");
+            // t_approval_action.uk_approval_action_slot が二重action防止のUNIQUEであること
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM information_schema.statistics"
+                            + " WHERE table_schema = DATABASE() AND table_name = 't_approval_action'"
+                            + " AND index_name = 'uk_approval_action_slot' AND non_unique = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) >= 1,
+                        "t_approval_action.uk_approval_action_slotがUNIQUEでない");
+            }
         }
     }
 

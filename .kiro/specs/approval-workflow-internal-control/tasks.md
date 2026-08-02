@@ -11,19 +11,50 @@
 > **Migration**: 本specの予約番号は **V75**。BP(V70/V71)とCRM(V73/V74)のmerge後に着手する。V72は永久欠番。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. G7と対象操作inventory
+- [x] 0. G7と対象操作inventory
+  - **状態**: 完了。成果物は[`operation-inventory.md`](operation-inventory.md)。production codeは変更していない。
+  - **実測**: 対象5業務・9操作（見積提出/受注、契約稼動化/単価改定、請求送付/取消、BP支払確定、月次締め/reopen）
+    の現endpoint/service/申請field/route/SLA/職務分離を特定し、全行にrequirements ID（R1.1〜R4.1）を付けた。
+    `git diff --check` exit 0。
+  - **Demo**: 財務/管理者レビュー用に表を提示。G7は`decision-log.md`推奨既定（組織上長→財務/管理者、
+    閾値は設定画面で管理）を採用する旨を明記（決定済みではなく既定採用として記録）。
+  - **申し送り（F1着手前に決定表へ反映が必要な観測事実）**: (1) 請求送付/取消・BP支払確定は既存
+    `assertOpenForUpdate`（月次締めロック）を呼ぶが、見積・契約は呼ばない非対称性がある。
+    (2) 単価改定(`revisePrice`)はcontract statusを検証しない唯一の操作。
+    (3) BP支払確定のみ行レベルpessimistic lockが無く状態CASのみ。
+    (4) 月次締め/reopenは金額を持たず「金額なし」routeに倒す。詳細は`operation-inventory.md` §3。
   - **Objective**: 対象5業務（見積提出/受注、契約稼動化/単価改定、請求送付/取消、BP支払確定、月次締め/reopen）の
     現endpoint・現service・申請field・route・SLA・職務分離が表として確定する。
     以降のadapter実装が「どのmethodを1回だけ呼ぶか」を推測せずに決められる状態にする。
   - **成果物**: 操作、現endpoint/service、申請field、route、SLA、職務分離表。
-  - **Demo**: 財務/管理者レビュー。金額帯の閾値と承認者はG7で決定済みか、既定を採るかを明記して提示。
   - **実装ガイダンス**: production codeを変更しない。対象5業務の既存単件methodを特定し、
     `applyApproved`が委譲する先を1対1で対応付ける。既存の状態機械/金額検証/監査を**再実装しない**前提を確認する。
     G7は`blocking=no`だが、閾値を変える場合は推奨既定を採るか発注者決定を得たことを明記する。
   - **テスト要件**: L0。対象5業務の全endpointが表に存在すること、
     各操作に対応するrequirements IDが付いていること、`git diff --check` exit 0。
 
-- [ ] F1. route/request/action/delegation DDL
+- [x] F1. route/request/action/delegation DDL
+  - **状態**: 完了。V75で5テーブル(`m_approval_route`/`m_approval_route_step`/`t_approval_request`/
+    `t_approval_action`/`t_approval_delegation`)を新設。V1へは追記していない（新規テーブルはCRM V73と
+    同じ方針、既存対象5業務テーブルも無変更）。H2は`sql/schema-approval-h2.sql`を追加し
+    `application-test.yml`のschema-locationsへ登録。engine core(`ApprovalEngineServiceImpl`)と
+    route resolver(`RouteResolverServiceImpl`)を実装。`ActionPermissionResolver.RESOURCE_NAMES`へ
+    `approval`を登録し、V75と`permission-group-seed-h2.sql`へ`approval.*`のgroup権限seedを追加
+    （営業/HR/マネージャー。CRM-R2-P1-01と同じ罠を踏まないための対応、design §8補足には含めず
+    実装必須事項として扱った）。
+  - **実測**: `RouteResolverServiceTest` 8/8、`ApprovalEngineServiceTest` 12/12、
+    `MigrationScriptIntegrityTest`・`ActionPermissionMatrixTest`・`ActionPermissionResolverTest`・
+    `MessageBundleConsistencyTest`（4クラス計51件）全green（回帰、L1〜L3+共有基盤の直接影響範囲）。
+    `git diff --check` exit 0。MySQL fresh smokeの assert block は`FlywayMigrationSmokeTest`へ追加済みだが
+    Docker未導入のため本環境では未実行（既存の全spec共通の制約、release gateとして継続管理）。
+  - **未実装・F2/A2/B1への申し送り**: `target_version`の実値取得・対象entityの`@Version`追加、
+    5対象adapterの登録(`ApprovalTargetAdapter`実装)はF2。`permission group`/`組織責任者`/`財務責任者`の
+    個別解決方式、routeのversion編集UIはA2。`escalate()`と`sla_hours`監視はB1。詳細はdesign.md §8。
+  - **Demo**: `RouteResolverServiceTest`の境界value test群（min-1/min/min+1/max-1/max/max+1）で
+    金額帯ちょうどの申請が意図したrouteへ解決されることを自動テストで確認（本番相当の実ブラウザ/curl Demoは
+    A1のUI実装後、Mで実施）。route未設定の場合の拒否+管理者通知は`request()`実装内で
+    `notifyAdminsOfConfigGap`を呼ぶことをコードレビューで確認済み（管理者宛通知の実送信テストはB1の
+    通知重複防止実装と合わせてB1で行う）。
   - **Objective**: 対象操作が直接確定されず申請draftと差分snapshotになる。
     routeが対象種別・組織・金額帯・申請者roleから1件に決まり、決まらない場合は申請が受け付けられず管理者へ通知される。
     申請者自身は自分の申請を承認できない。
