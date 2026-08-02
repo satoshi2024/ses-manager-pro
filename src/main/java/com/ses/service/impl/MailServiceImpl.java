@@ -82,6 +82,21 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
+    public MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to,
+                                               Long invoiceId, Long contactId, Long opportunityId) {
+        if (!StringUtils.hasText(to) || !to.contains("@")) {
+            throw com.ses.common.exception.BusinessException.of(400, "メール宛先が不正です");
+        }
+        EmailTemplate template = emailTemplateService.getById(templateId);
+        if (template == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "メールテンプレートが見つかりません: " + templateId);
+        }
+        String subject = TemplateRenderer.render(template.getSubjectTemplate(), params);
+        String body = TemplateRenderer.render(template.getBodyTemplate(), params);
+        return send(to, subject, body, invoiceId, contactId, opportunityId);
+    }
+
+    @Override
     public MailDispatchResult send(String to, String subject, String body, Long invoiceId) {
         return send(to, subject, body, invoiceId, null, null);
     }

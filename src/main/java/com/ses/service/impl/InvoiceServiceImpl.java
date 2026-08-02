@@ -528,6 +528,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         params.put("dueDate", invoice.getDueDate().toString());
         params.put("overdueDays", String.valueOf(overdueDays));
 
+        if (contactId != null) {
+            return mailService.sendWithTemplate(templateId, params, to, invoiceId, contactId, null);
+        }
         return mailService.sendWithTemplate(templateId, params, to, invoiceId);
     }
 

@@ -10,6 +10,8 @@ import com.ses.service.MailService;
 import com.ses.dto.mail.MailDispatchResult;
 import com.ses.service.ProjectService;
 import com.ses.service.ProposalService;
+import com.ses.service.OpportunityService;
+import com.ses.entity.Opportunity;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -32,12 +34,14 @@ import jakarta.validation.Valid;
 public class ProposalApiController {
 
     private final ProposalService proposalService;
+    private final OpportunityService opportunityService;
     private final EngineerService engineerService;
     private final ProjectService projectService;
     private final CustomerService customerService;
     private final MailService mailService;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.security.CrmScopeService crmScopeService;
     private final com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
     private final com.ses.service.FileStorageService fileStorageService;
 
@@ -116,6 +120,7 @@ public class ProposalApiController {
             if (proposal.getEngineerId() != null) dataScopeService.assertAllowedEngineer(proposal.getEngineerId());
             if (proposal.getProjectId() != null) dataScopeService.assertAllowedProject(proposal.getProjectId());
         }
+        validateSourceOpportunity(proposal);
         return ApiResult.success(proposalService.save(proposal));
     }
 
@@ -131,6 +136,7 @@ public class ProposalApiController {
             if (proposal.getEngineerId() != null) dataScopeService.assertAllowedEngineer(proposal.getEngineerId());
             if (proposal.getProjectId() != null) dataScopeService.assertAllowedProject(proposal.getProjectId());
         }
+        validateSourceOpportunity(proposal);
         com.ses.common.util.EntityProtectUtil.protectForUpdate(proposal);
         proposal.setId(id);
         return ApiResult.success(proposalService.updateById(proposal));
@@ -192,6 +198,17 @@ public class ProposalApiController {
         proposalService.updateById(proposal);
 
         return ApiResult.success(storedFile.getStoredName());
+    }
+
+    private void validateSourceOpportunity(Proposal proposal) {
+        if (proposal.getSourceOpportunityId() == null) return;
+        Opportunity opportunity = opportunityService.getById(proposal.getSourceOpportunityId());
+        Project project = projectService.getById(proposal.getProjectId());
+        if (opportunity == null || project == null
+                || !java.util.Objects.equals(opportunity.getCustomerId(), project.getCustomerId())
+                || !crmScopeService.isOpportunityVisible(opportunity.getCustomerId(), opportunity.getOwnerUserId(), java.time.LocalDate.now())) {
+            throw BusinessException.of(404, "error.crm.opportunityNotFound");
+        }
     }
 
     private void assertEngineerVisible(Long engineerId) {

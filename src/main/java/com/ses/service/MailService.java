@@ -22,6 +22,12 @@ public interface MailService {
         return sendWithTemplate(templateId, params, to, null);
     }
 
+    default MailDispatchResult sendWithTemplate(Long templateId, Map<String, String> params, String to,
+                                                Long invoiceId, Long contactId, Long opportunityId) {
+        return sendWithTemplate(templateId, params, to, invoiceId);
+    }
+
+
     /**
      * 件名・本文を直接指定して非同期送信する（テンプレートを使わない場合）。
      */

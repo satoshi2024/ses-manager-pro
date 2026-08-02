@@ -48,6 +48,8 @@ function loadCrmContext() {
             if (res.code !== 200 || !res.data) return;
             renderContacts(res.data.contacts || []);
             renderOpportunities(res.data.opportunities || []);
+            populateActivityRelations(res.data.contacts || [], res.data.opportunities || []);
+            loadActivityAssignees();
         }
     });
 }
@@ -73,18 +75,37 @@ function openContactModal(id) {
     const c = id ? contacts.find(x => x.id === id) : null;
     $('#contact-form')[0].reset(); $('#contact-id').val(c ? c.id : ''); $('#contact-version').val(c ? c.version : '');
     $('#contact-valid-from').val(c && c.validFrom ? c.validFrom : SES.util.getLocalDateString());
-    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
+    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); $('#contact-roles').val(c.rolesJson || ''); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('contactModal')).show();
 }
 
 function saveContact() {
     const id = $('#contact-id').val();
-    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
-    $.ajax({ url: `/api/customers/${customerId}/contacts${id ? '/' + id : ''}`, method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide(); loadCrmContext(); Toast.success(SES.i18n.t('success.save')); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed')));
+    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), rolesJson: $('#contact-roles').val() || null, email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
+    const save = () => $.ajax({ url: `/api/customers/${customerId}/contacts${id ? '/' + id : ''}`, method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide(); loadCrmContext(); Toast.success(SES.i18n.t('success.save')); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed')));
+    $.get(`/api/customers/${customerId}/contacts/duplicates`, { email: data.email, phone: data.phone, excludeId: id || null }).done(res => {
+        if (res.code === 200 && (res.data || []).length) {
+            Swal.fire({ title: SES.i18n.t('customer.contacts.duplicateTitle', '重複候補があります'), text: SES.i18n.t('customer.contacts.duplicateText', '同じメールまたは電話番号の担当者が存在します。自動統合は行いません。'), icon: 'warning', showCancelButton: true, confirmButtonText: SES.i18n.t('common.save'), cancelButtonText: SES.i18n.t('common.cancel') }).then(r => { if (r.isConfirmed) save(); });
+        } else save();
+    }).fail(save);
 }
 
 function retireContact(id, version) {
     Swal.fire({ title: SES.i18n.t('common.deleteConfirmTitle'), text: SES.i18n.t('customer.contacts.retireConfirm'), icon: 'warning', showCancelButton: true, confirmButtonText: SES.i18n.t('customer.contacts.retire'), cancelButtonText: SES.i18n.t('common.cancel') }).then(r => { if (!r.isConfirmed) return; $.ajax({ url: `/api/customers/${customerId}/contacts/${id}/retire`, method: 'PUT', data: { version } }).done(res => { if (res.code === 200) loadCrmContext(); else Toast.error(res.message); }); });
+}
+
+function populateActivityRelations(contacts, opportunities) {
+    const contactOptions = ['<option value="">-</option>'].concat((contacts || []).map(c => `<option value="${c.id}">${SES.escapeHtml(c.name || '-')}</option>`));
+    const opportunityOptions = ['<option value="">-</option>'].concat((opportunities || []).map(o => `<option value="${o.id}">${SES.escapeHtml(o.title || '-')}</option>`));
+    $('#act-contact').html(contactOptions.join(''));
+    $('#act-opportunity').html(opportunityOptions.join(''));
+}
+
+function loadActivityAssignees() {
+    $.get('/api/crm/leads/assignees', function(res) {
+        if (res.code !== 200) return;
+        $('#act-assignee').html(['<option value="">-</option>'].concat((res.data || []).map(u => `<option value="${u.value}">${SES.escapeHtml(u.label || '-')}</option>`)).join(''));
+    });
 }
 
 function renderOpportunities(opportunities) {
@@ -254,6 +275,9 @@ function editActivity(id) {
         $('#act-title').val(act.title);
         $('#act-content').val(act.content || '');
         $('#act-next-date').val(act.nextActionDate || '');
+        $('#act-contact').val(act.contactId || '');
+        $('#act-opportunity').val(act.opportunityId || '');
+        $('#act-assignee').val(act.assigneeUserId || '');
         
         bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).show();
     }
@@ -271,7 +295,10 @@ function saveActivity() {
         activityType: $('#act-type').val(),
         title: $('#act-title').val(),
         content: $('#act-content').val(),
-        nextActionDate: $('#act-next-date').val() || null
+        nextActionDate: $('#act-next-date').val() || null,
+        contactId: $('#act-contact').val() ? Number($('#act-contact').val()) : null,
+        opportunityId: $('#act-opportunity').val() ? Number($('#act-opportunity').val()) : null,
+        assigneeUserId: $('#act-assignee').val() ? Number($('#act-assignee').val()) : null
     };
 
     if (id) {

@@ -61,6 +61,19 @@ class OpportunityServiceImplTest {
     }
 
     @Test
+    void stageTransition_allowsRollbackToPreviousStageAndResetsDefaultProbability() {
+        Opportunity opportunity = opportunity(1L, "要件確認", 1);
+        opportunity.setProbability(30);
+        when(opportunityMapper.selectByIdForUpdate(1L)).thenReturn(opportunity);
+        when(opportunityMapper.updateById(any(Opportunity.class))).thenReturn(1);
+
+        Opportunity updated = service.changeStage(1L, "見込", null, 1);
+
+        assertEquals("見込", updated.getStage());
+        assertEquals(20, updated.getProbability());
+    }
+
+    @Test
     void stageTransition_rejectsSkipAndTerminalEdit() {
         Opportunity prospect = opportunity(1L, "見込", 1);
         when(opportunityMapper.selectByIdForUpdate(1L)).thenReturn(prospect);

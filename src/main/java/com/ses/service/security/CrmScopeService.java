@@ -1,5 +1,9 @@
 package com.ses.service.security;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.ses.entity.Lead;
+import com.ses.entity.Opportunity;
+
 import java.time.LocalDate;
 import java.util.Set;
 
@@ -16,6 +20,18 @@ public interface CrmScopeService {
     Set<Long> allowedCustomerIds(LocalDate asOf);
 
     Set<Long> allowedOwnerIds(LocalDate asOf);
+
+    /** leadのlist/detail/KPIで共有するSQL母集団を適用する。 */
+    void applyLeadScope(QueryWrapper<Lead> query, LocalDate asOf);
+
+    /** opportunityのlist/detail/KPI/forecastで共有するSQL母集団を適用する。 */
+    void applyOpportunityScope(QueryWrapper<Opportunity> query, LocalDate asOf);
+
+    boolean isOwnerAllowed(Long ownerUserId, LocalDate asOf);
+
+    boolean isLeadVisible(Long ownerUserId, Long convertedCustomerId, LocalDate asOf);
+
+    boolean isOpportunityVisible(Long customerId, Long ownerUserId, LocalDate asOf);
 
     boolean isCustomerAllowed(Long customerId, LocalDate asOf);
 

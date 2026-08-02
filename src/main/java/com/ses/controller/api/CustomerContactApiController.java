@@ -32,6 +32,15 @@ public class CustomerContactApiController {
         return ApiResult.success(customerContactService.list(customerId, asOf));
     }
 
+    @GetMapping("/duplicates")
+    public ApiResult<List<CustomerContactDto>> duplicates(
+            @PathVariable Long customerId,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String phone,
+            @RequestParam(required = false) Long excludeId) {
+        return ApiResult.success(customerContactService.duplicateCandidates(customerId, email, phone, excludeId));
+    }
+
     @GetMapping("/recipients")
     public ApiResult<List<CustomerContactDto>> recipients(
             @PathVariable Long customerId,
