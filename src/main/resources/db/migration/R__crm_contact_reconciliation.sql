@@ -72,7 +72,6 @@ SET @crm_sql = IF(@crm_mail_opp_index = 0,
   'ALTER TABLE t_mail_delivery ADD INDEX idx_mail_delivery_opportunity (opportunity_id)', 'SELECT 1');
 PREPARE crm_stmt FROM @crm_sql; EXECUTE crm_stmt; DEALLOCATE PREPARE crm_stmt;
 END IF;
-END IF;
 END $$
 CALL __ses_crm_contact_reconciliation() $$
 DROP PROCEDURE __ses_crm_contact_reconciliation $$

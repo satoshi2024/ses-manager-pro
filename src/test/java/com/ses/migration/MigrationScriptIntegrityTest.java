@@ -80,6 +80,87 @@ class MigrationScriptIntegrityTest {
         assertTrue(empties.isEmpty(), "空のマイグレーションスクリプトがあります（no-opでも SELECT 1; が必要）: " + empties);
     }
 
+    private static final Pattern FUNCTION_IF = Pattern.compile("\\bIF\\s*\\(", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MODIFIER_IF = Pattern.compile(
+            "\\bIF\\s+(NOT\\s+)?EXISTS\\s+`?[A-Za-z_]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ANY_IF = Pattern.compile("\\bIF\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern END_IF = Pattern.compile("\\bEND\\s+IF\\b", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * ストアドプロシージャ内の {@code IF ... THEN} と {@code END IF} の均衡を、
+     * DB無し・Docker無しで静的検査する（CRM-R4-P0-01）。
+     *
+     * <p>R__crm_contact_reconciliation.sql は複合文の {@code IF ... THEN} が1個しか無いのに
+     * {@code END IF;} を2個持っていた。MySQLのcompound statement文法上 {@code END IF} は
+     * 対応する {@code IF} の終端でしか使えないため {@code CREATE PROCEDURE} がERROR 1064で失敗し、
+     * Flywayが例外を投げて全MySQL環境（fresh/legacy/既存本番）が起動不能になる。
+     * {@link FlywayMigrationSmokeTest} 系はDocker不在で自動skipされ、H2 replay
+     * （application-test.yml）もRepeatableを読まないため、この静的検査が最後の防波堤になる。
+     *
+     * <p>判定対象は複合文の {@code IF ... THEN ... END IF} のみ。以下は対象外:
+     * <ul>
+     *   <li>{@code IF(expr1, expr2, expr3)} という3引数の関数呼び出し（{@code THEN}を伴わない）</li>
+     *   <li>{@code DROP PROCEDURE IF EXISTS x} / {@code CREATE TABLE IF NOT EXISTS x} という
+     *       EXISTS修飾（識別子が直後に来るため、サブクエリ条件の {@code IF EXISTS (...)}
+     *       と区別できる。{@code END IF} も不要）</li>
+     * </ul>
+     */
+    @Test
+    void ストアド内のIF_THENとEND_IFが均衡していること() throws Exception {
+        Map<String, String> sources = new LinkedHashMap<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql")) {
+            sources.put(String.valueOf(resource.getFilename()),
+                    resource.getContentAsString(StandardCharsets.UTF_8));
+        }
+        java.io.File[] runbookFiles = new java.io.File("sql/runbook")
+                .listFiles((dir, name) -> name.endsWith(".sql"));
+        if (runbookFiles != null) {
+            for (java.io.File file : runbookFiles) {
+                sources.put("sql/runbook/" + file.getName(),
+                        java.nio.file.Files.readString(file.toPath(), StandardCharsets.UTF_8));
+            }
+        }
+
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<String, String> entry : sources.entrySet()) {
+            String sql = stripComments(entry.getValue());
+
+            List<int[]> endIfSpans = new ArrayList<>();
+            Matcher endIfMatcher = END_IF.matcher(sql);
+            while (endIfMatcher.find()) {
+                endIfSpans.add(new int[]{endIfMatcher.start(), endIfMatcher.end()});
+            }
+
+            int controlIfCount = 0;
+            Matcher ifMatcher = ANY_IF.matcher(sql);
+            while (ifMatcher.find()) {
+                int pos = ifMatcher.start();
+                if (endIfSpans.stream().anyMatch(span -> span[0] <= pos && pos < span[1])) {
+                    continue; // "END IF" のIF部分
+                }
+                Matcher fm = FUNCTION_IF.matcher(sql);
+                if (fm.find(pos) && fm.start() == pos) {
+                    continue; // IF(expr1, expr2, expr3) 関数呼び出し
+                }
+                Matcher mm = MODIFIER_IF.matcher(sql);
+                if (mm.find(pos) && mm.start() == pos) {
+                    continue; // DROP PROCEDURE IF EXISTS x / CREATE TABLE IF NOT EXISTS x
+                }
+                controlIfCount++;
+            }
+
+            if (controlIfCount != endIfSpans.size()) {
+                violations.add(entry.getKey() + ": IF...THEN=" + controlIfCount
+                        + " END IF=" + endIfSpans.size());
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+                "ストアド内の IF...THEN と END IF が均衡していません。MySQLで CREATE PROCEDURE が"
+                        + " ERROR 1064 になり、Flywayが起動時に例外を投げて全環境が起動不能になります: " + violations);
+    }
+
     @Test
     void V60のlegacy互換列は所属backfillより先に追加されること() throws Exception {
         Resource resource = new PathMatchingResourcePatternResolver()
