@@ -60,6 +60,17 @@ class LeadServiceIntegrationTest {
     }
 
     @Test
+    void duplicateCandidatesAreBoundedAtSqlBoundary() {
+        for (int i = 0; i < 25; i++) {
+            leadService.create(request("有界候補社", "bounded" + i + "@example.com"));
+        }
+
+        List<Lead> candidates = leadService.duplicateCandidates("有界候補社", null, null, null);
+
+        assertEquals(20, candidates.size(), "重複候補はSQL境界で最大20件に制限するはず");
+    }
+
+    @Test
     void conversionCreatesCustomerContactAndOpportunityIdempotently() {
         Lead lead = leadService.create(request("転換対象社", "sales@convert.example"));
         LeadConversionDto first = leadService.convert(lead.getId(), lead.getVersion());

@@ -84,6 +84,7 @@ public class LeadServiceImpl implements LeadService {
             throw BusinessException.of(400, "error.crm.leadInitialStatusInvalid");
         }
         assertOwnerScope(lead.getOwnerUserId());
+        applySearchKeys(lead);
         if (leadMapper.insert(lead) != 1) throw BusinessException.of("error.crm.leadSaveFailed");
         return leadMapper.selectById(lead.getId());
     }
@@ -101,13 +102,17 @@ public class LeadServiceImpl implements LeadService {
             assertStatusTransition(current.getStatus(), request.getStatus());
         }
         apply(current, request);
+        applySearchKeys(current);
         assertOwnerScope(current.getOwnerUserId());
         UpdateWrapper<Lead> update = new UpdateWrapper<Lead>()
                 .eq("id", id).eq("version", current.getVersion())
                 .set("company_name", current.getCompanyName())
+                .set("company_name_normalized", current.getCompanyNameNormalized())
                 .set("contact_name", current.getContactName())
                 .set("contact_email", current.getContactEmail())
+                .set("contact_email_normalized", current.getContactEmailNormalized())
                 .set("contact_phone", current.getContactPhone())
+                .set("contact_phone_normalized", current.getContactPhoneNormalized())
                 .set("source", current.getSource())
                 .set("source_cost", current.getSourceCost())
                 .set("owner_user_id", current.getOwnerUserId())
@@ -120,30 +125,45 @@ public class LeadServiceImpl implements LeadService {
     @Override
     public List<Lead> duplicateCandidates(String companyName, String contactEmail, String contactPhone, Long excludeId) {
         QueryWrapper<Lead> query = new QueryWrapper<>();
-        boolean hasCompany = StringUtils.hasText(companyName);
-        boolean hasEmail = StringUtils.hasText(contactEmail);
-        boolean hasPhone = StringUtils.hasText(contactPhone);
-        if (!(hasCompany || hasEmail || hasPhone)) {
-            query.eq("id", -1L);
-        }
+        String companyKey = normalizeSearchKey(companyName, true);
+        String emailKey = normalizeSearchKey(contactEmail, false);
+        String phoneKey = normalizeSearchKey(contactPhone, false);
+        if (companyKey == null && emailKey == null && phoneKey == null) return List.of();
+        query.and(w -> {
+            boolean hasPrevious = false;
+            if (companyKey != null) {
+                w.eq("company_name_normalized", companyKey);
+                hasPrevious = true;
+            }
+            if (emailKey != null) {
+                if (hasPrevious) w.or();
+                w.eq("contact_email_normalized", emailKey);
+                hasPrevious = true;
+            }
+            if (phoneKey != null) {
+                if (hasPrevious) w.or();
+                w.eq("contact_phone_normalized", phoneKey);
+            }
+        });
         if (excludeId != null) query.ne("id", excludeId);
         applyCrmScope(query);
-        return leadMapper.selectList(query.orderByDesc("id")).stream()
-                .filter(candidate -> sameNormalized(companyName, candidate.getCompanyName(), true)
-                        || sameNormalized(contactEmail, candidate.getContactEmail(), false)
-                        || sameNormalized(contactPhone, candidate.getContactPhone(), false))
-                .limit(20)
-                .toList();
+        return leadMapper.selectList(query.orderByDesc("id").last("LIMIT 20"));
     }
 
-    private boolean sameNormalized(String left, String right, boolean company) {
-        if (!StringUtils.hasText(left) || !StringUtils.hasText(right)) return false;
-        String a = Normalizer.normalize(left, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
-        String b = Normalizer.normalize(right, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
-        if (company) {
-            return a.replaceAll("\\s+", "").equals(b.replaceAll("\\s+", ""));
-        }
-        return a.replaceAll("[^a-z0-9+@.]", "").equals(b.replaceAll("[^a-z0-9+@.]", ""));
+    private String normalizeSearchKey(String value, boolean company) {
+        if (!StringUtils.hasText(value)) return null;
+        String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC)
+                .toLowerCase(java.util.Locale.ROOT);
+        String key = company
+                ? normalized.replaceAll("\\s+", "")
+                : normalized.replaceAll("[^a-z0-9+@.]", "");
+        return key.isEmpty() ? null : key;
+    }
+
+    private void applySearchKeys(Lead lead) {
+        lead.setCompanyNameNormalized(normalizeSearchKey(lead.getCompanyName(), true));
+        lead.setContactEmailNormalized(normalizeSearchKey(lead.getContactEmail(), false));
+        lead.setContactPhoneNormalized(normalizeSearchKey(lead.getContactPhone(), false));
     }
 
     @Override

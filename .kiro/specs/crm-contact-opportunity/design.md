@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（V73 / V74 / V74.1）
+## 1. DDL（V73 / V74 / V74.1 / V74.2 / V74.3）
 
 - **逸脱と根拠（legacy repair）**: V73/V74は適用済みのため編集しない。RepeatableはV73より前の
   target適用でno-op履歴を残し得るため、V74.1をV75（S07 approval予約）より前のforward-fixとして追加する。
@@ -12,13 +12,18 @@
   `R__crm_contact_reconciliation.sql`の条件付きALTERを正とする。これは新規DDLの通常経路ではなく、
   V73適用履歴を確認したうえで欠落列だけを補完する逸脱であり、Repeatable以外のDML/backfillと
   同じrepair境界に置く。V74.1はlegacyのemail-only/phone-onlyを含むcontact backfill、activity
-  version、6列/indexの補完を冪等に実施する。同期表はV73/V74/V1（不変）、`V74_1`、
-  `schema-crm-h2.sql`、`engineer-schema-h2.sql`、MySQL smoke assert、entityの6点とし、R__の再実行は
-  欠落列・indexだけを変更する。
+  version、6列/indexの補完を冪等に実施する。V74.2はV74.1で小数型になった`source_cost`を
+  円単位の`DECIMAL(14,0)`へ四捨五入して収束させ、leadの会社名/email/電話の正規化済み検索キーと
+  indexを追加する。leadのcreate/updateは同じ正規化規則でキーを維持する。V74.2のSQL backfillでは
+  MySQLにUnicode NFKCがないため、V74.3のmanaged Java migrationが既存`t_lead`をruntimeと同じ
+  NFKC規則で再計算する。正規化後空文字はNULLとする。同期表はV73/V74/V1（不変）、`V74_1`、
+  `V74_2`、`V74_3`、`schema-crm-h2.sql`、`engineer-schema-h2.sql`、MySQL smoke assert、entityの7点とし、
+  R__の再実行は欠落列・indexだけを変更する。
 
 - `t_customer_contact(id, customer_id, name, name_kana, department, position, roles_json,
   email, phone, primary_flag, valid_from/to, status, version)`。
-- `t_lead(id, company_name, contact_name/email/phone, source, owner_user_id, status,
+- `t_lead(id, company_name/company_name_normalized, contact_name, contact_email/contact_email_normalized,
+  contact_phone/contact_phone_normalized, source, owner_user_id, status,
   converted_customer_id/opportunity_id, version)`。
 - `t_opportunity(id, customer_id, title, stage, expected_start_month, duration_months, required_count,
   unit_price, expected_amount, probability, owner_user_id, next_action_date, competitor, lost_reason,

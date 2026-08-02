@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 公開済みlatest（V71 = BP master/発注コンプライアンス）まで適用済みの既存DBへ、
-     * V73/V74/V74.1（CRM複数担当者・商機管理とRound 5 forward fix）を追加適用できることを検証する legacy smoke。
+     * V73/V74/V74.1/V74.2/V74.3（CRM複数担当者・商機管理とforward fix）を追加適用できることを検証する legacy smoke。
  *
  * <p>platform-invariants §4.2 の「freshの成功をlegacyの合格とみなさない」に対応する。
  * V73はCRMの定義をV1統合baselineへ書き戻さない設計なので、
@@ -57,7 +57,21 @@ class FlywayLegacyV71MigrationSmokeTest {
                     + "('empty legacy', NULL, NULL, NULL, 0)");
         }
 
-        // 2) V73を追加適用する
+        // 2) V73までを追加適用し、V74.2/V74.3適用前の既存leadをfixtureへ入れる
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("73")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO t_lead (company_name, contact_email, contact_phone, source, status, deleted_flag) VALUES "
+                    + "('ＦＵＬＬＷＩＤＴＨ株式会社', 'ｔｅｓｔ＠ｅｘａｍｐｌｅ．ｃｏｍ', '０３－１２３４－５６７８', 'legacy', '未対応', 0),"
+                    + "('空キー会社', '－－', '－－', 'legacy', '未対応', 0)");
+        }
+
+        // 3) V74.2/V74.3を含むlatestまでを適用する
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -78,6 +92,10 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertColumnExists(statement, "t_opportunity", "stage_changed_at");
             assertColumnExists(statement, "t_opportunity", "probability_override_reason");
             assertColumnExists(statement, "t_lead", "source_cost");
+            assertNumericColumn(statement, "t_lead", "source_cost", 14, 0);
+            assertColumnExists(statement, "t_lead", "company_name_normalized");
+            assertColumnExists(statement, "t_lead", "contact_email_normalized");
+            assertColumnExists(statement, "t_lead", "contact_phone_normalized");
             assertColumnExists(statement, "t_proposal", "source_opportunity_id");
             assertColumnExists(statement, "t_mail_delivery", "contact_id");
             assertColumnExists(statement, "t_mail_delivery", "opportunity_id");
@@ -101,6 +119,10 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertIndexExists(statement, "t_customer_contact", "uk_customer_contact_active_primary");
             assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_contact");
             assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_opportunity");
+            assertIndexExists(statement, "t_lead", "idx_lead_company_normalized");
+            assertIndexExists(statement, "t_lead", "idx_lead_email_normalized");
+            assertIndexExists(statement, "t_lead", "idx_lead_phone_normalized");
+            assertNormalizedLegacyLead(statement);
 
             // backfill: 既存顧客の担当者が件数・値とも一致して移行される
             assertEquals(countCustomersWithContact(statement), countMigratedContacts(statement),
@@ -138,7 +160,7 @@ class FlywayLegacyV71MigrationSmokeTest {
             }
         }
 
-        // 3) validateと二回目migrateで壊れない（V74.1が補完の正規経路であることも確認）
+        // 4) validateと二回目migrateで壊れない（V74.3を含む正規化の正規経路も確認）
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -166,6 +188,23 @@ class FlywayLegacyV71MigrationSmokeTest {
         try (ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM t_customer_contact")) {
             assertTrue(rs.next());
             return rs.getLong(1);
+        }
+    }
+
+    private void assertNormalizedLegacyLead(Statement statement) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT COUNT(*) FROM t_lead WHERE company_name='ＦＵＬＬＷＩＤＴＨ株式会社'"
+                        + " AND company_name_normalized='fullwidth株式会社'"
+                        + " AND contact_email_normalized='test@example.com'"
+                        + " AND contact_phone_normalized='0312345678'")) {
+            assertTrue(rs.next() && rs.getLong(1) == 1,
+                    "V74.3は既存leadへ実行時と同じNFKC正規化を適用するはず");
+        }
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT COUNT(*) FROM t_lead WHERE company_name='空キー会社'"
+                        + " AND contact_email_normalized IS NULL AND contact_phone_normalized IS NULL")) {
+            assertTrue(rs.next() && rs.getLong(1) == 1,
+                    "正規化後に空文字となるemail/phoneはNULLへ収束するはず");
         }
     }
 
@@ -214,6 +253,18 @@ class FlywayLegacyV71MigrationSmokeTest {
                 "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                         + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
             assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertNumericColumn(Statement statement, String table, String column,
+                                     int precision, int scale) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT numeric_precision, numeric_scale FROM information_schema.columns"
+                        + " WHERE table_schema=DATABASE() AND table_name='" + table
+                        + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " の数値型定義が存在するはず");
+            assertEquals(precision, rs.getInt(1));
+            assertEquals(scale, rs.getInt(2));
         }
     }
 }
