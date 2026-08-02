@@ -1,0 +1,26 @@
+{
+  "name": "agreement-year-crossing-resets-rule236-not-rule5",
+  "description": "overtime-rules.md §1.3/§3：ルール2/3/6は協定年度境界でリセットする（agreementYearMonthsは新年度分のみを渡す＝呼び出し側の契約）。ルール5は協定年度に紐づかずまたいで計算するため、rollingWindowMonthsは旧年度（2025-11〜2026-02）の月も含む6か月窓。旧年度4か月が高稼働（各totalMinutes=7000）でも、agreementYearMonthsには含まれないためルール2/3/6は適合のまま。ルール5はn=6でのみ違反し、6か月フルウィンドウが旧年度をまたいで使われていることを固定する。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": {
+    "specialClauseEnabled": true
+  },
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 500, "totalMinutes": 1000 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-03", "overtimeMinutes": 500, "totalMinutes": 1000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 500, "totalMinutes": 1000 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2025-11", "overtimeMinutes": 0, "totalMinutes": 7000 },
+    { "yearMonth": "2025-12", "overtimeMinutes": 0, "totalMinutes": 7000 },
+    { "yearMonth": "2026-01", "overtimeMinutes": 0, "totalMinutes": 7000 },
+    { "yearMonth": "2026-02", "overtimeMinutes": 0, "totalMinutes": 7000 },
+    { "yearMonth": "2026-03", "overtimeMinutes": 0, "totalMinutes": 1000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 0, "totalMinutes": 1000 }
+  ],
+  "expectedFindings": [
+    { "rule": "RULE5_MULTI_MONTH_AVERAGE", "severity": "VIOLATION", "windowMonths": 6 }
+  ]
+}

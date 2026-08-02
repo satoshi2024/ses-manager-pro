@@ -1,0 +1,9 @@
+{
+  "name": "rule4-month-total-boundary",
+  "description": "overtime-rules.md §1 ルール4（月の合計100時間、休日労働を含む）。最重要の境界：6ルール中ここだけ>=判定。「100時間未満」なので100時間ちょうどが違反、limit-1のみ適合。deltaは現在のlimit(MONTH_TOTAL_MINUTES)からの分単位オフセット。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": true },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

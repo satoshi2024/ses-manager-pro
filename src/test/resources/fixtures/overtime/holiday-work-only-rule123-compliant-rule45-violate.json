@@ -1,0 +1,22 @@
+{
+  "name": "holiday-work-only-rule123-compliant-rule45-violate",
+  "description": "overtime-rules.md §5 推奨fixture：法定休日労働のみでlimitを超えた場合、ルール1/2/3（休日労働を含まないovertimeMinutesを見る）は適合のまま、ルール4/5（休日労働を含むtotalMinutesを見る）だけが違反することを固定する。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": {
+    "specialClauseEnabled": true
+  },
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 6500 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 6500 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-03", "overtimeMinutes": 100, "totalMinutes": 6500 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 6500 }
+  ],
+  "expectedFindings": [
+    { "rule": "RULE4_MONTH_TOTAL", "severity": "VIOLATION" },
+    { "rule": "RULE5_MULTI_MONTH_AVERAGE", "severity": "VIOLATION", "windowMonths": 2 }
+  ]
+}

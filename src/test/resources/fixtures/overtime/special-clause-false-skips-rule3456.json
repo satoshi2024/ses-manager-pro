@@ -1,0 +1,28 @@
+{
+  "name": "special-clause-false-skips-rule3456",
+  "description": "overtime-rules.md §3：special_clause=falseの協定ではルール3/4/5/6を判定しない（特別条項が無ければ月45h・年360hを超えられないため、超えた時点でルール1/2の違反になる）。本fixtureはルール3/4/5/6それぞれが『評価されていれば』違反になる値をあえて与え、それでもfindingに出ないことを固定する。ルール1/2は特別条項の有無に関わらず判定されるため、両方とも違反として出ることも併せて確認する。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": {
+    "specialClauseEnabled": false
+  },
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 2701, "totalMinutes": 6500 },
+  "agreementYearMonths": [
+    { "yearMonth": "2025-10", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2025-11", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2025-12", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2026-01", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2026-02", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2026-03", "overtimeMinutes": 6300, "totalMinutes": 6300 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 6300, "totalMinutes": 6300 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-03", "overtimeMinutes": 0, "totalMinutes": 6000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 0, "totalMinutes": 6000 }
+  ],
+  "expectedFindings": [
+    { "rule": "RULE1_MONTH_NORMAL", "severity": "VIOLATION" },
+    { "rule": "RULE2_YEAR_NORMAL", "severity": "VIOLATION" }
+  ]
+}
