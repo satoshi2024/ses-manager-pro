@@ -63,21 +63,11 @@
             margin-bottom: 0.5rem;
         }
         
+        /* ログイン画面固有: アイコン分の左パディングだけを追加する（本体のスタイルは common.css の共通トークンに委ねる） */
         .form-control-dark {
-            background-color: var(--bg-primary);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
             padding: 0.75rem 1rem 0.75rem 2.5rem;
-            border-radius: var(--radius-sm);
         }
 
-        .form-control-dark:focus {
-            background-color: var(--bg-primary);
-            border-color: var(--accent-blue);
-            color: var(--text-primary);
-            box-shadow: 0 0 0 0.25rem rgba(74, 158, 255, 0.25);
-        }
-        
         .input-icon {
             position: absolute;
             left: 1rem;
@@ -86,11 +76,7 @@
             color: var(--text-muted);
             z-index: 10;
         }
-        
-        .form-control-dark::placeholder {
-            color: var(--text-muted);
-        }
-        
+
         .btn-login {
             background: linear-gradient(45deg, #2563eb, #4f46e5);
             border: none;
@@ -141,23 +127,26 @@
         </div>
 
         <form th:if="${localLoginEnabled or breakGlassLoginEnabled}" th:action="@{/login}" method="post">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
             <div class="mb-4 position-relative">
+                <label for="username" class="visually-hidden" th:text="#{login.username}">ユーザー名</label>
                 <i class="bi bi-person-fill input-icon"></i>
                 <input type="text" class="form-control form-control-dark" id="username" name="username" th:placeholder="#{login.username}" required autofocus autocomplete="username">
             </div>
-            
+
             <div class="mb-5 position-relative">
+                <label for="password" class="visually-hidden" th:text="#{login.password}">パスワード</label>
                 <i class="bi bi-shield-lock-fill input-icon"></i>
                 <input type="password" class="form-control form-control-dark" id="password" name="password" th:placeholder="#{login.password}" required autocomplete="current-password">
             </div>
-            
+
             <button type="submit" class="btn btn-primary btn-login w-100 rounded-sm text-white">
                 <i class="bi bi-box-arrow-in-right me-2"></i><span th:text="#{login.button}">ログイン</span>
             </button>
         </form>
 
         <div th:if="${oidcEnabled}" class="mt-3">
-            <a class="btn btn-outline-light w-100 rounded-sm" th:href="@{/oauth2/authorization/{registrationId}(registrationId=${oidcRegistrationId})}">
+            <a class="btn btn-outline-secondary w-100 rounded-sm" th:href="@{/oauth2/authorization/{registrationId}(registrationId=${oidcRegistrationId})}">
                 <i class="bi bi-building me-2"></i><span th:text="#{login.sso}">企業SSOでログイン</span>
             </a>
         </div>

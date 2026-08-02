@@ -28,21 +28,21 @@
                     <div class="tab-content" id="invoiceTabsContent">
                         <!-- 請求書タブ -->
                         <div class="tab-pane fade show active" id="invoice" role="tabpanel" aria-labelledby="invoice-tab">
-                            <div class="row mb-3">
+                            <form id="searchForm" class="row mb-3" onsubmit="event.preventDefault();">
                                 <div class="col-md-3">
-                                    <input type="month" id="billingMonth" class="form-control" th:placeholder="#{invoice.filter.month}">
+                                    <input type="month" id="billingMonth" name="billingMonth" class="form-control" th:placeholder="#{invoice.filter.month}">
                                 </div>
                                 <div class="col-md-3 d-flex align-items-center">
                                     <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="filterOverdue">
+                                        <input class="form-check-input" type="checkbox" id="filterOverdue" name="overdue">
                                         <label class="form-check-label" for="filterOverdue" th:text="#{invoice.filter.overdue}">期限超過のみ</label>
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <button id="btnBulkReminder" class="btn btn-warning me-2" th:text="#{invoice.btn.bulkReminder}">一括督促</button>
-                                    <button id="btnGenerateInvoice" class="btn btn-primary" th:text="#{invoice.btn.generate}">請求書生成</button>
+                                    <button type="button" id="btnBulkReminder" class="btn btn-warning me-2" th:text="#{invoice.btn.bulkReminder}">一括督促</button>
+                                    <button type="button" id="btnGenerateInvoice" class="btn btn-primary" th:text="#{invoice.btn.generate}">請求書生成</button>
                                 </div>
-                            </div>
+                            </form>
                             <div class="table-responsive">
                                 <table class="table table-bordered table-striped" id="invoiceTable">
                                     <thead>

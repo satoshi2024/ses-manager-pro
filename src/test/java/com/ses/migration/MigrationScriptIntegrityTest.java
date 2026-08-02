@@ -703,9 +703,11 @@ class MigrationScriptIntegrityTest {
                         + missing);
     }
 
-    /** {@code FROM}/{@code JOIN} の直後に現れうる、テーブル名ではない語。 */
+    /** {@code FROM}/{@code JOIN} の直後に現れうる、テーブル名ではない語。
+     * {@code flyway_schema_history} はどのマイグレーションもCREATEしない
+     * Flyway自身の管理テーブルだが、実行順序上R__より前に必ず存在するため除外する。 */
     private static final java.util.Set<String> NON_TABLE_TOKENS = java.util.Set.of(
-            "information_schema", "dual", "select", "if", "not", "exists");
+            "information_schema", "dual", "select", "if", "not", "exists", "flyway_schema_history");
 
     /**
      * db/migration 全体の {@code CREATE TABLE} を「テーブル名 -> 出現箇所」で集める。

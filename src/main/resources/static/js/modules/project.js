@@ -471,7 +471,7 @@ function findMatchingEngineers(projectId) {
                                         `<button class="btn btn-sm btn-outline-info rounded-pill px-3 shadow-sm" onclick="promoteAndProposeBp(this, ${match.bpAvailabilityId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
                                             <i class="bi bi-person-plus-fill me-1"></i>要員化して提案
                                         </button>` :
-                                        `<button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
+                                        `<button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeEngineerToProject(this, ${match.engineerId}, ${projectId}, ${match.score}, ${proposalPriceYen})">
                                             <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('js.project.match.propose_btn')}
                                         </button>`
                                     }
@@ -491,7 +491,11 @@ function findMatchingEngineers(projectId) {
     });
 }
 
-function proposeEngineerToProject(engineerId, projectId, score, price) {
+function proposeEngineerToProject(btnElement, engineerId, projectId, score, price) {
+    const btn = $(btnElement);
+    if (btn.prop('disabled')) return; // 連打による提案の二重作成を防ぐ
+    btn.prop('disabled', true);
+
     const data = {
         engineerId: engineerId,
         projectId: projectId,
@@ -512,10 +516,12 @@ function proposeEngineerToProject(engineerId, projectId, score, price) {
                 setTimeout(() => window.location.href = '/proposal/kanban', 1500);
             } else {
                 Toast.error(SES.i18n.t('js.project.propose.error') + ' ' + (res.message || ''));
+                btn.prop('disabled', false);
             }
         },
         error: function() {
             Toast.error(SES.i18n.t('js.common.error_network'));
+            btn.prop('disabled', false);
         }
     });
 }

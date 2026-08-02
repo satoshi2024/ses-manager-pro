@@ -10,12 +10,12 @@
 <div layout:fragment="content">
     <div class="card">
         <div class="card-body">
-            <div class="row mb-3 align-items-end">
+            <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
                 <div class="col-md-3">
-                    <input type="text" id="quotationKeyword" class="form-control" placeholder="件名・見積番号">
+                    <input type="text" id="quotationKeyword" name="keyword" class="form-control" placeholder="件名・見積番号">
                 </div>
                 <div class="col-md-3">
-                    <select id="quotationStatusFilter" class="form-select">
+                    <select id="quotationStatusFilter" name="status" class="form-select">
                         <option value="" th:text="#{common.all}">すべて</option>
                         <option value="下書き" th:text="#{quotation.status.下書き}">下書き</option>
                         <option value="提出済" th:text="#{quotation.status.提出済}">提出済</option>
@@ -24,10 +24,10 @@
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <button id="btnSearchQuotation" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
-                    <button id="btnNewQuotation" class="btn btn-primary" th:text="#{quotation.btn.new}">見積作成</button>
+                    <button type="button" id="btnSearchQuotation" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                    <button type="button" id="btnNewQuotation" class="btn btn-primary" th:text="#{quotation.btn.new}">見積作成</button>
                 </div>
-            </div>
+            </form>
             <div class="table-responsive">
                 <table class="table table-bordered table-striped" id="quotationTable">
                     <thead>
