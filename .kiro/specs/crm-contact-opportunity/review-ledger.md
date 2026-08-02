@@ -437,3 +437,27 @@ V74.2は適用済みのため編集せず、V74.3のJava migrationで既存行�
 
 Round 7差分の自動検証は、Lead/Contact/静的回帰、MySQL migration/repair、V74.3 legacy full-width backfill、compile、
 `git diff --check`でgreenを確認した。L4全量とdesktop/390px全role browser Demoは引き続きrelease hard gateである。
+
+## Round 8 独立再Review = PASS（2026-08-02）
+
+Base `94f95083f178b812caa43782a5e00d09a8d6f324`、Head `042bd0cfb8139466eb7199a7d625adfb181c8563`（`origin/main`と一致）。
+Round 7で対応したCRM-R5-P1-09（legacy NFKC backfill）・CRM-R5-P2-03（rollback順序）は、実MySQLでの
+全角会社名/email/電話・空キーNULLのassertとfresh/legacy/partial/repair全経路実行によりVERIFIED CLOSEDと確認された。
+
+| 観点 | 判定 |
+|---|---|
+| Migration | PASS（V74.3含むfresh/legacy/partial/repair実MySQL成功、H2/entity同期、rollback順序あり） |
+| Scope | PASS（`CrmScopeService`によるSQL条件付与、許可集合空はJava filter非依存で0件化） |
+| Security | PASS（管理者・営業・マネージャー許可、HR・要員は直接URLでも403、CSRF exemptionなし） |
+| 競合・冪等 | PASS（contact primary競合、activity/opportunity/lead version CAS、状態CAS、project/quotation UNIQUE） |
+| PII/i18n | PASS（画面/CSV同一mask、4言語bundle整合） |
+| 性能 | PASS（重複候補は正規化列の等価検索＋indexed key＋`LIMIT 20`、V74.3は一回限りbatch update） |
+
+**実測**: L4全量 1,280 / failures 0 / errors 0 / skipped 0。MySQL fresh/legacy/partial/repair全4経路成功。
+desktop/390px全role browser Demo（管理者・営業・マネージャー許可、HR・要員403）を確認。
+P0=0 / P1=0 / P2=0、open release gate=0。
+
+**判定**: `PASS`。T048〜T053は全task完了、`tasks.md`のM回帰も`[x]`化した。本Roundを最終independent Reviewとし、
+S07 `approval-workflow-internal-control`を中央台帳で正式解放する。以降の追加コード修正・再Reviewは不要。
+
+未検証環境（本番前条件として継続管理）: 本番実データ量でのV74.3所要時間・ロック時間、Gmail/Outlook実資格情報・rate limit・障害復旧（別lane）。
