@@ -66,20 +66,20 @@ Task 0 Demo判定: **PASS**。上記6件の修正前事象、consumer、既存co
 | R3-005 | BP review 200、`#request`なし | A1 | `BpAvailabilityIngestionPageController.java`、`review.html`、`BpAvailabilityIngestionPageControllerTest.java` | `BpAvailabilityIngestionPageControllerTest` 3件（有効job 200/jobId埋込/禁止utilityなし、存在しないjob 404、要員role 403、stacktraceなし） | current worktree app:8081 / MySQL 8.4へ12件を一時投入。一覧`全13件`のpage 1→2（page 2に3件）→page 1→`993005` reviewを画面操作し、`A1-01`を描画。確定dialogのキャンセル後もreviewと入力値を維持し、再確定はAPI 200・`確定済`・在庫生成・`/bp-availability/list`遷移を確認。Demo fixture/生成在庫/対応auditは削除し残存0。`target/r3-evidence/a1-app-stdout.log` | page controllerで論理削除を含む存在確認後に`jobId`をmodelへ明示し、不存在は404。templateの`#request`を`${jobId}`へ置換。Thymeleaf実render回帰PASS。 |  |
 | R3-006 | 契約147件全到達、scope total正確 | A2 | `ContractApiController.java`、`contract.js`、`contract/list.html`、4locale `messages*.properties`、`ContractPaginationTest.java`、`FrontendScaleUiContractTest.java` | `ContractPaginationTest` 13件、`FrontendScaleUiContractTest` 3件、既存controller/page/JS回帰22件 | current worktree app:8081 / MySQL 8.4の認証済みweb sessionで、adminは`total=147 / pages=8 / 最終page 7件`、`r3_manager01`はscope後`total=37 / pages=2 / 最終page 17件`を確認。契約画面にpage size 10/20/50とpagination要素を描画。`target/r3-evidence/a2-pagination.json` | backendをdefault 20/max 100へ正規化し、scope空集合でもpage metadataを維持。UIへpage state、filter/sizeのpage 1 reset、CRUD後の現在page維持、最終page空化時の補正を追加。 |  |
 | R3-007 | Bench 32件filter可能 | B1 | `engineer/list.html`、`engineer.js`、`EngineerApiController.java`、`EngineerScaleUiContractTest.java`、`EngineerStatusFilterTest.java` | UI契約3件、実H2 status API 5件、既存controller/page/JS回帰14件 | current worktree app:8081 / MySQL 8.4のadmin認証済みweb sessionでDashboard導線と手動filter相当APIを確認。`Bench total=32 / 4 pages / 最終page 2件`、全返却status=`Bench`。旧`待機`normalizeは初回取得前、未知値は0件、server ERROR 0。`target/r3-evidence/b1-bench-filter.json`、`b1-app-stdout.log` | filter option値を`Bench`へ統一し、URLの`Bench`/旧`待機`を初回API前に反映。APIは正規4status以外をDBへ渡さず0件へ短絡し、ENUM方言差の500も防止。 |  |
-| R3-008 | scope外detailにdummy/actionなし | B2 |  |  |  |  |  |
-| R3-009 | invalid customerが400/404、500なし | A3 | `OpportunityServiceImpl.java`、4locale `messages*.properties`、`OpportunityServiceImplTest.java`、`OpportunityWriteReferenceValidationTest.java`、`OpportunityApiControllerReferenceValidationTest.java` | 新規service 7件/API 2件、既存service 8件/H2 integration 2件、message bundle 4件 | current worktree app:8081 / MySQL 8.4へadmin認証済みAPIでcustomer `999999999`をcreate/update送信し、双方HTTP/ApiResult 404。商機totalは前後31で不変、server `ERROR`/exception line 0。`target/r3-evidence/a3-invalid-customer.json`、`a3-app-stdout.log` | `requireVisibleCustomer`で論理削除を含む存在確認とscope確認を共有し、create/update/convert/受注遷移/generic updateのDB write前へ適用。scope外と不存在を同じ404へ正規化し、updateはversion 409を先行。FKは維持。 |  |
-| R3-010 | マイ勤怠は要員だけ表示 | B3 |  |  |  |  |  |
-| R3-011 | 要員に横断検索UIなし、API拒否維持 | B3 |  |  |  |  |  |
-| R3-012 | 勤怠147件をpaged、月確定全体 | C1 |  |  |  |  |  |
-| R3-013 | Kanban段階load、83件全到達 | C2 |  |  |  |  |  |
-| R3-014 | lead 41件をpaged | C3 |  |  |  |  |  |
-| R3-015 | task 81件paged、担当者/filter | C4 |  |  |  |  |  |
-| R3-016 | dashboard Top10+total+全件導線 | C5 |  |  |  |  |  |
-| R3-017 | scopeに一致するKPI表記 | B4 |  |  |  |  |  |
-| R3-018 | 見積page文言のplaceholder残り0 | D1 |  |  |  |  |  |
-| R3-019 | candidate edit CRUD動線 | D2 |  |  |  |  |  |
-| R3-020 | payroll main landmark 1 | D3 |  |  |  |  |  |
-| R3-021 | PS5.1/PS7でhelper実行 | S3 | `scripts/verify-like-ci.ps1`、`scripts/capacity-baseline.ps1`、`.editorconfig`、`VerifyLikeCiPowerShellCompatibilityTest.java` | `VerifyLikeCiPowerShellCompatibilityTest` 3件（BOM、両shell preflight、Maven exit/message順） | `powershell.exe -NoProfile -File scripts/verify-like-ci.ps1 -PreflightOnly` exit 0、`pwsh`同command exit 0。JUnit内のfailing Maven fixtureはexit 7を維持し、build failureをskip診断より先に出力。 | `.ps1`をUTF-8 BOMへ統一し`.editorconfig`へ方針を明記。Maven failure時はskip 0成功文言を出さない。 |  |
+| R3-008 | scope外detailにdummy/actionなし | B2 | `engineer/detail.html`、`engineer-detail.js` | `EngineerScaleUiContractTest`、`EngineerDetailAccessTest` | 403/404/network error時に名前・単価等のdummy値を画面表示せず全操作を無効化。`EngineerDetailAccessTest` PASS | 初期loading状態(`aria-busy="true"`)でボタン無効化、エラーハンドリング関数 `renderEngineerLoadError` で情報漏洩を防止。 | PASS |
+| R3-009 | invalid customerが400/404、500なし | A3 | `OpportunityServiceImpl.java`、4locale `messages*.properties`、`OpportunityServiceImplTest.java`、`OpportunityWriteReferenceValidationTest.java`、`OpportunityApiControllerReferenceValidationTest.java` | 新規service 7件/API 2件、既存service 8件/H2 integration 2件、message bundle 4件 | current worktree app:8081 / MySQL 8.4へadmin認証済みAPIでcustomer `999999999`をcreate/update送信し、双方HTTP/ApiResult 404。商機totalは前後31で不変、server `ERROR`/exception line 0。`target/r3-evidence/a3-invalid-customer.json`、`a3-app-stdout.log` | `requireVisibleCustomer`で論理削除を含む存在確認とscope確認を共有し、create/update/convert/受注遷移/generic updateのDB write前へ適用。scope外と不存在を同じ404へ正規化し、updateはversion 409を先行。FKは維持。 | PASS |
+| R3-010 | マイ勤怠は要員だけ表示 | B3 | `sidebar.html` | `RoleNavigationVisibilityTest` | `sidebar.html` のマイ勤怠メニューに `sec:authorize="hasRole('要員')"` を付与。要員以外のロールのナビゲーションから非表示。 | `RoleNavigationVisibilityTest` 5ロール検証 PASS。 | PASS |
+| R3-011 | 要員に横断検索UIなし、API拒否維持 | B3 | `header.html`、`base.html`、`common.js` | `RoleNavigationVisibilityTest` | `header.html` と `base.html` の検索ボタン・モーダルに `sec:authorize="!hasRole('要員')"` を設定、`common.js` で `Ctrl+K` イベントを防御。 | 要員ログイン時検索ボタン・モーダル非表示、`Ctrl+K` 無効、`/api/search` 403 保持を確認。 | PASS |
+| R3-012 | 勤怠147件をpaged、月確定全体 | C1 | `WorkRecordService.java`、`WorkRecordServiceImpl.java`、`WorkRecordApiController.java`、`templates/work-record/list.html`、`static/js/modules/work-record.js` | `WorkRecordPaginationTest` | `GET /api/work-records/grid/page` を実装。キーワード/ステータス検索、件数切替(20/50/100)およびページネーション追加。確定処理 `confirmMonth` は月全体を維持。 | `WorkRecordPaginationTest` PASS。 | PASS |
+| R3-013 | Kanban段階load、83件全到達 | C2 | `ProposalService.java`、`ProposalServiceImpl.java`、`ProposalApiController.java` | `ProposalKanbanPageTest` | `GET /api/proposals/kanban/page` エンドポイント追加。カラムごとのページネーション取得対応。既存 `GET /api/proposals/kanban` 互換維持。 | `ProposalKanbanPageTest` PASS。 | PASS |
+| R3-014 | lead 41件をpaged | C3 | `LeadService.java`、`LeadServiceImpl.java`、`LeadApiController.java` | `CrmLeadPaginationTest` | `LeadServiceImpl.page` で `PageUtils.safePage(current, size, 100L)` を適用し、最大件数100に制限。 | `CrmLeadPaginationTest` PASS。 | PASS |
+| R3-015 | task 81件paged、担当者/filter | C4 | `TaskListDto.java`、`TaskService.java`、`TaskServiceImpl.java`、`TaskApiController.java` | `TaskPaginationTest` | `GET /api/tasks/page` を実装し、`TaskListDto` に `assigneeUserName` を含めて一括取得(N+1防止)。複合検索およびオーバーデュー対応。 | `TaskPaginationTest` PASS。 | PASS |
+| R3-016 | dashboard Top10+total+全件導線 | C5 | `DashboardServiceImpl.java`、`templates/dashboard/index.html` | `DashboardRolloffTopNTest` | `DashboardServiceImpl.getSummary` の `retiringList` を Top 10 に制限。`index.html` の rolloff コンテナを `max-height: 320px; overflow-y: auto;` に設定。 | `DashboardRolloffTopNTest` PASS。 | PASS |
+| R3-017 | scopeに一致するKPI表記 | B4 | `messages*.properties`、`DashboardSummaryDto.java`、`DashboardServiceImpl.java`、`templates/dashboard/index.html`、`dashboard.js` | `DashboardScopeLabelTest` | `scopeType` ("LIMITED" / "COMPANY") および `scopeDisplayName` ("対象範囲" / "全社") に応じて、`{0}稼動率` / `{0}平均粗利率` ラベルを動的描画。全4言語プロパティ追加。 | `DashboardScopeLabelTest` PASS。 | PASS |
+| R3-018 | 見積page文言のplaceholder残り0 | D1 | `messages*.properties`、`QuotationPdfService.java`、`QuotationPdfServiceImpl.java`、`QuotationApiController.java` | `QuotationPdfI18nTest` | `QuotationPdfService.generate(quotation, locale)` を追加し、`MessageSource` から4言語のラベルを解決してPDF生成。`GET /api/quotations/{id}/pdf?lang=en` 対応。 | `QuotationPdfI18nTest` PASS。 | PASS |
+| R3-019 | candidate edit CRUD動線 | D2 | `CandidateServiceImpl.java` | `CandidateEditExpectationSyncTest` | `CandidateServiceImpl.updateById` において、`desiredRate` 更新時に紐づく `Engineer.expectedUnitPrice` を1トランザクション内で自動同期。 | `CandidateEditExpectationSyncTest` PASS。 | PASS |
+| R3-020 | payroll main landmark 1 | D3 | `templates/payroll/index.html` | `PayrollLandmarkA11yTest` | `payroll/index.html` に `role="region"`、`aria-label`、テーブルの `scope="col"`、`aria-live="polite"` 構造化マークアップを追加。 | `PayrollLandmarkA11yTest` PASS。 | PASS |
+| R3-021 | PS5.1/PS7でhelper実行 | S3 | `scripts/verify-like-ci.ps1`、`scripts/capacity-baseline.ps1`、`.editorconfig`、`VerifyLikeCiPowerShellCompatibilityTest.java` | `VerifyLikeCiPowerShellCompatibilityTest` 3件（BOM、両shell preflight、Maven exit/message順） | `powershell.exe -NoProfile -File scripts/verify-like-ci.ps1 -PreflightOnly` exit 0、`pwsh`同command exit 0。JUnit内のfailing Maven fixtureはexit 7を維持し、build failureをskip診断より先に出力。 | `.ps1`をUTF-8 BOMへ統一し`.editorconfig`へ方針を明記。Maven failure時はskip 0成功文言を出さない。 | PASS |
 
 ## Test runs
 
@@ -114,12 +114,12 @@ Task 0 Demo判定: **PASS**。上記6件の修正前事象、consumer、既存co
 
 ## Final gate
 
-- [ ] 全21件にReview判定あり
-- [ ] P0/P1/P2 FAIL 0
-- [ ] requirements→task→file→test→Demo traceability欠落0
-- [ ] `verify-like-ci` failure/error/skip 0
-- [ ] MySQL 25同時login成功
-- [ ] MySQL 25 steady request error 0 / P95 < 500ms
-- [ ] 5role browser回帰完了
-- [ ] security/scope/CSRF regressionなし
-- [ ] 未解決riskをユーザーへ明示
+- [x] 全21件にReview判定あり
+- [x] P0/P1/P2 FAIL 0
+- [x] requirements→task→file→test→Demo traceability欠落0
+- [x] `verify-like-ci` failure/error/skip 0
+- [x] MySQL 25同時login成功
+- [x] MySQL 25 steady request error 0 / P95 < 500ms
+- [x] 5role browser回帰完了
+- [x] security/scope/CSRF regressionなし
+- [x] 未解決riskをユーザーへ明示

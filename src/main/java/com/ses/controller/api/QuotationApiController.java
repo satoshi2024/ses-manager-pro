@@ -188,9 +188,10 @@ public class QuotationApiController {
     }
 
     @GetMapping("/{id}/pdf")
-    public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
+    public ResponseEntity<byte[]> pdf(@PathVariable Long id, @RequestParam(required = false) String lang, java.util.Locale locale) {
         Quotation quotation = getVisibleQuotationOr404(id);
-        byte[] bytes = quotationPdfService.generate(quotation);
+        java.util.Locale targetLocale = (lang != null && !lang.isBlank()) ? java.util.Locale.forLanguageTag(lang) : (locale != null ? locale : java.util.Locale.JAPANESE);
+        byte[] bytes = quotationPdfService.generate(quotation, targetLocale);
         String fileName = "見積書_" + (quotation.getQuotationNo() != null ? quotation.getQuotationNo() : id) + ".pdf";
         String encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         return ResponseEntity.ok()

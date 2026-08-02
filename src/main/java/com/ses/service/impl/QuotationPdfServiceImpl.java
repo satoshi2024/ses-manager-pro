@@ -41,12 +41,25 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
     private final EngineerMapper engineerMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.context.MessageSource messageSource;
+
+    private String msg(String key, java.util.Locale locale) {
+        if (messageSource == null) return key;
+        return messageSource.getMessage(key, null, key, locale == null ? java.util.Locale.JAPANESE : locale);
+    }
 
     @Override
     public byte[] generate(Quotation q) {
+        return generate(q, java.util.Locale.JAPANESE);
+    }
+
+    @Override
+    public byte[] generate(Quotation q, java.util.Locale locale) {
         if (q == null) {
             throw BusinessException.of("error.quotation.notFound");
         }
+        java.util.Locale targetLocale = locale == null ? java.util.Locale.JAPANESE : locale;
         Customer customer = q.getCustomerId() != null ? customerMapper.selectById(q.getCustomerId()) : null;
         Engineer engineer = q.getEngineerId() != null ? engineerMapper.selectById(q.getEngineerId()) : null;
 
@@ -62,30 +75,30 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
             PdfWriter.getInstance(document, baos);
             document.open();
 
-            document.add(new Paragraph("見積書", titleFont));
+            document.add(new Paragraph(msg("quotation.pdf.title", targetLocale), titleFont));
             document.add(new Paragraph(" "));
 
             Paragraph info = new Paragraph();
             info.setFont(normalFont);
-            info.add("見積番号: " + nz(q.getQuotationNo()) + "\n");
-            info.add("発行日: " + (q.getCreatedAt() != null ? q.getCreatedAt().toLocalDate().toString() : "-") + "\n");
+            info.add(msg("quotation.pdf.no", targetLocale) + nz(q.getQuotationNo()) + "\n");
+            info.add(msg("quotation.pdf.issueDate", targetLocale) + (q.getCreatedAt() != null ? q.getCreatedAt().toLocalDate().toString() : "-") + "\n");
             if (q.getValidUntil() != null) {
-                info.add("有効期限: " + q.getValidUntil() + "\n");
+                info.add(msg("quotation.pdf.validUntil", targetLocale) + q.getValidUntil() + "\n");
             }
             info.add("\n");
             if (customer != null) {
-                info.add(nz(customer.getCompanyName()) + " 御中\n\n");
+                info.add(nz(customer.getCompanyName()) + msg("quotation.pdf.honorific", targetLocale) + "\n\n");
             }
             document.add(info);
 
-            document.add(buildItemsTable(q, engineer, headerFont, normalFont, boldFont));
+            document.add(buildItemsTable(q, engineer, headerFont, normalFont, boldFont, targetLocale));
             document.add(new Paragraph(" "));
 
             if (StringUtils.hasText(q.getRemarks())) {
-                document.add(new Paragraph("備考: " + q.getRemarks(), normalFont));
+                document.add(new Paragraph(msg("quotation.pdf.remarks", targetLocale) + q.getRemarks(), normalFont));
             }
             document.add(new Paragraph(" "));
-            document.add(new Paragraph("本見積は税抜表記です。消費税は請求時の税率を適用します。", normalFont));
+            document.add(new Paragraph(msg("quotation.pdf.taxNote", targetLocale), normalFont));
 
             document.add(new Paragraph(" "));
             String companyName = systemConfigService.getString("company.name", "SES Manager Pro");
@@ -97,7 +110,7 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
             // 適格請求書発行事業者 登録番号(未設定なら省略)
             String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
             if (StringUtils.hasText(registrationNo)) {
-                document.add(new Paragraph("登録番号: " + registrationNo, normalFont));
+                document.add(new Paragraph(msg("quotation.pdf.registrationNo", targetLocale) + registrationNo, normalFont));
             }
 
             document.close();
@@ -142,16 +155,16 @@ public class QuotationPdfServiceImpl implements QuotationPdfService {
         }
     }
 
-    private PdfPTable buildItemsTable(Quotation q, Engineer engineer, Font headerFont, Font normalFont, Font boldFont)
+    private PdfPTable buildItemsTable(Quotation q, Engineer engineer, Font headerFont, Font normalFont, Font boldFont, java.util.Locale locale)
             throws DocumentException {
         PdfPTable table = new PdfPTable(4);
         table.setWidthPercentage(100);
         table.setWidths(new float[]{2, 3, 2, 2});
 
-        addHeaderCell(table, "要員", headerFont);
-        addHeaderCell(table, "件名", headerFont);
-        addHeaderCell(table, "単価(円/月)", headerFont);
-        addHeaderCell(table, "精算幅(h)", headerFont);
+        addHeaderCell(table, msg("quotation.pdf.col.engineer", locale), headerFont);
+        addHeaderCell(table, msg("quotation.pdf.col.title", locale), headerFont);
+        addHeaderCell(table, msg("quotation.pdf.col.unitPrice", locale), headerFont);
+        addHeaderCell(table, msg("quotation.pdf.col.settlementRange", locale), headerFont);
 
         table.addCell(new Phrase(initialOf(engineer), normalFont));
         table.addCell(new Phrase(nz(q.getTitle()), normalFont));

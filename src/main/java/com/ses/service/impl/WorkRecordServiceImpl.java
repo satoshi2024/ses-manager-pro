@@ -114,6 +114,31 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds);
     }
 
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> monthlyGridPage(String workMonth, Long current, Long size, String keyword, String status) {
+        List<WorkRecordGridDto> all = monthlyGrid(workMonth);
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.toLowerCase().trim();
+            all = all.stream()
+                    .filter(g -> (g.getEngineerName() != null && g.getEngineerName().toLowerCase().contains(kw)) ||
+                            (g.getProjectName() != null && g.getProjectName().toLowerCase().contains(kw)) ||
+                            (g.getContractNo() != null && g.getContractNo().toLowerCase().contains(kw)))
+                    .collect(Collectors.toList());
+        }
+        if (status != null && !status.isBlank()) {
+            all = all.stream()
+                    .filter(g -> status.equals(g.getStatus()) || (g.getStatus() == null && "未入力".equals(status)))
+                    .collect(Collectors.toList());
+        }
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> page = com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 50L : size, 100L);
+        int total = all.size();
+        page.setTotal(total);
+        int from = (int) Math.min((page.getCurrent() - 1) * page.getSize(), total);
+        int to = (int) Math.min(from + page.getSize(), total);
+        page.setRecords(all.subList(from, to));
+        return page;
+    }
+
     /** テストおよび保守ツールからリフレクション経由で利用する互換エントリーポイント。 */
     @SuppressWarnings("unused")
     private void assertContractScope(Contract contract, String workMonth) {

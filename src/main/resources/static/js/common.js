@@ -759,7 +759,7 @@ SES.globalSearch = {
     init: function() {
         const $input = $('#global-search-input');
         const $results = $('#global-search-results');
-        if (!$input.length) return;
+        if (!$input.length || !$('#global-search-btn').length) return;
 
         $(document).on('keydown', function(e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {

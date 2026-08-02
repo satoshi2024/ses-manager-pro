@@ -254,6 +254,11 @@ public class DashboardServiceImpl implements DashboardService {
         long grossProfit = currentAmount.getProfit();
         double profitMargin = totalRevenue > 0 ? (double) grossProfit / totalRevenue * 100 : 0.0;
 
+        boolean isScoped = dataScopeService.isScoped() ||
+                (organizationScopeService != null && !organizationScopeService.hasFullAccess());
+        String scopeType = isScoped ? "LIMITED" : "COMPANY";
+        String scopeDisplayName = isScoped ? "対象範囲" : "全社";
+
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
                 .utilization(Math.round(utilization * 10.0) / 10.0)
                 .utilizationTrend(null)
@@ -262,6 +267,8 @@ public class DashboardServiceImpl implements DashboardService {
                 .revenueTrend(revenueTrend)
                 .profitMargin(Math.round(profitMargin * 10.0) / 10.0)
                 .profitTrend(profitTrend)
+                .scopeType(scopeType)
+                .scopeDisplayName(scopeDisplayName)
                 .build();
 
         DashboardSummaryDto.StatusChartDto statusChart = DashboardSummaryDto.StatusChartDto.builder()
@@ -325,6 +332,9 @@ public class DashboardServiceImpl implements DashboardService {
                             .build();
                     retiringList.add(dto);
                 }
+            }
+            if (retiringList.size() > 10) {
+                retiringList = new ArrayList<>(retiringList.subList(0, 10));
             }
         }
 

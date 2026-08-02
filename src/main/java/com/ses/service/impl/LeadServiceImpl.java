@@ -63,7 +63,7 @@ public class LeadServiceImpl implements LeadService {
         if (StringUtils.hasText(status)) query.eq("status", status);
         if (StringUtils.hasText(companyName)) query.like("company_name", companyName.trim());
         applyCrmScope(query);
-        return leadMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current <= 0 ? 1 : current, Math.min(Math.max(size, 1), 1000)), query.orderByDesc("id"));
+        return leadMapper.selectPage(com.ses.common.util.PageUtils.safePage(current, size, 100L), query.orderByDesc("id"));
     }
 
     @Override

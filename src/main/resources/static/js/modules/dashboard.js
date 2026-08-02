@@ -115,6 +115,11 @@ function loadCashflowData() {
 
 
 function renderKPIs(kpi) {
+    if (kpi.scopeType) {
+        const scopeText = kpi.scopeType === 'LIMITED' ? SES.i18n.t('dashboard.scope.limited') : SES.i18n.t('dashboard.scope.company');
+        $('#kpi-utilization-label').text(SES.i18n.t('dashboard.kpi.utilization', [scopeText]));
+        $('#kpi-profit-margin-label').text(SES.i18n.t('dashboard.kpi.avg_profit_margin', [scopeText]));
+    }
     $('#kpi-utilization').text(kpi.utilization + '%');
     updateTrendBadge($('#kpi-utilization-trend'), kpi.utilizationTrend);
     

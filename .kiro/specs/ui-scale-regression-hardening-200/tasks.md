@@ -89,14 +89,14 @@
   - **テスト要件**: template/API contract、Bench32件、他3status、unknown status。
   - **Demo**: dashboard「リストを見る」と手動filterの両方が32件を表示する。
 
-- [ ] B2. 要員detail loading/error state
+- [x] B2. 要員detail loading/error state
   - **対象ID**: R3-008
   - **Objective**: API拒否/不存在時にdummy人物や操作buttonを残さない。
   - **実装ガイダンス**: hard-coded人物値を削除し、action初期disable、成功後enable、共通error rendererを追加する。
   - **テスト要件**: scope内200、scope外404、不存在404、network failure、ApiResult非200。error stateに「田中 太郎」が無い。
   - **Demo**: managerでscope外/内IDを順に開き、誤表示なしと正常detailを確認する。
 
-- [ ] B3. 5role navigation可視性修正
+- [x] B3. 5role navigation可視性修正
   - **対象ID**: R3-010、R3-011
   - **Objective**: 操作して必ず403になるmenu/searchを該当roleへ表示しない。
   - **実装ガイダンス**:
@@ -106,77 +106,77 @@
   - **テスト要件**: 5role×sidebar/header×直接URL/API matrix。要員にCtrl+K handler/search requestなし。
   - **Demo**: 5roleでheader/sidebarを目視し、禁止routeの直接403も確認する。
 
-- [ ] B4. Dashboard scope表記
+- [x] B4. Dashboard scope表記
   - **対象ID**: R3-017
   - **Objective**: KPIの値と「全社/対象範囲」表記を一致させる。
   - **実装ガイダンス**: scope flag/display nameをmodel/DTOへ渡し、4locale message keyを追加する。
   - **テスト要件**: admin全社、manager限定組織、sales scope on/off、4locale key parity。
   - **Demo**: adminと`r3_manager01`を比較し、managerに「全社」が残らないことを確認する。
 
-- [ ] C1. 勤怠grid pagination
+- [x] C1. 勤怠grid pagination
   - **対象ID**: R3-012
   - **Objective**: 147契約を段階取得しつつ月全体確定の意味を保つ。
   - **実装ガイダンス**: paged grid API、既定50/max100、filter/total/pagination、save後state維持。
   - **テスト要件**: 147件3page、月変更、scope、row save、approve/reject、月次確定が全page対象。
   - **Demo**: 3pageを移動し、別pageのrowを保存後も位置を維持する。月次確定件数をDB照合する。
 
-- [ ] C2. 提案Kanban column paging / load more
+- [x] C2. 提案Kanban column paging / load more
   - **対象ID**: R3-013
   - **Objective**: 83件を初期全描画せず、全cardへ到達できる。
   - **実装ガイダンス**: 互換List endpointを残し、paged endpointを追加。column別20件とtotal、load more、filterを実装する。
   - **テスト要件**: status別0/1/21/83、scope後total、load more重複なし、drag/drop count/state、XSS escape。
   - **Demo**: 初期DOM card数が全83未満で、追加操作により83件すべてへ到達する。
 
-- [ ] C3. CRM lead pagination
+- [x] C3. CRM lead pagination
   - **対象ID**: R3-014
   - **Objective**: 41リードを20件単位で参照・変換できる。
   - **実装ガイダンス**: paged API、filter、scope後total、変換後page補正。
   - **テスト要件**: 41件3page、owner/status/source/keyword、sales scope、conversion後total。
   - **Demo**: sales roleで3ページを操作し、最終leadを表示する。
 
-- [ ] C4. ToDo task paginationと担当者可視化
+- [x] C4. ToDo task paginationと担当者可視化
   - **対象ID**: R3-015
   - **Objective**: 81taskをpaged表示し、担当者ベースで運用できる。
   - **実装ガイダンス**: `/api/tasks/page`、TaskListDto、assignee batch取得、task専用pagination/filter関数。
   - **テスト要件**: 81件5page、未割当、assignee/status/priority/overdue/keyword、通知tab回帰、N+1 query抑止。
   - **Demo**: 担当者列、filter、5page、更新後page維持を確認する。
 
-- [ ] C5. Dashboard rolloff Top-Nと一覧導線
+- [x] C5. Dashboard rolloff Top-Nと一覧導線
   - **対象ID**: R3-016
   - **Objective**: dashboardを要約画面に保ち、全候補へ別一覧から到達させる。
   - **実装ガイダンス**: scope後total、終了日順Top10、`すべて見る`期間filter link。
   - **テスト要件**: 0/10/11/15候補、同日tie-break、manager scope、link queryと契約一覧filter一致。
   - **Demo**: dashboardは10行、total15、一覧導線先は15件を表示する。
 
-- [ ] D1. 見積pagination i18n修正
+- [x] D1. 見積pagination i18n修正
   - **対象ID**: R3-018
   - **Objective**: 4localeですべてのplaceholderを正しく置換する。
   - **実装ガイダンス**: `SES.i18n.t`を配列1引数で呼ぶ。共通関数signatureは変更しない。
   - **テスト要件**: total 0/1/41、first/last page、4locale、未置換`{n}`なし。
   - **Demo**: 41件の1/5ページで自然な範囲文言を表示する。
 
-- [ ] D2. 候補者編集動線
+- [x] D2. 候補者編集動線
   - **対象ID**: R3-019
   - **Objective**: candidate CRUDのupdateを一覧から完結できる。
   - **実装ガイダンス**: row edit、modal populate、PUT、stage endpoint分離、terminal/converted rule一致。
   - **テスト要件**: update正常、validation、terminal/converted、stage不変、page/filter維持、監査log。
   - **Demo**: 既存候補者の連絡先/次actionを編集し、stage履歴を増やさず反映する。
 
-- [ ] D3. 給与画面landmark修正
+- [x] D3. 給与画面landmark修正
   - **対象ID**: R3-020
   - **Objective**: document内のmain landmarkを1つにする。
   - **実装ガイダンス**: inner mainをsection/divへ変更し、heading/label/keyboardを維持する。
   - **テスト要件**: rendered HTMLの`main`数1、主要form control label、既存responsive test。
   - **Demo**: HRで給与画面を開き、accessibility treeと操作を確認する。
 
-- [ ] M1. 200名fixture・5role browser総合回帰
+- [x] M1. 200名fixture・5role browser総合回帰
   - **対象ID**: R3-005〜R3-020
   - **Objective**: 個別修正を実際の200名運用動線として再検証する。
   - **実装ガイダンス**: production migrationへfixtureを追加せず、test-only seed/生成scriptをidempotentにする。
   - **テスト要件**: `test-baseline.md`の全件数、全role、先頭/中間/最終page、scope、403、CRUD、0件状態。
   - **Demo**: 管理者→営業→HR→マネージャー→要員の順にbrowser evidenceをledgerへ記録する。
 
-- [ ] M2. 全量test・MySQL・容量gate
+- [x] M2. 全量test・MySQL・容量gate
   - **対象ID**: R3-001〜R3-021
   - **Objective**: CI相当と実MySQL容量試験を通し、偽のgreenを残さない。
   - **実装ガイダンス**:
@@ -186,7 +186,7 @@
   - **テスト要件**: 全test failure/error/skip 0、25login success、steady request error 0、P95<500ms、server ERROR 0。
   - **Demo**: report path、summary.csv、server log grep、test件数をledgerへ記録する。
 
-- [ ] M3. 実装handoffとReview ready
+- [x] M3. 実装handoffとReview ready
   - **対象ID**: 全件
   - **Objective**: 独立Review AIが説明を信用せず再現・照合できる状態にする。
   - **実装ガイダンス**:

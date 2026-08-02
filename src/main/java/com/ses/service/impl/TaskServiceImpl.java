@@ -32,6 +32,8 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     private static final Set<String> TERMINAL_STATUSES = Set.of(STATUS_COMPLETED, STATUS_CANCELLED);
 
     private final ObjectProvider<NotificationService> notificationServiceProvider;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.SysUserMapper sysUserMapper;
 
     @Override
     @Transactional
@@ -212,5 +214,75 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
                 // 通知失敗が本体更新処理を直接失敗させない
             }
         }
+    }
+
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.task.TaskListDto> getTasksPage(
+            String status, String priority, Long assigneeUserId, String keyword, Boolean overdue,
+            Long current, Long size, Long userId) {
+        LambdaQueryWrapper<Task> query = new LambdaQueryWrapper<>();
+        String role = SecurityUtils.currentRole();
+        if (!"管理者".equals(role)) {
+            query.and(q -> q.eq(Task::getAssigneeUserId, userId).or().eq(Task::getRequesterUserId, userId));
+        }
+
+        if (StringUtils.hasText(status)) {
+            query.eq(Task::getStatus, status);
+        }
+        if (StringUtils.hasText(priority)) {
+            query.eq(Task::getPriority, priority);
+        }
+        if (assigneeUserId != null) {
+            query.eq(Task::getAssigneeUserId, assigneeUserId);
+        }
+        if (StringUtils.hasText(keyword)) {
+            String kw = keyword.trim();
+            query.and(q -> q.like(Task::getTitle, kw).or().like(Task::getDescription, kw));
+        }
+        if (Boolean.TRUE.equals(overdue)) {
+            query.isNotNull(Task::getDueDate).lt(Task::getDueDate, LocalDate.now())
+                 .notIn(Task::getStatus, TERMINAL_STATUSES);
+        }
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Task> pageReq =
+                com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 20L : size, 100L);
+        query.orderByDesc(Task::getId);
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Task> taskPage = baseMapper.selectPage(pageReq, query);
+        List<Task> records = taskPage.getRecords();
+
+        java.util.Set<Long> userIds = records.stream()
+                .map(Task::getAssigneeUserId)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        records.stream().map(Task::getRequesterUserId).filter(Objects::nonNull).forEach(userIds::add);
+
+        java.util.Map<Long, String> userNameMap = (userIds.isEmpty() || sysUserMapper == null) ? java.util.Map.of() :
+                sysUserMapper.selectBatchIds(userIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(com.ses.entity.SysUser::getId, com.ses.entity.SysUser::getRealName, (a, b) -> a));
+
+        LocalDate today = LocalDate.now();
+        List<com.ses.dto.task.TaskListDto> dtos = records.stream().map(t -> {
+            boolean isOverdue = t.getDueDate() != null && t.getDueDate().isBefore(today) && !TERMINAL_STATUSES.contains(t.getStatus());
+            return com.ses.dto.task.TaskListDto.builder()
+                    .id(t.getId())
+                    .title(t.getTitle())
+                    .description(t.getDescription())
+                    .status(t.getStatus())
+                    .priority(t.getPriority())
+                    .dueDate(t.getDueDate())
+                    .assigneeUserId(t.getAssigneeUserId())
+                    .assigneeUserName(userNameMap.getOrDefault(t.getAssigneeUserId(), "-"))
+                    .createdBy(t.getRequesterUserId())
+                    .createdAt(t.getCreatedAt())
+                    .updatedAt(t.getUpdatedAt())
+                    .overdue(isOverdue)
+                    .build();
+        }).collect(java.util.stream.Collectors.toList());
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.task.TaskListDto> dtoPage =
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(taskPage.getCurrent(), taskPage.getSize(), taskPage.getTotal());
+        dtoPage.setRecords(dtos);
+        return dtoPage;
     }
 }

@@ -93,6 +93,15 @@ public class ProposalApiController {
         return ApiResult.success(list);
     }
 
+    @GetMapping("/kanban/page")
+    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<ProposalKanbanDto>> getKanbanPage(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long current,
+            @RequestParam(required = false) Long size,
+            @RequestParam(required = false) String keyword) {
+        return ApiResult.success(proposalService.getKanbanPage(status, current, size, keyword));
+    }
+
     /**
      * ステータス変更
      *

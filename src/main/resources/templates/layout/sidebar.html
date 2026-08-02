@@ -29,7 +29,7 @@
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.business}">業務管理</span>
                 </li>
                 
-                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
                     <a th:href="@{/my/timesheet}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-workspace me-2"></i>
                         <span th:text="#{menu.myTimesheet}">マイ勤怠</span>

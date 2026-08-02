@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" xmlns:sec="http://www.thymeleaf.org/extras/spring-security" layout:decorate="~{layout/base}">
 <head>
     <title th:text="#{workRecord.title}">勤怠・実績</title>
@@ -22,13 +22,28 @@
     <!-- Filters -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body p-3">
-            <form class="row g-3 align-items-end" id="searchForm">
+            <form class="row g-3 align-items-end" id="searchForm" onsubmit="return false;">
                 <div class="col-md-3">
                     <label class="form-label text-muted small mb-1" th:text="#{workRecord.filter.month}">対象月</label>
-                    <input type="month" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" id="workMonth" onchange="loadWorkRecords()">
+                    <input type="month" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" id="workMonth" onchange="applyWorkRecordFilters()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label text-muted small mb-1" th:text="#{common.keyword}">キーワード</label>
+                    <input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" id="workRecordKeyword" th:placeholder="#{common.keyword.placeholder}" onkeyup="if(event.key==='Enter')applyWorkRecordFilters()">
                 </div>
                 <div class="col-md-2">
-                    <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="loadWorkRecords()">
+                    <label class="form-label text-muted small mb-1" th:text="#{workRecord.table.status}">ステータス</label>
+                    <select class="form-select form-select-sm bg-secondary text-white border-dark" id="workRecordStatus" onchange="applyWorkRecordFilters()">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="未入力">未入力</option>
+                        <option value="入力中">入力中</option>
+                        <option value="提出済">提出済</option>
+                        <option value="確定">確定</option>
+                        <option value="差戻し">差戻し</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary w-100 border-dark text-accent-blue hover-bg-blue" onclick="applyWorkRecordFilters()">
                         <i class="bi bi-search me-1"></i><th:block th:text="#{common.btn.search}">検索</th:block>
                     </button>
                 </div>
@@ -64,7 +79,7 @@
     </div>
 
     <!-- Table -->
-    <div class="card bg-card border-dark shadow-sm">
+    <div class="card bg-card border-dark shadow-sm mb-3">
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-dark table-hover table-striped mb-0 align-middle">
@@ -85,6 +100,21 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="d-flex justify-content-between align-items-center mt-3 mb-4" id="work-record-pagination-container">
+        <div class="text-muted small" id="work-record-page-info"></div>
+        <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm bg-secondary text-white border-dark" id="work-record-page-size" style="width: auto;" onchange="changeWorkRecordPageSize(this.value)">
+                <option value="20">20件</option>
+                <option value="50" selected>50件</option>
+                <option value="100">100件</option>
+            </select>
+            <nav aria-label="Page navigation">
+                <ul class="pagination pagination-sm mb-0" id="work-record-pagination"></ul>
+            </nav>
         </div>
     </div>
 

@@ -65,7 +65,7 @@
     </div>
 
     <!-- 横断検索 (Command Palette) モーダル -->
-    <div class="modal fade" id="globalSearchModal" tabindex="-1" aria-labelledby="globalSearchModalLabel" aria-hidden="true">
+    <div sec:authorize="!hasRole('要員')" class="modal fade" id="globalSearchModal" tabindex="-1" aria-labelledby="globalSearchModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content bg-secondary text-white border-dark">
                 <div class="modal-header border-dark py-2">

@@ -41,6 +41,22 @@ public class TaskApiController {
         return ApiResult.success(tasks);
     }
 
+    @GetMapping("/page")
+    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.task.TaskListDto>> getTasksPage(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) Long assigneeUserId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Boolean overdue,
+            @RequestParam(required = false) Long current,
+            @RequestParam(required = false) Long size) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
+        return ApiResult.success(taskService.getTasksPage(status, priority, assigneeUserId, keyword, overdue, current, size, userId));
+    }
+
     /**
      * 期限超過タスク一覧
      */

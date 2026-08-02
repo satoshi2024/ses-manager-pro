@@ -37,7 +37,7 @@ class FrontendScaleUiContractTest {
     @Test
     @DisplayName("filterとページサイズ変更は1ページ目へ戻る")
     void contractFilters_resetCurrentPage() throws IOException {
-        String js = read("static/js/modules/contract.js");
+        String js = read("static/js/modules/contract.js").replace("\r\n", "\n");
         assertTrue(js.contains("function applyContractFilters() {\n    loadContracts(1);\n}"));
         assertTrue(js.contains("contractPageSize = Number($(this).val()) || 20;\n        loadContracts(1);"));
     }

@@ -40,6 +40,16 @@ public class WorkRecordApiController {
         return ApiResult.success(workRecordService.monthlyGrid(month));
     }
 
+    @GetMapping("/grid/page")
+    public ApiResult<Page<WorkRecordGridDto>> getGridPage(
+            @RequestParam String month,
+            @RequestParam(required = false) Long current,
+            @RequestParam(required = false) Long size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status) {
+        return ApiResult.success(workRecordService.monthlyGridPage(month, current, size, keyword, status));
+    }
+
     /**
      * 承認滞留の可視化（読み取り専用・トラックA3）。対象月の提出済（未承認）件数と滞留日数を返す。
      * 状態遷移は一切行わない。組織scopeは {@link WorkRecordService#monthlyGrid} と同一経路で絞り込む

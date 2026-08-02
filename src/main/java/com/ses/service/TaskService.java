@@ -37,4 +37,11 @@ public interface TaskService extends IService<Task> {
      * 期限超過タスク一覧を取得（due_date IS NULL は除外）
      */
     List<Task> getOverdueTasksForUser(Long userId, LocalDate asOfDate);
+
+    /**
+     * ページ検索付きタスク一覧を取得（担当者名一括取得・N+1抑止）
+     */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.task.TaskListDto> getTasksPage(
+            String status, String priority, Long assigneeUserId, String keyword, Boolean overdue,
+            Long current, Long size, Long userId);
 }

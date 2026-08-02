@@ -11,6 +11,7 @@ import java.util.List;
 
 public interface WorkRecordService extends IService<WorkRecord> {
     List<WorkRecordGridDto> monthlyGrid(String workMonth);
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> monthlyGridPage(String workMonth, Long current, Long size, String keyword, String status);
     WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks);
     void confirmMonth(String workMonth);
     void reopenMonth(String workMonth);

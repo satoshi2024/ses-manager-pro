@@ -10,9 +10,9 @@
     <a th:if="${#authorization.expression('hasRole(''管理者'')')}" class="btn btn-outline-secondary" href="/integrations/freee/authorize">freeeに接続</a>
   </div>
   <div id="payrollStatus" class="alert alert-secondary">接続状態を確認中...</div>
-  <section class="card mb-3"><div class="card-body">
+  <section class="card mb-3" role="region" aria-label="freee従業員連携"><div class="card-body">
     <h2 class="h6">freee従業員</h2>
-    <div id="payrollEmployees" class="table-responsive"></div>
+    <div id="payrollEmployees" class="table-responsive" aria-live="polite" aria-atomic="true"></div>
     <form id="linkForm" class="row g-2 align-items-end mt-2">
       <div class="col-auto"><label class="form-label">SES要員</label><select id="linkEngineerId" class="form-select" required><option value="">選択してください</option></select></div>
       <div class="col-auto"><label class="form-label">freee従業員ID</label><input id="linkEmployeeId" class="form-control" type="text" required></div>
@@ -20,14 +20,14 @@
       <div class="col-auto"><button class="btn btn-danger" type="button" id="unlinkBtn">解除</button></div>
     </form>
   </div></section>
-  <section class="card"><div class="card-body">
+  <section class="card" role="region" aria-label="給与明細照会"><div class="card-body">
     <h2 class="h6">給与明細</h2>
     <form id="statementForm" class="row g-2 align-items-end">
       <div class="col-auto"><label class="form-label" for="statementYear">年</label><input id="statementYear" class="form-control" type="number" required></div>
       <div class="col-auto"><label class="form-label" for="statementMonth">月</label><input id="statementMonth" class="form-control" type="number" min="1" max="12" required></div>
       <div class="col-auto"><button class="btn btn-primary" type="submit">取得</button></div>
     </form>
-    <div id="payrollStatements" class="table-responsive mt-3"></div>
+    <div id="payrollStatements" class="table-responsive mt-3" aria-live="polite" aria-atomic="true"></div>
   </div></section>
 </main>
 <th:block layout:fragment="page-js">
@@ -41,7 +41,7 @@
         .text(status ? 'freee接続済み' : 'freee未接続');
       if (!status) return;
       const employees = await SES.api.get('/api/payroll/employees');
-      $('#payrollEmployees').html('<table class="table table-sm"><thead><tr><th>氏名</th><th>freee従業員ID</th><th>紐付け状態</th></tr></thead><tbody>' +
+      $('#payrollEmployees').html('<table class="table table-sm" aria-label="freee従業員一覧"><thead><tr><th scope="col">氏名</th><th scope="col">freee従業員ID</th><th scope="col">紐付け状態</th></tr></thead><tbody>' +
         (employees || []).map(e => `<tr><td>${esc(e.displayName)}</td><td>${esc(e.id || e.employeeId)}</td><td>${e.linkedEngineerId ? '済 (' + esc(e.linkedEngineerName) + ')' : '未連携'}</td></tr>`).join('') + '</tbody></table>');
       
       const engRes = await SES.api.get('/api/engineers?size=1000');
@@ -51,8 +51,8 @@
   };
   $('#statementYear').val(new Date().getFullYear()); $('#statementMonth').val(new Date().getMonth() + 1);
   $('#statementForm').on('submit', async e => { e.preventDefault(); try { const p = await SES.api.get('/api/payroll/statements', {year: $('#statementYear').val(), month: $('#statementMonth').val()}); 
-    $('#payrollStatements').html((!p || p.length === 0) ? '<p class="text-muted">データがありません</p>' : '<table class="table table-sm"><thead><tr><th>従業員ID</th><th>年</th><th>月</th><th>種別</th><th>総支給額</th><th>控除額</th><th>差引支給額</th></tr></thead><tbody>' +
-      p.map(s => `<tr><td>${esc(s.employeeId)}</td><td>${esc(s.year)}</td><td>${esc(s.month)}</td><td>${esc(s.type)}</td><td>${Number(s.grossAmount||0).toLocaleString()}</td><td>${Number(s.deductions||0).toLocaleString()}</td><td>${Number(s.netAmount||0).toLocaleString()}</td></tr>`).join('') + '</tbody></table>');
+    $('#payrollStatements').html((!p || p.length === 0) ? '<p class="text-muted">データがありません</p>' : '<table class="table table-sm" aria-label="給与明細一覧"><thead><tr><th scope="col">従業員ID</th><th scope="col">年</th><th scope="col">月</th><th scope="col">種別</th><th scope="col" class="text-end">総支給額</th><th scope="col" class="text-end">控除額</th><th scope="col" class="text-end">差引支給額</th></tr></thead><tbody>' +
+      p.map(s => `<tr><td>${esc(s.employeeId)}</td><td>${esc(s.year)}</td><td>${esc(s.month)}</td><td>${esc(s.type)}</td><td class="text-end" aria-label="総支給額: ${Number(s.grossAmount||0).toLocaleString()}円">${Number(s.grossAmount||0).toLocaleString()}</td><td class="text-end" aria-label="控除額: ${Number(s.deductions||0).toLocaleString()}円">${Number(s.deductions||0).toLocaleString()}</td><td class="text-end fw-bold" aria-label="差引支給額: ${Number(s.netAmount||0).toLocaleString()}円">${Number(s.netAmount||0).toLocaleString()}</td></tr>`).join('') + '</tbody></table>');
   } catch (err) { Toast.error(err.message || '取得に失敗しました'); } });
   
   $('#linkForm').on('submit', async e => {

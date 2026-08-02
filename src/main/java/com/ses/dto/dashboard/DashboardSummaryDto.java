@@ -28,6 +28,8 @@ public class DashboardSummaryDto {
         private String revenueTrend;
         private double profitMargin;
         private String profitTrend;
+        private String scopeType;
+        private String scopeDisplayName;
     }
 
     @Data
