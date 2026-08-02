@@ -125,10 +125,14 @@ public class LeadServiceImpl implements LeadService {
         boolean hasPhone = StringUtils.hasText(contactPhone);
         if (hasCompany || hasEmail || hasPhone) {
             query.and(w -> {
-                // SQLでは候補母集団だけを取得し、表記揺れの正規化はJava側で確定する。
                 boolean branch = false;
                 if (hasCompany) {
-                    w.like("company_name", companyName.trim().substring(0, Math.min(3, companyName.trim().length())));
+                    String raw = companyName.trim();
+                    String normalized = Normalizer.normalize(raw, Normalizer.Form.NFKC);
+                    w.like("company_name", raw.substring(0, Math.min(3, raw.length())));
+                    if (!raw.equals(normalized)) {
+                        w.or().like("company_name", normalized.substring(0, Math.min(3, normalized.length())));
+                    }
                     branch = true;
                 }
                 if (hasEmail) {

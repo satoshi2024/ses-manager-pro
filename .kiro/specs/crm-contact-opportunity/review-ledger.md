@@ -341,3 +341,32 @@ Base `f582f9e`（CRM既存完了記録）から、Round 3のP0/P1/P2指摘を本
 | CRM-R3-P0-03 / T048-T053 | `R__crm_contact_reconciliation.sql`をV71以下でno-op、V73後の列/backfillをidempotentに実行。`sql/runbook/v73-crm-partial-repair.sql`は列/index/FK/移行contactを段階復旧し、MySQL fixtureで欠落状態を再現 | `FlywayMigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`FlywayRepairRunbookTest` PASS。V73は未編集 | CLOSED。適用済み履歴はrepairせず、実行前dump・validate・許可リスト確認が必要 |
 | CRM-R3-P1 / T048-T052 | stage/probability/version/primary/null更新、activity relation/assignee、mail provider adapter、lead duplicate normalization、CSV formula injection、bounded list/batch customer load、4言語UIを補強 | CRM定向回帰、schema/entity regression、Node `--check`、L4全量。顧客detail/contact CRUD・lead/opportunity/KPIのDemo確認 | CLOSED。contact非管理者PII maskは編集画面で再送信しない運用確認を残す |
 | CRM-R3-P2 / T051-T053 | opportunityカードのkeyboard操作、一覧上限、stage_changed_at、asOf/履歴・ROI口径を反映 | `CrmUiRegressionTest`、`MobileResponsiveLayoutTest`、L4全量 | CLOSED。実ブラウザでの全role操作、drag/reload/backはrelease前に再確認 |
+
+## Round 4 独立Review FAIL 対応（2026-08-02〜）
+
+Review packet: Base `8e5066a`（P0修正merge後の`origin/main`） / 対応前Head `8e5066a` / 対応commitは完了時に固定。対象はS08のP1-01〜P1-04、P2-01〜P2-11とdesign/test matrixの改訂。
+
+| ID | 対応 | 変更file | 検証 | 状態 |
+|---|---|---|---|---|
+| CRM-R4-P1-01 | V75がapprovalへ予約済みのためV73/V74を編集せず、R__のlegacy-repair DDL例外と6点同期表をdesignへ固定 | `design.md`、V73/V74は不変 | migration/H2/entity/smokeの同期を台帳化 | CLOSED（逸脱根拠固定） |
+| CRM-R4-P1-02 | Round 4 packet、現行Head、P0修正証拠、Docker未実施skipを本節と中央台帳へ反映 | `review-ledger.md`、中央`spec-execution-ledger.md` | Docker L4/fresh/legacy/partial/repairはrelease gateとしてOPEN | OPEN（Docker証拠待ち） |
+| CRM-R4-P1-03 | 役割を5値checkboxへ変更し、serviceでJSON配列へ正規化・allow-list検証。MySQL JSON往復fixtureを追加 | contact service/API/template/JS、4言語messages、`FlywayMigrationSmokeTest` | H2 service + 実MySQL smoke | CLOSED（Docker smokeはOPEN） |
+| CRM-R4-P1-04 | PII平文を`customer.pii.view` actionへ移し、画面/CSV共通DTOとlegacy customer出力を同じ認可判定へ統一 | contact/customer service/API、design | 実service経由のrole/action別mask testを追加予定 | OPEN（テスト/Docker待ち） |
+| CRM-R4-P2-01〜11 | timeline scope、KPI口径/SQL scope、商機→提案導線、顧客select/filter、活動fallback、asOf、重複候補、宛先role、status allow-listを修正 | CRM scope/KPI/contact/activity/lead/opportunity、CRM templates/JS | 定向test・Node check・compile | OPEN（定向test待ち） |
+
+Review packet skip list: 本環境はDocker/browser未実施。Testcontainersのfresh/legacy/partial/repair/L4は0 skipped実測が必要。desktop/390px全roleのdrag/reload/back/二重click Demoもrelease前hard gateとしてOPEN。
+
+P0-01 evidence: `4058d9b`（`R__crm_contact_reconciliation.sql`の余分な`END IF`削除＋`MigrationScriptIntegrityTest`均衡検査）。
+
+### Round 4 同期6点と実測記録
+
+| 追加列 | legacy-repair Flyway | H2 schema | entity | MySQL smoke assert |
+|---|---|---|---|---|
+| `t_opportunity.stage_changed_at` / `probability_override_reason` | `R__crm_contact_reconciliation.sql` 条件付きALTER | `schema-crm-h2.sql` / `engineer-schema-h2.sql` | `Opportunity` | `FlywayMigrationSmokeTest` CRM schema block |
+| `t_lead.source_cost` | 同上 | 同上 | `Lead` | 同上 |
+| `t_proposal.source_opportunity_id` | 同上 | `engineer-schema-h2.sql` | `Proposal` | `FlywayMigrationSmokeTest` JSON/CRM blockとproposal生成SELECT |
+| `t_mail_delivery.contact_id` / `opportunity_id` | 同上 | `engineer-schema-h2.sql` | `MailDelivery` | `FlywayMigrationSmokeTest` mail schema assert |
+
+定向実測（対応後）: compile PASS、`MigrationScriptIntegrityTest` 25/25、CRM KPI/Activity/Contact関連 10/0/0、Contact service 3/0/0、customer controller 3/0/0。`git diff --check` PASS。Docker fresh/legacy/partial/repair smoke、L4、browser Demoは未実施（環境不在）。
+
+Task別変更file: T050 = contact/customer API/service・PII test、T051 = opportunity filter/proposal導線/lead duplicate、T052 = KPI scope/helper、T053 = 本ledger・中央ledger・release gate記録。

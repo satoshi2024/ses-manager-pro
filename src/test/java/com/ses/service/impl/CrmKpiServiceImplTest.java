@@ -2,10 +2,8 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.ses.entity.Opportunity;
-import com.ses.entity.Proposal;
 import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
-import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.SysUserMapper;
@@ -33,7 +31,6 @@ import static org.mockito.Mockito.*;
 class CrmKpiServiceImplTest {
     @Mock private LeadMapper leadMapper;
     @Mock private OpportunityMapper opportunityMapper;
-    @Mock private ProjectMapper projectMapper;
     @Mock private SalesActivityMapper salesActivityMapper;
     @Mock private ProposalMapper proposalMapper;
     @Mock private SysUserMapper sysUserMapper;
@@ -60,28 +57,17 @@ class CrmKpiServiceImplTest {
         hiddenOpportunity.setProbability(20);
         hiddenOpportunity.setVersion(1);
 
-        Proposal hiddenProposal = new Proposal();
-        hiddenProposal.setId(99L);
-        hiddenProposal.setProjectId(7L);
-        hiddenProposal.setSourceOpportunityId(10L);
-        hiddenProposal.setStatus("書類選考中");
-        hiddenProposal.setProposedUnitPrice(new BigDecimal("1000"));
-
         when(crmScopeService.canUseCrm()).thenReturn(true);
-        when(crmScopeService.hasFullAccess()).thenReturn(false);
         doNothing().when(crmScopeService).applyOpportunityScope(any(), any());
         doNothing().when(crmScopeService).applyLeadScope(any(), any());
-        when(crmScopeService.isOpportunityVisible(20L, 2L, java.time.LocalDate.now(Clock.systemUTC())))
-                .thenReturn(false);
+        doNothing().when(crmScopeService).applyProposalScope(any(), any());
         when(dataScopeService.isScoped()).thenReturn(true);
         when(dataScopeService.allowedProposalIds()).thenReturn(Set.of(99L));
         when(opportunityMapper.selectList(any(Wrapper.class))).thenReturn(List.of(hiddenOpportunity));
         when(leadMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(salesActivityMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(sysUserMapper.selectByIdsIncludingDeleted(any())).thenReturn(List.of());
-        when(proposalMapper.selectList(any(Wrapper.class))).thenReturn(List.of(hiddenProposal));
-        when(opportunityMapper.selectBatchIds(Set.of(10L))).thenReturn(List.of(hiddenOpportunity));
-        when(projectMapper.selectBatchIds(Set.of(7L))).thenReturn(List.of());
+        when(proposalMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
 
         var forecast = service.summarize(null, null).getForecast();
 

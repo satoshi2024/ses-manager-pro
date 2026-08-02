@@ -15,7 +15,6 @@ import com.ses.service.CustomerService;
 import com.ses.service.ProjectService;
 import com.ses.service.ProposalService;
 import com.ses.service.SalesActivityService;
-import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import jakarta.validation.Valid;
@@ -40,6 +39,7 @@ public class CustomerApiController {
     private final SalesActivityService salesActivityService;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.security.AuthorizationService authorizationService;
 
     /**
      * 顧客一覧（ページネーション）
@@ -243,7 +243,7 @@ public class CustomerApiController {
 
     /** 既存列を返す必要がある旧画面でも、連絡先APIと同じPIIマスク規則を適用する。 */
     private void maskLegacyContact(Customer customer) {
-        if (customer == null || "管理者".equals(SecurityUtils.currentRole())) return;
+        if (customer == null || canViewPii()) return;
         customer.setContactEmail(maskEmail(customer.getContactEmail()));
         customer.setContactPhone(maskPhone(customer.getContactPhone()));
     }
@@ -257,5 +257,11 @@ public class CustomerApiController {
     private String maskPhone(String value) {
         if (value == null || value.isBlank()) return value;
         return value.length() <= 4 ? "***" : "***" + value.substring(value.length() - 4);
+    }
+
+    private boolean canViewPii() {
+        return authorizationService.isAllowed(
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                "customer.pii.view");
     }
 }

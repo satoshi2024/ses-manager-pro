@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,10 +53,13 @@ class CustomerApiControllerTest {
     private com.ses.service.security.DataScopeService dataScopeService;
     @MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
+    @MockBean
+    private com.ses.service.security.AuthorizationService authorizationService;
 
     @BeforeEach
     void allowFullOrganizationScope() {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(authorizationService.isAllowed(any(), anyString())).thenReturn(true);
     }
 
     @Test

@@ -24,6 +24,7 @@ public class SalesActivityApiController {
 
     private final SalesActivityService salesActivityService;
     private final com.ses.service.security.CrmScopeService crmScopeService;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @GetMapping("/{id}/activities")
     public ApiResult<Page<SalesActivity>> getActivities(
@@ -31,7 +32,7 @@ public class SalesActivityApiController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String type) {
-        crmScopeService.assertAllowedCustomer(id, LocalDate.now());
+        assertActivityCustomerAllowed(id);
         salesActivityService.assertCustomerExists(id);
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
         Page<SalesActivity> page = PageUtils.safePage(current, size);
@@ -48,7 +49,7 @@ public class SalesActivityApiController {
 
     @PostMapping("/{id}/activities")
     public ApiResult<Boolean> createActivity(@PathVariable Long id, @Valid @RequestBody SalesActivityCreateRequest request) {
-        crmScopeService.assertAllowedCustomer(id, LocalDate.now());
+        assertActivityCustomerAllowed(id);
         // created_by は MyBatis-Plus の MetaObjectHandler がログイン中ユーザーを自動設定する
         salesActivityService.create(id, request);
         return ApiResult.success(true);
@@ -59,7 +60,7 @@ public class SalesActivityApiController {
             @PathVariable Long id,
             @PathVariable Long activityId,
             @Valid @RequestBody SalesActivityUpdateRequest request) {
-        crmScopeService.assertAllowedCustomer(id, LocalDate.now());
+        assertActivityCustomerAllowed(id);
         salesActivityService.update(id, activityId, request);
         return ApiResult.success(true);
     }
@@ -68,7 +69,7 @@ public class SalesActivityApiController {
     public ApiResult<Boolean> completeActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
-        crmScopeService.assertAllowedCustomer(id, LocalDate.now());
+        assertActivityCustomerAllowed(id);
         salesActivityService.complete(id, activityId);
         return ApiResult.success(true);
     }
@@ -77,7 +78,7 @@ public class SalesActivityApiController {
     public ApiResult<Boolean> deleteActivity(
             @PathVariable Long id,
             @PathVariable Long activityId) {
-        crmScopeService.assertAllowedCustomer(id, LocalDate.now());
+        assertActivityCustomerAllowed(id);
         salesActivityService.delete(id, activityId);
         return ApiResult.success(true);
     }
@@ -88,13 +89,25 @@ public class SalesActivityApiController {
         wrapper.le(SalesActivity::getNextActionDate, LocalDate.now())
                .eq(SalesActivity::getCompletedFlag, 0)
                .orderByAsc(SalesActivity::getNextActionDate);
-        if (!crmScopeService.hasFullAccess()) {
+        if (crmScopeService.canUseCrm() && !crmScopeService.hasFullAccess()) {
             java.util.Set<Long> allowed = crmScopeService.allowedCustomerIds(LocalDate.now());
             if (allowed.isEmpty()) {
                 return ApiResult.success(java.util.Collections.emptyList());
             }
             wrapper.in(SalesActivity::getCustomerId, allowed);
+        } else if (!crmScopeService.canUseCrm() && dataScopeService.isScoped()) {
+            java.util.Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed == null || allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
+            wrapper.in(SalesActivity::getCustomerId, allowed);
         }
         return ApiResult.success(salesActivityService.list(wrapper));
+    }
+
+    private void assertActivityCustomerAllowed(Long customerId) {
+        if (crmScopeService.canUseCrm()) {
+            crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
+        } else {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
     }
 }

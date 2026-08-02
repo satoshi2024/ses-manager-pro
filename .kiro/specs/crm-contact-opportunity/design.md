@@ -4,6 +4,14 @@
 
 ## 1. DDL（予約V73）
 
+- **逸脱と根拠（legacy repair）**: V73/V74は適用済みのため編集しない。`stage_changed_at`、
+  `probability_override_reason`、`source_cost`、`source_opportunity_id`、`contact_id`、
+  `opportunity_id`の6列は、V73適用済みDBとV71以前からの部分復旧DBを同一形状へ収束させる
+  `R__crm_contact_reconciliation.sql`の条件付きALTERを正とする。これは新規DDLの通常経路ではなく、
+  V73適用履歴を確認したうえで欠落列だけを補完する逸脱であり、Repeatable以外のDML/backfillと
+  同じrepair境界に置く。同期表はV73/V1（不変）、`schema-crm-h2.sql`、`engineer-schema-h2.sql`、
+  MySQL smoke assert、entityの6点とし、R__の再実行は欠落列・indexだけを変更する。
+
 - `t_customer_contact(id, customer_id, name, name_kana, department, position, roles_json,
   email, phone, primary_flag, valid_from/to, status, version)`。
 - `t_lead(id, company_name, contact_name/email/phone, source, owner_user_id, status,
@@ -47,6 +55,7 @@
 | 主担当 | `primary_flag=1`の1件 | 期間で切替 | — | 対象日時点 | 主担当**未設定**（宛先自動選択しない） |
 | 帳票の宛先 | — | — | quotation/contract/invoice/documentへ名称+email snapshot | **常にsnapshot** | 宛先contact未指定（既存の顧客代表へ） |
 | opportunity stage | `t_opportunity.stage` | 遷移は監査ログ | — | 現在値のみ | — |
+| 商機stageの滞留起点 | `stage_changed_at` | stage変更時刻は現行値のみ | — | `stage_changed_at` | 明示NULL/履歴不存在は同一視せず、旧行の未記録時だけ`updated_at`へfallback |
 | 確度 | `probability` | — | — | 現在値 | stage defaultを使う（override無し） |
 | 失注理由 | `lost_reason` | — | — | 現在値 | **未入力**。失注stageでは入力必須 |
 
@@ -66,6 +75,14 @@
 | 要員 | 不可視 | — | — | — |
 | portal user | 不可視（顧客に自社の商機情報を見せない） | — | — | — |
 | scheduler principal | 全件 | — | 宛先は`owner_user_id`本人 | next action期限、滞留日数 |
+
+- **PII平文閲覧の主体**: 顧客担当者のemail/phoneは`AuthorizationService`の
+  `customer.pii.view` actionとCRM/DataScopeの積集合で判定する。管理者・営業・マネージャーの
+  平文可否はrole文字列ではなくpermission groupのbaseline+denyで決め、画面DTOとCSVは同じ
+  service実装でmaskする。HR/要員はCRM母集団の外とする。
+- **営業活動の主体別可視母集団**: CRM利用可能な管理者・営業・マネージャーは
+  `CrmScopeService`、それ以外の既存ロールは既存`DataScopeService`を使う。営業活動APIの
+  CRM化でHR/要員の既存顧客活動導線を404へ変えない（CRM商機画面自体の可視性は上表どおり）。
 
 - **contact のPIIは`export`にも同じmaskを適用する**（R1.4）。画面でmaskしてCSVで素通しにしない。
   §2.3のconsumer inventoryで`export/CSV/Excel`を必ず確認する。
@@ -97,3 +114,7 @@
 ## 7. テスト
 
 primary contact一意、期間、PII mask、stage、冪等変換、forecast排他、activity scope、duplicate candidate。
+- migration静的検査: `db/migration`と`sql/runbook`のストアド内`IF ... THEN`/`END IF`均衡。
+- H2⇔MySQL型差: `roles_json`のJSON/CLOB往復fixtureをMySQL smokeとservice testで検証。
+- PII mask: mask済みDTOをmockせず、実serviceのAuthorizationService判定を通した営業・マネージャー・
+  管理者の画面/CSV出力を検証。

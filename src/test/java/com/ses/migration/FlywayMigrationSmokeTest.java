@@ -397,6 +397,18 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_customer_contact", "active_primary_customer_id");
             assertColumnExists(st, "t_opportunity", "converted_project_id");
             assertColumnExists(st, "t_opportunity", "converted_quotation_id");
+            assertColumnExists(st, "t_opportunity", "stage_changed_at");
+            assertColumnExists(st, "t_opportunity", "probability_override_reason");
+            assertColumnExists(st, "t_lead", "source_cost");
+            assertColumnExists(st, "t_proposal", "source_opportunity_id");
+            assertColumnExists(st, "t_mail_delivery", "contact_id");
+            assertColumnExists(st, "t_mail_delivery", "opportunity_id");
+            // MySQL JSON型の往復。H2(CLOB)だけでは不正なJSONを検出できないため、実MySQLで検証する。
+            st.execute("INSERT INTO t_customer_contact (customer_id, name, roles_json, valid_from, status) "
+                    + "SELECT id, 'roles-json-smoke', JSON_ARRAY('決裁者','請求'), CURDATE(), '有効' "
+                    + "FROM m_customer WHERE deleted_flag = 0 LIMIT 1");
+            assertRowExists(st, "SELECT 1 FROM t_customer_contact WHERE name='roles-json-smoke' "
+                    + "AND JSON_CONTAINS(roles_json, JSON_QUOTE('請求'))");
             assertColumnExists(st, "t_lead", "converted_opportunity_id");
             // t_sales_activity拡張はV6を編集せずV73のALTERで入る（fresh/legacy共通経路）
             assertColumnExists(st, "t_sales_activity", "contact_id");

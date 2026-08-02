@@ -194,9 +194,16 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
 
     @Override
     public com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId, long current, long size) {
+        return pageForScreen(stage, ownerUserId, null, current, size);
+    }
+
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId,
+                                                                                                         Long customerId, long current, long size) {
         QueryWrapper<Opportunity> query = new QueryWrapper<>();
         if (StringUtils.hasText(stage)) query.eq("stage", stage);
         if (ownerUserId != null) query.eq("owner_user_id", ownerUserId);
+        if (customerId != null) query.eq("customer_id", customerId);
         if (ownerUserId != null && crmScopeService != null
                 && !crmScopeService.isOwnerAllowed(ownerUserId, LocalDate.now(clock))) {
             return new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size);

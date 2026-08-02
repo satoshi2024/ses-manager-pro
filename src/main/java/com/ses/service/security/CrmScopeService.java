@@ -3,6 +3,7 @@ package com.ses.service.security;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.entity.Lead;
 import com.ses.entity.Opportunity;
+import com.ses.entity.Proposal;
 
 import java.time.LocalDate;
 import java.util.Set;
@@ -26,6 +27,9 @@ public interface CrmScopeService {
 
     /** opportunityのlist/detail/KPI/forecastで共有するSQL母集団を適用する。 */
     void applyOpportunityScope(QueryWrapper<Opportunity> query, LocalDate asOf);
+
+    /** proposal forecastへ、source opportunity / projectの可視性をSQL条件として適用する。 */
+    void applyProposalScope(QueryWrapper<Proposal> query, LocalDate asOf);
 
     boolean isOwnerAllowed(Long ownerUserId, LocalDate asOf);
 

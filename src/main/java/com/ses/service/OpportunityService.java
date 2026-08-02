@@ -25,6 +25,11 @@ public interface OpportunityService extends IService<Opportunity> {
 
     Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId, long current, long size);
 
+    default Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId, Long customerId,
+                                                    long current, long size) {
+        return pageForScreen(stage, ownerUserId, current, size);
+    }
+
     Opportunity createBasic(OpportunitySaveRequest request);
 
     Opportunity updateBasic(Long id, OpportunitySaveRequest request);

@@ -8,6 +8,8 @@ const PROPOSAL_STATUS_TRANSITIONS = {
 };
 
 $(document).ready(function() {
+    const sourceOpportunityId = new URLSearchParams(window.location.search).get('sourceOpportunityId');
+    if (sourceOpportunityId) $('#prop-sourceOpportunityId').val(sourceOpportunityId);
     // --- Initialize Sortable for Kanban Columns ---
     const columns = document.querySelectorAll('.kanban-column-body');
     const sortables = [];
@@ -387,6 +389,7 @@ function saveProposal() {
         proposalEmailText: $('#prop-proposalEmailText').val(),
         matchReason: $('#prop-matchReason').val(),
         aiMatchScore: $('#prop-aiMatchScore').val() ? parseFloat($('#prop-aiMatchScore').val()) : null
+        ,sourceOpportunityId: $('#prop-sourceOpportunityId').val() ? Number($('#prop-sourceOpportunityId').val()) : null
     };
 
     const method = id ? 'PUT' : 'POST';

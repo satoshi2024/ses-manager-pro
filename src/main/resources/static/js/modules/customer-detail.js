@@ -75,13 +75,15 @@ function openContactModal(id) {
     const c = id ? contacts.find(x => x.id === id) : null;
     $('#contact-form')[0].reset(); $('#contact-id').val(c ? c.id : ''); $('#contact-version').val(c ? c.version : '');
     $('#contact-valid-from').val(c && c.validFrom ? c.validFrom : SES.util.getLocalDateString());
-    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); $('#contact-roles').val(c.rolesJson || ''); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
+    $('#contact-roles input[type="checkbox"]').prop('checked', false);
+    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); let roles = []; try { roles = JSON.parse(c.rolesJson || '[]'); } catch (_) { roles = []; } $('#contact-roles input[type="checkbox"]').each(function() { $(this).prop('checked', roles.includes(this.value)); }); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('contactModal')).show();
 }
 
 function saveContact() {
     const id = $('#contact-id').val();
-    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), rolesJson: $('#contact-roles').val() || null, email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
+    const roles = $('#contact-roles input[type="checkbox"]:checked').map(function() { return this.value; }).get();
+    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), rolesJson: JSON.stringify(roles), email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
     const save = () => $.ajax({ url: `/api/customers/${customerId}/contacts${id ? '/' + id : ''}`, method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide(); loadCrmContext(); Toast.success(SES.i18n.t('success.save')); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed')));
     $.get(`/api/customers/${customerId}/contacts/duplicates`, { email: data.email, phone: data.phone, excludeId: id || null }).done(res => {
         if (res.code === 200 && (res.data || []).length) {

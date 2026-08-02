@@ -44,8 +44,9 @@ public class CustomerContactApiController {
     @GetMapping("/recipients")
     public ApiResult<List<CustomerContactDto>> recipients(
             @PathVariable Long customerId,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
-        return ApiResult.success(customerContactService.recipientCandidates(customerId, asOf));
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
+            @RequestParam(required = false) String role) {
+        return ApiResult.success(customerContactService.recipientCandidates(customerId, asOf, role));
     }
 
     @PostMapping

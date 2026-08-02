@@ -37,9 +37,10 @@ public class OpportunityApiController {
     public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto>> list(
             @RequestParam(required = false) String stage,
             @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(required = false) Long customerId,
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "50") long size) {
-        return ApiResult.success(opportunityService.pageForScreen(stage, ownerUserId, current, size));
+        return ApiResult.success(opportunityService.pageForScreen(stage, ownerUserId, customerId, current, size));
     }
 
     @GetMapping("/kpi")

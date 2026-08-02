@@ -5,6 +5,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.Lead;
 import com.ses.entity.Opportunity;
+import com.ses.entity.Proposal;
 import com.ses.service.security.CrmScopeService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
@@ -123,6 +124,38 @@ public class CrmScopeServiceImpl implements CrmScopeService {
         } else if (!"営業".equals(SecurityUtils.currentRole())) {
             query.isNull("owner_user_id");
         }
+    }
+
+    @Override
+    public void applyProposalScope(QueryWrapper<Proposal> query, LocalDate asOf) {
+        if (!canUseCrm()) {
+            query.eq("id", -1L);
+            return;
+        }
+        if (hasFullAccess()) return;
+        Set<Long> customers = allowedCustomerIds(asOf);
+        if (customers.isEmpty()) {
+            query.eq("id", -1L);
+            return;
+        }
+        String customerIds = ids(customers);
+        Set<Long> owners = allowedOwnerIds(asOf);
+        String ownerPredicate = owners.isEmpty()
+                ? "o.owner_user_id IS NULL"
+                : "(o.owner_user_id IS NULL OR o.owner_user_id IN (" + ids(owners) + "))";
+        query.and(w -> w.exists("SELECT 1 FROM t_opportunity o"
+                        + " WHERE o.id = t_proposal.source_opportunity_id"
+                        + " AND o.deleted_flag = 0 AND o.customer_id IN (" + customerIds + ")"
+                        + " AND " + ownerPredicate)
+                .or().exists("SELECT 1 FROM t_project p"
+                        + " WHERE t_proposal.source_opportunity_id IS NULL"
+                        + " AND p.id = t_proposal.project_id"
+                        + " AND p.deleted_flag = 0 AND p.customer_id IN (" + customerIds + ")"));
+    }
+
+    private String ids(Set<Long> values) {
+        return values.stream().filter(java.util.Objects::nonNull).map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     @Override

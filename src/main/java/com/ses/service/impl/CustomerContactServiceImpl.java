@@ -2,8 +2,9 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.common.util.SecurityUtils;
 import com.ses.dto.customer.CustomerContactDto;
 import com.ses.dto.customer.CustomerContactSaveRequest;
 import com.ses.entity.CustomerContact;
@@ -18,29 +19,43 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 public class CustomerContactServiceImpl implements CustomerContactService {
+    private static final Set<String> ALLOWED_ROLES = Set.of("決裁者", "現場", "調達", "請求", "契約");
+    private static final Set<String> ALLOWED_STATUSES = Set.of("有効", "退職", "異動");
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String PII_VIEW_ACTION = "customer.pii.view";
     private final CustomerContactMapper mapper;
     private final DataScopeService dataScopeService;
+    private final com.ses.service.security.AuthorizationService authorizationService;
     @Autowired(required = false)
     private Clock clock = Clock.systemDefaultZone();
     @Autowired(required = false)
     private CrmScopeService crmScopeService;
 
-    public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService, Clock clock) {
+    public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService,
+                                     com.ses.service.security.AuthorizationService authorizationService,
+                                     Clock clock) {
         this.mapper = mapper;
         this.dataScopeService = dataScopeService;
+        this.authorizationService = authorizationService;
         this.clock = clock == null ? Clock.systemDefaultZone() : clock;
     }
 
     @Override
     public List<CustomerContactDto> list(Long customerId, LocalDate asOf) {
         assertCustomerScope(customerId);
+        LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
         return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
                         .eq(CustomerContact::getCustomerId, customerId)
+                        .le(CustomerContact::getValidFrom, target)
+                        .and(w -> w.isNull(CustomerContact::getValidTo)
+                                .or().ge(CustomerContact::getValidTo, target))
                         .orderByDesc(CustomerContact::getValidFrom)
                         .orderByDesc(CustomerContact::getId))
                 .stream().map(this::toDto).collect(Collectors.toList());
@@ -63,10 +78,10 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     @Override
-    public List<CustomerContactDto> recipientCandidates(Long customerId, LocalDate asOf) {
+    public List<CustomerContactDto> recipientCandidates(Long customerId, LocalDate asOf, String role) {
         assertCustomerScope(customerId);
         LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
-        return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
+        LambdaQueryWrapper<CustomerContact> query = new LambdaQueryWrapper<CustomerContact>()
                         .eq(CustomerContact::getCustomerId, customerId)
                         .eq(CustomerContact::getStatus, "有効")
                         .le(CustomerContact::getValidFrom, target)
@@ -75,7 +90,14 @@ public class CustomerContactServiceImpl implements CustomerContactService {
                         .isNotNull(CustomerContact::getEmail)
                         .ne(CustomerContact::getEmail, "")
                         .orderByDesc(CustomerContact::getPrimaryFlag)
-                        .orderByAsc(CustomerContact::getId))
+                        .orderByAsc(CustomerContact::getId);
+        if (role != null && !role.isBlank()) {
+            if (!ALLOWED_ROLES.contains(role)) {
+                throw BusinessException.of(400, "error.crm.contactRoleInvalid");
+            }
+            query.like(CustomerContact::getRolesJson, "\"" + role + "\"");
+        }
+        return mapper.selectList(query)
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
@@ -83,6 +105,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     @Transactional(rollbackFor = Exception.class)
     public CustomerContactDto create(Long customerId, CustomerContactSaveRequest request) {
         assertCustomerScope(customerId);
+        validateStatus(request.getStatus());
         validatePeriod(request.getValidFrom(), request.getValidTo());
         lockCustomerContacts(customerId);
         validatePrimaryPeriod(customerId, null, request.getPrimaryFlag(), request.getStatus(),
@@ -100,6 +123,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     @Transactional(rollbackFor = Exception.class)
     public CustomerContactDto update(Long customerId, Long contactId, CustomerContactSaveRequest request) {
         assertCustomerScope(customerId);
+        validateStatus(request.getStatus());
         validatePeriod(request.getValidFrom(), request.getValidTo());
         lockCustomerContacts(customerId);
         CustomerContact current = lockOwned(customerId, contactId);
@@ -117,7 +141,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
                 .set("name_kana", request.getNameKana())
                 .set("department", request.getDepartment())
                 .set("position", request.getPosition())
-                .set("roles_json", request.getRolesJson())
+                .set("roles_json", normalizeRolesJson(request.getRolesJson()))
                 .set("email",preserveMasked(current.getEmail(), request.getEmail(), true))
                 .set("phone",preserveMasked(current.getPhone(), request.getPhone(), false))
                 .set("primary_flag", request.getPrimaryFlag() == null ? 0 : request.getPrimaryFlag())
@@ -229,7 +253,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
         contact.setNameKana(request.getNameKana());
         contact.setDepartment(request.getDepartment());
         contact.setPosition(request.getPosition());
-        contact.setRolesJson(request.getRolesJson());
+        contact.setRolesJson(normalizeRolesJson(request.getRolesJson()));
         contact.setEmail(request.getEmail());
         contact.setPhone(request.getPhone());
         contact.setPrimaryFlag(request.getPrimaryFlag() == null ? 0 : request.getPrimaryFlag());
@@ -265,7 +289,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
 
     /** 非管理者の表示マスクを更新値として書き戻さず、明示的な空欄はクリアとして扱う。 */
     private String preserveMasked(String current, String requested, boolean email) {
-        if ("管理者".equals(SecurityUtils.currentRole()) || current == null) return requested;
+        if (canViewPii() || current == null) return requested;
         String masked = maskPii(current, email);
         return masked.equals(requested) ? current : requested;
     }
@@ -290,11 +314,41 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     private String maskPii(String value, boolean email) {
-        if (value == null || value.isBlank() || "管理者".equals(SecurityUtils.currentRole())) return value;
+        if (value == null || value.isBlank() || canViewPii()) return value;
         if (email) {
             int at = value.indexOf('@');
             return at > 1 ? value.charAt(0) + "***" + value.substring(at) : "***";
         }
         return value.length() <= 4 ? "***" : "***" + value.substring(value.length() - 4);
+    }
+
+    private boolean canViewPii() {
+        return authorizationService != null && authorizationService.isAllowed(
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                PII_VIEW_ACTION);
+    }
+
+    private void validateStatus(String status) {
+        if (!ALLOWED_STATUSES.contains(status)) {
+            throw BusinessException.of(400, "error.crm.contactStatusInvalid");
+        }
+    }
+
+    private String normalizeRolesJson(String raw) {
+        if (raw == null || raw.isBlank()) return "[]";
+        try {
+            JsonNode node = JSON.readTree(raw);
+            if (!node.isArray()) throw new IllegalArgumentException("roles_json must be an array");
+            LinkedHashSet<String> roles = new LinkedHashSet<>();
+            for (JsonNode item : node) {
+                if (!item.isTextual() || !ALLOWED_ROLES.contains(item.textValue())) {
+                    throw new IllegalArgumentException("unknown contact role");
+                }
+                roles.add(item.textValue());
+            }
+            return JSON.writeValueAsString(roles);
+        } catch (Exception e) {
+            throw BusinessException.of(400, "error.crm.contactRolesInvalid");
+        }
     }
 }

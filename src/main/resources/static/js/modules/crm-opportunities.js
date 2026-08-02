@@ -1,5 +1,29 @@
 const CRM_OPPORTUNITY_STAGES = ['見込', '要件確認', '提案準備', '見積提出', '交渉', '受注', '失注'];
-$(function () { loadAssignees(); loadOpportunities(); initOpportunityDragDrop(); });
+$(function () { replaceCustomerInputWithSelect(); loadAssignees(); loadCustomerOptions(); loadOpportunities(); initOpportunityDragDrop(); $('#opportunityModal .modal-footer').prepend('<button type="button" id="opportunity-create-proposal" class="btn btn-outline-info me-auto" onclick="openOpportunityProposal()">提案を作成</button>'); });
+
+function replaceCustomerInputWithSelect() {
+    $('#opportunity-customer').replaceWith('<select id="opportunity-customer" class="form-select bg-dark text-light border-secondary" required><option value="">顧客を選択...</option></select>');
+    $('label[for="opportunity-customer"]').text('顧客 *');
+}
+
+function loadCustomerOptions() {
+    $.get('/api/customers/options', function(res) {
+        if (res.code !== 200) return;
+        const options = (res.data || []).map(c => `<option value="${c.value}">${SES.escapeHtml(c.label || '')}</option>`).join('');
+        $('#opportunity-customer-filter').append(options);
+        $('#opportunity-customer').append(options);
+    });
+}
+
+function applyOpportunityFilters() {
+    const params = new URLSearchParams(window.location.search);
+    const customerId = $('#opportunity-customer-filter').val();
+    const stage = $('#opportunity-stage-filter').val();
+    customerId ? params.set('customerId', customerId) : params.delete('customerId');
+    stage ? params.set('stage', stage) : params.delete('stage');
+    history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
+    loadOpportunities(1);
+}
 
 function loadAssignees() {
     $.get('/api/crm/leads/assignees', function(res) {
@@ -15,6 +39,7 @@ function loadOpportunities(page = opportunityPage) {
     const query = new URLSearchParams(window.location.search);
     const params = {};
     if (query.get('stage')) params.stage = query.get('stage');
+    if (query.get('customerId')) params.customerId = query.get('customerId');
     if (query.get('ownerUserId')) params.ownerUserId = query.get('ownerUserId');
     params.current = page;
     params.size = 50;
@@ -46,5 +71,6 @@ function changeOpportunityStage(card, from, to) {
 function rollbackOpportunityCard(card, from) { $(`#opportunity-board .crm-kanban-list[data-stage="${CSS.escape(from)}"]`).append(card); card.dataset.stage = from; updateOpportunityCounts(); }
 function updateOpportunityCounts() { $('#opportunity-board .crm-kanban-column').each(function () { $(this).find('[data-count]').text($(this).find('.crm-opportunity-card').length); }); }
 function openOpportunityModal(item) { $('#opportunity-form')[0].reset(); $('#opportunity-id').val(item ? item.id : ''); $('#opportunity-version').val(item ? item.version : ''); $('#opportunity-count').val(item && item.requiredCount || 1); $('#opportunity-probability').val(item && item.probability != null ? item.probability : 20); $('#opportunity-owner').val(item && item.ownerUserId || ''); if (item) { $('#opportunity-customer').val(item.customerId); $('#opportunity-title').val(item.title); $('#opportunity-month').val(item.expectedStartMonth || ''); $('#opportunity-duration').val(item.durationMonths || ''); $('#opportunity-price').val(item.unitPrice || ''); $('#opportunity-amount').val(item.expectedAmount || ''); $('#opportunity-next-action').val(item.nextActionDate || ''); $('#opportunity-competitor').val(item.competitor || ''); $('#opportunity-override-reason').val(item.probabilityOverrideReason || ''); } bootstrap.Modal.getOrCreateInstance(document.getElementById('opportunityModal')).show(); }
-function editOpportunity(id) { const item = (window.crmOpportunities || []).find(x => x.id === id); if (item) openOpportunityModal(item); }
+function editOpportunity(id) { const item = (window.crmOpportunities || []).find(x => x.id === id); if (item) { window._editingOpportunityId = item.id; openOpportunityModal(item); } }
+function openOpportunityProposal() { if (window._editingOpportunityId) window.location.href = `/proposal/kanban?sourceOpportunityId=${window._editingOpportunityId}`; }
 function saveOpportunity() { const id = $('#opportunity-id').val(); const data = { customerId: Number($('#opportunity-customer').val()), title: $('#opportunity-title').val(), expectedStartMonth: $('#opportunity-month').val() || null, durationMonths: $('#opportunity-duration').val() ? Number($('#opportunity-duration').val()) : null, requiredCount: Number($('#opportunity-count').val() || 1), unitPrice: $('#opportunity-price').val() ? Number($('#opportunity-price').val()) : null, expectedAmount: $('#opportunity-amount').val() ? Number($('#opportunity-amount').val()) : null, probability: $('#opportunity-probability').val() ? Number($('#opportunity-probability').val()) : null, ownerUserId: $('#opportunity-owner').val() ? Number($('#opportunity-owner').val()) : null, nextActionDate: $('#opportunity-next-action').val() || null, competitor: $('#opportunity-competitor').val() || null, probabilityOverrideReason: $('#opportunity-override-reason').val() || null, version: id ? Number($('#opportunity-version').val()) : null }; $.ajax({ url: id ? `/api/crm/opportunities/${id}` : '/api/crm/opportunities', method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { Toast.success(SES.i18n.t('success.save')); bootstrap.Modal.getInstance(document.getElementById('opportunityModal')).hide(); loadOpportunities(); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed'))); }

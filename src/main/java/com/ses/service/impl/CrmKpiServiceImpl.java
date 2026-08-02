@@ -5,13 +5,11 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.dto.crm.CrmKpiDto;
 import com.ses.entity.Lead;
 import com.ses.entity.Opportunity;
-import com.ses.entity.Project;
 import com.ses.entity.Proposal;
 import com.ses.entity.SalesActivity;
 import com.ses.entity.SysUser;
 import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
-import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.SysUserMapper;
@@ -49,7 +47,6 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     private static final Set<String> PROPOSAL_OPEN = Set.of("書類選考中", "一次面接", "二次面接", "結果待ち");
     private final LeadMapper leadMapper;
     private final OpportunityMapper opportunityMapper;
-    private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
     private final ProposalMapper proposalMapper;
     private final SysUserMapper sysUserMapper;
@@ -63,14 +60,15 @@ public class CrmKpiServiceImpl implements CrmKpiService {
         Long effectiveOwner = requestedOwnerId;
         List<Opportunity> opportunities = visibleOpportunities(effectiveOwner, requestedStage);
         List<Lead> leads = visibleLeads(effectiveOwner);
+        List<Proposal> proposals = visibleProposalForecast();
         Map<Long, List<SalesActivity>> activities = activitiesByOpportunity(opportunities);
 
         CrmKpiDto dto = new CrmKpiDto();
-        dto.setStages(buildStages(opportunities, activities));
+        dto.setStages(buildStages(opportunities, proposals, activities));
         dto.setOwners(buildOwners(leads, opportunities));
         dto.setLostReasons(buildLostReasons(opportunities));
         dto.setSources(buildSources(leads, opportunities));
-        dto.setForecast(buildForecast(opportunities));
+        dto.setForecast(buildForecast(opportunities, proposals));
         return dto;
     }
 
@@ -114,6 +112,7 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     }
 
     private List<CrmKpiDto.StageKpi> buildStages(List<Opportunity> opportunities,
+                                                  List<Proposal> proposals,
                                                   Map<Long, List<SalesActivity>> activities) {
         LocalDate today = LocalDate.now(clock);
         List<CrmKpiDto.StageKpi> result = new ArrayList<>();
@@ -123,7 +122,7 @@ public class CrmKpiServiceImpl implements CrmKpiService {
             item.setStage(stage);
             item.setCount(rows.size());
             item.setAmount(rows.stream().map(this::amount).reduce(BigDecimal.ZERO, BigDecimal::add));
-            item.setWeightedAmount(rows.stream().filter(this::isOpenUnconverted)
+            item.setWeightedAmount(forecastOpportunities(rows, proposals).stream()
                     .map(this::weightedAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
             item.setAverageStagnationDays(averageDays(rows, today, true));
             item.setAverageNoActivityDays(averageNoActivityDays(rows, activities, today));
@@ -191,17 +190,13 @@ public class CrmKpiServiceImpl implements CrmKpiService {
         return new ArrayList<>(map.values());
     }
 
-    private CrmKpiDto.ForecastKpi buildForecast(List<Opportunity> opportunities) {
+    private CrmKpiDto.ForecastKpi buildForecast(List<Opportunity> opportunities, List<Proposal> proposals) {
         CrmKpiDto.ForecastKpi forecast = new CrmKpiDto.ForecastKpi();
-        List<Proposal> proposals = visibleProposalForecast();
-        Set<Long> proposalOpportunityIds = proposals.stream().map(Proposal::getSourceOpportunityId)
-                .filter(Objects::nonNull).collect(Collectors.toSet());
-        BigDecimal opportunityAmount = opportunities.stream().filter(this::isOpenUnconverted)
-                .filter(o -> !proposalOpportunityIds.contains(o.getId()))
+        List<Opportunity> forecastOpportunities = forecastOpportunities(opportunities, proposals);
+        BigDecimal opportunityAmount = forecastOpportunities.stream()
                 .map(this::weightedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         forecast.setOpportunityAmount(opportunityAmount);
-        forecast.setOpportunityCount(opportunities.stream().filter(this::isOpenUnconverted)
-                .filter(o -> !proposalOpportunityIds.contains(o.getId())).count());
+        forecast.setOpportunityCount(forecastOpportunities.size());
         forecast.setProposalAmount(proposals.stream().map(this::weightedProposalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
         forecast.setProposalCount(proposals.size());
         return forecast;
@@ -209,43 +204,25 @@ public class CrmKpiServiceImpl implements CrmKpiService {
 
     private List<Proposal> visibleProposalForecast() {
         if (crmScopeService != null && !crmScopeService.canUseCrm()) return Collections.emptyList();
-        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>()
-                .in(Proposal::getStatus, PROPOSAL_OPEN);
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Proposal> query =
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Proposal>()
+                .in("status", PROPOSAL_OPEN);
         if (dataScopeService.isScoped()) {
             Set<Long> allowed = dataScopeService.allowedProposalIds();
             if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
-            query.in(Proposal::getId, allowed);
+            query.in("id", allowed);
         }
-        List<Proposal> proposals = proposalMapper.selectList(query);
-        if (crmScopeService == null || crmScopeService.hasFullAccess() || proposals.isEmpty()) {
-            return proposals;
+        if (crmScopeService != null) {
+            crmScopeService.applyProposalScope(query, LocalDate.now(clock));
         }
+        return proposalMapper.selectList(query);
+    }
 
-        LocalDate asOf = LocalDate.now(clock);
-        Set<Long> sourceOpportunityIds = proposals.stream()
-                .map(Proposal::getSourceOpportunityId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        Map<Long, Opportunity> opportunities = sourceOpportunityIds.isEmpty() ? Map.of()
-                : opportunityMapper.selectBatchIds(sourceOpportunityIds)
-                .stream().collect(Collectors.toMap(Opportunity::getId, Function.identity(), (a, b) -> a));
-        Set<Long> projectIds = proposals.stream()
-                .map(Proposal::getProjectId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        Map<Long, Project> projects = projectIds.isEmpty() ? Map.of()
-                : projectMapper.selectBatchIds(projectIds)
-                .stream().collect(Collectors.toMap(Project::getId, Function.identity(), (a, b) -> a));
-
-        return proposals.stream().filter(proposal -> {
-            if (proposal.getSourceOpportunityId() != null) {
-                Opportunity source = opportunities.get(proposal.getSourceOpportunityId());
-                return source != null && crmScopeService.isOpportunityVisible(
-                        source.getCustomerId(), source.getOwnerUserId(), asOf);
-            }
-            Project project = projects.get(proposal.getProjectId());
-            return project != null && crmScopeService.isCustomerAllowed(project.getCustomerId(), asOf);
-        }).toList();
+    private List<Opportunity> forecastOpportunities(List<Opportunity> opportunities, List<Proposal> proposals) {
+        Set<Long> proposalOpportunityIds = proposals.stream().map(Proposal::getSourceOpportunityId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        return opportunities.stream().filter(this::isOpenUnconverted)
+                .filter(o -> !proposalOpportunityIds.contains(o.getId())).toList();
     }
 
     private BigDecimal weightedProposalAmount(Proposal proposal) {

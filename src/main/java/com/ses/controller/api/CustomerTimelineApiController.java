@@ -1,6 +1,7 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.customer.CustomerContactDto;
 import com.ses.entity.Opportunity;
@@ -37,10 +38,12 @@ public class CustomerTimelineApiController {
                 .eq(SalesActivity::getCustomerId, customerId)
                 .orderByDesc(SalesActivity::getActivityDate)
                 .last("LIMIT 100"));
-        List<Opportunity> opportunities = opportunityMapper.selectList(new LambdaQueryWrapper<Opportunity>()
-                .eq(Opportunity::getCustomerId, customerId)
-                .orderByDesc(Opportunity::getId)
-                .last("LIMIT 100"));
+        QueryWrapper<Opportunity> opportunityQuery = new QueryWrapper<Opportunity>()
+                .eq("customer_id", customerId)
+                .orderByDesc("id")
+                .last("LIMIT 100");
+        crmScopeService.applyOpportunityScope(opportunityQuery, LocalDate.now());
+        List<Opportunity> opportunities = opportunityMapper.selectList(opportunityQuery);
         return ApiResult.success(Map.of(
                 "contacts", contacts,
                 "activities", activities,
