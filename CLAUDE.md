@@ -22,6 +22,10 @@ No Maven wrapper is checked in; use the bundled Maven distribution under `apache
 # the Testcontainers migration smoke test auto-skips unless Docker is available (see "Tests and the DB")
 .\apache-maven-3.9.6\bin\mvn test
 
+# run what CI runs, and report which tests your environment silently skipped
+# (see "Local vs CI" — plain `mvn test` is NOT the same set of tests as CI)
+.\scripts\verify-like-ci.ps1
+
 # run a single test class
 .\apache-maven-3.9.6\bin\mvn test -Dtest=DashboardServiceImplTest
 
@@ -68,6 +72,19 @@ Because tests run on H2 with Flyway disabled, **migration SQL is never executed 
 Because that smoke test disappears without Docker, the checks that must hold *regardless of environment* live in Docker-free tests instead — treat these as the last line of defence and extend them rather than relying on the Testcontainers run:
 - `MigrationScriptIntegrityTest` — duplicate migration versions and empty scripts (see the version-numbering warning above).
 - `MessageBundleConsistencyTest` — key parity across `messages{,_en,_ko,_zh_CN}.properties`, no duplicate keys, and (`testTemplateMessageKeysExist`) that every `#{...}` a Thymeleaf template references actually exists. The last one matters because `spring.messages.use-code-as-default-message: true` means a missing key renders the raw key name in the UI instead of throwing.
+
+### Local vs CI — why a green local run can still fail CI
+
+A local `mvn test` and the CI run (`.github/workflows/ci.yml`) execute **different sets of tests on a different JVM configuration**. Four differences have each produced a real "passes locally, fails in CI" (or the reverse). Two are now pinned in `pom.xml` and must stay pinned; two are environment capabilities you have to supply locally.
+
+1. **Docker decides whether 8 classes run at all.** `Flyway*SmokeTest` (×5), `FlywayRepairRunbookTest`, `FlywayV73PartialRepairSmokeTest`, `ConcurrentUpdateTest` are `@Testcontainers(disabledWithoutDocker = true)`. Without Docker they report as *skipped*, so the suite is green while every migration check has silently vanished — and these are the only tests that ever run the migrations against real MySQL. CI has Docker, so a MySQL-dialect or migration-ordering bug surfaces **only there**. CI now fails if Docker is missing *and* if any test is skipped, so this can no longer pass unnoticed.
+2. **Node decides whether the JS syntax check runs.** `JsSyntaxCheckTest` runs `node --check` over every file in `static/js`. Without `node` on PATH it skips locally; in CI (`CI=true`) a missing Node is an assertion failure, so JS syntax errors are caught only in CI.
+3. **Test execution order — pinned to `<runOrder>alphabetical</runOrder>`.** Surefire's default is `filesystem`, i.e. directory-enumeration order, which differs between Windows and Linux. That matters here because **every test in the JVM shares one H2 database** (`jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1` — the URL is identical for every Spring context, and the DB outlives each context), so data committed by one class is visible to the next and the order changes the outcome. That is exactly how `BpPaymentWritePathTest` failed locally but passed in CI: it used `contractId = 1L`, a row created by another test class. **Never read rows you did not insert** — build your own fixtures (see `RetentionRiskServiceImplTest`).
+4. **Timezone / locale / encoding — pinned in surefire's `argLine`** to `Asia/Tokyo`, `ja_JP`, UTF-8, matching `application.yml` (`jackson.time-zone: Asia/Tokyo`) and production. Unpinned, a JST workstation and a UTC runner disagree about "today" for nine hours a day (35 test files call `LocalDate.now()`), and message lookups that go through `LocaleContextHolder` resolve to `messages_en` on an English-locale runner while returning Japanese locally.
+
+**The CI contract is: zero skipped tests.** Anything that skips is a test that silently stopped protecting you, so don't reintroduce `Assumptions.assumeTrue(...)` for environment probing — make the test deterministic instead (e.g. `QuotationPdfServiceImplTest` used to probe for an OS Japanese font, which never existed on Windows *or* on the CI runner, while `PdfFontUtils` loads the bundled `resources/fonts/ipaexg.ttf` anyway).
+
+Before pushing, run `scripts/verify-like-ci.sh` (or `scripts/verify-like-ci.ps1` on Windows) instead of bare `mvn test`: it runs the same `mvn -B clean test` as the workflow, applies the same "no skipped tests" check, and prints which classes your environment could not run. `clean` matters — `MigrationScriptIntegrityTest` reads migrations from the classpath, so a stale copy under `target/classes` can hide a problem that CI, which always starts from a fresh checkout, will see. CI runs Temurin **21**; `<java.version>17</java.version>` only sets the bytecode target, so 17+ works locally.
 
 ## Architecture
 
