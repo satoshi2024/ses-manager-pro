@@ -1,8 +1,14 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = 'http://localhost:8080',
     [string]$Username = $(if ($env:LOADTEST_USERNAME) { $env:LOADTEST_USERNAME } else { 'admin' }),
     [string]$Password = $(if ($env:LOADTEST_PASSWORD) { $env:LOADTEST_PASSWORD } else { 'admin123' }),
+    [string]$CredentialFile = '',
+    [int]$ExpectedMaxConcurrentSessions = 5,
+    [switch]$AllowSingleCredentialSessionEviction,
+    [switch]$RequireMetrics,
+    [ValidateSet('steady', 'login-spike', 'session-eviction')]
+    [string]$Scenario = 'steady',
     [int[]]$Stages = @(20, 50, 100),
     [int]$StageDurationSeconds = 1800,
     [int]$ThinkTimeMs = 250,
@@ -25,29 +31,119 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $baseUri = [Uri]($BaseUrl.TrimEnd('/') + '/')
+$maxStageUsers = [int](($Stages | Measure-Object -Maximum).Maximum)
+if ($maxStageUsers -lt 1) {
+    throw 'Stagesには1以上の同時ユーザー数を指定してください。'
+}
+
+$credentials = @()
+if (-not [string]::IsNullOrWhiteSpace($CredentialFile)) {
+    if (-not (Test-Path -LiteralPath $CredentialFile -PathType Leaf)) {
+        throw "credential fileが見つかりません: $CredentialFile"
+    }
+    $credentials = @(Import-Csv -LiteralPath $CredentialFile)
+    foreach ($credential in $credentials) {
+        if ($credential.PSObject.Properties.Name -notcontains 'username' -or
+                $credential.PSObject.Properties.Name -notcontains 'password' -or
+                [string]::IsNullOrWhiteSpace([string]$credential.username) -or
+                [string]::IsNullOrWhiteSpace([string]$credential.password)) {
+            throw 'credential CSVはusername,password列を持ち、空値を含まない必要があります。'
+        }
+    }
+    if ($credentials.Count -lt $maxStageUsers) {
+        throw "credential数($($credentials.Count))が最大stage($maxStageUsers)未満です。"
+    }
+    $duplicateUsers = @($credentials | Group-Object username | Where-Object { $_.Count -gt 1 })
+    if ($duplicateUsers.Count -gt 0) {
+        throw 'credential CSVのusernameはworkerごとに一意である必要があります。'
+    }
+} else {
+    $credentials = @([pscustomobject]@{ username = $Username; password = $Password })
+    $evictionAllowed = $Scenario -eq 'session-eviction' -and $AllowSingleCredentialSessionEviction
+    if ($maxStageUsers -gt $ExpectedMaxConcurrentSessions -and -not $evictionAllowed) {
+        throw "単一credentialのstage($maxStageUsers)がsession上限($ExpectedMaxConcurrentSessions)を超えます。複数credentialを指定するかsession-evictionを明示してください。"
+    }
+}
+
+if ($Scenario -eq 'session-eviction' -and -not $AllowSingleCredentialSessionEviction) {
+    throw 'session-eviction scenarioには-AllowSingleCredentialSessionEvictionが必要です。'
+}
+
+if ($CheckOnly) {
+    Write-Host "CheckOnly: preflight成功 (scenario=$Scenario, maxStage=$maxStageUsers, credentials=$($credentials.Count))"
+    exit 0
+}
+
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $runDirectory = Join-Path $OutputDirectory $runId
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 
 function Get-EndpointStatus {
-    param([string]$Path)
+    param([string]$Path, $Session, [string]$AuthenticationFailureReason = '')
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $handler = New-Object System.Net.Http.HttpClientHandler
-    $handler.AllowAutoRedirect = $false
-    $client = New-Object System.Net.Http.HttpClient($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(3)
-    try {
-        $response = $client.GetAsync([Uri]::new($baseUri, $Path)).GetAwaiter().GetResult()
+    if ($Path.StartsWith('/actuator/') -and $null -eq $Session) {
         $sw.Stop()
-        return [pscustomobject]@{ Path = $Path; Status = [int]$response.StatusCode; LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2); Error = '' }
+        $reason = if ([string]::IsNullOrWhiteSpace($AuthenticationFailureReason)) {
+            'monitor認証sessionを作成できませんでした'
+        } else { $AuthenticationFailureReason }
+        return [pscustomobject]@{ Path = $Path; Status = 0; Available = $false; Reason = $reason;
+            LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2); Error = $reason }
+    }
+    try {
+        $params = @{
+            UseBasicParsing = $true
+            Uri = [Uri]::new($baseUri, $Path)
+            Method = 'GET'
+            TimeoutSec = 3
+        }
+        if ($null -ne $Session) { $params['WebSession'] = $Session }
+        $response = Invoke-WebRequest @params
+        $sw.Stop()
+        $status = [int]$response.StatusCode
+        $available = $status -ge 200 -and $status -lt 300
+        $reason = if ($available) { '' } else { "HTTP $status" }
+        return [pscustomobject]@{ Path = $Path; Status = $status; Available = $available; Reason = $reason;
+            LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2); Error = $reason }
     } catch {
         $sw.Stop()
         $status = 0
-        return [pscustomobject]@{ Path = $Path; Status = $status; LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2); Error = $_.Exception.Message }
-    } finally {
-        $client.Dispose()
-        $handler.Dispose()
+        if ($null -ne $_.Exception.Response) {
+            try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = 0 }
+        }
+        $reason = if ($status -gt 0) { "HTTP $status" } else { $_.Exception.Message }
+        return [pscustomobject]@{ Path = $Path; Status = $status; Available = $false; Reason = $reason;
+            LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2); Error = $reason }
+    }
+}
+
+function New-MonitorSession {
+    param($Credential)
+
+    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    try {
+        $null = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($baseUri, '/login')) -Method Get -WebSession $session
+        $cookie = @($session.Cookies.GetCookies($baseUri) |
+            Where-Object { $_.Name -eq 'XSRF-TOKEN' } | Select-Object -First 1)
+        if ($cookie.Count -eq 0) { throw 'monitor login用XSRF-TOKENがありません' }
+        $headers = @{ 'X-XSRF-TOKEN' = [Uri]::UnescapeDataString($cookie[0].Value); 'Accept' = 'text/html' }
+        $body = @{ username = [string]$Credential.username; password = [string]$Credential.password }
+        $response = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($baseUri, '/login')) -Method Post `
+            -WebSession $session -Headers $headers -Body $body
+        $finalUri = $null
+        if ($null -ne $response.BaseResponse) {
+            if ($null -ne $response.BaseResponse.ResponseUri) {
+                $finalUri = $response.BaseResponse.ResponseUri
+            } elseif ($null -ne $response.BaseResponse.RequestMessage) {
+                $finalUri = $response.BaseResponse.RequestMessage.RequestUri
+            }
+        }
+        if ($null -ne $finalUri -and $finalUri.AbsolutePath -eq '/login') {
+            throw 'monitor loginに失敗しました'
+        }
+        return [pscustomobject]@{ Available = $true; Reason = ''; Session = $session }
+    } catch {
+        return [pscustomobject]@{ Available = $false; Reason = $_.Exception.Message; Session = $null }
     }
 }
 
@@ -120,7 +216,9 @@ function Get-MonitorSnapshot {
         '/actuator/metrics/hikaricp.connections.pending',
         '/actuator/metrics/tomcat.threads.busy'
     )
-    $probes = @($actuatorPaths | ForEach-Object { Get-EndpointStatus $_ })
+    $probes = @($actuatorPaths | ForEach-Object {
+        Get-EndpointStatus $_ $monitorAuthentication.Session $monitorAuthentication.Reason
+    })
     return [pscustomobject]@{
         Label = $Label
         TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -153,20 +251,30 @@ function Get-RequestSummary {
         [double]$ElapsedSeconds
     )
 
+    $setup = @($Records | Where-Object { $_.Kind -eq 'setup' })
+    $setupErrors = @($setup | Where-Object { $_.ErrorClass -ne 'success-2xx' })
+    $authenticated = @($setup | Where-Object { $_.ErrorClass -eq 'success-2xx' })
     $requests = @($Records | Where-Object { $_.Kind -eq 'request' })
     $latencies = @($requests | ForEach-Object { [double]$_.LatencyMs })
-    $errors = @($requests | Where-Object { $_.ErrorClass -ne 'success-2xx' })
-    $errorGroups = @($errors | Group-Object ErrorClass | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" })
+    $requestErrors = @($requests | Where-Object { $_.ErrorClass -ne 'success-2xx' })
+    $errors = @($setupErrors + $requestErrors)
+    $errorGroups = @($errors | Group-Object ErrorClass | Sort-Object Name |
+        ForEach-Object { "$($_.Name)=$($_.Count)" })
     $rps = if ($ElapsedSeconds -gt 0) { [math]::Round($requests.Count / $ElapsedSeconds, 2) } else { $null }
     return [pscustomobject]@{
         Scenario = $Scenario
         StageUsers = $Stage
+        RequestedUsers = $Stage
+        AuthenticatedUsers = $authenticated.Count
+        SetupErrors = $setupErrors.Count
         ExportConcurrency = $Concurrency
         Requests = $requests.Count
         P50Ms = Get-Percentile $latencies 50
         P95Ms = Get-Percentile $latencies 95
         P99Ms = Get-Percentile $latencies 99
         ReqPerSec = $rps
+        RequestErrors = $requestErrors.Count
+        TotalErrors = $errors.Count
         Errors = $errors.Count
         ErrorClassification = ($errorGroups -join ';')
         ElapsedSeconds = [math]::Round($ElapsedSeconds, 2)
@@ -184,7 +292,11 @@ $worker = {
         [bool]$WorkerSkipUpdates,
         [string]$WorkerScenario,
         [string]$WorkerExportPath,
-        [int]$WorkerId
+        [int]$WorkerId,
+        $WorkerLoginBarrier,
+        $WorkerLoginCompleted,
+        $WorkerWorkloadStart,
+        [int]$WorkerLoginDelayMs
     )
 
     $ErrorActionPreference = 'Stop'
@@ -262,12 +374,44 @@ $worker = {
             $null = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($workerBaseUri, '/login')) -Method Get -WebSession $session
             $token = Get-WorkerXsrfToken $session
             if ([string]::IsNullOrWhiteSpace($token)) { throw 'XSRF-TOKEN Cookieが発行されませんでした' }
+            if ($WorkerLoginDelayMs -gt 0) { Start-Sleep -Milliseconds $WorkerLoginDelayMs }
+            if ($null -ne $WorkerLoginBarrier -and
+                    -not $WorkerLoginBarrier.SignalAndWait([TimeSpan]::FromSeconds(30))) {
+                throw 'login barrierがtimeoutしました'
+            }
             $headers = @{ 'X-XSRF-TOKEN' = $token; 'Accept' = 'text/html' }
             $body = @{ username = $WorkerUsername; password = $WorkerPassword }
-            $null = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($workerBaseUri, '/login')) -Method Post -WebSession $session -Headers $headers -Body $body
+            $loginResponse = Invoke-WebRequest -UseBasicParsing -Uri ([Uri]::new($workerBaseUri, '/login')) -Method Post -WebSession $session -Headers $headers -Body $body
+            $finalUri = $null
+            if ($null -ne $loginResponse.BaseResponse) {
+                if ($null -ne $loginResponse.BaseResponse.ResponseUri) {
+                    $finalUri = $loginResponse.BaseResponse.ResponseUri
+                } elseif ($null -ne $loginResponse.BaseResponse.RequestMessage) {
+                    $finalUri = $loginResponse.BaseResponse.RequestMessage.RequestUri
+                }
+            }
+            if ($null -ne $finalUri -and $finalUri.AbsolutePath -eq '/login') {
+                throw 'ログインに失敗しました'
+            }
             $sessionCookie = @($session.Cookies.GetCookies($workerBaseUri) | Where-Object { $_.Name -eq 'JSESSIONID' } | Select-Object -First 1)
             if ($sessionCookie.Count -eq 0) { throw 'ログイン後のJSESSIONID Cookieがありません' }
-            return [pscustomobject]@{ Success = $true; Session = $session; Result = $null }
+            $sw.Stop()
+            return [pscustomobject]@{
+                Success = $true
+                Session = $session
+                Result = [pscustomobject]@{
+                    Kind = 'setup'
+                    Scenario = $WorkerScenario
+                    WorkerId = $WorkerId
+                    Path = '/login'
+                    Method = 'POST'
+                    Status = 200
+                    ErrorClass = 'success-2xx'
+                    ErrorMessage = ''
+                    LatencyMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+                    TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+                }
+            }
         } catch {
             $sw.Stop()
             return [pscustomobject]@{
@@ -290,8 +434,18 @@ $worker = {
     }
 
     $login = New-WorkerSession
+    $null = $WorkerLoginCompleted.Signal()
+    $login.Result
     if (-not $login.Success) {
-        $login.Result
+        return
+    }
+    if (-not $WorkerWorkloadStart.Wait([TimeSpan]::FromSeconds(60))) {
+        [pscustomobject]@{
+            Kind = 'request'; Scenario = $WorkerScenario; WorkerId = $WorkerId; Path = '/load-worker';
+            Method = 'BARRIER'; Status = 0; ErrorClass = 'load-generator-error';
+            ErrorMessage = 'workload barrierがtimeoutしました'; LatencyMs = 0;
+            TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+        }
         return
     }
 
@@ -331,15 +485,30 @@ function Invoke-Stage {
     $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $StageUsers)
     $runspacePool.Open()
     $workers = @()
+    $records = @()
+    $loginBarrier = if ($Scenario -eq 'login-spike' -or $Scenario -eq 'session-eviction') {
+        [System.Threading.Barrier]::new($StageUsers)
+    } else { $null }
+    $loginCompleted = [System.Threading.CountdownEvent]::new($StageUsers)
+    $workloadStart = [System.Threading.ManualResetEventSlim]::new($false)
     for ($i = 1; $i -le $StageUsers; $i++) {
         $powershell = [PowerShell]::Create()
         $powershell.RunspacePool = $runspacePool
-        [void]$powershell.AddScript($worker).AddArgument($BaseUrl).AddArgument($Username).AddArgument($Password).`
+        $credential = if ($credentials.Count -eq 1) { $credentials[0] } else { $credentials[$i - 1] }
+        $loginDelayMs = if ($Scenario -eq 'steady') { ($i - 1) * 150 } else { 0 }
+        [void]$powershell.AddScript($worker).AddArgument($BaseUrl).AddArgument([string]$credential.username).AddArgument([string]$credential.password).`
             AddArgument($StageDurationSeconds).AddArgument($ThinkTimeMs).AddArgument($EngineerId).`
-            AddArgument([bool]$SkipUpdates).AddArgument($Scenario).AddArgument($ExportPath).AddArgument($i)
+            AddArgument([bool]$SkipUpdates).AddArgument($Scenario).AddArgument($ExportPath).AddArgument($i).`
+            AddArgument($loginBarrier).AddArgument($loginCompleted).AddArgument($workloadStart).AddArgument($loginDelayMs)
         $workers += [pscustomobject]@{ PowerShell = $powershell; Handle = $powershell.BeginInvoke() }
     }
-    $records = @()
+    if (-not $loginCompleted.Wait([TimeSpan]::FromSeconds(60))) {
+        $records += [pscustomobject]@{ Kind = 'setup'; Scenario = $Scenario; WorkerId = 0; Path = '/load-worker';
+            Method = 'BARRIER'; Status = 0; ErrorClass = 'load-generator-error';
+            ErrorMessage = 'login完了待機がtimeoutしました'; LatencyMs = 0;
+            TimestampUtc = (Get-Date).ToUniversalTime().ToString('o') }
+    }
+    $workloadStart.Set()
     foreach ($workerHandle in $workers) {
         try {
             $records += @($workerHandle.PowerShell.EndInvoke($workerHandle.Handle))
@@ -351,6 +520,9 @@ function Invoke-Stage {
             $workerHandle.PowerShell.Dispose()
         }
     }
+    if ($null -ne $loginBarrier) { $loginBarrier.Dispose() }
+    $loginCompleted.Dispose()
+    $workloadStart.Dispose()
     $runspacePool.Close()
     $runspacePool.Dispose()
     $elapsed = ((Get-Date) - $stageStart).TotalSeconds
@@ -366,6 +538,7 @@ $monitorProbePaths = @(
     '/actuator/metrics/hikaricp.connections.pending',
     '/actuator/metrics/tomcat.threads.busy'
 )
+$monitorAuthentication = New-MonitorSession $credentials[0]
 $environment = [ordered]@{
     RunId = $runId
     TimestampLocal = (Get-Date).ToString('o')
@@ -380,34 +553,51 @@ $environment = [ordered]@{
     ExportConcurrency = $ExportConcurrency
     AppProcess = Get-AppProcessSnapshot $AppPid
     MySql = Get-MySqlSnapshot $MySqlCli
-    EndpointProbes = @($monitorProbePaths | ForEach-Object { Get-EndpointStatus $_ })
+    MonitorAuthentication = [pscustomobject]@{
+        Available = $monitorAuthentication.Available
+        Reason = $monitorAuthentication.Reason
+    }
+    EndpointProbes = @($monitorProbePaths | ForEach-Object {
+        Get-EndpointStatus $_ $monitorAuthentication.Session $monitorAuthentication.Reason
+    })
 }
 $environment | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $runDirectory 'environment.json')
 
 Write-Host "容量基線 run=$runId output=$runDirectory"
 Write-Host (($environment.EndpointProbes | Format-Table -AutoSize | Out-String).TrimEnd())
 
-if ($CheckOnly) {
-    Write-Host 'CheckOnly: 負荷試験は実行しません。'
-    exit 0
-}
-
 $allRecords = New-Object System.Collections.Generic.List[object]
 $allSummaries = New-Object System.Collections.Generic.List[object]
 $monitorSnapshots = New-Object System.Collections.Generic.List[object]
 
+function Copy-ResultRecord {
+    param($Record)
+    return [pscustomobject]@{
+        Kind = [string]$Record.Kind
+        Scenario = [string]$Record.Scenario
+        WorkerId = [int]$Record.WorkerId
+        Path = [string]$Record.Path
+        Method = [string]$Record.Method
+        Status = [int]$Record.Status
+        ErrorClass = [string]$Record.ErrorClass
+        ErrorMessage = [string]$Record.ErrorMessage
+        LatencyMs = [double]$Record.LatencyMs
+        TimestampUtc = [string]$Record.TimestampUtc
+    }
+}
+
 foreach ($stage in $Stages) {
-    $monitorSnapshots.Add((Get-MonitorSnapshot "before-normal-$stage"))
-    $normal = Invoke-Stage $stage 'normal' 0
-    foreach ($record in $normal.Records) { $allRecords.Add($record) }
+    $monitorSnapshots.Add((Get-MonitorSnapshot "before-$Scenario-$stage"))
+    $normal = Invoke-Stage $stage $Scenario 0
+    foreach ($record in $normal.Records) { $allRecords.Add((Copy-ResultRecord $record)) }
     $allSummaries.Add($normal.Summary)
-    $monitorSnapshots.Add((Get-MonitorSnapshot "after-normal-$stage"))
+    $monitorSnapshots.Add((Get-MonitorSnapshot "after-$Scenario-$stage"))
     Write-Host ($normal.Summary | Format-List | Out-String).TrimEnd()
 
     if (-not $SkipExport) {
         $monitorSnapshots.Add((Get-MonitorSnapshot "before-export-$stage-x$ExportConcurrency"))
-        $export = Invoke-Stage $ExportConcurrency 'export' $ExportConcurrency $stage
-        foreach ($record in $export.Records) { $allRecords.Add($record) }
+        $export = Invoke-Stage $ExportConcurrency 'export' $ExportConcurrency $ExportConcurrency
+        foreach ($record in $export.Records) { $allRecords.Add((Copy-ResultRecord $record)) }
         $allSummaries.Add($export.Summary)
         $monitorSnapshots.Add((Get-MonitorSnapshot "after-export-$stage-x$ExportConcurrency"))
         Write-Host ($export.Summary | Format-List | Out-String).TrimEnd()
@@ -419,3 +609,21 @@ $allSummaries | Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $runDire
 $monitorSnapshots | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 (Join-Path $runDirectory 'monitor-snapshots.json')
 
 Write-Host "完了: $(Join-Path $runDirectory 'summary.csv')"
+if ($RequireMetrics) {
+    $metricProbes = @($environment.EndpointProbes | Where-Object { $_.Path -like '/actuator/metrics/*' })
+    foreach ($snapshot in $monitorSnapshots) {
+        $metricProbes += @($snapshot.Actuator | Where-Object { $_.Path -like '/actuator/metrics/*' })
+    }
+    $unavailableMetrics = @($metricProbes | Where-Object { -not $_.Available })
+    if ($unavailableMetrics.Count -gt 0) {
+        $reasons = @($unavailableMetrics | ForEach-Object { "$($_.Path):$($_.Reason)" } | Select-Object -Unique)
+        Write-Error ("必須metricsを取得できません: " + ($reasons -join '; '))
+        exit 2
+    }
+}
+$totalErrors = ($allSummaries | Measure-Object -Property TotalErrors -Sum).Sum
+if ($null -ne $totalErrors -and [int]$totalErrors -gt 0) {
+    Write-Error "容量試験でerrorを検出しました: TotalErrors=$totalErrors"
+    exit 1
+}
+exit 0

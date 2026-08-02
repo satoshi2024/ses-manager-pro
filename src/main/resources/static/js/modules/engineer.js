@@ -5,6 +5,23 @@ window.stationIndex = {};
 // (保存完了後にPUT /api/candidates/{id}/converted-engineerで紐付けるために保持する)
 let prefillCandidateId = null;
 
+const ENGINEER_STATUS_VALUES = ['稼動中', 'Bench', '提案中', '退場予定'];
+
+/** 旧bookmarkの「待機」だけをDB正規値へ寄せ、未知値はfilterへ適用しない。 */
+function normalizeEngineerListStatus(status) {
+    if (status === '待機') return 'Bench';
+    return ENGINEER_STATUS_VALUES.includes(status) ? status : '';
+}
+
+/** Dashboard導線・bookmarkのstatusを初回API取得より先にselectへ反映する。 */
+function applyEngineerListQueryFilters() {
+    const params = new URLSearchParams(window.location.search);
+    const status = normalizeEngineerListStatus(params.get('status'));
+    if (status) {
+        $('#searchStatus').val(status);
+    }
+}
+
 /**
  * 所属組織・原価部門の選択肢を読み込む。要員の所属組織は部門損益の帰属基準になるため、
  * ID直打ちではなくマスタから選ばせる。組織スコープはAPI側で適用済み。
@@ -26,6 +43,7 @@ function loadOrganizationOptions() {
 
 $(document).ready(function() {
     loadOrganizationOptions();
+    applyEngineerListQueryFilters();
     // Load engineers on page load
     loadEngineers();
 

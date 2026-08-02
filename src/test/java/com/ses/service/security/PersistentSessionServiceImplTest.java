@@ -28,11 +28,13 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -77,7 +79,7 @@ class PersistentSessionServiceImplTest {
     void sessionIDを平文保存せず登録属性を設定する() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         when(userSessionMapper.selectBySessionHash(anyString(), anyString())).thenReturn(null);
-        when(userSessionMapper.selectActiveByUserForUpdate(anyString(), eq(7L), any())).thenReturn(List.of());
+        when(userSessionMapper.selectActiveByUser(anyString(), eq(7L), any())).thenReturn(List.of());
 
         service.register(request, authentication);
 
@@ -114,12 +116,25 @@ class PersistentSessionServiceImplTest {
         UserSession oldest = active(1L, LocalDateTime.of(2025, 12, 1, 0, 0));
         UserSession newest = active(2L, LocalDateTime.of(2025, 12, 31, 0, 0));
         when(userSessionMapper.selectBySessionHash(anyString(), anyString())).thenReturn(null);
-        when(userSessionMapper.selectActiveByUserForUpdate(anyString(), eq(7L), any()))
+        when(userSessionMapper.selectActiveByUser(anyString(), eq(7L), any()))
                 .thenReturn(List.of(newest, oldest));
 
         service.register(request, authentication);
 
         verify(userSessionMapper).revoke(1L, LocalDateTime.of(2026, 1, 1, 0, 0), "MAX_CONCURRENT");
+    }
+
+    @Test
+    void 無効ユーザーには永続sessionを発行しない() {
+        SysUser disabled = new SysUser();
+        disabled.setId(7L);
+        disabled.setStatus(0);
+        when(sysUserMapper.selectByIdForUpdate(7L)).thenReturn(disabled);
+
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.register(new MockHttpServletRequest(), authentication));
+
+        verify(userSessionMapper, never()).insert(any(UserSession.class));
     }
 
     @Test

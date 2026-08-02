@@ -3,10 +3,12 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.crm.OpportunityConversionDto;
+import com.ses.entity.Customer;
 import com.ses.entity.Opportunity;
 import com.ses.entity.Project;
 import com.ses.entity.Quotation;
 import com.ses.mapper.OpportunityMapper;
+import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.QuotationService;
@@ -39,6 +41,8 @@ class OpportunityServiceImplTest {
     private QuotationService quotationService;
     @Mock
     private DataScopeService dataScopeService;
+    @Mock
+    private CustomerMapper customerMapper;
 
     @InjectMocks
     private OpportunityServiceImpl service;
@@ -46,6 +50,11 @@ class OpportunityServiceImplTest {
     @org.junit.jupiter.api.BeforeEach
     void setBaseMapper() {
         ReflectionTestUtils.setField(service, "baseMapper", opportunityMapper);
+        lenient().when(customerMapper.selectById(anyLong())).thenAnswer(invocation -> {
+            Customer customer = new Customer();
+            customer.setId(invocation.getArgument(0));
+            return customer;
+        });
     }
 
     @Test

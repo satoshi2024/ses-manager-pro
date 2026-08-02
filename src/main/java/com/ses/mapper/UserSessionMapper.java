@@ -25,14 +25,6 @@ public interface UserSessionMapper extends BaseMapper<UserSession> {
                                          @Param("userId") Long userId,
                                          @Param("now") LocalDateTime now);
 
-    /** 同時session上限のquery→revoke→insertを同一ユーザー単位で直列化する。 */
-    @Select("SELECT * FROM t_user_session WHERE tenant_id = #{tenantId} AND user_id = #{userId} "
-            + "AND revoked_at IS NULL AND idle_expires_at > #{now} AND expires_at > #{now} "
-            + "AND deleted_flag = 0 ORDER BY issued_at DESC FOR UPDATE")
-    List<UserSession> selectActiveByUserForUpdate(@Param("tenantId") String tenantId,
-                                                   @Param("userId") Long userId,
-                                                   @Param("now") LocalDateTime now);
-
     @Update("UPDATE t_user_session SET last_seen_at = #{now}, idle_expires_at = #{idleExpiresAt}, "
             + "updated_at = CURRENT_TIMESTAMP WHERE id = #{id} AND revoked_at IS NULL "
             + "AND idle_expires_at > #{now} AND expires_at > #{now} AND deleted_flag = 0")
