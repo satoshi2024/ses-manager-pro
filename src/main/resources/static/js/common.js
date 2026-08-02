@@ -484,8 +484,11 @@ const SES = {
 
             function position() {
                 const rect = input.getBoundingClientRect();
-                menu.style.left = rect.left + 'px';
-                menu.style.width = Math.max(rect.width, 200) + 'px';
+                // 入力欄が狭い画面(スマホの絞り込み欄など)でも最低幅を確保しつつ、
+                // 右端がビューポートからはみ出さないように寄せる
+                const width = Math.min(Math.max(rect.width, 200), window.innerWidth - 16);
+                menu.style.width = width + 'px';
+                menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) + 'px';
                 const below = window.innerHeight - rect.bottom;
                 if (below < 200 && rect.top > below) {
                     menu.style.top = 'auto';
@@ -594,8 +597,11 @@ const SES = {
                 } else if (e.key === 'Tab') { close(); }
             });
 
-            // mousedown を止めて blur より先に選択を確定させる
-            menu.addEventListener('mousedown', function(e) { e.preventDefault(); });
+            // 候補の上での mousedown だけを止めて、blur より先に選択を確定させる。
+            // メニュー全体で止めるとスクロールバーのドラッグまで巻き込む恐れがある。
+            menu.addEventListener('mousedown', function(e) {
+                if (e.target.closest && e.target.closest('.ses-suggest-item')) e.preventDefault();
+            });
             menu.addEventListener('click', function(e) {
                 const target = e.target.closest ? e.target.closest('.ses-suggest-item') : null;
                 if (target) select(parseInt(target.getAttribute('data-index'), 10));
