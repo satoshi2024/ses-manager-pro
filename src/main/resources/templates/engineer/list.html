@@ -63,8 +63,7 @@
                     <label for="searchName" class="form-label text-muted small" th:text="#{engineer.name}">名前</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" th:placeholder="#{engineer.placeholder.name}" list="engineer-list">
-                        <datalist id="engineer-list"></datalist>
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-primary" id="searchName" name="name" th:placeholder="#{engineer.placeholder.name}" data-suggest="engineers">
                     </div>
                 </div>
                 <div class="col-md-2">
@@ -249,10 +248,8 @@
                             <label class="form-label text-muted small" th:text="#{engineer.nearestStation}">最寄り駅</label>
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-dark border-dark text-muted"><i class="bi bi-train-front"></i></span>
-                                <input type="text" id="eng-nearestStation" class="form-control form-control-dark bg-secondary text-white border-dark" list="station-list" th:placeholder="#{engineer.placeholder.station}" autocomplete="off">
-                                <datalist id="station-list">
-                                    <!-- Populated via API -->
-                                </datalist>
+                                <!-- 候補は engineer.js が /data/station_names.json から読み込み、SES.autocomplete で前方一致サジェストする -->
+                                <input type="text" id="eng-nearestStation" class="form-control form-control-dark bg-secondary text-white border-dark" data-suggest="station" th:placeholder="#{engineer.placeholder.station}" autocomplete="off">
                             </div>
                             <!-- 駅名に紐づく路線（鉄道会社）を選択。同名駅が複数路線に存在するため選択式にする -->
                             <div class="input-group input-group-sm mt-2">

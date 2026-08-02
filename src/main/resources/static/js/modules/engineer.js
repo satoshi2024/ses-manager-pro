@@ -163,29 +163,37 @@ function loadAllStations() {
         method: 'GET',
         dataType: 'json',
         success: function(res) {
-            if (res && res.length > 0) {
-                const datalist = $('#station-list');
-                datalist.empty();
-                // To prevent browser lag with 10k elements, modern browsers handle datalists very well,
-                // but we can just append them as strings.
-                let html = '';
-                const seenNames = {};
-                window.stationIndex = {};
-                res.forEach(item => {
-                    // 駅名 -> pref のインデックスを構築（重複 pref は除外）
-                    if (!window.stationIndex[item.name]) window.stationIndex[item.name] = [];
-                    if (window.stationIndex[item.name].indexOf(item.pref) === -1) {
-                        window.stationIndex[item.name].push(item.pref);
-                    }
-                    // datalist は駅名の重複を避けて 1 件だけ出す
-                    if (!seenNames[item.name]) {
-                        seenNames[item.name] = true;
-                        // Setting text content of <option> shows as lighter text on the right side in Chrome
-                        html += `<option value="${item.name}">${item.pref}</option>`;
-                    }
-                });
-                datalist.html(html);
-            }
+            if (!res || res.length === 0) return;
+
+            window.stationIndex = {};
+            const items = [];
+            const indexByName = {};
+            res.forEach(item => {
+                // 駅名 -> pref のインデックスを構築（重複 pref は除外）
+                if (!window.stationIndex[item.name]) window.stationIndex[item.name] = [];
+                if (window.stationIndex[item.name].indexOf(item.pref) === -1) {
+                    window.stationIndex[item.name].push(item.pref);
+                }
+                // 候補は駅名の重複を避けて 1 件だけ持つ。同名駅の都道府県は補足表示にまとめる
+                const prefecture = splitPref(item.pref).prefecture;
+                if (indexByName[item.name] === undefined) {
+                    indexByName[item.name] = items.length;
+                    items.push({ value: item.name, prefectures: prefecture ? [prefecture] : [] });
+                } else {
+                    const known = items[indexByName[item.name]].prefectures;
+                    if (prefecture && known.indexOf(prefecture) === -1) known.push(prefecture);
+                }
+            });
+            items.forEach(item => {
+                // 補足表示は都道府県のみ。路線名を出すと「東」で JR東海道… が並ぶ誤解を招くうえ、
+                // 路線は駅を選んだ後の路線セレクトで選ばせる。
+                item.label = item.prefectures.slice(0, 2).join('・')
+                    + (item.prefectures.length > 2 ? '…' : '');
+                delete item.prefectures;
+            });
+
+            // 前方一致サジェストを取り付ける（照合対象は駅名のみ。ラベルは表示専用）
+            SES.autocomplete.attach(document.getElementById('eng-nearestStation'), { items: items });
         },
         error: function(err) {
             console.error("Failed to load station names", err);
