@@ -135,3 +135,60 @@ system migration以外はengine経由のみ。既存API互換が必要なら同U
 
 route resolution、金額境界、自己承認、代理期間、並列、競合、二重承認、apply rollback、outbox、
 対象5adapterの単件service回帰。
+
+## 8. F1実装注記（逸脱と根拠）
+
+T042(F1)実装時に確定した、§1/§6の記述だけでは一意に決まらない実装詳細。既定解・決定表と矛盾する
+ものは「逸脱と根拠」形式で明記する。矛盾しないものは補足として残す。
+
+### 逸脱: §6.4の二重action防止キー
+
+- 既定解: `UNIQUE(request_id, step_no, approver_user_id)`
+- 本specの解: `UNIQUE(request_id, step_no, approver_slot_user_id)`。
+  `approver_slot_user_id = COALESCE(delegated_from, approver_user_id)`（本人操作時は`approver_user_id`と同値）。
+- 根拠（design §6.4「代理と本人の重複」との整合）: 本人と代理者は**別のuser id**で操作する。
+  `approver_user_id`をそのままUNIQUEキーにすると、本人(A)と代理(B)がそれぞれ別行としてinsertでき、
+  「先着1件を有効とし2件目はCAS失敗」を構造的に保証できない。「どちらが操作しても同じslot」を表す
+  `approver_slot_user_id`（=解決されたstepの原承認者id）をキーにすることで、本人・代理のどちらが
+  先着してもDB UNIQUE制約1つで二重カウントを防げる。
+- 影響するconsumer: `t_approval_action`のみ。F2のadapter実装・A1のUI表示（`delegated_from`で代理表示）に影響しない。
+- 追加テスト: `ApprovalEngineServiceTest.本人と代理の同時解決は先着1件だけが有効になる`。
+
+### 補足: draft/requestedの扱い
+
+対象5業務は既存entityの現在値からsnapshotを作るだけで、複数fieldを画面上で時間をかけて
+下書き編集するUXを持たない（design §1のpayload/diffは対象adapterが機械的に組み立てる）。
+そのため`request()`は`draft`→`requested`→`in_review`を1つのtransaction内で連続遷移させ、
+外部から観測できる状態は最初から`in_review`になる。`draft`状態のAPIは現状提供しない。
+§6.4の状態表自体は変更しない（`draft`はDBの`status`列が取り得る値として維持し、将来UIが
+下書き編集を必要とする場合はそこへ差し込む）。
+
+### 補足: approver_typeの実装範囲
+
+R1.3は承認者解決元として「特定user、permission group、申請者の上長、組織責任者、財務責任者」を挙げる。
+F1はG7推奨既定（組織上長→財務/管理者）を満たすために必要な3種——`USER`（固定user）、
+`ROLE`（`sys_user.role`一致の全員）、`APPLICANT_MANAGER`（申請時点の`t_user_organization.manager_user_id`）
+——のみ実装する。未対応の`approver_type`値は「承認者解決不能」としてfail-closedに扱う
+（推測実装せず拒否する）。`permission group`/`組織責任者`個別/`財務責任者`個別の追加解決方式が
+必要になった場合はA2（route/代理管理）で追加する。
+
+### 補足: `resolveApprovers`の実現方法
+
+design §3が挙げる`resolveApprovers`はengineの独立public methodとしてではなく、
+`RouteResolverService.resolve(...)`が返す`ResolvedRoute`の各stepの承認者一覧として実現した
+（route解決と承認者解決は同一トランザクション・同一呼び出しで行う必要があり、分離するとF1の
+「route未設定/承認者解決不能は同じ理由で申請を拒否する」という単純さが崩れるため）。
+
+### 補足: `target_version`とtarget entityの`@Version`
+
+`t_approval_request.target_version`は本specが新設する対象5テーブル(`t_quotation`/`t_contract`/
+`t_invoice`/`t_bp_payment`)への`@Version`列追加を伴わない。F1のengineはこの値を保存・通過させるだけで、
+「最終承認時に対象entityの現在versionと比較する」実処理（design §3/§6.4の「target version再検証」）は
+F2（5対象adapter）が対象ごとに定義する。対象4entityへの`@Version`追加が必要かどうかもF2の判断に委ねる
+（T041 inventory §3の申し送り事項を参照）。
+
+### 補足: `escalate`とB1の関係
+
+design §3が挙げる`escalate`はF1では未実装。SLA期限監視・冪等scheduler・通知重複防止はB1
+（通知/SLA/escalation）の担当であり、F1のtest matrixにも含まれない。`m_approval_route_step.sla_hours`
+列はDDLとして用意済みで、B1がそのまま参照できる。

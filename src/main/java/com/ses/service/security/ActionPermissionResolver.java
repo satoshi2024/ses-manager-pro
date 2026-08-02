@@ -15,6 +15,9 @@ public final class ActionPermissionResolver {
             Map.entry("analytics", "analytics"),
             Map.entry("autocomplete", "autocomplete"),
             Map.entry("audit-logs", "audit"),
+            // approval-workflow-internal-control(S07)。未登録のままだと/api/approval/**が
+            // 管理者を含む全roleで403になる(CRM-R2-P1-01と同じ罠)。V75の権限seedと対にする。
+            Map.entry("approval", "approval"),
             Map.entry("bp-availabilities", "bp-availability"),
             Map.entry("bp-companies", "bp-company"),
             Map.entry("bp-availability-ingestions", "bp-availability-ingestion"),

@@ -59,6 +59,12 @@ SELECT 'default', g.group_id, a.action_key, 0, 0
 FROM (VALUES (2), (3), (4)) g(group_id)
 CROSS JOIN (VALUES ('search.*'), ('task.*'), ('saved-view.*'), ('batch-operation.*')) a(action_key);
 
+-- V75: approval-workflow-internal-control(S07)。営業(2)・HR(3)・マネージャー(4)へ付与。
+-- 要員(5)はSecurityConfigのanyRequestが4管理ロール限定のため対象外（既存仕様、V74と同型）。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT 'default', g.group_id, 'approval.*', 0, 0
+FROM (VALUES (2), (3), (4)) g(group_id);
+
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
   ('default', 1, '*', 0, 0),
   ('default', 5, 'my.*', 0, 0),
