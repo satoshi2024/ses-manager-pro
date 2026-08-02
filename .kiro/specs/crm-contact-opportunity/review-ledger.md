@@ -266,6 +266,9 @@ ALTER TABLE t_mail_delivery
   DROP COLUMN contact_id,
   DROP COLUMN opportunity_id;
 
+-- t_proposal.source_opportunity_idはV73で追加された参照列だが、FK/indexは無い。
+ALTER TABLE t_proposal DROP COLUMN source_opportunity_id;
+
 -- 2. メニュー・権限（t_role_menu は m_menu へのFKで CASCADE 削除される）
 DELETE FROM m_menu WHERE menu_key IN ('crm-lead', 'crm-opportunity');
 DELETE FROM t_permission_group_action WHERE action_key = 'crm.*';
@@ -402,3 +405,19 @@ Review packet: Base `8e5066a` / 実装Head `eb5adc4` / review時Head `bd3831d`�
 
 Round 5の自動検証は、定向回帰77/0/0、MySQL fresh/legacy/partial/repair 4/4、Node 3/3、compile、diff-checkでgreen。
 L4全量は20分timeoutで完了前に停止したため、全量greenとは判定しない。desktop/390px全role browser証拠と併せてrelease gateへ残す。
+
+## Round 6 再Review FAIL 対応（2026-08-02）
+
+再ReviewのOPEN指摘は、`source_cost`のfresh/legacy/partial/H2間の型不一致と、lead重複候補の
+Java全件走査であった。P2-02の有限期間primary同時作成証拠と、P2-03のproposal rollback記述も同時に補完した。
+
+| ID | 対応 | 検証 | 状態 |
+|---|---|---|---|
+| CRM-R6-P1-01 | V74.1は編集せずV74.2を追加。`source_cost`を円単位`DECIMAL(14,0)`へ統一し、既存小数値は四捨五入してから型変更。lead正規化検索key 3列/indexも同migrationで追加 | fresh/legacy/partial MySQL smokeでprecision=14/scale=0と3 index、H2 schema同期、`MigrationScriptIntegrityTest` 25/25 | CLOSED |
+| CRM-R6-P1-09 | `company_name_normalized`/`contact_email_normalized`/`contact_phone_normalized`をcreate/update時に維持し、候補SQLをOR＋indexed key＋`LIMIT 20`へ変更 | `LeadServiceIntegrationTest` 4/4。25件一致fixtureでSQL結果20件、NFKC/空白/電話記号fixtureもPASS | CLOSED |
+| CRM-R6-P2-02 | customer親行を`FOR UPDATE`する既存実装へ、2 transactionの有限期間primary作成fixtureを追加 | `CustomerContactPrimaryConcurrencyTest` MySQL 1/1、成功1・競合失敗1・残存contact1 | CLOSED |
+| CRM-R6-P2-03 | rollbackへ`t_proposal.source_opportunity_id`のdropを追加。V74.2の新列/indexと履歴もrollback対象として明記 | review-ledger rollback手順とdesign/tasksのV74.2同期 | CLOSED |
+
+Round 6対応後の実測は、定向/H2 39/0/0、MySQL fresh/legacy/partial/repair/concurrency 各1/1・0 failure/error、
+Node 3/3、`git diff --check` PASS、compile PASS。L4全量とdesktop/390px全role browser Demoは未検証のrelease hard gateとして残す。
+したがってP1は解消したが、S07/次Waveの解放判定はL4/browser証拠取得まで継続する。

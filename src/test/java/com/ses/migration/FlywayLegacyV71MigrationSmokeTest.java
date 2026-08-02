@@ -78,6 +78,10 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertColumnExists(statement, "t_opportunity", "stage_changed_at");
             assertColumnExists(statement, "t_opportunity", "probability_override_reason");
             assertColumnExists(statement, "t_lead", "source_cost");
+            assertNumericColumn(statement, "t_lead", "source_cost", 14, 0);
+            assertColumnExists(statement, "t_lead", "company_name_normalized");
+            assertColumnExists(statement, "t_lead", "contact_email_normalized");
+            assertColumnExists(statement, "t_lead", "contact_phone_normalized");
             assertColumnExists(statement, "t_proposal", "source_opportunity_id");
             assertColumnExists(statement, "t_mail_delivery", "contact_id");
             assertColumnExists(statement, "t_mail_delivery", "opportunity_id");
@@ -101,6 +105,9 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertIndexExists(statement, "t_customer_contact", "uk_customer_contact_active_primary");
             assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_contact");
             assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_opportunity");
+            assertIndexExists(statement, "t_lead", "idx_lead_company_normalized");
+            assertIndexExists(statement, "t_lead", "idx_lead_email_normalized");
+            assertIndexExists(statement, "t_lead", "idx_lead_phone_normalized");
 
             // backfill: 既存顧客の担当者が件数・値とも一致して移行される
             assertEquals(countCustomersWithContact(statement), countMigratedContacts(statement),
@@ -214,6 +221,18 @@ class FlywayLegacyV71MigrationSmokeTest {
                 "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                         + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
             assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertNumericColumn(Statement statement, String table, String column,
+                                     int precision, int scale) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+                "SELECT numeric_precision, numeric_scale FROM information_schema.columns"
+                        + " WHERE table_schema=DATABASE() AND table_name='" + table
+                        + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " の数値型定義が存在するはず");
+            assertEquals(precision, rs.getInt(1));
+            assertEquals(scale, rs.getInt(2));
         }
     }
 }

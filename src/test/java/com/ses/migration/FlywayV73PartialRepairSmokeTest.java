@@ -91,6 +91,13 @@ class FlywayV73PartialRepairSmokeTest {
             assertTrue(hasColumn(st, "t_opportunity", "stage_changed_at"));
             assertTrue(hasColumn(st, "t_opportunity", "probability_override_reason"));
             assertTrue(hasColumn(st, "t_lead", "source_cost"));
+            assertNumericColumn(st, "t_lead", "source_cost", 14, 0);
+            assertTrue(hasColumn(st, "t_lead", "company_name_normalized"));
+            assertTrue(hasColumn(st, "t_lead", "contact_email_normalized"));
+            assertTrue(hasColumn(st, "t_lead", "contact_phone_normalized"));
+            assertTrue(hasIndex(st, "t_lead", "idx_lead_company_normalized"));
+            assertTrue(hasIndex(st, "t_lead", "idx_lead_email_normalized"));
+            assertTrue(hasIndex(st, "t_lead", "idx_lead_phone_normalized"));
             assertTrue(hasColumn(st, "t_proposal", "source_opportunity_id"));
             assertTrue(hasColumn(st, "t_mail_delivery", "contact_id"));
             assertTrue(hasColumn(st, "t_mail_delivery", "opportunity_id"));
@@ -134,6 +141,18 @@ class FlywayV73PartialRepairSmokeTest {
         try (ResultSet rs = st.executeQuery("SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='"
                 + table + "' AND index_name='" + index + "'")) {
             return rs.next();
+        }
+    }
+
+    private void assertNumericColumn(Statement st, String table, String column,
+                                     int precision, int scale) throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT numeric_precision, numeric_scale FROM information_schema.columns"
+                        + " WHERE table_schema=DATABASE() AND table_name='" + table
+                        + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " の数値型定義が存在するはず");
+            assertEquals(precision, rs.getInt(1));
+            assertEquals(scale, rs.getInt(2));
         }
     }
 

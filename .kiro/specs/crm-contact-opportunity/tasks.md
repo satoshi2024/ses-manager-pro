@@ -6,7 +6,8 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specのDDLは **V73**、権限seedは **V74**、Round 5 legacy forward-fixは **V74.1**
+> **Migration**: 本specのDDLは **V73**、権限seedは **V74**、Round 5 legacy forward-fixは **V74.1**、
+> Round 6の型・検索キーforward-fixは **V74.2**
 >（2026-08-02に確定）。BP master(V70/V71)は
 > `origin/main`にmerge済みで、適用済みの最新は**V71**。したがってV73は空き番号であり、そのまま使用する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
@@ -16,7 +17,7 @@
   - **状態**: 完了。DDL(V73) / 移行 / entity / 定向testに加え、T050の顧客detailで移行contactの表示を確認。
   - **Objective**: 1顧客に決裁者・現場・調達・請求・契約の担当者を役割付きで登録でき、
     既存の`m_customer.contact_*`が初回contactへ移行されて顧客詳細に表示される。
-  - **実装ガイダンス**: **V73**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
+  - **実装ガイダンス**: **V73/V74.2**/V1/H2(`sql/schema-crm-h2.sql`)/MySQL smoke、既存contact→初回contact。
     `primary_flag`は「1顧客につき有効期間内に1件」。**0件も許容**し、先頭担当者へ暗黙fallbackしない（design §6.1）。
     既存単一contact fieldはmigration後read compatibility、write禁止。
   - **テスト要件**: L1〜L3。移行件数と値の一致、primary一意（0件許容）、

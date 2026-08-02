@@ -422,9 +422,12 @@ CREATE TABLE t_customer_contact (
 CREATE TABLE t_lead (
   id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
   company_name             VARCHAR(200) NOT NULL,
+  company_name_normalized  VARCHAR(200),
   contact_name             VARCHAR(100),
   contact_email            VARCHAR(255),
+  contact_email_normalized VARCHAR(255),
   contact_phone            VARCHAR(50),
+  contact_phone_normalized VARCHAR(50),
   source                   VARCHAR(100),
   source_cost              DECIMAL(14,0),
   owner_user_id            BIGINT,

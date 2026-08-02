@@ -23,6 +23,9 @@ public class Lead extends BaseEntity {
     @NotBlank(message = "会社名は必須です")
     private String companyName;
 
+    /** 正規化済み会社名。重複候補検索のSQL境界キー。 */
+    private String companyNameNormalized;
+
     /**
      * 担当者名
      */
@@ -33,10 +36,16 @@ public class Lead extends BaseEntity {
      */
     private String contactEmail;
 
+    /** 正規化済みメール。重複候補検索のSQL境界キー。 */
+    private String contactEmailNormalized;
+
     /**
      * 担当者電話
      */
     private String contactPhone;
+
+    /** 正規化済み電話番号。重複候補検索のSQL境界キー。 */
+    private String contactPhoneNormalized;
 
     /**
      * リードソース

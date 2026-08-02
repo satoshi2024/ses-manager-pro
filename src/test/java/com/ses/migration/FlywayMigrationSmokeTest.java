@@ -11,6 +11,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * 実MySQL上で db/migration のFlywayマイグレーションを「空DBから通しで」適用できることを検証する
@@ -400,6 +401,13 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_opportunity", "stage_changed_at");
             assertColumnExists(st, "t_opportunity", "probability_override_reason");
             assertColumnExists(st, "t_lead", "source_cost");
+            assertNumericColumn(st, "t_lead", "source_cost", 14, 0);
+            assertColumnExists(st, "t_lead", "company_name_normalized");
+            assertColumnExists(st, "t_lead", "contact_email_normalized");
+            assertColumnExists(st, "t_lead", "contact_phone_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_company_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_email_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_phone_normalized");
             assertColumnExists(st, "t_proposal", "source_opportunity_id");
             assertColumnExists(st, "t_mail_delivery", "contact_id");
             assertColumnExists(st, "t_mail_delivery", "opportunity_id");
@@ -500,6 +508,18 @@ class FlywayMigrationSmokeTest {
                 "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                         + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
             org.junit.jupiter.api.Assertions.assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertNumericColumn(Statement st, String table, String column,
+                                     int precision, int scale) throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT numeric_precision, numeric_scale FROM information_schema.columns"
+                        + " WHERE table_schema=DATABASE() AND table_name='" + table
+                        + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " の数値型定義が存在するはず");
+            assertEquals(precision, rs.getInt(1));
+            assertEquals(scale, rs.getInt(2));
         }
     }
 
