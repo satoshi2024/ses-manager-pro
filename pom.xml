@@ -24,6 +24,9 @@
         <caffeine.version>3.1.8</caffeine.version>
         <testcontainers.version>1.20.6</testcontainers.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- JaCoCoのprepare-agentが差し込むJVM引数の受け皿。surefireの<argLine>で@{jacocoArgLine}として
+             展開する。JaCoCoをskipした場合でも未解決にならないよう既定値を空で定義しておく。 -->
+        <jacocoArgLine></jacocoArgLine>
     </properties>
 
     <dependencies>
@@ -201,6 +204,18 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <!-- ローカルとCIで結果を一致させるための固定設定。詳細は CLAUDE.md
+                         「ローカルとCIの差分」を参照。ここを緩めると"ローカルは通るのにCIで落ちる"が再発する。
+
+                         runOrder: 既定の filesystem はディレクトリ列挙順に依存するため、
+                         Windows(ローカル)とLinux(CI)でテストクラスの実行順が変わる。
+                         テストは同一JVM内で1つのH2(jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1)を共有するので、
+                         順序が変わると先行テストが残したデータの有無で結果が変わってしまう。 -->
+                    <runOrder>alphabetical</runOrder>
+                    <!-- タイムゾーン/ロケール/文字コードを本番設定(application.ymlのAsia/Tokyo・日本語)へ固定する。
+                         未固定だとローカル(JST・ja_JP・環境依存のfile.encoding)とCI(UTC・en_US)で
+                         日付境界やメッセージ解決が食い違う。@{jacocoArgLine}はカバレッジ計測用エージェント。 -->
+                    <argLine>@{jacocoArgLine} -Duser.timezone=Asia/Tokyo -Duser.language=ja -Duser.country=JP -Dfile.encoding=UTF-8</argLine>
                     <systemPropertyVariables>
                         <api.version>1.40</api.version>
                     </systemPropertyVariables>
@@ -253,6 +268,10 @@
                         <goals>
                             <goal>prepare-agent</goal>
                         </goals>
+                        <configuration>
+                            <!-- surefireの<argLine>を上書きせず、専用プロパティへ入れて@{jacocoArgLine}で合成する -->
+                            <propertyName>jacocoArgLine</propertyName>
+                        </configuration>
                     </execution>
                     <execution>
                         <id>report</id>

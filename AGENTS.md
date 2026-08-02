@@ -20,6 +20,10 @@ No Maven wrapper is checked in; use the bundled Maven distribution under `apache
 # the Testcontainers migration smoke test auto-skips unless Docker is available (see "Tests and the DB")
 .\apache-maven-3.9.6\bin\mvn test
 
+# run what CI runs, and report which tests your environment silently skipped
+# (see "Local vs CI" — plain `mvn test` is NOT the same set of tests as CI)
+.\scripts\verify-like-ci.ps1
+
 # run a single test class
 .\apache-maven-3.9.6\bin\mvn test -Dtest=DashboardServiceImplTest
 
@@ -51,6 +55,17 @@ Tests do **not** need MySQL — Spring Boot tests pick up `src/test/resources/ap
 2. Test classes that need a fuller/isolated schema load `@Sql("/sql/engineer-schema-h2.sql")`, a hand-maintained consolidated H2 schema. **If you add a column/table, update `engineer-schema-h2.sql` too** or MyBatis-Plus's generated `SELECT` (which lists every entity column) will fail with "Unknown column".
 
 Because tests run on H2 with Flyway disabled, **migration SQL is never executed against real MySQL by the normal suite**. `src/test/java/com/ses/migration/FlywayMigrationSmokeTest` (Testcontainers) fills that gap: it spins up a real MySQL 8 container, runs the full `db/migration` set from an empty DB, and asserts the resulting schema. **It requires Docker** — it auto-skips when Docker is unavailable (`@Testcontainers(disabledWithoutDocker = true)`), so `mvn test` stays green locally, but **CI needs Docker for this test to actually run** (it is the only automated check that catches MySQL-dialect errors, missing columns, and migration-vs-migration conflicts).
+
+### Local vs CI — why a green local run can still fail CI
+
+A local `mvn test` and the CI run (`.github/workflows/ci.yml`) execute **different sets of tests on a different JVM configuration**. Four differences have each produced a real "passes locally, fails in CI" (or the reverse). Two are now pinned in `pom.xml` and must stay pinned; two are environment capabilities you have to supply locally.
+
+1. **Docker decides whether 8 classes run at all.** `Flyway*SmokeTest` (×5), `FlywayRepairRunbookTest`, `FlywayV73PartialRepairSmokeTest`, `ConcurrentUpdateTest` are `@Testcontainers(disabledWithoutDocker = true)`. Without Docker they report as *skipped*, so the suite is green while every migration check has silently vanished — and these are the only tests that ever run the migrations against real MySQL. CI has Docker, so a MySQL-dialect or migration-ordering bug surfaces **only there**. CI now fails if Docker is missing *and* if any test is skipped.
+2. **Node decides whether the JS syntax check runs.** `JsSyntaxCheckTest` runs `node --check` over every file in `static/js`. Without `node` on PATH it skips locally; in CI (`CI=true`) a missing Node is an assertion failure.
+3. **Test execution order — pinned to `<runOrder>alphabetical</runOrder>`.** Surefire's default `filesystem` order differs between Windows and Linux, and **every test in the JVM shares one H2 database** (`jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`), so data committed by one class is visible to the next and the order changes the outcome. That is how `BpPaymentWritePathTest` failed locally but passed in CI: it used `contractId = 1L`, a row created by another test class. **Never read rows you did not insert.**
+4. **Timezone / locale / encoding — pinned in surefire's `argLine`** to `Asia/Tokyo`, `ja_JP`, UTF-8, matching `application.yml` and production. Unpinned, a JST workstation and a UTC runner disagree about "today" for nine hours a day, and `LocaleContextHolder`-based message lookups resolve to `messages_en` on an English-locale runner.
+
+**The CI contract is: zero skipped tests.** Don't reintroduce `Assumptions.assumeTrue(...)` for environment probing — make the test deterministic instead. Before pushing run `scripts/verify-like-ci.sh` / `.ps1`, which runs the same `mvn -B clean test` plus the same skip check and names the classes your environment could not run. CI runs Temurin **21**; `<java.version>17</java.version>` only sets the bytecode target.
 
 ## Architecture
 

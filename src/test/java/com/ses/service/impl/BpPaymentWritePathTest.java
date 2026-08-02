@@ -3,8 +3,12 @@ package com.ses.service.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpCompany;
 import com.ses.entity.BpPayment;
+import com.ses.entity.Contract;
+import com.ses.entity.Engineer;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpCompanyService;
 import com.ses.service.BpPaymentService;
@@ -36,6 +40,37 @@ class BpPaymentWritePathTest {
     @Autowired
     private WorkRecordMapper workRecordMapper;
 
+    @Autowired
+    private ContractMapper contractMapper;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    /**
+     * 勤怠のスコープ判定は契約→要員をINNER JOINするため、勤怠には実在する契約が必要。
+     * 以前は contractId=1 という「他テストが作った既存データ」に暗黙依存しており、
+     * 実行順（surefireのrunOrder）や先行テストの論理削除で結果が変わっていた。
+     * テスト内で必要なデータを自前に作ることで実行順に依存しないようにする。
+     */
+    private Long insertOwnContract() {
+        Engineer engineer = new Engineer();
+        engineer.setFullName("BP支払テスト要員");
+        engineer.setEmploymentType("BP");
+        engineer.setStatus("稼動中");
+        engineerMapper.insert(engineer);
+
+        Contract contract = new Contract();
+        contract.setEngineerId(engineer.getId());
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setStartDate(java.time.LocalDate.of(2026, 5, 1));
+        contract.setSellingPrice(new BigDecimal("700000"));
+        contract.setCostPrice(new BigDecimal("600000"));
+        contract.setStatus("稼動中");
+        contractMapper.insert(contract);
+        return contract.getId();
+    }
+
     @Test
     @DisplayName("支払先の会社名自由入力は拒否し、BP ID指定時は表示用snapshotを自動設定する")
     void addLayerRequiresBpCompanyIdWhenPayeeNameProvided() {
@@ -52,7 +87,7 @@ class BpPaymentWritePathTest {
 
         WorkRecord record = new WorkRecord();
         record.setWorkMonth("2026-05");
-        record.setContractId(1L);
+        record.setContractId(insertOwnContract());
         record.setActualHours(new BigDecimal("160.0"));
         workRecordMapper.insert(record);
 
