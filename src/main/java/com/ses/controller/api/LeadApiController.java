@@ -5,6 +5,7 @@ import com.ses.dto.crm.LeadConversionDto;
 import com.ses.dto.crm.LeadConversionRequest;
 import com.ses.dto.crm.LeadSaveRequest;
 import com.ses.entity.Lead;
+import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.LeadService;
 import com.ses.service.security.CrmScopeService;
