@@ -344,30 +344,271 @@ const SES = {
             }
         }
     },
+    /**
+     * サジェスト（オートコンプリート）
+     *
+     * ネイティブの {@code <datalist>} は使わず自前のドロップダウンに置き換えている。datalist には
+     * 「入力した文字で始まらない候補が出る」2つの原因があり、最寄り駅の入力で実害が出たため。
+     *  1) Chrome/Edge は option の value だけでなく表示テキスト（ラベル）にも一致させる。
+     *     最寄り駅は value=駅名 / ラベル=「都道府県 路線」で出していたので、「東」と打つと
+     *     駅名が「東」で始まらない候補（東京都の駅、JR東海道本線の駅…）が大量に並んでいた。
+     *  2) 絞り込みが前方一致ではなく部分一致で、しかも元データ順に出るため、
+     *     「田」で 神田 → 池田 … のように途中一致が先頭に来る。
+     * ここでは「前方一致を必ず先に、部分一致はその後ろ」に固定し、照合対象も value（駅名・氏名など）
+     * だけに限定する。ラベルは表示専用で照合には使わない。
+     */
     autocomplete: {
+        /** 候補として一度に表示する最大件数（駅は8千件超あるため必ず打ち切る） */
+        LIMIT: 20,
+
         init: function() {
-            this.loadDatalist('/api/autocomplete/engineers', 'engineer-list');
-            this.loadDatalist('/api/autocomplete/customers', 'customer-list');
-            this.loadDatalist('/api/autocomplete/projects', 'project-list');
-            this.loadDatalist('/api/autocomplete/users', 'user-list');
+            this.bind('/api/autocomplete/engineers', 'engineers');
+            this.bind('/api/autocomplete/customers', 'customers');
+            this.bind('/api/autocomplete/projects', 'projects');
+            this.bind('/api/autocomplete/users', 'users');
         },
-        loadDatalist: async function(url, listId) {
-            const datalist = document.getElementById(listId);
-            if (!datalist) return;
+
+        /**
+         * data-suggest="<key>" が付いた入力欄へ、APIから取得した候補を割り当てる。
+         * 対象の入力欄が無いページではAPIを呼ばない。
+         */
+        bind: async function(url, key) {
+            const inputs = document.querySelectorAll('input[data-suggest="' + key + '"]');
+            if (inputs.length === 0) return;
             try {
                 const names = await SES.api.get(url);
-                if (names && names.length > 0) {
-                    let html = '';
-                    names.forEach(name => {
-                        // 全特殊文字をエスケープ（XSS対策強化）
-                        const safeName = SES.escapeHtml(name);
-                        html += `<option value="${safeName}"></option>`;
-                    });
-                    datalist.innerHTML = html;
-                }
+                if (!names || names.length === 0) return;
+                const items = names.map(function(name) { return { value: name }; });
+                inputs.forEach(function(input) {
+                    SES.autocomplete.attach(input, { items: items });
+                });
             } catch (e) {
-                console.error(`Failed to load autocomplete data for ${listId}`, e);
+                console.error(`Failed to load autocomplete data for ${key}`, e);
             }
+        },
+
+        /**
+         * 照合用の正規化。全角英数→半角、半角カナ→全角カナ（NFKC）、大文字小文字、
+         * カタカナ/ひらがな、空白・中黒の有無を吸収する。
+         * 例: 「ＪＲ河内永和」と「JR河内永和」、「トウキョウ」と「とうきょう」を同一視。
+         */
+        normalize: function(text) {
+            if (text == null) return '';
+            let s = String(text);
+            if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+            s = s.toLowerCase();
+            s = s.replace(/[ァ-ヶ]/g, function(c) {
+                return String.fromCharCode(c.charCodeAt(0) - 0x60);
+            });
+            return s.replace(/[\s　・]/g, '');
+        },
+
+        /** 候補配列に正規化済み文字列を持たせる（入力のたびに正規化し直さないため） */
+        prepare: function(items) {
+            const self = this;
+            return (items || [])
+                .map(function(item) {
+                    const obj = (typeof item === 'string') ? { value: item } : (item || {});
+                    return { value: obj.value == null ? '' : String(obj.value), label: obj.label || '', norm: self.normalize(obj.value) };
+                })
+                .filter(function(item) { return item.value !== ''; });
+        },
+
+        /**
+         * 完全一致 → 前方一致 → 部分一致 の順に並べて返す。照合は value のみ（ラベルは対象外）。
+         * 戻り値の先頭は必ず入力文字で始まる候補になる。
+         *
+         * 候補全件を走査するのは、完全一致（例:「東京」に対する 東京駅）が元データの後方にあっても
+         * 先頭に出すため。1万件規模でも indexOf のみなので1キー入力あたりのコストは無視できる。
+         */
+        match: function(items, query, limit) {
+            const max = limit || this.LIMIT;
+            const q = this.normalize(query);
+            if (!q) return [];
+            const exactHits = [];
+            const prefixHits = [];
+            const partialHits = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const norm = (item.norm !== undefined) ? item.norm : this.normalize(item.value);
+                const pos = norm.indexOf(q);
+                if (pos !== 0) {
+                    if (pos > 0 && partialHits.length < max) partialHits.push(item);
+                } else if (norm.length === q.length) {
+                    exactHits.push(item);
+                } else if (prefixHits.length < max) {
+                    prefixHits.push(item);
+                }
+            }
+            return exactHits.concat(prefixHits, partialHits).slice(0, max);
+        },
+
+        /**
+         * 入力欄にサジェストを取り付ける。同じ入力欄に再度呼ぶと候補の差し替えになる。
+         * options: { items, limit, minChars, onSelect }
+         */
+        attach: function(input, options) {
+            if (!input) return null;
+            const opts = options || {};
+            if (input._sesSuggest) {
+                input._sesSuggest.setItems(opts.items);
+                return input._sesSuggest;
+            }
+
+            const api = this;
+            const limit = opts.limit || api.LIMIT;
+            const minChars = (opts.minChars === undefined) ? 1 : opts.minChars;
+            let items = api.prepare(opts.items);
+            let results = [];
+            let activeIndex = -1;
+            let composing = false;
+            let suppress = false;
+
+            api._seq = (api._seq || 0) + 1;
+            const menuId = 'ses-suggest-' + api._seq;
+            const menu = document.createElement('div');
+            menu.className = 'ses-suggest-menu';
+            menu.id = menuId;
+            menu.setAttribute('role', 'listbox');
+            menu.hidden = true;
+            // モーダル内の overflow に切られないよう body 直下 + position:fixed で描画する
+            document.body.appendChild(menu);
+
+            // ネイティブのサジェストと二重に出さない
+            input.removeAttribute('list');
+            input.setAttribute('autocomplete', 'off');
+            input.setAttribute('role', 'combobox');
+            input.setAttribute('aria-autocomplete', 'list');
+            input.setAttribute('aria-controls', menuId);
+            input.setAttribute('aria-expanded', 'false');
+
+            function position() {
+                const rect = input.getBoundingClientRect();
+                menu.style.left = rect.left + 'px';
+                menu.style.width = Math.max(rect.width, 200) + 'px';
+                const below = window.innerHeight - rect.bottom;
+                if (below < 200 && rect.top > below) {
+                    menu.style.top = 'auto';
+                    menu.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+                } else {
+                    menu.style.bottom = 'auto';
+                    menu.style.top = (rect.bottom + 2) + 'px';
+                }
+            }
+
+            // 入力文字そのものが値のどこに現れるかで太字にする（正規化前の素の文字列で判定）
+            function highlight(value) {
+                const raw = input.value.trim();
+                const idx = raw ? value.toLowerCase().indexOf(raw.toLowerCase()) : -1;
+                if (idx < 0) return SES.escapeHtml(value);
+                return SES.escapeHtml(value.slice(0, idx))
+                    + '<mark class="ses-suggest-hit">' + SES.escapeHtml(value.slice(idx, idx + raw.length)) + '</mark>'
+                    + SES.escapeHtml(value.slice(idx + raw.length));
+            }
+
+            function close() {
+                if (menu.hidden) return;
+                menu.hidden = true;
+                activeIndex = -1;
+                input.setAttribute('aria-expanded', 'false');
+            }
+
+            function render() {
+                if (results.length === 0) {
+                    close();
+                    return;
+                }
+                menu.innerHTML = results.map(function(item, idx) {
+                    const label = item.label
+                        ? '<span class="ses-suggest-label">' + SES.escapeHtml(item.label) + '</span>' : '';
+                    return '<div class="ses-suggest-item' + (idx === activeIndex ? ' active' : '') + '"'
+                        + ' role="option" aria-selected="' + (idx === activeIndex) + '" data-index="' + idx + '">'
+                        + '<span class="ses-suggest-value">' + highlight(item.value) + '</span>' + label
+                        + '</div>';
+                }).join('');
+                menu.hidden = false;
+                input.setAttribute('aria-expanded', 'true');
+                position();
+            }
+
+            function refresh() {
+                const query = input.value.trim();
+                if (query.length < minChars) {
+                    results = [];
+                    close();
+                    return;
+                }
+                results = api.match(items, query, limit);
+                activeIndex = -1;
+                render();
+            }
+
+            function select(index) {
+                const item = results[index];
+                if (!item) return;
+                suppress = true;
+                input.value = item.value;
+                close();
+                // 既存の 'input'/'change' ハンドラ（路線の絞り込み等）へ選択を伝える
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                suppress = false;
+                if (typeof opts.onSelect === 'function') opts.onSelect(item);
+            }
+
+            function moveActive(delta) {
+                if (menu.hidden) {
+                    refresh();
+                    if (menu.hidden) return;
+                }
+                activeIndex = (activeIndex + delta + results.length) % results.length;
+                render();
+                const activeEl = menu.querySelector('.ses-suggest-item.active');
+                if (activeEl && activeEl.scrollIntoView) activeEl.scrollIntoView({ block: 'nearest' });
+            }
+
+            input.addEventListener('compositionstart', function() { composing = true; });
+            input.addEventListener('compositionend', function() {
+                composing = false;
+                refresh();
+            });
+            input.addEventListener('input', function(e) {
+                // IME変換中は確定前の読みで候補が乱れるため、確定(compositionend)まで待つ
+                if (suppress || composing || (e && e.isComposing)) return;
+                refresh();
+            });
+            input.addEventListener('focus', function() {
+                if (input.value.trim().length >= minChars) refresh();
+            });
+            input.addEventListener('blur', function() { close(); });
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+                else if (e.key === 'Enter') {
+                    if (!menu.hidden && activeIndex >= 0) { e.preventDefault(); select(activeIndex); }
+                    else { close(); }
+                } else if (e.key === 'Escape') {
+                    // 候補が開いている間のEscapeは候補を閉じるだけにする。
+                    // 伝播させるとモーダル(入力中のフォーム)ごと閉じてしまう。
+                    if (!menu.hidden) { e.stopPropagation(); close(); }
+                } else if (e.key === 'Tab') { close(); }
+            });
+
+            // mousedown を止めて blur より先に選択を確定させる
+            menu.addEventListener('mousedown', function(e) { e.preventDefault(); });
+            menu.addEventListener('click', function(e) {
+                const target = e.target.closest ? e.target.closest('.ses-suggest-item') : null;
+                if (target) select(parseInt(target.getAttribute('data-index'), 10));
+            });
+            window.addEventListener('scroll', function() { if (!menu.hidden) position(); }, true);
+            window.addEventListener('resize', function() { if (!menu.hidden) position(); });
+
+            input._sesSuggest = {
+                setItems: function(next) { items = api.prepare(next); },
+                refresh: refresh,
+                close: close
+            };
+            return input._sesSuggest;
         }
     },
     
