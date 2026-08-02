@@ -16,6 +16,7 @@ import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.approval.ApprovalNotificationService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -38,8 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 承認engine core（design §3/§6.4）。
- * F1時点では{@link ApprovalTargetAdapter}の具体実装(F2)は登録されていないため、
- * 最終stepまで承認が進んでも{@code approved}で終端するだけで対象業務は何も呼ばれない。
+ * 対象5業務のadapterはrequest typeごとのaliasをregistryへ登録し、最終承認で既存serviceへ委譲する。
  */
 @Service
 public class ApprovalEngineServiceImpl implements ApprovalEngineService {
@@ -58,6 +58,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     private final SysUserMapper sysUserMapper;
     private final RouteResolverService routeResolverService;
     private final NotificationService notificationService;
+    private final ApprovalNotificationService approvalNotificationService;
     private final ObjectMapper objectMapper;
     private final Map<String, ApprovalTargetAdapter> adaptersByType = new ConcurrentHashMap<>();
 
@@ -67,6 +68,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                                       SysUserMapper sysUserMapper,
                                       RouteResolverService routeResolverService,
                                       NotificationService notificationService,
+                                      ApprovalNotificationService approvalNotificationService,
                                       ObjectMapper objectMapper,
                                       List<ApprovalTargetAdapter> adapters) {
         this.approvalRequestMapper = approvalRequestMapper;
@@ -75,8 +77,9 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         this.sysUserMapper = sysUserMapper;
         this.routeResolverService = routeResolverService;
         this.notificationService = notificationService;
+        this.approvalNotificationService = approvalNotificationService;
         this.objectMapper = objectMapper;
-        adapters.forEach(a -> this.adaptersByType.put(a.requestType(), a));
+        adapters.forEach(a -> a.supportedRequestTypes().forEach(type -> this.adaptersByType.put(type, a)));
     }
 
     @PostConstruct
@@ -99,7 +102,12 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             route = routeResolverService.resolve(command.requestType(), command.organizationId(),
                     command.amountSnapshot(), command.applicantId(), LocalDate.now());
         } catch (BusinessException e) {
-            notifyAdminsOfConfigGap(command);
+            try {
+                // 設定不足通知は申請transactionと分離し、直後のrollback後も残す(F1 P1)。
+                approvalNotificationService.notifyConfigGap(command);
+            } catch (RuntimeException ignored) {
+                // 元の設定不足エラーを隠さない。通知失敗は運用ログで検知する。
+            }
             throw e;
         }
 
@@ -122,6 +130,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .routeSnapshotJson(writeJson(snapshot))
                 .status(STATUS_IN_REVIEW)
                 .currentStep(firstStep.stepNo())
+                .currentStepStartedAt(LocalDateTime.now())
                 .requestedAt(LocalDateTime.now())
                 .idempotencyKey(command.idempotencyKey())
                 .build();
@@ -130,6 +139,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         approvalRequestMapper.update(null, new UpdateWrapper<ApprovalRequest>()
                 .eq("id", entity.getId())
                 .set("request_no", entity.getRequestNo()));
+        notifyApprovers(entity, firstStep);
         return entity;
     }
 
@@ -150,6 +160,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         if (!inserted) {
             return; // 同一slotへの二重click/retry。既に記録済みのため何もしない（冪等）。
         }
+        notifyApplicant(request, "APPROVAL_APPROVED", "承認申請が承認されました",
+                "approval-approved:" + requestId + ":step:" + currentStep.stepNo() + ":slot:" + resolution.slotOwnerId());
 
         long approvedCount = countActions(requestId, currentStep.stepNo(), "APPROVE");
         if (approvedCount < currentStep.approverUserIds().size()) {
@@ -160,10 +172,12 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         if (nextStep != null) {
             boolean advanced = casUpdate(request, w -> w
                     .eq("current_step", request.getCurrentStep())
-                    .set("current_step", nextStep.stepNo()));
+                    .set("current_step", nextStep.stepNo())
+                    .set("current_step_started_at", LocalDateTime.now()));
             if (!advanced) {
                 throw BusinessException.of("error.common.optimisticLock");
             }
+            notifyApprovers(request, nextStep);
             return;
         }
 
@@ -197,6 +211,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         if (!inserted) {
             return;
         }
+        notifyApplicant(request, "APPROVAL_REJECTED", "承認申請が却下されました",
+                "approval-rejected:" + requestId);
         boolean updated = casUpdate(request, w -> w
                 .set("status", STATUS_REJECTED)
                 .set("finalized_at", LocalDateTime.now()));
@@ -221,6 +237,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         if (!inserted) {
             return;
         }
+        notifyApplicant(request, "APPROVAL_RETURNED", "承認申請が差し戻されました",
+                "approval-returned:" + requestId);
         boolean updated = casUpdate(request, w -> w.set("status", STATUS_RETURNED));
         if (!updated) {
             throw BusinessException.of("error.common.optimisticLock");
@@ -244,6 +262,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         boolean updated = casUpdate(request, w -> {
             w.set("status", STATUS_IN_REVIEW)
                     .set("current_step", firstStep.stepNo())
+                    .set("current_step_started_at", LocalDateTime.now())
                     .set("requested_at", LocalDateTime.now());
             if (updatedPayload != null) {
                 w.set("payload_json", writeJson(updatedPayload));
@@ -261,6 +280,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         }
         request.setStatus(STATUS_IN_REVIEW);
         request.setCurrentStep(firstStep.stepNo());
+        request.setCurrentStepStartedAt(LocalDateTime.now());
+        notifyApprovers(request, firstStep);
         return request;
     }
 
@@ -390,18 +411,25 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         return approvalRequestMapper.update(null, wrapper) > 0;
     }
 
-    private void notifyAdminsOfConfigGap(ApprovalRequestCommand command) {
-        List<Long> adminIds = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .eq(SysUser::getRole, "管理者")
-                        .eq(SysUser::getStatus, 1))
-                .stream().map(SysUser::getId).toList();
-        String dedupeKey = "approval-config-gap-" + command.requestType() + "-" + command.organizationId();
-        for (Long adminId : adminIds) {
-            notificationService.publishToUser(adminId, "APPROVAL_CONFIG_GAP",
-                    "承認route設定不足",
-                    "対象種別「" + command.requestType() + "」の承認routeまたは承認者が解決できませんでした。設定を確認してください。",
-                    NotificationLinks.DASHBOARD, dedupeKey);
+    private void notifyApprovers(ApprovalRequest request, RouteStepGroup step) {
+        String message = writeJson(List.of("notification.msg.APPROVAL_REQUESTED",
+                request.getRequestNo(), request.getRequestType()));
+        String dedupeKey = "approval-requested:" + request.getId() + ":step:" + step.stepNo();
+        for (Long approverId : step.approverUserIds()) {
+            notificationService.publishToUser(approverId, "APPROVAL_REQUESTED", "承認申請が届きました", message,
+                    NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");
         }
+    }
+
+    private void notifyApplicant(ApprovalRequest request, String type, String title, String dedupeKey) {
+        String messageKey = switch (type) {
+            case "APPROVAL_RETURNED" -> "notification.msg.APPROVAL_RETURNED";
+            case "APPROVAL_REJECTED" -> "notification.msg.APPROVAL_REJECTED";
+            default -> "notification.msg.APPROVAL_APPROVED";
+        };
+        String message = writeJson(List.of(messageKey, request.getRequestNo(), request.getCurrentStep()));
+        notificationService.publishToUser(request.getApplicantId(), type, title, message,
+                NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");
     }
 
     private String writeJson(Object value) {

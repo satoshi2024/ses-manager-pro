@@ -95,10 +95,10 @@ function loadInvoices(page = window.invoiceCurrentPage) {
                     <td>${inv.paidDate || ''}</td>
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
-                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('invoice.btn.markSent')}</button>` : ''}
+                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('approval.request', '送付を申請')}</button>` : ''}
                         ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
                         ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder', '督促')}</button>` : ''}
-                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.void')}</button>` : ''}
+                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('approval.request', '取消を申請')}</button>` : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -122,6 +122,7 @@ function updateInvoiceStatus(id, status, requireDate = false) {
         body: JSON.stringify({ status, paidDate })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
+            SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
             loadInvoices();
         } else {
             alert(data.message);
@@ -145,7 +146,7 @@ function voidInvoice(id, invoiceNo) {
             }).then(res => res.json()).then(data => {
                 if (data.code === 200) {
                     if (window.SES && SES.toast) {
-                        SES.toast.success(SES.i18n.t('invoice.toast.voidSuccess'));
+                        SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
                     } else {
                         alert(SES.i18n.t('invoice.toast.voidSuccess'));
                     }
@@ -186,8 +187,8 @@ function loadBpPayments() {
                     <td>${SES.i18n.t('invoice.status.' + bp.status, bp.status)}</td>
                     <td>${bp.paidDate || ''}</td>
                     <td>
-                        ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('invoice.btn.markPaid')}</button>` : ''}
-                        ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">${SES.i18n.t('invoice.btn.revertToUnpaid')}</button>` : ''}
+                        ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('approval.request', '支払確定を申請')}</button>` : ''}
+                        ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">${SES.i18n.t('approval.request', '支払状態変更を申請')}</button>` : ''}
                         <button class="btn btn-sm btn-info" onclick="openBpPaymentLayerModal(${bp.workRecordId}, ${bp.id}, ${bp.layerOrder ? bp.layerOrder + 1 : 2})">階層追加</button>
                     </td>
                 `;
@@ -254,6 +255,7 @@ function updateBpPaymentStatus(id, status) {
         body: JSON.stringify({ status, paidDate })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
+            if (window.SES && SES.toast) SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
             loadBpPayments();
         } else {
             alert(data.message);

@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head><title th:text="#{approval.requests.title} + ' - SES Manager Pro'">自分の申請 - SES Manager Pro</title></head>
+<body>
+<div layout:fragment="content" class="container-fluid py-3 approval-page" data-approval-view="mine">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2"><div><h1 class="h3 mb-1"><i class="bi bi-file-earmark-text me-2 text-info"></i><span th:text="#{approval.requests.title}">自分の申請</span></h1><p class="text-muted small mb-0" th:text="#{approval.requests.subtitle}">申請の状態と履歴を確認します。</p></div><a class="btn btn-outline-info" th:href="@{/approval/inbox}" th:text="#{approval.inbox.link}">承認inboxへ</a></div>
+  <div class="card shadow-sm border-0"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover align-middle mb-0" id="approvalTable"><thead class="table-light"><tr><th th:text="#{approval.table.requestNo}">申請番号</th><th th:text="#{approval.table.type}">対象</th><th th:text="#{approval.table.amount}">金額</th><th th:text="#{approval.table.status}">状態</th><th th:text="#{approval.table.requestedAt}">申請日時</th><th></th></tr></thead><tbody id="approvalTableBody"><tr><td colspan="6" class="text-center py-4 text-muted" th:text="#{common.loading}">読み込み中...</td></tr></tbody></table></div></div><div class="card-footer d-flex justify-content-between align-items-center"><span id="approvalPaginationInfo" class="small text-muted"></span><nav id="approvalPagination"></nav></div></div>
+</div>
+<th:block layout:fragment="page-js"><script th:src="@{/js/modules/approval.js}"></script></th:block>
+</body></html>

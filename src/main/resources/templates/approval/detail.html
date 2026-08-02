@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head><title th:text="#{approval.detail.title} + ' - SES Manager Pro'">承認申請詳細 - SES Manager Pro</title></head>
+<body>
+<div layout:fragment="content" class="container-fluid py-3 approval-page" id="approvalDetailPage" th:attr="data-request-id=${requestId}">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2"><h1 class="h3 mb-0"><i class="bi bi-card-checklist me-2 text-info"></i><span th:text="#{approval.detail.title}">承認申請詳細</span></h1><a class="btn btn-outline-secondary" th:href="@{/approval/inbox}" th:text="#{approval.backInbox}">inboxへ戻る</a></div>
+  <div id="approvalDetailLoading" class="text-muted" th:text="#{common.loading}">読み込み中...</div>
+  <div id="approvalDetail" class="d-none"><div class="card shadow-sm border-0 mb-3"><div class="card-body"><div class="row g-3" id="approvalSummary"></div><div class="mt-3 d-flex flex-wrap gap-2"><a id="approvalTargetLink" class="btn btn-outline-info btn-sm" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i><span th:text="#{approval.targetLink}">対象画面を開く</span></a><a id="approvalExportLink" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i><span th:text="#{approval.export}">差分をCSV出力</span></a></div></div></div>
+  <div class="card shadow-sm border-0 mb-3"><div class="card-header border-dark"><h5 class="mb-0" th:text="#{approval.diff.title}">変更差分</h5></div><div class="card-body p-0"><div class="table-responsive"><table class="table align-middle mb-0"><thead class="table-light"><tr><th th:text="#{approval.diff.field}">項目</th><th th:text="#{approval.diff.before}">変更前</th><th th:text="#{approval.diff.after}">変更後</th><th th:text="#{approval.diff.state}">状態</th></tr></thead><tbody id="approvalDiffBody"></tbody></table></div></div></div>
+  <div class="card shadow-sm border-0 mb-3"><div class="card-header border-dark"><h5 class="mb-0" th:text="#{approval.history.title}">履歴・comment</h5></div><div class="card-body"><div id="approvalHistory" class="approval-history"></div></div></div>
+  <div class="card shadow-sm border-0"><div class="card-body"><div id="approvalActions" class="d-flex flex-wrap gap-2"></div><textarea id="approvalComment" class="form-control mt-3" rows="3" th:placeholder="#{approval.comment.placeholder}"></textarea></div></div></div>
+</div>
+<th:block layout:fragment="page-js"><script th:src="@{/js/modules/approval.js}"></script></th:block>
+</body></html>

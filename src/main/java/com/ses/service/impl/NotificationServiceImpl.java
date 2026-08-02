@@ -135,6 +135,8 @@ public class NotificationServiceImpl implements NotificationService {
             case "FOLLOW_UP" -> "customer";
             case "MAIL_FAILED" -> "user";
             case "CASHFLOW_ALERT" -> "dashboard";
+            case "APPROVAL_REQUESTED", "APPROVAL_RETURNED", "APPROVAL_APPROVED",
+                    "APPROVAL_REJECTED", "APPROVAL_SLA_ESCALATED", "APPROVAL_CONFIG_GAP" -> "approval";
             default -> null;
         };
     }

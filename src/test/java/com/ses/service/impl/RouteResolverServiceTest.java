@@ -125,6 +125,13 @@ class RouteResolverServiceTest {
     }
 
     @Test
+    void 固定USERが不存在または無効なら承認者解決不能で拒否される() {
+        insertRoute("route.invalid-user", null, null, 1, null, 999999999L);
+        assertThrows(BusinessException.class,
+                () -> routeResolverService.resolve("route.invalid-user", null, null, applicantId, LocalDate.now()));
+    }
+
+    @Test
     void 申請者自身しか承認候補が居ないrouteは承認者解決不能で拒否される() {
         ApprovalRoute route = ApprovalRoute.builder()
                 .tenantId(1L).requestType("route.self").organizationId(null)

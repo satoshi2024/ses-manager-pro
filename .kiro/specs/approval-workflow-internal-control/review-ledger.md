@@ -1,6 +1,22 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-現行判定: **IN PROGRESS（T041/T042完了、実装対話は継続中。独立Review未実施）**
+現行判定: **IN PROGRESS（M実装・定向回帰完了、L4全量は既知の非M失敗2件。実ブラウザ確認とrelease gate未解決事項が残るためPASSではない。独立Review未実施）**
+
+## M. 対象画面統合/回帰 実行記録（2026-08-03）
+
+Mの対象5業務（見積提出/受注、契約稼動化/単価改定、請求送付/取消、BP支払確定、月次締め/reopen）を、
+対象APIから`ApprovalTargetAdapterRegistry`経由の申請へ統合した状態で回帰した。申請者が直接確定する経路には戻していない。
+
+- **変更・実装**: `ApprovalPayloads`、5種類のtarget adapter、決定的SHA-256 idempotency key、月次締めの最終承認者/roleを既存締めサービスへ渡す監査主体、対象APIの申請レスポンス、UI文言、4言語bundleを確認した。既存DI不足（`QuotationPdfService`、`InvoiceApiController`、`MonthlyClosingService`）も修正済み。
+- **定向回帰**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、`ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件、計46件を failures 0 / errors 0 / skipped 0で実行した。39 errorsだった初回全量の原因（対象WebMvcTest fixtureに`ApprovalTargetAdapterRegistry` mockが無い）は4 fixtureへmockを追加して解消した。
+- **L4全量**: `mvn test`は`1410 tests / failures 2 / errors 0 / skipped 0`。残る失敗はM変更に起因しない次の2件のみである。
+  1. `SpecDispatchConsistencyTest.予約Migration番号が実在スクリプトと衝突しないこと`: 実在最新V77に対しS07がV75、S09がV76、S10がV77を予約している。仕様/作業木の採番不整合であり、M実装の失敗ではない。
+  2. `MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`: `.tmp-ui-scale-r3`等の既存dirty worktree変更に関連する`quick-add-label` markup不足。M対象APIの失敗ではない。
+- **Docker/Testcontainers**: Dockerは利用可能で、fresh/legacy/upgrade/partial-repair/repair/concurrentの8経路を実行した。`FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`FlywayRepairRunbookTest`、`ConcurrentUpdateTest`は全件PASS（各1件、skipped 0）。
+- **Node/差分検証**: Node `--check`はPASS（`JsSyntaxCheckTest` 1件）、対象回帰時点の`git diff --check`もexit 0。今回の文書追記後に再実行する。
+- **未実施**: 実ブラウザdesktop/390pxの5業務通しは未実施。理由は本実行環境でブラウザ通しを自動起動できる受入経路が未構成で、代替としてMockMvc/Thymeleaf UI契約テストを実施したため。影響は実表示・実操作・viewport依存の回帰を保証できないこと。
+- **release gate（未解決、PASS扱い禁止）**: `targetVersion`正式定義とCAS/current_step再検証、`ApprovalEngineServiceImpl.approve()`の現行対象version比較、対象テーブル側`UNIQUE(approval_request_id)`、同時二重申請のDB UNIQUE競合処理、outbox/通知失敗時のrollback・再送、ROLE quorumと申請者role条件、差戻し再申請時のUNIQUE衝突、締め済み月のconfirm/reopen判定、diff maskingの正式確認、見積受注時の`changeStatus`と`createDraftFromQuotation`のmethod境界。
+- **判定**: Mの対象統合・定向回帰・Docker smokeは実測済みだが、上記2件の全量失敗、実ブラウザ未実施、release gate未解決事項のためMは完了にしない。コミット・pushは行っていない。
 
 ## T042(F1) route/request/action/delegation DDL 完了（2026-08-02）
 
@@ -146,3 +162,23 @@ READINESS
 ## 変更ファイル
 
 - 本ファイル（新規作成）。production code / SQL / 他specファイル / `tasks.md`のcheckboxは変更していない。
+
+## T043(F2) 着手判定（2026-08-02、STOP: engine/対象version/outbox契約未確定）
+
+- **task / requirements / 変更file**: F2（カタログT043、R1.1〜R1.5、R2.1〜R2.4、R5）を着手確認した。production変更なし。許可範囲内の変更は本記録のみ。`tasks.md`・migration・V1・H2共通schema・共通entity/service・message bundleは変更していない。
+- **必須事前確認**: `AGENTS.md`、spec requirements/design/tasks、`customer-product-expansion-2026` README/decision-log/gate-decisions-g1-g6/execution-review-handbook/shared-standards/platform-invariants/dependency-matrix/parallel-execution-plan/subagent-delegation-summary/spec-execution-ledger、独立Review用R07 conversation、V75 migrationを確認。`.config`はspec directoryに実在せず、bugfix specである証拠はない。
+- **migration / base-head**: 実在latestは`V75__approval_workflow.sql`（V74_2後、V75重複なし）。V59/V72は永久欠番。`git rev-parse HEAD`=`9a57eebf78aff7d4566f614cb33d37845f4685c5`、working treeは既存の`tasks.md`変更のみ（本taskは保持）、`git diff --check` exit 0。
+- **OPEN P1確認**: R07独立Review資料は対象確認用promptであり、approval固有のIssue Register/OPEN P1はrepository内で確認できなかった。指定されたreturned→resubmit UNIQUE衝突、route解決不能通知rollback消失、ROLE quorum不一致、申請者role条件欠落、P2-06締め済み月決定表未反映の解消状態を示す独立Review証跡も見つからないため、独立Review結果は未検証として扱う。
+- **blocker 1（R2.1/R5）**: `t_quotation`/`t_invoice`/`t_bp_payment`に実version列がなく、月次締めは`m_system_config`のJSON記録でversionがない。`Contract`のみ`BaseEntity.updatedAt`（@Versionなし）である。F1の`ApprovalSnapshot.targetVersion`は任意Longを保存するだけで、対象versionの取得・再検証契約/mapperもない。古いsnapshotを適用しないことを保証するには、対象ごとのversion定義または対象更新CASを上位契約で確定する必要がある。adapter側だけでupdated_at等を推測してLong化する実装は決定表にないため実施しない。
+- **blocker 2（R2.3）**: F1の`ApprovalEngineServiceImpl.approve()`はrequest lock→adapter.applyApproved→request approvedまでで、outbox entity/mapper/table/jobまたはcommit-after hookの契約が存在しない。外部API/メールを呼ばないことは確認できるが、commit後のみ実行されるoutbox insertをF2専用ファイルだけで実装できない。migration・共通engine契約を変更する必要があり、TASK CONTRACTの禁止共有ファイル/停止条件に該当する。
+- **blocker 3（R1.1/R2.2/R2.4）**: inventoryは9操作（quotation submit/accept、contract activate/revisePrice、invoice send/void、BP confirm、closing confirm/reopen）を示す一方、F1 registry契約は`requestType()`一キーの5 adapterを想定している。quotation acceptは既存serviceの`changeStatus`と`createDraftFromQuotation`の2単件methodを必要とし、単一委譲「1回だけ」と同時に満たす操作境界が未確定。月次締めreopen/confirmも同様に別methodである。9操作を5 adapterへ写像するrequestType/operation契約がdesign/tasksにないため推測実装しない。
+- **test / Demo**: F2 production/test実装は未実施。したがってF2対象testの件数は0、failures/errors/skippedは未実行、exit codeは未実行。5対象curl申請→承認、同一request 10回承認、rollback/outbox commit後実測Demoも未実施。
+- **risk / rollback / 未検証事項**: 推測したversion・operation・outboxを実装すると、古いsnapshot適用、二重業務操作、rollback時の外部副作用またはcommit前送信を隠れたまま通す高riskがある。今回production変更はないためrollbackは本追記行のrevertのみ（`tasks.md`の既存変更は主担当管理）。未検証は上記独立Review issue状態、対象version定義、outbox schema/job、direct endpoint申請化、MySQL/H2同期、対象adapter integration test、curl Demo。
+- **依頼**: 主担当で①5 adapter対9 operationの明示mapping（特にquotation.acceptの一操作境界）、②各対象のversion/CAS契約（migration/entity変更可否を含む）、③outbox persistence/job契約とtransaction順序、④指定OPEN P1およびP2-06の独立Review判定表をrequirements/designへ反映・確定してから、T043を再派工すること。
+
+## A2 route/代理管理 完了（2026-08-03）
+
+- route version登録・適用期間・approver preview、期間/対象付き代理登録・論理削除、代理監査表示を実装した。既存routeは変更せず新行へversionを採番し、申請時route snapshotを維持する。
+- 代理は承認操作時点の有効期間とrequest typeで評価し、本人/代理の同一slotは一意制約で先着1件に抑制する。固定USERと申請者上長は有効ユーザーのみを候補にし、解決不能なら受付を拒否する。
+- 管理API/ページは`hasRole('管理者')`で保護し、CSRFは既存`SES.api`方式、i18nは4言語bundleを維持した。
+- 検証: `ApprovalAdministrationServiceTest` 8件、`RouteResolverServiceTest` 9件、`ApprovalEngineServiceTest` 12件、`ApprovalPageRenderTest` 1件、`ApprovalUiContractTest` 2件、`MessageBundleConsistencyTest`を変更後に実行し、合計35件・failures 0・errors 0・skipped 0でPASS。Node `--check`と`git diff --check`もPASS。実ブラウザdesktop/390px、MySQL/Docker fresh smoke、mvn全量は未実施。

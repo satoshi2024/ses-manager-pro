@@ -34,6 +34,9 @@ public class QuotationApiController {
     private QuotationPdfService quotationPdfService;
 
     @Autowired
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
+
+    @Autowired
     private com.ses.service.security.DataScopeService dataScopeService;
 
     @GetMapping
@@ -176,15 +179,22 @@ public class QuotationApiController {
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody StatusRequest request) {
         getVisibleQuotationOr404(id);
-        quotationService.changeStatus(id, request.getStatus());
-        return ApiResult.success(null);
+        String requestType = "受注".equals(request.getStatus()) ? "quotation.accept"
+                : "提出済".equals(request.getStatus()) ? "quotation.submit" : "quotation.status";
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "status");
+        command.put("status", request.getStatus());
+        command.put("createDraft", Boolean.TRUE.equals(request.getCreateDraft()));
+        return ApiResult.success(approvalTargetAdapterRegistry.request(requestType, "QUOTATION", id, command));
     }
 
     @PostMapping("/{id}/create-draft")
     public ApiResult<?> createDraft(@PathVariable Long id) {
         getVisibleQuotationOr404(id);
-        Contract contract = quotationService.createDraftFromQuotation(id);
-        return ApiResult.success(contract);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "createDraft");
+        command.put("createDraft", Boolean.TRUE);
+        return ApiResult.success(approvalTargetAdapterRegistry.request("quotation.accept", "QUOTATION", id, command));
     }
 
     @GetMapping("/{id}/pdf")
@@ -202,7 +212,10 @@ public class QuotationApiController {
 
     public static class StatusRequest {
         private String status;
+        private Boolean createDraft;
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
+        public Boolean getCreateDraft() { return createDraft; }
+        public void setCreateDraft(Boolean createDraft) { this.createDraft = createDraft; }
     }
 }

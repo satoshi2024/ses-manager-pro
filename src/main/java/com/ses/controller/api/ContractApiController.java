@@ -35,6 +35,7 @@ public class ContractApiController {
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.security.AuthorizationService authorizationService;
     private final org.springframework.context.MessageSource messageSource;
+    private final com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     /**
      * 契約一覧取得
@@ -202,10 +203,13 @@ public class ContractApiController {
 
     /** 契約状態変更（状態機械を通す専用 API）。 */
     @PutMapping("/{id}/status")
-    public ApiResult<Boolean> changeStatus(@PathVariable Long id, @Valid @RequestBody ContractStatusChangeRequest request) {
+    public ApiResult<?> changeStatus(@PathVariable Long id, @Valid @RequestBody ContractStatusChangeRequest request) {
         assertContractVisible(id);
-        contractService.changeStatus(id, request.getStatus(), request.getCancelDate());
-        return ApiResult.success(Boolean.TRUE);
+        String requestType = "稼動中".equals(request.getStatus()) ? "contract.activate" : "contract.status";
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "status"); command.put("status", request.getStatus());
+        command.put("cancelDate", request.getCancelDate() == null ? null : request.getCancelDate().toString());
+        return ApiResult.success(approvalTargetAdapterRegistry.request(requestType, "CONTRACT", id, command));
     }
 
     /**
@@ -267,9 +271,10 @@ public class ContractApiController {
     @PostMapping("/{id}/price-revisions")
     public ApiResult<?> revisePrice(@PathVariable Long id, @RequestBody PriceRevisionRequest req) {
         assertContractVisible(id);
-        boolean warning = contractService.revisePrice(id, req.getApplyFromMonth(),
-                req.getSellingPrice(), req.getCostPrice(), req.getReason());
-        return ApiResult.success(java.util.Map.of("warning", warning));
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "revisePrice"); command.put("applyFromMonth", req.getApplyFromMonth());
+        command.put("sellingPrice", req.getSellingPrice()); command.put("costPrice", req.getCostPrice()); command.put("reason", req.getReason());
+        return ApiResult.success(approvalTargetAdapterRegistry.request("contract.revisePrice", "CONTRACT", id, command));
     }
 
     @DeleteMapping("/{id}/price-revisions/{month}")

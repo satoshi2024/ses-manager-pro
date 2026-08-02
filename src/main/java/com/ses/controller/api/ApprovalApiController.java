@@ -1,25 +1,26 @@
 package com.ses.controller.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.approval.ApprovalActionRequest;
 import com.ses.dto.approval.ApprovalRequestCreateRequest;
+import com.ses.dto.approval.ApprovalRequestListResponse;
+import com.ses.dto.approval.ApprovalRequestView;
 import com.ses.dto.approval.ApprovalResubmitRequest;
-import com.ses.entity.ApprovalDelegation;
 import com.ses.entity.ApprovalRequest;
-import com.ses.mapper.ApprovalDelegationMapper;
-import com.ses.mapper.ApprovalRequestMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
-import com.ses.service.approval.RouteSnapshot;
+import com.ses.service.approval.ApprovalViewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
+import java.nio.charset.StandardCharsets;
+import java.util.stream.Collectors;
 
 /**
  * 承認engine core向けの汎用API（F1）。対象種別ごとの専用endpoint（見積送信ボタン等）は
@@ -32,9 +33,7 @@ import java.time.LocalDate;
 public class ApprovalApiController {
 
     private final ApprovalEngineService approvalEngineService;
-    private final ApprovalRequestMapper approvalRequestMapper;
-    private final ApprovalDelegationMapper approvalDelegationMapper;
-    private final ObjectMapper objectMapper;
+    private final ApprovalViewService approvalViewService;
 
     @PostMapping
     public ApiResult<ApprovalRequest> create(@Valid @RequestBody ApprovalRequestCreateRequest body) {
@@ -45,13 +44,46 @@ public class ApprovalApiController {
         return ApiResult.success(approvalEngineService.request(command));
     }
 
+    @GetMapping
+    public ApiResult<ApprovalRequestListResponse> list(
+            @RequestParam(defaultValue = "inbox") String view,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "20") long pageSize,
+            Authentication authentication) {
+        return ApiResult.success(approvalViewService.list(view, status, page, pageSize,
+                SecurityUtils.currentUserId(), SecurityUtils.currentRole(), authentication));
+    }
+
     @GetMapping("/{id}")
-    public ApiResult<ApprovalRequest> detail(@PathVariable Long id) {
-        ApprovalRequest request = approvalRequestMapper.selectById(id);
-        if (request == null || !isVisible(request)) {
-            throw BusinessException.of(404, "error.approval.notFound");
-        }
-        return ApiResult.success(request);
+    public ApiResult<ApprovalRequestView> detail(@PathVariable Long id, Authentication authentication) {
+        return ApiResult.success(approvalViewService.detail(id, SecurityUtils.currentUserId(),
+                SecurityUtils.currentRole(), authentication));
+    }
+
+    /** 詳細画面と同じマスク済み差分だけをCSV化する。生のdiff_jsonは直接返さない。 */
+    @GetMapping(value = "/{id}/export", produces = "text/csv;charset=UTF-8")
+    public ResponseEntity<byte[]> export(@PathVariable Long id, Authentication authentication) {
+        ApprovalRequestView view = approvalViewService.detail(id, SecurityUtils.currentUserId(),
+                SecurityUtils.currentRole(), authentication);
+        StringBuilder csv = new StringBuilder("field,label,before,after,changed,masked\\r\\n");
+        view.diff().forEach(d -> csv.append(csv(d.field())).append(',')
+                .append(csv(d.label())).append(',').append(csv(string(d.before())))
+                .append(',').append(csv(string(d.after()))).append(',')
+                .append(d.changed()).append(',').append(d.masked()).append("\\r\\n"));
+        byte[] body = ("\\uFEFF" + csv).getBytes(StandardCharsets.UTF_8);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=approval-" + id + "-diff.csv")
+                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(body);
+    }
+
+    private String csv(String value) {
+        String safe = value == null ? "" : value.replace("\\r", " ").replace("\\n", " ");
+        return "\\\"" + safe.replace("\\\"", "\\\"\\\"") + "\\\"";
+    }
+
+    private String string(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     @PostMapping("/{id}/approve")
@@ -89,38 +121,5 @@ public class ApprovalApiController {
 
     private String comment(ApprovalActionRequest body) {
         return body == null ? null : body.comment();
-    }
-
-    /** design §6.3: 申請者本人、現在解決される承認者、有効な代理者、管理者のみ可視。組織scopeは重ねない。 */
-    private boolean isVisible(ApprovalRequest request) {
-        Long currentUserId = SecurityUtils.currentUserId();
-        if ("管理者".equals(SecurityUtils.currentRole())) {
-            return true;
-        }
-        if (request.getApplicantId().equals(currentUserId)) {
-            return true;
-        }
-        RouteSnapshot snapshot;
-        try {
-            snapshot = objectMapper.readValue(request.getRouteSnapshotJson(), RouteSnapshot.class);
-        } catch (Exception e) {
-            return false;
-        }
-        java.util.Set<Long> approverIds = snapshot.steps().stream()
-                .flatMap(s -> s.approverUserIds().stream())
-                .collect(java.util.stream.Collectors.toSet());
-        if (approverIds.contains(currentUserId)) {
-            return true;
-        }
-        if (approverIds.isEmpty()) {
-            return false;
-        }
-        LocalDate today = LocalDate.now();
-        return approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
-                        .in(ApprovalDelegation::getFromUserId, approverIds)
-                        .eq(ApprovalDelegation::getToUserId, currentUserId)
-                        .le(ApprovalDelegation::getValidFrom, today)
-                        .and(w -> w.isNull(ApprovalDelegation::getValidTo).or().ge(ApprovalDelegation::getValidTo, today)))
-                .stream().findAny().isPresent();
     }
 }

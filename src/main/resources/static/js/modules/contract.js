@@ -260,7 +260,7 @@ function renderContracts(list) {
         // 遷移可能なステータスがあれば状態変更ボタンを表示
         const transitions = STATUS_TRANSITIONS[c.status] || [];
         const statusBtn = transitions.length > 0
-            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('contract.action.changeStatus')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
+            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('approval.request', '申請')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
             : '';
 
         const tr = `
@@ -502,7 +502,7 @@ function postStatusChange(id, newStatus, cancelDate) {
         data: JSON.stringify({ status: newStatus, cancelDate: cancelDate }),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(SES.i18n.t('js.contract.success.update'));
+                Toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
                 loadContracts(contractCurrentPage);
             } else {
                 Toast.error(res.message || SES.i18n.t('js.contract.error.register'));

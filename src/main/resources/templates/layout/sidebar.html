@@ -140,6 +140,17 @@
                         <span th:text="#{menu.workRecord}">勤怠・請求</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('approval')}">
+                    <a th:href="@{/approval/inbox}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/approval') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-inbox me-2"></i>
+                        <span th:text="#{menu.approval}">承認ワークフロー</span>
+                    </a>
+                </li>
+                <li class="nav-item" sec:authorize="hasRole('管理者')" th:if="${allowedMenus != null and allowedMenus.contains('approval')}">
+                    <a th:href="@{/approval/routes}" class="nav-link px-4 py-1 small text-secondary">
+                        <i class="bi bi-diagram-3 me-2"></i><span th:text="#{approval.routes.title}">承認route・代理管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('invoice')}">
                     <a th:href="@{/invoice}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/invoice') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-receipt me-2"></i>

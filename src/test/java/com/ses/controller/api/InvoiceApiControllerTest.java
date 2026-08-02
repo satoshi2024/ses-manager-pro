@@ -71,6 +71,9 @@ class InvoiceApiControllerTest {
     @MockBean
     private CustomerContactService customerContactService;
 
+    @MockBean
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
+
     @Test
     @WithMockUser
     void pdf_ContentTypeとファイル名付きで返す() throws Exception {

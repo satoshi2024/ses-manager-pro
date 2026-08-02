@@ -34,6 +34,9 @@ class QuotationApiControllerTest {
     @MockBean
     private com.ses.service.CustomerService customerService;
 
+    @MockBean
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
+
     @Test
     @WithMockUser
     void list_returnsOk() throws Exception {
@@ -53,7 +56,9 @@ class QuotationApiControllerTest {
                         .contentType("application/json")
                         .content("{\"status\":\"提出済\"}"))
                 .andExpect(status().isOk());
-        verify(quotationService).changeStatus(1L, "提出済");
+        verify(approvalTargetAdapterRegistry).request(eq("quotation.submit"), eq("QUOTATION"), eq(1L),
+                argThat(command -> "提出済".equals(command.get("status"))
+                        && "status".equals(command.get("operation"))));
     }
 
     @Test
@@ -75,6 +80,8 @@ class QuotationApiControllerTest {
         mockMvc.perform(post("/api/quotations/3/create-draft")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
                 .andExpect(status().isOk());
-        verify(quotationService).createDraftFromQuotation(3L);
+        verify(approvalTargetAdapterRegistry).request(eq("quotation.accept"), eq("QUOTATION"), eq(3L),
+                argThat(command -> Boolean.TRUE.equals(command.get("createDraft"))
+                        && "createDraft".equals(command.get("operation"))));
     }
 }

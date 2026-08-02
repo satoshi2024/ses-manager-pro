@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS t_approval_request (
   route_snapshot_json CLOB          NOT NULL,
   status              VARCHAR(20)   NOT NULL DEFAULT 'draft',
   current_step        INT           NOT NULL DEFAULT 0,
+  current_step_started_at DATETIME,
   requested_at        DATETIME,
   finalized_at        DATETIME,
   idempotency_key     VARCHAR(100),
@@ -116,3 +117,12 @@ WHERE g.tenant_id = 'default'
     SELECT 1 FROM t_permission_group_action x
     WHERE x.tenant_id = 'default' AND x.group_id = g.id AND x.action_key = 'approval.*'
   );
+
+-- V76: A1のページ/APIをMenuPermissionFilterから到達可能にする。
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+SELECT 'approval', '承認ワークフロー', '/approval', '/api/approval', 58
+WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'approval');
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id FROM (SELECT '管理者' AS role UNION SELECT '営業' UNION SELECT 'HR' UNION SELECT 'マネージャー') r
+CROSS JOIN m_menu m WHERE m.menu_key = 'approval'
+AND NOT EXISTS (SELECT 1 FROM t_role_menu x WHERE x.role = r.role AND x.menu_id = m.id);

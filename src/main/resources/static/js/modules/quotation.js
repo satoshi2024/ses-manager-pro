@@ -137,13 +137,13 @@ function loadQuotations(page = 1) {
             let actions = `<button class="btn btn-sm btn-outline-primary" onclick="openQuotationModalById(${q.id})">${SES.i18n.t('common.btn.edit', '編集')}</button>`;
             actions += ` <a href="/api/quotations/${q.id}/pdf" class="btn btn-sm btn-info">${SES.i18n.t('quotation.btn.pdf', 'PDF')}</a>`;
             transitions.forEach(t => {
-                const label = t === '提出済' ? SES.i18n.t('quotation.btn.submit', '提出')
-                    : t === '受注' ? SES.i18n.t('quotation.btn.win', '受注')
-                    : t === '失注' ? SES.i18n.t('quotation.btn.lose', '失注') : t;
+                const label = t === '提出済' ? SES.i18n.t('approval.request', '提出を申請')
+                    : t === '受注' ? SES.i18n.t('approval.request', '受注を申請')
+                    : t === '失注' ? SES.i18n.t('approval.request', '失注を申請') : t;
                 actions += ` <button class="btn btn-sm btn-outline-success" onclick="changeQuotationStatus(${q.id}, '${t}')">${label}</button>`;
             });
             if (q.status === '受注') {
-                actions += ` <button class="btn btn-sm btn-outline-primary" onclick="createQuotationDraft(${q.id})">${SES.i18n.t('quotation.btn.createDraft', '契約ドラフト生成')}</button>`;
+                actions += ` <button class="btn btn-sm btn-outline-primary" onclick="createQuotationDraft(${q.id})">${SES.i18n.t('approval.request', '契約ドラフト生成を申請')}</button>`;
             }
             if (q.status === '下書き') {
                 actions += ` <button class="btn btn-sm btn-danger" onclick="deleteQuotation(${q.id})">${SES.i18n.t('common.btn.delete', '削除')}</button>`;
@@ -281,14 +281,11 @@ function changeQuotationStatus(id, newStatus) {
         fetch(`/api/quotations/${id}/status`, {
             method: 'PUT',
             headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify({ status: newStatus, createDraft: !!createDraft })
         }).then(res => res.json()).then(data => {
             if (data.code !== 200) { SES.toast.error(data.message); return; }
-            // 状態遷移成功直後に必ず一覧をreloadし、受注状態と再試行ボタンを即時反映する（R3R-27）。
+            SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
             loadQuotations(1);
-            if (newStatus === '受注' && createDraft) {
-                createQuotationDraft(id);
-            }
         }).catch(err => SES.toast.error(err.message));
     };
 
@@ -316,7 +313,7 @@ function createQuotationDraft(id) {
         headers: SES.csrf.header()
     }).then(res => res.json()).then(data => {
         if (data.code === 200) {
-            SES.toast.success(SES.i18n.t('quotation.btn.createDraft', '契約ドラフト生成') + ' OK');
+            SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
         } else {
             SES.toast.error(data.message);
         }

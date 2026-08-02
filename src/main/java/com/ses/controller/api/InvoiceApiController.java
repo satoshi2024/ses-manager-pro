@@ -47,7 +47,7 @@ public class InvoiceApiController {
     private BpPaymentMapper bpPaymentMapper;
 
     @Autowired
-    private com.ses.service.BpPaymentService bpPaymentService;
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     @Autowired
     private ExcelExportService excelExportService;
@@ -57,6 +57,9 @@ public class InvoiceApiController {
 
     @Autowired
     private com.ses.service.security.DataScopeService dataScopeService;
+
+    @Autowired
+    private com.ses.service.BpPaymentService bpPaymentService;
 
     @Autowired
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -129,15 +132,17 @@ public class InvoiceApiController {
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
         assertInvoiceVisible(id);
-        invoiceService.changeStatus(id, request.getStatus(), request.getPaidDate());
-        return ApiResult.success(null);
+        String requestType = "送付済".equals(request.getStatus()) ? "invoice.send" : "invoice.status";
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "send"); command.put("status", request.getStatus()); command.put("paidDate", request.getPaidDate());
+        return ApiResult.success(approvalTargetAdapterRegistry.request(requestType, "INVOICE", id, command));
     }
 
     @PutMapping("/{id}/void")
     public ApiResult<?> voidInvoice(@PathVariable Long id) {
         assertInvoiceVisible(id);
-        invoiceService.voidInvoice(id);
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>(); command.put("operation", "void");
+        return ApiResult.success(approvalTargetAdapterRegistry.request("invoice.void", "INVOICE", id, command));
     }
 
     // ===== 債権管理（ar-management / P2） =====
@@ -298,8 +303,9 @@ public class InvoiceApiController {
         // 誤り（BP支払IDを請求書IDとして扱ってしまう）。BP支払はメニュー権限で保護される管理業務であり、
         // データスコープ対象外のため請求書可視性検証は行わない（R3R-35）。
         bpPaymentService.assertAllowed(id);
-        invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("status", request.getStatus()); command.put("paidDate", request.getPaidDate());
+        return ApiResult.success(approvalTargetAdapterRegistry.request("bp_payment.confirm", "BP_PAYMENT", id, command));
     }
 
     private java.util.Set<Long> effectiveInvoiceIds(String month) {

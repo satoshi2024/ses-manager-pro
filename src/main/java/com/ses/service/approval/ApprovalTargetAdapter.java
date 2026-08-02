@@ -3,16 +3,21 @@ package com.ses.service.approval;
 import com.ses.entity.ApprovalRequest;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 対象業務(見積/契約/請求/BP支払/月次締め)ごとのadapter契約（design §2）。
- * F1はこのinterfaceと、{@link #requestType()}をキーにした registry 経由の{@link #applyApproved}
- * 呼び出しだけを実装する。5つの具体adapter実装はF2の担当。
+ * requestType aliasを含むregistry経由で、5つの対象adapterがapplyApprovedを実装する。
  */
 public interface ApprovalTargetAdapter {
 
     /** このadapterが扱う{@code request_type}。 */
     String requestType();
+
+    /** 1 adapterが扱う業務操作。旧実装との互換のためrequestType単体を既定値とする。 */
+    default Set<String> supportedRequestTypes() {
+        return Set.of(requestType());
+    }
 
     /** 対象entityの現在値からsnapshotを作る。呼出元(F2の申請API)が{@link ApprovalRequestCommand}を組み立てる際に使う。 */
     ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command);

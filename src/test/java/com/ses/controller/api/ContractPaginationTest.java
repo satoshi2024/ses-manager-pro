@@ -55,6 +55,7 @@ class ContractPaginationTest {
     @MockBean private AuthorizationService authorizationService;
     @MockBean private MfaService mfaService;
     @MockBean private PersistentSessionService persistentSessionService;
+    @MockBean private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     private long datasetTotal;
 

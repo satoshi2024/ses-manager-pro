@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -82,7 +83,7 @@ public class RouteResolverServiceImpl implements RouteResolverService {
         List<RouteStepGroup> stepGroups = new ArrayList<>();
         for (Map.Entry<Integer, List<ApprovalRouteStep>> entry : byStep.entrySet()) {
             List<Long> approverIds = entry.getValue().stream()
-                    .flatMap(step -> resolveStepCandidates(step, applicantId).stream())
+                    .flatMap(step -> resolveStepCandidates(step, applicantId, asOf).stream())
                     .distinct()
                     .toList();
             if (approverIds.isEmpty()) {
@@ -119,34 +120,46 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     }
 
     /** 職務分離(R1.4): 申請者自身をstepの承認候補から除外する。 */
-    private List<Long> resolveStepCandidates(ApprovalRouteStep step, Long applicantId) {
+    private List<Long> resolveStepCandidates(ApprovalRouteStep step, Long applicantId, LocalDate asOf) {
         List<Long> ids = switch (step.getApproverType()) {
             case "USER" -> {
-                Long userId = Long.valueOf(step.getApproverValue());
-                yield List.of(userId);
+                try {
+                    yield activeUserIds(List.of(Long.valueOf(step.getApproverValue())));
+                } catch (NumberFormatException e) {
+                    yield List.of();
+                }
             }
             case "ROLE" -> sysUserMapper.selectList(
                             new LambdaQueryWrapper<SysUser>()
                                     .eq(SysUser::getRole, step.getApproverValue())
                                     .eq(SysUser::getStatus, 1))
                     .stream().map(SysUser::getId).toList();
-            case "APPLICANT_MANAGER" -> resolveApplicantManager(applicantId);
+            case "APPLICANT_MANAGER" -> activeUserIds(resolveApplicantManager(applicantId, asOf));
             default -> List.of();
         };
         return ids.stream().filter(id -> !id.equals(applicantId)).toList();
     }
 
-    private List<Long> resolveApplicantManager(Long applicantId) {
-        LocalDate today = LocalDate.now();
+    private List<Long> resolveApplicantManager(Long applicantId, LocalDate asOf) {
         List<UserOrganization> rows = userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>()
                         .eq(UserOrganization::getUserId, applicantId)
                         .eq(UserOrganization::getPrimaryFlag, 1)
-                        .le(UserOrganization::getValidFrom, today)
-                        .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, today)));
+                        .le(UserOrganization::getValidFrom, asOf)
+                        .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, asOf)));
         return rows.stream()
                 .map(UserOrganization::getManagerUserId)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /** 固定userや申請者上長も、存在しない/無効なuserを承認候補として残さない。 */
+    private List<Long> activeUserIds(List<Long> candidateIds) {
+        return candidateIds.stream()
+                .map(sysUserMapper::selectById)
+                .filter(Objects::nonNull)
+                .filter(user -> Objects.equals(user.getStatus(), 1))
+                .map(SysUser::getId)
                 .toList();
     }
 }

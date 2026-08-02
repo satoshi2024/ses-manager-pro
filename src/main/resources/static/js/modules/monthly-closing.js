@@ -138,20 +138,24 @@ function showClosingDetail(key) {
 
 function confirmClosing() {
     const month = document.getElementById('closingMonth').value;
+    const button = document.getElementById('btnConfirmClosing');
+    if (button) button.disabled = true;
     fetch('/api/monthly-closing/confirm', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
         body: JSON.stringify({ month })
     }).then(res => res.json()).then(data => {
-        if (data.code === 200) { SES.toast.success(SES.i18n.t('closing.btn.confirm') + ' OK'); loadClosing(); }
+        if (data.code === 200) { SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。')); loadClosing(); }
         else alert(data.message);
     }).catch(e => {
         SES.toast.error("通信エラーが発生しました");
-    });
+    }).finally(() => { if (button) button.disabled = false; });
 }
 
 function reopenClosing() {
     const month = document.getElementById('closingMonth').value;
+    const button = document.getElementById('btnReopenClosing');
+    if (button) button.disabled = true;
     fetch('/api/monthly-closing/reopen', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
