@@ -8,7 +8,7 @@
 - P1/P2を「手動で見えなくなった」だけで完了にしない。失敗を固定する自動testを追加する。
 - Docker無しでMySQL testがskipされた場合、そのtaskは実装済みにできるが、最終`M2`は未完了のままにする。
 
-- [ ] 0. Baseline固定と変更範囲inventory
+- [x] 0. Baseline固定と変更範囲inventory
   - **対象ID**: R3-001〜R3-021
   - **Objective**: 修正前の失敗と既存利用箇所を固定し、互換endpointやscopeを誤って壊さない。
   - **実装ガイダンス**:
@@ -19,7 +19,7 @@
   - **テスト要件**: P1/P2各件について、既存testで未検出の理由と新規test名を記録する。
   - **Demo**: 修正前にR3-001、005、006、007、008、018の再現証跡を提示する。
 
-- [ ] S1. 永続session同時login deadlock修正
+- [x] S1. 永続session同時login deadlock修正
   - **対象ID**: R3-001
   - **Objective**: 異なる25ユーザーの同時loginをdeadlock/500なしで完了させる。
   - **実装ガイダンス**:
@@ -33,7 +33,7 @@
     - login監査の成功/失敗整合。
   - **Demo**: `login-spike` 25/25成功、server logのdeadlock/ERROR 0。
 
-- [ ] S2. 容量summaryと複数credential対応
+- [x] S2. 容量summaryと複数credential対応
   - **対象ID**: R3-002、R3-003
   - **Objective**: login失敗を隠さず、実際の25ユーザーを試験できるharnessにする。
   - **実装ガイダンス**:
@@ -44,7 +44,7 @@
   - **テスト要件**: wrong password、credential不足、single credential超過、10 unique credentials、summary/exit code一致。
   - **Demo**: 意図的login失敗が`SetupErrors=1`かつ非0終了し、正常25userが`TotalErrors=0`になる。
 
-- [ ] S3. Capacity monitorとPowerShell互換
+- [x] S3. Capacity monitorとPowerShell互換
   - **対象ID**: R3-004、R3-021
   - **Objective**: 負荷中のmetricsを信頼でき、Windows標準shellでもhelperを実行できる。
   - **実装ガイダンス**:
@@ -58,14 +58,14 @@
     - Actuator 401時`Available=false`、RequireMetrics非0。
   - **Demo**: 両shellで起動し、認証済みmetricsまたは正しいUnavailable判定を表示する。
 
-- [ ] A1. BP availability ingestion review 500修正
+- [x] A1. BP availability ingestion review 500修正
   - **対象ID**: R3-005
   - **Objective**: review画面をThymeleaf 3.1で正常描画する。
   - **実装ガイダンス**: page controllerから`jobId`をmodelへ渡し、templateの`#request`を除去する。
   - **テスト要件**: MockMvcで有効job 200、jobId埋込、不存在404、権限外403/404、responseにstacktraceなし。
   - **Demo**: browserでjob list→review→pagination→確定/取消の主要動線を通す。
 
-- [ ] A2. 契約一覧server-side pagination
+- [x] A2. 契約一覧server-side pagination
   - **対象ID**: R3-006
   - **Objective**: 147件すべてへUIから到達でき、scope後totalを正しく表示する。
   - **実装ガイダンス**:
@@ -75,14 +75,14 @@
   - **テスト要件**: 0/1/100/101/147件、負数/0/過大size、manager37件scope、filter後total、削除後最終page。
   - **Demo**: adminで8ページ、managerで2ページを操作し、147件目/37件目を表示する。
 
-- [ ] A3. 商機customer参照の事前validation
+- [x] A3. 商機customer参照の事前validation
   - **対象ID**: R3-009
   - **Objective**: invalid/stale customerIdを業務errorへ正規化しDB FK 500を防ぐ。
   - **実装ガイダンス**: service共通methodで存在/scopeを確認し、create/update/convertへ適用する。FKは残す。
   - **テスト要件**: admin invalid ID、sales scope外、deleted customer、正常customer、update version conflictとの優先順位。
   - **Demo**: browser/APIでinvalid IDが400/404 JSONとなりserver ERROR 0。
 
-- [ ] B1. 要員Bench filterの正規化
+- [x] B1. 要員Bench filterの正規化
   - **対象ID**: R3-007
   - **Objective**: 待機32件を一覧filterとdashboard linkの両方から取得できる。
   - **実装ガイダンス**: option valueを`Bench`へ修正し、URL query初期化と旧`待機`normalizeを実装する。
@@ -195,4 +195,3 @@
     - diff、migration、test、Demo、known riskを要約する。
   - **テスト要件**: requirements ID→task→file→test→Demoのtraceability欠落0。
   - **Demo**: Review conversationへ実装commit/branch、ledger、test結果を渡す。
-

@@ -24,6 +24,9 @@ import com.ses.dto.contract.ContractStatusChangeRequest;
 @RequiredArgsConstructor
 public class ContractApiController {
 
+    private static final long DEFAULT_CONTRACT_PAGE_SIZE = 20L;
+    private static final long MAX_CONTRACT_PAGE_SIZE = 100L;
+
     private final ContractService contractService;
     private final ContractRenewalService contractRenewalService;
     private final com.ses.service.RenewalCalendarService renewalCalendarService;
@@ -41,7 +44,7 @@ public class ContractApiController {
     @GetMapping
     public ApiResult<Page<ContractListDto>> page(
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "100") long size,
+            @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) Long engineerId,
@@ -54,13 +57,15 @@ public class ContractApiController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate periodTo,
             org.springframework.security.core.Authentication authentication) {
-        // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
-        Page<ContractListDto> page = PageUtils.safePage(current, size, 1000L);
+        // 契約一覧は画面密度に合わせて最大100件に制限する。共通上限1000件は他APIとの互換のため変更しない。
+        long boundedSize = Math.min(size, MAX_CONTRACT_PAGE_SIZE);
+        Page<ContractListDto> page = PageUtils.safePage(current, boundedSize, DEFAULT_CONTRACT_PAGE_SIZE);
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
         // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
         java.util.Set<Long> effectiveIds = effectiveContractIds();
         if (effectiveIds != null && effectiveIds.isEmpty()) {
-            return ApiResult.success(new Page<>(current, size, 0));
+            page.setTotal(0);
+            return ApiResult.success(page);
         }
         java.util.List<Long> allowedIds = effectiveIds == null ? null : new java.util.ArrayList<>(effectiveIds);
         Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds);

@@ -91,6 +91,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
             throw BusinessException.of(400, "error.opportunity.stageUpdateRequiresTransition");
         }
         assertExpectedVersion(current, entity.getVersion());
+        requireVisibleCustomer(entity.getCustomerId() == null
+                ? current.getCustomerId() : entity.getCustomerId());
         if (!super.updateById(entity)) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
         }
@@ -109,6 +111,10 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         }
         if (STAGE_LOST.equals(newStage) && !StringUtils.hasText(lostReason)) {
             throw BusinessException.of("error.opportunity.lostReasonRequired");
+        }
+        if (STAGE_WON.equals(newStage)) {
+            // 受注更新より先に参照整合性を検証し、変換時のFK例外を業務エラーへ正規化する。
+            requireVisibleCustomer(current.getCustomerId());
         }
 
         current.setStage(newStage);
@@ -141,6 +147,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (!STAGE_WON.equals(current.getStage())) {
             throw BusinessException.of(409, "error.opportunity.conversionRequiresWon");
         }
+        requireVisibleCustomer(current.getCustomerId());
         return convertLocked(current);
     }
 
@@ -230,7 +237,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Opportunity createBasic(OpportunitySaveRequest request) {
-        assertCustomerScope(request.getCustomerId());
+        requireVisibleCustomer(request.getCustomerId());
         validateProbability(request, STAGE_PROSPECT);
         assertOwnerScope(request.getOwnerUserId());
         Opportunity opportunity = new Opportunity();
@@ -253,11 +260,9 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (request.getVersion() == null || !Objects.equals(current.getVersion(), request.getVersion())) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
         }
+        requireVisibleCustomer(request.getCustomerId());
         validateProbability(request, current.getStage());
         assertOwnerScope(request.getOwnerUserId());
-        if (request.getCustomerId() != null && !Objects.equals(current.getCustomerId(), request.getCustomerId())) {
-            assertCustomerScope(request.getCustomerId());
-        }
         com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity> update =
                 new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity>()
                 .eq("id", id).eq("version", current.getVersion())
@@ -313,6 +318,22 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private void assertCustomerScope(Long customerId) {
         if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, LocalDate.now(clock));
         else dataScopeService.assertAllowedCustomer(customerId);
+    }
+
+    /**
+     * 商機の全write pathで共有する顧客参照検証。
+     * 論理削除済みを含む不存在とscope外は同じ404へ正規化し、DB更新前に停止する。
+     */
+    private Customer requireVisibleCustomer(Long customerId) {
+        if (customerId == null) {
+            throw BusinessException.of(404, "error.crm.customerNotFound");
+        }
+        Customer customer = customerMapper.selectById(customerId);
+        if (customer == null) {
+            throw BusinessException.of(404, "error.crm.customerNotFound");
+        }
+        assertCustomerScope(customerId);
+        return customer;
     }
 
     private void validateProbability(OpportunitySaveRequest request, String stage) {

@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class EngineerApiController {
 
+    private static final java.util.Set<String> ENGINEER_STATUSES =
+            java.util.Set.of("稼動中", "Bench", "提案中", "退場予定");
+
     private final EngineerService engineerService;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.service.security.DataScopeService dataScopeService;
@@ -42,6 +45,10 @@ public class EngineerApiController {
 
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<Engineer> page = PageUtils.safePage(current, size, 1000L);
+        if (org.springframework.util.StringUtils.hasText(status) && !ENGINEER_STATUSES.contains(status)) {
+            // MySQL/H2のENUM比較差に依存せず、未知値は安全に0件へ正規化する。
+            return ApiResult.success(new Page<>(page.getCurrent(), page.getSize(), 0));
+        }
         java.util.Set<Long> allowedIds = effectiveEngineerIds();
         if (allowedIds != null && allowedIds.isEmpty()) {
             return ApiResult.success(new Page<>(current, size, 0));

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   CIと同じ条件でテストを実行し、CIとの差分（skipされたテスト）を明示する（Windows向け）。
 
@@ -11,7 +11,9 @@
   .\scripts\verify-like-ci.ps1 -MavenArgs '-Dtest=DashboardServiceImplTest'
 #>
 param(
-    [string[]]$MavenArgs = @()
+    [string[]]$MavenArgs = @(),
+    [string]$MavenExecutable = '',
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Continue'
@@ -20,7 +22,11 @@ Set-Location $repoRoot
 
 $mvn = 'mvn'
 $bundled = Join-Path $repoRoot 'apache-maven-3.9.6\bin\mvn.cmd'
-if (Test-Path $bundled) { $mvn = $bundled }
+if (-not [string]::IsNullOrWhiteSpace($MavenExecutable)) {
+    $mvn = $MavenExecutable
+} elseif (Test-Path $bundled) {
+    $mvn = $bundled
+}
 
 Write-Host '=== 前提ツールの確認（CIとの差分） ==='
 & $mvn -v 2>$null | Select-Object -First 1
@@ -46,9 +52,17 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 }
 Write-Host ''
 
+if ($PreflightOnly) {
+    Write-Host 'PreflightOnly: 前提ツール確認まで正常に完了しました。'
+    exit 0
+}
+
 Write-Host '=== mvn -B clean test ==='
 & $mvn -B clean test @MavenArgs
 $testStatus = $LASTEXITCODE
+if ($testStatus -ne 0) {
+    Write-Error "Maven build/test failed (exit=$testStatus)."
+}
 
 Write-Host ''
 Write-Host '=== skipされたテストの確認（CIと同じ判定） ==='
@@ -67,8 +81,10 @@ if ($skipped.Count -gt 0) {
         Write-Host 'Docker Desktop を起動してから再実行すると、CIと同じ範囲を検証できます。'
     }
     $skipStatus = 1
-} else {
+} elseif ($testStatus -eq 0) {
     Write-Host 'skipされたテストはありません（CIと同じ範囲を検証できています）'
+} else {
+    Write-Host 'Maven失敗のため、skip 0を成功判定として扱いません。'
 }
 
 if ($testStatus -ne 0) { exit $testStatus }
