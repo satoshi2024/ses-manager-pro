@@ -75,10 +75,10 @@
     forecast二重計上なし。
   - **Demo**: 担当別funnel drilldown。全社合計と担当別合計が一致することを提示。
 
-- [ ] M. 回帰
-  - **状態**: Round 5修正のL1〜L3・MySQL fresh/legacy/partial/repairはgreen。L4全量とdesktop/390px全role browser Demoは最終gateとして残る。
-  - **実測**: Round 5定向回帰77件 / failures 0 / errors 0、MySQL migration smoke 4件 / failures 0 / errors 0、Node `--check` 3/3、compile PASS、`git diff --check` exit 0。
-  - **ブラウザDemo**: 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を確認。KPIは390px幅で主要見出し、Forecast、担当別、失注理由を確認。
+- [x] M. 回帰
+  - **状態**: 完了。Round 8独立再Reviewにより最終PASS。L4全量、MySQL fresh/legacy/partial/repair、desktop/390px全role browser Demoをすべて実施し、CRM-R5-P1-09（legacy NFKC backfill）・CRM-R5-P2-03（rollback順序）はVERIFIED CLOSED。
+  - **実測**: L4全量 1,280 / failures 0 / errors 0 / skipped 0（F0/E0/S0）。MySQL fresh/legacy/partial/repairの4経路すべて成功。P0=0/P1=0/P2=0、open release gate=0。Base `94f95083f178b812caa43782a5e00d09a8d6f324` → Head `042bd0cfb8139466eb7199a7d625adfb181c8563`（`origin/main`と一致）。
+  - **ブラウザDemo**: 管理者・営業・マネージャーで`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`のdesktop/390px表示を確認（390pxはForecast・担当別・失注理由を確認）。HR・要員は直接URLアクセスでも403を確認。
   - **Objective**: 新規leadから受注までが一気通貫で動き、既存のcustomer/proposal/quotation機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     customer/proposal/quotation回帰、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。

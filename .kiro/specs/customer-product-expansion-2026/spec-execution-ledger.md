@@ -27,8 +27,8 @@
 | 4 | 0 | `legal-document-ledger-archive` | T021〜T027 | `PASS` | R04最終独立Review完了（CONDITIONAL PASS: P0=0/P1=0/P2=11/release gates=G-1〜G-5）。V1/V67/H2/entity 4系統同期、isScoped先行＋SQL境界scope、廃棄承認管理者固定、全1104件テスト完走(1104/0/0/7 100% PASS)、git diff --check 警告0件達成 | S04 legal-document-ledger-archive | Base `9330796` → Head `c572a8f` (`main` / `origin/main`) | Tests run: 1104, Failures: 0, Errors: 0, Skipped: 7 (100% PASS)。BUILD SUCCESS実測。本番前Release Gate (G-1〜G-5) を継続管理 | R04 PASS成就。S05 (productivity-search-saved-view) 開放 |
 | 5 | 0 | `productivity-search-saved-view` | T028〜T033 | `PASS` | **2026-08-01 発注者確認によりPASS（CONDITIONAL PASS: P0=0/P1=0）**。R5-P1-01 (todo.js 編集ボタンのインライン JS 直埋め破綻) を既存作法の `data-*` 属性方式へ修復し `VERIFIED_CLOSED`。M task L4全量 1135/0/0/7 BUILD SUCCESS。migration実績はV68/V69 | S05 productivity-search-saved-view 実装 | Base `ef488ff` → Head `b96d6e9`（`main` / `origin/main` merge済み） | R5-P1-01 VERIFIED_CLOSED、全量 1135/0/0/7 BUILD SUCCESS。本番前release gateとして継続管理: Docker実MySQL smoke / desktop・390px Demo / 検索p95 | **PASS成就によりWave 0完了。S06（実装済み）およびS08を正式解放** |
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `PASS` | R06 Round 5 = **CONDITIONAL PASS（P0=0/P1=0/P2=13）**。R2〜R4の全指摘 `VERIFIED_CLOSED`。migration実績はV70/V71（V71は`information_schema`判定付きストアドプロシージャで State A/B/C 全DB環境へ冪等適用） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `4d34212`（台帳記録`ef8ddd7`まで含めて`main` / `origin/main` merge済み） | L4全量 1169/0/0/7 BUILD SUCCESS。`MigrationScriptIntegrityTest` 17/17、`SpecDispatchConsistencyTest` 8/8。本番前release gate G-1〜G-5（実MySQL fresh/legacy smoke、DELIMITER検証、desktop/390px Demo、G2外部専門家Review）を継続管理 | R06 PASS成就。S07（approval）解放。approvalの採番はCRMのV73/V74 merge後に**V75**で確定（V72は永久欠番） |
-| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `NOT READY` | BP PASS済み。CRM（S08）のT049〜T053完了とG7方針記録後にS07。migrationは**V75で確定**（CRMがV73＝DDL、V74＝権限seedを使用済み。V72は永久欠番、`out-of-order`は使わない） |  |  |  | R07 PASSでWave 1完了 |
-| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`IN PROGRESS`** | Round 7再ReviewのP1-09 legacy NFKC backfillとP2-03 rollback履歴を`8a6531a`で修正。V74.2は不変、V74.3 Java migrationを追加。残りはL4全量とdesktop/390px全role browserのrelease hard gate | S08 crm-contact-opportunity Round 7対応 | Base `94f9508` → Head `8a6531a`（`main` / `origin/main`） | Round 7差分はP0=0/P1=0/P2=0。H2/静的36/0/0、MySQL V74.3 fresh/legacy/partial 各1/1・0 failure/error、legacy full-width/空キーNULL backfill、compile、Node 3/3、`git diff --check` PASS。Round 6のrepair/concurrency証拠も維持 | L4全量とdesktop/390px全role Demoを完了し、独立再ReviewでPASS確認するまでS07 approval/次Waveを解放しない |
+| 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | `READY` | BP PASS済み。CRM（S08）がRound 8独立再ReviewでPASS確定したため開始条件成就。migrationは**V75で確定**（CRMがV73＝DDL、V74＝権限seedを使用済み。V72は永久欠番、`out-of-order`は使わない） |  |  |  | R07 PASSでWave 1完了 |
+| 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`PASS`** | Round 8独立再ReviewでPASS確定。CRM-R5-P1-09（legacy NFKC backfill）・CRM-R5-P2-03（rollback順序）はVERIFIED CLOSED。T048〜T053全task完了、tasks.mdのM回帰も`[x]`化済み | S08 crm-contact-opportunity Round 7対応 | Base `94f95083f178b812caa43782a5e00d09a8d6f324` → Head `042bd0cfb8139466eb7199a7d625adfb181c8563`（`main` / `origin/main`） | Round 8: L4全量1,280/0/0/0（F0/E0/S0）、MySQL fresh/legacy/partial/repair全4経路成功、desktop/390px全role Demo（管理者・営業・マネージャー許可、HR・要員403）確認。P0=0/P1=0/P2=0、open release gate=0 | **PASS成就。S07 approval-workflow-internal-controlを正式解放**（採番V75確定・V72は永久欠番のまま） |
 | 9 | 2 | `order-acceptance-workflow` | T054〜T059 | `NOT READY` | approval PASS後S09 |  |  |  | R09 PASS |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可 |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可 |  |  |  | R11 PASS |
@@ -131,6 +131,21 @@ V73が登録したmenuに `MenuPermissionFilter` がヒットした時点で**�
   **CIが緑であることをもって実MySQL smokeが実行された証拠にしない**。当該runのsurefire XMLで
   `skipped="0"` を直接確認すること。
 - **NOTE-R2-01**: 閉区間同士のprimary重なりは生成列UNIQUEの対象外。T049/A1のservice CASで塞ぐ。
+
+## 2.5 CRM（S08）Round 8独立再ReviewによるPASS確定とS07解放（2026-08-02）
+
+S08 `crm-contact-opportunity`のRound 8独立再Reviewが完了した。CRM-R5-P1-09（legacy NFKC backfill）・
+CRM-R5-P2-03（rollback順序）はいずれもVERIFIED CLOSED。Base `94f9508` → Head `042bd0c`（`origin/main`と一致）で
+L4全量 1,280/0/0/0（F0/E0/S0）、MySQL fresh/legacy/partial/repair全4経路成功、desktop/390px全role browser Demo
+（管理者・営業・マネージャー許可、HR・要員403）を確認した。P0=0/P1=0/P2=0、open release gate=0。
+
+これにより§2.4「残課題」記載のCRM-R2-P2-01（`main`既存RED: `WorkRecordServiceImplTest`/`BpPaymentWritePathTest`）は
+本Round時点でL4全量がF0/E0/S0であることから解消済みと確認できる。
+
+- `crm-contact-opportunity`のtasks.md（T048〜T053、M回帰含む）は全項目`[x]`。review-ledger.mdにRound 8 PASSを追記済み。
+- 上表の§2番号8行を`IN PROGRESS`→`PASS`、Reviewを`8a6531a`→`042bd0c`Roundへ更新した。
+- 番号7行（`approval-workflow-internal-control`）を`NOT READY`→`READY`へ更新した。採番はV75で確定のまま（V72は永久欠番）。
+- 追加のコード修正・再Reviewは不要。Wave 2はS07完了とその独立Review PASSまで引き続き未開始。
 
 ## 3. 1specの状態遷移
 
