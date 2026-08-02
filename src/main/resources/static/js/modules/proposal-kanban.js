@@ -204,8 +204,8 @@ function createKanbanCard(item) {
                 <span class="text-truncate">${SES.escapeHtml(item.engineerName || SES.i18n.t('js.kanban.engineer_not_set'))}</span>
             </div>
 
-            <div class="kanban-card-subtitle mb-2 small text-truncate">
-                <i class="bi bi-building me-1"></i> ${SES.escapeHtml(item.customerName || SES.i18n.t('js.kanban.customer_tbd'))}
+            <div class="kanban-card-subtitle mb-2 small">
+                <i class="bi bi-building me-1"></i><span class="text-truncate">${SES.escapeHtml(item.customerName || SES.i18n.t('js.kanban.customer_tbd'))}</span>
             </div>
             
             <div class="kanban-card-meta">
