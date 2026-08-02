@@ -1,0 +1,9 @@
+{
+  "name": "rule3-year-special-boundary",
+  "description": "overtime-rules.md §1 ルール3（年の時間外720時間・特別条項、協定年度累計、休日労働を含まない）。境界は「超過のみ違反」＝720時間ちょうどは適合。deltaは現在のlimit(YEAR_SPECIAL_MINUTES)からの分単位オフセット。720h付近は必然的に360h(ルール2)も超えるため、ルール2の同時違反はこのfixtureでは無視し、ルール3の有無だけを検証する。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": false },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

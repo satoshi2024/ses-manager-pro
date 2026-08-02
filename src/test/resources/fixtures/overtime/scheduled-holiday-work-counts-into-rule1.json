@@ -1,0 +1,20 @@
+{
+  "name": "scheduled-holiday-work-counts-into-rule1",
+  "description": "overtime-rules.md §1.2：所定休日労働（法定休日以外の休日労働）は法定休日労働ではなく時間外労働として扱われ、overtimeMinutesに算入済みであるべき。ここではその算入込みの値がルール1へ正しく反映されることを固定する（calculator自体は休日区分を判定しない。呼び出し側が算入済みの値を渡す契約）。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": {
+    "specialClauseEnabled": true
+  },
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 2701, "totalMinutes": 2701 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 2701, "totalMinutes": 2701 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 2701, "totalMinutes": 2701 }
+  ],
+  "expectedFindings": [
+    { "rule": "RULE1_MONTH_NORMAL", "severity": "VIOLATION" }
+  ]
+}

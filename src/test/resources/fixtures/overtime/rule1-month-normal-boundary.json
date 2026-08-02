@@ -1,0 +1,9 @@
+{
+  "name": "rule1-month-normal-boundary",
+  "description": "overtime-rules.md §1 ルール1（月の時間外45時間、休日労働を含まない）。境界は「超過のみ違反」＝45時間ちょうどは適合。deltaは第2/3段で解決される現在のlimit(OvertimeLimitDefaults.MONTH_NORMAL_MINUTES)からの分単位オフセット。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": false },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

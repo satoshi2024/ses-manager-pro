@@ -1,0 +1,9 @@
+{
+  "name": "rule6-exceed-month-count-boundary",
+  "description": "overtime-rules.md §1 ルール6（45時間超の月数、協定年度で年6回まで）。境界は「6回は適合、7回目が違反」。45時間超の判定はルール1の定義（>limit）に従う。各月をMONTH_NORMAL_MINUTES+1分（=45時間超ちょうど1分）にして、月数側をdelta（現在のEXCEED_MONTH_COUNTからのオフセット）で動かす。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": false },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

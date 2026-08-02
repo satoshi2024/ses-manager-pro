@@ -1,0 +1,18 @@
+{
+  "name": "missing-agreement-indeterminate-finding",
+  "description": "overtime-rules.md §3：m_overtime_agreementの行が無い法人はfail-closedで判定不能findingを返す。既定値で「適合」にしない。入力の時間外実績自体はどのlimitも超えない安全な値にしてあり、それでも『適合』ではなく『判定不能』になることを固定する。",
+  "legalEntityId": 999,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": null,
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 100 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 100 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 100, "totalMinutes": 100 }
+  ],
+  "expectedFindings": [
+    { "rule": "AGREEMENT_MISSING", "severity": "INDETERMINATE" }
+  ]
+}
