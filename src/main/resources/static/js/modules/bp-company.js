@@ -43,11 +43,11 @@ function renderTable(records) {
 
     records.forEach(c => {
         const entityLabel = c.entityType === 'CORPORATE' ? '法人' : (c.entityType === 'INDIVIDUAL' ? '個人事業主' : 'フリーランス');
-        const statusBadge = c.status === 'ACTIVE' ? '<span class="badge bg-success">有効</span>' :
-            (c.status === 'SUSPENDED' ? '<span class="badge bg-danger">取引停止</span>' : '<span class="badge bg-secondary">停止</span>');
+        const statusBadge = c.status === 'ACTIVE' ? '<span class="status-badge status-success">有効</span>' :
+            (c.status === 'SUSPENDED' ? '<span class="status-badge status-danger">取引停止</span>' : '<span class="status-badge status-secondary">停止</span>');
 
-        const complianceLabel = !c.complianceApplicability ? '<span class="badge bg-warning text-dark">未確認</span>' :
-            (c.complianceApplicability === 'FREELANCE_ACT' ? '<span class="badge bg-info">フリーランス法</span>' : '<span class="badge bg-primary">取適法</span>');
+        const complianceLabel = !c.complianceApplicability ? '<span class="status-badge status-warning">未確認</span>' :
+            (c.complianceApplicability === 'FREELANCE_ACT' ? '<span class="status-badge status-info">フリーランス法</span>' : '<span class="status-badge status-primary">取適法</span>');
 
         const row = `
             <tr class="border-secondary">
@@ -56,7 +56,7 @@ function renderTable(records) {
                     <a href="/bp-company/${c.id}" class="text-info fw-bold text-decoration-none">${escapeHtml(c.legalName)}</a>
                     <div class="text-muted small">${escapeHtml(c.nameKana || '')}</div>
                 </td>
-                <td><span class="badge bg-outline-light border">${entityLabel}</span></td>
+                <td><span class="status-badge status-secondary">${entityLabel}</span></td>
                 <td class="small">
                     <div>法: ${escapeHtml(c.corporateNumber || '-')}</div>
                     <div>番: ${escapeHtml(c.invoiceRegistrationNumber || '-')}</div>

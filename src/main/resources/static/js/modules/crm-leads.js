@@ -13,7 +13,7 @@ let leadPage = 1;
 
 function loadLeads(page = 1) {
     leadPage = page;
-    $.get('/api/crm/leads', { status: $('#lead-status-filter').val(), companyName: $('#lead-company-filter').val(), current: page, size: 50 }, function (res) {
+    $.get('/api/crm/leads', { status: $('#lead-status-filter').val(), companyName: $('#lead-company-filter').val(), current: page, size: 20 }, function (res) {
         const payload = res.data || {}, rows = payload.records || payload;
         const html = (rows || []).map(lead => `<tr><td>${SES.escapeHtml(lead.companyName || '')}</td><td>${SES.escapeHtml(lead.contactName || '-')}</td><td>${SES.escapeHtml(lead.source || '-')}</td><td><span class="badge bg-secondary">${SES.escapeHtml(lead.status || '')}</span></td><td class="text-end">${lead.status === '転換済' ? '<span class="text-muted">転換済</span>' : `<button class="btn btn-sm btn-outline-info me-1" onclick="editLead(${lead.id})">編集</button><button class="btn btn-sm btn-info" onclick="convertLead(${lead.id}, ${lead.version || 1})">顧客・商機へ転換</button>`}</td></tr>`).join('');
         $('#lead-table-body').html(html || '<tr><td colspan="5" class="text-center text-muted py-4">該当するリードはありません</td></tr>');
@@ -22,8 +22,25 @@ function loadLeads(page = 1) {
 }
 
 function renderLeadPagination(page) {
-    if (!page || page.pages === undefined || page.pages <= 1) { $('#lead-pagination').empty(); return; }
-    $('#lead-pagination').html(`<button class="btn btn-sm btn-outline-secondary" ${page.current <= 1 ? 'disabled' : ''} onclick="loadLeads(${page.current - 1})">‹</button><span class="mx-2 text-muted">${page.current} / ${page.pages}</span><button class="btn btn-sm btn-outline-secondary" ${page.current >= page.pages ? 'disabled' : ''} onclick="loadLeads(${page.current + 1})">›</button>`);
+    if (!page || page.pages === undefined) { $('#lead-pagination').empty(); return; }
+    const total = page.total || 0;
+    const start = total === 0 ? 0 : (page.current - 1) * page.size + 1;
+    const end = Math.min(page.current * page.size, total);
+    let html = `<div class="text-muted small ps-2">全${total}件中 ${start}〜${end}件</div>`;
+    if (page.pages > 1) {
+        html += `<nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
+        html += `<li class="page-item ${page.current <= 1 ? 'disabled' : ''}"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadLeads(${page.current - 1})">‹</a></li>`;
+        for (let i = 1; i <= page.pages; i++) {
+            if (i === page.current) {
+                html += `<li class="page-item active" aria-current="page"><a class="page-link bg-primary border-primary" href="javascript:void(0)">${i}</a></li>`;
+            } else {
+                html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadLeads(${i})">${i}</a></li>`;
+            }
+        }
+        html += `<li class="page-item ${page.current >= page.pages ? 'disabled' : ''}"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadLeads(${page.current + 1})">›</a></li>`;
+        html += `</ul></nav>`;
+    }
+    $('#lead-pagination').html(html);
 }
 
 function openLeadModal(lead) {

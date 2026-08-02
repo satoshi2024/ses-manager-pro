@@ -402,7 +402,11 @@ a:hover {
     color: var(--text-muted);
 }
 
-/* Date Input normalization for Chrome/Safari/Edge to prevent different font sizes for year vs month/day */
+/* Date Input normalization for Chrome/Safari/Edge to prevent different font sizes/weights for year vs month/day */
+input[type="date"] {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif !important;
+}
+
 input[type="date"]::-webkit-datetime-edit,
 input[type="date"]::-webkit-datetime-edit-fields-wrapper,
 input[type="date"]::-webkit-datetime-edit-year-field,
@@ -412,6 +416,7 @@ input[type="date"]::-webkit-datetime-edit-text {
     font-family: inherit !important;
     font-size: inherit !important;
 }
+
 
 
 /* Buttons */
@@ -456,6 +461,7 @@ input[type="date"]::-webkit-datetime-edit-text {
 .status-danger { background: rgba(239, 68, 68, 0.15) !important; color: var(--accent-red) !important; border-color: rgba(239, 68, 68, 0.3) !important; }
 .status-warning { background: rgba(245, 158, 11, 0.15) !important; color: var(--accent-yellow) !important; border-color: rgba(245, 158, 11, 0.3) !important; }
 .status-primary { background: rgba(59, 130, 246, 0.15) !important; color: var(--accent-blue) !important; border-color: rgba(59, 130, 246, 0.3) !important; }
+.status-info { background: rgba(6, 182, 212, 0.15) !important; color: #06b6d4 !important; border-color: rgba(6, 182, 212, 0.3) !important; }
 .status-secondary { background: rgba(156, 163, 175, 0.15) !important; color: var(--text-secondary) !important; border-color: rgba(156, 163, 175, 0.3) !important; }
 
 .badge.bg-purple { background-color: var(--accent-purple) !important; }

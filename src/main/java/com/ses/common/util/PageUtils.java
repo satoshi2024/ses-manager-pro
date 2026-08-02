@@ -53,9 +53,23 @@ public final class PageUtils {
      * @return 正規化済みの {@link Page}
      */
     public static <T> Page<T> safePage(long current, long size, long defaultSize) {
+        return safePage(current, size, defaultSize, MAX_PAGE_SIZE);
+    }
+
+    /**
+     * current・size を正規化し {@link Page} を返す（既定サイズおよび上限指定版）。
+     *
+     * @param current     リクエストのページ番号（1 始まり）
+     * @param size        リクエストのページサイズ
+     * @param defaultSize size が 0 以下だったときの既定値
+     * @param maxLimit    size の上限（これを超える場合は丸める）
+     * @param <T>         エンティティ型
+     * @return 正規化済みの {@link Page}
+     */
+    public static <T> Page<T> safePage(long current, long size, long defaultSize, long maxLimit) {
         if (current <= 0) current = 1;
         if (size <= 0) size = (defaultSize > 0 ? defaultSize : DEFAULT_PAGE_SIZE);
-        if (size > MAX_PAGE_SIZE) size = MAX_PAGE_SIZE;
+        if (size > maxLimit) size = maxLimit;
         return new Page<>(current, size);
     }
 }

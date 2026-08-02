@@ -149,4 +149,18 @@ class BpCompanyServiceImplTest {
         assertEquals(45, activeJuly.getMaxPaymentDays());
         assertEquals(0, activeJuly.getPaymentMonthOffset());
     }
+
+    @Test
+    @DisplayName("BP会社一覧検索がIDの昇順（小さい順）でソートされることの検証")
+    void searchBpCompanies_ordersByIdAscending() {
+        BpCompany companyA = BpCompany.builder().legalName("昇順テスト会社A").entityType("CORPORATE").status("ACTIVE").build();
+        BpCompany companyB = BpCompany.builder().legalName("昇順テスト会社B").entityType("CORPORATE").status("ACTIVE").build();
+        bpCompanyService.createBpCompany(companyA);
+        bpCompanyService.createBpCompany(companyB);
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<BpCompanyDto> page = bpCompanyService.searchBpCompanies("昇順テスト会社", null, "ACTIVE", 1, 10);
+        assertTrue(page.getRecords().size() >= 2);
+        assertTrue(page.getRecords().get(0).getId() < page.getRecords().get(1).getId(),
+                "ID昇順（小さい順）でソートされている必要があります");
+    }
 }

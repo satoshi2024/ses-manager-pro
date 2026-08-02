@@ -90,7 +90,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
             wrapper.eq(BpCompany::getStatus, status);
         }
         applySalesDataScope(wrapper);
-        wrapper.orderByDesc(BpCompany::getId);
+        wrapper.orderByAsc(BpCompany::getId);
 
         Page<BpCompany> pageResult = this.page(pageParam, wrapper);
 

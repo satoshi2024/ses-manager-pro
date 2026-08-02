@@ -116,6 +116,9 @@ class ConcurrentLoginSessionSmokeTest {
                             new UsernamePasswordAuthenticationToken(principal, null, List.of());
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                     MockHttpServletRequest request = new MockHttpServletRequest();
+                    org.springframework.mock.web.MockHttpSession session =
+                            new org.springframework.mock.web.MockHttpSession(null, "r3-session-" + workerId + "-" + java.util.UUID.randomUUID());
+                    request.setSession(session);
                     request.setRemoteAddr("127.0.0." + ((workerId % 200) + 1));
                     persistentSessionService.register(request, authentication);
                 } finally {

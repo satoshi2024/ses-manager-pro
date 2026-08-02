@@ -171,12 +171,12 @@ function renderWorkRecords(list) {
     }
     
     list.forEach(item => {
-        // 保存可能なのは「入力中」「差戻し」のみ（提出済・確定は編集不可）
-        const editable = item.status === '入力中' || item.status === '差戻し';
+        // 保存可能なのは「未入力」「入力中」「差戻し」のみ（提出済・確定は編集不可）
+        const editable = !item.status || item.status === '未入力' || item.status === '入力中' || item.status === '差戻し';
         const readonly = editable ? '' : 'readonly';
         const hoursInput = `<input type="number" step="0.01" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark actual-hours-input"
                                 data-contract-id="${item.contractId}"
-                                value="${item.actualHours || ''}"
+                                value="${item.actualHours != null ? item.actualHours : ''}"
                                 ${readonly}
                                 onblur="saveHours(this)">`;
 

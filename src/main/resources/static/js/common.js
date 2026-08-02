@@ -11,7 +11,12 @@ const SES = {
      */
     i18n: {
         t: function(key, ...args) {
-            let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : key;
+            let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : null;
+            let fallback = null;
+            if (args.length > 1 && typeof args[args.length - 1] === 'string') {
+                fallback = args.pop();
+            }
+            if (!msg) msg = fallback || key;
             if (args.length === 0) return msg;
 
             // 引数がオブジェクト1つの場合: 名前付きプレースホルダー {key} を置換
@@ -23,8 +28,8 @@ const SES = {
                 return msg;
             }
 
-            // 引数が配列1つの場合: 位置プレースホルダー {0},{1},... を置換
-            if (args.length === 1 && Array.isArray(args[0])) {
+            // 配列が渡された場合、配列要素を位置引数として展開
+            if (Array.isArray(args[0])) {
                 args = args[0];
             }
 
@@ -341,6 +346,14 @@ const SES = {
                         if (window.innerWidth <= 992) closeSidebar();
                     });
                 });
+
+                // アクティブなメニュー項目を自動的にスクロール位置まで移動させる
+                const activeLink = sidebar.querySelector('.nav-link.active');
+                if (activeLink) {
+                    setTimeout(() => {
+                        activeLink.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                    }, 50);
+                }
             }
         }
     },

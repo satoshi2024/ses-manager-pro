@@ -80,7 +80,7 @@ function renderPagination(pageData, loadFuncName) {
     
     let html = `
         <div class="text-muted small ps-2">
-            ${SES.i18n.t('common.page.info', [pageData.total, start, end], `全${pageData.total}件中 ${start}〜${end}件`)}
+            ${SES.i18n.t('common.page.info', [pageData.total, start, end])}
         </div>
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm mb-0 pe-2">

@@ -4,16 +4,20 @@
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
-    loadTasks();
+    loadTasks(1);
     loadTodos(1);
 });
 
+let taskCurrentPage = 1;
+
 // タスク一覧の読み込み
-async function loadTasks() {
+async function loadTasks(page = 1) {
+    taskCurrentPage = page;
     try {
-        const res = await $.ajax({ url: '/api/tasks', type: 'GET' });
-        if (res && res.code === 200) {
-            renderTaskTable(res.data);
+        const res = await $.ajax({ url: '/api/tasks/page', type: 'GET', data: { current: page, size: 20 } });
+        if (res && res.code === 200 && res.data) {
+            renderTaskTable(res.data.records || []);
+            renderTaskTablePagination(res.data);
         }
     } catch (e) {
         console.error('Failed to load tasks', e);
@@ -24,7 +28,7 @@ function renderTaskTable(tasks) {
     const tbody = document.getElementById('task-table-body');
     if (!tbody) return;
     if (!tasks || tasks.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">登録されたタスクはありません</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">登録されたタスクはありません</td></tr>`;
         return;
     }
 
@@ -46,11 +50,13 @@ function renderTaskTable(tasks) {
         const isTerminal = t.status === 'COMPLETED' || t.status === 'CANCELLED';
         const isOverdue = t.dueDate && new Date(t.dueDate) < new Date().setHours(0,0,0,0) && !isTerminal;
         const dueText = t.dueDate ? (isOverdue ? `<span class="text-danger fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>${t.dueDate} (超過)</span>` : t.dueDate) : '<span class="text-muted">期限なし</span>';
+        const assigneeName = t.assigneeUserName || '未割当';
 
         html += `
             <tr class="${isTerminal ? 'opacity-75' : ''}">
                 <td class="ps-4">${statusBadge[t.status] || t.status}</td>
                 <td>${priorityBadge[t.priority] || t.priority}</td>
+                <td><span class="badge bg-dark border border-secondary text-light">${SES.escapeHtml(assigneeName)}</span></td>
                 <td>
                     <div class="fw-bold text-light">${SES.escapeHtml(t.title)}</div>
                     ${t.description ? `<div class="small text-muted">${SES.escapeHtml(t.description)}</div>` : ''}
@@ -68,6 +74,33 @@ function renderTaskTable(tasks) {
         `;
     });
     tbody.innerHTML = html;
+}
+
+function renderTaskTablePagination(pageData) {
+    const container = $('#task-pagination');
+    if (!container.length) return;
+    if (pageData.total === 0) {
+        container.html('<div class="text-muted small ps-2">データがありません</div>');
+        return;
+    }
+
+    const start = (pageData.current - 1) * pageData.size + 1;
+    const end = Math.min(pageData.current * pageData.size, pageData.total);
+    let html = `<div class="text-muted small ps-2">全${pageData.total}件中 ${start}〜${end}件</div>`;
+    if (pageData.pages > 1) {
+        html += `<nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
+        html += `<li class="page-item ${pageData.current <= 1 ? 'disabled' : ''}"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadTasks(${pageData.current - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
+        for (let i = 1; i <= pageData.pages; i++) {
+            if (i === pageData.current) {
+                html += `<li class="page-item active" aria-current="page"><a class="page-link bg-primary border-primary" href="javascript:void(0)">${i}</a></li>`;
+            } else {
+                html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadTasks(${i})">${i}</a></li>`;
+            }
+        }
+        html += `<li class="page-item ${pageData.current >= pageData.pages ? 'disabled' : ''}"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadTasks(${pageData.current + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
+        html += `</ul></nav>`;
+    }
+    container.html(html);
 }
 
 function openNewTaskModal() {
@@ -180,7 +213,7 @@ async function saveTask() {
             const modalEl = document.getElementById('taskModal');
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if (modalInstance) modalInstance.hide();
-            loadTasks();
+            loadTasks(taskCurrentPage);
         } else {
             Toast.error(res.message || 'タスクの保存に失敗しました');
         }
@@ -201,7 +234,7 @@ async function updateTaskStatus(taskId, status) {
         });
         if (res && res.code === 200) {
             Toast.success('タスクを更新しました');
-            loadTasks();
+            loadTasks(taskCurrentPage);
         } else {
             Toast.error(res.message || 'タスクの更新に失敗しました');
         }
@@ -223,7 +256,7 @@ async function convertNotificationToTask(event, notificationId) {
         });
         if (res && res.code === 200) {
             Toast.success('通知からタスクを作成しました');
-            loadTasks();
+            loadTasks(taskCurrentPage);
         } else {
             Toast.error(res.message || 'タスクの作成に失敗しました');
         }

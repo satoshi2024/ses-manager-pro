@@ -136,7 +136,7 @@
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/resume-ingestion.js}" defer></script>
     <script th:inline="javascript">
-        const JOB_ID = /*[[${#request.getRequestURI().split('/')[3]}]]*/ null;
+        const JOB_ID = /*[[${jobId}]]*/ null;
     </script>
 </th:block>
 </body>

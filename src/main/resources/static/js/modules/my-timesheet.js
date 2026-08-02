@@ -119,7 +119,7 @@ function renderMy(rows, engineerName) {
     }
     rows.forEach(row => {
         myRowMap.set(String(row.contractId), row);
-        const editable = !row.status || ['入力中', '差戻し'].includes(row.status);
+        const editable = !row.status || ['入力中', '差戻し', '未入力'].includes(row.status);
         const card = document.createElement('div');
         card.className = 'card mb-3';
         let dailyRows = (row.dailies || []).map(d => `

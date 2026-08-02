@@ -119,26 +119,87 @@ function moveProposalCardBack(itemEl, fromCol, oldIndex) {
     fromCol.insertBefore(itemEl, beforeNode);
 }
 
+const kanbanColumnPages = {};
+const KANBAN_PAGE_SIZE = 20;
+
+const KANBAN_STATUS_MAP = {
+    '書類選考中': '#col-document',
+    '一次面接': '#col-interview1',
+    '二次面接': '#col-interview2',
+    '結果待ち': '#col-waiting',
+    '成約': '#col-won',
+    '見送り': '#col-lost'
+};
+
 function loadKanbanData() {
-    // Show loading state
     $('.kanban-column-body').html('<div class="text-center text-muted p-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</div>');
-    
+    $('.kanban-column .badge').text('0');
+
+    const statuses = Object.keys(KANBAN_STATUS_MAP);
+    let completed = 0;
+
+    statuses.forEach(status => {
+        kanbanColumnPages[status] = 1;
+        loadKanbanColumnPage(status, 1, false);
+    });
+}
+
+function loadKanbanColumnPage(status, page, append = false) {
+    const colSelector = KANBAN_STATUS_MAP[status];
+    if (!colSelector) return;
+    const colBody = $(colSelector);
+    const colHeaderBadge = colBody.closest('.kanban-column').find('.badge');
+
+    if (!append) {
+        colBody.html('<div class="text-center text-muted p-3"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</div>');
+    }
+
     $.ajax({
-        url: '/api/proposals/kanban',
+        url: '/api/proposals/kanban/page',
         method: 'GET',
+        data: { status: status, current: page, size: KANBAN_PAGE_SIZE },
         success: function(res) {
-            if (res.code === 200) {
-                renderKanbanBoard(res.data);
-            } else {
-                Toast.error(res.message || SES.i18n.t('js.kanban.error_fetch'));
+            if (res.code === 200 && res.data) {
+                const pageData = res.data;
+                colHeaderBadge.text(pageData.total || 0);
+
+                if (!append) {
+                    colBody.empty();
+                } else {
+                    colBody.find('.kanban-load-more-btn').remove();
+                }
+
+                const records = pageData.records || [];
+                records.forEach(item => {
+                    renderKanbanCard(item, colBody);
+                });
+
+                if (records.length === 0 && !append) {
+                    colBody.html('<div class="text-center text-muted small py-4">' + SES.i18n.t('common.noData') + '</div>');
+                }
+
+                if (pageData.current < pageData.pages) {
+                    colBody.append(`
+                        <div class="text-center py-2 kanban-load-more-btn">
+                            <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark w-100" onclick="loadMoreKanbanColumn('${status}')">
+                                <i class="bi bi-chevron-down me-1"></i>さらに表示 (${records.length}/${pageData.total})
+                            </button>
+                        </div>
+                    `);
+                }
             }
         },
         error: function(err) {
             console.error(err);
-            Toast.error(SES.i18n.t('js.common.error_network'));
-            $('.kanban-column-body').empty();
+            if (!append) colBody.empty();
         }
     });
+}
+
+function loadMoreKanbanColumn(status) {
+    const nextPage = (kanbanColumnPages[status] || 1) + 1;
+    kanbanColumnPages[status] = nextPage;
+    loadKanbanColumnPage(status, nextPage, true);
 }
 
 function loadSelectOptions() {
