@@ -7,7 +7,7 @@
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
 > **Migration**: 本specのDDLは **V73**、権限seedは **V74**、Round 5 legacy forward-fixは **V74.1**、
-> Round 6の型・検索キーforward-fixは **V74.2**
+> Round 6の型・検索キーforward-fixは **V74.2**、Round 7のlegacy NFKC backfillは **V74.3**
 >（2026-08-02に確定）。BP master(V70/V71)は
 > `origin/main`にmerge済みで、適用済みの最新は**V71**。したがってV73は空き番号であり、そのまま使用する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。

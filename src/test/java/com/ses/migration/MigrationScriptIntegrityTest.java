@@ -649,6 +649,24 @@ class MigrationScriptIntegrityTest {
                 "V73の生成列もVIRTUALに揃えてください（既存DBのALTERがERROR 1215になります）");
     }
 
+    @Test
+    void CRMのrollback手順は現行migration履歴を全て戻すこと() throws Exception {
+        String ledger = java.nio.file.Files.readString(
+                java.nio.file.Path.of(".kiro/specs/crm-contact-opportunity/review-ledger.md"),
+                StandardCharsets.UTF_8);
+        int rollback = ledger.indexOf("### Rollback");
+        assertTrue(rollback >= 0, "CRM rollback手順がledgerに存在するはず");
+        String section = ledger.substring(rollback);
+        for (String version : List.of("73", "74", "74.1", "74.2", "74.3")) {
+            assertTrue(section.contains("DELETE FROM flyway_schema_history WHERE version = '" + version + "';"),
+                    "rollbackにV" + version + "履歴の削除が必要です");
+        }
+        assertTrue(section.contains("DELETE FROM flyway_schema_history WHERE script = 'R__crm_contact_reconciliation.sql';"),
+                "rollbackにRepeatable履歴の削除が必要です");
+        assertTrue(section.indexOf("version = '74.3'") < section.indexOf("version = '74.2'"),
+                "rollbackはV74.3をV74.2より先に履歴から除去するはずです");
+    }
+
     /**
      * V73のメニュー権限は design §6.2 のとおり 管理者 / マネージャー / 営業 のみ。
      * HR・要員へ広げると顧客の商機情報が本来見えない主体へ露出する。

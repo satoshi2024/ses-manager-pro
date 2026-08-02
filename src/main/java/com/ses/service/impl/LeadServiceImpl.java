@@ -154,9 +154,10 @@ public class LeadServiceImpl implements LeadService {
         if (!StringUtils.hasText(value)) return null;
         String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC)
                 .toLowerCase(java.util.Locale.ROOT);
-        return company
+        String key = company
                 ? normalized.replaceAll("\\s+", "")
                 : normalized.replaceAll("[^a-z0-9+@.]", "");
+        return key.isEmpty() ? null : key;
     }
 
     private void applySearchKeys(Lead lead) {

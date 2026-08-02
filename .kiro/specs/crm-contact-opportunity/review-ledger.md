@@ -243,7 +243,7 @@ F1の完了定義そのものがT050へ依存する点は Round 1 NOTE-7 のと�
 ### Rollback
 
 V73適用済みDBを戻す手順（**実行前に必ずフルダンプを取得する**）。V1/V6は変更していないため、
-戻すのはV73/V74/V74.1が作った物とRepeatable補完履歴である。
+戻すのはV73/V74/V74.1/V74.2/V74.3が作った物とRepeatable補完履歴である。
 
 ```sql
 -- 1. 参照している側から外す（FKがあるためこの順序）
@@ -278,8 +278,10 @@ DROP TABLE IF EXISTS t_opportunity;
 DROP TABLE IF EXISTS t_lead;
 DROP TABLE IF EXISTS t_customer_contact;
 
--- 4. Repeatable/V74.1/V74/V73の履歴を、旧artifactへ戻す場合だけ削除する。
+-- 4. Repeatable/V74.3/V74.2/V74.1/V74/V73の履歴を、旧artifactへ戻す場合だけ削除する。
 DELETE FROM flyway_schema_history WHERE script = 'R__crm_contact_reconciliation.sql';
+DELETE FROM flyway_schema_history WHERE version = '74.3';
+DELETE FROM flyway_schema_history WHERE version = '74.2';
 DELETE FROM flyway_schema_history WHERE version = '74.1';
 DELETE FROM flyway_schema_history WHERE version = '74';
 DELETE FROM flyway_schema_history WHERE version = '73';
@@ -287,7 +289,8 @@ DELETE FROM flyway_schema_history WHERE version = '73';
 
 - 移行で作られた `t_customer_contact` の行は上記3で消えるが、**元データ `m_customer.contact_*` は
   V73が一切書き換えていない**ため、rollbackでの情報欠損は無い。
-- `V74.1`で補完したactivity version、mail link列、6列、legacy contact backfillも上記で対象に含める。
+- `V74.1`で補完したactivity version、mail link列、6列、legacy contact backfill、V74.2/V74.3で補完した
+  source_cost/search keyを上記で対象に含める。
   rollback後は旧artifactを起動する前にFlyway `validate`とschema差分確認を行う。
 - コード側（entity / mapper / test）は他から参照されていないため、revertのみで影響しない。
 
@@ -421,3 +424,16 @@ Java全件走査であった。P2-02の有限期間primary同時作成証拠と�
 Round 6対応後の実測は、定向/H2 39/0/0、MySQL fresh/legacy/partial/repair/concurrency 各1/1・0 failure/error、
 Node 3/3、`git diff --check` PASS、compile PASS。L4全量とdesktop/390px全role browser Demoは未検証のrelease hard gateとして残す。
 したがってP1は解消したが、S07/次Waveの解放判定はL4/browser証拠取得まで継続する。
+
+## Round 7 再Review FAIL 対応（2026-08-02）
+
+Round 6再Reviewで再OPENされたlegacy lead正規化とrollback履歴を、V74.3と手順修正で対応した。
+V74.2は適用済みのため編集せず、V74.3のJava migrationで既存行をNFKC正規化する。
+
+| ID | 対応 | 検証 | 状態 |
+|---|---|---|---|
+| CRM-R5-P1-09 REOPEN | V74.3が既存`t_lead`を実行時と同じNFKC/小文字/空白・記号除去でbackfill。正規化後空文字はNULL。runtime側も同じ空文字→NULL契約へ統一 | V71→V73でfull-width company/email/phoneと空キーleadを投入し、V74.2/V74.3後の列値をMySQL legacy smokeでassert。新規候補のindexed SQL＋LIMIT 20は既存Lead testで維持 | CLOSED |
+| CRM-R5-P2-03 REOPEN | rollback本文とSQLへ74.2/74.3履歴削除を追加し、現行CRM migration集合と順序を同期 | rollback静的検査、review-ledger本文、V73〜V74.3/Repeatableの履歴許可リストを確認 | CLOSED |
+
+Round 7差分の自動検証は、Lead/Contact/静的回帰、MySQL migration/repair、V74.3 legacy full-width backfill、compile、
+`git diff --check`でgreenを確認した。L4全量とdesktop/390px全role browser Demoは引き続きrelease hard gateである。
