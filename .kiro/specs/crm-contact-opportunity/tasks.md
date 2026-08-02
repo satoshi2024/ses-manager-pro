@@ -6,10 +6,11 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §6「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V73**（2026-08-01に中央台帳で確定）。BP master(V70/V71)は
+> **Migration**: 本specのDDLは **V73**、権限seedは **V74**、Round 5 legacy forward-fixは **V74.1**
+>（2026-08-02に確定）。BP master(V70/V71)は
 > `origin/main`にmerge済みで、適用済みの最新は**V71**。したがってV73は空き番号であり、そのまま使用する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
-> approvalの予約V72は未使用のまま残るが、本specがV72を代わりに使ってはならない（欠番は埋めない）。
+> S07 approvalの予約V75は維持し、本specがV75を代わりに使ってはならない。V72は欠番のまま残す。
 
 - [x] F1. contact/lead/opportunity DDLと移行
   - **状態**: 完了。DDL(V73) / 移行 / entity / 定向testに加え、T050の顧客detailで移行contactの表示を確認。
@@ -39,7 +40,7 @@
 
 - [x] A1. 顧客contacts/timeline
   - **状態**: 完了。顧客detailのcontacts/opportunities/activities、請求宛先選択、退職者除外、PII mask/exportを実装・検証済み。
-  - **実測**: `CustomerContactServiceIntegrationTest` 3/3、`CustomerContactApiControllerTest` 1/1、`InvoiceServiceImplTest` 41/41、`InvoiceApiControllerTest` 10/10、`SalesActivityApiControllerTest` 7/7、`CustomerApiControllerTest` 3/3、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4 PASS。
+  - **実測**: `CustomerContactServiceIntegrationTest` 3/3、`CustomerContactApiControllerTest` 1/1、`InvoiceServiceImplTest` 41/41、`InvoiceApiControllerTest` 10/10、`SalesActivityApiControllerTest` 8/8、`CustomerApiControllerTest` 3/3、`MobileResponsiveLayoutTest` 23/23、`MessageBundleConsistencyTest` 4/4 PASS。
   - **Demo**: 顧客detailで移行contactと関連商機を表示し、請求書リマインドの有効contact候補を選択。退職処理後は候補から消え、`t_mail_delivery.recipient` に送信時点の宛先snapshotが残る。CSVは画面と同じmask。
   - **Objective**: 顧客詳細でcontacts・opportunities・activitiesが1つのtimelineで見え、
     請求書送付時に「請求担当」を宛先として選べる。退職した担当者は新規宛先候補に出ない。
@@ -73,9 +74,9 @@
     forecast二重計上なし。
   - **Demo**: 担当別funnel drilldown。全社合計と担当別合計が一致することを提示。
 
-- [x] M. 回帰
-  - **状態**: 完了。Round3で残っていた`WorkRecordServiceImplTest` 2件を直属組織scope優先・account-link迂回禁止へ修正し、L4全量greenを確認。
-  - **実測**: `mvn test` 1223件 / failures 0 / errors 0 / skipped 1。fresh/legacy Flyway smoke 6系統、`ConcurrentUpdateTest` 1/1、直接回帰96/96、Node `--check` 6/6、`git diff --check` exit 0。
+- [ ] M. 回帰
+  - **状態**: Round 5修正のL1〜L3・MySQL fresh/legacy/partial/repairはgreen。L4全量とdesktop/390px全role browser Demoは最終gateとして残る。
+  - **実測**: Round 5定向回帰77件 / failures 0 / errors 0、MySQL migration smoke 4件 / failures 0 / errors 0、Node `--check` 3/3、compile PASS、`git diff --check` exit 0。
   - **ブラウザDemo**: 管理者ログイン後、`/crm/leads`、`/crm/opportunities`、`/crm/opportunities/kpi`を確認。KPIは390px幅で主要見出し、Forecast、担当別、失注理由を確認。
   - **Objective**: 新規leadから受注までが一気通貫で動き、既存のcustomer/proposal/quotation機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、

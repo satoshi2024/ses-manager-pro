@@ -38,10 +38,20 @@ class FlywayV73PartialRepairSmokeTest {
             // V73のALTERが途中で停止した状態を再現するため、一部の追加物だけを先に除去する。
             // CRMテーブルとデータは残し、残りのALTERはpartial stateとして残す。
             st.execute("ALTER TABLE t_sales_activity DROP FOREIGN KEY fk_activity_contact");
+            st.execute("ALTER TABLE t_sales_activity DROP FOREIGN KEY fk_activity_opportunity");
+            st.execute("ALTER TABLE t_sales_activity DROP FOREIGN KEY fk_activity_assignee");
             st.execute("ALTER TABLE t_sales_activity DROP INDEX idx_activity_contact");
+            st.execute("ALTER TABLE t_sales_activity DROP INDEX idx_activity_opportunity");
+            st.execute("ALTER TABLE t_sales_activity DROP INDEX idx_activity_assignee");
             st.execute("ALTER TABLE t_sales_activity DROP COLUMN contact_id");
+            st.execute("ALTER TABLE t_sales_activity DROP COLUMN opportunity_id");
+            st.execute("ALTER TABLE t_sales_activity DROP COLUMN assignee_user_id");
+            st.execute("ALTER TABLE t_project DROP FOREIGN KEY fk_project_source_opportunity");
             st.execute("ALTER TABLE t_project DROP INDEX uk_project_source_opportunity");
             st.execute("ALTER TABLE t_project DROP COLUMN source_opportunity_id");
+            st.execute("ALTER TABLE t_quotation DROP FOREIGN KEY fk_quotation_source_opportunity");
+            st.execute("ALTER TABLE t_quotation DROP INDEX uk_quotation_source_opportunity");
+            st.execute("ALTER TABLE t_quotation DROP COLUMN source_opportunity_id");
 
             long contactCount = countRows(st, "t_customer_contact");
             st.execute("DELETE FROM flyway_schema_history WHERE version='73'");
@@ -76,7 +86,14 @@ class FlywayV73PartialRepairSmokeTest {
 
         try (Connection connection = MYSQL.createConnection(""); Statement st = connection.createStatement()) {
             assertTrue(hasColumn(st, "t_sales_activity", "contact_id"));
+            assertTrue(hasColumn(st, "t_sales_activity", "version"));
             assertTrue(hasColumn(st, "t_project", "source_opportunity_id"));
+            assertTrue(hasColumn(st, "t_opportunity", "stage_changed_at"));
+            assertTrue(hasColumn(st, "t_opportunity", "probability_override_reason"));
+            assertTrue(hasColumn(st, "t_lead", "source_cost"));
+            assertTrue(hasColumn(st, "t_proposal", "source_opportunity_id"));
+            assertTrue(hasColumn(st, "t_mail_delivery", "contact_id"));
+            assertTrue(hasColumn(st, "t_mail_delivery", "opportunity_id"));
             assertTrue(hasSuccessV73(st), "migrate後にV73 success=1が必要です");
         }
     }

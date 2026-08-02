@@ -378,6 +378,7 @@ CREATE TABLE t_sales_activity (
   next_action_date DATE,
   completed_flag   TINYINT DEFAULT 0,
   assignee_user_id BIGINT,
+  version          INT DEFAULT 1,
   created_by       BIGINT,
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

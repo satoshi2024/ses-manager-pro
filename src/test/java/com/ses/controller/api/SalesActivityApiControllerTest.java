@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.Customer;
 import com.ses.entity.SalesActivity;
+import com.ses.dto.salesactivity.SalesActivityUpdateRequest;
 import com.ses.service.CustomerService;
 import com.ses.service.SalesActivityService;
 import org.junit.jupiter.api.BeforeEach;
@@ -105,13 +106,41 @@ public class SalesActivityApiControllerTest {
         salesActivityService.save(activity);
 
         mockMvc.perform(put("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId() + "/complete")
-                .with(csrf()))
+                .with(csrf()).param("version", String.valueOf(activity.getVersion())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));
 
         SalesActivity updated = salesActivityService.getById(activity.getId());
         assertEquals(1, updated.getCompletedFlag());
+    }
+
+    @Test
+    @WithMockUser(username = "test", roles = {"営業"})
+    void staleActivityUpdateIsRejectedWithConflict() throws Exception {
+        SalesActivity activity = new SalesActivity();
+        activity.setCustomerId(testCustomer.getId());
+        activity.setActivityType("電話");
+        activity.setActivityDate(LocalDate.now());
+        activity.setTitle("Initial");
+        salesActivityService.save(activity);
+
+        SalesActivityUpdateRequest request = new SalesActivityUpdateRequest();
+        request.setVersion(activity.getVersion());
+        request.setActivityType("電話");
+        request.setActivityDate(LocalDate.now());
+        request.setTitle("First writer");
+        String payload = objectMapper.writeValueAsString(request);
+
+        mockMvc.perform(put("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId())
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+
+        mockMvc.perform(put("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId())
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is(409)));
     }
 
     @Test
@@ -125,7 +154,7 @@ public class SalesActivityApiControllerTest {
         salesActivityService.save(activity);
 
         mockMvc.perform(delete("/api/customers/" + testCustomer.getId() + "/activities/" + activity.getId())
-                .with(csrf()))
+                .with(csrf()).param("version", String.valueOf(activity.getVersion())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));
@@ -149,7 +178,7 @@ public class SalesActivityApiControllerTest {
         salesActivityService.save(activity);
 
         mockMvc.perform(delete("/api/customers/" + anotherCustomer.getId() + "/activities/" + activity.getId())
-                        .with(csrf()))
+                        .with(csrf()).param("version", String.valueOf(activity.getVersion())))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(404)));
 

@@ -302,7 +302,10 @@ public class NotificationGenerateService {
             String title = "【フォロー】" + customerName;
             String message = a.getTitle();
             String linkUrl = NotificationLinks.customer(a.getCustomerId());
-            notificationService.publishToUser(a.getCreatedBy(), "FOLLOW_UP", title, message, linkUrl, dedupeKey);
+            Long recipientUserId = a.getAssigneeUserId() != null ? a.getAssigneeUserId() : a.getCreatedBy();
+            if (recipientUserId != null) {
+                notificationService.publishToUser(recipientUserId, "FOLLOW_UP", title, message, linkUrl, dedupeKey);
+            }
         }
     }
 

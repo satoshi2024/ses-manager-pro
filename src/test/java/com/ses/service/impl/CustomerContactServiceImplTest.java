@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
+import com.ses.mapper.CustomerMapper;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.DataScopeService;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +26,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CustomerContactServiceImplTest {
     @Mock private CustomerContactMapper mapper;
+    @Mock private CustomerMapper customerMapper;
     @Mock private DataScopeService dataScopeService;
     @Mock private AuthorizationService authorizationService;
 
@@ -84,7 +86,8 @@ class CustomerContactServiceImplTest {
     private CustomerContactServiceImpl service() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("sales", "n/a"));
-        return new CustomerContactServiceImpl(mapper, dataScopeService, authorizationService, Clock.systemUTC());
+        lenient().when(customerMapper.selectByIdForUpdate(10L)).thenReturn(new com.ses.entity.Customer());
+        return new CustomerContactServiceImpl(mapper, customerMapper, dataScopeService, authorizationService, Clock.systemUTC());
     }
 
     private com.ses.dto.customer.CustomerContactSaveRequest request(String rolesJson) {

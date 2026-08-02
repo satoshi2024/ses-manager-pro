@@ -62,10 +62,10 @@ function renderContacts(contacts) {
         return;
     }
     tbody.html(contacts.map(c => `<tr>
-        <td>${SES.escapeHtml(c.name || '-')} ${c.primaryFlag === 1 ? '<span class="badge bg-info text-dark ms-1">主</span>' : ''}</td>
+        <td>${SES.escapeHtml(c.name || '-')} ${c.primaryFlag === 1 ? `<span class="badge bg-info text-dark ms-1">${SES.i18n.t('customer.contacts.primaryShort')}</span>` : ''}</td>
         <td>${SES.escapeHtml([c.department, c.position].filter(Boolean).join(' / ') || '-')}</td>
         <td class="font-monospace">${SES.escapeHtml(c.email || '-')}<br><span class="text-muted small">${SES.escapeHtml(c.phone || '')}</span></td>
-        <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(c.status || '-')}</span></td>
+        <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(SES.i18n.e('customerContactStatus', c.status) || '-')}</span></td>
         <td class="text-end"><button class="btn btn-sm btn-outline-info" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>${c.status === '有効' ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="retireContact(${c.id}, ${c.version || 1})"><i class="bi bi-person-dash"></i></button>` : ''}</td>
     </tr>`).join(''));
 }
@@ -118,7 +118,7 @@ function renderOpportunities(opportunities) {
     }
     container.html(opportunities.map(o => `<div class="border-bottom border-secondary pb-2 mb-2">
         <div class="fw-bold text-light">${SES.escapeHtml(o.title || '-')}</div>
-        <div class="small text-muted">${SES.escapeHtml(o.stage || '-')} · ${SES.escapeHtml(o.expectedStartMonth || '-')}</div>
+        <div class="small text-muted">${SES.escapeHtml(SES.i18n.e('opportunityStage', o.stage) || '-')} · ${SES.escapeHtml(o.expectedStartMonth || '-')}</div>
     </div>`).join(''));
 }
 
@@ -193,9 +193,9 @@ function renderActivities(records) {
 
         let completeBtn = '';
         if (isOverdue) {
-            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         } else if (act.completedFlag === 0 && act.nextActionDate) {
-            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         }
 
         html += `
@@ -216,7 +216,7 @@ function renderActivities(records) {
                             <div class="btn-group btn-group-sm">
                                 ${completeBtn}
                                 <button type="button" class="btn btn-outline-info text-info ms-2" onclick="editActivity(${act.id})"><i class="bi bi-pencil"></i></button>
-                                <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id})"><i class="bi bi-trash"></i></button>
+                                <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id}, ${act.version || 1})"><i class="bi bi-trash"></i></button>
                             </div>
                         </div>
                         <div class="text-light text-wrap" style="white-space: pre-wrap;">${SES.escapeHtml(act.content || '')}</div>
@@ -300,7 +300,8 @@ function saveActivity() {
         nextActionDate: $('#act-next-date').val() || null,
         contactId: $('#act-contact').val() ? Number($('#act-contact').val()) : null,
         opportunityId: $('#act-opportunity').val() ? Number($('#act-opportunity').val()) : null,
-        assigneeUserId: $('#act-assignee').val() ? Number($('#act-assignee').val()) : null
+        assigneeUserId: $('#act-assignee').val() ? Number($('#act-assignee').val()) : null,
+        version: id ? ((currentActivities.find(a => a.id === Number(id)) || {}).version || 1) : null
     };
 
     if (id) {
@@ -331,7 +332,7 @@ function saveActivity() {
     });
 }
 
-function deleteActivity(id) {
+function deleteActivity(id, version) {
     Swal.fire({
         title: SES.i18n.t('common.deleteConfirmTitle'),
         text: SES.i18n.t('confirm.deleteActivity'),
@@ -344,7 +345,7 @@ function deleteActivity(id) {
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
-                url: `/api/customers/${customerId}/activities/${id}`,
+                url: `/api/customers/${customerId}/activities/${id}?version=${version}`,
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
@@ -359,9 +360,9 @@ function deleteActivity(id) {
     });
 }
 
-function completeActivity(id) {
+function completeActivity(id, version) {
     $.ajax({
-        url: `/api/customers/${customerId}/activities/${id}/complete`,
+        url: `/api/customers/${customerId}/activities/${id}/complete?version=${version}`,
         method: 'PUT',
         success: function(res) {
             if (res.code === 200) {

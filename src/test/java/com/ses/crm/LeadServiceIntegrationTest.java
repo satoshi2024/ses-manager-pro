@@ -46,6 +46,20 @@ class LeadServiceIntegrationTest {
     }
 
     @Test
+    void duplicateCandidatesNormalizeWhitespacePhoneSymbolsAndDoNotDropOlderRows() {
+        Lead original = leadService.create(request("株式会社テスト", "0312345678"));
+        for (int i = 0; i < 101; i++) {
+            leadService.create(request("別会社" + i, "0900000" + String.format("%04d", i)));
+        }
+
+        List<Lead> candidates = leadService.duplicateCandidates("株 式会社テスト", null,
+                "03-1234-5678", null);
+
+        assertEquals(1, candidates.size());
+        assertEquals(original.getId(), candidates.get(0).getId());
+    }
+
+    @Test
     void conversionCreatesCustomerContactAndOpportunityIdempotently() {
         Lead lead = leadService.create(request("転換対象社", "sales@convert.example"));
         LeadConversionDto first = leadService.convert(lead.getId(), lead.getVersion());

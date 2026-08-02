@@ -68,18 +68,20 @@ public class SalesActivityApiController {
     @PutMapping("/{id}/activities/{activityId}/complete")
     public ApiResult<Boolean> completeActivity(
             @PathVariable Long id,
-            @PathVariable Long activityId) {
+            @PathVariable Long activityId,
+            @RequestParam Integer version) {
         assertActivityCustomerAllowed(id);
-        salesActivityService.complete(id, activityId);
+        salesActivityService.complete(id, activityId, version);
         return ApiResult.success(true);
     }
 
     @DeleteMapping("/{id}/activities/{activityId}")
     public ApiResult<Boolean> deleteActivity(
             @PathVariable Long id,
-            @PathVariable Long activityId) {
+            @PathVariable Long activityId,
+            @RequestParam Integer version) {
         assertActivityCustomerAllowed(id);
-        salesActivityService.delete(id, activityId);
+        salesActivityService.delete(id, activityId, version);
         return ApiResult.success(true);
     }
 

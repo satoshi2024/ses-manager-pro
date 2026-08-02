@@ -19,6 +19,7 @@ import com.ses.entity.EngineerAccountLink;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.entity.Invoice;
 import com.ses.entity.Customer;
+import com.ses.entity.SalesActivity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -216,6 +217,27 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.invoiceOverdue();
 
         verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void followUpDue_担当者が設定されていれば担当者へ通知する() {
+        SalesActivity activity = new SalesActivity();
+        activity.setId(21L);
+        activity.setCustomerId(3L);
+        activity.setAssigneeUserId(200L);
+        activity.setCreatedBy(100L);
+        activity.setNextActionDate(LocalDate.now().minusDays(1));
+        activity.setCompletedFlag(0);
+        activity.setTitle("担当者フォロー");
+        when(salesActivityMapper.selectList(any())).thenReturn(List.of(activity));
+        Customer customer = new Customer();
+        customer.setCompanyName("顧客A");
+        when(customerMapper.selectById(3L)).thenReturn(customer);
+
+        notificationGenerateService.followUpDue();
+
+        verify(notificationService).publishToUser(eq(200L), eq("FOLLOW_UP"), any(), eq("担当者フォロー"),
+                eq("/customer/3"), eq("FOLLOW_UP:21:" + activity.getNextActionDate()));
     }
 
     // ===== S4: CONTRACT_END と更新ドラフトの連動 =====

@@ -71,8 +71,12 @@ class CustomerContactServiceIntegrationTest {
 
         contactService.retire(customer.getId(), created.getId(), LocalDate.of(2026, 2, 28), created.getVersion());
 
+        assertEquals(1, contactService.list(customer.getId(), LocalDate.of(2026, 2, 28)).size(),
+                "valid_toはinclusiveなので退職日当日は時点ビューに含める");
         assertTrue(contactService.recipientCandidates(customer.getId(), LocalDate.of(2026, 3, 1)).isEmpty());
-        assertEquals(1, contactService.list(customer.getId(), LocalDate.of(2026, 3, 1)).size());
+        assertTrue(contactService.list(customer.getId(), LocalDate.of(2026, 3, 1)).isEmpty(),
+                "list(asOf)は対象日時点ビューなので退職翌日は除外する");
+        assertNotNull(contactMapper.selectById(created.getId()), "履歴行は論理削除せずDBに残す");
     }
 
     @Test

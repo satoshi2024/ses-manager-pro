@@ -123,34 +123,11 @@ public class LeadServiceImpl implements LeadService {
         boolean hasCompany = StringUtils.hasText(companyName);
         boolean hasEmail = StringUtils.hasText(contactEmail);
         boolean hasPhone = StringUtils.hasText(contactPhone);
-        if (hasCompany || hasEmail || hasPhone) {
-            query.and(w -> {
-                boolean branch = false;
-                if (hasCompany) {
-                    String raw = companyName.trim();
-                    String normalized = Normalizer.normalize(raw, Normalizer.Form.NFKC);
-                    w.like("company_name", raw.substring(0, Math.min(3, raw.length())));
-                    if (!raw.equals(normalized)) {
-                        w.or().like("company_name", normalized.substring(0, Math.min(3, normalized.length())));
-                    }
-                    branch = true;
-                }
-                if (hasEmail) {
-                    if (branch) w.or();
-                    w.like("contact_email", contactEmail.trim().substring(0, Math.min(5, contactEmail.trim().length())));
-                    branch = true;
-                }
-                if (hasPhone) {
-                    if (branch) w.or();
-                    w.like("contact_phone", contactPhone.trim().substring(0, Math.min(4, contactPhone.trim().length())));
-                }
-            });
-        } else {
+        if (!(hasCompany || hasEmail || hasPhone)) {
             query.eq("id", -1L);
         }
         if (excludeId != null) query.ne("id", excludeId);
         applyCrmScope(query);
-        query.last("LIMIT 100");
         return leadMapper.selectList(query.orderByDesc("id")).stream()
                 .filter(candidate -> sameNormalized(companyName, candidate.getCompanyName(), true)
                         || sameNormalized(contactEmail, candidate.getContactEmail(), false)

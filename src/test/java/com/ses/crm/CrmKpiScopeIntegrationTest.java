@@ -3,8 +3,14 @@ package com.ses.crm;
 import com.ses.dto.crm.CrmKpiDto;
 import com.ses.entity.Lead;
 import com.ses.entity.Opportunity;
+import com.ses.entity.Engineer;
+import com.ses.entity.Project;
+import com.ses.entity.Proposal;
 import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.ProposalMapper;
 import com.ses.service.CrmKpiService;
 import com.ses.service.LeadService;
 import com.ses.service.OpportunityService;
@@ -43,6 +49,9 @@ class CrmKpiScopeIntegrationTest {
     @Autowired private CustomerService customerService;
     @Autowired private OpportunityMapper opportunityMapper;
     @Autowired private LeadMapper leadMapper;
+    @Autowired private EngineerMapper engineerMapper;
+    @Autowired private ProjectMapper projectMapper;
+    @Autowired private ProposalMapper proposalMapper;
     @MockBean private DataScopeService dataScopeService;
 
     @BeforeEach
@@ -84,9 +93,36 @@ class CrmKpiScopeIntegrationTest {
         Lead unassignedLead = Lead.builder().companyName("未割当").status("未対応").version(1).build();
         leadMapper.insert(unassignedLead);
 
+        Engineer engineer = Engineer.builder().fullName("T052 scope engineer").status("稼動中")
+                .employmentType("正社員").build();
+        engineerMapper.insert(engineer);
+        Project allowedProject = Project.builder().projectName("T052 scope project A")
+                .customerId(10L).status("募集中").build();
+        projectMapper.insert(allowedProject);
+        Project hiddenProject = Project.builder().projectName("T052 scope project B")
+                .customerId(11L).status("募集中").build();
+        projectMapper.insert(hiddenProject);
+        Proposal allowedProposal = new Proposal();
+        allowedProposal.setEngineerId(engineer.getId());
+        allowedProposal.setProjectId(allowedProject.getId());
+        allowedProposal.setStatus("結果待ち");
+        allowedProposal.setProposedBy(1L);
+        allowedProposal.setSourceOpportunityId(own.getId());
+        proposalMapper.insert(allowedProposal);
+        Proposal hiddenProposal = new Proposal();
+        hiddenProposal.setEngineerId(engineer.getId());
+        hiddenProposal.setProjectId(hiddenProject.getId());
+        hiddenProposal.setStatus("結果待ち");
+        hiddenProposal.setProposedBy(null);
+        hiddenProposal.setSourceOpportunityId(otherCustomerOpp.getId());
+        proposalMapper.insert(hiddenProposal);
+        when(dataScopeService.allowedProposalIds()).thenReturn(Set.of(allowedProposal.getId(), hiddenProposal.getId()));
+
         CrmKpiDto dto = crmKpiService.summarize(null, null);
-        assertEquals(2, dto.getForecast().getOpportunityCount());
+        // own商機はsource opportunity付き提案があるためforecastから除外し、未割当商機だけを残す。
+        assertEquals(1, dto.getForecast().getOpportunityCount());
         assertEquals(2, dto.getOwners().stream().mapToLong(CrmKpiDto.OwnerKpi::getLeadCount).sum());
+        assertEquals(1, dto.getForecast().getProposalCount(), "提案forecastはSQL scope内の商機だけを含む");
         assertEquals(2, opportunityService.listForScreen(null, null).size());
         assertTrue(crmScopeService.isOpportunityVisible(10L, null, java.time.LocalDate.now()));
         assertFalse(crmScopeService.isOpportunityVisible(10L, 2L, java.time.LocalDate.now()));

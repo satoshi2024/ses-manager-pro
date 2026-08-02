@@ -116,6 +116,17 @@ class ActionPermissionMatrixTest {
         assertEquals("crm.create", ActionPermissionResolver.resolve("POST", "/api/crm/leads"));
         assertEquals("crm.update", ActionPermissionResolver.resolve("PUT", "/api/crm/opportunities/1"));
         assertEquals("crm.delete", ActionPermissionResolver.resolve("DELETE", "/api/crm/leads/1"));
+        assertEquals("customer.view", ActionPermissionResolver.resolve("GET", "/api/customers/1/activities"));
+        assertEquals("customer.update", ActionPermissionResolver.resolve("PUT", "/api/customers/1/activities/2"));
+        assertEquals("crm.view", ActionPermissionResolver.resolve("GET", "/api/customers/1/contacts"));
+    }
+
+    @Test
+    void HRの既存活動導線はcustomer権限で維持されCRM専用導線だけ拒否される() {
+        Authentication hr = authenticate(9002L, "HR");
+        assertTrue(authorizationService.isAllowed(hr, "customer.view"));
+        assertTrue(authorizationService.isAllowed(hr, "customer.update"));
+        assertFalse(authorizationService.isAllowed(hr, "crm.view"));
     }
 
     @Test

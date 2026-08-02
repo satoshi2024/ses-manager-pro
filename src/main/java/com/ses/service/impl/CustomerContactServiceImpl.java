@@ -9,6 +9,7 @@ import com.ses.dto.customer.CustomerContactDto;
 import com.ses.dto.customer.CustomerContactSaveRequest;
 import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
+import com.ses.mapper.CustomerMapper;
 import com.ses.service.CustomerContactService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.CrmScopeService;
@@ -31,6 +32,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String PII_VIEW_ACTION = "customer.pii.view";
     private final CustomerContactMapper mapper;
+    private final CustomerMapper customerMapper;
     private final DataScopeService dataScopeService;
     private final com.ses.service.security.AuthorizationService authorizationService;
     @Autowired(required = false)
@@ -38,10 +40,12 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     @Autowired(required = false)
     private CrmScopeService crmScopeService;
 
-    public CustomerContactServiceImpl(CustomerContactMapper mapper, DataScopeService dataScopeService,
-                                     com.ses.service.security.AuthorizationService authorizationService,
-                                     Clock clock) {
+    public CustomerContactServiceImpl(CustomerContactMapper mapper, CustomerMapper customerMapper,
+                                      DataScopeService dataScopeService,
+                                      com.ses.service.security.AuthorizationService authorizationService,
+                                      Clock clock) {
         this.mapper = mapper;
+        this.customerMapper = customerMapper;
         this.dataScopeService = dataScopeService;
         this.authorizationService = authorizationService;
         this.clock = clock == null ? Clock.systemDefaultZone() : clock;
@@ -216,6 +220,9 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     private void lockCustomerContacts(Long customerId) {
+        if (customerMapper.selectByIdForUpdate(customerId) == null) {
+            throw BusinessException.of(404, "error.crm.customerNotFound");
+        }
         mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
                 .eq(CustomerContact::getCustomerId, customerId).orderByAsc(CustomerContact::getId).last("FOR UPDATE"));
     }

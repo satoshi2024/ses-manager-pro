@@ -227,8 +227,7 @@ public final class ActionPermissionResolver {
     }
 
     private static boolean isCrmCustomerPath(String uri) {
-        return uri.matches("/api/customers/\\d+/(contacts|timeline)(/.*)?")
-                || uri.matches("/api/customers/\\d+/activities(/.*)?");
+        return uri.matches("/api/customers/\\d+/(contacts|timeline)(/.*)?");
     }
 
     private static String action(String resource, String method) {

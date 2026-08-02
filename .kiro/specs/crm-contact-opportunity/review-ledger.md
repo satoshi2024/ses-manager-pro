@@ -243,7 +243,7 @@ F1の完了定義そのものがT050へ依存する点は Round 1 NOTE-7 のと�
 ### Rollback
 
 V73適用済みDBを戻す手順（**実行前に必ずフルダンプを取得する**）。V1/V6は変更していないため、
-戻すのはV73が作った物だけでよい。
+戻すのはV73/V74/V74.1が作った物とRepeatable補完履歴である。
 
 ```sql
 -- 1. 参照している側から外す（FKがあるためこの順序）
@@ -258,21 +258,34 @@ ALTER TABLE t_sales_activity
   DROP FOREIGN KEY fk_activity_assignee;
 ALTER TABLE t_sales_activity
   DROP COLUMN contact_id, DROP COLUMN opportunity_id, DROP COLUMN assignee_user_id;
+ALTER TABLE t_sales_activity DROP COLUMN version;
+
+ALTER TABLE t_mail_delivery
+  DROP INDEX idx_mail_delivery_contact,
+  DROP INDEX idx_mail_delivery_opportunity,
+  DROP COLUMN contact_id,
+  DROP COLUMN opportunity_id;
 
 -- 2. メニュー・権限（t_role_menu は m_menu へのFKで CASCADE 削除される）
 DELETE FROM m_menu WHERE menu_key IN ('crm-lead', 'crm-opportunity');
+DELETE FROM t_permission_group_action WHERE action_key = 'crm.*';
 
 -- 3. テーブル本体（t_opportunity が t_customer_contact より先）
 DROP TABLE IF EXISTS t_opportunity;
 DROP TABLE IF EXISTS t_lead;
 DROP TABLE IF EXISTS t_customer_contact;
 
--- 4. Flywayの履歴から V73 を消す（消さないと再適用されない）
+-- 4. Repeatable/V74.1/V74/V73の履歴を、旧artifactへ戻す場合だけ削除する。
+DELETE FROM flyway_schema_history WHERE script = 'R__crm_contact_reconciliation.sql';
+DELETE FROM flyway_schema_history WHERE version = '74.1';
+DELETE FROM flyway_schema_history WHERE version = '74';
 DELETE FROM flyway_schema_history WHERE version = '73';
 ```
 
 - 移行で作られた `t_customer_contact` の行は上記3で消えるが、**元データ `m_customer.contact_*` は
   V73が一切書き換えていない**ため、rollbackでの情報欠損は無い。
+- `V74.1`で補完したactivity version、mail link列、6列、legacy contact backfillも上記で対象に含める。
+  rollback後は旧artifactを起動する前にFlyway `validate`とschema差分確認を行う。
 - コード側（entity / mapper / test）は他から参照されていないため、revertのみで影響しない。
 
 ## T049: F2. opportunity状態/変換/forecast排他（task別完了記録）
@@ -370,3 +383,22 @@ P0-01 evidence: `4058d9b`（`R__crm_contact_reconciliation.sql`の余分な`END 
 定向実測（対応後）: compile PASS、`MigrationScriptIntegrityTest` 25/25、CRM KPI/Activity/Contact関連 10/0/0、Contact service 3/0/0、customer controller 3/0/0。`git diff --check` PASS。Docker fresh/legacy/partial/repair smoke、L4、browser Demoは未実施（環境不在）。
 
 Task別変更file: T050 = contact/customer API/service・PII test、T051 = opportunity filter/proposal導線/lead duplicate、T052 = KPI scope/helper、T053 = 本ledger・中央ledger・release gate記録。
+
+## Round 5 独立Review FAIL 対応（2026-08-02）
+
+Review packet: Base `8e5066a` / 実装Head `eb5adc4` / review時Head `bd3831d`。P1-01〜09、P2-01〜03を
+修正対象とし、V75（S07 approval）の予約を維持したままCRMのforward-fixを`V74_1__crm_review_forward_fix.sql`
+へ追加した。
+
+| ID | 対応 | 検証 | 状態 |
+|---|---|---|---|
+| CRM-R5-P1-01/02 | V74.1でlegacy contact backfill、Repeatable補完6列/index、activity versionを冪等補完。partial fixtureはFK→index→column順でcleanup | `FlywayLegacyV71MigrationSmokeTest` 1/1、`FlywayV73PartialRepairSmokeTest` 1/1、clean classpathで0 skipped | CLOSED |
+| CRM-R5-P1-03 | `list(asOf)`を閉区間の時点ビューとして固定し、退職後は空、DB履歴と退職日当日/前日は保持・表示 | `CustomerContactServiceIntegrationTest` | CLOSED |
+| CRM-R5-P1-04/05 | activitiesをCRM actionから分離してHRはDataScope継続。follow-up通知先をassignee優先、NULL時のみcreator fallback | `ActionPermissionMatrixTest`、`NotificationGenerateServiceTest` | CLOSED |
+| CRM-R5-P1-06 | `t_sales_activity.version`とexpectedVersion CASをupdate/complete/deleteへ追加。stale更新は409 | `SalesActivityApiControllerTest` | CLOSED |
+| CRM-R5-P1-07/08 | CRM表示ラベルを4言語message/enum mappingへ移し、opportunity modalの編集IDとproposal導線を保存済み行だけに限定 | `MessageBundleConsistencyTest` 4/4、Node `--check` 3/3。desktop/locale browser確認はrelease gate | 条件付きCLOSED |
+| CRM-R5-P1-09 | raw prefix SQL prefilterを除去し、NFKC/空白/電話記号をJava正規化比較へ到達させる | `LeadServiceIntegrationTest`（100件超 fixture） | CLOSED |
+| CRM-R5-P2-01/02/03 | KPI scopeを実H2 SQL fixtureで検証、初回primary作成前にcustomer親行をロック、rollbackへV74/V74.1/Repeatableと6列を追加 | `CrmKpiScopeIntegrationTest` 1/1、contact integration、migration/runbook/static check | CLOSED（browser rollback確認はrelease gate） |
+
+Round 5の自動検証は、定向回帰77/0/0、MySQL fresh/legacy/partial/repair 4/4、Node 3/3、compile、diff-checkでgreen。
+L4全量は20分timeoutで完了前に停止したため、全量greenとは判定しない。desktop/390px全role browser証拠と併せてrelease gateへ残す。

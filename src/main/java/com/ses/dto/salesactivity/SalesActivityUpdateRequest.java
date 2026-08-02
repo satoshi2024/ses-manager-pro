@@ -9,6 +9,8 @@ import java.time.LocalDate;
 
 @Data
 public class SalesActivityUpdateRequest {
+    @NotNull(message = "バージョンは必須です")
+    private Integer version;
     private Long contactId;
     private Long opportunityId;
     private Long assigneeUserId;

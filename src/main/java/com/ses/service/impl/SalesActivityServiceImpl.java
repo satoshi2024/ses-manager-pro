@@ -83,6 +83,9 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     public SalesActivity update(Long customerId, Long activityId, SalesActivityUpdateRequest request) {
         assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
+        if (request.getVersion() == null || !java.util.Objects.equals(request.getVersion(), activity.getVersion())) {
+            throw BusinessException.of(409, "error.salesActivity.concurrentModified");
+        }
         activity.setActivityType(request.getActivityType());
         activity.setActivityDate(request.getActivityDate());
         activity.setTitle(request.getTitle());
@@ -98,6 +101,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
         }
         UpdateWrapper<SalesActivity> update = new UpdateWrapper<SalesActivity>()
                 .eq("id", activityId).eq("customer_id", customerId)
+                .eq("version", activity.getVersion())
                 .set("contact_id", activity.getContactId())
                 .set("opportunity_id", activity.getOpportunityId())
                 .set("activity_type", activity.getActivityType())
@@ -107,25 +111,37 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
                 .set("next_action_date", activity.getNextActionDate())
                 .set("assignee_user_id", activity.getAssigneeUserId());
         if (request.getCompletedFlag() != null) update.set("completed_flag", activity.getCompletedFlag());
+        update.set("version", activity.getVersion() + 1);
         if (!update(update)) throw BusinessException.of(409, "error.salesActivity.concurrentModified");
-        return activity;
+        return getById(activityId);
     }
 
     @Override
     @Transactional
-    public void complete(Long customerId, Long activityId) {
+    public void complete(Long customerId, Long activityId, Integer version) {
         assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
-        activity.setCompletedFlag(1);
-        updateById(activity);
+        if (version == null || !java.util.Objects.equals(version, activity.getVersion())) {
+            throw BusinessException.of(409, "error.salesActivity.concurrentModified");
+        }
+        UpdateWrapper<SalesActivity> update = new UpdateWrapper<SalesActivity>()
+                .eq("id", activityId).eq("customer_id", customerId).eq("version", version)
+                .set("completed_flag", 1).set("version", version + 1);
+        if (!update(update)) throw BusinessException.of(409, "error.salesActivity.concurrentModified");
     }
 
     @Override
     @Transactional
-    public void delete(Long customerId, Long activityId) {
+    public void delete(Long customerId, Long activityId, Integer version) {
         assertCustomerScope(customerId);
-        getOwnedOrThrow(customerId, activityId);
-        removeById(activityId);
+        SalesActivity activity = getOwnedOrThrow(customerId, activityId);
+        if (version == null || !java.util.Objects.equals(version, activity.getVersion())) {
+            throw BusinessException.of(409, "error.salesActivity.concurrentModified");
+        }
+        UpdateWrapper<SalesActivity> update = new UpdateWrapper<SalesActivity>()
+                .eq("id", activityId).eq("customer_id", customerId).eq("version", version)
+                .set("deleted_flag", 1).set("version", version + 1);
+        if (!update(update)) throw BusinessException.of(409, "error.salesActivity.concurrentModified");
     }
 
     private void applyRelations(SalesActivity activity, Long customerId, Long contactId, Long opportunityId) {
@@ -146,7 +162,10 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     }
 
     private void assertCustomerScope(Long customerId) {
-        if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, java.time.LocalDate.now());
-        else dataScopeService.assertAllowedCustomer(customerId);
+        if (crmScopeService != null && crmScopeService.canUseCrm()) {
+            crmScopeService.assertAllowedCustomer(customerId, java.time.LocalDate.now());
+        } else {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
     }
 }

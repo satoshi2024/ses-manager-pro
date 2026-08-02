@@ -3,6 +3,7 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import lombok.*;
 
@@ -35,6 +36,10 @@ public class SalesActivity extends BaseEntity {
     private Integer completedFlag;
 
     private Long assigneeUserId;
+
+    @Version
+    @Builder.Default
+    private Integer version = 1;
 
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;

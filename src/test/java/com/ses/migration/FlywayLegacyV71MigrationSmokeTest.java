@@ -15,12 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 公開済みlatest（V71 = BP master/発注コンプライアンス）まで適用済みの既存DBへ、
- * V73（CRM複数担当者・商機管理）だけを追加適用できることを検証する legacy smoke。
+     * V73/V74/V74.1（CRM複数担当者・商機管理とRound 5 forward fix）を追加適用できることを検証する legacy smoke。
  *
  * <p>platform-invariants §4.2 の「freshの成功をlegacyの合格とみなさない」に対応する。
  * V73はCRMの定義をV1統合baselineへ書き戻さない設計なので、
  * 「V1が作る（fresh）」「V73が作る（legacy）」の分岐が無く、両経路が同一スキーマへ収束する。
- * 本testはlegacy側で実際にV73だけが作れることと、既存contactのbackfillが効くことを固定する。
+     * 本testはlegacy側でV73後の補完がRepeatable履歴に依存せず、既存contactのbackfillまで効くことを固定する。
  *
  * <p>Dockerが無い環境ではTestcontainersの規約によりskipする。
  */
@@ -72,8 +72,15 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertColumnExists(statement, "t_sales_activity", "contact_id");
             assertColumnExists(statement, "t_sales_activity", "opportunity_id");
             assertColumnExists(statement, "t_sales_activity", "assignee_user_id");
+            assertColumnExists(statement, "t_sales_activity", "version");
             assertColumnExists(statement, "t_project", "source_opportunity_id");
             assertColumnExists(statement, "t_quotation", "source_opportunity_id");
+            assertColumnExists(statement, "t_opportunity", "stage_changed_at");
+            assertColumnExists(statement, "t_opportunity", "probability_override_reason");
+            assertColumnExists(statement, "t_lead", "source_cost");
+            assertColumnExists(statement, "t_proposal", "source_opportunity_id");
+            assertColumnExists(statement, "t_mail_delivery", "contact_id");
+            assertColumnExists(statement, "t_mail_delivery", "opportunity_id");
 
             // FK集合が fresh と一致すること（Round 1 の CRM-R1-P1-02）
             assertConstraintExists(statement, "t_customer_contact", "fk_customer_contact_customer");
@@ -92,6 +99,8 @@ class FlywayLegacyV71MigrationSmokeTest {
             assertIndexExists(statement, "t_project", "uk_project_source_opportunity");
             assertIndexExists(statement, "t_quotation", "uk_quotation_source_opportunity");
             assertIndexExists(statement, "t_customer_contact", "uk_customer_contact_active_primary");
+            assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_contact");
+            assertIndexExists(statement, "t_mail_delivery", "idx_mail_delivery_opportunity");
 
             // backfill: 既存顧客の担当者が件数・値とも一致して移行される
             assertEquals(countCustomersWithContact(statement), countMigratedContacts(statement),
@@ -129,18 +138,25 @@ class FlywayLegacyV71MigrationSmokeTest {
             }
         }
 
-        // 3) 再適用しても壊れない（Flywayは再実行しないが、V73自体が冪等であることの確認）
+        // 3) validateと二回目migrateで壊れない（V74.1が補完の正規経路であることも確認）
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .load()
                 .validate();
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
     }
 
     private long countCustomersWithContact(Statement statement) throws Exception {
         try (ResultSet rs = statement.executeQuery(
-                "SELECT COUNT(*) FROM m_customer WHERE contact_person IS NOT NULL"
-                        + " AND contact_person <> '' AND deleted_flag = 0")) {
+                "SELECT COUNT(*) FROM m_customer WHERE deleted_flag = 0"
+                        + " AND (NULLIF(TRIM(contact_person), '') IS NOT NULL"
+                        + " OR NULLIF(TRIM(contact_email), '') IS NOT NULL"
+                        + " OR NULLIF(TRIM(contact_phone), '') IS NOT NULL)")) {
             assertTrue(rs.next());
             return rs.getLong(1);
         }

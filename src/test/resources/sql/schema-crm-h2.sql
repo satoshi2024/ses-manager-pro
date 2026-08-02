@@ -117,6 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_opportunity_next_action ON t_opportunity(next_act
 ALTER TABLE t_sales_activity ADD COLUMN IF NOT EXISTS contact_id BIGINT;
 ALTER TABLE t_sales_activity ADD COLUMN IF NOT EXISTS opportunity_id BIGINT;
 ALTER TABLE t_sales_activity ADD COLUMN IF NOT EXISTS assignee_user_id BIGINT;
+ALTER TABLE t_sales_activity ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_activity_contact ON t_sales_activity(contact_id);
 CREATE INDEX IF NOT EXISTS idx_activity_opportunity ON t_sales_activity(opportunity_id);
 CREATE INDEX IF NOT EXISTS idx_activity_assignee ON t_sales_activity(assignee_user_id);
