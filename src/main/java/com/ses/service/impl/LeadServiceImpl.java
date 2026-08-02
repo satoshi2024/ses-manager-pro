@@ -58,6 +58,15 @@ public class LeadServiceImpl implements LeadService {
     }
 
     @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<Lead> page(String status, String companyName, long current, long size) {
+        QueryWrapper<Lead> query = new QueryWrapper<>();
+        if (StringUtils.hasText(status)) query.eq("status", status);
+        if (StringUtils.hasText(companyName)) query.like("company_name", companyName.trim());
+        applyCrmScope(query);
+        return leadMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current <= 0 ? 1 : current, Math.min(Math.max(size, 1), 1000)), query.orderByDesc("id"));
+    }
+
+    @Override
     public Lead getVisible(Long id) {
         Lead lead = leadMapper.selectById(id);
         if (lead == null || !isVisible(lead)) throw BusinessException.of(404, "error.crm.leadNotFound");
@@ -71,6 +80,10 @@ public class LeadServiceImpl implements LeadService {
         apply(lead, request);
         if (!StringUtils.hasText(lead.getStatus())) lead.setStatus(STATUS_NEW);
         assertKnownStatus(lead.getStatus());
+        if (STATUS_CONVERTED.equals(lead.getStatus()) || STATUS_DISCARDED.equals(lead.getStatus())) {
+            throw BusinessException.of(400, "error.crm.leadInitialStatusInvalid");
+        }
+        assertOwnerScope(lead.getOwnerUserId());
         if (leadMapper.insert(lead) != 1) throw BusinessException.of("error.crm.leadSaveFailed");
         return leadMapper.selectById(lead.getId());
     }
@@ -88,6 +101,7 @@ public class LeadServiceImpl implements LeadService {
             assertStatusTransition(current.getStatus(), request.getStatus());
         }
         apply(current, request);
+        assertOwnerScope(current.getOwnerUserId());
         UpdateWrapper<Lead> update = new UpdateWrapper<Lead>()
                 .eq("id", id).eq("version", current.getVersion())
                 .set("company_name", current.getCompanyName())
@@ -201,6 +215,12 @@ public class LeadServiceImpl implements LeadService {
         return new LeadConversionDto(id, customer.getId(), opportunity.getId());
     }
 
+    private void assertOwnerScope(Long ownerUserId) {
+        if (crmScopeService != null && !crmScopeService.isOwnerAllowed(ownerUserId, LocalDate.now())) {
+            throw BusinessException.of(404, "error.crm.ownerNotFound");
+        }
+    }
+
     private void apply(Lead lead, LeadSaveRequest request) {
         lead.setCompanyName(request.getCompanyName());
         lead.setContactName(request.getContactName());
@@ -233,12 +253,7 @@ public class LeadServiceImpl implements LeadService {
 
     private boolean isVisible(Lead lead) {
         if (crmScopeService != null) {
-            if (!crmScopeService.canUseCrm()) return false;
-            if (crmScopeService.hasFullAccess()) return true;
-            if (lead.getConvertedCustomerId() != null
-                    && crmScopeService.isCustomerAllowed(lead.getConvertedCustomerId(), LocalDate.now())) return true;
-            Long owner = lead.getOwnerUserId();
-            return owner != null && crmScopeService.allowedOwnerIds(LocalDate.now()).contains(owner);
+            return crmScopeService.isLeadVisible(lead.getOwnerUserId(), lead.getConvertedCustomerId(), LocalDate.now());
         }
         if (!dataScopeService.isSalesDataScoped()) return true;
         Long userId = SecurityUtils.currentUserId();
@@ -247,35 +262,7 @@ public class LeadServiceImpl implements LeadService {
 
     private void applyCrmScope(QueryWrapper<Lead> query) {
         if (crmScopeService != null) {
-            if (!crmScopeService.canUseCrm()) {
-                query.eq("id", -1L);
-                return;
-            }
-            if (crmScopeService.hasFullAccess()) return;
-            java.util.Set<Long> customers = crmScopeService.allowedCustomerIds(LocalDate.now());
-            java.util.Set<Long> owners = crmScopeService.allowedOwnerIds(LocalDate.now());
-            Long current = SecurityUtils.currentUserId();
-            boolean unassignedVisible = "営業".equals(SecurityUtils.currentRole());
-            if (customers.isEmpty() && owners.isEmpty() && !unassignedVisible) {
-                query.eq("id", -1L);
-                return;
-            }
-            query.and(w -> {
-                boolean hasBranch = false;
-                if (!customers.isEmpty()) {
-                    w.in("converted_customer_id", customers);
-                    hasBranch = true;
-                }
-                if (!owners.isEmpty()) {
-                    if (hasBranch) w.or();
-                    w.in("owner_user_id", owners);
-                    hasBranch = true;
-                }
-                if (unassignedVisible) {
-                    if (hasBranch) w.or();
-                    w.isNull("owner_user_id");
-                }
-            });
+            crmScopeService.applyLeadScope(query, LocalDate.now());
             return;
         }
         if (!dataScopeService.isSalesDataScoped()) return;

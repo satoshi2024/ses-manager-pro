@@ -34,10 +34,12 @@ public class OpportunityApiController {
     }
 
     @GetMapping
-    public ApiResult<java.util.List<OpportunityListDto>> list(
+    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto>> list(
             @RequestParam(required = false) String stage,
-            @RequestParam(required = false) Long ownerUserId) {
-        return ApiResult.success(opportunityService.listForScreen(stage, ownerUserId));
+            @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "50") long size) {
+        return ApiResult.success(opportunityService.pageForScreen(stage, ownerUserId, current, size));
     }
 
     @GetMapping("/kpi")
@@ -68,7 +70,9 @@ public class OpportunityApiController {
         if (opportunity == null) {
             throw BusinessException.of(404, "error.opportunity.notFound");
         }
-        crmScopeService.assertAllowedCustomer(opportunity.getCustomerId(), java.time.LocalDate.now());
+        if (!crmScopeService.isOpportunityVisible(opportunity.getCustomerId(), opportunity.getOwnerUserId(), java.time.LocalDate.now())) {
+            throw BusinessException.of(404, "error.opportunity.notFound");
+        }
         return ApiResult.success(opportunity);
     }
 }

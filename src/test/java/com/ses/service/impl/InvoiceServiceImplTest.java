@@ -598,12 +598,12 @@ public class InvoiceServiceImplTest {
         when(customerContactService.resolveRecipientEmail(5L, 88L, LocalDate.now()))
                 .thenReturn("current@example.com");
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
-        when(mailService.sendWithTemplate(any(), any(), any(), any()))
+        when(mailService.sendWithTemplate(any(), any(), any(), any(), any(), any()))
                 .thenReturn(new com.ses.dto.mail.MailDispatchResult(2L, "QUEUED"));
 
         var result = invoiceService.sendReminder(invoiceId, 7L, 88L);
         assertEquals("QUEUED", result.getStatus());
-        verify(mailService).sendWithTemplate(eq(7L), any(), eq("current@example.com"), eq(invoiceId));
+        verify(mailService).sendWithTemplate(eq(7L), any(), eq("current@example.com"), eq(invoiceId), eq(88L), isNull());
     }
 
     @Test

@@ -105,7 +105,7 @@
         <div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content bg-card text-light border-dark">
             <div class="modal-header border-dark"><h5 class="modal-title" th:text="#{customer.contacts.form.title}">担当者</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
             <div class="modal-body"><form id="contact-form"><input type="hidden" id="contact-id"><input type="hidden" id="contact-version">
-                <div class="row g-3"><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.name}">氏名</label><input id="contact-name" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.nameKana}">氏名カナ</label><input id="contact-name-kana" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.department}">部署</label><input id="contact-department" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.position}">役職</label><input id="contact-position" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.email}">メール</label><input id="contact-email" type="email" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.phone}">電話</label><input id="contact-phone" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validFrom}">有効開始日</label><input id="contact-valid-from" type="date" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validTo}">有効終了日</label><input id="contact-valid-to" type="date" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4 form-check mt-5 ms-2"><input id="contact-primary" type="checkbox" class="form-check-input"><label class="form-check-label" for="contact-primary" th:text="#{customer.contacts.primary}">主担当</label></div></div>
+                <div class="row g-3"><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.name}">氏名</label><input id="contact-name" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.nameKana}">氏名カナ</label><input id="contact-name-kana" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.department}">部署</label><input id="contact-department" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.position}">役職</label><input id="contact-position" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.roles}">役割</label><input id="contact-roles" class="form-control bg-dark text-light border-secondary" placeholder="決裁者,調達"></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.email}">メール</label><input id="contact-email" type="email" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-6"><label class="form-label" th:text="#{customer.contacts.phone}">電話</label><input id="contact-phone" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validFrom}">有効開始日</label><input id="contact-valid-from" type="date" class="form-control bg-dark text-light border-secondary" required></div><div class="col-md-4"><label class="form-label" th:text="#{customer.contacts.validTo}">有効終了日</label><input id="contact-valid-to" type="date" class="form-control bg-dark text-light border-secondary"></div><div class="col-md-4 form-check mt-5 ms-2"><input id="contact-primary" type="checkbox" class="form-check-input"><label class="form-check-label" for="contact-primary" th:text="#{customer.contacts.primary}">主担当</label></div></div>
             </form></div><div class="modal-footer border-dark"><button class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button><button class="btn btn-info" onclick="saveContact()" th:text="#{common.save}">保存</button></div>
         </div></div>
     </div>
@@ -162,6 +162,11 @@
                             <label class="form-label text-muted small" th:text="#{customer.activity.nextDate}">次回アクション予定日</label>
                             <input type="date" id="act-next-date" class="form-control form-control-dark bg-secondary text-white border-dark">
                         </div>
+                        <div class="row g-2">
+                            <div class="col-md-4"><label class="form-label text-muted small" th:text="#{customer.contacts.name}">担当者</label><select id="act-contact" class="form-select bg-secondary text-white border-dark"><option value="">-</option></select></div>
+                            <div class="col-md-4"><label class="form-label text-muted small" th:text="#{crm.opportunity.name}">商機</label><select id="act-opportunity" class="form-select bg-secondary text-white border-dark"><option value="">-</option></select></div>
+                            <div class="col-md-4"><label class="form-label text-muted small" th:text="#{crm.opportunity.owner}">担当営業</label><select id="act-assignee" class="form-select bg-secondary text-white border-dark"><option value="">-</option></select></div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer border-dark bg-dark">
@@ -181,11 +186,11 @@
         document.getElementById('activityModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('activity-form').reset();
             document.getElementById('act-id').value = '';
-            document.getElementById('act-date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('act-date').value = SES.util.getLocalDateString();
         });
         document.getElementById('activityModal').addEventListener('show.bs.modal', function () {
             if (!document.getElementById('act-id').value) {
-                document.getElementById('act-date').value = new Date().toISOString().split('T')[0];
+                document.getElementById('act-date').value = SES.util.getLocalDateString();
             }
         });
     </script>

@@ -27,7 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
@@ -46,6 +48,12 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private static final String STAGE_WON = "受注";
 
     /** フロントの表示順と一致させる状態遷移の唯一の権威。 */
+    private static final Map<String, String> ROLLBACK_STAGES = Map.of(
+            "要件確認", "見込",
+            "提案準備", "要件確認",
+            "見積提出", "提案準備",
+            "交渉", "見積提出");
+
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
             "見込", Set.of("要件確認"),
             "要件確認", Set.of("提案準備", "失注"),
@@ -60,6 +68,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private final QuotationService quotationService;
     private final DataScopeService dataScopeService;
     private final CustomerMapper customerMapper;
+    @Autowired(required = false)
+    private Clock clock = Clock.systemDefaultZone();
     @Autowired(required = false)
     private CrmScopeService crmScopeService;
 
@@ -93,7 +103,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         Opportunity current = loadVisibleForUpdate(id);
         assertExpectedVersion(current, expectedVersion);
 
-        if (!ALLOWED_TRANSITIONS.getOrDefault(current.getStage(), Set.of()).contains(newStage)) {
+        if (!ALLOWED_TRANSITIONS.getOrDefault(current.getStage(), Set.of()).contains(newStage)
+                && !Objects.equals(ROLLBACK_STAGES.get(current.getStage()), newStage)) {
             throw BusinessException.of("error.opportunity.statusTransitionInvalid", current.getStage(), newStage);
         }
         if (STAGE_LOST.equals(newStage) && !StringUtils.hasText(lostReason)) {
@@ -101,7 +112,11 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         }
 
         current.setStage(newStage);
-        current.setStageChangedAt(java.time.LocalDateTime.now());
+        current.setStageChangedAt(LocalDateTime.now(clock));
+        if (!StringUtils.hasText(current.getProbabilityOverrideReason())) {
+            current.setProbability(defaultProbability(newStage));
+            current.setProbabilityOverrideReason(null);
+        }
         if (STAGE_LOST.equals(newStage)) {
             current.setLostReason(lostReason.trim());
         }
@@ -137,11 +152,9 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
                 .orderByAsc("expected_start_month")
                 .orderByAsc("id");
         if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
-            Set<Long> allowedCustomerIds = crmScopeService.allowedCustomerIds(LocalDate.now());
-            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
-                return java.util.Collections.emptyList();
-            }
-            query.in("customer_id", allowedCustomerIds);
+            crmScopeService.applyOpportunityScope(query, LocalDate.now(clock));
+        } else if (crmScopeService != null && !crmScopeService.canUseCrm()) {
+            query.eq("id", -1L);
         } else if (crmScopeService == null && dataScopeService.isScoped()) {
             Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
             if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
@@ -155,11 +168,14 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         QueryWrapper<Opportunity> query = new QueryWrapper<>();
         if (StringUtils.hasText(stage)) query.eq("stage", stage);
         if (ownerUserId != null) query.eq("owner_user_id", ownerUserId);
-        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
-            Set<Long> allowedCustomerIds = crmScopeService.allowedCustomerIds(LocalDate.now());
-            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
-            query.in("customer_id", allowedCustomerIds);
-        } else if (crmScopeService == null && dataScopeService.isScoped()) {
+        if (ownerUserId != null && crmScopeService != null
+                && !crmScopeService.isOwnerAllowed(ownerUserId, LocalDate.now(clock))) {
+            return java.util.Collections.emptyList();
+        }
+        if (crmScopeService != null) {
+            if (!crmScopeService.canUseCrm()) return java.util.Collections.emptyList();
+            crmScopeService.applyOpportunityScope(query, LocalDate.now(clock));
+        } else if (dataScopeService.isScoped()) {
             Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
             if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return java.util.Collections.emptyList();
             query.in("customer_id", allowedCustomerIds);
@@ -177,10 +193,39 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     }
 
     @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto> pageForScreen(String stage, Long ownerUserId, long current, long size) {
+        QueryWrapper<Opportunity> query = new QueryWrapper<>();
+        if (StringUtils.hasText(stage)) query.eq("stage", stage);
+        if (ownerUserId != null) query.eq("owner_user_id", ownerUserId);
+        if (ownerUserId != null && crmScopeService != null
+                && !crmScopeService.isOwnerAllowed(ownerUserId, LocalDate.now(clock))) {
+            return new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size);
+        }
+        if (crmScopeService != null) {
+            if (!crmScopeService.canUseCrm()) return new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size);
+            crmScopeService.applyOpportunityScope(query, LocalDate.now(clock));
+        } else if (dataScopeService.isScoped()) {
+            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) return new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, size);
+            query.in("customer_id", allowedCustomerIds);
+        }
+        long safeCurrent = current <= 0 ? 1 : current;
+        long safeSize = Math.min(Math.max(size, 1), 1000);
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Opportunity> source =
+                baseMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(safeCurrent, safeSize), query.orderByAsc("stage").orderByDesc("id"));
+        Set<Long> customerIds = source.getRecords().stream().map(Opportunity::getCustomerId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        Map<Long, Customer> customers = customerIds.isEmpty() ? Map.of() : customerMapper.selectBatchIds(customerIds).stream().collect(java.util.stream.Collectors.toMap(Customer::getId, c -> c, (a, b) -> a));
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<OpportunityListDto> result = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(source.getCurrent(), source.getSize(), source.getTotal());
+        result.setRecords(source.getRecords().stream().map(o -> OpportunityListDto.from(o, customers.containsKey(o.getCustomerId()) ? customers.get(o.getCustomerId()).getCompanyName() : null)).toList());
+        return result;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public Opportunity createBasic(OpportunitySaveRequest request) {
         assertCustomerScope(request.getCustomerId());
-        validateProbability(request);
+        validateProbability(request, STAGE_PROSPECT);
+        assertOwnerScope(request.getOwnerUserId());
         Opportunity opportunity = new Opportunity();
         applyBasic(opportunity, request);
         opportunity.setStage(STAGE_PROSPECT);
@@ -201,7 +246,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (request.getVersion() == null || !Objects.equals(current.getVersion(), request.getVersion())) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
         }
-        validateProbability(request);
+        validateProbability(request, current.getStage());
+        assertOwnerScope(request.getOwnerUserId());
         if (request.getCustomerId() != null && !Objects.equals(current.getCustomerId(), request.getCustomerId())) {
             assertCustomerScope(request.getCustomerId());
         }
@@ -258,17 +304,36 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     }
 
     private void assertCustomerScope(Long customerId) {
-        if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, LocalDate.now());
+        if (crmScopeService != null) crmScopeService.assertAllowedCustomer(customerId, LocalDate.now(clock));
         else dataScopeService.assertAllowedCustomer(customerId);
     }
 
-    private void validateProbability(OpportunitySaveRequest request) {
+    private void validateProbability(OpportunitySaveRequest request, String stage) {
+        int stageDefault = defaultProbability(stage);
         if (request.getProbability() != null && (request.getProbability() < 0 || request.getProbability() > 100)) {
             throw BusinessException.of(400, "error.opportunity.probabilityInvalid");
         }
-        if (request.getProbability() != null && request.getProbability() != 20
+        if (request.getProbability() != null && request.getProbability() != stageDefault
                 && !StringUtils.hasText(request.getProbabilityOverrideReason())) {
             throw BusinessException.of(400, "error.opportunity.probabilityOverrideReasonRequired");
+        }
+    }
+
+    private int defaultProbability(String stage) {
+        return switch (stage) {
+            case "見込" -> 20;
+            case "要件確認" -> 30;
+            case "提案準備" -> 40;
+            case "見積提出" -> 60;
+            case "交渉" -> 80;
+            case "受注" -> 100;
+            default -> 0;
+        };
+    }
+
+    private void assertOwnerScope(Long ownerUserId) {
+        if (crmScopeService != null && !crmScopeService.isOwnerAllowed(ownerUserId, LocalDate.now(clock))) {
+            throw BusinessException.of(404, "error.crm.ownerNotFound");
         }
     }
 
@@ -345,7 +410,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
             throw BusinessException.of("error.opportunity.conversion.unitPriceRequired");
         }
         Quotation quotation = new Quotation();
-        quotation.setQuotationNo(quotationService.generateQuotationNo(LocalDate.now()));
+        quotation.setQuotationNo(quotationService.generateQuotationNo(LocalDate.now(clock)));
         quotation.setCustomerId(opportunity.getCustomerId());
         quotation.setProjectId(projectId);
         quotation.setTitle(opportunity.getTitle());

@@ -5,11 +5,13 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.dto.crm.CrmKpiDto;
 import com.ses.entity.Lead;
 import com.ses.entity.Opportunity;
+import com.ses.entity.Project;
 import com.ses.entity.Proposal;
 import com.ses.entity.SalesActivity;
 import com.ses.entity.SysUser;
 import com.ses.mapper.LeadMapper;
 import com.ses.mapper.OpportunityMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.SalesActivityMapper;
 import com.ses.mapper.SysUserMapper;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -46,17 +49,18 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     private static final Set<String> PROPOSAL_OPEN = Set.of("書類選考中", "一次面接", "二次面接", "結果待ち");
     private final LeadMapper leadMapper;
     private final OpportunityMapper opportunityMapper;
+    private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
     private final ProposalMapper proposalMapper;
     private final SysUserMapper sysUserMapper;
     private final DataScopeService dataScopeService;
     private final SystemConfigService systemConfigService;
-    @Autowired(required = false)
-    private CrmScopeService crmScopeService;
+    private final CrmScopeService crmScopeService;
+    private final Clock clock;
 
     @Override
     public CrmKpiDto summarize(Long requestedOwnerId, String requestedStage) {
-        Long effectiveOwner = effectiveOwner(requestedOwnerId);
+        Long effectiveOwner = requestedOwnerId;
         List<Opportunity> opportunities = visibleOpportunities(effectiveOwner, requestedStage);
         List<Lead> leads = visibleLeads(effectiveOwner);
         Map<Long, List<SalesActivity>> activities = activitiesByOpportunity(opportunities);
@@ -71,53 +75,47 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     }
 
     private List<Opportunity> visibleOpportunities(Long ownerId, String stage) {
-        LambdaQueryWrapper<Opportunity> query = new LambdaQueryWrapper<>();
-        if (StringUtilsCompat.hasText(stage)) query.eq(Opportunity::getStage, stage);
-        if (ownerId != null) query.eq(Opportunity::getOwnerUserId, ownerId);
-        else if (isSalesScoped()) {
-            Long current = SecurityUtils.currentUserId();
-            if (current == null) query.isNull(Opportunity::getOwnerUserId);
-            else query.and(w -> w.eq(Opportunity::getOwnerUserId, current).or().isNull(Opportunity::getOwnerUserId));
+        if (crmScopeService != null && !crmScopeService.canUseCrm()) return Collections.emptyList();
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Opportunity> query = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        if (StringUtilsCompat.hasText(stage)) query.eq("stage", stage);
+        if (ownerId != null) {
+            if (crmScopeService != null && !crmScopeService.isOwnerAllowed(ownerId, LocalDate.now(clock))) {
+                return Collections.emptyList();
+            }
+            query.eq("owner_user_id", ownerId);
         }
-        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
-            Set<Long> allowed = crmScopeService.allowedCustomerIds(LocalDate.now());
-            if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
-            query.in(Opportunity::getCustomerId, allowed);
-        } else if (crmScopeService == null && dataScopeService.isScoped()) {
+        if (crmScopeService != null) {
+            crmScopeService.applyOpportunityScope(query, LocalDate.now(clock));
+        } else if (dataScopeService.isScoped()) {
             Set<Long> allowed = dataScopeService.allowedCustomerIds();
             if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
-            query.in(Opportunity::getCustomerId, allowed);
+            query.in("customer_id", allowed);
         }
-        return opportunityMapper.selectList(query.orderByAsc(Opportunity::getStage).orderByDesc(Opportunity::getId).last("LIMIT 1000"));
+        return opportunityMapper.selectList(query.orderByAsc("stage").orderByDesc("id"));
     }
 
     private List<Lead> visibleLeads(Long ownerId) {
-        LambdaQueryWrapper<Lead> query = new LambdaQueryWrapper<>();
-        if (ownerId != null) query.eq(Lead::getOwnerUserId, ownerId);
-        else if (isSalesScoped()) {
-            Long current = SecurityUtils.currentUserId();
-            if (current == null) query.isNull(Lead::getOwnerUserId);
-            else query.and(w -> w.eq(Lead::getOwnerUserId, current).or().isNull(Lead::getOwnerUserId));
-        }
-        if (crmScopeService != null && !crmScopeService.hasFullAccess()) {
-            Set<Long> allowedCustomers = crmScopeService.allowedCustomerIds(LocalDate.now());
-            Set<Long> allowedOwners = crmScopeService.allowedOwnerIds(LocalDate.now());
-            if (allowedCustomers.isEmpty() && allowedOwners.isEmpty() && !"営業".equals(SecurityUtils.currentRole())) {
+        if (crmScopeService != null && !crmScopeService.canUseCrm()) return Collections.emptyList();
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Lead> query = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        if (ownerId != null) {
+            if (crmScopeService != null && !crmScopeService.isOwnerAllowed(ownerId, LocalDate.now(clock))) {
                 return Collections.emptyList();
             }
-            query.and(w -> {
-                boolean branch = false;
-                if (!allowedCustomers.isEmpty()) { w.in(Lead::getConvertedCustomerId, allowedCustomers); branch = true; }
-                if (!allowedOwners.isEmpty()) { if (branch) w.or(); w.in(Lead::getOwnerUserId, allowedOwners); branch = true; }
-                if ("営業".equals(SecurityUtils.currentRole())) { if (branch) w.or(); w.isNull(Lead::getOwnerUserId); }
-            });
+            query.eq("owner_user_id", ownerId);
         }
-        return leadMapper.selectList(query.orderByDesc(Lead::getId).last("LIMIT 1000"));
+        if (crmScopeService != null) {
+            crmScopeService.applyLeadScope(query, LocalDate.now(clock));
+        } else if (dataScopeService.isScoped()) {
+            Long current = SecurityUtils.currentUserId();
+            if (current == null) query.isNull("owner_user_id");
+            else query.and(w -> w.eq("owner_user_id", current).or().isNull("owner_user_id"));
+        }
+        return leadMapper.selectList(query.orderByDesc("id"));
     }
 
     private List<CrmKpiDto.StageKpi> buildStages(List<Opportunity> opportunities,
                                                   Map<Long, List<SalesActivity>> activities) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         List<CrmKpiDto.StageKpi> result = new ArrayList<>();
         for (String stage : STAGES) {
             List<Opportunity> rows = opportunities.stream().filter(o -> Objects.equals(stage, o.getStage())).toList();
@@ -195,21 +193,59 @@ public class CrmKpiServiceImpl implements CrmKpiService {
 
     private CrmKpiDto.ForecastKpi buildForecast(List<Opportunity> opportunities) {
         CrmKpiDto.ForecastKpi forecast = new CrmKpiDto.ForecastKpi();
-        BigDecimal opportunityAmount = opportunities.stream().filter(this::isOpenUnconverted).map(this::weightedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<Proposal> proposals = visibleProposalForecast();
+        Set<Long> proposalOpportunityIds = proposals.stream().map(Proposal::getSourceOpportunityId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        BigDecimal opportunityAmount = opportunities.stream().filter(this::isOpenUnconverted)
+                .filter(o -> !proposalOpportunityIds.contains(o.getId()))
+                .map(this::weightedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
         forecast.setOpportunityAmount(opportunityAmount);
-        forecast.setOpportunityCount(opportunities.stream().filter(this::isOpenUnconverted).count());
-        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>()
-                .in(Proposal::getStatus, PROPOSAL_OPEN)
-                .isNull(Proposal::getSourceOpportunityId);
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedProposalIds();
-            if (allowed == null || allowed.isEmpty()) { forecast.setProposalAmount(BigDecimal.ZERO); forecast.setProposalCount(0); return forecast; }
-            query.in(Proposal::getId, allowed);
-        }
-        List<Proposal> proposals = proposalMapper.selectList(query);
+        forecast.setOpportunityCount(opportunities.stream().filter(this::isOpenUnconverted)
+                .filter(o -> !proposalOpportunityIds.contains(o.getId())).count());
         forecast.setProposalAmount(proposals.stream().map(this::weightedProposalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
         forecast.setProposalCount(proposals.size());
         return forecast;
+    }
+
+    private List<Proposal> visibleProposalForecast() {
+        if (crmScopeService != null && !crmScopeService.canUseCrm()) return Collections.emptyList();
+        LambdaQueryWrapper<Proposal> query = new LambdaQueryWrapper<Proposal>()
+                .in(Proposal::getStatus, PROPOSAL_OPEN);
+        if (dataScopeService.isScoped()) {
+            Set<Long> allowed = dataScopeService.allowedProposalIds();
+            if (allowed == null || allowed.isEmpty()) return Collections.emptyList();
+            query.in(Proposal::getId, allowed);
+        }
+        List<Proposal> proposals = proposalMapper.selectList(query);
+        if (crmScopeService == null || crmScopeService.hasFullAccess() || proposals.isEmpty()) {
+            return proposals;
+        }
+
+        LocalDate asOf = LocalDate.now(clock);
+        Set<Long> sourceOpportunityIds = proposals.stream()
+                .map(Proposal::getSourceOpportunityId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, Opportunity> opportunities = sourceOpportunityIds.isEmpty() ? Map.of()
+                : opportunityMapper.selectBatchIds(sourceOpportunityIds)
+                .stream().collect(Collectors.toMap(Opportunity::getId, Function.identity(), (a, b) -> a));
+        Set<Long> projectIds = proposals.stream()
+                .map(Proposal::getProjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, Project> projects = projectIds.isEmpty() ? Map.of()
+                : projectMapper.selectBatchIds(projectIds)
+                .stream().collect(Collectors.toMap(Project::getId, Function.identity(), (a, b) -> a));
+
+        return proposals.stream().filter(proposal -> {
+            if (proposal.getSourceOpportunityId() != null) {
+                Opportunity source = opportunities.get(proposal.getSourceOpportunityId());
+                return source != null && crmScopeService.isOpportunityVisible(
+                        source.getCustomerId(), source.getOwnerUserId(), asOf);
+            }
+            Project project = projects.get(proposal.getProjectId());
+            return project != null && crmScopeService.isCustomerAllowed(project.getCustomerId(), asOf);
+        }).toList();
     }
 
     private BigDecimal weightedProposalAmount(Proposal proposal) {
@@ -245,7 +281,7 @@ public class CrmKpiServiceImpl implements CrmKpiService {
     private long averageDays(List<Opportunity> rows, LocalDate today, boolean stageUpdated) {
         if (rows.isEmpty()) return 0;
         return Math.round(rows.stream().mapToLong(o -> daysSince(stageUpdated
-                ? (o.getStageChangedAt() != null ? o.getStageChangedAt() : o.getCreatedAt())
+                ? (o.getStageChangedAt() != null ? o.getStageChangedAt() : o.getUpdatedAt())
                 : o.getCreatedAt(), today)).average().orElse(0));
     }
 

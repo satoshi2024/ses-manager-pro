@@ -5,7 +5,10 @@ import com.ses.dto.crm.LeadConversionDto;
 import com.ses.dto.crm.LeadConversionRequest;
 import com.ses.dto.crm.LeadSaveRequest;
 import com.ses.entity.Lead;
+import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.LeadService;
+import com.ses.service.security.CrmScopeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -18,11 +21,30 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LeadApiController {
     private final LeadService leadService;
+    private final SysUserMapper sysUserMapper;
+    private final CrmScopeService crmScopeService;
 
     @GetMapping
-    public ApiResult<List<Lead>> list(@RequestParam(required = false) String status,
-                                     @RequestParam(required = false) String companyName) {
-        return ApiResult.success(leadService.list(status, companyName));
+    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<Lead>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String companyName,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "50") long size) {
+        return ApiResult.success(leadService.page(status, companyName, current, size));
+    }
+
+    @GetMapping("/assignees")
+    public ApiResult<List<com.ses.dto.common.OptionDto>> assignees() {
+        var query = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getRole, "営業").eq(SysUser::getStatus, 1).orderByAsc(SysUser::getId);
+        if (!crmScopeService.hasFullAccess()) {
+            var ids = crmScopeService.allowedOwnerIds(java.time.LocalDate.now());
+            if (ids.isEmpty()) return ApiResult.success(List.of());
+            query.in(SysUser::getId, ids);
+        }
+        return ApiResult.success(sysUserMapper.selectList(query).stream()
+                .map(u -> new com.ses.dto.common.OptionDto(u.getId(), u.getRealName()))
+                .toList());
     }
 
     @GetMapping("/duplicates")

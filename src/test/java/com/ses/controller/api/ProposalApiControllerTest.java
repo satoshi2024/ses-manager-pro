@@ -7,6 +7,7 @@ import com.ses.service.EngineerService;
 import com.ses.service.MailService;
 import com.ses.service.ProjectService;
 import com.ses.service.ProposalService;
+import com.ses.service.OpportunityService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -40,6 +41,8 @@ class ProposalApiControllerTest {
     @MockBean
     private ProposalService proposalService;
     @MockBean
+    private OpportunityService opportunityService;
+    @MockBean
     private EngineerService engineerService;
     @MockBean
     private ProjectService projectService;
@@ -51,6 +54,8 @@ class ProposalApiControllerTest {
     private com.ses.service.security.DataScopeService dataScopeService;
     @MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
+    @MockBean
+    private com.ses.service.security.CrmScopeService crmScopeService;
     @MockBean
     private com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
     @MockBean
