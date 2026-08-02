@@ -344,15 +344,15 @@ Base `f582f9e`（CRM既存完了記録）から、Round 3のP0/P1/P2指摘を本
 
 ## Round 4 独立Review FAIL 対応（2026-08-02〜）
 
-Review packet: Base `8e5066a`（P0修正merge後の`origin/main`） / 対応前Head `8e5066a` / 対応commitは完了時に固定。対象はS08のP1-01〜P1-04、P2-01〜P2-11とdesign/test matrixの改訂。
+Review packet: Base `8e5066a`（P0修正merge後の`origin/main`） / 対応前Head `8e5066a` / 対応commit `eb5adc4`。対象はS08のP1-01〜P1-04、P2-01〜P2-11とdesign/test matrixの改訂。
 
 | ID | 対応 | 変更file | 検証 | 状態 |
 |---|---|---|---|---|
 | CRM-R4-P1-01 | V75がapprovalへ予約済みのためV73/V74を編集せず、R__のlegacy-repair DDL例外と6点同期表をdesignへ固定 | `design.md`、V73/V74は不変 | migration/H2/entity/smokeの同期を台帳化 | CLOSED（逸脱根拠固定） |
 | CRM-R4-P1-02 | Round 4 packet、現行Head、P0修正証拠、Docker未実施skipを本節と中央台帳へ反映 | `review-ledger.md`、中央`spec-execution-ledger.md` | Docker L4/fresh/legacy/partial/repairはrelease gateとしてOPEN | OPEN（Docker証拠待ち） |
-| CRM-R4-P1-03 | 役割を5値checkboxへ変更し、serviceでJSON配列へ正規化・allow-list検証。MySQL JSON往復fixtureを追加 | contact service/API/template/JS、4言語messages、`FlywayMigrationSmokeTest` | H2 service + 実MySQL smoke | CLOSED（Docker smokeはOPEN） |
-| CRM-R4-P1-04 | PII平文を`customer.pii.view` actionへ移し、画面/CSV共通DTOとlegacy customer出力を同じ認可判定へ統一 | contact/customer service/API、design | 実service経由のrole/action別mask testを追加予定 | OPEN（テスト/Docker待ち） |
-| CRM-R4-P2-01〜11 | timeline scope、KPI口径/SQL scope、商機→提案導線、顧客select/filter、活動fallback、asOf、重複候補、宛先role、status allow-listを修正 | CRM scope/KPI/contact/activity/lead/opportunity、CRM templates/JS | 定向test・Node check・compile | OPEN（定向test待ち） |
+| CRM-R4-P1-03 | 役割を5値checkboxへ変更し、serviceでJSON配列へ正規化・allow-list検証。MySQL JSON往復fixtureを追加 | contact service/API/template/JS、4言語messages、`FlywayMigrationSmokeTest` | Contact service 3/3、MySQL fixtureはDocker待ち | CLOSED（実MySQL smokeはOPEN） |
+| CRM-R4-P1-04 | PII平文を`customer.pii.view` actionへ移し、画面/CSV共通DTOとlegacy customer出力を同じ認可判定へ統一 | contact/customer service/API、design | 実service経由のmask test 3/3、画面/CSVは同一DTO経路 | CLOSED（browser DemoはOPEN） |
+| CRM-R4-P2-01〜11 | timeline scope、KPI口径/SQL scope、商機→提案導線、顧客select/filter、活動fallback、asOf、重複候補、宛先role、status allow-listを修正 | CRM scope/KPI/contact/activity/lead/opportunity、CRM templates/JS | CRM定向10/10、compile PASS、Node check 3/3 | CLOSED（P2-08のbrowser rollback/390pxはowner: release QA、期限: 2026-08-15でDEFERRED） |
 
 Review packet skip list: 本環境はDocker/browser未実施。Testcontainersのfresh/legacy/partial/repair/L4は0 skipped実測が必要。desktop/390px全roleのdrag/reload/back/二重click Demoもrelease前hard gateとしてOPEN。
 
