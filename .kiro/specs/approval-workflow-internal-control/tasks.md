@@ -8,7 +8,7 @@
 > 本specは「状態機械 × 期間 × 金額 × 権限」の四重交差であり、S02と同じ事故構造を持つ。
 > **design.md §6.2の金額帯境界を実装前に確定すること。実装中に決めない。**
 >
-> **Migration**: 本specの予約番号は **V75**。BP(V70/V71)とCRM(V73/V74)のmerge後に着手する。V72は永久欠番。
+> **Migration**: 本specの予約番号は **V78**。BP(V70/V71)とCRM(V73/V74)のmerge後に着手する。V72は永久欠番。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [x] 0. G7と対象操作inventory
@@ -58,7 +58,7 @@
   - **Objective**: 対象操作が直接確定されず申請draftと差分snapshotになる。
     routeが対象種別・組織・金額帯・申請者roleから1件に決まり、決まらない場合は申請が受け付けられず管理者へ通知される。
     申請者自身は自分の申請を承認できない。
-  - **実装ガイダンス**: **V75**/V1/H2(`sql/schema-approval-h2.sql`)/MySQL smoke、engine core/CAS。
+  - **実装ガイダンス**: **V78**/V1/H2(`sql/schema-approval-h2.sql`)/MySQL smoke、engine core/CAS。
     **route snapshotは申請時に確定し以後不変**（design §6.1）。
     金額帯はmin/max ともに**inclusive**、判定に`amount_snapshot`（税込）を使う。
     `amount_snapshot IS NULL`を0円として金額帯へ当てない。負の金額は**絶対値**で判定（design §6.2）。
@@ -98,7 +98,8 @@
   - **自動検証**: `ApprovalAdministrationServiceTest`（version/snapshot、preview、代理期間開始/終了、監査項目、逆期間、不正USER値）、`RouteResolverServiceTest`（金額境界、未設定、自己承認、組織/帯幅/version優先、無効USER）各全件PASS。関連`ApprovalEngineServiceTest`、`ApprovalPageRenderTest`、`ApprovalUiContractTest`、`MessageBundleConsistencyTest`もPASS。Node `--check`と`git diff --check`もPASS。
   - **Demo/未検証事項**: MockMvc/Thymeleafと定向テストで管理画面・snapshot・代理期間・監査表示を確認した。実ブラウザのdesktop/390px目視、MySQL/Docker fresh migration smoke、mvn全量は未実施。
   - **テスト要件**: L2〜L3。進行中申請のroute snapshot不変、申請後の代理期間開始/終了、解決不能拒否、本人/代理のslot二重承認防止をカバー。
-- [~] B1. 通知/SLA/escalation
+- [ ] B1. 通知/SLA/escalation
+  - **状態**: 未着手（継続。Round 2 指摘 P1-03/P1-07 の engine 修正後に着手する）。
   - **Objective**: 申請・差戻し・承認・却下・期限超過が**対象本人だけ**に届く。
     stepごとのSLA期限を超えると上位責任者へescalateされ、同じ超過で二重に通知されない。
   - **実装ガイダンス**: recipient限定、冪等scheduler、`NotificationLinks`定数を使う。
@@ -107,8 +108,8 @@
     **同一超過で通知が重複しないこと**、宛先が対象本人に限定されること、`sla_hours IS NULL`が対象外であること。
   - **Demo**: overdueを上位責任者へ通知。schedulerを2回起動して通知が1件のみを確認。
 
-- [x] M. 対象画面統合/回帰
-  - **状態**: 継続（2026-08-03）。対象画面の申請化と定向回帰は完了したが、全量テストにrelease gate外の既知失敗が残り、実ブラウザ通し確認と承認基盤の未解決事項もあるため完了扱いにしない。
+- [ ] M. 対象画面統合/回帰
+  - **状態**: 継続（Round 2 未解決。PASS扱い禁止。P1-01/03/06/07/08 修正完了後に再測定する）。
   - **Objective**: 対象5業務の画面が「実行」から「申請」へ変わり、申請者単独では確定できない。
     二重click/retryでも業務操作は1回。既存の5業務の機能が壊れていない。
   - **実装済み**: 見積提出/受注、契約稼動化/単価改定、請求送付/取消、BP支払確定、月次締め/reopenを
@@ -119,7 +120,7 @@
     failures 0 / errors 0 / skipped 0で確認した。adapterは既存service委譲、月次締め最終承認者、registry idempotencyを確認した。
   - **全量実測**: `mvn test`は`1410 tests / failures 2 / errors 0 / skipped 0`（2026-08-03）。
     初回の対象API fixture不足による39 errorsはWebMvcTestへregistry mockを追加して解消した。残る2 failuresはM実装由来ではない既知問題で、
-    (1) `SpecDispatchConsistencyTest`のS07=V75/S09=V76/S10=V77と実在migrationの予約番号衝突、
+    (1) 旧版で記録された`SpecDispatchConsistencyTest`のS07=V75/S09=V76/S10=V77予約衝突は、Round 2でS07=V78/S09=V80/S10=V81へ更新済みである。
     (2) `MobileResponsiveLayoutTest`の既存`.tmp-ui-scale-r3`系変更に関連する`quick-add-label` markup不足である。
   - **MySQL smoke**: Docker/Testcontainersが利用可能で、fresh/legacy/upgrade/partial-repair/repair/concurrentの8経路を実行し、
     `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、

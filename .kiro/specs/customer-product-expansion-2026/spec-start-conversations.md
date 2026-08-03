@@ -420,8 +420,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V75（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59とV72は永久欠番。CRMがV73に加え権限seedのV74を使用したため、本specの予約はV72ではなくV75である。Flywayは`out-of-order`無効のため、V74適用済みDBへ後からV72/V73を足すと`FlywayValidateException`になる）
-- 先行条件: BP master V70/V71とCRM V73が完了・merge済み。
+- Migration: V78（着手時にmerge済み`db/migration`の最新を再確認する。V75は既存approval DDL、V76はapproval menu seed、V77は`current_step_started_at`追加であり変更不可。S07の追加migrationはV78とし、前の欠番は埋めない。V59とV72は永久欠番）
+- 先行条件: BP master V70/V71とCRM V73/V74が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
@@ -558,7 +558,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V76（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V80（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: approval-workflow-internal-control完了・merge済み。
 - Decision gate: 承認状態機械と帳票archive interfaceが固定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -628,7 +628,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V77（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V81（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2の公式様式field mappingと法務受入責任者が確定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -699,7 +699,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V78（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V82（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G6（雇用勤怠の正＝本システム）が正式決定済み。
 - 時間外計算の値は `overtime-rules.md` で**確定済み**である。社労士確認と法人別36協定・就業規則の突合は
@@ -778,7 +778,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V79（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V83（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -848,7 +848,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V80（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V84（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -922,7 +922,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V81（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V85（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -993,7 +993,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V82（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V86（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1063,7 +1063,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V83（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V87（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1133,7 +1133,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 4
-- Migration: V84（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V88（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: CRM、proposal、staffing、outcome sourceが完了・merge済み。
 - Decision gate: G10はmock/rule継続または実provider/DPA/PII許可を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

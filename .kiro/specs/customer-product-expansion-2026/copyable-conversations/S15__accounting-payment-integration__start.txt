@@ -13,7 +13,7 @@
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V82（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V86（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

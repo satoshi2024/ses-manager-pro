@@ -6,14 +6,14 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V79**。CRM(V71)のmerge後に着手する。
+> **Migration**: 本specの予約番号は **V83**。dispatch(V81)とattendance(V82)の両方が完了・merge済み後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] F1. position/allocation/scenario DDL
   - **Objective**: 案件に役割・必須skill・単価帯・稼働率を持つ複数positionを登録でき、
     要員の期間別allocationを計画できる。同一期間の配賦率合計が100%を超える配置は拒否され、
     例外は理由と承認が必須になる。scenarioは実データを変更しない。
-  - **実装ガイダンス**: **V79**/V1/H2(`sql/schema-staffing-h2.sql`)/MySQL smoke、状態/区間/競合service。
+  - **実装ガイダンス**: **V83**/V1/H2(`sql/schema-staffing-h2.sql`)/MySQL smoke、状態/区間/競合service。
     区間は`start_date`/`end_date`とも**inclusive**、open endは計画window末（design §5.2）。
     `position_id IS NULL`は**社内/待機**を表す業務値（design §5.1）。未割当と混同しない。
     **過配賦の判定は日単位**。月平均で判定しない。

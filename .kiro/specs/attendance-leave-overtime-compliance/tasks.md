@@ -10,7 +10,7 @@
 > 社労士確認待ちではない。実装は同書の値でそのまま進める。確認結果がずれた場合は同書§4の手順で変更する
 > （多くは`/system-config`の値変更だけで済む）。**閾値をコードへ直書きしないこと。**
 >
-> **Migration**: 本specの予約番号は **V78**。order(V76)のmerge後、dispatch(V77)と並行可。
+> **Migration**: 本specの予約番号は **V82**。order(V80)のmerge後、dispatch(V81)と並行可。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. source matrixと法人別36協定の棚卸し
@@ -33,11 +33,11 @@
 - [ ] F1. calendar/attendance/month/leave/agreement DDL
   - **Objective**: 社員の日別出退勤・休憩・勤務区分を分単位で登録でき、法人/組織/個人別の勤務カレンダーを持てる。
     月次状態が入力中→提出済→承認済→締め済で進み、締め済みは管理承認なしに変更できない。
-  - **実装ガイダンス**: **V78**/V1/H2(`sql/schema-attendance-h2.sql`)/MySQL smoke、
+  - **実装ガイダンス**: **V82**/V1/H2(`sql/schema-attendance-h2.sql`)/MySQL smoke、
     **分の整数モデル**（浮動小数を使わない、design §1）、scope。
     `(source, source_external_id)`にUNIQUE。
     `scheduled_minutes IS NULL`（所定日でない）と`= 0`（所定日だが0分）を区別する（design §5.1）。
-    **同じV78で`overtime.*`のconfigをseedする**（`overtime-rules.md`§1/§2のconfig key全件）。
+    **同じV82で`overtime.*`のconfigをseedする**（`overtime-rules.md`§1/§2のconfig key全件）。
     seedは`INSERT IGNORE`で既存値を壊さない（V56の書き方に合わせる）。
     `m_overtime_agreement.valid_from`は**月初のみ許可**する制約を入れる（`overtime-rules.md`§2 #7）。
   - **テスト要件**: L1〜L3。期間/unique、締め済みの変更拒否、休暇との整合、

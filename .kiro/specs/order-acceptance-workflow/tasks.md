@@ -6,13 +6,13 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V76**。approval(V71)のmerge後に着手する。
+> **Migration**: 本specの予約番号は **V80**。approval(V75)のmerge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] F1. 注文/明細/検収DDL
   - **Objective**: 顧客の注文書を注文番号・顧客PO番号・期間・金額・支払条件付きで登録でき、
     1要員1明細で複数要員の注文を表現できる。契約×月の検収が1件だけ作られる。
-  - **実装ガイダンス**: **V76**/V1/H2(`sql/schema-order-acceptance-h2.sql`)/MySQL smoke、
+  - **実装ガイダンス**: **V80**/V1/H2(`sql/schema-order-acceptance-h2.sql`)/MySQL smoke、
     entity/mapper/採番/状態。`t_contract.order_line_id`にUNIQUE、`t_acceptance`に`UNIQUE(contract_id, work_month)`。
     **`t_contract.acceptance_required`は`NOT NULL DEFAULT TRUE`**（design §5.1）。
     NULLを許すと「未設定＝検収不要」に化けてR3.3が破れる。

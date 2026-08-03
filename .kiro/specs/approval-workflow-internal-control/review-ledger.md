@@ -1,6 +1,31 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-現行判定: **IN PROGRESS（M実装・定向回帰完了、L4全量は既知の非M失敗2件。実ブラウザ確認とrelease gate未解決事項が残るためPASSではない。独立Review未実施）**
+現行判定: **FAIL（Round 2 / P0=0 / P1=7 / P2=10 / NOTE=2。Round 2 差し戻し対応中。2026-08-03）**
+
+## Issue Register（Round 2 — P1/P2 全件）
+
+| ID | 分類 | 概要 | 状態 |
+|---|---|---|---|
+| S07-R2-P1-01 | P1 | 差戻し→再申請→承認が silent failure（round_no 未追加により UNIQUE 衝突） | 対応中 |
+| S07-R2-P1-03 | P1 | ROLE step quorum が全員要求になっており any-of ではない | 対応中 |
+| S07-R2-P1-04 | P1 | 申請者 role 条件が design.md に記載なし（逸脱明記が必要） | design.md 更新済み |
+| S07-R2-P1-05 | P1 | V76/V77 が S09/S10 の予約番号を占有して `SpecDispatchConsistencyTest` FAIL | **対応済み（S07=V78、S09=V80、S10=V81へ文書統一。定向8件PASS）** |
+| S07-R2-P1-06 | P1 | 却下/取下げ後の再申請で UNIQUE(idempotency_key) 違反が発生 | 対応中 |
+| S07-R2-P1-07 | P1 | target_version 再検証未実装（秒精度問題 + conflict 遷移なし） | 対応中 |
+| S07-R2-P1-08 | P1 | ApprovalViewServiceImpl が全件 load 後 Java 側 filter（SQL 境界違反） | 対応中 |
+| S07-R2-P2-06 | P2 | 締め済み月の一律適用方針が decision table に未記載（F1 着手前から申し送り） | design.md 更新済み |
+| S07-R2-P2-09 | P2 | tasks.md の `- [~]` / `- [x]` が不正な記法 | 修正済み |
+| S07-R2-P2-11 | P2 | 口座 field の mask が `bp-company.view` 判定で実質無効 | 対応中 |
+| S07-R2-P2-12 | P2 | Issue Register が review-ledger.md に未記載 | 本行で対応 |
+
+### 各 Issue の再現条件（実測）
+
+- **P1-01**: `returned` 状態の申請を `resubmit()` → `approve()` すると `t_approval_action` の UNIQUE `(request_id, step_no, approver_slot_user_id)` が前 round の action と衝突する。`round_no` を UNIQUE キーに含めれば解消。
+- **P1-03**: `ApprovalEngineServiceImpl.approve()` L167 が `approvedCount < currentStep.approverUserIds().size()` で判定。ROLE 解決で管理者が3名の場合 `approvedCount < 3` となり1名承認では step が進まない。`requiredCount=1` の any-of quorum に変更が必要。
+- **P1-05**: 旧版の`SpecDispatchConsistencyTest.予約Migration番号が実在スクリプトと衝突しないこと`で、実在V76(`approval_menu`)・V77(`approval_sla_step_start`)とS09(V76予約)/S10(V77予約)が衝突した。Round 2でdesign/tasks/派工資料を正としてS07=V78、S09=V80、S10=V81以降へ統一し、定向8件PASSで解消。
+- **P1-06**: reject/withdraw 後の `idempotency_key` が UNIQUE 制約のままのため、同一 key での再 insert が `DuplicateKeyException` になる。終端到達時に `SET idempotency_key = NULL` でクリアすることで解消。
+- **P1-07**: `ApprovalTargetAdapter` に `currentVersion()` がなく `target_version` が常に申請時値のまま変わらない。対象4テーブルへ `version INT`（`@Version`）追加と `currentVersion()` 実装が必要。
+- **P1-08**: `ApprovalViewServiceImpl.listPendingForUser()` が `selectList()` 全件取得。`t_approval_participant` 追加と JOIN クエリへの変更が必要。
 
 ## M. 対象画面統合/回帰 実行記録（2026-08-03）
 
