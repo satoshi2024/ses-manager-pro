@@ -512,12 +512,32 @@ CREATE TABLE m_menu (
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- @Sqlで共有H2 schemaを再構築した後も、画面レンダリングに必要な管理者メニューを保持する。
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
+  ('dashboard', 'ダッシュボード', '/dashboard', '/api/dashboard', 1),
+  ('engineer',  '要員管理',       '/engineer',  '/api/engineers', 2),
+  ('customer',  '顧客管理',       '/customer',  '/api/customers', 3),
+  ('project',   '案件管理',       '/project',   '/api/projects', 4),
+  ('proposal',  '提案管理',       '/proposal',  '/api/proposals', 5),
+  ('contract',  '契約管理',       '/contract',  '/api/contracts', 6),
+  ('ai',        'AI機能',         '/ai',        '/api/ai', 7),
+  ('email',     'メールテンプレート', '/email/template', '/api/email-templates', 8),
+  ('user',      'ユーザー管理',   '/user',       '/api/users', 9);
+
 DROP TABLE IF EXISTS t_role_menu CASCADE;
 CREATE TABLE t_role_menu (
   id       BIGINT AUTO_INCREMENT PRIMARY KEY,
   role     VARCHAR(50) NOT NULL,
   menu_id  BIGINT NOT NULL
 );
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '管理者', id FROM m_menu;
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM m_menu m
+CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
+WHERE m.menu_key <> 'user';
 
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (

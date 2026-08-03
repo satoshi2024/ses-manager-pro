@@ -322,3 +322,47 @@ READINESS
 - **全量failure**: `MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`の`quick-add-label`契約。clean Head基準の1420件実測と同じ既知failureであり、B1/M追加テストを含むcurrent作業木では総数が1432件となった。`MobileResponsiveLayoutTest`単独は23 / 0 / 0 / 0 PASSだが、全量failureをPASSへ読み替えない。
 - **skip内訳**: 12 test cases / 10 report classes。`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。Docker未起動が原因で、CI契約のzero skippedは未達。
 - **未検証のrelease gate**: 実MySQLでのV79 fresh/legacy/upgrade/partial-repair/repair/concurrent smoke、commit前例外時の実DB rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、実ブラウザdesktop/390pxの5業務通しは未実施。したがってB1/Mのcheckboxは未完了のまま維持し、今回の定向PASSだけでrelease PASSとは判定しない。
+
+## Round 3追跡続行（2026-08-03、RG-3/B1）
+
+### RG-3 Mobile全量failureの原因特定とfixture修正
+
+- Surefireの`alphabetical`順を維持した固定prefix（`SesManagerApplicationTests`、common/config/controller/crm/dto/mapper/migration/scripts/service各prefix、web前半）へ`EngineerFollowupServiceTest`だけを追加し、`MobileResponsiveLayoutTest`と同時実行した。結果は**1392 tests / failures 3 / errors 0 / skipped 12**。内訳はMobileの`quick-add-label` failure 1件と、通常`powershell.exe`のExecutionPolicyに起因する`VerifyLikeCiPowerShellCompatibilityTest` 2件である。
+- 汚染元の`EngineerFollowupServiceTest`は`@Sql("/sql/engineer-schema-h2.sql")`で`m_menu`/`t_role_menu`をDROP/CREATEしていたが、メニュー行を投入していなかった。`GlobalControllerAdvice`の管理者向け`allowedMenus`は`MenuCacheService`の`m_menu`を読むため、後続Mobileのquick-add markupが消える共有H2状態汚染を特定した。
+- `src/test/resources/sql/engineer-schema-h2.sql`へV2相当の9メニューと管理者・営業・HR・マネージャーのrole mappingを追加した。`MobileResponsiveLayoutTest`とUI assertは変更していない。
+- 修正後、`EngineerFollowupServiceTest`→`MobileResponsiveLayoutTest`を直列実行し、**26 tests / failures 0 / errors 0 / skipped 0 PASS**。これはfixture修正の定向回帰であり、L4全量のzero failure/zero skippedを意味しない。
+
+### B1残要件とscheduler Demo相当
+
+- `ApprovalNotificationSlaTest` 6件で、期限直前/ちょうど/直後、同一超過の重複抑止、対象本人以外への宛先限定、`sla_hours IS NULL`の対象外、round 1→2のREQUESTED/RETURNED/SLA dedupe分離を確認した。
+- `NotificationOutboxSchedulerIntegrationTest` 1件を追加し、Webhook未設定のSYSTEM通知をoutboxへ1件投入して、実Spring beanの`NotificationOutboxScheduler.dispatchPending()`を2回起動した。実測は1回目のみdue行1件を処理し、2回目はdue対象なし。同一dedupe keyはDB上**1行のみ、`SENT`、`attempt_count=1`**となった。
+- `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`NotificationOutboxSchedulerIntegrationTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`の8クラスを再実行し、**47 tests / failures 0 / errors 0 / skipped 0 PASS**。
+- 残るB1 release gateは、実MySQLでのV79 fresh/legacy/rollback/lock、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackである。Docker daemon・DB接続情報がないため未検証とし、B1 checkboxは`[ ]`のまま維持する。
+
+### 現時点の判定
+
+- RG-3の既知Mobile failureは、汚染元fixtureを修正し、定向prefixでは解消した。L4全量の再測定、Docker依存skip解消、実MySQL/実ブラウザは別gateとして残る。
+- B1の定向要件とscheduler二重起動Demo相当はPASS。ただし実環境gate未達のため、B1/Mを完了扱い・release PASS扱いにはしない。V75〜V78は変更していない。
+
+## CI run証跡（2026-08-03、run `30790999682`）
+
+- Workflow `CI` のpush run。Headは`a33a6e9b1e1f8a973ccb45c59e5a1a38805cda8d`、URLは<https://github.com/satoshi2024/ses-manager-pro/actions/runs/30790999682>、結論は`failure`。
+- Docker検証stepは成功した。ログは`Docker Engine 28.0.4 / API 1.48`で、TestcontainersもDocker server `28.0.4`へ接続している。したがってこのCI runではDocker依存testはskipされず、実MySQL経路まで到達した。
+- `FlywayMigrationSmokeTest`は2件実行・failures 1・errors 0・skipped 0。ログ上、fresh側は77 migrationを適用してschema version `v78`へ到達した。一方、`FlywayMigrationSmokeTest.java:564`の`V78legacy申請は終端済みならparticipantをbackfillし多名旧snapshotの進行中申請は停止する()`で、終端fixtureの`participant_role='applicant'`件数が`expected: <1> but was: <3>`となった。これはV78 legacy participant backfill検証の実MySQL failureであり、RG-1のPASS証拠ではない。V75〜V78は変更しない。
+- `MobileResponsiveLayoutTest`は23件実行・failures 1・errors 0・skipped 0。`MobileResponsiveLayoutTest.java:148`の`quick-add-label` assertionで失敗し、同runのログでは`m_menu`取得件数が0だった。これはfixture修正前のHead（`a33a6e9`）に対するCI結果であり、current作業木の`EngineerFollowupServiceTest` fixture修正およびV79未commit変更は含まれない。したがってRG-3定向回帰の26件PASSを無効化する証拠ではないが、CI全量PASSの証拠にもならない。
+- 最終集計は`Tests run: 1420, Failures: 2, Errors: 0, Skipped: 0`、`BUILD FAILURE`。`Ensure no tests were skipped` stepは前段のtest failureにより実行されていない。
+- 判定: CIはDocker/Testcontainers到達性の証拠を提供したが、V78 legacy smoke failureとMobile全量failureがあるためRG-1/RG-3のrelease PASSには使えない。current作業木のL4再測定、実ブラウザ、ローカルDB接続（RG-4）は別途未達のまま確認する。B1/M checkboxは未完了を維持する。
+
+## 最終L4再測定とrelease gate確認（2026-08-03、fixture修正後のcurrent作業木）
+
+- `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`を実行した。Nodeは`v24.18.0`でJS構文チェックを実行可能、Docker daemonはローカルで利用不可と再確認した。
+- 内部の`mvn -B clean test`は**1433 tests / failures 0 / errors 0 / skipped 12**、Maven本体は`BUILD SUCCESS`。script全体は、CI契約と同じskip検出でDocker依存の12 test cases（10 report classes）を検出したためexit 1となった。
+- skipは`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。したがってL4はfailure 0まで到達したが、CI契約のzero skippedは未達である。
+- RG-3: `EngineerFollowupServiceTest`のH2 fixtureへV2相当メニュー9行とrole mappingを復元した後の全量でfailure 0となり、Mobileの`quick-add-label` failureはcurrent作業木では解消した。fixture修正後の`EngineerFollowupServiceTest`→`MobileResponsiveLayoutTest`直列回帰も26 / 0 / 0 / 0 PASS。Mobileのassert/UIは変更していない。
+- RG-1: current環境のDocker daemonが利用不可でV79を含む実MySQL smokeは未実施。CI run `30790999682`はDocker/Testcontainers到達後にV78 legacy participant検証（expected 1 / actual 3）でfailureとなったため、実MySQL gateのPASS証拠ではない。
+- RG-2: Playwright/Selenium/WebDriver等のbrowser通し経路とChrome/Edge/Firefox実行ファイルが環境にないため、desktop/390pxの5業務browser Demoは未検証。
+- RG-4: `mysql` CLIなし、`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`未設定。`localhost:3306`へのTCP接続のみ確認済みで、認証・DB名・`flyway_schema_history`照会は未実施。V78適用状況は未確認のまま。
+- B1/M: 定向・scheduler二重起動Demo相当とL4 failure 0は確認できたが、実MySQL、複数JVM競合、実Webhook、commit前例外時の実DB rollback、browser Demo、zero skippedが未達のため、`tasks.md`のB1/M checkboxは`[ ]`を維持し、release PASSとは判定しない。
+- 最終差分ゲート: `git status --short --untracked-files=all`は台帳・tasks・H2 fixtureの変更とschedulerテスト新規ファイルの4件のみ。`git diff --check`はexit 0。V75/V76/V77/V78の`git diff --name-only`は空。commit/pushは実施していない。
+
+- **HEAD/commit補足**: 最終ゲート時の実HEADは`b380a5a1bbf13e5cf0f61168e429bfafe467cc58`（親`a33a6e9`）で、commit日時は2026-08-03 17:24:50 JST、`origin/main`/`origin/HEAD`も同じcommitを指していた。これは本継続のテスト・台帳追記開始時点ですでに存在した履歴であり、本継続中にcommit/pushコマンドは実行していない。既存commitの巻き戻しや追加commitは行わない。従来の`Head a33a6e9`記録はその時点の履歴として保持し、本節のHEADを最終ゲート時点の正とする。
