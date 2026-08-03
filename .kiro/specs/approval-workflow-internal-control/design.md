@@ -20,8 +20,9 @@ payload/diffはPII最小化し、対象全entityをserializeしない。adapter�
 
 V75は既存の承認DDL 5テーブル、V76は既存の承認menu seed、V77は既存の
 `current_step_started_at`追加であり、いずれも変更しない。S07が追加で使用するmigrationは
-**V78の1本だけ**とする。V79以降はS09以降の予約とし、S09〜S17はそれぞれ
-V80〜V88へ繰り上げる（前の欠番は埋めない）。
+**V78の1本だけ**とする。**V79は現在未使用の欠番として保持し、S09以降の予約には割り当てない。**
+S09〜S17はそれぞれV80〜V88へ繰り上げる（既存の欠番も埋めない）。S07が追加migrationを
+要する場合に限りV79をS07の追加分として再割当し、その場合のみS09以降の予約を再度繰り上げる。
 
 V78は次の変更を同一migrationで行う。V75の`t_approval_action`には`round_no`が存在しないため、
 UNIQUEキーの張替えに必要なaction側の`round_no`も追加する。`t_contract`はV1に`version`列が
@@ -39,8 +40,9 @@ ALTER TABLE t_approval_action
 ALTER TABLE t_approval_action
   ADD COLUMN slot_index INT NOT NULL DEFAULT 0 AFTER step_no;
 ALTER TABLE t_approval_action DROP KEY uk_approval_action_slot;
+-- slot_indexは記録用の通常列。1人1slotを構造的に保証するためUNIQUEには含めない
 ALTER TABLE t_approval_action ADD UNIQUE KEY uk_approval_action_slot
-  (request_id, round_no, step_no, slot_index, approver_slot_user_id);
+  (request_id, round_no, step_no, approver_slot_user_id);
 
 -- (C) 承認一覧のSQL境界
 CREATE TABLE t_approval_participant (
@@ -176,21 +178,50 @@ system migration以外はengine経由のみ。既存API互換が必要なら同U
 含める。
 
 ```sql
-SELECT DISTINCT r.*
+SELECT r.*
 FROM t_approval_request r
-  JOIN t_approval_participant p
-    ON p.request_id = r.id
-   AND p.round_no = r.round_no
-   AND p.user_id = :userId
 WHERE r.deleted_flag = 0
+  AND (
+    EXISTS (
+      SELECT 1
+      FROM t_approval_participant p
+      WHERE p.request_id = r.id
+        AND p.round_no = r.round_no
+        AND p.user_id = :userId
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM t_approval_participant p
+        JOIN t_approval_delegation d
+          ON d.from_user_id = p.user_id
+      WHERE p.request_id = r.id
+        AND p.round_no = r.round_no
+        AND p.participant_role = 'approver'
+        AND d.to_user_id = :userId
+        AND d.deleted_flag = 0
+        AND d.valid_from <= :today
+        AND (d.valid_to IS NULL OR d.valid_to >= :today)
+        AND (
+          d.request_types_json IS NULL
+          OR <d.request_types_json が r.request_type を含む>
+        )
+    )
+  )
   AND <view 条件 (status フィルタ等)>
 ORDER BY r.requested_at DESC
 ```
 
+代理者の分岐はparticipantのapprover行と有効期間をSQL側で判定し、`request_types_json`の種別
+限定も**ページング前のSQL側で適用する**。`request_types_json IS NULL`は全種別を意味し、NULLで
+ない場合は`r.request_type`が配列に含まれる場合だけ代理可視とする。包含判定はMySQL/H2で同じ
+結果になるmapperのDB別SQLへ閉じ込め、一覧取得後のJava filterで除外してページング結果を壊しては
+ならない。`EXISTS`で可視性を判定するため重複行は生成されず、`SELECT DISTINCT`は不要である。
+
 `PageUtils.safePage(current, size, mapper::selectPage, wrapper)`でページングし、Java側の
 全件取得・filter・`subList`による手動ページングは廃止する。participantは承認一覧の可視性を
-SQL境界へ移すための正規化表であり、`route_snapshot_json`をJSON関数で検索しない。
-したがってH2/MySQLのJSON関数差異（`platform-invariants §4.3`）は生じない。
+SQL境界へ移すための正規化表であり、申請者・承認者・代理者のいずれも同じSQL境界で扱う。
+`request_types_json`の包含判定以外はJSON関数に依存せず、MySQL/H2のJSON関数差異を一覧の可視性
+判定へ持ち込まない。
 
 ### 6.4 状態機械と競合
 
@@ -202,7 +233,7 @@ SQL境界へ移すための正規化表であり、`route_snapshot_json`をJSON�
 | returned | →requested（`round_no`を+1して再申請） | 状態CAS | — | — |
 | approved | 終端。`applyApproved`を**1回だけ**実行 | `UNIQUE(approval_request_id)`を対象側に持たせる | retry / 二重click | **業務rollbackは対象serviceの取消操作で表現** |
 | rejected / withdrawn | 終端 | idempotency keyをNULLへクリア | 同一操作の再送 | 新規申請を作る |
-| conflict | 終端。再申請入口は`resubmit()` | target version不一致を通知 | 対象entityの更新割込み | 新しいsnapshotで再申請 |
+| conflict | →requested（`resubmit()`による再申請のみ） | target version不一致を通知 | 対象entityの更新割込み | 現在値から新しいsnapshotを作って再申請 |
 
 - **最終承認transactionの順序**（design §3を再掲・固定）:
   `request行をロック` → `adapter.currentVersion()`でtarget versionを再検証 → `adapter.applyApproved` →
@@ -210,9 +241,14 @@ SQL境界へ移すための正規化表であり、`route_snapshot_json`をJSON�
 - **target version競合の扱い**（R2.1）: 最終承認時に対象entityの現在`version`が申請時の
   `target_version`と異なる場合、承認を失敗させたり`returned`へ遷移させたりせず、`conflict`へ遷移して
   申請者へ通知する。古いsnapshotを適用せず、自動再解決もしない。
+- **conflictからの再申請**: `resubmit()`の受付状態は`returned`または`conflict`とする。
+  `conflict`からの再申請では、対象entityの現在値を読み直して`target_version`を取り直し、
+  `payload_json`と`diff_json`も現在値から再生成してから`round_no`を+1する。古いsnapshotを
+  再利用しない。`conflict`から許可する遷移はこの再申請だけとし、`approve()`や`withdraw()`は
+  引き続き受け付けない。
 - **並列group**: 同一`step_no`の各route step行をslotとして扱う。各slotは候補のうち1名のAPPROVEで充足し、
   **全slotが充足したときだけ**次stepへ進む。1件のREJECTで即終端とする。
-  actionの二重記録は`UNIQUE(request_id, round_no, step_no, slot_index, approver_slot_user_id)`で防ぐ。
+  actionの二重記録は`UNIQUE(request_id, round_no, step_no, approver_slot_user_id)`で防ぐ。
 - **代理と本人の重複**: 同一stepの同一slotに本人と代理者の両方が解決された場合、
   **先着1件を有効**とし2件目はCASまたはUNIQUE競合で冪等returnする。承認者数を二重にカウントしない。
 - **職務分離**（R1.4）: 申請者が承認者として解決された場合、そのstepは**次の候補者へ委譲**する。
@@ -251,9 +287,11 @@ record RouteSlot(
 **同一人物が同一stepの複数slotの候補として解決された場合**:
 その人物の1回の承認で充足できるのは**1slotのみ**（snapshot解決順で最初の未充足slot）とする。
 残りのslotは別の人物による承認が必要であり、職務分離（R1.4）の観点から全slotを1名が単独充足することは
-許容しない。実装では`t_approval_participant`の候補をslot単位で扱い、
-`t_approval_action.slot_index`と
-`UNIQUE(request_id, round_no, step_no, slot_index, approver_slot_user_id)`で構造的に保証する。
+許容しない。実装では`t_approval_participant`の候補をslot単位で扱い、`slot_index`は監査・表示用の
+通常列として保持する。`t_approval_action`のUNIQUEは
+`UNIQUE(request_id, round_no, step_no, approver_slot_user_id)`とし、`slot_index`を含めない。
+これにより同一人物（代理時は委任元の承認者）が同一request・round・stepの複数slotを埋めることを
+DBレベルで拒否し、1人1slotを構造的に保証する。
 
 #### §6.4.2 対象 version 口径（確定済み。実装中に変更しない）
 
@@ -268,6 +306,24 @@ record RouteSlot(
 | `t_invoice` | `version INT NOT NULL DEFAULT 0` | `Invoice.version`をそのまま`target_version`へ保存 | `target_version` ≠ 現在の`Invoice.version`なら競合 | 同上 |
 | `t_bp_payment` | `version INT NOT NULL DEFAULT 0` | `BpPayment.version`をそのまま`target_version`へ保存 | `target_version` ≠ 現在の`BpPayment.version`なら競合 | 同上 |
 | `m_system_config`（月次締め） | `@Version`列は追加しない。`payload_json`へ申請時点の`closedMonths`配列を保存 | 締め済み月のリストを`payload_json`へ保存 | 申請時点の`closedMonths`と現在値が不一致なら競合 | 同上 |
+
+`@Version`の自動増分は`updateById(entity)`系に限られる。既存の対象4表には`UpdateWrapper`や生SQLで
+更新する経路もあるため、次の7経路ではversion増分を明示的に同じUPDATEへ組み込む。ここにない
+新しい更新経路を追加する場合も、`updateById`へ寄せるか、同じ表へ追記して増分方法を固定する。
+
+| 既存更新経路 | 対象 | versionを増分する方法 |
+|---|---|---|
+| `ContractMapper.java:222` の `revisePrice` 生SQL（`selling_price`/`cost_price`更新） | `t_contract` | `SET selling_price = ..., cost_price = ..., version = version + 1` とする |
+| `ContractServiceImpl.java:581` の `UpdateWrapper<Contract>` | `t_contract` | wrapperへ`.setSql("version = version + 1")`を追加する |
+| `InvoiceServiceImpl.java:371` の `UpdateWrapper<Invoice>` | `t_invoice` | wrapperへ`.setSql("version = version + 1")`を追加する |
+| `InvoiceServiceImpl.java:556` の `UpdateWrapper<BpPayment>` | `t_bp_payment` | wrapperへ`.setSql("version = version + 1")`を追加する |
+| `InvoiceServiceImpl.java:565` の `UpdateWrapper<BpPayment>` | `t_bp_payment` | wrapperへ`.setSql("version = version + 1")`を追加する |
+| `BpPaymentServiceImpl.java:191` の `UpdateWrapper<BpPayment>` | `t_bp_payment` | wrapperへ`.setSql("version = version + 1")`を追加する |
+| `WorkRecordServiceImpl.java:502` の `UpdateWrapper<BpPayment>` | `t_bp_payment` | wrapperへ`.setSql("version = version + 1")`を追加する |
+
+上表以外の4対象表の`updateById(entity)`経路はMyBatis-Plusの`@Version`自動増分を使用する。
+`UpdateWrapper`経路でJava側の古いversion値を`.set("version", ...)`するだけでは競合検知を
+すり抜けるため禁止し、必ずDB式`version = version + 1`を使う。生SQLにも同じ増分を含める。
 
 V1を確認した結果、`t_contract`に既存の`version`列はないため、V78では`version`を新設する。
 `approval_version`という別名は採用しない。`m_system_config`の月次締めadapterは、対象IDのversionではなく
@@ -300,7 +356,7 @@ long currentVersion(Long targetId);
 | **却下/取下げ後に同一操作を再申請** | **新しい申請を作る** | **reject/withdraw到達時に`idempotency_key = NULL`へクリア**。MySQLのUNIQUEはNULLの重複を許容する |
 | 最終承認後の再送 | 既存のapproved申請を再適用しない | `approve()`の`status=approved` CASと同時にkeyをNULLへクリア |
 | 差戻し後の再申請（resubmit） | 既存申請の`round_no`を+1する | `t_approval_request.round_no INT NOT NULL DEFAULT 1`。actionのUNIQUEにもround_noを含める |
-| 承認操作の二重click（同一round内） | 1件目のみ記録し、2件目は冪等return | `UNIQUE(request_id, round_no, step_no, slot_index, approver_slot_user_id)`の競合を捕捉 |
+| 承認操作の二重click（同一round内） | 1件目のみ記録し、2件目は冪等return | `UNIQUE(request_id, round_no, step_no, approver_slot_user_id)`の競合を捕捉 |
 | 前roundのaction残存 | 新roundのactionと衝突せず共存する | UNIQUE keyに`round_no`を含める |
 
 `selectByIdempotencyKey`は次のSQL条件へ変更する。
@@ -348,7 +404,7 @@ T042(F1)実装時に確定した、§1/§6の記述だけでは一意に決ま�
 ### 逸脱: §6.4の二重action防止キー
 
 - 既定解: `UNIQUE(request_id, step_no, approver_user_id)`
-- 本specの解: `UNIQUE(request_id, step_no, approver_slot_user_id)`。
+- 本specの解: `UNIQUE(request_id, round_no, step_no, approver_slot_user_id)`。
   `approver_slot_user_id = COALESCE(delegated_from, approver_user_id)`（本人操作時は`approver_user_id`と同値）。
 - 根拠（design §6.4「代理と本人の重複」との整合）: 本人と代理者は**別のuser id**で操作する。
   `approver_user_id`をそのままUNIQUEキーにすると、本人(A)と代理(B)がそれぞれ別行としてinsertでき、
@@ -427,4 +483,5 @@ design §3が挙げる`escalate`はF1では未実装。SLA期限監視・冪等s
 F1/A1 実装では `ApprovalViewServiceImpl` が `selectList()` 全件取得 → Java フィルタ →
 `subList` 手動ページングを行っており、platform-invariants §2.2 に違反していた。
 Round 2 指摘（P1-08）により V78 で `t_approval_participant` を追加し SQL 境界を確立した（§6.3.1）。
-旧実装の全件取得・Java フィルタ・手動ページングは廃止。新実装は `t_approval_participant JOIN t_approval_request` + `PageUtils.safePage` とする。500件制限（暫定）は採用しない。
+旧実装の全件取得・Java フィルタ・手動ページングは廃止。新実装は`t_approval_participant`による
+可視性`EXISTS`判定と`PageUtils.safePage`を組み合わせる。500件制限（暫定）は採用しない。
