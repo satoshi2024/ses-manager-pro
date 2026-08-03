@@ -48,7 +48,7 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済み |
 | 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68, V69 | 仕様済み |
 | 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済み・G2開発方針決定済み |
-| 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V78** | 仕様済み・S07着手可 |
+| 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V76, V77, V78, V79** | S07実装中・独立Review NOT REVIEWABLE |
 | 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
 | 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80** | 仕様済み |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V81** | 仕様済み・G2開発方針決定済み |
@@ -69,7 +69,7 @@ permission group seed）、V65（break-glass二者承認とMFA試行制限）、
 V59とV72は永久欠番として保持する。
 
 S07の既存承認DDLはV75、承認menu seedはV76、`current_step_started_at`追加はV77であり、これらは変更不可とする。
-S07が今回追加で使用するのはV78の1本である。V79は予約外migrationとして再利用せず、S09〜S17の予約は
+S07正式migrationはV75〜V79とする。内訳はV75（承認DDL）、V76（承認menu seed）、V77（SLA開始時刻）、V78（round/participant/version）、V79（B1 notification outbox）である。V79をS09以降へ再利用せず、S09〜S17の予約は
 S09=V80、S10=V81、S11=V82、S12=V83、S13=V84、S14=V85、S15=V86、S16=V87、S17=V88とする。
 過去migrationの編集やout-of-order適用は禁止する。
 

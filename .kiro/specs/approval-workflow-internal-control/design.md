@@ -2,7 +2,9 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V78 + B1追加V79）
+## 1. DDL（S07正式migration V75/V76/V77/V78/V79）
+
+S07の採番正本は、既存のV75/V76/V77、S07追加のV78、B1追加のV79である。S09以降はV80〜V88を使用し、V75〜V79の適用済みmigrationは編集・削除しない。
 
 - `m_approval_route(id, tenant_id, request_type, organization_id, min/max_amount, version_no,
   valid_from/to, active_flag)`。

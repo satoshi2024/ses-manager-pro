@@ -8,8 +8,8 @@
 > 本specは「状態機械 × 期間 × 金額 × 権限」の四重交差であり、S02と同じ事故構造を持つ。
 > **design.md §6.2の金額帯境界を実装前に確定すること。実装中に決めない。**
 >
-> **Migration**: 本specの予約番号は **V78**。BP(V70/V71)とCRM(V73/V74)のmerge後に着手する。V72は永久欠番。
-> 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
+> **Migration**: S07の正式migrationは **V75/V76/V77/V78/V79**。V75は承認DDL、V76は承認menu、V77はSLA開始時刻、V78はround/participant/version、V79はB1 notification outboxを担当する。BP(V70/V71)とCRM(V73/V74)のmerge後に採番を確定し、V72は永久欠番とする。
+> S09〜S17は **V80〜V88** を予約し、過去migrationの編集・削除・out-of-order適用は行わない。適用済みDBの`flyway_schema_history`はReview Packetで別途照会結果を記録する。
 
 - [x] 0. G7と対象操作inventory
   - **状態**: 完了。成果物は[`operation-inventory.md`](operation-inventory.md)。production codeは変更していない。
