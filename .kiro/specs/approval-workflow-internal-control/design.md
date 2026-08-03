@@ -13,6 +13,7 @@
 - `t_approval_action(request_id, round_no, step_no, slot_index, approver_user_id, approver_slot_user_id,
   action, comment, delegated_from, acted_at)`。
 - `t_approval_delegation(from_user_id, to_user_id, valid_from/to, request_types_json, approved_by)`。
+- `t_approval_delegation_type(delegation_id, request_type)`（V78で新設する代理対象種別の正規化表）。
 
 payload/diffはPII最小化し、対象全entityをserializeしない。adapterが許可fieldだけをsnapshotする。
 
@@ -22,7 +23,7 @@ V75は既存の承認DDL 5テーブル、V76は既存の承認menu seed、V77は
 `current_step_started_at`追加であり、いずれも変更しない。S07が追加で使用するmigrationは
 **V78の1本だけ**とする。**V79は現在未使用の欠番として保持し、S09以降の予約には割り当てない。**
 S09〜S17はそれぞれV80〜V88へ繰り上げる（既存の欠番も埋めない）。S07が追加migrationを
-要する場合に限りV79をS07の追加分として再割当し、その場合のみS09以降の予約を再度繰り上げる。
+要する場合に限りV79をS07の追加分として再割当し、その場合もS09〜S17のV80〜V88は変更しない。
 
 V78は次の変更を同一migrationで行う。V75の`t_approval_action`には`round_no`が存在しないため、
 UNIQUEキーの張替えに必要なaction側の`round_no`も追加する。`t_contract`はV1に`version`列が
@@ -57,6 +58,15 @@ CREATE TABLE t_approval_participant (
     REFERENCES t_approval_request(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='承認参加者';
 
+-- (C-2) 代理対象種別の正規化。子行が0件なら全種別対象
+CREATE TABLE t_approval_delegation_type (
+  delegation_id BIGINT NOT NULL,
+  request_type  VARCHAR(50) NOT NULL,
+  PRIMARY KEY (delegation_id, request_type),
+  CONSTRAINT fk_delegation_type FOREIGN KEY (delegation_id)
+    REFERENCES t_approval_delegation(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='代理対象種別';
+
 -- (D) 対象業務entityの楽観ロック
 ALTER TABLE t_quotation
   ADD COLUMN version INT NOT NULL DEFAULT 0 COMMENT '楽観ロックバージョン';
@@ -70,6 +80,10 @@ ALTER TABLE t_bp_payment
 
 このDDLは設計上の確定値であり、実装時に`approval_version`へ読み替えたり、action側の
 `round_no`追加を省略したりしない。H2 schemaも同じ列・キー形状へ同期する。
+`t_approval_delegation_type`の既存行移行はV78に含める。`request_types_json IS NULL`の代理には子行を
+作らず（子行0件＝全種別対象）、NULLでない配列は要素ごとに`(delegation_id, request_type)`をINSERTする。
+V78適用後の代理種別判定は子表を正本とし、既存の`request_types_json`列は移行互換のため保持するが、
+一覧可視性のSQLではJSON関数を使って参照しない。
 
 ## 2. Adapter
 
@@ -118,7 +132,7 @@ system migration以外はengine経由のみ。既存API互換が必要なら同U
 | route定義 | `active_flag=1`かつ有効期間内 | `m_approval_route.version_no`＋`valid_from/to` | `t_approval_request.route_snapshot_json` | **申請時点**で解決しsnapshotへ固定 | `valid_to IS NULL`＝無期限有効 |
 | 承認者 | route snapshotから解決 | `t_approval_action` | 同上 | **申請時点のsnapshot**。後のroute変更で変えない | — |
 | 対象データ | 業務entityの現在値 | — | `payload_json`＋`diff_json`＋`target_version` | 申請時点 | — |
-| 代理設定 | `t_approval_delegation`の有効期間内 | `valid_from/to` | actionへ`delegated_from`を記録 | **承認操作の実行時点** | `request_types_json IS NULL`＝全種別対象 |
+| 代理設定 | `t_approval_delegation`の有効期間内 | `valid_from/to` | actionへ`delegated_from`を記録 | **承認操作の実行時点** | `request_types_json IS NULL`（移行後は子表0行）＝全種別対象 |
 | 金額 | 業務entityの現在値 | — | `amount_snapshot` | **申請時点**。route判定にもこれを使う | 金額なし申請（月次締め等）。**金額帯routeの対象外** |
 | SLA期限 | `requested_at`＋`sla_hours` | — | step開始時に固定 | step開始時点 | `sla_hours IS NULL`＝**期限なし**。escalation対象外 |
 
@@ -202,8 +216,17 @@ WHERE r.deleted_flag = 0
         AND d.valid_from <= :today
         AND (d.valid_to IS NULL OR d.valid_to >= :today)
         AND (
-          d.request_types_json IS NULL
-          OR <d.request_types_json が r.request_type を含む>
+          NOT EXISTS (
+            SELECT 1
+            FROM t_approval_delegation_type dt_any
+            WHERE dt_any.delegation_id = d.id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM t_approval_delegation_type dt
+            WHERE dt.delegation_id = d.id
+              AND dt.request_type = r.request_type
+          )
         )
     )
   )
@@ -211,17 +234,18 @@ WHERE r.deleted_flag = 0
 ORDER BY r.requested_at DESC
 ```
 
-代理者の分岐はparticipantのapprover行と有効期間をSQL側で判定し、`request_types_json`の種別
-限定も**ページング前のSQL側で適用する**。`request_types_json IS NULL`は全種別を意味し、NULLで
-ない場合は`r.request_type`が配列に含まれる場合だけ代理可視とする。包含判定はMySQL/H2で同じ
-結果になるmapperのDB別SQLへ閉じ込め、一覧取得後のJava filterで除外してページング結果を壊しては
-ならない。`EXISTS`で可視性を判定するため重複行は生成されず、`SELECT DISTINCT`は不要である。
+代理者の分岐はparticipantのapprover行と有効期間をSQL側で判定し、代理対象種別の限定も
+**ページング前のSQL側で適用する**。V78以降は`t_approval_delegation_type`を正本とし、子行が0件なら
+全種別対象、子行が1件以上なら`r.request_type`と一致する子行がある場合だけ代理可視とする。
+`request_types_json`はV78の既存行移行元および互換保持列であり、一覧可視性のSQLでは参照しない。
+したがって判定は`NOT EXISTS`/`EXISTS`だけで完結し、MySQL/H2で同じSQLを実行できる。取得後の
+Java filterで除外してページング結果を壊してはならない。`EXISTS`で可視性を判定するため重複行は
+生成されず、`SELECT DISTINCT`は不要である。
 
 `PageUtils.safePage(current, size, mapper::selectPage, wrapper)`でページングし、Java側の
-全件取得・filter・`subList`による手動ページングは廃止する。participantは承認一覧の可視性を
-SQL境界へ移すための正規化表であり、申請者・承認者・代理者のいずれも同じSQL境界で扱う。
-`request_types_json`の包含判定以外はJSON関数に依存せず、MySQL/H2のJSON関数差異を一覧の可視性
-判定へ持ち込まない。
+全件取得・filter・`subList`による手動ページングは廃止する。participantとdelegation typeは
+承認一覧の可視性をSQL境界へ移すための正規化表であり、申請者・承認者・代理者のいずれも同じSQL
+境界で扱う。
 
 ### 6.4 状態機械と競合
 
@@ -231,13 +255,15 @@ SQL境界へ移すための正規化表であり、申請者・承認者・代�
 | requested | →in_review（step進行） | 状態CAS＋`current_step` | 二重承認 | — |
 | in_review | →approved / →rejected / →returned / →withdrawn / →conflict | **状態CAS＋`version`＋`current_step`の複合条件** | 並列group内の同時承認、代理と本人の同時承認 | returnedへ |
 | returned | →requested（`round_no`を+1して再申請） | 状態CAS | — | — |
-| approved | 終端。`applyApproved`を**1回だけ**実行 | `UNIQUE(approval_request_id)`を対象側に持たせる | retry / 二重click | **業務rollbackは対象serviceの取消操作で表現** |
+| approved | 終端。`applyApproved`を**1回だけ**実行 | request行の`SELECT ... FOR UPDATE`＋`status/version/current_step` CAS | retry / 二重click | **業務rollbackは対象serviceの取消操作で表現** |
 | rejected / withdrawn | 終端 | idempotency keyをNULLへクリア | 同一操作の再送 | 新規申請を作る |
 | conflict | →requested（`resubmit()`による再申請のみ） | target version不一致を通知 | 対象entityの更新割込み | 現在値から新しいsnapshotを作って再申請 |
 
 - **最終承認transactionの順序**（design §3を再掲・固定）:
   `request行をロック` → `adapter.currentVersion()`でtarget versionを再検証 → `adapter.applyApproved` →
   `request=approved` → `outbox insert`。外部API・メール送信はoutboxでcommit後に実行する（§3.3、R2.3）。
+  対象業務entity側に`UNIQUE(approval_request_id)`は追加しない。request行のロックと状態/version/current_step
+  のCASを同一transactionで行い、approved済みのretryは`applyApproved`へ再到達させないことで二重適用を防ぐ。
 - **target version競合の扱い**（R2.1）: 最終承認時に対象entityの現在`version`が申請時の
   `target_version`と異なる場合、承認を失敗させたり`returned`へ遷移させたりせず、`conflict`へ遷移して
   申請者へ通知する。古いsnapshotを適用せず、自動再解決もしない。
