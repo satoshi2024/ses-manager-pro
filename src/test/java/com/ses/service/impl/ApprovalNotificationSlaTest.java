@@ -186,6 +186,50 @@ class ApprovalNotificationSlaTest {
     }
 
     @Test
+    void 再申請roundはRETURNED_REQUESTED_SLAのdedupeを分離する() {
+        String type = "b1.round-dedupe." + System.nanoTime();
+        insertRoute(type, 1, approverId);
+        organizationMapper.insert(UserOrganization.builder()
+                .userId(approverId).organizationId(organizationId).managerUserId(managerId)
+                .primaryFlag(1).validFrom(LocalDate.now().minusDays(1)).build());
+
+        ApprovalRequest first = request(type);
+        requestMapper.update(null, new UpdateWrapper<ApprovalRequest>()
+                .eq("id", first.getId())
+                .set("current_step_started_at", LocalDateTime.now().minusHours(2)));
+        approvalSlaService.escalateOverdue(LocalDateTime.now());
+        approvalEngineService.returnForRevision(first.getId(), approverId, "修正してください");
+
+        ApprovalRequest second = approvalEngineService.resubmit(first.getId(), applicantId,
+                Map.of("k", "round2"), Map.of("k", Map.of("before", "v", "after", "round2")),
+                BigDecimal.valueOf(2000));
+        requestMapper.update(null, new UpdateWrapper<ApprovalRequest>()
+                .eq("id", second.getId())
+                .set("current_step_started_at", LocalDateTime.now().minusHours(2)));
+        approvalSlaService.escalateOverdue(LocalDateTime.now());
+
+        List<Notification> requested = notifications("APPROVAL_REQUESTED").stream()
+                .filter(n -> n.getDedupeKey().contains("approval-requested:" + first.getId()))
+                .toList();
+        assertEquals(2, requested.size());
+        assertTrue(requested.stream().anyMatch(n -> n.getDedupeKey().contains(":round:1:step:1")));
+        assertTrue(requested.stream().anyMatch(n -> n.getDedupeKey().contains(":round:2:step:1")));
+
+        List<Notification> returned = notifications("APPROVAL_RETURNED").stream()
+                .filter(n -> n.getDedupeKey().contains("approval-returned:" + first.getId()))
+                .toList();
+        assertEquals(1, returned.size());
+        assertTrue(returned.get(0).getDedupeKey().contains(":round:1:step:1"));
+
+        List<Notification> escalations = notifications("APPROVAL_SLA_ESCALATED").stream()
+                .filter(n -> n.getDedupeKey().contains("approval-sla-overdue:" + first.getId()))
+                .toList();
+        assertEquals(2, escalations.size());
+        assertTrue(escalations.stream().anyMatch(n -> n.getDedupeKey().contains(":round:1:step:1")));
+        assertTrue(escalations.stream().anyMatch(n -> n.getDedupeKey().contains(":round:2:step:1")));
+    }
+
+    @Test
     void NULLのSLAは期限超過対象外() {
         String type = "b1.no-sla." + System.nanoTime();
         insertRoute(type, null, approverId);

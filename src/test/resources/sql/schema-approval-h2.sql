@@ -4,6 +4,7 @@
 -- 外部キーは張らない（schema-crm-h2.sql等と同じ方針。共有インメモリH2は複数contextで
 -- schema-locationsを再実行するため、FKを張るとDROP TABLE順序で他specの再生成が失敗しうる）。
 
+DROP TABLE IF EXISTS t_notification_outbox CASCADE;
 DROP TABLE IF EXISTS t_approval_participant CASCADE;
 DROP TABLE IF EXISTS t_approval_delegation_type CASCADE;
 DROP TABLE IF EXISTS t_approval_action CASCADE;
@@ -11,6 +12,28 @@ DROP TABLE IF EXISTS t_approval_delegation CASCADE;
 DROP TABLE IF EXISTS t_approval_request CASCADE;
 DROP TABLE IF EXISTS m_approval_route_step CASCADE;
 DROP TABLE IF EXISTS m_approval_route CASCADE;
+
+CREATE TABLE IF NOT EXISTS t_notification_outbox (
+  id               BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  notification_id  BIGINT,
+  type             VARCHAR(30)  NOT NULL,
+  title            VARCHAR(200) NOT NULL,
+  message          VARCHAR(500),
+  link_url         VARCHAR(300),
+  menu_key         VARCHAR(100),
+  recipient_user_id BIGINT,
+  organization_id  BIGINT,
+  dedupe_key       VARCHAR(200) NOT NULL UNIQUE,
+  status           VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+  attempt_count    INT          NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_at        DATETIME,
+  last_error       VARCHAR(1000),
+  sent_at          DATETIME,
+  created_at       DATETIME     DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_due
+  ON t_notification_outbox(status, next_attempt_at);
 
 CREATE TABLE IF NOT EXISTS m_approval_route (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,

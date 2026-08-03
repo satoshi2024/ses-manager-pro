@@ -7,6 +7,7 @@ import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.notification.NotificationOutboxService;
 import com.ses.service.notification.WebhookNotifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,8 +39,17 @@ class NotificationServiceImplTest {
     @Mock
     private WebhookNotifier webhookNotifier;
 
+    @Mock
+    private NotificationOutboxService notificationOutboxService;
+
     @InjectMocks
     private NotificationServiceImpl notificationService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void injectOptionalOutboxDependency() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                notificationService, "notificationOutboxService", notificationOutboxService);
+    }
 
     @Test
     void testGetRecentNotifications() {
@@ -85,9 +95,14 @@ class NotificationServiceImplTest {
 
     @Test
     void testPublish_Success() {
+        when(notificationOutboxService.enqueue(any(Notification.class))).thenReturn(1L);
+
         notificationService.publish("SYSTEM", "Title", "Msg", "Url", "Key");
+
         verify(notificationMapper, times(1)).insert(any(Notification.class));
-        verify(webhookNotifier, times(1)).notify(any(Notification.class));
+        verify(notificationOutboxService).enqueue(any(Notification.class));
+        verify(notificationOutboxService).dispatchOne(1L);
+        verify(webhookNotifier, never()).notify(any(Notification.class));
     }
 
     @Test

@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V78）
+## 1. DDL（予約V78 + B1追加V79）
 
 - `m_approval_route(id, tenant_id, request_type, organization_id, min/max_amount, version_no,
   valid_from/to, active_flag)`。
@@ -21,9 +21,9 @@ payload/diffはPII最小化し、対象全entityをserializeしない。adapter�
 
 V75は既存の承認DDL 5テーブル、V76は既存の承認menu seed、V77は既存の
 `current_step_started_at`追加であり、いずれも変更しない。S07が追加で使用するmigrationは
-**V78の1本だけ**とする。**V79は現在未使用の欠番として保持し、S09以降の予約には割り当てない。**
-S09〜S17はそれぞれV80〜V88へ繰り上げる（既存の欠番も埋めない）。S07が追加migrationを
-要する場合に限りV79をS07の追加分として再割当し、その場合もS09〜S17のV80〜V88は変更しない。
+**V78の1本**と、B1で追加する**V79の1本**とする。V78は承認workflowのround/participant/version、
+V79は通知Webhook outboxだけを担当する。S09〜S17はそれぞれV80〜V88へ繰り上げる（既存の欠番も
+埋めない）。
 
 V78は次の変更を同一migrationで行う。V75の`t_approval_action`には`round_no`が存在しないため、
 UNIQUEキーの張替えに必要なaction側の`round_no`も追加する。`t_contract`はV1に`version`列が
@@ -119,6 +119,15 @@ dev/stagingに非終端・旧形式・残りstepに多名承認者を持つ申�
 作らず（子行0件＝全種別対象）、NULLでない配列は要素ごとに`(delegation_id, request_type)`をINSERTする。
 V78適用後の代理種別判定は子表を正本とし、既存の`request_types_json`列は移行互換のため保持するが、
 一覧可視性のSQLではJSON関数を使って参照しない。
+
+### 1.2 V79（B1 通知Webhook outbox）
+
+V78は適用済み可能性のあるmigrationとして編集せず、B1の外部通知配信だけを**V79__notification_webhook_outbox.sql**へ追加する。
+`t_notification_outbox`は通知本体のID・宛先・本文・dedupe keyをsnapshotし、`PENDING`/`PROCESSING`/`RETRY`/`SENT`/`FAILED`の状態、試行回数、次回時刻、claim時刻、直近エラーを保持する。`dedupe_key`は一意制約で保護する。
+
+通知本体とoutbox行は同一のDB transactionで保存する。transaction中には外部Webhookを呼ばず、commit後callbackから1件workerを起動する。schedulerはdue行を取得し、worker beanの`REQUIRES_NEW` transaction内でclaim→Webhook送信→`SENT`または指数backoffの`RETRY`/上限到達の`FAILED`更新を行う。claim競合は送信せず、30分以上の`PROCESSING`は再送可能へ戻す。Webhook URL未設定または対象外種別は配信対象外として`SENT`扱いにする。
+
+H2ではFlywayを実行しないため、`sql/schema-approval-h2.sql`へ同じ列・一意制約・due indexを反映する。V79はV78のchecksumやDDLを変更せず、適用済みV78の有無にかかわらずforward-onlyで適用できる追加migrationとする。
 
 ## 2. Adapter
 

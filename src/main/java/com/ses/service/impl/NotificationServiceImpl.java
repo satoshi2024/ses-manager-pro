@@ -10,6 +10,7 @@ import com.ses.service.NotificationService;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.notification.WebhookNotifier;
+import com.ses.service.notification.NotificationOutboxService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,8 @@ public class NotificationServiceImpl implements NotificationService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private OrganizationScopeService organizationScopeService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private NotificationOutboxService notificationOutboxService;
     private final UserOrganizationMapper userOrganizationMapper;
 
     @Override
@@ -118,6 +121,7 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publish(String type, String title, String message, String linkUrl, String dedupeKey) {
         publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
     }
@@ -142,21 +146,25 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publish(String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKey);
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publishToUser(Long userId, String type, String title, String message, String linkUrl, String dedupeKey) {
         publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKeyForType(type));
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publishToUser(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
         publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey);
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publishToOrganization(Long organizationId, String type, String title, String message,
                                        String linkUrl, String dedupeKey) {
         if (organizationId == null) {
@@ -191,15 +199,33 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);
             notification.setCreatedAt(LocalDateTime.now());
             notificationMapper.insert(notification);
-            final Notification finalNotification = notification;
-            if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
-                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                    new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            webhookNotifier.notify(finalNotification);
-                        }
+
+            if (notificationOutboxService != null) {
+                Long outboxId = notificationOutboxService.enqueue(notification);
+                if (outboxId != null) {
+                    Runnable dispatch = () -> notificationOutboxService.dispatchOne(outboxId);
+                    if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+                        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                                new org.springframework.transaction.support.TransactionSynchronization() {
+                                    @Override
+                                    public void afterCommit() {
+                                        dispatch.run();
+                                    }
+                                });
+                    } else {
+                        dispatch.run();
                     }
+                }
+            } else if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+                // 旧構成（outbox beanなし）との互換経路。通常のSpring構成ではoutboxを使用する。
+                final Notification finalNotification = notification;
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            @Override
+                            public void afterCommit() {
+                                webhookNotifier.notify(finalNotification);
+                            }
+                        }
                 );
             } else {
                 webhookNotifier.notify(notification);

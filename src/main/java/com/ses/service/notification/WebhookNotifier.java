@@ -43,22 +43,28 @@ public class WebhookNotifier {
      */
     @Async
     public void notify(Notification notification) {
+        notifyNow(notification);
+    }
+
+    /** outbox workerから同期実行し、成功/再送要否を返す。 */
+    public boolean notifyNow(Notification notification) {
         String url = systemConfigService.getString(KEY_WEBHOOK_URL, null);
         if (!StringUtils.hasText(url)) {
-            // Webhook未設定時はアプリ全体の動作に影響を与えないようスキップする
-            return;
+            // Webhook未設定時は配信対象外として成功扱いにする。
+            return true;
         }
         if (notification == null || !isTargetType(notification.getType())) {
-            return;
+            return true;
         }
         try {
             Map<String, String> payload = new HashMap<>();
             payload.put("text", buildText(notification));
             restTemplate.postForEntity(url, payload, String.class);
+            return true;
         } catch (Exception e) {
-            // タイムアウト・4xx/5xx等の失敗は通知自体の生成・画面表示に影響させないため、
-            // ログ出力のみとし再試行は行わない
+            // outbox workerが再送するため、ここでは例外を外へ投げず失敗だけ返す。
             log.warn("Webhook通知の送信に失敗しました: type={} title={}", notification.getType(), notification.getTitle(), e);
+            return false;
         }
     }
 

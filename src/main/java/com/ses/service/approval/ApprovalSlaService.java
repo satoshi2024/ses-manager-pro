@@ -11,6 +11,7 @@ import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.approval.ApprovalNotificationKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +55,9 @@ public class ApprovalSlaService {
             if (!now.isAfter(deadline)) {
                 continue;
             }
-            String dedupeKey = "approval-sla-overdue:" + request.getId() + ":step:" + request.getCurrentStep();
+            int round = request.getRoundNo() == null ? 1 : request.getRoundNo();
+            String dedupeKey = ApprovalNotificationKeys.slaOverdue(request.getId(), round,
+                    request.getCurrentStep());
             for (Long managerId : resolveManagers(step.approverUserIds(), now.toLocalDate())) {
                 notificationService.publishToUser(managerId, "APPROVAL_SLA_ESCALATED",
                         "承認stepのSLA超過",

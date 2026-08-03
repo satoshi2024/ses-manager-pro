@@ -1,6 +1,47 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-現行判定: **FAIL（Round 3 / 設計承認済み。release validation未完了：Docker未検証、全量test failure 1件、skip 12件。2026-08-03）**
+現行判定: **CONDITIONAL PASS（Round 3 fix delta。P0=0 / P1=0。spec全体はB1/Mとrelease gate未完了のため未完了。2026-08-03）**
+
+## Round 3追跡Review訂正（2026-08-03、Head `a33a6e9`）
+
+以下を現Headで直接確認した。後続に残るRound 3/Mの旧記録は履歴として保持するが、Docker可用性・全量test・commit状態については本節を正とし、旧記録をrelease PASSの証拠として再利用しない。
+
+### S07-R3-P2-17 — Base / Head / 作業木
+
+- Base: `5110f1204a2270a3cff4195ae580ac7bf366031d`。
+- Head: `a33a6e9b1e1f8a973ccb45c59e5a1a38805cda8d`（`main`、`origin/main`、`origin/HEAD`が一致）。
+- Headは既にcommit済みであり、「commit/push未実施」「HeadはBaseと同じ」という旧記録は訂正する。今回の追跡作業ではcommit/pushを行わない。
+- 作業木はclean、`git diff --check`はexit 0。HeadのBase差分は17ファイル、503 insertions / 127 deletions。
+- V75/V76/V77は現Headの差分対象外であり、変更していない。
+
+### S07-R3-P2-18 — Docker / MySQL / V78適用証跡
+
+- Docker CLIは存在するが、現環境の`docker info`/`docker ps`はいずれもDocker daemonへ接続できずexit 1（`dockerDesktopLinuxEngine` named pipe不存在）。したがって、同日旧M記録の「Docker利用可能、8経路全件PASS」は現Headで再確認できず、証拠未提示のためrelease gateのPASS根拠として扱わない。
+- `mysql` CLIは未導入、`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`は未設定。`localhost:3306`（IPv6 `::1`）へのTCP接続だけは成功したが、認証・DB名・`flyway_schema_history`の照会は未実施である。
+- `application.yml`の既定接続先は`jdbc:mysql://localhost:3306/ses_manager_db`、ユーザー`root`、パスワード`123456`だが、これで接続・照会できることは確認していない。
+- よって、V78を適用済みのDBが存在しないとは断定しない。現ローカルDB、dev/staging DBとも、V78の`flyway_schema_history`行をread-only照会できる接続情報・CLIがなく、**V78適用状況は未確認**と記録する。V78適用済みDBがある場合のchecksum/remediation判断は、接続後に別途行う。
+
+### S07-R3-P2-19 — L4全量 / Mobile
+
+- 旧台帳の`1420 / failures 1 / skipped 12`は、現Headのclean作業木を対象にした再測定結果として確定していないため、現Headの実測値として扱わない。
+- `MobileResponsiveLayoutTest`を含むL4全量とCI相当skip数は、現Headでclean再測定してから更新する。再測定前の状態は**未確定**であり、旧failureを現Headのfailureとして継承しない。
+
+### 訂正範囲と残作業
+
+- Round 3のコード修正（P1-09/P2-16/P2-11）はcommit `a33a6e9`に含まれる。P2-17/18/19はコード欠陥ではなく、台帳と検証証拠の整合を訂正する追跡項目である。
+- B1（通知/SLA/escalation）とM（対象画面統合/回帰）は`tasks.md`上で未完了のまま維持する。実MySQL、実ブラウザ、L4 zero skipped、outbox/commit後処理など、証拠のない項目はPASSにしない。
+
+## Round 3追跡再測定（2026-08-03、clean worktree / Head `a33a6e9`）
+
+`git worktree add .tmp-clean-head-r3 a33a6e9b1e1f8a973ccb45c59e5a1a38805cda8d`で作成したdetached clean worktreeを使用した。作成時の作業木はcleanで、テスト対象のproduction/test codeに変更はない。
+
+- **L4 CI相当**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`を実行。Node `v24.18.0`は利用可能、Docker daemonは利用不可。`mvn -B clean test`は**1420 tests / failures 1 / errors 0 / skipped 12**、script exit 1。
+- **L4 failure**: `MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`。clean worktreeの全量実行で再現したため、旧台帳の「現Headでは再現しない」という記録は今回の全量測定結果で上書きする。ただし、S07のRound 3変更差分に含まれない既存UI契約のfailureとして扱う。
+- **skipの内訳**: 12 test cases、10 XML report classes。`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。Docker未起動が原因で、CI契約のzero skippedは未達。
+- **Mobile単独**: `mvn -B -Dtest=MobileResponsiveLayoutTest test`は**23 tests / failures 0 / errors 0 / skipped 0 PASS**。全量failureと単独PASSが異なるため、Mobileの単独結果をL4全量PASSへ読み替えない。
+- **Round 3対象回帰**: `ActionPermissionMatrixTest` 15、`ApprovalViewServiceImplTest` 4、`ApprovalTargetAdapterTest` 7、`InvoiceServiceImplTest` 41の計67件はfailures 0 / errors 0 / skipped 0。併せて`FlywayMigrationSmokeTest` 2件はDocker不可でskip、コマンド全体は**69 / 0 / 0 / 2**。
+- **M定向回帰**: `QuotationApiControllerTest` 4、`ContractApiControllerTest` 12、`ContractPaginationTest` 13、`InvoiceApiControllerTest` 10、`ApprovalTargetAdapterTest` 7の計**46 / 0 / 0 / 0 PASS**。
+- **再測定後の結論**: L4全量はfailure 1・skip 12でrelease gate未達。単独Mobile、Round 3対象回帰、M定向回帰はPASSだが、実MySQL smokeと実ブラウザdesktop/390px通しは未検証のまま維持する。
 
 ## Round 3 実装・検証記録（2026-08-03）
 
@@ -261,3 +302,23 @@ READINESS
 - 代理は承認操作時点の有効期間とrequest typeで評価し、本人/代理の同一slotは一意制約で先着1件に抑制する。固定USERと申請者上長は有効ユーザーのみを候補にし、解決不能なら受付を拒否する。
 - 管理API/ページは`hasRole('管理者')`で保護し、CSRFは既存`SES.api`方式、i18nは4言語bundleを維持した。
 - 検証: `ApprovalAdministrationServiceTest` 8件、`RouteResolverServiceTest` 9件、`ApprovalEngineServiceTest` 12件、`ApprovalPageRenderTest` 1件、`ApprovalUiContractTest` 2件、`MessageBundleConsistencyTest`を変更後に実行し、合計35件・failures 0・errors 0・skipped 0でPASS。Node `--check`と`git diff --check`もPASS。実ブラウザdesktop/390px、MySQL/Docker fresh smoke、mvn全量は未実施。
+
+## B1通知/SLA/escalation 実装追跡（2026-08-03）
+
+- `ApprovalNotificationKeys`を追加し、承認申請・承認・差戻し・却下・conflict・SLA超過のdedupe keyを`requestId + round + step (+ slot)`へ統一した。`ApprovalSlaService`のSLA keyもround対応へ変更したため、round 1の通知がround 2の再申請通知を抑止しない。
+- V78は変更していない。B1の外部配信を`V79__notification_webhook_outbox.sql`へ追加し、通知本体とoutboxを同一transactionで保存する。commit前のWebhook呼出しを避け、commit後callbackまたはschedulerから、別worker beanの`REQUIRES_NEW` transactionでclaim→送信→SENT/RETRY/FAILED更新を行う。claim競合、30分超PROCESSING回復、指数backoff、最大5回、dedupe UNIQUEを実装した。
+- H2 `schema-approval-h2.sql`へoutbox表・due indexを反映した。`NotificationServiceImpl`の通常publish経路もtransaction化し、outboxが利用可能な構成では直接Webhook非同期経路を使わない。
+- 定向検証: `ApprovalNotificationSlaTest` 6件、`NotificationServiceImplTest` 9件、`NotificationOutboxDispatcherTest` 5件、`NotificationOutboxServiceTest` 5件、計**25 / failures 0 / errors 0 / skipped 0**。round 1→2のREQUESTED/RETURNED/SLA key分離、SLA境界/重複/NULL、宛先限定、outbox成功/RETRY/FAILED/claim競合/重複登録を確認した。
+- 残るrelease gate: Docker daemon未起動のためV79を含む実MySQL fresh/legacy/upgrade smoke、複数JVMのclaim/ShedLock競合、実Webhook endpoint、commit前例外の実DBrollbackは未検証。V78適用状況も引き続き`flyway_schema_history`未照会であり、適用済み/未適用を断定しない。
+
+## B1/M追跡再検証（2026-08-03、current B1作業木）
+
+前項のclean Head基準測定後に、V79とB1の実装・テストを含むcurrent作業木で追加回帰を実行した。V75/V76/V77/V78は変更していない。V78の`flyway_schema_history`適用状況は引き続き未照会であり、適用済み/未適用を断定しない。
+
+- **広いB1回帰**: `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`を実行し、**46 tests / failures 0 / errors 0 / skipped 0 PASS**。
+- **M定向回帰**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、`ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件を再実行し、計**46 tests / failures 0 / errors 0 / skipped 0 PASS**。
+- **migration/static回帰**: `MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`FlywayMigrationSmokeTest` 2件を実行し、計**36 tests / failures 0 / errors 0 / skipped 2**。skip 2件はDocker daemon unavailableによる`FlywayMigrationSmokeTest`である。
+- **current Head相当のCI相当全量**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`をcurrent B1作業木で実行。Node `v24.18.0`は利用可能、Docker daemonは利用不可。内部の`mvn -B clean test`は**1432 tests / failures 1 / errors 0 / skipped 12**、script exit 1。
+- **全量failure**: `MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`の`quick-add-label`契約。clean Head基準の1420件実測と同じ既知failureであり、B1/M追加テストを含むcurrent作業木では総数が1432件となった。`MobileResponsiveLayoutTest`単独は23 / 0 / 0 / 0 PASSだが、全量failureをPASSへ読み替えない。
+- **skip内訳**: 12 test cases / 10 report classes。`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。Docker未起動が原因で、CI契約のzero skippedは未達。
+- **未検証のrelease gate**: 実MySQLでのV79 fresh/legacy/upgrade/partial-repair/repair/concurrent smoke、commit前例外時の実DB rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、実ブラウザdesktop/390pxの5業務通しは未実施。したがってB1/Mのcheckboxは未完了のまま維持し、今回の定向PASSだけでrelease PASSとは判定しない。

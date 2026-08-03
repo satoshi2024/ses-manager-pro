@@ -21,6 +21,7 @@ import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.approval.ApprovalNotificationService;
+import com.ses.service.approval.ApprovalNotificationKeys;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -176,8 +177,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             return; // 同一slotへの二重click/retry。既に記録済みのため何もしない（冪等）。
         }
         notifyApplicant(request, "APPROVAL_APPROVED", "承認申請が承認されました",
-                "approval-approved:" + requestId + ":round:" + roundNo(request) + ":step:" + currentStep.stepNo()
-                        + ":slot:" + resolution.slotOwnerId());
+                ApprovalNotificationKeys.approved(requestId, roundNo(request), currentStep.stepNo(),
+                        resolution.slotOwnerId()));
 
         if (!allSlotsSatisfied(request, currentStep)) {
             return; // 各slotはany-of、stepは全slotが揃うまで進めない
@@ -207,7 +208,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 }
                 request.setStatus(STATUS_CONFLICT);
                 notifyApplicant(request, "APPROVAL_CONFLICT", "承認対象が変更されたため再申請が必要です",
-                        "approval-conflict:" + requestId + ":round:" + roundNo(request));
+                        ApprovalNotificationKeys.conflict(requestId, roundNo(request), currentStep.stepNo()));
                 return;
             }
             adapter.applyApproved(request);
@@ -239,7 +240,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             return;
         }
         notifyApplicant(request, "APPROVAL_REJECTED", "承認申請が却下されました",
-                "approval-rejected:" + requestId);
+                ApprovalNotificationKeys.rejected(requestId, roundNo(request), currentStep.stepNo(),
+                        resolution.slotOwnerId()));
         boolean updated = casUpdate(request, w -> w
                 .set("status", STATUS_REJECTED)
                 .set("finalized_at", LocalDateTime.now())
@@ -266,7 +268,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             return;
         }
         notifyApplicant(request, "APPROVAL_RETURNED", "承認申請が差し戻されました",
-                "approval-returned:" + requestId);
+                ApprovalNotificationKeys.returned(requestId, roundNo(request), currentStep.stepNo(),
+                        resolution.slotOwnerId()));
         boolean updated = casUpdate(request, w -> w.set("status", STATUS_RETURNED));
         if (!updated) {
             throw BusinessException.of("error.common.optimisticLock");
@@ -571,8 +574,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     private void notifyApprovers(ApprovalRequest request, RouteStepGroup step) {
         String message = writeJson(List.of("notification.msg.APPROVAL_REQUESTED",
                 request.getRequestNo(), request.getRequestType()));
-        String dedupeKey = "approval-requested:" + request.getId() + ":round:" + roundNo(request)
-                + ":step:" + step.stepNo();
+        String dedupeKey = ApprovalNotificationKeys.requested(request.getId(), roundNo(request), step.stepNo());
         for (Long approverId : step.approverUserIds()) {
             notificationService.publishToUser(approverId, "APPROVAL_REQUESTED", "承認申請が届きました", message,
                     NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");

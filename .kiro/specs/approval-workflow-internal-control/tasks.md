@@ -99,7 +99,11 @@
   - **Demo/未検証事項**: MockMvc/Thymeleafと定向テストで管理画面・snapshot・代理期間・監査表示を確認した。実ブラウザのdesktop/390px目視、MySQL/Docker fresh migration smoke、mvn全量は未実施。
   - **テスト要件**: L2〜L3。進行中申請のroute snapshot不変、申請後の代理期間開始/終了、解決不能拒否、本人/代理のslot二重承認防止をカバー。
 - [ ] B1. 通知/SLA/escalation
-  - **状態**: 未着手（継続。Round 2 指摘 P1-03/P1-07 の engine 修正後に着手する）。
+  - **状態**: 実装中（V79 outboxとround/step/slot対応dedupe keyを追加済み。Demo/release gate未達のため完了扱いにしない）。
+  - **実装済み**: `ApprovalNotificationKeys`へ申請/承認/差戻し/却下/conflict/SLAの共通key生成を集約し、`requestId + round + step (+ slot)`でラウンド再利用を防止。`ApprovalSlaService`もroundを含むkeyへ統一した。V78は変更せず、V79で`t_notification_outbox`を追加し、通知保存と外部Webhook配信をcommit後worker・再送経路へ分離した。
+  - **定向検証**: `ApprovalNotificationSlaTest` 6件、`NotificationServiceImplTest` 9件、`NotificationOutboxDispatcherTest` 5件、`NotificationOutboxServiceTest` 5件の計25件を failures 0 / errors 0 / skipped 0で確認。期限境界、同一超過の重複抑止、宛先限定、NULL SLA、round 1→2のRETURNED/REQUESTED/SLA key分離、outboxのclaim/成功/RETRY/FAILED/重複を含む。
+  - **広いB1回帰**: `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`の7クラスを再実行し、計46件を failures 0 / errors 0 / skipped 0で確認した。
+  - **未検証**: 実MySQLのV79適用・rollback/lock、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前失敗時の実DBrollbackはDocker/接続情報不足のため未確認。CI相当全量も`MobileResponsiveLayoutTest` 1件とDocker依存skip 12件が残るため、B1はrelease gate未達としてPASS扱いにしない。
   - **Objective**: 申請・差戻し・承認・却下・期限超過が**対象本人だけ**に届く。
     stepごとのSLA期限を超えると上位責任者へescalateされ、同じ超過で二重に通知されない。
   - **実装ガイダンス**: recipient限定、冪等scheduler、`NotificationLinks`定数を使う。
@@ -118,19 +122,11 @@
   - **定向回帰実測**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、
     `ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を
     failures 0 / errors 0 / skipped 0で確認した。adapterは既存service委譲、月次締め最終承認者、registry idempotencyを確認した。
-  - **全量実測**: `mvn test`は`1410 tests / failures 2 / errors 0 / skipped 0`（2026-08-03）。
-    初回の対象API fixture不足による39 errorsはWebMvcTestへregistry mockを追加して解消した。残る2 failuresはM実装由来ではない既知問題で、
-    (1) 旧版で記録された`SpecDispatchConsistencyTest`のS07=V75/S09=V76/S10=V77予約衝突は、Round 2でS07=V78/S09=V80/S10=V81へ更新済みである。
-    (2) `MobileResponsiveLayoutTest`の既存`.tmp-ui-scale-r3`系変更に関連する`quick-add-label` markup不足である。
-  - **MySQL smoke**: Docker/Testcontainersが利用可能で、fresh/legacy/upgrade/partial-repair/repair/concurrentの8経路を実行し、
-    `FlywayMigrationSmokeTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、
-    `FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、
-    `FlywayRepairRunbookTest`、`ConcurrentUpdateTest`は全件PASS（各1件、skipped 0）。
-  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通しは未実施。以下はrelease gateとしてPASS扱いにしない。
-    `targetVersion`正式定義とCAS/current_step再検証、`ApprovalEngineServiceImpl.approve()`の対象version比較、
-    対象テーブル側`UNIQUE(approval_request_id)`、同時二重申請のDB UNIQUE競合処理、outbox/通知失敗時のrollback・再送、
-    ROLE quorumと申請者role条件、差戻し再申請時のUNIQUE衝突、締め済み月のconfirm/reopen判定、diff maskingの正式確認、
-    見積受注時の`changeStatus`と`createDraftFromQuotation`のmethod境界。
+  - **全量実測（current B1作業木、2026-08-03）**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`が実行した`mvn -B clean test`は`1432 tests / failures 1 / errors 0 / skipped 12`、script exit 1。Node `v24.18.0`は利用可能でJS構文チェックは実行された。failureは`MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`の`quick-add-label`契約である。skipは12 test cases / 10 report classesで、Docker依存の`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。clean Head基準では1420 / 1 / 0 / 12だったが、B1追加テストを含むcurrent作業木の実測は1432 / 1 / 0 / 12である。
+  - **M定向回帰の再測定**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、`ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を failures 0 / errors 0 / skipped 0で再確認した。
+  - **migration/static回帰**: `MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`FlywayMigrationSmokeTest` 2件の計36件を実行し、failures 0 / errors 0 / skipped 2。後者2件はDocker daemon unavailableによるskipである。
+  - **MySQL smoke**: current環境ではDocker daemonへ接続できず、V78/V79を含むfresh/legacy/upgrade/partial-repair/repair/concurrentの実MySQL検証は未実施である。過去のDocker利用可能時のPASS記録は履歴として保持するが、current作業木のrelease evidenceには再利用しない。
+  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通し、実MySQLでのV79適用・rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackは未確認である。全量failure 1、Docker依存skip 12も残るため、B1/Mはrelease gate未達としてPASS扱いにしない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     5業務のbrowser通し（desktop/390px）、既存Contract/Invoice/BpPayment/Closingの回帰、
     Node/JS syntax、`git diff --check`。
