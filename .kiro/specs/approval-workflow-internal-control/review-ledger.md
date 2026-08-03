@@ -366,3 +366,13 @@ READINESS
 - 最終差分ゲート: `git status --short --untracked-files=all`は台帳・tasks・H2 fixtureの変更とschedulerテスト新規ファイルの4件のみ。`git diff --check`はexit 0。V75/V76/V77/V78の`git diff --name-only`は空。commit/pushは実施していない。
 
 - **HEAD/commit補足**: 最終ゲート時の実HEADは`b380a5a1bbf13e5cf0f61168e429bfafe467cc58`（親`a33a6e9`）で、commit日時は2026-08-03 17:24:50 JST、`origin/main`/`origin/HEAD`も同じcommitを指していた。これは本継続のテスト・台帳追記開始時点ですでに存在した履歴であり、本継続中にcommit/pushコマンドは実行していない。既存commitの巻き戻しや追加commitは行わない。従来の`Head a33a6e9`記録はその時点の履歴として保持し、本節のHEADを最終ゲート時点の正とする。
+
+## S07-R4-P1-10追跡結果（2026-08-03、現行HEAD `df674db`）
+
+- CI run `30790999682`の`expected: <1> but was: <3>`を、V78 migration defectと断定せずソースとfixtureの対応で再切り分けした。`V78__approval_workflow_round_participant_version.sql`のparticipant backfillは、申請者を`participant_role='applicant'`で1件、旧snapshotの`approverUserIds` 2名を`participant_role='approver'`で2件投入する2文だけである。
+- `FlywayMigrationSmokeTest`の最初のassertはapplicant件数1、次のassertはapprover件数2であり、いずれもこの形状と一致する。失敗していた第三assertは`countParticipantsForRound()`（`request_id`と`round_no`だけで絞り、roleを絞らないround総数helper）へ期待値1を渡していた。round総数の正しい値は**1 + 2 = 3**であり、CI failureはtest oracleの誤りだった。`participant_role`の誤格納、Flyway `DELIMITER`分割副作用、fixture累積は確認されなかった。
+- 修正は`src/test/java/com/ses/migration/FlywayMigrationSmokeTest.java`の第三assertを`1`から`3`へ変更し、申請者1名＋承認者2名の内訳を日本語コメントで明記した。`V78__approval_workflow_round_participant_version.sql`、V75〜V78のmigration SQL、Flyway parser設定は変更していない。
+- Docker Desktopが起動したため、修正後に実MySQL Testcontainersを実行した。`FlywayMigrationSmokeTest`は**2 / failures 0 / errors 0 / skipped 0 PASS**、`MigrationScriptIntegrityTest`は**26 / 0 / 0 / 0 PASS**。fresh migrationはV79まで適用され、legacy V77→V78 success/backfillと非終端停止経路を含む対象smokeが通過した。
+- CI相当全量`verify-like-ci.ps1`もDocker有効・Node `v24.18.0`で開始したが、1800秒上限で`FlywayRepairRunbookTest`付近の途中終了となった。Maven全量の最終集計は取得できず、全量PASS/zero-skippedとは判定しない。残留していたMaven/Surefireプロセスはこの途中実行のため停止した。
+- `gh run list --commit df674db0effd9fa35eaedd1d4474adcfb40e9125`には修正後のremote CI runは表示されなかった。今回の修正は未commit作業木にあり、commit/pushは実施していないため、GitHub CIでの修正後runと`Ensure no tests were skipped`到達は未確認である。
+- 判定: S07-R4-P1-10の「V78がparticipant_roleを誤生成する」主張は、実MySQL再実行で否定された。修正後の対象smokeはPASSであり、migration側P1 blockerは解消（test oracle修正）と判定する。ただしRG-1のremote CI修正後証跡、CI相当全量の完走、browser/RG-4等の既存release gateは別途未達のまま。B1/M checkboxは変更しない。

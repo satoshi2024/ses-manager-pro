@@ -561,7 +561,8 @@ class FlywayMigrationSmokeTest {
              Statement statement = connection.createStatement()) {
             assertEquals(1, countParticipants(statement, terminal.requestId(), "applicant"));
             assertEquals(2, countParticipants(statement, terminal.requestId(), "approver"));
-            assertEquals(1, countParticipantsForRound(statement, terminal.requestId(), 1));
+            // round総数は申請者1名＋旧snapshotの承認者2名で3件になる。
+            assertEquals(3, countParticipantsForRound(statement, terminal.requestId(), 1));
         }
 
         // 成功経路のスキーマを一度初期化し、同じV77 legacy形状で停止経路を再現する。
