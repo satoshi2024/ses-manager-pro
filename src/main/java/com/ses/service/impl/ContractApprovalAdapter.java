@@ -49,7 +49,9 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
 
     @Override
     public long currentVersion(Long targetId) {
-        return version(require(targetId).getVersion());
+        Contract c = targetId == null ? null : mapper.selectByIdForUpdate(targetId);
+        if (c == null) throw BusinessException.of(404, "error.scope.notFound");
+        return version(c.getVersion());
     }
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
 

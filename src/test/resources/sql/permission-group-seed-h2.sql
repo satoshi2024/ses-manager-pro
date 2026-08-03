@@ -1,4 +1,4 @@
--- V64〜V66.1 のpermission group seedをH2で再現するfixture。
+-- V64〜V66.1・V78 のpermission group seedをH2で再現するfixture。
 -- 本体migrationは MySQL 固有構文（INSERT IGNORE / DELETE a FROM ... JOIN）を使うため
 -- そのままH2へ流せない。最終状態だけを同じ内容で作る。
 -- 差異が出ないよう、action keyと deny_flag は V64/V66 と1対1で対応させること。
@@ -86,7 +86,10 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   ('default', 4, 'permission.manage', 1, 0),
   ('default', 4, 'audit.security.view', 1, 0),
   ('default', 4, 'file.scan.retry', 1, 0),
-  ('default', 4, 'payroll.view', 1, 0);
+  ('default', 4, 'payroll.view', 1, 0),
+  -- V78: 承認画面の口座fieldは専用actionで明示拒否する。BP会社マスタのbp-company.*は維持。
+  ('default', 2, 'bp-company.bank-account.view', 1, 0),
+  ('default', 4, 'bp-company.bank-account.view', 1, 0);
 
 -- role別のdefault group割当（V64/V66のbackfill相当）
 INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_at, deleted_flag) VALUES

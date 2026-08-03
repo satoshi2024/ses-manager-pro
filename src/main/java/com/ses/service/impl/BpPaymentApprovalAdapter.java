@@ -37,7 +37,9 @@ public class BpPaymentApprovalAdapter implements ApprovalTargetAdapter {
     }
     @Override
     public long currentVersion(Long targetId) {
-        return version(require(targetId).getVersion());
+        BpPayment p = targetId == null ? null : mapper.selectByIdForUpdate(targetId);
+        if (p == null) throw BusinessException.of(404, "error.scope.notFound");
+        return version(p.getVersion());
     }
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
     @Override public void applyApproved(ApprovalRequest request) {

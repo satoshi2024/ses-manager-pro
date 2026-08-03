@@ -12,6 +12,10 @@ import java.util.List;
 @Mapper
 public interface BpPaymentMapper extends BaseMapper<BpPayment> {
 
+    /** 承認最終適用の対象行をロックして取得する。request行→BP支払行の順で呼び出す。 */
+    @Select("SELECT * FROM t_bp_payment WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    BpPayment selectByIdForUpdate(@Param("id") Long id);
+
     @Select("""
         <script>
         SELECT

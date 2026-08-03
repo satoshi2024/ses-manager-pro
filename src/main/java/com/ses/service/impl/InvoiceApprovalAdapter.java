@@ -37,7 +37,9 @@ public class InvoiceApprovalAdapter implements ApprovalTargetAdapter {
     }
     @Override
     public long currentVersion(Long targetId) {
-        return version(require(targetId).getVersion());
+        Invoice i = targetId == null ? null : mapper.selectByIdForUpdate(targetId);
+        if (i == null) throw BusinessException.of(404, "error.scope.notFound");
+        return version(i.getVersion());
     }
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
     @Override public void applyApproved(ApprovalRequest request) {

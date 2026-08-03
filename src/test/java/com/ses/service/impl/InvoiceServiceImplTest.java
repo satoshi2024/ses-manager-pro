@@ -608,7 +608,7 @@ public class InvoiceServiceImplTest {
 
     @Test
     void testChangeBpPaymentStatus_NotFound() {
-        when(bpPaymentMapper.selectById(anyLong())).thenReturn(null);
+        when(bpPaymentMapper.selectByIdForUpdate(anyLong())).thenReturn(null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "支払済", null));
         assertTrue(ex.getMessage().contains("error.invoice.bpPaymentNotFound"));
@@ -619,7 +619,7 @@ public class InvoiceServiceImplTest {
         BpPayment bp = new BpPayment();
         bp.setId(1L);
         bp.setStatus("支払済");
-        when(bpPaymentMapper.selectById(1L)).thenReturn(bp);
+        when(bpPaymentMapper.selectByIdForUpdate(1L)).thenReturn(bp);
         when(bpPaymentMapper.update(any(), any())).thenReturn(1);
 
         invoiceService.changeBpPaymentStatus(1L, "未払", null);
@@ -631,7 +631,7 @@ public class InvoiceServiceImplTest {
     void testChangeBpPaymentStatus_InvalidStatus() {
         BpPayment bp = new BpPayment();
         bp.setId(1L);
-        when(bpPaymentMapper.selectById(1L)).thenReturn(bp);
+        when(bpPaymentMapper.selectByIdForUpdate(1L)).thenReturn(bp);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> invoiceService.changeBpPaymentStatus(1L, "済", null));
         assertTrue(ex.getMessage().contains("error.invoice.statusInvalid"));

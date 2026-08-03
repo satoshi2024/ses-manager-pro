@@ -130,6 +130,16 @@ class ActionPermissionMatrixTest {
     }
 
     @Test
+    void 承認画面の口座actionは営業とマネージャーを拒否し管理者だけ表示できる() {
+        assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"),
+                "bp-company.bank-account.view"));
+        assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"),
+                "bp-company.bank-account.view"));
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"),
+                "bp-company.bank-account.view"));
+    }
+
+    @Test
     void 既知resource許可を持つroleでも機密actionは拒否指定が優先される() {
         Authentication sales = authenticate(9001L, "営業");
         assertFalse(authorizationService.isAllowed(sales, "user.view"));
@@ -224,14 +234,25 @@ class ActionPermissionMatrixTest {
                 Integer.class);
         org.junit.jupiter.api.Assertions.assertEquals(1, adminBaselineCount, "管理者groupにbaselineが未セット");
 
-        // manager(4) と sales(2) の deny 行がそれぞれ5件存在すること
+        // manager(4) と sales(2) のdeny行はV66の5件にV78の口座actionを加えた6件。
         Integer salesDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(5, salesDenyCount, "営業groupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(6, salesDenyCount, "営業groupのdeny行数が不一致");
 
         Integer managerDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(5, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(6, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+
+        Integer salesBankDeny = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 "
+                        + "AND action_key = 'bp-company.bank-account.view' AND deny_flag = 1", Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(1, salesBankDeny,
+                "営業groupにV78の口座action denyが必要");
+        Integer managerBankDeny = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 "
+                        + "AND action_key = 'bp-company.bank-account.view' AND deny_flag = 1", Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(1, managerBankDeny,
+                "マネージャーgroupにV78の口座action denyが必要");
     }
 
     private Authentication authenticate(Long id, String role) {

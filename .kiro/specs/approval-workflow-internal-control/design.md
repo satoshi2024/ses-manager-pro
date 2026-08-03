@@ -78,6 +78,41 @@ ALTER TABLE t_bp_payment
   ADD COLUMN version INT NOT NULL DEFAULT 0 COMMENT '楽観ロックバージョン';
 ```
 
+**V78既存データ移行境界（A′）**:
+V78の最初の実行処理は、既存申請のslot意味論を検査するstored procedureの`CALL`とする。
+既存の`ALTER TABLE`/`CREATE TABLE`およびparticipant backfillを先に実行してはならない。
+MySQLではV71と同じstored procedure方式を使用し、`SIGNAL SQLSTATE '45000'`で停止する。
+
+検査対象の`route_snapshot_json`がNULL・空文字・JSON解析不能、または`steps`配列を持たない場合は、
+条件に該当しないとみなさず、fail-closedで停止する。JSONのstep展開はMySQLのfilter式を使わず、
+`JSON_TABLE(route_snapshot_json, '$.steps[*]' COLUMNS (...))`で展開してから`stepNo`を比較する。
+
+participantの可視性backfillは、全非削除申請を対象に冪等実行する。
+
+- `applicant_id`を`participant_role='applicant'`として登録する。
+- `route_snapshot_json`の`$.steps[*].approverUserIds[*]`を展開し、
+  `participant_role='approver'`として登録する。
+- `round_no`は`COALESCE(round_no, 1)`を使用する。
+- backfillは`INSERT IGNORE`を使用し、`uk_participant`による既存行との重複を
+  migration失敗にしない。
+- 終端済み申請も対象とし、完了一覧の可視性を復元する。
+
+ただし、次の3条件をすべて満たす既存申請が1件でもある場合は、V78を停止する。
+
+1. `route_snapshot_json`に`slots`形式が存在しない。
+2. statusが`draft`、`requested`、`in_review`、`returned`または`conflict`である。
+3. `current_step`以上のstepのうち少なくとも1つで、`approverUserIds`が2名以上である。
+
+この条件は、旧snapshotのparallel groupが新実装で1slotへ縮退し、1名承認で成立する
+内部統制の弱体化を防ぐためのfail-closed境界である。旧snapshotのslot境界を現在のroute定義から
+再構成してはならない。検査で使用する対象申請ID・request_no・status・current_stepを停止メッセージに
+含め、運用者が次のSQLで該当行を特定できるようにする。該当申請は取下げまたは旧workflowで完了させ、
+Flyway repair後にV78を再実行する。
+
+dev/stagingに非終端・旧形式・残りstepに多名承認者を持つ申請が存在しないことを確認し、
+確認結果をreview-ledger.mdへ記録する。この条件が将来満たされない場合は、旧申請を残したまま
+アップグレードする別designを承認するまでV78を適用しない。
+
 このDDLは設計上の確定値であり、実装時に`approval_version`へ読み替えたり、action側の
 `round_no`追加を省略したりしない。H2 schemaも同じ列・キー形状へ同期する。
 `t_approval_delegation_type`の既存行移行はV78に含める。`request_types_json IS NULL`の代理には子行を
@@ -175,6 +210,14 @@ system migration以外はengine経由のみ。既存API互換が必要なら同U
 - `diff_json`の表示は**field単位のpermissionに従う**。原価・給与・口座を承認画面で素通しにしない。
   承認者が対象fieldを見る権限を持たない場合、その行を「変更あり（値非表示）」で示す。
 - 通知は**対象本人だけ**へ送る。組織一斉通知にしない。
+- 承認画面のbank/account fieldは`bp-company.bank-account.view`を要求し、
+  `bp-company.*`の許可だけでは口座値を表示しない。role-salesおよびrole-managerには
+  V78とH2のpermission seedで同actionの`deny_flag=1`を明示登録し、管理者だけが
+  既存の管理者bypassで閲覧できることを固定する。
+- この変更は承認画面のdiff/payload表示だけを対象とし、BP会社マスタ画面の既存
+  `bp-company.*`認可は変更しない。BP会社マスタでは表示され、承認画面ではマスクされる
+  差は意図した境界であり、BP会社マスタ自体の口座fieldを締める変更は本specの範囲外とする。
+  必要になった場合は別specで扱う。
 
 #### §6.3.1 承認一覧の SQL 境界化方針（確定済み）
 
@@ -338,6 +381,19 @@ DBレベルで拒否し、1人1slotを構造的に保証する。
 | `t_bp_payment` | `version INT NOT NULL DEFAULT 0` | `BpPayment.version`をそのまま`target_version`へ保存 | `target_version` ≠ 現在の`BpPayment.version`なら競合 | 同上 |
 | `m_system_config`（月次締め） | `@Version`列は追加しない。`payload_json`へ申請時点の`closedMonths`配列を保存 | 締め済み月のリストを`payload_json`へ保存 | 申請時点の`closedMonths`と現在値が不一致なら競合 | 同上 |
 
+**対象行ロックとlock order（P2-16）**:
+`approve()`は常に`request row → target row`の順でロックする。最終承認時の
+`currentVersion()`は対象業務行を`SELECT ... FOR UPDATE`で取得し、`applyApproved()`および
+requestのapproved確定まで対象行ロックを保持する。`currentVersion()`と`applyApproved()`の間に
+対象業務行の更新を許可しない。
+月次締めは既存`MonthlyClosingServiceImpl.lockConfig()`が使用する`m_system_config`の同一行を
+対象とし、承認engineも`request row → m_system_config row`の順序を守る。
+`SystemConfigServiceImpl`のJVM内`ConcurrentHashMap` cacheは最終承認時のversion再検証で
+経由しない。`t_bp_payment`についても対象行を`FOR UPDATE`で取得する。これは
+`operation-inventory.md` §3が記録した「行レベルpessimistic lockがなく状態CASのみ」という
+申し送りを閉じるものである。直接更新経路と承認経路は同じ対象行・同じlock orderを使用し、
+request rowを先に取得する承認engineとの逆順ロックを作らない。
+
 `@Version`の自動増分は`updateById(entity)`系に限られる。既存の対象4表には`UpdateWrapper`や生SQLで
 更新する経路もあるため、次の7経路ではversion増分を明示的に同じUPDATEへ組み込む。ここにない
 新しい更新経路を追加する場合も、`updateById`へ寄せるか、同じ表へ追記して増分方法を固定する。
@@ -426,6 +482,22 @@ conflictは再申請待ちであり、入口は`resubmit()`とする。ただし
 
 route resolution、金額境界、自己承認、代理期間、並列、競合、二重承認、apply rollback、outbox、
 対象5adapterの単件service回帰。
+
+V78のlegacy migration回帰には次の両方を含める。
+
+1. 終端済み申請だけが存在するfixtureではV78が成功し、applicantおよびapproverの
+   participant backfill件数を検証する。
+2. `slots`なし・非終端・`current_step`以上の残りstepのいずれかで
+   `approverUserIds`が2名以上のfixtureでは、V78が実MySQL上で指定メッセージを返して
+   停止することを検証する。
+
+H2ではFlyway migrationを実行しないため、上記停止経路はDockerを利用した
+`FlywayMigrationSmokeTest`でのみ検証する。
+
+P2-11の回帰では、H2 seedと`ActionPermissionMatrixTest`で
+`bp-company.bank-account.view`のdeny actionを名指しで検証し、
+`ApprovalViewServiceImplTest`では営業/マネージャーで口座値がマスクされることと、
+管理者で値が表示されることの両方をassertする。
 
 ## 8. F1実装注記（逸脱と根拠）
 
@@ -516,3 +588,10 @@ F1/A1 実装では `ApprovalViewServiceImpl` が `selectList()` 全件取得 →
 Round 2 指摘（P1-08）により V78 で `t_approval_participant` を追加し SQL 境界を確立した（§6.3.1）。
 旧実装の全件取得・Java フィルタ・手動ページングは廃止。新実装は`t_approval_participant`による
 可視性`EXISTS`判定と`PageUtils.safePage`を組み合わせる。500件制限（暫定）は採用しない。
+
+### 補足: 独立Review証跡の格納先
+
+独立Review AIが生成したtop-levelの一時成果物は正式な判定資料ではない。
+観測事実と再現条件だけを`.kiro/specs/approval-workflow-internal-control/review-ledger.md`へ転記し、
+判定は独立Reviewの結果として明記する。転記後はtop-levelの`semantic-review/`成果物を削除し、
+review-ledger.mdを本specのReview記録の正本とする。

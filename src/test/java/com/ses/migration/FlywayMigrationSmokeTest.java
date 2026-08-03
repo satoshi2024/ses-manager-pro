@@ -7,9 +7,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -34,6 +36,14 @@ class FlywayMigrationSmokeTest {
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_db")
+            .withUsername("ses")
+            .withPassword("ses");
+
+    /** V77適用済みlegacy DBへ、V78の成功/停止両経路を適用する専用container。 */
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> LEGACY_V78 = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_legacy_v78")
             .withUsername("ses")
             .withPassword("ses");
 
@@ -531,6 +541,56 @@ class FlywayMigrationSmokeTest {
         }
     }
 
+    @Test
+    void V78legacy申請は終端済みならparticipantをbackfillし多名旧snapshotの進行中申請は停止する() throws Exception {
+        Flyway.configure()
+                .dataSource(LEGACY_V78.getJdbcUrl(), LEGACY_V78.getUsername(), LEGACY_V78.getPassword())
+                .locations("classpath:db/migration")
+                .target("77")
+                .load()
+                .migrate();
+
+        LegacyFixture terminal = insertLegacyApprovalFixture(LEGACY_V78, "AR-V78-TERM", "approved");
+        Flyway.configure()
+                .dataSource(LEGACY_V78.getJdbcUrl(), LEGACY_V78.getUsername(), LEGACY_V78.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+
+        try (Connection connection = LEGACY_V78.createConnection("");
+             Statement statement = connection.createStatement()) {
+            assertEquals(1, countParticipants(statement, terminal.requestId(), "applicant"));
+            assertEquals(2, countParticipants(statement, terminal.requestId(), "approver"));
+            assertEquals(1, countParticipantsForRound(statement, terminal.requestId(), 1));
+        }
+
+        // 成功経路のスキーマを一度初期化し、同じV77 legacy形状で停止経路を再現する。
+        Flyway.configure()
+                .dataSource(LEGACY_V78.getJdbcUrl(), LEGACY_V78.getUsername(), LEGACY_V78.getPassword())
+                .locations("classpath:db/migration")
+                .cleanDisabled(false)
+                .load()
+                .clean();
+        Flyway.configure()
+                .dataSource(LEGACY_V78.getJdbcUrl(), LEGACY_V78.getUsername(), LEGACY_V78.getPassword())
+                .locations("classpath:db/migration")
+                .target("77")
+                .load()
+                .migrate();
+        insertLegacyApprovalFixture(LEGACY_V78, "AR-V78-BLOCK", "in_review");
+
+        Exception failure = assertThrows(Exception.class, () -> Flyway.configure()
+                .dataSource(LEGACY_V78.getJdbcUrl(), LEGACY_V78.getUsername(), LEGACY_V78.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate());
+        String messages = allMessages(failure);
+        assertTrue(messages.contains("V78"), "V78の停止メッセージが例外chainに含まれるはず: " + messages);
+        assertTrue(messages.contains("AR-V78-BLOCK"), "request_noが停止メッセージに含まれるはず: " + messages);
+        assertTrue(messages.contains("in_review"), "statusが停止メッセージに含まれるはず: " + messages);
+        assertTrue(messages.contains("flyway repair"), "repair後再実行の手順が停止メッセージに含まれるはず: " + messages);
+    }
+
     /** 当該actionを許可されている既定groupが、期待どおりの集合に一致すること。 */
     private void assertActionGrantedTo(Statement st, String actionKey, String... expectedGroupKeys)
             throws Exception {
@@ -578,6 +638,83 @@ class FlywayMigrationSmokeTest {
             assertEquals(precision, rs.getInt(1));
             assertEquals(scale, rs.getInt(2));
         }
+    }
+
+    private record LegacyFixture(long requestId) {
+    }
+
+    private LegacyFixture insertLegacyApprovalFixture(MySQLContainer<?> container,
+                                                       String requestNo, String status) throws Exception {
+        try (Connection connection = container.createConnection("");
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO sys_user "
+                    + "(username, password, real_name, role, email, status) VALUES "
+                    + "('v78-legacy-approver-a', 'x', 'V78承認者A', '管理者', 'v78-a@ses.local', 1),"
+                    + "('v78-legacy-approver-b', 'x', 'V78承認者B', '管理者', 'v78-b@ses.local', 1)");
+            long applicantId = queryLong(statement, "SELECT id FROM sys_user WHERE username='admin'");
+            long approverA = queryLong(statement,
+                    "SELECT id FROM sys_user WHERE username='v78-legacy-approver-a'");
+            long approverB = queryLong(statement,
+                    "SELECT id FROM sys_user WHERE username='v78-legacy-approver-b'");
+            String snapshot = "{\"routeId\":1,\"versionNo\":1,\"organizationId\":null,"
+                    + "\"steps\":[{\"stepNo\":1,\"slaHours\":null,"
+                    + "\"approverUserIds\":[" + approverA + "," + approverB + "]}]}";
+
+            try (PreparedStatement prepared = connection.prepareStatement(
+                    "INSERT INTO t_approval_request "
+                            + "(request_no, request_type, target_type, target_id, target_version, "
+                            + "applicant_id, organization_id, amount_snapshot, payload_json, diff_json, "
+                            + "route_snapshot_json, status, current_step, requested_at, finalized_at, "
+                            + "idempotency_key, version, created_by) "
+                            + "VALUES (?, 'legacy.v78', 'CONTRACT', 1, NULL, ?, NULL, NULL, '{}', NULL, "
+                            + "?, ?, 1, CURRENT_TIMESTAMP, NULL, NULL, 1, ?)")) {
+                prepared.setString(1, requestNo);
+                prepared.setLong(2, applicantId);
+                prepared.setString(3, snapshot);
+                prepared.setString(4, status);
+                prepared.setLong(5, applicantId);
+                prepared.executeUpdate();
+            }
+            return new LegacyFixture(queryLong(statement,
+                    "SELECT id FROM t_approval_request WHERE request_no='" + requestNo + "'"));
+        }
+    }
+
+    private long countParticipants(Statement statement, long requestId, String role) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT COUNT(*) FROM t_approval_participant WHERE request_id=" + requestId
+                        + " AND participant_role='" + role + "'")) {
+            assertTrue(resultSet.next());
+            return resultSet.getLong(1);
+        }
+    }
+
+    private long countParticipantsForRound(Statement statement, long requestId, int roundNo) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT COUNT(*) FROM t_approval_participant WHERE request_id=" + requestId
+                        + " AND round_no=" + roundNo)) {
+            assertTrue(resultSet.next());
+            return resultSet.getLong(1);
+        }
+    }
+
+    private long queryLong(Statement statement, String sql) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            assertTrue(resultSet.next(), "fixture query returned no row: " + sql);
+            return resultSet.getLong(1);
+        }
+    }
+
+    private String allMessages(Throwable failure) {
+        StringBuilder messages = new StringBuilder();
+        Throwable current = failure;
+        while (current != null) {
+            if (current.getMessage() != null) {
+                messages.append(current.getMessage()).append('\n');
+            }
+            current = current.getCause();
+        }
+        return messages.toString();
     }
 
     private void assertRowExists(Statement st, String sql) throws Exception {

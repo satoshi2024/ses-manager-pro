@@ -13,6 +13,10 @@ import java.util.List;
 @Mapper
 public interface InvoiceMapper extends BaseMapper<Invoice> {
 
+    /** 承認最終適用の対象行をロックして取得する。request行→invoice行の順で呼び出す。 */
+    @Select("SELECT * FROM t_invoice WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    Invoice selectByIdForUpdate(@Param("id") Long id);
+
     @Select("""
         <script>
         SELECT i.id

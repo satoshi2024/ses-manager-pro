@@ -538,7 +538,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     @org.springframework.transaction.annotation.Transactional
     public void changeBpPaymentStatus(Long id, String status, LocalDate paidDate) {
-        BpPayment bpPayment = bpPaymentMapper.selectById(id);
+        // 直接更新経路も承認経路と同じBP支払行をロックし、状態確認からCAS更新まで保持する。
+        BpPayment bpPayment = bpPaymentMapper.selectByIdForUpdate(id);
         if (bpPayment == null) {
             throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }

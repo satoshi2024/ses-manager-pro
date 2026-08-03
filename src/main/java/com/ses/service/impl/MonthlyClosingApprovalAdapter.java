@@ -7,8 +7,10 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SysUser;
+import com.ses.entity.SystemConfig;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalPayloads;
@@ -20,7 +22,6 @@ import org.springframework.stereotype.Component;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -35,23 +36,26 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
     private final ApprovalActionMapper approvalActionMapper;
     private final SysUserMapper sysUserMapper;
     private final SystemConfigService systemConfigService;
+    private final SystemConfigMapper systemConfigMapper;
 
-    /** 本番DI用。締め済み月の現在値をSystemConfigServiceから取得する。 */
+    /** 本番DI用。締め済み月の現在値はDB行をFOR UPDATEで取得し、JVM cacheを経由しない。 */
     @Autowired
     public MonthlyClosingApprovalAdapter(MonthlyClosingService service, ObjectMapper objectMapper,
                                          ApprovalActionMapper approvalActionMapper, SysUserMapper sysUserMapper,
-                                         SystemConfigService systemConfigService) {
+                                         SystemConfigService systemConfigService,
+                                         SystemConfigMapper systemConfigMapper) {
         this.service = service;
         this.objectMapper = objectMapper;
         this.approvalActionMapper = approvalActionMapper;
         this.sysUserMapper = sysUserMapper;
         this.systemConfigService = systemConfigService;
+        this.systemConfigMapper = systemConfigMapper;
     }
 
     /** 既存のadapter直接テストconstructorを維持する。 */
     public MonthlyClosingApprovalAdapter(MonthlyClosingService service, ObjectMapper objectMapper,
                                          ApprovalActionMapper approvalActionMapper, SysUserMapper sysUserMapper) {
-        this(service, objectMapper, approvalActionMapper, sysUserMapper, null);
+        this(service, objectMapper, approvalActionMapper, sysUserMapper, null, null);
     }
 
     @Override public String requestType() { return "closing.confirm"; }
@@ -105,11 +109,37 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
         }
     }
 
+    /**
+     * 最終承認時は同一m_system_config行を悲観ロックして読む。行が無い異常環境でも
+     * MonthlyClosingServiceImpl.lockConfig()と同じinsert-if-absent経路で直列化を維持する。
+     */
+    private String currentConfigValue() {
+        if (systemConfigMapper == null) {
+            // 直接テストconstructor向け。本番DIでは必ずmapper経路を使う。
+            return systemConfigService == null ? "[]" : systemConfigService.getString(CONFIG_KEY, "[]");
+        }
+        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        if (config == null) {
+            SystemConfig created = new SystemConfig();
+            created.setConfigKey(CONFIG_KEY);
+            created.setConfigValue("[]");
+            created.setDescription("月次締め済み月の記録(JSON)");
+            try {
+                systemConfigMapper.insert(created);
+            } catch (RuntimeException ignored) {
+                // 同時insertは既存行を再取得して同じロックを取る。
+            }
+            config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
+        }
+        if (config == null) {
+            throw BusinessException.of(500, "error.closing.corrupted");
+        }
+        return config.getConfigValue();
+    }
+
     /** JSON内のClosingRecordから月だけを抽出し、順序を正規化する。 */
     private List<String> currentClosedMonths() {
-        String json = systemConfigService == null
-                ? "[]"
-                : systemConfigService.getString(CONFIG_KEY, "[]");
+        String json = currentConfigValue();
         try {
             JsonNode root = objectMapper.readTree(json == null || json.isBlank() ? "[]" : json);
             if (!root.isArray()) {

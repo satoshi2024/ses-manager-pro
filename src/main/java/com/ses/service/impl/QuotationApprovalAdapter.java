@@ -46,7 +46,9 @@ public class QuotationApprovalAdapter implements ApprovalTargetAdapter {
 
     @Override
     public long currentVersion(Long targetId) {
-        return version(require(targetId).getVersion());
+        Quotation q = targetId == null ? null : mapper.selectByIdForUpdate(targetId);
+        if (q == null) throw BusinessException.of(404, "error.scope.notFound");
+        return version(q.getVersion());
     }
 
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }

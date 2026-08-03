@@ -1,6 +1,60 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-現行判定: **FAIL（Round 2 / P0=0 / P1=7 / P2=10 / NOTE=2。Round 2 差し戻し対応中。2026-08-03）**
+現行判定: **FAIL（Round 3 / 設計承認済み。release validation未完了：Docker未検証、全量test failure 1件、skip 12件。2026-08-03）**
+
+## Round 3 実装・検証記録（2026-08-03）
+
+### Base / Head / 作業木
+
+- Base: `5110f1204a2270a3cff4195ae580ac7bf366031d`（親 `1e204df953ff09617b39bbb0da6289a1ade06033`、`指摘対応`）。
+- Head: 同じ`5110f12`。commit/pushは未実施で、今回の変更はすべて未commitの作業木にある。
+- 作業木: 15ファイル変更、`git diff --stat`は448 insertions / 21 deletions。
+- `git diff --check`: exit 0。
+- V75/V76/V77: `git diff --name-only --`の結果0件。これらのmigrationは変更していない。
+
+### 実装内容とP1-09 A′ / P2-16 / P2-11の対応
+
+- V78はDDLより先にstored procedure gateを実行する。`route_snapshot_json`のmalformed/NULL/空、`steps`欠落/空、現在step以降の残り全stepにおける複数approver slot欠落/空をfail-closedで停止する。
+- terminal申請は既存履歴を削除せずparticipantを`INSERT IGNORE`でbackfillする。非終端で多名旧snapshotのslot境界を復元できない申請は停止し、停止メッセージに申請特定SQL、`flyway repair`後の取下げ/完了と再実行手順を含めた。
+- 承認適用のロック順序は全対象で固定し、`request row → target row`とした。見積・契約・請求・BP支払は対象行を`FOR UPDATE`取得し、月次締めは`m_system_config`対象行を`FOR UPDATE`取得してJVM内cacheを最終version確認に使わない。請求の直接BP支払状態変更経路にも対象行ロックを追加した。
+- P2-11はV78と`permission-group-seed-h2.sql`の双方へ`bp-company.bank-account.view`のdeny行を追加した。`ActionPermissionMatrixTest`はdeny総数だけでなくaction keyを名指しで確認し、`ApprovalViewServiceImplTest`は営業/マネージャーのマスクと管理者の表示を確認する。
+
+### 自動検証の実測
+
+- 対象回帰: `ActionPermissionMatrixTest` 15件、`ApprovalViewServiceImplTest` 4件、`ApprovalTargetAdapterTest` 7件、`InvoiceServiceImplTest` 41件。合計67件、failures 0 / errors 0 / skipped 0。
+- コンパイル: 対象回帰時および`mvn -B clean test`のcompile/testCompileが成功。
+- `FlywayMigrationSmokeTest`: 2件、failures 0 / errors 0 / skipped 2。Docker daemonが利用できず、fresh migrationとV77 legacyからの終端成功/backfill・非終端停止fixtureは実MySQL上では未実行。
+- 直接実行した`mvn -B clean test`: 1420件、failures 3 / errors 0 / skipped 12。失敗3件の内訳は、既存の`MobileResponsiveLayoutTest` 1件と、Windows execution policyにより`VerifyLikeCiPowerShellCompatibilityTest` 2件。
+- `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`: Node `v24.18.0`を検出し、`JsSyntaxCheckTest`は実行可能な状態。1420件、failures 1 / errors 0 / skipped 12、exit 1。残るfailureは`MobileResponsiveLayoutTest.クイック作成ボタンのラベルは小画面で非表示にできるようspanで包まれている`。skipは12件で、Docker依存の`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`CustomerContactPrimaryConcurrencyTest`、`ConcurrentLoginSessionSmokeTest`に対応する。
+- `MobileResponsiveLayoutTest`の失敗はS07変更ファイル外の既存UI fixture/共通メニュー注入に関するもので、今回の承認実装の対象回帰は全件greenとして切り分けた。CI契約のzero skippedと全量failure 0は、この環境では満たしていない。
+
+### 未検証事項 / release gate
+
+1. Docker未利用のため、V78のMySQL dialect、DDL前gate、legacy終端backfill、非終端旧snapshot停止、`SIGNAL`例外連鎖を実DBで確認できていない。
+2. request→targetの同一transactionロックは対象adapterテストで確認したが、実MySQLの並行承認・通常更新との競合および複数JVMの月次締め変更検知は未確認である。
+3. 実ブラウザdesktop/390pxの5業務通しは未実施である。
+4. 全量testは`MobileResponsiveLayoutTest` 1件が未解決で、CI相当のskip 12件も未解消である。CIでDockerを有効にして`verify-like-ci.ps1`を再実行し、zero skippedを確認する必要がある。
+5. `VerifyLikeCiPowerShellCompatibilityTest`はExecutionPolicy Bypassでは通過したが、通常の`powershell.exe -File`は端末ポリシーにより拒否された。Windows開発環境の実行ポリシー設定差として記録し、CI相当実行時は明示的な実行ポリシーを使用する。
+
+### Rollback
+
+- commit/push前のため、コード・テスト・spec文書はこの作業木の15ファイル単位で元の`5110f12`へ戻せる。戻す場合も`V75/V76/V77`は変更しない。
+- V78を本番DBへ適用した後は、適用済みmigrationを編集・削除せず、バックアップ復元または新しいforward migrationで業務影響を戻す。停止したlegacy申請は、メッセージに示したID特定SQLで確認し、運用判断により取下げまたは完了させ、`flyway repair`後に再実行する。
+- 今回はcommit/pushを行っていないため、rollback用commitは作成していない。
+
+## Round 3 semantic-review転記（自動検証の観測であり独立Review判定ではない）
+
+対象成果物は削除前の`semantic-review/2026-08-03-140419-pr-0.md`である。この成果物は独立reviewerによる承認・PASS判定ではなく、変更差分に対する自動検証観測として扱う。内容の主要観測は次のとおり。
+
+- **blocker / confirmed — 対象版確認と承認適用のTOCTOU**: 現在版のreadと`applyApproved`の間に対象更新が入ると古い申請を適用できる観測。今回のRound 3ではrequest rowからtarget rowを`FOR UPDATE`で固定する方針を実装したが、実MySQL並行競合は未検証。
+- **high / confirmed — V78の既存申請participant backfill欠落**: 参加者テーブル作成だけではV78前の進行中申請が非管理者一覧から消える観測。P1-09 A′としてterminal backfillと危険な非終端旧snapshotのfail-closed gateを実装したが、legacy MySQL fixtureはDocker未利用で未実行。
+- **medium / confirmed — view/statusの交差条件**: inbox/completedのview境界と明示statusの積がSQLで保証されない組合せがあるという観測。今回の変更で新たな修正を加えたものではなく、独立Review判定ではない未再検証事項として保持する。
+- **medium / confirmed — 口座情報の権限キー不一致**: `bp-company.bank-account.view`とseed/設計上の判定キーの不一致という観測。Round 3ではV78/H2 seed、action key名指し回帰、営業/マネージャーmask・管理者表示を追加して整合を取った。
+- **high / likely — 月次締めfingerprintのJVM cache依存**: 複数インスタンスでcacheが古くなる可能性という観測。Round 3では最終確認をDB対象行`FOR UPDATE`へ寄せたが、複数JVM実測は未実施。
+- **medium / confirmed — reject/return通知dedupeのround非依存**: round 2の通知がround 1のdedupe keyに抑止される可能性という観測。今回の変更で通知機構自体は変更しておらず、B1/別作業の未解決観測として保持する。
+- **medium / confirmed — MySQL実行と重要経路の検証gap**: Docker不在でfresh/legacy migration、競合、backfill、権限の実DB検証が未実施という観測。Round 3でもDocker未利用のため解消していない。
+
+**独立Review結果**: semantic-review成果物は独立Review判定ではない。設計承認は済みだが、Docker未検証、全量failure、skip残存、上記未検証事項があるため、release PASSとは判定しない。
 
 ## Issue Register（Round 2 — P1/P2 全件）
 
