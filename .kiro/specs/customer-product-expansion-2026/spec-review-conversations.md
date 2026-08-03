@@ -479,7 +479,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 1
-- Migration: V78（CRMがV73とV74を使用済みのため本specはV75。V72は永久欠番で、前の欠番は埋めない）
+- Migration: V75〜V79（S07正式migration。V75は承認DDL、V76は承認menu seed、V77はSLA開始時刻、V78はround/participant/version、V79はB1 notification outbox。V72は永久欠番で、過去migrationの編集・欠番の補填・out-of-order適用は行わない）
 - 先行条件: BP master V70/V71とCRM V73が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M

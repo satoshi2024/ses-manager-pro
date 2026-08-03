@@ -1,31 +1,32 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-## Latest authoritative REVIEW PACKET — Round 4再基線（2026-08-03）
+## Latest authoritative REVIEW PACKET — Round 4再基線 / fix-delta追跡（2026-08-03）
 
 **requested verdict:** intermediate / re-baseline。通常Reviewの開始判定ではなく、現時点の判定は **NOT REVIEWABLE** とする。
 
 - **handbook version:** `execution-review-handbook.md` v2.0。Round 4以降は§11により通常Reviewを停止し、spec・時間モデル・scope inventory・migration fixture・test matrixを先に改訂する。
 - **spec/tasks:** `.kiro/specs/approval-workflow-internal-control/requirements.md`、`design.md`、`tasks.md`、T041〜T047。
-- **base / head / merge status:** Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`（S07 merge `4edb399`のfirst parent）、Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`。`main`、`origin/main`、`origin/HEAD`はHeadで一致し、merge済み。作業木はclean。
-- **scope inventory:** Base→Headは203 files、`+8501/-284`。内訳はproduction 118、test 34、S07 spec 4、other-spec 42、migration 5。S07専用範囲と範囲外変更を1つのtask別manifestへ完全帰属できていないため、working treeがcleanでもReview Packet不足は解消しない。
+- **base / head / fix-delta status:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`（S07 merge `4edb399`のfirst parent）、original implementation Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`。Packet統合commitは`9215c5e797d063d13719b231175ab8741736a591`（original Headの直後、文書5ファイル）。現在のfix-deltaは`9215c5e797d063d13719b231175ab8741736a591`を基点とする未commit作業木で、`main` HEADは同commit、`origin/main`はoriginal Headである。
+- **scope inventory:** Base→original Headは203 files、`+8501/-284`。内訳はproduction 118、test 34、S07 spec 4、other-spec 42、migration 5。Packet統合commit `9215c5e`は文書5ファイル、`+36/-9`。今回のfunctional fix-deltaは6ファイル（文書5＋`SpecDispatchConsistencyTest`）、`+157/-60`で、Packet/ledger追跡更新の2ファイルを含む現在の作業木は8ファイル、`+167/-69`。production code・migration SQLは変更していない。S07専用範囲と範囲外変更を1つのtask別manifestへ完全帰属できていないため、direct regressionがgreenでもReview Packet不足は解消しない。
 - **task別changed filesの既知範囲:** F1/T042=`4edb399`（41 files）、業務画面統合/T043〜T045相当=`d440eb5`（97 files）、Round 3修正は`5110f12`/`a33a6e9`を中心とする混在差分、B1/T046=`b380a5a`（19 files）＋`df674db`（4 files）、P1-10 test oracle修正=`a70cb51`（2 files）。`9a57eeb`等の他spec・共通基盤変更を含む未帰属範囲が残る。
+- **functional fix-delta changed files:** `parallel-execution-plan.md`、S07の中央/copyable開始・Review入口4ファイル、`src/test/java/com/ses/migration/SpecDispatchConsistencyTest.java`。S07=V75〜V79、S09〜S17=V80〜V88のconsumer契約を同期した。Packet/ledger追跡更新は本`review-ledger.md`と中央`spec-execution-ledger.md`の2ファイルである。
 - **requirements/acceptance trace:** R1〜R5は`requirements.md`に存在し、T041〜T047の実装・test・Demo欄は`tasks.md`にある。ただし現Headに対する独立trace、変更public contractのconsumer inventory、task別完全manifest、同一Headの証拠commitは未提出。
 - **migration latest/reserved/applied:** 実ファイルはV75/V76/V77/V78/V79。採用方針をS07正式migration=`V75/V76/V77/V78/V79`、S09〜S17=`V80〜V88`へ統一する。V75〜V77は既存、V78はround/participant/version、V79はB1 notification outbox。適用済みDBの`flyway_schema_history`は未照会であり、applied判定は未確認。
-- **test / Demo evidence:** 旧Head・旧作業木由来の定向/L4記録は履歴として保持するが、`a70cb51`を対象とする完走済みL4/zero-skipped、fresh/legacy/partial/backfill/repair、実browser desktop/390px、実Webhook、複数JVM、rollbackの同一Head証拠はない。B1/T046とM/T047は未完了。
-- **known review blockers:** `R4-REVIEW-01` latest Packetの完全manifest/同一Head evidence不足、`R4-REVIEW-03` B1/M未完了、`R4-REVIEW-04` Round 4後改訂・Issue Register正規化不足。`R4-REVIEW-02`の文書採番契約は本PacketでS07=V75〜V79、S09〜S17=V80〜V88へ統一したが、適用済みDBの履歴は未照会である。P0/P1/P2は対象範囲確定前のため未判定であり、旧Round 2 Issue Registerの状態を現Headの独立判定へ流用しない。
+- **test / Demo evidence:** fix-delta worktree（base=`9215c5e`）で`mvn -B -Dtest=SpecDispatchConsistencyTest,MigrationScriptIntegrityTest test`を実行し、MigrationScriptIntegrityTest 26/26、SpecDispatchConsistencyTest 8/8、合計34 tests / failures 0 / errors 0 / skipped 0、BUILD SUCCESSを確認した。これはdirect regressionの未commit worktree evidenceであり、同一Headの独立Review・完走済みL4/zero-skippedの代替ではない。fresh/legacy/partial/backfill/repair、実browser desktop/390px、実Webhook、複数JVM、rollbackの同一Head証拠はない。B1/T046とM/T047は未完了。
+- **known review blockers:** `R4-REVIEW-01`は完全manifest/同一Head evidence不足、`R4-REVIEW-02`はfix-deltaのdirect regressionがgreenだが未commit・独立再Review待ち、`R4-REVIEW-03`はB1/M未完了、`R4-REVIEW-04`はRound 4後改訂・Issue Register正規化不足である。P0/P1/P2は対象範囲確定前のため未判定であり、旧Round 2 Issue Registerの状態を現Headの独立判定へ流用しない。
 - **out-of-scope changes:** Base→Headのother-spec 42 filesと、S07 taskへ帰属未確定のproduction/test変更。別specの問題や旧Headのissueを現HeadのP0/P1として再起票しない。
-- **rollback:** 本Packet更新は文書のみ。コード・migration SQL・testは変更しない。文書差分はこのPacket統合commit単位でrevert可能で、V75〜V79を編集・削除しない。
+- **rollback:** functional fix-deltaはparallel-execution-planとS07派工/Review入口4文書、`SpecDispatchConsistencyTest`のみ。Packet/ledger追跡更新は`review-ledger.md`と中央`spec-execution-ledger.md`である。production code・migration SQLは変更していない。未commit作業木を破棄すれば戻せるが、commit後はfix-delta commit単位でrevert可能。V75〜V79を編集・削除しない。
 
 ### Round 4 Issue Register（review process blocker。P分類ではない）
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
 | `R4-REVIEW-01` | OPEN | a70cb51向け最新Packet、完全manifest、同一Head evidenceがない | task別changed files、scope外帰属、requirements trace、証拠commitをPacketへ固定 |
-| `R4-REVIEW-02` | RESOLVED_IN_PACKET | README/design/tasks/中央ledger/Packetの文書契約をS07正式V75〜V79、S09〜S17=V80〜V88へ統一 | 適用済みDBの`flyway_schema_history`をread-only照会し、migration適用状況を同一Head evidenceとして追加 |
+| `R4-REVIEW-02` | FIXED_PENDING_REVIEW | fix-deltaでparallel/派工・Review資料をS07正式V75〜V79、S09〜S17=V80〜V88へ同期し、direct regression 34/0/0/0を確認したが、現時点は未commit作業木 | fix-deltaをcommit化し、current Head relationと完全consumer inventoryを独立Round 4 Reviewへ提出して再確認 |
 | `R4-REVIEW-03` | OPEN | B1/T046とM/T047が`[ ]`、実Webhook/browser/zero-skipped等未達 | B1/MのDoDと残gateを満たすまでPASS・次Wave解放を行わない |
 | `R4-REVIEW-04` | OPEN | Round 4以降の通常Review停止条件、旧Issue RegisterのVERIFIED_CLOSED正規化、final/fix-delta種別が未整理 | Round 4改訂内容と旧issueの履歴/状態をPacketに明示し、Review再開根拠を作る |
 
-**現行判定:** **NOT REVIEWABLE**。P0/P1/P2の独立判定、通常Review、テスト再実行、次Wave解放は行わない。
+**現行判定:** **NOT REVIEWABLE**。P0/P1/P2の独立判定、通常Review、L4全量再実行、次Wave解放は行わない。今回実施したのはfix-deltaのdirect regressionのみである。
 
 ## Round 3追跡Review訂正（2026-08-03、Head `a33a6e9`）
 

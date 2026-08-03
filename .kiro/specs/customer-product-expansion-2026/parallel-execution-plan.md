@@ -58,19 +58,18 @@ Wave 4: AI feedback
 |---|---|---|---|---|
 | 0 | なし | G0決定済み、対象specのblocking決定済み | tenantはT001成果物で停止。共有DB再開後に当時のlatest+1から再計画 | BaseEntity、SecurityConfig、sidebar、file、監査を横断変更するため、現行独立DBでは実装しない |
 | 1-A | BP master（T034〜T040）とCRM（T048〜T053） | Wave 0完了（2026-08-01成就） | BP V70/V71（merge済み）→CRM V73/V74（merge済み） | 実装は並行可だがDDL merge/deployは番号順。approvalは両方待つ |
-| 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V75 | Contract/Invoice/BP payment共通経路を変更 |
-| 2-A | order（T054〜T059）単独 | approval完了 | V76 | 契約・請求状態機械の基礎 |
-| 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order完了、G2/G6確定 | V77→V78 | Contract担当メソッドと雇用勤怠テーブルを分離 |
-| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V79 | proposal/contract/availabilityを統合参照 |
-| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V80→V81 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
-| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V82 | Freee adapter、invoice、BP paymentを変更 |
-| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V83 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
-| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V84 | 学習指標の母集団とPII境界を先に固定 |
+| 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V75〜V79 | S07正式migration（承認DDL/menu/SLA/round・participant・outbox）。Contract/Invoice/BP payment共通経路を変更 |
+| 2-A | order（T054〜T059）単独 | approval完了 | V80 | 契約・請求状態機械の基礎 |
+| 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order完了、G2/G6確定 | V81→V82 | Contract担当メソッドと雇用勤怠テーブルを分離 |
+| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V83 | proposal/contract/availabilityを統合参照 |
+| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V84→V85 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
+| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V86 | Freee adapter、invoice、BP paymentを変更 |
+| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V87 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
+| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V88 | 学習指標の母集団とPII境界を先に固定 |
 
-> **採番の正本は `README.md` の予約表**（V75〜V84）であり、実適用済みの最新は **V74**（CRM権限seed）である。
+> **採番の正本は `README.md` の予約表**であり、S07の正式migrationはV75〜V79、S09〜S17はV80〜V88である。実適用済みの最新は **V74**（CRM権限seed）である。
 > 上表のmerge順は計画値なので、着手時は必ず `db/migration` の実ファイルを再確認する。
-> CRMはDDLのV73に加えて権限seedのV74を使用したため（R08 Round 2）、
-> approvalはV75、#9〜#17はV76〜V84へ繰り上げ済みである。
+> S07はV75（承認DDL）、V76（承認menu）、V77（SLA開始時刻）、V78（round/participant/version）、V79（B1 notification outbox）を使用する。
 > **V72はV59と同じ永久欠番**とする。Flywayは `out-of-order` を有効化していないため、
 > V73/V74適用済みDBへ後からV72を足すと `FlywayValidateException` になる。
 

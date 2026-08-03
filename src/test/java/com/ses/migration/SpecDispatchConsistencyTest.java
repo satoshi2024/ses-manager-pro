@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -60,14 +59,20 @@ class SpecDispatchConsistencyTest {
         SPEC_BY_CONVERSATION.put("S17", "ai-feedback-learning");
     }
 
-    /** 実装済みspecは予約から実在へ移行済みなので、そのspec/versionだけ衝突検査の対象外とする。 */
-    private static final Map<String, Integer> REALIZED_RESERVED = Map.of(
-            "approval-workflow-internal-control", 78);
+    /** S07は複数migrationを実装済み。後続specの単一予約と同じ契約で扱わない。 */
+    private static final Map<String, List<Integer>> REALIZED_MIGRATIONS = Map.of(
+            "approval-workflow-internal-control", List.of(75, 76, 77, 78, 79));
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
+    private static final Pattern DESIGN_REALIZED = Pattern.compile("S07正式migration V(\\d+(?:/V\\d+)*)");
+    private static final Pattern TASKS_REALIZED = Pattern.compile("S07の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);
+    private static final Pattern MIGRATION_SET_LINE = Pattern.compile("^- Migration: (V\\d+(?:〜V\\d+)*)", Pattern.MULTILINE);
+    private static final Pattern PARALLEL_APPROVAL = Pattern.compile(
+            "^\\| 1-B \\| approval（T041〜T047）単独 \\|[^\\n]*?\\| (V\\d+(?:〜V\\d+)*) \\|",
+            Pattern.MULTILINE);
 
     private String read(Path path) throws IOException {
         assertTrue(Files.exists(path), "spec文書が見つかりません: " + path);
@@ -80,15 +85,51 @@ class SpecDispatchConsistencyTest {
         return Integer.parseInt(m.group(1));
     }
 
+    private List<Integer> versionList(String value) {
+        List<Integer> versions = new ArrayList<>();
+        for (String token : value.split("/")) {
+            String[] range = token.split("〜");
+            int start = parseVersionToken(range[0]);
+            int end = range.length == 1 ? start : parseVersionToken(range[1]);
+            for (int version = start; version <= end; version++) {
+                versions.add(version);
+            }
+        }
+        return versions;
+    }
+
+    private int parseVersionToken(String token) {
+        String digits = token.startsWith("V") ? token.substring(1) : token;
+        return Integer.parseInt(digits);
+    }
+
+    private List<Integer> migrationSet(Pattern pattern, String text, String what) {
+        Matcher m = pattern.matcher(text);
+        assertTrue(m.find(), what + " が見つかりません（表記を変えた場合は本テストも更新してください）");
+        return versionList(m.group(1));
+    }
+
+    private List<Integer> expectedMigrations(String spec, String design) {
+        List<Integer> realized = REALIZED_MIGRATIONS.get(spec);
+        if (realized != null) {
+            List<Integer> declared = migrationSet(DESIGN_REALIZED, design,
+                    spec + " のS07正式migration集合");
+            assertEquals(realized, declared,
+                    spec + " のdesign.mdの正式migration集合が正本と一致しません");
+            return realized;
+        }
+        return List.of(firstGroup(DESIGN_RESERVED, design, spec + " のdesign.mdの予約V##"));
+    }
+
     /**
-     * 予約番号の唯一の正は `design.md` の「予約V##」。
-     * tasks.md（冒頭の宣言と実装ガイダンスの2箇所）、派工対話、個別 .txt の全てが
-     * 同じ番号を指していること。
+     * 予約番号の唯一の正は `design.md` の予約宣言、S07は正式migration集合である。
+     * tasks.md、派工対話、個別 .txt の全てが同じ契約を指していること。
      */
     @Test
     void 予約Migration番号が全ての派工資料で一致すること() throws Exception {
         String startConversations = read(EXPANSION.resolve("spec-start-conversations.md"));
         String reviewConversations = read(EXPANSION.resolve("spec-review-conversations.md"));
+        String parallelPlan = read(EXPANSION.resolve("parallel-execution-plan.md"));
 
         List<String> mismatches = new ArrayList<>();
 
@@ -99,31 +140,56 @@ class SpecDispatchConsistencyTest {
             String design = read(SPECS.resolve(spec).resolve("design.md"));
             String tasks = read(SPECS.resolve(spec).resolve("tasks.md"));
 
-            int expected = firstGroup(DESIGN_RESERVED, design, spec + " の design.md の予約V##");
+            List<Integer> expectedVersions = expectedMigrations(spec, design);
 
-            int tasksHeader = firstGroup(TASKS_HEADER, tasks, spec + " の tasks.md 冒頭の予約番号");
-            if (tasksHeader != expected) {
-                mismatches.add(spec + " tasks.md冒頭: V" + tasksHeader + " ≠ design.md V" + expected);
-            }
+            if (expectedVersions.size() == 1) {
+                int expected = expectedVersions.get(0);
 
-            int tasksGuidance = firstGroup(TASKS_GUIDANCE, tasks, spec + " の tasks.md 実装ガイダンスの V##/V1/H2");
-            if (tasksGuidance != expected) {
-                mismatches.add(spec + " tasks.md実装ガイダンス: V" + tasksGuidance + " ≠ design.md V" + expected);
+                int tasksHeader = firstGroup(TASKS_HEADER, tasks, spec + " の tasks.md 冒頭の予約番号");
+                if (tasksHeader != expected) {
+                    mismatches.add(spec + " tasks.md冒頭: V" + tasksHeader + " ≠ design.md V" + expected);
+                }
+
+                int tasksGuidance = firstGroup(TASKS_GUIDANCE, tasks,
+                        spec + " の tasks.md 実装ガイダンスの V##/V1/H2");
+                if (tasksGuidance != expected) {
+                    mismatches.add(spec + " tasks.md実装ガイダンス: V" + tasksGuidance
+                            + " ≠ design.md V" + expected);
+                }
+            } else {
+                List<Integer> taskVersions = migrationSet(TASKS_REALIZED, tasks,
+                        spec + " のtasks.md正式migration集合");
+                if (!taskVersions.equals(expectedVersions)) {
+                    mismatches.add(spec + " tasks.md正式migration集合: " + taskVersions
+                            + " ≠ design.md " + expectedVersions);
+                }
+
+                List<Integer> parallelVersions = migrationSet(PARALLEL_APPROVAL, parallelPlan,
+                        spec + " のparallel-execution-plan正式migration集合");
+                if (!parallelVersions.equals(expectedVersions)) {
+                    mismatches.add(spec + " parallel-execution-plan正式migration集合: " + parallelVersions
+                            + " ≠ design.md " + expectedVersions);
+                }
             }
 
             // 個別 .txt（実際にコピーされるファイル）
             Path txt = EXPANSION.resolve("copyable-conversations")
                     .resolve(conversation + "__" + spec + "__start.txt");
-            int txtVersion = firstGroup(MIGRATION_LINE, read(txt), txt + " の Migration行");
-            if (txtVersion != expected) {
-                mismatches.add(txt.getFileName() + ": V" + txtVersion + " ≠ design.md V" + expected);
+            List<Integer> txtVersions = expectedVersions.size() == 1
+                    ? List.of(firstGroup(MIGRATION_LINE, read(txt), txt + " の Migration行"))
+                    : migrationSet(MIGRATION_SET_LINE, read(txt), txt + " のMigration集合行");
+            if (!txtVersions.equals(expectedVersions)) {
+                mismatches.add(txt.getFileName() + ": " + txtVersions
+                        + " ≠ design.md " + expectedVersions);
             }
 
             // 派工対話（該当specの節）
-            int jpVersion = versionInSection(startConversations, "## " + conversation + " — ", spec);
-            if (jpVersion != expected) {
-                mismatches.add("spec-start-conversations.md " + conversation
-                        + ": V" + jpVersion + " ≠ design.md V" + expected);
+            List<Integer> jpVersions = expectedVersions.size() == 1
+                    ? List.of(versionInSection(startConversations, "## " + conversation + " — ", spec))
+                    : migrationsInSection(startConversations, "## " + conversation + " — ", spec);
+            if (!jpVersions.equals(expectedVersions)) {
+                mismatches.add("spec-start-conversations.md " + conversation + ": " + jpVersions
+                        + " ≠ design.md " + expectedVersions);
             }
 
             // Review側も同じ番号を指していること。
@@ -132,16 +198,20 @@ class SpecDispatchConsistencyTest {
             String review = conversation.replace('S', 'R');
             Path reviewTxt = EXPANSION.resolve("copyable-conversations")
                     .resolve(review + "__" + spec + "__review.txt");
-            int reviewTxtVersion = firstGroup(MIGRATION_LINE, read(reviewTxt), reviewTxt + " の Migration行");
-            if (reviewTxtVersion != expected) {
-                mismatches.add(reviewTxt.getFileName() + ": V" + reviewTxtVersion
-                        + " ≠ design.md V" + expected);
+            List<Integer> reviewTxtVersions = expectedVersions.size() == 1
+                    ? List.of(firstGroup(MIGRATION_LINE, read(reviewTxt), reviewTxt + " の Migration行"))
+                    : migrationSet(MIGRATION_SET_LINE, read(reviewTxt), reviewTxt + " のMigration集合行");
+            if (!reviewTxtVersions.equals(expectedVersions)) {
+                mismatches.add(reviewTxt.getFileName() + ": " + reviewTxtVersions
+                        + " ≠ design.md " + expectedVersions);
             }
 
-            int reviewDocVersion = versionInSection(reviewConversations, "## " + review + " — ", spec);
-            if (reviewDocVersion != expected) {
-                mismatches.add("spec-review-conversations.md " + review
-                        + ": V" + reviewDocVersion + " ≠ design.md V" + expected);
+            List<Integer> reviewDocVersions = expectedVersions.size() == 1
+                    ? List.of(versionInSection(reviewConversations, "## " + review + " — ", spec))
+                    : migrationsInSection(reviewConversations, "## " + review + " — ", spec);
+            if (!reviewDocVersions.equals(expectedVersions)) {
+                mismatches.add("spec-review-conversations.md " + review + ": " + reviewDocVersions
+                        + " ≠ design.md " + expectedVersions);
             }
         }
 
@@ -151,13 +221,24 @@ class SpecDispatchConsistencyTest {
                         + "design.mdを正として全資料を揃えてください:\n  " + String.join("\n  ", mismatches));
     }
 
-    /** 派工対話の該当節（次の "## " 見出しまで）から Migration 行を読む。 */
-    private int versionInSection(String document, String headingPrefix, String spec) {
+    /** 派工対話の該当節（次の "## " 見出しまで）を返す。 */
+    private String sectionIn(String document, String headingPrefix) {
         int start = document.indexOf(headingPrefix);
         assertTrue(start >= 0, "派工対話に節 " + headingPrefix + " がありません");
         int next = document.indexOf("\n## ", start + headingPrefix.length());
-        String section = next < 0 ? document.substring(start) : document.substring(start, next);
-        return firstGroup(MIGRATION_LINE, section, spec + " の派工対話のMigration行");
+        return next < 0 ? document.substring(start) : document.substring(start, next);
+    }
+
+    /** 派工対話の該当節から単一予約のMigration行を読む。 */
+    private int versionInSection(String document, String headingPrefix, String spec) {
+        return firstGroup(MIGRATION_LINE, sectionIn(document, headingPrefix),
+                spec + " の派工対話のMigration行");
+    }
+
+    /** 派工対話の該当節から実装済みmigration集合のMigration行を読む。 */
+    private List<Integer> migrationsInSection(String document, String headingPrefix, String spec) {
+        return migrationSet(MIGRATION_SET_LINE, sectionIn(document, headingPrefix),
+                spec + " の派工対話のMigration集合行");
     }
 
     /**
@@ -168,8 +249,12 @@ class SpecDispatchConsistencyTest {
     void 予約Migration番号が重複していないこと() throws Exception {
         Map<Integer, List<String>> bySpec = new LinkedHashMap<>();
         for (String spec : SPEC_BY_CONVERSATION.values()) {
-            int reserved = firstGroup(DESIGN_RESERVED, read(SPECS.resolve(spec).resolve("design.md")),
-                    spec + " の予約V##");
+            String design = read(SPECS.resolve(spec).resolve("design.md"));
+            List<Integer> migrations = expectedMigrations(spec, design);
+            if (REALIZED_MIGRATIONS.containsKey(spec)) {
+                continue;
+            }
+            int reserved = migrations.get(0);
             bySpec.computeIfAbsent(reserved, k -> new ArrayList<>()).add(spec);
         }
 
@@ -210,10 +295,21 @@ class SpecDispatchConsistencyTest {
         List<String> conflicts = new ArrayList<>();
         for (Map.Entry<String, String> entry : SPEC_BY_CONVERSATION.entrySet()) {
             String spec = entry.getValue();
-            int reserved = firstGroup(DESIGN_RESERVED, read(SPECS.resolve(spec).resolve("design.md")),
-                    spec + " の予約V##");
-            if (existing.contains(reserved)
-                    && !Objects.equals(REALIZED_RESERVED.get(spec), reserved)) {
+            List<Integer> migrations = expectedMigrations(spec,
+                    read(SPECS.resolve(spec).resolve("design.md")));
+            if (REALIZED_MIGRATIONS.containsKey(spec)) {
+                List<Integer> missing = migrations.stream()
+                        .filter(version -> !existing.contains(version))
+                        .toList();
+                if (!missing.isEmpty()) {
+                    conflicts.add(entry.getKey() + " " + spec
+                            + " の正式migrationが実在しません: V" + missing);
+                }
+                continue;
+            }
+
+            int reserved = migrations.get(0);
+            if (existing.contains(reserved)) {
                 conflicts.add(entry.getKey() + " " + spec + " が実在するV" + reserved + " を予約しています");
             }
         }
@@ -228,10 +324,12 @@ class SpecDispatchConsistencyTest {
     void V59を予約しているspecが無いこと() throws Exception {
         for (Map.Entry<String, String> entry : SPEC_BY_CONVERSATION.entrySet()) {
             String spec = entry.getValue();
-            int reserved = firstGroup(DESIGN_RESERVED, read(SPECS.resolve(spec).resolve("design.md")),
-                    spec + " の予約V##");
-            assertEquals(false, reserved == 59,
-                    entry.getKey() + " " + spec + " がV59を予約しています。V59は永久欠番です");
+            List<Integer> migrations = expectedMigrations(spec,
+                    read(SPECS.resolve(spec).resolve("design.md")));
+            for (int migration : migrations) {
+                assertEquals(false, migration == 59,
+                        entry.getKey() + " " + spec + " がV59を予約しています。V59は永久欠番です");
+            }
         }
     }
 

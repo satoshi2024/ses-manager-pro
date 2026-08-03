@@ -420,7 +420,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 1
-- Migration: V78（着手時にmerge済み`db/migration`の最新を再確認する。V75は既存approval DDL、V76はapproval menu seed、V77は`current_step_started_at`追加であり変更不可。S07の追加migrationはV78とし、前の欠番は埋めない。V59とV72は永久欠番）
+- Migration: V75〜V79（S07正式migration。V75は承認DDL、V76は承認menu seed、V77は`current_step_started_at`追加、V78はround/participant/version、V79はB1 notification outbox。着手時にmerge済み`db/migration`の実ファイルを再確認し、過去migrationの編集・欠番の補填・out-of-order適用は行わない。V59とV72は永久欠番）
 - 先行条件: BP master V70/V71とCRM V73/V74が完了・merge済み。
 - Decision gate: G7は決定値またはdecision-log推奨既定を明記。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
