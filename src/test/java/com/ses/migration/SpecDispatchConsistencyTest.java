@@ -83,6 +83,7 @@ class SpecDispatchConsistencyTest {
     @Test
     void 予約Migration番号が全ての派工資料で一致すること() throws Exception {
         String startConversations = read(EXPANSION.resolve("spec-start-conversations.md"));
+        String reviewConversations = read(EXPANSION.resolve("spec-review-conversations.md"));
 
         List<String> mismatches = new ArrayList<>();
 
@@ -118,6 +119,24 @@ class SpecDispatchConsistencyTest {
             if (jpVersion != expected) {
                 mismatches.add("spec-start-conversations.md " + conversation
                         + ": V" + jpVersion + " ≠ design.md V" + expected);
+            }
+
+            // Review側も同じ番号を指していること。
+            // ここを検査対象から外していたため、mainが採番を繰り上げた際にR09〜R17だけが
+            // 4つ古い番号のまま取り残された（Review AIが誤った番号で照合してしまう）。
+            String review = conversation.replace('S', 'R');
+            Path reviewTxt = EXPANSION.resolve("copyable-conversations")
+                    .resolve(review + "__" + spec + "__review.txt");
+            int reviewTxtVersion = firstGroup(MIGRATION_LINE, read(reviewTxt), reviewTxt + " の Migration行");
+            if (reviewTxtVersion != expected) {
+                mismatches.add(reviewTxt.getFileName() + ": V" + reviewTxtVersion
+                        + " ≠ design.md V" + expected);
+            }
+
+            int reviewDocVersion = versionInSection(reviewConversations, "## " + review + " — ", spec);
+            if (reviewDocVersion != expected) {
+                mismatches.add("spec-review-conversations.md " + review
+                        + ": V" + reviewDocVersion + " ≠ design.md V" + expected);
             }
         }
 
