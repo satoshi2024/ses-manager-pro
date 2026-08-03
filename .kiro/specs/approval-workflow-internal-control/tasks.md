@@ -133,3 +133,13 @@
     Node/JS syntax、`git diff --check`。
   - **Demo**: 申請者単独確定不可と二重実行0を確認。5業務それぞれで申請→承認→適用を通す。
   - **実装ガイダンス**: `design.md`§6決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
+
+
+## R4 current Head B1/M検証追記（2026-08-03）
+
+- **基準**: 検証開始時のreview baselineは`10dc316d003d7070b7b232056d2c17a240274bb8`。本追記を含む修正は別local commitへまとめ、pushは行わない。
+- **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。定向テストがgreenでも、未達release gateを完了扱いにしない。
+- **B1/M定向回帰**: `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`NotificationOutboxSchedulerIntegrationTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`QuotationApiControllerTest`、`ContractApiControllerTest`、`ContractPaginationTest`、`InvoiceApiControllerTest`、`ApprovalTargetAdapterTest`を現作業木で実行し、**93 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**を確認した。
+- **実MySQL gate**: Docker daemonは再確認時に利用可能だったが、`FlywayMigrationSmokeTest`はTestcontainers/FlywayのMySQL named lock取得で約8分停止した。Surefireの今回実行結果は生成されず、プロセスを停止したため、V79 fresh/legacy/rollback/lockのPASS証拠にはしない。
+- **未達gate**: 実MySQL smoke、実Webhook endpoint、複数JVMのShedLock/claim競合、commit前例外時の実DB rollback、desktop/390px browser Demo、CI zero-skipped。mysql CLI、DB接続環境変数、Chrome/Edge/Firefox/Playwright executableも未検出だった。
+- **判定**: B1/Mは実装・定向回帰・scheduler Demo相当まで確認済みだが、release gate未達のため完了・PASSへ変更しない。S07は`IN PROGRESS`、S09/Wave 2は解放不可。
