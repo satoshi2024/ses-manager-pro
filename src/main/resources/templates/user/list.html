@@ -35,8 +35,7 @@
                     <form id="searchForm" onsubmit="event.preventDefault(); loadUsers(1);" class="row g-3 align-items-end">
                         <div class="col-md-4">
                             <label for="searchUsername" class="form-label text-muted small" th:text="#{user.label.loginId}">ログインID</label>
-                            <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" th:placeholder="#{user.placeholder.loginId}" list="user-list">
-                            <datalist id="user-list"></datalist>
+                            <input type="text" class="form-control bg-dark border-secondary text-light" id="searchUsername" th:placeholder="#{user.placeholder.loginId}" data-suggest="users">
                         </div>
                         <div class="col-md-3">
                             <label for="searchRole" class="form-label text-muted small" th:text="#{user.label.role}">ロール</label>

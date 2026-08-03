@@ -83,8 +83,8 @@ function submitPriceRevision() {
         body: JSON.stringify(body)
     }).then(res => res.json()).then(data => {
         if (data.code !== 200) { alert(data.message); return; }
-        const warning = data.data && data.data.warning;
-        document.getElementById('priceRevWarning').classList.toggle('d-none', !warning);
+        const warning = false;
+        SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
         form.reset();
         loadPriceRevisions(contractId);
         refreshPriceRevisionState(contractId);

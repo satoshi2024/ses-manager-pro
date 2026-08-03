@@ -10,11 +10,16 @@ import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.dto.billing.CashFlowForecastDto;
+import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.SysUser;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.entity.Invoice;
 import com.ses.entity.Customer;
+import com.ses.entity.SalesActivity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -22,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -64,6 +70,12 @@ class NotificationGenerateServiceTest {
 
     @Mock
     private SysUserMapper sysUserMapper;
+
+    @Mock
+    private WorkRecordMapper workRecordMapper;
+
+    @Mock
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     @Mock
     private CashFlowForecastService cashFlowForecastService;
@@ -207,6 +219,27 @@ class NotificationGenerateServiceTest {
         verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void followUpDue_担当者が設定されていれば担当者へ通知する() {
+        SalesActivity activity = new SalesActivity();
+        activity.setId(21L);
+        activity.setCustomerId(3L);
+        activity.setAssigneeUserId(200L);
+        activity.setCreatedBy(100L);
+        activity.setNextActionDate(LocalDate.now().minusDays(1));
+        activity.setCompletedFlag(0);
+        activity.setTitle("担当者フォロー");
+        when(salesActivityMapper.selectList(any())).thenReturn(List.of(activity));
+        Customer customer = new Customer();
+        customer.setCompanyName("顧客A");
+        when(customerMapper.selectById(3L)).thenReturn(customer);
+
+        notificationGenerateService.followUpDue();
+
+        verify(notificationService).publishToUser(eq(200L), eq("FOLLOW_UP"), any(), eq("担当者フォロー"),
+                eq("/customer/3"), eq("FOLLOW_UP:21:" + activity.getNextActionDate()));
+    }
+
     // ===== S4: CONTRACT_END と更新ドラフトの連動 =====
 
     private com.ses.entity.Contract endingContract(Long id) {
@@ -250,5 +283,112 @@ class NotificationGenerateServiceTest {
 
         verify(notificationService, times(1)).publishToUser(
                 any(), eq("CONTRACT_END"), any(), any(), eq("/contract/list"), contains("CONTRACT_END:100:"));
+    }
+
+    // ===== トラックA2: 勤怠未提出リマインド =====
+
+    private WorkRecordGridDto gridRow(Long contractId, String status) {
+        WorkRecordGridDto row = new WorkRecordGridDto();
+        row.setContractId(contractId);
+        row.setStatus(status);
+        return row;
+    }
+
+    private com.ses.entity.Contract contractWithEngineer(Long contractId, Long engineerId) {
+        com.ses.entity.Contract c = new com.ses.entity.Contract();
+        c.setId(contractId);
+        c.setEngineerId(engineerId);
+        return c;
+    }
+
+    private EngineerAccountLink linkOf(Long engineerId, Long sysUserId) {
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setEngineerId(engineerId);
+        link.setSysUserId(sysUserId);
+        return link;
+    }
+
+    @Test
+    void testAttendanceUnsubmitted_未提出契約の紐付けアカウント本人へ通知する() {
+        when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
+                .thenReturn(LocalDate.now().getDayOfMonth());
+        // workRecordId=null（勤怠レコード無し）＝未提出。既存グリッドのLEFT JOINと同じ形。
+        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(100L, null)));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithEngineer(100L, 10L));
+        when(engineerAccountLinkMapper.selectByEngineerId(10L)).thenReturn(linkOf(10L, 999L));
+
+        notificationGenerateService.attendanceUnsubmitted();
+
+        String expectedMonth = YearMonth.now().minusMonths(1).toString();
+        // menuKeyを明示指定しないとNotificationServiceImpl.menuKeyForTypeが未知typeをnullへ解決し、
+        // n.menu_key IS NULLの通知は非管理者ロールから不可視になる（NotificationMapperの可視性条件）。
+        // TIMESHEET_REJECTEDと同じ"my-timesheet"を渡す7引数オーバーロードで呼ばれていることを検証する。
+        verify(notificationService, times(1)).publishToUser(
+                eq(999L), eq("ATTENDANCE_UNSUBMITTED"), any(), contains(expectedMonth),
+                eq(com.ses.common.constant.NotificationLinks.MY_TIMESHEET),
+                eq("ATTENDANCE_UNSUBMITTED:100:" + expectedMonth),
+                eq("my-timesheet"));
+    }
+
+    @Test
+    void testAttendanceUnsubmitted_提出済みまたは確定は通知しない() {
+        when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
+                .thenReturn(LocalDate.now().getDayOfMonth());
+        when(workRecordMapper.selectMonthlyGrid(any(), any()))
+                .thenReturn(List.of(gridRow(200L, "提出済"), gridRow(201L, "確定")));
+
+        notificationGenerateService.attendanceUnsubmitted();
+
+        verify(notificationService, never()).publishToUser(
+                any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
+        verify(contractMapper, never()).selectById(any());
+    }
+
+    @Test
+    void testAttendanceUnsubmitted_要員アカウント未紐付けは全体配信せず通知しない() {
+        when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
+                .thenReturn(LocalDate.now().getDayOfMonth());
+        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(300L, "入力中")));
+        when(contractMapper.selectById(300L)).thenReturn(contractWithEngineer(300L, 30L));
+        when(engineerAccountLinkMapper.selectByEngineerId(30L)).thenReturn(null);
+
+        notificationGenerateService.attendanceUnsubmitted();
+
+        verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToOrganization(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void testAttendanceUnsubmitted_締め日を過ぎたら対象月を評価しない() {
+        // 締め日を今日より前に設定＝「締め日超過」を強制する（テスト実行日に依存しない）。
+        when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
+                .thenReturn(LocalDate.now().getDayOfMonth() - 1);
+
+        notificationGenerateService.attendanceUnsubmitted();
+
+        verify(workRecordMapper, never()).selectMonthlyGrid(any(), any());
+        verify(notificationService, never()).publishToUser(
+                any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void testAttendanceUnsubmitted_同日2回実行しても通知が増えない() {
+        when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
+                .thenReturn(LocalDate.now().getDayOfMonth());
+        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(400L, null)));
+        when(contractMapper.selectById(400L)).thenReturn(contractWithEngineer(400L, 40L));
+        when(engineerAccountLinkMapper.selectByEngineerId(40L)).thenReturn(linkOf(40L, 888L));
+
+        String expectedMonth = YearMonth.now().minusMonths(1).toString();
+        String expectedDedupeKey = "ATTENDANCE_UNSUBMITTED:400:" + expectedMonth;
+
+        notificationGenerateService.attendanceUnsubmitted();
+        notificationGenerateService.attendanceUnsubmitted();
+
+        // dedupe_keyは日付を含まず対象月とcontractIdだけで決まるため、2回実行しても同一キーになる
+        // （実際の重複排除はNotificationServiceImplのユニーク制約側の責務）。
+        verify(notificationService, times(2)).publishToUser(
+                eq(888L), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), eq(expectedDedupeKey), eq("my-timesheet"));
     }
 }

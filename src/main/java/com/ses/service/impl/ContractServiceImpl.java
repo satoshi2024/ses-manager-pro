@@ -51,6 +51,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
     private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
     private final com.ses.service.AuditLogService auditLogService;
+    private final com.ses.service.BpComplianceService bpComplianceService;
+    private final com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
 
     /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -206,8 +208,32 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (engineerChanged && oldEngineerId != null) {
             engineerStatusService.releaseIfIdle(oldEngineerId);
         }
-        if ("稼動中".equals(newStatus) && newEngineerId != null) {
-            engineerStatusService.onContractActive(newEngineerId);
+        if ("稼動中".equals(newStatus)) {
+            // エンジニアの所属BP会社を解決 (BP案件・発注の場合のみコンプライアンス評価を実行)
+            Long bpCompanyId = null;
+            if (newEngineerId != null && engineerBpAffiliationService != null) {
+                com.ses.entity.EngineerBpAffiliation affiliation =
+                        engineerBpAffiliationService.getActiveAffiliationAsOf(newEngineerId, LocalDate.now());
+                if (affiliation != null) {
+                    bpCompanyId = affiliation.getBpCompanyId();
+                }
+            }
+            // 発注コンプライアンス必須明示項目等の判定 (ERRORがあれば確定拒否)
+            if (bpComplianceService != null && bpCompanyId != null) {
+                List<com.ses.dto.compliance.ProcurementComplianceFinding> findings =
+                        bpComplianceService.evaluateContractCompliance(bpCompanyId, contract, null);
+                boolean hasError = findings.stream().anyMatch(f -> "ERROR".equalsIgnoreCase(f.getSeverity()));
+                if (hasError) {
+                    String errorMsg = findings.stream()
+                            .filter(f -> "ERROR".equalsIgnoreCase(f.getSeverity()))
+                            .map(com.ses.dto.compliance.ProcurementComplianceFinding::getMessage)
+                            .reduce((a, b) -> a + "; " + b).orElse("必須明示事項が不足しています");
+                    throw new BusinessException(400, "発注コンプライアンス不合格のため確定できません: " + errorMsg);
+                }
+            }
+            if (newEngineerId != null) {
+                engineerStatusService.onContractActive(newEngineerId);
+            }
         } else if (!engineerChanged && "稼動中".equals(old.getStatus()) && newEngineerId != null) {
             engineerStatusService.releaseIfIdle(newEngineerId);
         }

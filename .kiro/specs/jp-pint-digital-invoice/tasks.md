@@ -7,7 +7,7 @@
 > HTTP/job/error/idempotencyの基盤は accounting spec を再利用する。
 > 時間/金額/scope/状態の判断は `design.md` §5「決定表」を正とする。
 >
-> **Migration**: 本specの予約番号は **V79**。accounting(V78)のmerge後に着手する。
+> **Migration**: 本specの予約番号は **V87**。accounting(V86)のmerge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G5/provider/spec version spike
@@ -27,7 +27,7 @@
   - **Objective**: 法人/顧客のPeppol participant IDを検証状態付きで管理でき、
     未検証の宛先へは送信できない。送受信のstatusとeventが記録され、
     同じproviderイベントが二重に処理されない。
-  - **実装ガイダンス**: **V79**/V1/H2(`sql/schema-jp-pint-h2.sql`)/MySQL smoke、state/idempotency。
+  - **実装ガイダンス**: **V87**/V1/H2(`sql/schema-jp-pint-h2.sql`)/MySQL smoke、state/idempotency。
     `provider_event_id`にUNIQUE。`(invoice_id, direction, specification_version)`にUNIQUE（design §5.4）。
     **`verified_at IS NULL`の宛先へ送信しない**（design §5.1）。
     `t_digital_invoice.invoice_id IS NULL`は**受信invoice**を表す業務値。`direction`と併せて判定する。

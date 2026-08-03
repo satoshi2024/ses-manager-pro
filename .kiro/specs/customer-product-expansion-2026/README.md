@@ -43,32 +43,35 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | # | spec | 主な価値 | 規模 | migration計画 | 状態 |
 |---|---|---|---|---|---|
 | 1 | `multi-company-tenant-isolation` | SaaS/複数法人のデータ境界 | XXL | V59（永久欠番） | 独立DBモード完了、共有DB実装延期、現在の実装taskなし |
-| 2 | `organization-management-accounting` | 部門・上長・原価部門・予算 | XL | V60 | 仕様済 |
-| 3 | `enterprise-identity-security` | OIDC/MFA/権限/セッション統制 | XL | V63〜V66 | 仕様済・G1決定済 |
-| 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済 |
-| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68 | 仕様済 |
-| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V69 | 仕様済・G2開発方針決定済 |
-| 7 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | V70 | 仕様済 |
-| 8 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | V71 | 仕様済 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | V72 | 仕様済 |
-| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | V73 | 仕様済・G2開発方針決定済 |
-| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | V74 | 仕様済・G6決定済 |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | V75 | 仕様済 |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | V76 | 仕様済・G3決定済 |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | V77 | 仕様済 |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | V78 | 仕様済・G4決定済 |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | V79 | 仕様済・G5決定済 |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | V80 | 仕様済 |
+| 2 | `organization-management-accounting` | 部門・上長・原価部門・予算 | XL | V60 | 仕様済み |
+| 3 | `enterprise-identity-security` | OIDC/MFA/権限/セッション統制 | XL | V63〜V66 | 仕様済み・G1決定済み |
+| 4 | `legal-document-ledger-archive` | 電帳法を意識した文書原本・版・検索 | XL | V67 | 仕様済み |
+| 5 | `productivity-search-saved-view` | 全文横断検索・実ToDo・保存ビュー・一括処理 | L | V68, V69 | 仕様済み |
+| 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済み・G2開発方針決定済み |
+| 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V78** | 仕様済み・S07着手可 |
+| 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80** | 仕様済み |
+| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V81** | 仕様済み・G2開発方針決定済み |
+| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V82** | 仕様済み・G6決定済み |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V83** | 仕様済み |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V84** | 仕様済み・G3決定済み |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V85** | 仕様済み |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V86** | 仕様済み・G4決定済み |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V87** | 仕様済み・G5決定済み |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V88** | 仕様済み |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
 `enterprise-identity-security` がV63（identity/MFA/session/permission/file DDL）、V64（legacy role→
 permission group seed）、V65（break-glass二者承認とMFA試行制限）、V66（action permissionのbaseline付与と
 拒否指定）を使用した。そのため後続spec全ての予約番号を、その時点のFlyway最新番号`latest + 1`から
-振り直している（本書とこの下の全designを同一更新で反映済み）。**現在適用済みの最新はV66であり、
-後続specの予約はV67から始まる。** V59は作成せず、永久欠番として保持する。
-実装依存順はV69 BP→V70 CRM→V71 approvalとして計画しているが、これらは実装前の計画値である。
-実装開始までに別migrationが追加された場合、V59を補完・再利用せず、予約表全体をその時点のFlyway最新番号`latest + 1`から連番で振り直し、本書と全designを先に更新する。V60以降が適用済みの場合もV59を追加してはならず、過去migrationの編集やout-of-order適用は禁止する。
+振り直している（本書と各design/tasks/派工資料を同一更新で反映する）。**現在適用済みの最新はV74**であり、
+V59とV72は永久欠番として保持する。
+
+S07の既存承認DDLはV75、承認menu seedはV76、`current_step_started_at`追加はV77であり、これらは変更不可とする。
+S07が今回追加で使用するのはV78の1本である。V79は予約外migrationとして再利用せず、S09〜S17の予約は
+S09=V80、S10=V81、S11=V82、S12=V83、S13=V84、S14=V85、S15=V86、S16=V87、S17=V88とする。
+過去migrationの編集やout-of-order適用は禁止する。
 
 ## 4. 実行Wave
 

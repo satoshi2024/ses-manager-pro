@@ -15,4 +15,12 @@ public class EngineerListDto extends Engineer {
 
     /** 定着リスク高判定 */
     private Boolean retentionHighRisk;
+
+    /**
+     * ログインアカウントが紐付いているか。
+     *
+     * <p>未紐付けは「不備」とは限らない（BP要員などセルフサービスを使わない要員も多い）ため
+     * 一覧では警告表示せず、絞り込みで探せるようにするための項目である。
+     */
+    private Boolean accountLinked;
 }

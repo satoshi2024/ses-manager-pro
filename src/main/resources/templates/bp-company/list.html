@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>BP会社管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="mb-1 fw-bold text-white"><i class="bi bi-building-gear me-2"></i>BP会社管理</h4>
+            <p class="text-muted small mb-0">パートナー会社・個人事業主のマスタ・発注コンプライアンス管理</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" onclick="openBpCompanyModal()">
+                <i class="bi bi-plus-lg me-1"></i>新規BP登録
+            </button>
+        </div>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-dark border-secondary mb-4">
+        <div class="card-body">
+            <form id="searchForm" class="row g-3" onsubmit="return false;">
+                <div class="col-md-4">
+                    <label for="keyword" class="form-label text-light small">キーワード検索</label>
+                    <input type="text" class="form-bg-dark form-control form-control-sm text-light border-secondary" id="keyword" placeholder="会社名、カナ、法人番号、登録番号">
+                </div>
+                <div class="col-md-3">
+                    <label for="entityType" class="form-label text-light small">事業体区分</label>
+                    <select class="form-select form-select-sm form-bg-dark text-light border-secondary" id="entityType">
+                        <option value="">すべて</option>
+                        <option value="CORPORATE">法人</option>
+                        <option value="INDIVIDUAL">個人事業主</option>
+                        <option value="FREELANCE">フリーランス</option>
+                        <option value="PROVISIONAL">仮登録 (未移行)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="status" class="form-label text-light small">ステータス</label>
+                    <select class="form-select form-select-sm form-bg-dark text-light border-secondary" id="status">
+                        <option value="">すべて</option>
+                        <option value="ACTIVE" selected>有効 (取引中)</option>
+                        <option value="INACTIVE">停止中</option>
+                        <option value="SUSPENDED">取引停止</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="button" class="btn btn-secondary btn-sm w-100 me-2" onclick="resetSearch()">リセット</button>
+                    <button type="button" class="btn btn-primary btn-sm w-100" onclick="loadBpCompanies(1)">検索</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- テーブル -->
+    <div class="card bg-dark border-secondary">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead>
+                    <tr class="border-secondary text-muted small">
+                        <th>ID</th>
+                        <th>正式名称 / カナ</th>
+                        <th>区分</th>
+                        <th>法人番号 / インボイス番号</th>
+                        <th>取適法/フリーランス法</th>
+                        <th>評価</th>
+                        <th>ステータス</th>
+                        <th class="text-end">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="bpCompanyTableBody">
+                    <!-- Dynamic rendering -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer bg-dark border-secondary d-flex justify-content-between align-items-center">
+            <span class="text-muted small" id="totalCountInfo">全 0 件</span>
+            <ul class="pagination pagination-sm mb-0" id="pagination">
+                <!-- Dynamic pagination -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- Modal: 新規・編集 -->
+    <div class="modal fade" id="bpCompanyModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="bpCompanyModalTitle">BP会社登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="bpCompanyForm">
+                        <input type="hidden" id="bpCompanyIdHidden">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small">正式名称 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formLegalName" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">フリガナ</label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formNameKana">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label small">事業体区分 <span class="text-danger">*</span></label>
+                                <select class="form-select form-select-sm form-bg-dark text-light border-secondary" id="formEntityType" required>
+                                    <option value="CORPORATE">法人</option>
+                                    <option value="INDIVIDUAL">個人事業主</option>
+                                    <option value="FREELANCE">フリーランス</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">法人番号</label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formCorporateNumber" maxlength="13" placeholder="13桁数字">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">適格請求書登録番号</label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formInvoiceRegistrationNumber" maxlength="14" placeholder="T+13桁">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small">代表者名</label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formRepresentative">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">住所</label>
+                                <input type="text" class="form-control form-control-sm form-bg-dark text-light border-secondary" id="formAddress">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="saveBpCompany()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/bp-company.js"></script>
+</th:block>
+</body>
+</html>

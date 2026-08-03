@@ -61,7 +61,8 @@ class InvoicePdfServiceImplTest {
     @Test
     void generate_有効なPDFバイト列を返し日本語テキストが抽出できること() throws Exception {
         com.ses.common.util.PdfFontUtils pdfFontUtils = new com.ses.common.util.PdfFontUtils(new PdfProperties());
-        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(systemConfigService(), pdfFontUtils);
+        org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> provider = Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        InvoicePdfServiceImpl service = new InvoicePdfServiceImpl(systemConfigService(), pdfFontUtils, provider);
 
         byte[] bytes = service.generate(sampleDetail());
 

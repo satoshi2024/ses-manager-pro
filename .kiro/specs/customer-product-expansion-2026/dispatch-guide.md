@@ -61,8 +61,9 @@ Demo結果、skip、未検証事項、rollback方法、Base/Headを報告し、
 2. G0確定後、同spec F1〜Mを**1つずつ**。このspec中は他の新specを並行しない。
 3. `organization-management-accounting` → `enterprise-identity-security` →
    `legal-document-ledger-archive` → `productivity-search-saved-view`。
-4. BP masterとCRMは別AIへ並行分派可。migration基盤taskはBP V69→CRM V70の順にmergeする。
-5. approvalはBP/CRM merge後。
+4. BP masterとCRMは別AIへ並行分派可。migration基盤taskはBP V70/V71→CRM V73/V74の順にmergeする（いずれもmerge済み）。
+5. approvalはBP/CRM merge後で、予約は**V75**（CRMがV73に加えV74を使用したため繰り上げ済み。
+   V72はV59と同じ永久欠番。Flywayは`out-of-order`無効。前の欠番は埋めない）。
 6. Wave 2以降はREADMEの順序とdependency matrixを守る。
 
 ## 4. 必ず停止させる条件

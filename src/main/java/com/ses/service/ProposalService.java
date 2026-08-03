@@ -17,6 +17,7 @@ public interface ProposalService extends IService<Proposal> {
      * @return 提案かんばんDTOリスト
      */
     List<ProposalKanbanDto> getKanbanList();
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<ProposalKanbanDto> getKanbanPage(String status, Long current, Long size, String keyword);
 
     /**
      * ステータス変更

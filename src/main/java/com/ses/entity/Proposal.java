@@ -63,6 +63,9 @@ public class Proposal extends BaseEntity {
     /** 提案者ID */
     private Long proposedBy;
 
+    /** 商機を起点とする提案の場合の重複計上防止リンク。 */
+    private Long sourceOpportunityId;
+
     /** 提案日時 */
     private LocalDateTime proposedAt;
 

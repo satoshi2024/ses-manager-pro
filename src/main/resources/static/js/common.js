@@ -11,7 +11,12 @@ const SES = {
      */
     i18n: {
         t: function(key, ...args) {
-            let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : key;
+            let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : null;
+            let fallback = null;
+            if (args.length > 1 && typeof args[args.length - 1] === 'string') {
+                fallback = args.pop();
+            }
+            if (!msg) msg = fallback || key;
             if (args.length === 0) return msg;
 
             // 引数がオブジェクト1つの場合: 名前付きプレースホルダー {key} を置換
@@ -23,8 +28,8 @@ const SES = {
                 return msg;
             }
 
-            // 引数が配列1つの場合: 位置プレースホルダー {0},{1},... を置換
-            if (args.length === 1 && Array.isArray(args[0])) {
+            // 配列が渡された場合、配列要素を位置引数として展開
+            if (Array.isArray(args[0])) {
                 args = args[0];
             }
 
@@ -341,33 +346,288 @@ const SES = {
                         if (window.innerWidth <= 992) closeSidebar();
                     });
                 });
+
+                // アクティブなメニュー項目を自動的にスクロール位置まで移動させる
+                const activeLink = sidebar.querySelector('.nav-link.active');
+                if (activeLink) {
+                    setTimeout(() => {
+                        activeLink.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                    }, 50);
+                }
             }
         }
     },
+    /**
+     * サジェスト（オートコンプリート）
+     *
+     * ネイティブの {@code <datalist>} は使わず自前のドロップダウンに置き換えている。datalist には
+     * 「入力した文字で始まらない候補が出る」2つの原因があり、最寄り駅の入力で実害が出たため。
+     *  1) Chrome/Edge は option の value だけでなく表示テキスト（ラベル）にも一致させる。
+     *     最寄り駅は value=駅名 / ラベル=「都道府県 路線」で出していたので、「東」と打つと
+     *     駅名が「東」で始まらない候補（東京都の駅、JR東海道本線の駅…）が大量に並んでいた。
+     *  2) 絞り込みが前方一致ではなく部分一致で、しかも元データ順に出るため、
+     *     「田」で 神田 → 池田 … のように途中一致が先頭に来る。
+     * ここでは「前方一致を必ず先に、部分一致はその後ろ」に固定し、照合対象も value（駅名・氏名など）
+     * だけに限定する。ラベルは表示専用で照合には使わない。
+     */
     autocomplete: {
+        /** 候補として一度に表示する最大件数（駅は8千件超あるため必ず打ち切る） */
+        LIMIT: 20,
+
         init: function() {
-            this.loadDatalist('/api/autocomplete/engineers', 'engineer-list');
-            this.loadDatalist('/api/autocomplete/customers', 'customer-list');
-            this.loadDatalist('/api/autocomplete/projects', 'project-list');
-            this.loadDatalist('/api/autocomplete/users', 'user-list');
+            this.bind('/api/autocomplete/engineers', 'engineers');
+            this.bind('/api/autocomplete/customers', 'customers');
+            this.bind('/api/autocomplete/projects', 'projects');
+            this.bind('/api/autocomplete/users', 'users');
         },
-        loadDatalist: async function(url, listId) {
-            const datalist = document.getElementById(listId);
-            if (!datalist) return;
+
+        /**
+         * data-suggest="<key>" が付いた入力欄へ、APIから取得した候補を割り当てる。
+         * 対象の入力欄が無いページではAPIを呼ばない。
+         */
+        bind: async function(url, key) {
+            const inputs = document.querySelectorAll('input[data-suggest="' + key + '"]');
+            if (inputs.length === 0) return;
             try {
                 const names = await SES.api.get(url);
-                if (names && names.length > 0) {
-                    let html = '';
-                    names.forEach(name => {
-                        // 全特殊文字をエスケープ（XSS対策強化）
-                        const safeName = SES.escapeHtml(name);
-                        html += `<option value="${safeName}"></option>`;
-                    });
-                    datalist.innerHTML = html;
-                }
+                if (!names || names.length === 0) return;
+                const items = names.map(function(name) { return { value: name }; });
+                inputs.forEach(function(input) {
+                    SES.autocomplete.attach(input, { items: items });
+                });
             } catch (e) {
-                console.error(`Failed to load autocomplete data for ${listId}`, e);
+                console.error(`Failed to load autocomplete data for ${key}`, e);
             }
+        },
+
+        /**
+         * 照合用の正規化。全角英数→半角、半角カナ→全角カナ（NFKC）、大文字小文字、
+         * カタカナ/ひらがな、空白・中黒の有無を吸収する。
+         * 例: 「ＪＲ河内永和」と「JR河内永和」、「トウキョウ」と「とうきょう」を同一視。
+         */
+        normalize: function(text) {
+            if (text == null) return '';
+            let s = String(text);
+            if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+            s = s.toLowerCase();
+            s = s.replace(/[ァ-ヶ]/g, function(c) {
+                return String.fromCharCode(c.charCodeAt(0) - 0x60);
+            });
+            return s.replace(/[\s　・]/g, '');
+        },
+
+        /** 候補配列に正規化済み文字列を持たせる（入力のたびに正規化し直さないため） */
+        prepare: function(items) {
+            const self = this;
+            return (items || [])
+                .map(function(item) {
+                    const obj = (typeof item === 'string') ? { value: item } : (item || {});
+                    return { value: obj.value == null ? '' : String(obj.value), label: obj.label || '', norm: self.normalize(obj.value) };
+                })
+                .filter(function(item) { return item.value !== ''; });
+        },
+
+        /**
+         * 完全一致 → 前方一致 → 部分一致 の順に並べて返す。照合は value のみ（ラベルは対象外）。
+         * 戻り値の先頭は必ず入力文字で始まる候補になる。
+         *
+         * 候補全件を走査するのは、完全一致（例:「東京」に対する 東京駅）が元データの後方にあっても
+         * 先頭に出すため。1万件規模でも indexOf のみなので1キー入力あたりのコストは無視できる。
+         */
+        match: function(items, query, limit) {
+            const max = limit || this.LIMIT;
+            const q = this.normalize(query);
+            if (!q) return [];
+            const exactHits = [];
+            const prefixHits = [];
+            const partialHits = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const norm = (item.norm !== undefined) ? item.norm : this.normalize(item.value);
+                const pos = norm.indexOf(q);
+                if (pos !== 0) {
+                    if (pos > 0 && partialHits.length < max) partialHits.push(item);
+                } else if (norm.length === q.length) {
+                    exactHits.push(item);
+                } else if (prefixHits.length < max) {
+                    prefixHits.push(item);
+                }
+            }
+            return exactHits.concat(prefixHits, partialHits).slice(0, max);
+        },
+
+        /**
+         * 入力欄にサジェストを取り付ける。同じ入力欄に再度呼ぶと候補の差し替えになる。
+         * options: { items, limit, minChars, onSelect }
+         */
+        attach: function(input, options) {
+            if (!input) return null;
+            const opts = options || {};
+            if (input._sesSuggest) {
+                input._sesSuggest.setItems(opts.items);
+                return input._sesSuggest;
+            }
+
+            const api = this;
+            const limit = opts.limit || api.LIMIT;
+            const minChars = (opts.minChars === undefined) ? 1 : opts.minChars;
+            let items = api.prepare(opts.items);
+            let results = [];
+            let activeIndex = -1;
+            let composing = false;
+            let suppress = false;
+
+            api._seq = (api._seq || 0) + 1;
+            const menuId = 'ses-suggest-' + api._seq;
+            const menu = document.createElement('div');
+            menu.className = 'ses-suggest-menu';
+            menu.id = menuId;
+            menu.setAttribute('role', 'listbox');
+            menu.hidden = true;
+            // モーダル内の overflow に切られないよう body 直下 + position:fixed で描画する
+            document.body.appendChild(menu);
+
+            // ネイティブのサジェストと二重に出さない
+            input.removeAttribute('list');
+            input.setAttribute('autocomplete', 'off');
+            input.setAttribute('role', 'combobox');
+            input.setAttribute('aria-autocomplete', 'list');
+            input.setAttribute('aria-controls', menuId);
+            input.setAttribute('aria-expanded', 'false');
+
+            function position() {
+                const rect = input.getBoundingClientRect();
+                // 入力欄が狭い画面(スマホの絞り込み欄など)でも最低幅を確保しつつ、
+                // 右端がビューポートからはみ出さないように寄せる
+                const width = Math.min(Math.max(rect.width, 200), window.innerWidth - 16);
+                menu.style.width = width + 'px';
+                menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) + 'px';
+                const below = window.innerHeight - rect.bottom;
+                if (below < 200 && rect.top > below) {
+                    menu.style.top = 'auto';
+                    menu.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+                } else {
+                    menu.style.bottom = 'auto';
+                    menu.style.top = (rect.bottom + 2) + 'px';
+                }
+            }
+
+            // 入力文字そのものが値のどこに現れるかで太字にする（正規化前の素の文字列で判定）
+            function highlight(value) {
+                const raw = input.value.trim();
+                const idx = raw ? value.toLowerCase().indexOf(raw.toLowerCase()) : -1;
+                if (idx < 0) return SES.escapeHtml(value);
+                return SES.escapeHtml(value.slice(0, idx))
+                    + '<mark class="ses-suggest-hit">' + SES.escapeHtml(value.slice(idx, idx + raw.length)) + '</mark>'
+                    + SES.escapeHtml(value.slice(idx + raw.length));
+            }
+
+            function close() {
+                if (menu.hidden) return;
+                menu.hidden = true;
+                activeIndex = -1;
+                input.setAttribute('aria-expanded', 'false');
+            }
+
+            function render() {
+                if (results.length === 0) {
+                    close();
+                    return;
+                }
+                menu.innerHTML = results.map(function(item, idx) {
+                    const label = item.label
+                        ? '<span class="ses-suggest-label">' + SES.escapeHtml(item.label) + '</span>' : '';
+                    return '<div class="ses-suggest-item' + (idx === activeIndex ? ' active' : '') + '"'
+                        + ' role="option" aria-selected="' + (idx === activeIndex) + '" data-index="' + idx + '">'
+                        + '<span class="ses-suggest-value">' + highlight(item.value) + '</span>' + label
+                        + '</div>';
+                }).join('');
+                menu.hidden = false;
+                input.setAttribute('aria-expanded', 'true');
+                position();
+            }
+
+            function refresh() {
+                const query = input.value.trim();
+                if (query.length < minChars) {
+                    results = [];
+                    close();
+                    return;
+                }
+                results = api.match(items, query, limit);
+                activeIndex = -1;
+                render();
+            }
+
+            function select(index) {
+                const item = results[index];
+                if (!item) return;
+                suppress = true;
+                input.value = item.value;
+                close();
+                // 既存の 'input'/'change' ハンドラ（路線の絞り込み等）へ選択を伝える
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                suppress = false;
+                if (typeof opts.onSelect === 'function') opts.onSelect(item);
+            }
+
+            function moveActive(delta) {
+                if (menu.hidden) {
+                    refresh();
+                    if (menu.hidden) return;
+                }
+                activeIndex = (activeIndex + delta + results.length) % results.length;
+                render();
+                const activeEl = menu.querySelector('.ses-suggest-item.active');
+                if (activeEl && activeEl.scrollIntoView) activeEl.scrollIntoView({ block: 'nearest' });
+            }
+
+            input.addEventListener('compositionstart', function() { composing = true; });
+            input.addEventListener('compositionend', function() {
+                composing = false;
+                refresh();
+            });
+            input.addEventListener('input', function(e) {
+                // IME変換中は確定前の読みで候補が乱れるため、確定(compositionend)まで待つ
+                if (suppress || composing || (e && e.isComposing)) return;
+                refresh();
+            });
+            input.addEventListener('focus', function() {
+                if (input.value.trim().length >= minChars) refresh();
+            });
+            input.addEventListener('blur', function() { close(); });
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+                else if (e.key === 'Enter') {
+                    if (!menu.hidden && activeIndex >= 0) { e.preventDefault(); select(activeIndex); }
+                    else { close(); }
+                } else if (e.key === 'Escape') {
+                    // 候補が開いている間のEscapeは候補を閉じるだけにする。
+                    // 伝播させるとモーダル(入力中のフォーム)ごと閉じてしまう。
+                    if (!menu.hidden) { e.stopPropagation(); close(); }
+                } else if (e.key === 'Tab') { close(); }
+            });
+
+            // 候補の上での mousedown だけを止めて、blur より先に選択を確定させる。
+            // メニュー全体で止めるとスクロールバーのドラッグまで巻き込む恐れがある。
+            menu.addEventListener('mousedown', function(e) {
+                if (e.target.closest && e.target.closest('.ses-suggest-item')) e.preventDefault();
+            });
+            menu.addEventListener('click', function(e) {
+                const target = e.target.closest ? e.target.closest('.ses-suggest-item') : null;
+                if (target) select(parseInt(target.getAttribute('data-index'), 10));
+            });
+            window.addEventListener('scroll', function() { if (!menu.hidden) position(); }, true);
+            window.addEventListener('resize', function() { if (!menu.hidden) position(); });
+
+            input._sesSuggest = {
+                setItems: function(next) { items = api.prepare(next); },
+                refresh: refresh,
+                close: close
+            };
+            return input._sesSuggest;
         }
     },
     
@@ -753,3 +1013,108 @@ $(function() {
     });
 });
 
+// ================== 横断検索 (Global Search / Command Palette) ==================
+SES.globalSearch = {
+    timer: null,
+    init: function() {
+        const $input = $('#global-search-input');
+        const $results = $('#global-search-results');
+        if (!$input.length || !$('#global-search-btn').length) return;
+
+        $(document).on('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                $('#globalSearchModal').modal('show');
+            }
+        });
+
+        $('#globalSearchModal').on('shown.bs.modal', function() {
+            $input.focus().select();
+        });
+
+        $input.on('input', function() {
+            const query = $(this).val().trim();
+            clearTimeout(SES.globalSearch.timer);
+            SES.globalSearch.requestId = (SES.globalSearch.requestId || 0) + 1;
+            if (query.length < 2) {
+                $results.html('<div class="text-center text-muted py-5"><i class="bi bi-search fs-1 mb-2 d-block opacity-50"></i>' + SES.escapeHtml(SES.i18n.t('header.globalSearch.hint')) + '</div>');
+                return;
+            }
+            SES.globalSearch.timer = setTimeout(function() {
+                SES.globalSearch.execute(query, SES.globalSearch.requestId);
+            }, 300);
+        });
+    },
+    requestId: 0,
+    execute: function(query, requestId) {
+        const $results = $('#global-search-results');
+        $results.html('<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2" role="status"></div>' + SES.escapeHtml(SES.i18n.t('header.globalSearch.searching')) + '</div>');
+        $.ajax({
+            url: '/api/search',
+            type: 'GET',
+            data: { q: query },
+            success: function(res) {
+                // 入力中に後続のリクエストが発行されていたら、古い応答は破棄して結果の逆転を防ぐ
+                if (requestId !== SES.globalSearch.requestId) return;
+                if (res.code === 200) {
+                    SES.globalSearch.renderResults(res.data);
+                } else {
+                    $results.html('<div class="text-center text-danger py-4">' + SES.escapeHtml(res.message || SES.i18n.t('header.globalSearch.error')) + '</div>');
+                }
+            },
+            error: function() {
+                if (requestId !== SES.globalSearch.requestId) return;
+                $results.html('<div class="text-center text-danger py-4">' + SES.escapeHtml(SES.i18n.t('header.globalSearch.error')) + '</div>');
+            }
+        });
+    },
+    renderResults: function(dataMap) {
+        const $results = $('#global-search-results');
+        let html = '';
+        let totalCount = 0;
+
+        const typeLabels = {
+            'ENGINEER': { label: SES.i18n.t('search.type.engineer'), icon: 'bi-person', color: 'text-primary' },
+            'CUSTOMER': { label: SES.i18n.t('search.type.customer'), icon: 'bi-building', color: 'text-info' },
+            'PROJECT': { label: SES.i18n.t('search.type.project'), icon: 'bi-briefcase', color: 'text-success' },
+            'CONTRACT': { label: SES.i18n.t('search.type.contract'), icon: 'bi-file-earmark-text', color: 'text-warning' },
+            'INVOICE': { label: SES.i18n.t('search.type.invoice'), icon: 'bi-receipt', color: 'text-danger' },
+            'PROPOSAL': { label: SES.i18n.t('search.type.proposal'), icon: 'bi-kanban', color: 'text-purple' },
+            'QUOTATION': { label: SES.i18n.t('search.type.quotation'), icon: 'bi-calculator', color: 'text-cyan' },
+            'BP_COMPANY': { label: SES.i18n.t('search.type.bpCompany'), icon: 'bi-people', color: 'text-secondary' }
+        };
+
+        for (const typeKey in dataMap) {
+            const list = dataMap[typeKey];
+            if (!list || list.length === 0) continue;
+            totalCount += list.length;
+            const meta = typeLabels[typeKey] || { label: typeKey, icon: 'bi-tag', color: 'text-light' };
+
+            html += '<div class="mb-3"><h6 class="text-muted border-bottom border-dark pb-1 mb-2 small"><i class="bi ' + meta.icon + ' me-1 ' + meta.color + '"></i>' + SES.escapeHtml(meta.label) + ' (' + list.length + ')</h6>';
+            html += '<div class="list-group list-group-flush bg-transparent">';
+            list.forEach(function(item) {
+                html += '<a href="' + SES.escapeHtml(item.url || '#') + '" class="list-group-item list-group-item-action bg-dark text-white border-secondary rounded mb-1 py-2 px-3 hover-bg-secondary">';
+                html += '<div class="d-flex w-100 justify-content-between align-items-center">';
+                html += '<div><span class="fw-bold me-2">' + SES.escapeHtml(item.title || '') + '</span>';
+                if (item.subtitle) {
+                    html += '<span class="text-muted small ms-1">' + SES.escapeHtml(item.subtitle) + '</span>';
+                }
+                html += '</div>';
+                if (item.status) {
+                    html += '<span class="badge bg-secondary text-light">' + SES.escapeHtml(item.status) + '</span>';
+                }
+                html += '</div></a>';
+            });
+            html += '</div></div>';
+        }
+
+        if (totalCount === 0) {
+            html = '<div class="text-center text-muted py-5"><i class="bi bi-emoji-neutral fs-2 mb-2 d-block opacity-50"></i>該当するデータが見つかりませんでした</div>';
+        }
+        $results.html(html);
+    }
+};
+
+$(function() {
+    SES.globalSearch.init();
+});

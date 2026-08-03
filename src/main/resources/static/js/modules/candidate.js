@@ -123,7 +123,8 @@ function renderCandidates(records) {
                 <td class="text-end pe-4">
                     <div class="btn-group btn-group-sm" role="group">
                         <a href="/candidate/detail?id=${c.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteCandidate(${c.id})"><i class="bi bi-trash"></i></button>
+                        <button type="button" class="btn btn-outline-primary text-primary border-primary ms-1" onclick="editCandidate(${c.id})"><i class="bi bi-pencil"></i></button>
+                        <button type="button" class="btn btn-outline-danger text-danger border-danger ms-1" onclick="deleteCandidate(${c.id})"><i class="bi bi-trash"></i></button>
                     </div>
                 </td>
             </tr>
@@ -166,12 +167,45 @@ function renderCandidatePagination(pageData) {
     container.html(html);
 }
 
+function editCandidate(id) {
+    $.ajax({
+        url: '/api/candidates/' + id,
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data) {
+                const c = res.data;
+                $('#cand-id').val(c.id);
+                $('#cand-name').val(c.name || '');
+                $('#cand-contactEmail').val(c.contactEmail || '');
+                $('#cand-contactPhone').val(c.contactPhone || '');
+                $('#cand-skillSummary').val(c.skillSummary || '');
+                $('#cand-desiredRate').val(c.desiredRate || '');
+                $('#cand-source').val(c.source || '');
+                $('#cand-nextActionDate').val(c.nextActionDate || '');
+                $('#cand-remarks').val(c.remarks || '');
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('candidateModal')).show();
+            } else {
+                Toast.error(SES.i18n.t('error.getDataFailed'));
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            Toast.error(SES.i18n.t('error.networkError'));
+        }
+    });
+}
+
 function saveCandidate() {
     const name = $('#cand-name').val();
     if (!name) {
         Toast.error(SES.i18n.t('validation.required', SES.i18n.t('candidate.name')));
         return;
     }
+
+    const id = $('#cand-id').val();
+    const isUpdate = !!id;
+    const url = isUpdate ? '/api/candidates/' + id : '/api/candidates';
+    const method = isUpdate ? 'PUT' : 'POST';
 
     const data = {
         name: name,
@@ -185,15 +219,16 @@ function saveCandidate() {
     };
 
     $.ajax({
-        url: '/api/candidates',
-        method: 'POST',
+        url: url,
+        method: method,
         contentType: 'application/json',
         data: JSON.stringify(data),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(SES.i18n.t('success.create'));
+                Toast.success(isUpdate ? SES.i18n.t('success.update') : SES.i18n.t('success.create'));
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('candidateModal')).hide();
                 $('#candidate-form')[0].reset();
+                $('#cand-id').val('');
                 loadCandidates(1);
             } else {
                 Toast.error(res.message || SES.i18n.t('error.saveFailed'));

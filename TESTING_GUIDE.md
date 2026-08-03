@@ -65,6 +65,33 @@ mvn test -Dtest=UserApiControllerTest#testUserApiController_GetById_NotFound -Ds
 
 ---
 
+## 3.4. CIと同じ条件で実行する（「ローカルは通るのにCIで落ちる」対策）
+
+**ローカルの `mvn test` とCI（`.github/workflows/ci.yml`）は、実行されるテストの集合が同じではありません。** push前は次のスクリプトを使ってください。CIと同じコマンド・同じ判定を行い、**自分の環境で実行されなかった（skipされた）テストを名前付きで表示します**。
+
+```bash
+# Mac / Linux
+./scripts/verify-like-ci.sh
+
+# Windows (PowerShell)
+.\scripts\verify-like-ci.ps1
+```
+
+差分の原因は次の4つで、うち2つは `pom.xml` で固定済み、2つは実行環境側で用意する必要があります。
+
+| # | 差分 | 内容 | 対処 |
+|---|---|---|---|
+| 1 | **Docker** | `Flyway*SmokeTest`（×5）/ `FlywayRepairRunbookTest` / `ConcurrentUpdateTest` の8クラスは `@Testcontainers(disabledWithoutDocker = true)`。Dockerが無いと**エラーではなくskip**され、緑のまま**マイグレーション検証だけが消えます**。実MySQLでマイグレーションを流すテストはこれだけなので、MySQL方言やマイグレーション衝突は**CIでしか出ません**。 | ローカルでもDockerを起動して実行する（CIはDocker必須・skipも失敗扱い） |
+| 2 | **Node.js** | `JsSyntaxCheckTest` が `static/js` 配下を `node --check` する。ローカルはNodeが無ければskipだが、CI（`CI=true`）ではNodeが無いこと自体が失敗。 | Node.jsを入れる |
+| 3 | **テスト実行順** | surefireの既定 `filesystem` はディレクトリ列挙順依存でWindowsとLinuxで変わる。**全テストが1つのH2（`jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`）を共有する**ため、先行テストがcommitしたデータの有無で結果が変わる。 | `pom.xml` で `<runOrder>alphabetical</runOrder>` に固定済み。**自分でinsertしていない行を前提にしないこと**（`contractId = 1L` のような他テスト由来のIDに依存しない） |
+| 4 | **TZ / ロケール / 文字コード** | 未固定だとローカル（JST・日本語）とCI（UTC・英語）で日付境界やメッセージ解決が食い違う。`LocalDate.now()` を使うテストは35ファイルある。 | `pom.xml` のsurefire `argLine` で `Asia/Tokyo` / `ja_JP` / UTF-8 に固定済み（`application.yml` の本番設定と同じ） |
+
+**CIの契約は「skipされたテストが1件も無いこと」です。** 環境を判定して `Assumptions.assumeTrue(...)` でskipするテストは、どの環境でも実行されない「見せかけの緑」になりがちなので追加しないでください（見積書PDFテストが実際にそうなっていました。同梱フォント `resources/fonts/ipaexg.ttf` があるためOSのフォント判定自体が不要でした）。
+
+なお `clean` を付けるのは、`MigrationScriptIntegrityTest` が**クラスパス上の**マイグレーションを読むためです。`target/classes` に古いコピーが残っていると、常にfresh checkoutのCIだけが問題を検出します。CIのJDKは Temurin 21、`pom.xml` の `java.version=17` はバイトコードのターゲット指定です。
+
+---
+
 ## 4. カバレッジレポートの確認
 
 フルテストを実行すると、JaCoCoによるテストカバレッジレポートが自動生成されます。

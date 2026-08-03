@@ -80,6 +80,49 @@ class UserApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
     }
 
+    /**
+     * 紐付けの無い要員アカウントはログインしてもマイ勤怠が常に403になり何も操作できない。
+     * 一覧で気づけるよう engineerLinked を返すこと、および要員以外のロールには
+     * 出さない（null のまま）ことを固定する。要員以外にも false が出ると全ユーザーへ
+     * 不要な警告バッジが並ぶ。
+     */
+    @Test
+    @WithMockUser
+    void page_要員ロールだけ紐付け有無を返す() throws Exception {
+        SysUser engineerUser = SysUser.builder().username("eng1").role("要員").status(1).build();
+        engineerUser.setId(10L);
+        SysUser adminUser = SysUser.builder().username("admin").role("管理者").status(1).build();
+        adminUser.setId(11L);
+
+        Page<SysUser> page = new Page<>(1, 10, 2);
+        page.setRecords(java.util.List.of(engineerUser, adminUser));
+        when(sysUserService.page(any(), any())).thenReturn(page);
+        when(engineerAccountLinkService.findLinkedUserIds(any())).thenReturn(java.util.Set.of());
+
+        mockMvc.perform(get("/api/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].engineerLinked").value(false))
+                .andExpect(jsonPath("$.data.records[1].engineerLinked").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser
+    void page_紐付け済みの要員はtrueを返す() throws Exception {
+        SysUser engineerUser = SysUser.builder().username("eng1").role("要員").status(1).build();
+        engineerUser.setId(10L);
+
+        Page<SysUser> page = new Page<>(1, 10, 1);
+        page.setRecords(java.util.List.of(engineerUser));
+        when(sysUserService.page(any(), any())).thenReturn(page);
+        when(engineerAccountLinkService.findLinkedUserIds(any())).thenReturn(java.util.Set.of(10L));
+
+        mockMvc.perform(get("/api/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].engineerLinked").value(true))
+                // パスワードは一覧へ出さない（既存の不変条件）。
+                .andExpect(jsonPath("$.data.records[0].password").doesNotExist());
+    }
+
     @Test
     @WithMockUser
     void save_正常は200() throws Exception {

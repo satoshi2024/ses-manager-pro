@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{document.title} + ' - SES Manager Pro'">法定文書台帳 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-3">
+    <!-- ページヘッダー -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-0"><i class="bi bi-journal-check me-2 text-primary"></i><span th:text="#{document.title}">法定文書台帳</span></h1>
+            <p class="text-muted small mb-0" th:text="#{document.subtitle}">電子帳簿保存法・各種法定要件に準拠した取引・契約文書の検索と保管履歴</p>
+        </div>
+    </div>
+
+    <!-- 検索フィルターカード -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 fw-bold text-primary"><i class="bi bi-funnel me-1"></i><span th:text="#{document.search.title}">検索条件設定</span></h6>
+        </div>
+        <div class="card-body">
+            <form id="searchForm" class="row g-3">
+                <div class="col-md-3">
+                    <label for="searchDocumentType" class="form-label small" th:text="#{document.type}">文書種別</label>
+                    <select class="form-select form-select-sm" id="searchDocumentType" name="documentType">
+                        <option value="" th:text="#{document.type.all}">すべての種別</option>
+                        <option value="CONTRACT" th:text="#{document.type.contract}">契約書</option>
+                        <option value="INVOICE_OUT" th:text="#{document.type.invoiceOut}">請求書 (発行)</option>
+                        <option value="INVOICE_IN" th:text="#{document.type.invoiceIn}">請求書 (受領)</option>
+                        <option value="QUOTATION" th:text="#{document.type.quotation}">見積書</option>
+                        <option value="WORK_REPORT" th:text="#{document.type.workReport}">作業報告書</option>
+                        <option value="SIGNED_PDF" th:text="#{document.type.signedPdf}">署名済PDF</option>
+                        <option value="ESIGN_CERT" th:text="#{document.type.esignCert}">合意締結証明書</option>
+                        <option value="DISPATCH_LEDGER" th:text="#{document.type.dispatchLedger}">派遣元管理台帳</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchCounterpartyName" class="form-label small" th:text="#{document.counterpartyName}">取引先名称</label>
+                    <input type="text" class="form-control form-control-sm" id="searchCounterpartyName" name="counterpartyName" placeholder="取引先名で検索...">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchStartDate" class="form-label small" th:text="#{document.transactionDateStart}">取引日 (開始)</label>
+                    <input type="date" class="form-control form-control-sm" id="searchStartDate" name="startDate">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchEndDate" class="form-label small" th:text="#{document.transactionDateEnd}">取引日 (終了)</label>
+                    <input type="date" class="form-control form-control-sm" id="searchEndDate" name="endDate">
+                </div>
+
+                <div class="col-md-3">
+                    <label for="searchMinAmount" class="form-label small" th:text="#{document.minAmount}">最小金額 (円)</label>
+                    <input type="number" class="form-control form-control-sm" id="searchMinAmount" name="minAmount" placeholder="0">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchMaxAmount" class="form-label small" th:text="#{document.maxAmount}">最大金額 (円)</label>
+                    <input type="number" class="form-control form-control-sm" id="searchMaxAmount" name="maxAmount" placeholder="無制限">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchStatus" class="form-label small" th:text="#{document.status}">ステータス</label>
+                    <select class="form-select form-select-sm" id="searchStatus" name="status">
+                        <option value="" th:text="#{document.status.all}">すべて</option>
+                        <option value="DRAFT" th:text="#{document.status.draft}">下書き (DRAFT)</option>
+                        <option value="CONFIRMED" th:text="#{document.status.confirmed}">確定 (CONFIRMED)</option>
+                        <option value="AMENDED" th:text="#{document.status.amended}">訂正済 (AMENDED)</option>
+                        <option value="CANCELLED" th:text="#{document.status.cancelled}">取消 (CANCELLED)</option>
+                        <option value="DISPOSED" th:text="#{document.status.disposed}">廃棄済 (DISPOSED)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchLegalHold" class="form-label small" th:text="#{document.legalHold}">法的ホールド</label>
+                    <select class="form-select form-select-sm" id="searchLegalHold" name="legalHoldFlag">
+                        <option value="" th:text="#{document.legalHold.all}">指定なし</option>
+                        <option value="1" th:text="#{document.legalHold.active}">ホールド中のみ</option>
+                        <option value="0" th:text="#{document.legalHold.none}">ホールドなし</option>
+                    </select>
+                </div>
+
+                <div class="col-12 text-end">
+                    <button type="button" class="btn btn-outline-secondary btn-sm me-2" onclick="resetSearch()"><i class="bi bi-x-circle me-1"></i><span th:text="#{document.btn.clear}">クリア</span></button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search me-1"></i><span th:text="#{document.btn.search}">検索実行</span></button>
+                    <button type="button" class="btn btn-success btn-sm ms-2" onclick="exportZip()"><i class="bi bi-file-earmark-zip me-1"></i><span th:text="#{document.btn.exportZip}">税務用ZIP一括エクスポート</span></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- テーブルカード -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="documentTable">
+                    <thead class="table-light">
+                    <tr>
+                        <th th:text="#{document.table.id}">ID</th>
+                        <th th:text="#{document.table.type}">文書種別</th>
+                        <th th:text="#{document.table.title}">文書番号 / タイトル</th>
+                        <th th:text="#{document.table.counterparty}">取引先</th>
+                        <th th:text="#{document.table.date}">取引日</th>
+                        <th th:text="#{document.table.amount}">金額</th>
+                        <th th:text="#{document.table.status}">状態</th>
+                        <th th:text="#{document.table.retention}">保存期限</th>
+                        <th th:text="#{document.legalHold}">法的Hold</th>
+                        <th class="text-center" th:text="#{document.table.actions}">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="documentTableBody">
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-muted">読み込み中...</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center py-3">
+            <span id="paginationInfo" class="small text-muted">全 0 件</span>
+            <nav id="paginationNav"></nav>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/document.js}"></script>
+</th:block>
+</body>
+</html>

@@ -15,15 +15,24 @@ public final class ActionPermissionResolver {
             Map.entry("analytics", "analytics"),
             Map.entry("autocomplete", "autocomplete"),
             Map.entry("audit-logs", "audit"),
+            // approval-workflow-internal-control(S07)。未登録のままだと/api/approval/**が
+            // 管理者を含む全roleで403になる(CRM-R2-P1-01と同じ罠)。V75の権限seedと対にする。
+            Map.entry("approval", "approval"),
             Map.entry("bp-availabilities", "bp-availability"),
+            Map.entry("bp-companies", "bp-company"),
             Map.entry("bp-availability-ingestions", "bp-availability-ingestion"),
             Map.entry("candidates", "candidate"),
             Map.entry("cashflow", "cashflow"),
             Map.entry("compliance", "compliance"),
             Map.entry("contract-documents", "contract-document"),
             Map.entry("contracts", "contract"),
+            // CRM(S08)。ここへ登録しないと resolve() が null を返し、V73が m_menu へ入れた
+            // path_prefix='/crm/leads' に MenuPermissionFilter がヒットした時点で
+            // 管理者bypassより前に deny() される（＝全roleで403）。R08 Round 2 CRM-R2-P1-01。
+            Map.entry("crm", "crm"),
             Map.entry("customers", "customer"),
             Map.entry("dashboard", "dashboard"),
+            Map.entry("documents", "document"),
             Map.entry("email-templates", "email"),
             Map.entry("engineers", "engineer"),
             Map.entry("files", "file"),
@@ -49,7 +58,11 @@ public final class ActionPermissionResolver {
             Map.entry("skillsheet-templates", "skillsheet-template"),
             Map.entry("system-configs", "system-config"),
             Map.entry("users", "user"),
-            Map.entry("work-records", "work-record")
+            Map.entry("work-records", "work-record"),
+            Map.entry("search", "search"),
+            Map.entry("tasks", "task"),
+            Map.entry("saved-views", "saved-view"),
+            Map.entry("batch-operations", "batch-operation")
     );
 
     private ActionPermissionResolver() {
@@ -117,6 +130,11 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/engineers")) {
             return action("engineer", method);
         }
+        // 顧客配下でもCRMの接点・活動・タイムラインは顧客マスタ権限ではなく
+        // CRM権限で保護する。一般顧客APIの分岐より先に解決すること。
+        if (isCrmCustomerPath(uri)) {
+            return action("crm", method);
+        }
         if (matchesPrefix(uri, "/api/customers")) {
             return action("customer", method);
         }
@@ -132,12 +150,27 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/invoices")) {
             return action("invoice", method);
         }
+        if (matchesPrefix(uri, "/api/documents")) {
+            return action("document", method);
+        }
         if (matchesPrefix(uri, "/api/payroll")) {
             return "payroll.view";
         }
         if (matchesPrefix(uri, "/api/work-records")
                 && (uri.endsWith("/approve") || uri.endsWith("/reject"))) {
             return "work-record.approve";
+        }
+        if (matchesPrefix(uri, "/api/search")) {
+            return "search.view";
+        }
+        if (matchesPrefix(uri, "/api/tasks")) {
+            return action("task", method);
+        }
+        if (matchesPrefix(uri, "/api/saved-views")) {
+            return action("saved-view", method);
+        }
+        if (matchesPrefix(uri, "/api/batch-operations")) {
+            return action("batch-operation", method);
         }
         return action(resource, method);
     }
@@ -194,6 +227,10 @@ public final class ActionPermissionResolver {
     private static boolean isDownloadPath(String uri) {
         return uri.endsWith("/download") || uri.contains("/download/")
                 || uri.endsWith(".pdf") || uri.endsWith(".xlsx") || uri.endsWith(".csv");
+    }
+
+    private static boolean isCrmCustomerPath(String uri) {
+        return uri.matches("/api/customers/\\d+/(contacts|timeline)(/.*)?");
     }
 
     private static String action(String resource, String method) {

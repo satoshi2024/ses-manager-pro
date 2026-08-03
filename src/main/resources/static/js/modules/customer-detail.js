@@ -8,6 +8,7 @@ $(document).ready(function() {
     if (customerId && !isNaN(customerId)) {
         loadCustomerInfo();
         loadCustomerSummary();
+        loadCrmContext();
         loadActivities(1);
     }
 });
@@ -36,6 +37,89 @@ function loadCustomerInfo() {
             }
         }
     });
+}
+
+function loadCrmContext() {
+    $('#contact-export').attr('href', '/api/customers/' + customerId + '/contacts/export');
+    $.ajax({
+        url: '/api/customers/' + customerId + '/timeline',
+        method: 'GET',
+        success: function(res) {
+            if (res.code !== 200 || !res.data) return;
+            renderContacts(res.data.contacts || []);
+            renderOpportunities(res.data.opportunities || []);
+            populateActivityRelations(res.data.contacts || [], res.data.opportunities || []);
+            loadActivityAssignees();
+        }
+    });
+}
+
+function renderContacts(contacts) {
+    window._crmContacts = contacts || [];
+    const tbody = $('#customer-contact-table tbody');
+    if (!contacts.length) {
+        tbody.html('<tr><td colspan="5" class="text-center text-muted py-3">' + SES.i18n.t('customer.contacts.empty', '担当者情報がありません') + '</td></tr>');
+        return;
+    }
+    tbody.html(contacts.map(c => `<tr>
+        <td>${SES.escapeHtml(c.name || '-')} ${c.primaryFlag === 1 ? `<span class="badge bg-info text-dark ms-1">${SES.i18n.t('customer.contacts.primaryShort')}</span>` : ''}</td>
+        <td>${SES.escapeHtml([c.department, c.position].filter(Boolean).join(' / ') || '-')}</td>
+        <td class="font-monospace">${SES.escapeHtml(c.email || '-')}<br><span class="text-muted small">${SES.escapeHtml(c.phone || '')}</span></td>
+        <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(SES.i18n.e('customerContactStatus', c.status) || '-')}</span></td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-info" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>${c.status === '有効' ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="retireContact(${c.id}, ${c.version || 1})"><i class="bi bi-person-dash"></i></button>` : ''}</td>
+    </tr>`).join(''));
+}
+
+function openContactModal(id) {
+    const contacts = window._crmContacts || [];
+    const c = id ? contacts.find(x => x.id === id) : null;
+    $('#contact-form')[0].reset(); $('#contact-id').val(c ? c.id : ''); $('#contact-version').val(c ? c.version : '');
+    $('#contact-valid-from').val(c && c.validFrom ? c.validFrom : SES.util.getLocalDateString());
+    $('#contact-roles input[type="checkbox"]').prop('checked', false);
+    if (c) { $('#contact-name').val(c.name || ''); $('#contact-name-kana').val(c.nameKana || ''); $('#contact-department').val(c.department || ''); $('#contact-position').val(c.position || ''); let roles = []; try { roles = JSON.parse(c.rolesJson || '[]'); } catch (_) { roles = []; } $('#contact-roles input[type="checkbox"]').each(function() { $(this).prop('checked', roles.includes(this.value)); }); $('#contact-email').val(c.email || ''); $('#contact-phone').val(c.phone || ''); $('#contact-valid-to').val(c.validTo || ''); $('#contact-primary').prop('checked', c.primaryFlag === 1); }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('contactModal')).show();
+}
+
+function saveContact() {
+    const id = $('#contact-id').val();
+    const roles = $('#contact-roles input[type="checkbox"]:checked').map(function() { return this.value; }).get();
+    const data = { name: $('#contact-name').val(), nameKana: $('#contact-name-kana').val(), department: $('#contact-department').val(), position: $('#contact-position').val(), rolesJson: JSON.stringify(roles), email: $('#contact-email').val() || null, phone: $('#contact-phone').val() || null, primaryFlag: $('#contact-primary').prop('checked') ? 1 : 0, validFrom: $('#contact-valid-from').val(), validTo: $('#contact-valid-to').val() || null, status: '有効', version: $('#contact-version').val() ? Number($('#contact-version').val()) : null };
+    const save = () => $.ajax({ url: `/api/customers/${customerId}/contacts${id ? '/' + id : ''}`, method: id ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(data) }).done(res => { if (res.code === 200) { bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide(); loadCrmContext(); Toast.success(SES.i18n.t('success.save')); } else Toast.error(res.message); }).fail(xhr => Toast.error((xhr.responseJSON || {}).message || SES.i18n.t('error.saveFailed')));
+    $.get(`/api/customers/${customerId}/contacts/duplicates`, { email: data.email, phone: data.phone, excludeId: id || null }).done(res => {
+        if (res.code === 200 && (res.data || []).length) {
+            Swal.fire({ title: SES.i18n.t('customer.contacts.duplicateTitle', '重複候補があります'), text: SES.i18n.t('customer.contacts.duplicateText', '同じメールまたは電話番号の担当者が存在します。自動統合は行いません。'), icon: 'warning', showCancelButton: true, confirmButtonText: SES.i18n.t('common.save'), cancelButtonText: SES.i18n.t('common.cancel') }).then(r => { if (r.isConfirmed) save(); });
+        } else save();
+    }).fail(save);
+}
+
+function retireContact(id, version) {
+    Swal.fire({ title: SES.i18n.t('common.deleteConfirmTitle'), text: SES.i18n.t('customer.contacts.retireConfirm'), icon: 'warning', showCancelButton: true, confirmButtonText: SES.i18n.t('customer.contacts.retire'), cancelButtonText: SES.i18n.t('common.cancel') }).then(r => { if (!r.isConfirmed) return; $.ajax({ url: `/api/customers/${customerId}/contacts/${id}/retire`, method: 'PUT', data: { version } }).done(res => { if (res.code === 200) loadCrmContext(); else Toast.error(res.message); }); });
+}
+
+function populateActivityRelations(contacts, opportunities) {
+    const contactOptions = ['<option value="">-</option>'].concat((contacts || []).map(c => `<option value="${c.id}">${SES.escapeHtml(c.name || '-')}</option>`));
+    const opportunityOptions = ['<option value="">-</option>'].concat((opportunities || []).map(o => `<option value="${o.id}">${SES.escapeHtml(o.title || '-')}</option>`));
+    $('#act-contact').html(contactOptions.join(''));
+    $('#act-opportunity').html(opportunityOptions.join(''));
+}
+
+function loadActivityAssignees() {
+    $.get('/api/crm/leads/assignees', function(res) {
+        if (res.code !== 200) return;
+        $('#act-assignee').html(['<option value="">-</option>'].concat((res.data || []).map(u => `<option value="${u.value}">${SES.escapeHtml(u.label || '-')}</option>`)).join(''));
+    });
+}
+
+function renderOpportunities(opportunities) {
+    const container = $('#customer-opportunity-list');
+    if (!opportunities.length) {
+        container.html('<div class="text-muted">' + SES.i18n.t('customer.opportunities.empty', '関連商機がありません') + '</div>');
+        return;
+    }
+    container.html(opportunities.map(o => `<div class="border-bottom border-secondary pb-2 mb-2">
+        <div class="fw-bold text-light">${SES.escapeHtml(o.title || '-')}</div>
+        <div class="small text-muted">${SES.escapeHtml(SES.i18n.e('opportunityStage', o.stage) || '-')} · ${SES.escapeHtml(o.expectedStartMonth || '-')}</div>
+    </div>`).join(''));
 }
 
 function loadCustomerSummary() {
@@ -109,9 +193,9 @@ function renderActivities(records) {
 
         let completeBtn = '';
         if (isOverdue) {
-            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         } else if (act.completedFlag === 0 && act.nextActionDate) {
-            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         }
 
         html += `
@@ -132,7 +216,7 @@ function renderActivities(records) {
                             <div class="btn-group btn-group-sm">
                                 ${completeBtn}
                                 <button type="button" class="btn btn-outline-info text-info ms-2" onclick="editActivity(${act.id})"><i class="bi bi-pencil"></i></button>
-                                <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id})"><i class="bi bi-trash"></i></button>
+                                <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id}, ${act.version || 1})"><i class="bi bi-trash"></i></button>
                             </div>
                         </div>
                         <div class="text-light text-wrap" style="white-space: pre-wrap;">${SES.escapeHtml(act.content || '')}</div>
@@ -193,6 +277,9 @@ function editActivity(id) {
         $('#act-title').val(act.title);
         $('#act-content').val(act.content || '');
         $('#act-next-date').val(act.nextActionDate || '');
+        $('#act-contact').val(act.contactId || '');
+        $('#act-opportunity').val(act.opportunityId || '');
+        $('#act-assignee').val(act.assigneeUserId || '');
         
         bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).show();
     }
@@ -210,7 +297,11 @@ function saveActivity() {
         activityType: $('#act-type').val(),
         title: $('#act-title').val(),
         content: $('#act-content').val(),
-        nextActionDate: $('#act-next-date').val() || null
+        nextActionDate: $('#act-next-date').val() || null,
+        contactId: $('#act-contact').val() ? Number($('#act-contact').val()) : null,
+        opportunityId: $('#act-opportunity').val() ? Number($('#act-opportunity').val()) : null,
+        assigneeUserId: $('#act-assignee').val() ? Number($('#act-assignee').val()) : null,
+        version: id ? ((currentActivities.find(a => a.id === Number(id)) || {}).version || 1) : null
     };
 
     if (id) {
@@ -241,7 +332,7 @@ function saveActivity() {
     });
 }
 
-function deleteActivity(id) {
+function deleteActivity(id, version) {
     Swal.fire({
         title: SES.i18n.t('common.deleteConfirmTitle'),
         text: SES.i18n.t('confirm.deleteActivity'),
@@ -254,7 +345,7 @@ function deleteActivity(id) {
     }).then((result) => {
         if (result.isConfirmed) {
             $.ajax({
-                url: `/api/customers/${customerId}/activities/${id}`,
+                url: `/api/customers/${customerId}/activities/${id}?version=${version}`,
                 method: 'DELETE',
                 success: function(res) {
                     if (res.code === 200) {
@@ -269,9 +360,9 @@ function deleteActivity(id) {
     });
 }
 
-function completeActivity(id) {
+function completeActivity(id, version) {
     $.ajax({
-        url: `/api/customers/${customerId}/activities/${id}/complete`,
+        url: `/api/customers/${customerId}/activities/${id}/complete?version=${version}`,
         method: 'PUT',
         success: function(res) {
             if (res.code === 200) {

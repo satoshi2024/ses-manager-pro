@@ -64,6 +64,29 @@
         </div>
     </div>
 
+    <!-- 横断検索 (Command Palette) モーダル -->
+    <div sec:authorize="!hasRole('要員')" class="modal fade" id="globalSearchModal" tabindex="-1" aria-labelledby="globalSearchModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content bg-secondary text-white border-dark">
+                <div class="modal-header border-dark py-2">
+                    <label for="global-search-input" id="globalSearchModalLabel" class="visually-hidden" th:text="#{header.globalSearch.title}">横断検索</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark text-muted border-secondary"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control bg-dark text-white border-secondary" id="global-search-input" th:placeholder="#{header.globalSearch.placeholder}" placeholder="要員、顧客、案件、契約、請求、提案、見積を検索... (2文字以上)" autocomplete="off">
+                    </div>
+                    <button type="button" class="btn-close btn-close-white ms-2" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-3" id="global-search-results" style="min-height: 250px;">
+                    <div class="text-center text-muted py-5" id="global-search-placeholder">
+                        <i class="bi bi-search fs-1 mb-2 d-block opacity-50"></i>
+                        <span th:text="#{header.globalSearch.hint}">キーワードを2文字以上入力してください</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
     <div class="app-wrapper">
         <!-- Sidebar -->
         <aside class="sidebar" th:replace="~{layout/sidebar :: sidebar}"></aside>

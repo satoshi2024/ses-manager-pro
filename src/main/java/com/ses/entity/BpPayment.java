@@ -2,8 +2,8 @@ package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -18,6 +18,9 @@ public class BpPayment {
     private Long workRecordId;
     private Integer layerOrder;
     private String payeeCompanyName;
+    private Long bpCompanyId;
+    private String bpCompanyNameSnapshot;
+    private String termsSnapshotJson;
     private Long parentPaymentId;
     private BigDecimal amount;
     private Long costCenterId;

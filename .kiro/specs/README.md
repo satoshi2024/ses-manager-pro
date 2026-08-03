@@ -4,6 +4,14 @@
 
 **並行実行の原則**: 別々のspecディレクトリを別々のAIセッションに割り当てれば、担当ファイルが交差しないよう設計済みのため安全に同時実行できる。同一spec内でレーン(A/B/C/D等)が分かれているものは、レーン単位で別AIに割り振ることも可能（「一言で着手」列に個別レーンの例文も記載）。
 
+## 2026-08-02 200名規模UI・同時実行回帰（21件）
+
+| spec | 状態 | 優先度 | 概要 | 一言で着手 |
+|---|---|---|---|---|
+| `ui-scale-regression-hardening-200` | **未着手** | P1 4件 / P2 12件 / P3 5件 | 25user同時login deadlock、容量試験偽green、BP review 500、契約100件打切り、Bench filter、scope外detail dummy、role dead link、勤怠/提案/CRM/ToDo/dashboard大量表示、見積i18n、候補者編集、PowerShell互換 | `.kiro/specs/ui-scale-regression-hardening-200/start-conversation.md を読み、tasks.mdを上から順に実装してください。完了taskだけ - [x] にし、review-ledger.mdへ証跡を記録してください。` |
+
+独立Reviewは実装完了後に `.kiro/specs/ui-scale-regression-hardening-200/review-conversation.md` を使用する。既存の完了済みspecを再実行せず、本specを横断回帰の唯一の進捗台帳とする。
+
 ## 2026-07-26 顧客視点プロダクト拡張（全17件採用・仕様整理済み）
 
 実装順、依存、共有ファイル、Flyway採番方針（V59は永久欠番、将来は当時のlatest + 1）、共通テスト規約、外部調査資料、未決定ゲートは

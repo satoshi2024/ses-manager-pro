@@ -94,3 +94,13 @@ scope付きqueryをそのまま呼ぶ。検索用に新しいSQLを書くと母�
 
 scope、timeout、短query、target削除、task遷移、期限冪等、view schema、bulk token/200境界/部分成功。
 
+## 9. 逸脱と根拠 (Scope Trade-offs & Rationale)
+
+1. **保存ビューの対象属性** (R3.1):
+   - 保存ビュー (`m_saved_view`) の保存・適用対象は、最も検索頻度の高い `filter_json` (抽出条件) および `page_size` に限定する。
+   - `columns_json` (列表示選択) および `sort_json` (個別のソート順) はスキーマ上フィールドを保持するが、初期UI適用は対象外とし、ドロップダウン表示文言を「現在の検索条件を保存...」に整える。
+
+2. **一括操作のエンドポイント・UI導線** (R4.1 / R4.2):
+   - 一括操作 (`BatchOperationService`) は、要員・案件のステータス変更に対する安全な 2 段階 API (`/preview` -> HMAC 署名 Token -> `/apply`) に特化する。
+   - 一覧画面の選択ツールバー UI および担当変更・タスク作成などの追加操作種別は初期提供範囲外とする。
+

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{document.detail.title} + ' - SES Manager Pro'">文書詳細 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-3">
+    <!-- ヘッダー -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb small mb-1">
+                    <li class="breadcrumb-item"><a th:href="@{/document/list}" th:text="#{document.title}">法定文書台帳</a></li>
+                    <li class="breadcrumb-item active" th:text="#{document.detail.title}">文書詳細</li>
+                </ol>
+            </nav>
+            <h1 class="h3 mb-0" id="docTitleHeader" th:text="#{document.detail.title}">文書詳細</h1>
+        </div>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm me-2" onclick="history.back()"><i class="bi bi-arrow-left me-1"></i><span th:text="#{document.button.back}">戻る</span></button>
+            <button class="btn btn-warning btn-sm me-2" id="toggleHoldBtn" onclick="toggleLegalHold()"><i class="bi bi-shield-lock me-1"></i><span th:text="#{document.button.legalHold}">法的Hold設定</span></button>
+            <button class="btn btn-danger btn-sm" id="requestDisposalBtn" onclick="openDisposalModal()"><i class="bi bi-trash me-1"></i><span th:text="#{document.button.requestDisposal}">廃棄申請</span></button>
+        </div>
+    </div>
+
+    <input type="hidden" id="documentId" th:value="${documentId}">
+
+    <div class="row g-4">
+        <!-- 左側: メタデータカード -->
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-info-circle me-1"></i><span th:text="#{document.detail.metadata}">基本メタデータ</span></h6>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless table-sm mb-0">
+                        <tbody>
+                        <tr>
+                            <th class="text-muted w-35" th:text="#{document.detail.docId} + ':'">文書ID:</th>
+                            <td id="detailDocId">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.docType} + ':'">文書種別:</th>
+                            <td id="detailDocType">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.docNo} + ':'">文書番号:</th>
+                            <td id="detailDocNo">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.docTitle} + ':'">タイトル:</th>
+                            <td id="detailTitle">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.counterparty} + ':'">取引先:</th>
+                            <td id="detailCounterparty">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.transactionDate} + ':'">取引日:</th>
+                            <td id="detailTransactionDate">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.amount} + ':'">金額:</th>
+                            <td id="detailAmount">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.status} + ':'">ステータス:</th>
+                            <td id="detailStatus">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.retentionUntil} + ':'">保存期限:</th>
+                            <td id="detailRetentionUntil">-</td>
+                        </tr>
+                        <tr>
+                            <th class="text-muted" th:text="#{document.detail.legalHold} + ':'">法的Hold:</th>
+                            <td id="detailLegalHold">-</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 関連リンクカード -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-link-45deg me-1"></i><span th:text="#{document.detail.links}">業務エンティティ紐付け</span></h6>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush" id="linkList">
+                        <li class="list-group-item text-muted small" th:text="#{document.detail.noLinks}">紐付け情報がありません</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側: バージョン履歴カード -->
+        <div class="col-lg-7">
+            <div class="card shadow-sm border-0">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold text-primary"><i class="bi bi-clock-history me-1"></i><span th:text="#{document.detail.versionHistory}">版履歴 (Append-Only)</span></h6>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                            <tr>
+                                <th th:text="#{document.detail.version}">版</th>
+                                <th th:text="#{document.detail.fileName}">ファイル名</th>
+                                <th th:text="#{document.detail.size}">サイズ</th>
+                                <th th:text="#{document.detail.sha256}">SHA-256</th>
+                                <th th:text="#{document.detail.sourceType}">取得経路</th>
+                                <th th:text="#{document.detail.scan}">スキャン</th>
+                                <th class="text-center" th:text="#{document.detail.action}">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="versionTableBody">
+                            <tr>
+                                <td colspan="7" class="text-center py-4 text-muted" th:text="#{document.detail.loading}">読み込み中...</td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 廃棄申請モーダル -->
+<div class="modal fade" id="disposalModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" th:text="#{document.disposal.modalTitle}">文書廃棄申請</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted" th:text="#{document.disposal.modalDesc}">保存期限が経過した文書の廃棄を申請します。管理者の承認後に物理削除が実行されます。</p>
+                <div class="mb-3">
+                    <label for="disposalReason" class="form-label" th:text="#{document.disposal.reasonLabel}">廃棄申請理由</label>
+                    <textarea class="form-control" id="disposalReason" rows="3" th:placeholder="#{document.disposal.placeholder}"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" th:text="#{document.button.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="submitDisposalRequest()" th:text="#{document.disposal.submit}">申請送信</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/document.js}"></script>
+</th:block>
+</body>
+</html>

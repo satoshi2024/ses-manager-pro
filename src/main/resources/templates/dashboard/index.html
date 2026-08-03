@@ -33,7 +33,7 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-activity text-accent-blue" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.utilization}">全社稼動率</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" id="kpi-utilization-label" th:text="#{dashboard.kpi.utilization(#{dashboard.scope.company})}">全社稼動率</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-utilization">--%</h2>
                         <span class="badge bg-success text-white rounded-pill px-2 py-1 small">
@@ -97,7 +97,7 @@
                     <div class="position-absolute top-0 end-0 p-3 opacity-25">
                         <i class="bi bi-graph-up-arrow text-accent-yellow" style="font-size: 4rem;"></i>
                     </div>
-                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.avg_profit_margin}">全社平均粗利率</h6>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" id="kpi-profit-margin-label" th:text="#{dashboard.kpi.avg_profit_margin(#{dashboard.scope.company})}">全社平均粗利率</h6>
                     <div class="d-flex align-items-end mb-2">
                         <h2 class="text-white fw-bold mb-0 me-2" id="kpi-profit-margin">--%</h2>
                         <span class="badge bg-secondary text-white rounded-pill px-2 py-1 small">
@@ -211,7 +211,7 @@
                         <i class="bi bi-calendar-check me-1"></i><span th:text="#{dashboard.utilizationForecast.renewalCalendar}">更新カレンダー</span>
                     </a>
                 </div>
-                <div class="card-body p-0" style="max-height: 330px; overflow-y: auto;">
+                <div class="card-body p-0" style="max-height: 320px; overflow-y: auto;">
                     <div class="table-responsive">
                         <table class="table table-dark table-hover table-striped mb-0 align-middle">
                             <thead class="table-dark-header border-bottom border-dark sticky-top">

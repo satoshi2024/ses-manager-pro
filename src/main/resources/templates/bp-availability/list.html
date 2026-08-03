@@ -14,10 +14,10 @@
     <!-- フィルター -->
     <div class="card bg-card border-dark shadow-sm mb-4">
         <div class="card-body">
-            <div class="row g-3 align-items-end">
+            <form id="searchForm" class="row g-3 align-items-end" onsubmit="event.preventDefault(); loadList(1);">
                 <div class="col-md-3">
                     <label for="filterStatus" class="form-label text-muted small">ステータス</label>
-                    <select id="filterStatus" class="form-select bg-dark border-secondary text-light">
+                    <select id="filterStatus" name="status" class="form-select bg-dark border-secondary text-light">
                         <option value="" th:text="#{common.all}"></option>
                         <option value="提案可能">提案可能</option>
                         <option value="失効">失効</option>
@@ -25,11 +25,11 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <button type="button" class="btn btn-outline-primary w-100" onclick="loadList(1)">
+                    <button type="submit" class="btn btn-outline-primary w-100">
                         <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}"></th:block>
                     </button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 

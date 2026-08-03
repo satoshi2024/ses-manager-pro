@@ -236,26 +236,21 @@ class WorkRecordServiceImplTest {
     }
 
     @Test
-    void assertContractScope_直属組織がありaccountLinkなしでも許可する() {
+    void assertContractScope_過去月は現在の直属組織をフォールバックしない() {
         ReflectionTestUtils.setField(workRecordService, "organizationScopeService", organizationScopeService);
         ReflectionTestUtils.setField(workRecordService, "engineerMapper", engineerMapper);
-        ReflectionTestUtils.setField(workRecordService, "engineerAccountLinkMapper", engineerAccountLinkMapper);
         Contract contract = new Contract();
         contract.setId(1L);
         contract.setEngineerId(7L);
-        Engineer engineer = new Engineer();
-        engineer.setId(7L);
-        engineer.setOrganizationId(20L);
 
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1)))
                 .thenReturn(java.util.Set.of(20L));
-        when(engineerMapper.selectById(7L)).thenReturn(engineer);
 
-        org.assertj.core.api.Assertions.assertThatCode(() ->
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 ReflectionTestUtils.invokeMethod(workRecordService, "assertContractScope", contract, "2026-07"))
-                .doesNotThrowAnyException();
-        verify(engineerAccountLinkMapper, never()).selectByEngineerId(any());
+                .isInstanceOf(BusinessException.class);
+        verify(engineerMapper, never()).selectById(any());
     }
 
     @Test

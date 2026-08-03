@@ -92,7 +92,7 @@ function showClosingDetail(key) {
         headers = ['顧客名 / 要員', '案件', '金額', '操作'];
         let html = `<h5>${SES.escapeHtml(SES.i18n.t(key))}</h5>`;
         s.unbilledConfirmed.forEach(g => {
-            html += `<h6>${SES.escapeHtml(g.customerName)} (小計: ${g.subtotal})</h6>`;
+            html += `<h6>${SES.escapeHtml(g.customerName)} (小計: ¥${Number(g.subtotal || 0).toLocaleString()})</h6>`;
             html += `<table class="table table-sm table-bordered"><thead><tr>`;
             headers.forEach(h => html += `<th>${h}</th>`);
             html += `</tr></thead><tbody>`;
@@ -100,7 +100,7 @@ function showClosingDetail(key) {
                 html += `<tr>
                     <td>${SES.escapeHtml(r.engineerName)}</td>
                     <td>${SES.escapeHtml(r.projectName)}</td>
-                    <td>${r.billingAmount}</td>
+                    <td>¥${Number(r.billingAmount || 0).toLocaleString()}</td>
                     <td><a href="/invoice?month=${month}&customerId=${encodeURIComponent(g.customerId)}" class="btn btn-sm btn-outline-primary">請求作成</a></td>
                 </tr>`;
             });
@@ -110,10 +110,10 @@ function showClosingDetail(key) {
         return;
     } else if (key === 'closing.item.unpaidBp') {
         headers = ['要員', '案件', '金額', '操作'];
-        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, r.amount, `<a href="/invoice?tab=bp-payment&month=${month}" class="btn btn-sm btn-outline-primary">支払画面</a>`]);
+        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, '¥' + Number(r.amount || 0).toLocaleString(), `<a href="/invoice?tab=bp-payment&month=${month}" class="btn btn-sm btn-outline-primary">支払画面</a>`]);
     } else if (key === 'closing.item.overdue') {
         headers = ['請求書番号', '顧客', '残高', '期限', '操作'];
-        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, r.balance, r.dueDate, `<a href="/invoice?invoiceId=${encodeURIComponent(r.invoiceId)}" class="btn btn-sm btn-outline-primary">督促</a>`]);
+        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, '¥' + Number(r.balance || 0).toLocaleString(), r.dueDate, `<a href="/invoice?invoiceId=${encodeURIComponent(r.invoiceId)}" class="btn btn-sm btn-outline-primary">督促</a>`]);
     } else if (key === 'closing.item.compliance') {
         // 該当リスク列は最終列(操作)より前のため showClosingDetail の共通ループでエスケープされる。
         // 生HTML(<br>等)は差し込まずプレーンテキストで連結する。
@@ -138,20 +138,24 @@ function showClosingDetail(key) {
 
 function confirmClosing() {
     const month = document.getElementById('closingMonth').value;
+    const button = document.getElementById('btnConfirmClosing');
+    if (button) button.disabled = true;
     fetch('/api/monthly-closing/confirm', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
         body: JSON.stringify({ month })
     }).then(res => res.json()).then(data => {
-        if (data.code === 200) { SES.toast.success(SES.i18n.t('closing.btn.confirm') + ' OK'); loadClosing(); }
+        if (data.code === 200) { SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。')); loadClosing(); }
         else alert(data.message);
     }).catch(e => {
         SES.toast.error("通信エラーが発生しました");
-    });
+    }).finally(() => { if (button) button.disabled = false; });
 }
 
 function reopenClosing() {
     const month = document.getElementById('closingMonth').value;
+    const button = document.getElementById('btnReopenClosing');
+    if (button) button.disabled = true;
     fetch('/api/monthly-closing/reopen', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),

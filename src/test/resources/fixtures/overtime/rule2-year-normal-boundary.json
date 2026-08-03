@@ -1,0 +1,9 @@
+{
+  "name": "rule2-year-normal-boundary",
+  "description": "overtime-rules.md §1 ルール2（年の時間外360時間、協定年度累計、休日労働を含まない）。境界は「超過のみ違反」＝360時間ちょうどは適合。deltaは現在のlimit(YEAR_NORMAL_MINUTES)からの分単位オフセットで、協定年度内の1か月に集約して与える。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": false },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

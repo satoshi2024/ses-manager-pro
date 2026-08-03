@@ -6,11 +6,12 @@ $(document).ready(function() {
     if (id) {
         loadEngineerDetail(id);
     } else {
-        Toast.error(SES.i18n.t('error.noEngineerId'));
+        renderEngineerLoadError(400, SES.i18n.t('error.noEngineerId'));
     }
 });
 
 function loadEngineerDetail(id) {
+    beginEngineerDetailLoading();
     $.ajax({
         url: '/api/engineers/' + id,
         method: 'GET',
@@ -18,18 +19,54 @@ function loadEngineerDetail(id) {
             if (res.code === 200 && res.data) {
                 renderEngineerDetail(res.data);
             } else {
-                Toast.error(SES.i18n.t('error.getDataFailed'));
+                renderEngineerLoadError(res.code, res.message);
             }
         },
-        error: function(err) {
-            console.error(err);
-            Toast.error(SES.i18n.t('error.networkError'));
+        error: function(xhr) {
+            console.error(xhr);
+            const message = xhr.responseJSON && xhr.responseJSON.message;
+            renderEngineerLoadError(xhr.status, message);
         }
     });
 }
 
 // 現在表示中の要員（写真アップロード等で参照）
 let detailEngineer = null;
+
+function beginEngineerDetailLoading() {
+    detailEngineer = null;
+    if (typeof currentEngineerId !== 'undefined') currentEngineerId = null;
+    if (typeof currentEngineerName !== 'undefined') currentEngineerName = null;
+    $('#engineer-detail-container').attr('aria-busy', 'true');
+    $('#engineer-detail-loading').removeClass('d-none');
+    $('#engineer-detail-error').addClass('d-none');
+    $('#engineer-detail-content').addClass('d-none');
+    $('.engineer-detail-action').prop('disabled', true);
+}
+
+/** 403/404・ApiResult非200・network failureを同じ安全な画面状態へ集約する。 */
+function renderEngineerLoadError(status, message) {
+    detailEngineer = null;
+    if (typeof currentEngineerId !== 'undefined') currentEngineerId = null;
+    if (typeof currentEngineerName !== 'undefined') currentEngineerName = null;
+    if (typeof currentEngineerExpectedPrice !== 'undefined') currentEngineerExpectedPrice = null;
+    if (typeof currentEngineerSkills !== 'undefined') currentEngineerSkills = [];
+
+    const displayMessage = status === 403 || status === 404
+        ? SES.i18n.t('error.scope.notFound')
+        : (message || (status === 0
+            ? SES.i18n.t('error.networkError')
+            : SES.i18n.t('error.getDataFailed')));
+
+    $('#eng-name, #eng-initial, #det-name, #det-avatar, #det-status, #det-experience, #det-price, #det-station, #det-prefecture, #det-railway').empty();
+    $('#det-skills, #det-resume, #career-table-body, #proposal-history-table-body, #sales-rep-list, #followup-list, #account-link-current').empty();
+    $('.engineer-detail-action').prop('disabled', true);
+    $('#engineer-detail-content').addClass('d-none');
+    $('#engineer-detail-loading').addClass('d-none');
+    $('#engineer-detail-error-message').text(displayMessage);
+    $('#engineer-detail-error').removeClass('d-none');
+    $('#engineer-detail-container').attr('aria-busy', 'false');
+}
 
 function renderEngineerDetail(eng) {
     detailEngineer = eng;
@@ -103,6 +140,11 @@ function renderEngineerDetail(eng) {
     } else {
         $('#det-resume').html('<div class="text-muted small">' + SES.i18n.t('engineer.career.empty') + '</div>');
     }
+
+    $('.engineer-detail-action').prop('disabled', false);
+    $('#engineer-detail-loading, #engineer-detail-error').addClass('d-none');
+    $('#engineer-detail-content').removeClass('d-none');
+    $('#engineer-detail-container').attr('aria-busy', 'false');
 }
 
 // ==========================================

@@ -15,9 +15,95 @@ function loadMyTimesheet() {
     myMonthValue = document.getElementById('myMonth').value;
     fetch('/api/my/timesheet?month=' + encodeURIComponent(myMonthValue))
         .then(res => res.json()).then(data => {
-            if (data.code !== 200) { document.getElementById('myContracts').textContent = data.message || ''; return; }
+            if (data.code !== 200) { renderMyError(data); return; }
+            renderMySummary(data.data.rows || []);
             renderMy(data.data.rows || [], data.data.engineerName);
         });
+}
+
+// 対象月の最終日を求める（提出期限の目安。バックエンドに期限設定は無いため月末を採用）。
+// isoは今日の日付文字列との比較用、displayは表示用（どちらもDateの往復無しで組み立てる。
+// 日付専用文字列をnew Date()でUTCとして解釈しローカルgetterで読むと、UTCより遅いTZで1日ずれるため）。
+function myMonthEnd(monthValue) {
+    const [y, m] = monthValue.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const mm = String(m).padStart(2, '0');
+    const dd = String(lastDay).padStart(2, '0');
+    return { iso: `${y}-${mm}-${dd}`, display: `${y}/${mm}/${dd}` };
+}
+
+// 提出期限・当月合計・承認状況の要約バー。状態集計は既存の workRecord.status.* をそのまま使う。
+function renderMySummary(rows) {
+    const el = document.getElementById('myTimesheetSummary');
+    if (!el) return;
+    if (!myMonthValue || rows.length === 0) { el.innerHTML = ''; return; }
+
+    const deadline = myMonthEnd(myMonthValue);
+    const today = SES.util.getLocalDateString();
+    const hasUnfinished = rows.some(row => !['提出済', '確定'].includes(row.status));
+    const overdue = hasUnfinished && today > deadline.iso;
+
+    const monthTotal = rows.reduce((sum, row) => sum + (Number(row.actualHours) || 0), 0);
+
+    const statusOrder = ['入力中', '差戻し', '提出済', '確定'];
+    const statusBadgeClass = { '入力中': 'bg-secondary', '差戻し': 'bg-danger', '提出済': 'bg-info', '確定': 'bg-success' };
+    const statusCounts = {};
+    rows.forEach(row => {
+        const status = row.status || '入力中';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+    });
+    const statusBadges = statusOrder
+        .filter(status => statusCounts[status])
+        .map(status => `<span class="badge ${statusBadgeClass[status]} me-1">${SES.escapeHtml(SES.i18n.t('workRecord.status.' + status, status))} (${statusCounts[status]})</span>`)
+        .join('');
+
+    el.innerHTML = `
+        <div class="card">
+            <div class="card-body d-flex flex-wrap gap-4">
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.deadline', '提出期限')}</div>
+                    <div class="fw-bold ${overdue ? 'text-danger' : ''}" data-field="deadline">
+                        ${SES.escapeHtml(deadline.display)}
+                        ${overdue ? `<span class="badge bg-danger ms-1">${SES.escapeHtml(SES.i18n.t('my.timesheet.summary.overdue', '期限超過'))}</span>` : ''}
+                    </div>
+                </div>
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.monthTotal', '当月合計')}</div>
+                    <div class="fw-bold" data-field="monthTotal">${SES.escapeHtml(monthTotal.toFixed(1))} h</div>
+                </div>
+                <div>
+                    <div class="text-muted small">${SES.i18n.t('my.timesheet.summary.approvalStatus', '承認状況')}</div>
+                    <div data-field="approvalStatus">${statusBadges}</div>
+                </div>
+            </div>
+        </div>`;
+}
+
+/**
+ * エラー時の表示。特に未紐付け(403)は新規要員が初日に必ず見る画面なので、
+ * エラー文だけを置いて行き止まりにせず、次に何をすればよいかを示す。
+ */
+function renderMyError(data) {
+    const summary = document.getElementById('myTimesheetSummary');
+    if (summary) summary.innerHTML = '';
+    const container = document.getElementById('myContracts');
+    container.innerHTML = '';
+    const box = document.createElement('div');
+    if (data.code === 403) {
+        box.className = 'alert alert-warning';
+        const title = document.createElement('div');
+        title.className = 'fw-bold mb-1';
+        title.textContent = data.message || SES.i18n.t('error.my.notLinked');
+        const guide = document.createElement('div');
+        guide.className = 'small';
+        guide.textContent = SES.i18n.t('my.timesheet.notLinked.guide');
+        box.appendChild(title);
+        box.appendChild(guide);
+    } else {
+        box.className = 'alert alert-danger';
+        box.textContent = data.message || '';
+    }
+    container.appendChild(box);
 }
 
 function renderMy(rows, engineerName) {
@@ -33,7 +119,7 @@ function renderMy(rows, engineerName) {
     }
     rows.forEach(row => {
         myRowMap.set(String(row.contractId), row);
-        const editable = !row.status || ['入力中', '差戻し'].includes(row.status);
+        const editable = !row.status || ['入力中', '差戻し', '未入力'].includes(row.status);
         const card = document.createElement('div');
         card.className = 'card mb-3';
         let dailyRows = (row.dailies || []).map(d => `

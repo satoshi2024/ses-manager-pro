@@ -27,6 +27,11 @@
                 2026年07月10日 (金) 19:00
             </div>
 
+            <!-- Global Search Button / Trigger -->
+            <button sec:authorize="!hasRole('要員')" class="btn btn-outline-secondary btn-sm text-light rounded-pill border-secondary px-3 py-1 me-2 no-print" type="button" id="global-search-btn" data-bs-toggle="modal" data-bs-target="#globalSearchModal" th:title="#{header.globalSearch.title}">
+                <i class="bi bi-search me-1"></i><span class="d-none d-md-inline" th:text="#{header.globalSearch.label}">横断検索...</span> <kbd class="bg-dark text-muted border-0 d-none d-lg-inline-block small" style="font-size: 0.7rem;">Ctrl+K</kbd>
+            </button>
+
             <!-- Language Switch -->
             <div class="dropdown">
                 <button class="btn btn-link text-secondary hover-text-white p-1 border-0" type="button" id="languageDropdown" data-bs-toggle="dropdown" aria-expanded="false" th:title="#{common.language.switch}">

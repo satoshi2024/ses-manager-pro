@@ -39,6 +39,7 @@ public class CustomerApiController {
     private final SalesActivityService salesActivityService;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.security.AuthorizationService authorizationService;
 
     /**
      * 顧客一覧（ページネーション）
@@ -72,7 +73,9 @@ public class CustomerApiController {
         }
 
         queryWrapper.orderByDesc(Customer::getId);
-        return ApiResult.success(customerService.page(page, queryWrapper));
+        Page<Customer> result = customerService.page(page, queryWrapper);
+        result.getRecords().forEach(this::maskLegacyContact);
+        return ApiResult.success(result);
     }
 
     /**
@@ -105,6 +108,7 @@ public class CustomerApiController {
         }
         var entity = customerService.getById(id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        maskLegacyContact(entity);
         return ApiResult.success(entity);
     }
 
@@ -115,6 +119,7 @@ public class CustomerApiController {
     public ApiResult<Boolean> save(@Valid @RequestBody com.ses.dto.customer.CustomerSaveDto customerDto) {
         Customer customer = new Customer();
         org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
+        clearLegacyContactWrite(customer);
         com.ses.common.util.EntityProtectUtil.protectForCreate(customer);
         return ApiResult.success(customerService.save(customer));
     }
@@ -126,6 +131,7 @@ public class CustomerApiController {
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.customer.CustomerSaveDto customerDto) {
         Customer customer = new Customer();
         org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
+        clearLegacyContactWrite(customer);
         customer.setId(id);
         java.util.Set<Long> allowed = effectiveCustomerIds();
         if (allowed != null && !allowed.contains(id)) {
@@ -226,5 +232,36 @@ public class CustomerApiController {
         }
         return organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+    }
+
+    /** 旧contact_*列は移行後の互換表示専用。新規書込み経路へ流さない。 */
+    private void clearLegacyContactWrite(Customer customer) {
+        customer.setContactPerson(null);
+        customer.setContactEmail(null);
+        customer.setContactPhone(null);
+    }
+
+    /** 既存列を返す必要がある旧画面でも、連絡先APIと同じPIIマスク規則を適用する。 */
+    private void maskLegacyContact(Customer customer) {
+        if (customer == null || canViewPii()) return;
+        customer.setContactEmail(maskEmail(customer.getContactEmail()));
+        customer.setContactPhone(maskPhone(customer.getContactPhone()));
+    }
+
+    private String maskEmail(String value) {
+        if (value == null || value.isBlank()) return value;
+        int at = value.indexOf('@');
+        return at > 1 ? value.charAt(0) + "***" + value.substring(at) : "***";
+    }
+
+    private String maskPhone(String value) {
+        if (value == null || value.isBlank()) return value;
+        return value.length() <= 4 ? "***" : "***" + value.substring(value.length() - 4);
+    }
+
+    private boolean canViewPii() {
+        return authorizationService.isAllowed(
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                "customer.pii.view");
     }
 }

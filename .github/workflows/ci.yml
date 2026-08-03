@@ -21,20 +21,40 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # JsSyntaxCheckTest（全JSモジュールの node --check）に必要。
+      # CI=true のときは「Nodeが無ければskipではなく失敗」する契約になっている。
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Run tests
-        run: mvn -B test
+      # Testcontainers（Flyway系のMySQL smoke, ConcurrentUpdateTest）に必要。
+      # Dockerが使えないとこれらは「skip」に化けるだけでビルドは緑になり、
+      # マイグレーションSQLの検証が丸ごと消える。ここで先に落として気付けるようにする。
+      - name: Verify Docker is available (required by Testcontainers tests)
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "Error: Docker is not available. Flyway migration smoke tests would be silently skipped."
+            exit 1
+          fi
+          docker version --format 'Docker Engine {{.Server.Version}} / API {{.Server.APIVersion}}'
 
+      # scripts/verify-like-ci.sh がローカルで実行するコマンドと揃えること。
+      - name: Run tests
+        run: mvn -B clean test
+
+      # 「skipされたテストが1件も無いこと」がCIの契約。
+      # Docker/Node/フォント等の環境差でテストが静かに消えるのを防ぐ。
       - name: Ensure no tests were skipped
         run: |
-          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml | grep -vE 'InvoicePdfServiceImplTest|QuotationPdfServiceImplTest' || true)
+          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml || true)
           if [ -n "$skipped_files" ]; then
             echo "Error: Tests were skipped. This is not allowed to prevent silent regressions."
             echo "$skipped_files"
+            echo ""
+            echo "Likely causes:"
+            echo "  - Docker unavailable       -> Flyway*SmokeTest / FlywayRepairRunbookTest / ConcurrentUpdateTest"
+            echo "  - Node.js unavailable      -> JsSyntaxCheckTest"
             exit 1
           fi
 

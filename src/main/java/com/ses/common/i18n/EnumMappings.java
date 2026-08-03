@@ -12,6 +12,9 @@ public class EnumMappings {
         userRole.put("営業", "sales");
         userRole.put("HR", "hr");
         userRole.put("マネージャー", "manager");
+        // 要員ロールの欠落は SES.i18n.e のフォールバックで素通りし、EN/KO/ZH 利用者にだけ
+        // 日本語の「要員」が出ていた（未マッピングは dbValue をそのまま返す）。
+        userRole.put("要員", "engineer");
         GROUPS.put("userRole", userRole);
 
         Map<String, String> customerTrustLevel = new HashMap<>();
@@ -124,5 +127,21 @@ public class EnumMappings {
         customerActivityType.put("メール", "email");
         customerActivityType.put("その他", "other");
         GROUPS.put("customerActivityType", customerActivityType);
+
+        Map<String, String> customerContactStatus = new HashMap<>();
+        customerContactStatus.put("有効", "active");
+        customerContactStatus.put("退職", "retired");
+        customerContactStatus.put("異動", "transferred");
+        GROUPS.put("customerContactStatus", customerContactStatus);
+
+        Map<String, String> opportunityStage = new HashMap<>();
+        opportunityStage.put("見込", "prospect");
+        opportunityStage.put("要件確認", "qualification");
+        opportunityStage.put("提案準備", "proposalPreparation");
+        opportunityStage.put("見積提出", "quotationSubmitted");
+        opportunityStage.put("交渉", "negotiation");
+        opportunityStage.put("受注", "won");
+        opportunityStage.put("失注", "lost");
+        GROUPS.put("opportunityStage", opportunityStage);
     }
 }

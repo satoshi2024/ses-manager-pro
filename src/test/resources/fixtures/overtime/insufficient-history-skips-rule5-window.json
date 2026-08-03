@@ -1,0 +1,23 @@
+{
+  "name": "insufficient-history-skips-rule5-window",
+  "description": "overtime-rules.md §1.3：対象月より前のデータがn か月分そろわない場合はそのnの判定をskipする（不足月を0扱いにしない）。入社直後等で3か月分しかデータが無いケース。n=2,3は実データで判定され違反、n=4,5,6はデータ不足でskipされ（findingが出ない＝0扱いで適合と誤判定されたのでもない）。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": false,
+  "agreement": {
+    "specialClauseEnabled": true
+  },
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 0, "totalMinutes": 0 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-04", "overtimeMinutes": 0, "totalMinutes": 0 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-02", "overtimeMinutes": 0, "totalMinutes": 5000 },
+    { "yearMonth": "2026-03", "overtimeMinutes": 0, "totalMinutes": 5000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 0, "totalMinutes": 5000 }
+  ],
+  "expectedFindings": [
+    { "rule": "RULE5_MULTI_MONTH_AVERAGE", "severity": "VIOLATION", "windowMonths": 2 },
+    { "rule": "RULE5_MULTI_MONTH_AVERAGE", "severity": "VIOLATION", "windowMonths": 3 }
+  ]
+}

@@ -1,0 +1,180 @@
+-- ============================================================
+-- V67: 法定文書台帳・電子保存 (legal-document-ledger-archive)
+-- 電帳法を意識した文書原本・版・台帳・廃棄・アクセス管理
+-- ============================================================
+
+-- ============================================================
+-- 1. m_document_type — 文書種別マスタ
+-- ============================================================
+CREATE TABLE IF NOT EXISTS m_document_type (
+  id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  code                   VARCHAR(50)   NOT NULL COMMENT '種別コード (例: CONTRACT, INVOICE_OUT)',
+  name                   VARCHAR(100)  NOT NULL COMMENT '種別名',
+  direction              VARCHAR(10)   NOT NULL COMMENT '方向: OUTGOING/INCOMING/INTERNAL',
+  retention_years        INT           NOT NULL COMMENT '法定保存年数',
+  retention_start_rule   VARCHAR(50)   NOT NULL COMMENT '起算日ルール: TRANSACTION_DATE/SIGNED_AT/CLOSED_AT/DISPATCH_END',
+  legal_hold_supported   TINYINT       NOT NULL DEFAULT 1 COMMENT '法的holdの可否 (1=可,0=不可)',
+  created_at             DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at             DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag           TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除',
+  UNIQUE KEY uk_document_type_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書種別マスタ';
+
+-- ============================================================
+-- 2. t_document — 文書台帳
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document (
+  id                       BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id                VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
+  legal_entity_id          VARCHAR(100)  COMMENT '法人ID（将来multi-entity用）',
+  document_type            VARCHAR(50)   NOT NULL COMMENT '文書種別コード (m_document_type.code 参照)',
+  document_no              VARCHAR(100)  COMMENT '文書番号',
+  title                    VARCHAR(500)  COMMENT '文書タイトル',
+  counterparty_type        VARCHAR(50)   COMMENT '相手先区分: CUSTOMER/BP/INTERNAL',
+  counterparty_id          BIGINT        COMMENT '相手先ID（顧客/BPマスタ）',
+  counterparty_name_snapshot VARCHAR(200) COMMENT '相手先名スナップショット（変更不変保証）',
+  transaction_date         DATE          COMMENT '取引日',
+  amount                   DECIMAL(15,0) COMMENT '金額（円）。金額なし文書はNULL',
+  currency                 CHAR(3)       NOT NULL DEFAULT 'JPY' COMMENT '通貨コード',
+  direction                VARCHAR(10)   NOT NULL COMMENT '方向: OUTGOING/INCOMING/INTERNAL',
+  status                   VARCHAR(20)   NOT NULL DEFAULT 'DRAFT' COMMENT '状態: DRAFT/CONFIRMED/AMENDED/CANCELLED/DISPOSED',
+  retention_until          DATE          COMMENT '保存期限（計算済み固定値。NULLは未確定＝廃棄候補から除外）',
+  legal_hold_flag          TINYINT       NOT NULL DEFAULT 0 COMMENT '法的hold中フラグ (1=hold中)',
+  `version`                BIGINT        NOT NULL DEFAULT 1 COMMENT '楽観ロック用バージョン',
+  created_by               BIGINT        COMMENT '作成者ユーザーID',
+  created_at               DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at               DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag             TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+
+  INDEX idx_document_type      (document_type),
+  INDEX idx_document_transaction_date (transaction_date),
+  INDEX idx_document_amount    (amount),
+  INDEX idx_document_counterparty (counterparty_type, counterparty_id),
+  INDEX idx_document_status    (status),
+  INDEX idx_document_retention (retention_until),
+  INDEX idx_document_legal_hold (legal_hold_flag),
+  INDEX idx_document_tenant    (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書台帳';
+
+-- ============================================================
+-- 3. t_document_version — 文書版（append-only）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document_version (
+  id               BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id        VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
+  document_id      BIGINT        NOT NULL COMMENT '文書ID',
+  version_no       INT           NOT NULL COMMENT '版番号（1始まり、単調増加）',
+  storage_key      VARCHAR(500)  NOT NULL COMMENT 'Storageオブジェクトキー',
+  original_name    VARCHAR(500)  NOT NULL COMMENT '元ファイル名',
+  content_type     VARCHAR(100)  COMMENT 'MIMEタイプ',
+  size_bytes       BIGINT        COMMENT 'ファイルサイズ',
+  sha256           CHAR(64)      NOT NULL COMMENT 'SHA-256ハッシュ値',
+  source_type      VARCHAR(50)   NOT NULL COMMENT '取得経路',
+  business_key     VARCHAR(200)  NOT NULL COMMENT '業務一意キー',
+  version_discriminator VARCHAR(100) NOT NULL COMMENT '版識別子',
+  external_id      VARCHAR(200)  COMMENT '外部文書ID',
+  scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING' COMMENT 'scanステータス',
+  change_reason    VARCHAR(500)  COMMENT '差替理由',
+  created_by       BIGINT        NOT NULL COMMENT '登録ユーザーID',
+  created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '登録日時',
+  updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag     TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+
+  UNIQUE KEY uk_document_version_no (document_id, version_no),
+  UNIQUE KEY uk_document_idempotency (tenant_id, source_type, business_key, version_discriminator),
+  INDEX idx_dv_document   (document_id),
+  INDEX idx_dv_sha256     (sha256),
+  INDEX idx_dv_external   (external_id),
+  INDEX idx_dv_scan_status (scan_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書版（append-only）';
+
+-- ============================================================
+-- 4. t_document_link — 文書と業務エンティティの関連
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document_link (
+  id           BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  document_id  BIGINT       NOT NULL COMMENT '文書ID',
+  target_type  VARCHAR(50)  NOT NULL COMMENT 'リンク先種別',
+  target_id    BIGINT       NOT NULL COMMENT 'リンク先エンティティID',
+  created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag TINYINT      NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+
+  UNIQUE KEY uk_document_link (document_id, target_type, target_id),
+  INDEX idx_dl_document  (document_id),
+  INDEX idx_dl_target    (target_type, target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書業務リンク';
+
+-- ============================================================
+-- 5. t_document_access_log — 文書アクセス監査ログ
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document_access_log (
+  id          BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  document_id BIGINT       NOT NULL COMMENT '文書ID',
+  version_id  BIGINT       COMMENT '文書版ID',
+  action      VARCHAR(30)  NOT NULL COMMENT 'アクション',
+  user_id     BIGINT       NOT NULL COMMENT '操作ユーザーID',
+  ip_hash     VARCHAR(64)  COMMENT 'IPアドレスハッシュ',
+  occurred_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作日時',
+
+  INDEX idx_dal_document   (document_id),
+  INDEX idx_dal_user       (user_id),
+  INDEX idx_dal_occurred   (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書アクセス監査ログ';
+
+-- ============================================================
+-- 6. t_document_disposal_request — 廃棄申請
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document_disposal_request (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  document_id   BIGINT       NOT NULL COMMENT '文書ID',
+  requested_by  BIGINT       NOT NULL COMMENT '廃棄申請者ユーザーID',
+  approved_by   BIGINT       COMMENT '廃棄承認者ユーザーID',
+  approved_at   DATETIME     COMMENT '廃棄承認日時',
+  status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING' COMMENT '状態',
+  reason        VARCHAR(1000) NOT NULL COMMENT '廃棄理由',
+  disposed_at   DATETIME     COMMENT '廃棄実施日時',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '申請日時',
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag  TINYINT      NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+
+  INDEX idx_ddr_document (document_id),
+  INDEX idx_ddr_status   (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書廃棄申請';
+
+-- ============================================================
+-- シードデータ: 文書種別マスタ（provisional mapping準拠）
+-- ============================================================
+INSERT IGNORE INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported) VALUES
+  ('CONTRACT',         '契約書',           'OUTGOING', 10, 'CLOSED_AT',        1),
+  ('INVOICE_OUT',      '請求書（発行）',   'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('INVOICE_IN',       '請求書（受領）',   'INCOMING', 10, 'TRANSACTION_DATE', 1),
+  ('QUOTATION',        '見積書',           'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('WORK_REPORT',      '作業報告書',       'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('SIGNED_PDF',       '署名済PDF',        'OUTGOING', 10, 'SIGNED_AT',        1),
+  ('ESIGN_CERT',       '合意締結証明書',   'INCOMING', 10, 'SIGNED_AT',        1),
+  ('DISPATCH_LEDGER',  '派遣元管理台帳',   'INTERNAL',  3, 'DISPATCH_END',     1);
+
+-- ============================================================
+-- メニュー権限マッピング (m_menu / t_role_menu)
+-- ============================================================
+INSERT IGNORE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
+  ('document-archive', '法定文書保存', '/document', '/api/documents', 90);
+
+-- 管理者・営業・HR・マネージャーに権限を付与
+INSERT IGNORE INTO t_role_menu (role, menu_id)
+SELECT '管理者', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT '営業', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT 'HR', id FROM m_menu WHERE menu_key = 'document-archive'
+UNION ALL
+SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'document-archive';
+
+-- 非管理者ロール (role-sales, role-hr, role-manager) へ document.* アクションを許可
+INSERT IGNORE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, 'document.*', 0
+FROM m_permission_group g
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('role-sales', 'role-hr', 'role-manager');

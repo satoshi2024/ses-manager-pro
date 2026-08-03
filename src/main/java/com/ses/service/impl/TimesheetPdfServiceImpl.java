@@ -48,6 +48,7 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
     private final ProjectMapper projectMapper;
     private final CustomerMapper customerMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
 
     @Override
     public byte[] generate(Long workRecordId) {
@@ -101,10 +102,44 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
             document.add(buildApprovalTable(headerFont, normalFont));
 
             document.close();
-            return baos.toByteArray();
+            byte[] pdfBytes = baos.toByteArray();
+            registerTimesheetToLedger(record, contract, pdfBytes);
+            return pdfBytes;
         } catch (DocumentException e) {
             log.error("作業報告書PDF生成に失敗しました: workRecordId={}", workRecordId, e);
             throw BusinessException.of("error.workRecord.pdfGenerateFailed");
+        }
+    }
+
+    private void registerTimesheetToLedger(WorkRecord record, Contract contract, byte[] pdfBytes) {
+        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
+        if (docService == null || record == null || pdfBytes == null || pdfBytes.length == 0) {
+            return;
+        }
+        try {
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("WORK_REPORT")
+                    .title("作業報告書 PDF: " + record.getWorkMonth() + " ID:" + record.getId())
+                    .documentNo("WR-" + record.getId())
+                    .counterpartyType(contract != null ? "CUSTOMER" : null)
+                    .counterpartyId(contract != null ? contract.getCustomerId() : null)
+                    .transactionDate(record.getUpdatedAt() != null ? record.getUpdatedAt().toLocalDate() : java.time.LocalDate.now())
+                    .amount(null)
+                    .direction("OUTGOING")
+                    .originalName("timesheet_" + record.getWorkMonth() + "_" + record.getId() + ".pdf")
+                    .contentType("application/pdf")
+                    .sourceType("GENERATED")
+                    .businessKey("WORK_RECORD:" + record.getId())
+                    .versionDiscriminator("wr-" + record.getId())
+                    .targetType("WORK_RECORD")
+                    .targetId(record.getId())
+                    .build();
+
+            try (java.io.InputStream is = new java.io.ByteArrayInputStream(pdfBytes)) {
+                docService.registerGenerated(req, is);
+            }
+        } catch (Exception e) {
+            log.warn("[帳票連携] 作業報告書PDFの法定文書台帳登録失敗: workRecordId={} error={}", record.getId(), e.getMessage());
         }
     }
 

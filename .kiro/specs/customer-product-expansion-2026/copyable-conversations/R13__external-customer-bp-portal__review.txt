@@ -15,7 +15,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V76
+- Migration: V84
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M

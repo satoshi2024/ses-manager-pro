@@ -192,9 +192,7 @@ function saveCustomer() {
     const data = {
         companyName: companyName,
         commercialFlow: $('#cust-commercialFlow').val(),
-        trustLevel: $('#cust-trustLevel').val(),
-        contactPerson: $('#cust-contactPerson').val(),
-        contactPhone: $('#cust-contactPhone').val()
+        trustLevel: $('#cust-trustLevel').val()
     };
 
     if (id) {

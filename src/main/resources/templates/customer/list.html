@@ -25,8 +25,7 @@
                     <label for="searchCompanyName" class="form-label text-muted small" th:text="#{customer.companyName}">会社名</label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary text-muted border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-info" id="searchCompanyName" name="companyName" th:placeholder="#{customer.placeholder.companyName}" list="customer-list">
-                        <datalist id="customer-list"></datalist>
+                        <input type="text" class="form-control bg-dark border-secondary border-start-0 text-light focus-ring focus-ring-info" id="searchCompanyName" name="companyName" th:placeholder="#{customer.placeholder.companyName}" data-suggest="customers">
                     </div>
                 </div>
                 <div class="col-md-3">
@@ -142,11 +141,11 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{customer.contactPerson}">担当者名</label>
-                            <input type="text" id="cust-contactPerson" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.contactPerson}">
+                            <input type="text" id="cust-contactPerson" class="form-control form-control-dark bg-secondary text-white border-dark" readonly th:placeholder="#{customer.placeholder.contactPerson}">
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-muted small" th:text="#{customer.contactPhone}">電話番号</label>
-                            <input type="text" id="cust-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.contactPhone}">
+                            <input type="text" id="cust-contactPhone" class="form-control form-control-dark bg-secondary text-white border-dark" readonly th:placeholder="#{customer.placeholder.contactPhone}">
                         </div>
                     </form>
                 </div>

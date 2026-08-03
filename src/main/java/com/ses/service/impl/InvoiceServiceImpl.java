@@ -24,6 +24,7 @@ import com.ses.entity.BpPayment;
 import com.ses.service.InvoiceService;
 import com.ses.service.MailService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.CustomerContactService;
 import com.ses.service.SystemConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
@@ -87,6 +88,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     @Autowired
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
+    @Autowired
+    private CustomerContactService customerContactService;
 
     private void checkClosing(String month) {
         // 締め設定行をロックし confirm と直列化する（締め成立後の請求差分commit防止 / R3R-05）。
@@ -491,6 +495,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     @Override
     public MailDispatchResult sendReminder(Long invoiceId, Long templateId) {
+        return sendReminder(invoiceId, templateId, null);
+    }
+
+    @Override
+    public MailDispatchResult sendReminder(Long invoiceId, Long templateId, Long contactId) {
         Invoice invoice = baseMapper.selectById(invoiceId);
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
@@ -501,7 +510,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         }
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
-        String to = customer != null ? customer.getContactEmail() : null;
+        String to = contactId != null && customerContactService != null
+                ? customerContactService.resolveRecipientEmail(invoice.getCustomerId(), contactId, LocalDate.now())
+                : customer != null ? customer.getContactEmail() : null;
         if (to == null || to.isBlank()) {
             throw BusinessException.of("error.invoice.customerEmailMissing");
         }
@@ -517,6 +528,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         params.put("dueDate", invoice.getDueDate().toString());
         params.put("overdueDays", String.valueOf(overdueDays));
 
+        if (contactId != null) {
+            return mailService.sendWithTemplate(templateId, params, to, invoiceId, contactId, null);
+        }
         return mailService.sendWithTemplate(templateId, params, to, invoiceId);
     }
 

@@ -312,6 +312,12 @@ CREATE TABLE t_contract (
   customer_id           BIGINT       NOT NULL                  COMMENT '顧客ID',
   contract_type         ENUM('準委任','請負','派遣')            COMMENT '契約形態',
   start_date            DATE         NOT NULL                  COMMENT '契約開始日',
+  contract_date         DATE                                   COMMENT '委託日（発注年月日）',
+  job_description       TEXT                                   COMMENT '役務内容',
+  work_location         VARCHAR(255)                           COMMENT '就業場所',
+  inspection_due_date   DATE                                   COMMENT '検査完了期日',
+  payment_due_date      DATE                                   COMMENT '具体的支払期日',
+  payment_method        VARCHAR(100)                           COMMENT '支払方法',
   end_date              DATE                                   COMMENT '契約終了日',
   selling_price         DECIMAL(10,0) NOT NULL                 COMMENT '売上単価(対上)',
   cost_price            DECIMAL(10,0) NOT NULL                 COMMENT '原価単価(対下)',
@@ -575,6 +581,322 @@ CREATE TABLE t_monthly_accounting_dimension (
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月次管理会計帰属snapshot';
 
+
+-- ============================================================
+-- 法定文書台帳 (V67 legal-document-ledger-archive)
+-- ============================================================
+DROP TABLE IF EXISTS t_document_access_log;
+DROP TABLE IF EXISTS t_document_disposal_request;
+DROP TABLE IF EXISTS t_document_link;
+DROP TABLE IF EXISTS t_document_version;
+DROP TABLE IF EXISTS t_document;
+DROP TABLE IF EXISTS m_document_type;
+
+CREATE TABLE m_document_type (
+  id                     BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  code                   VARCHAR(50)   NOT NULL COMMENT '種別コード',
+  name                   VARCHAR(100)  NOT NULL COMMENT '種別名',
+  direction              VARCHAR(10)   NOT NULL COMMENT '方向: OUTGOING/INCOMING/INTERNAL',
+  retention_years        INT           NOT NULL COMMENT '法定保存年数',
+  retention_start_rule   VARCHAR(50)   NOT NULL COMMENT '起算日ルール',
+  legal_hold_supported   TINYINT       NOT NULL DEFAULT 1 COMMENT '法的hold可否',
+  created_at             DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag           TINYINT       NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_type_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書種別マスタ';
+
+CREATE TABLE t_document (
+  id                       BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id                VARCHAR(100)  NOT NULL DEFAULT 'default',
+  legal_entity_id          VARCHAR(100),
+  document_type            VARCHAR(50)   NOT NULL COMMENT '文書種別コード',
+  document_no              VARCHAR(100),
+  title                    VARCHAR(500),
+  counterparty_type        VARCHAR(50),
+  counterparty_id          BIGINT,
+  counterparty_name_snapshot VARCHAR(200),
+  transaction_date         DATE,
+  amount                   DECIMAL(15,0),
+  currency                 CHAR(3)       NOT NULL DEFAULT 'JPY',
+  direction                VARCHAR(10)   NOT NULL,
+  status                   VARCHAR(20)   NOT NULL DEFAULT 'DRAFT',
+  retention_until          DATE,
+  legal_hold_flag          TINYINT       NOT NULL DEFAULT 0,
+  `version`                BIGINT        NOT NULL DEFAULT 1,
+  created_by               BIGINT,
+  created_at               DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag             TINYINT       NOT NULL DEFAULT 0,
+  INDEX idx_document_type      (document_type),
+  INDEX idx_document_transaction_date (transaction_date),
+  INDEX idx_document_amount    (amount),
+  INDEX idx_document_counterparty (counterparty_type, counterparty_id),
+  INDEX idx_document_status    (status),
+  INDEX idx_document_retention (retention_until),
+  INDEX idx_document_tenant    (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書台帳';
+
+CREATE TABLE t_document_version (
+  id               BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id        VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
+  document_id      BIGINT        NOT NULL,
+  version_no       INT           NOT NULL,
+  storage_key      VARCHAR(500)  NOT NULL,
+  original_name    VARCHAR(500)  NOT NULL,
+  content_type     VARCHAR(100),
+  size_bytes       BIGINT,
+  sha256           CHAR(64)      NOT NULL,
+  source_type      VARCHAR(50)   NOT NULL,
+  business_key     VARCHAR(200)  NOT NULL,
+  version_discriminator VARCHAR(100) NOT NULL,
+  external_id      VARCHAR(200),
+  scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
+  change_reason    VARCHAR(500),
+  created_by       BIGINT        NOT NULL,
+  created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag     TINYINT       NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_version_no (document_id, version_no),
+  UNIQUE KEY uk_document_idempotency (tenant_id, source_type, business_key, version_discriminator),
+  INDEX idx_dv_document   (document_id),
+  INDEX idx_dv_sha256     (sha256),
+  INDEX idx_dv_external   (external_id),
+  INDEX idx_dv_scan_status (scan_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書版';
+
+CREATE TABLE t_document_link (
+  id           BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id  BIGINT       NOT NULL,
+  target_type  VARCHAR(50)  NOT NULL,
+  target_id    BIGINT       NOT NULL,
+  created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag TINYINT      NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_document_link (document_id, target_type, target_id),
+  INDEX idx_dl_target    (target_type, target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書業務リンク';
+
+CREATE TABLE t_document_access_log (
+  id          BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id BIGINT       NOT NULL,
+  version_id  BIGINT,
+  action      VARCHAR(30)  NOT NULL,
+  user_id     BIGINT       NOT NULL,
+  ip_hash     VARCHAR(64),
+  occurred_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_dal_document   (document_id),
+  INDEX idx_dal_user       (user_id),
+  INDEX idx_dal_occurred   (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書アクセス監査ログ';
+
+CREATE TABLE t_document_disposal_request (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id   BIGINT       NOT NULL,
+  requested_by  BIGINT       NOT NULL,
+  approved_by   BIGINT,
+  approved_at   DATETIME,
+  status        VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+  reason        VARCHAR(1000) NOT NULL,
+  disposed_at   DATETIME,
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT      NOT NULL DEFAULT 0,
+  INDEX idx_ddr_document (document_id),
+  INDEX idx_ddr_status   (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書廃棄申請';
+
+CREATE TABLE IF NOT EXISTS t_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(64) DEFAULT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT DEFAULT NULL,
+    assignee_user_id BIGINT NOT NULL,
+    requester_user_id BIGINT NOT NULL,
+    due_date DATE DEFAULT NULL,
+    priority VARCHAR(32) NOT NULL DEFAULT 'MEDIUM',
+    status VARCHAR(32) NOT NULL DEFAULT 'NOT_STARTED',
+    target_type VARCHAR(64) DEFAULT NULL,
+    target_id BIGINT DEFAULT NULL,
+    completed_at DATETIME DEFAULT NULL,
+    version INT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_flag TINYINT(1) NOT NULL DEFAULT 0,
+    INDEX idx_task_assignee (assignee_user_id),
+    INDEX idx_task_requester (requester_user_id),
+    INDEX idx_task_status_due (status, due_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='タスク';
+
+CREATE TABLE IF NOT EXISTS m_saved_view (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(64) DEFAULT NULL,
+    owner_user_id BIGINT DEFAULT NULL,
+    page_key VARCHAR(64) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    filter_json TEXT DEFAULT NULL,
+    sort_json TEXT DEFAULT NULL,
+    columns_json TEXT DEFAULT NULL,
+    page_size INT DEFAULT 20,
+    shared_flag TINYINT(1) NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_flag TINYINT(1) NOT NULL DEFAULT 0,
+    INDEX idx_saved_view_page_owner (page_key, owner_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='保存ビュー';
+
+CREATE TABLE IF NOT EXISTS t_task_notification_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    notify_date DATE NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_task_notify_date (task_id, notify_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='タスク期限通知ログ';
+
+CREATE TABLE IF NOT EXISTS `m_bp_company` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `legal_name` VARCHAR(255) NOT NULL,
+    `name_kana` VARCHAR(255),
+    `normalized_name` VARCHAR(255),
+    `entity_type` VARCHAR(50) NOT NULL COMMENT 'CORPORATE / INDIVIDUAL / FREELANCE / PROVISIONAL',
+    `corporate_number` VARCHAR(13),
+    `invoice_registration_number` VARCHAR(14),
+    `capital_band` VARCHAR(50),
+    `employee_band` VARCHAR(50),
+    `address` VARCHAR(500),
+    `representative` VARCHAR(100),
+    `status` VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    `suspension_reason` VARCHAR(500),
+    `suspension_start_date` DATE,
+    `suspension_end_date` DATE,
+    `suspension_approved_by` BIGINT,
+    `rating` INT DEFAULT 0,
+    `primary_sales_user_id` BIGINT,
+    `compliance_applicability` VARCHAR(50),
+    `applicability_checked_by` BIGINT,
+    `applicability_checked_at` DATETIME,
+    `applicability_note` TEXT,
+    `version` INT NOT NULL DEFAULT 1,
+    `created_by` BIGINT,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_company_tenant_status` (`tenant_id`, `status`),
+    INDEX `idx_bp_company_corporate_num` (`corporate_number`),
+    INDEX `idx_bp_company_invoice_num` (`invoice_registration_number`),
+    UNIQUE KEY `uk_bp_company_normalized` (`tenant_id`, `normalized_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP会社マスタ';
+
+CREATE TABLE IF NOT EXISTS `t_bp_contact` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `bp_company_id` BIGINT NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `department` VARCHAR(100),
+    `role` VARCHAR(100),
+    `email` VARCHAR(255),
+    `phone` VARCHAR(50),
+    `primary_flag` INT NOT NULL DEFAULT 0,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_contact_company` (`bp_company_id`, `deleted_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP担当者連絡先';
+
+CREATE TABLE IF NOT EXISTS `t_bp_bank_account` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `bp_company_id` BIGINT NOT NULL,
+    `bank_name` VARCHAR(100),
+    `branch_name` VARCHAR(100),
+    `account_type` VARCHAR(20) DEFAULT 'ORDINARY',
+    `encrypted_account_number` VARCHAR(500),
+    `account_holder` VARCHAR(100),
+    `masked_label` VARCHAR(100) NOT NULL,
+    `valid_from` DATE NOT NULL,
+    `valid_to` DATE,
+    `approval_status` VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    `approved_by` BIGINT,
+    `approved_at` DATETIME,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_bank_company` (`bp_company_id`, `approval_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP口座情報';
+
+CREATE TABLE IF NOT EXISTS `t_bp_terms` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `bp_company_id` BIGINT NOT NULL,
+    `effective_from` DATE NOT NULL,
+    `effective_to` DATE,
+    `closing_day` INT NOT NULL DEFAULT 31,
+    `payment_month_offset` INT NOT NULL DEFAULT 1,
+    `payment_day` INT NOT NULL DEFAULT 30,
+    `fee_bearer` VARCHAR(20) NOT NULL DEFAULT 'PAYEE',
+    `payment_method` VARCHAR(50) NOT NULL DEFAULT 'BANK_TRANSFER',
+    `fee_bearer_exception_reason` VARCHAR(500),
+    `fee_bearer_approved_by` BIGINT,
+    `fee_bearer_approved_at` DATETIME,
+    `max_payment_days` INT NOT NULL DEFAULT 60,
+    `version` INT NOT NULL DEFAULT 1,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_terms_company_effective` (`bp_company_id`, `effective_from`, `effective_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP取引条件';
+
+CREATE TABLE IF NOT EXISTS `t_engineer_bp_affiliation` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `engineer_id` BIGINT NOT NULL,
+    `bp_company_id` BIGINT NOT NULL,
+    `valid_from` DATE NOT NULL,
+    `valid_to` DATE,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_engineer_bp_affiliation` (`engineer_id`, `valid_from`, `valid_to`),
+    INDEX `idx_bp_engineer_affiliation` (`bp_company_id`, `valid_from`, `valid_to`),
+    UNIQUE KEY `uk_affiliation_eng_from` (`engineer_id`, `valid_from`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP要員所属履歴';
+
+CREATE TABLE IF NOT EXISTS `t_bp_evaluation` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `bp_company_id` BIGINT NOT NULL,
+    `period` VARCHAR(20) NOT NULL,
+    `quality_score` INT DEFAULT 0,
+    `response_score` INT DEFAULT 0,
+    `retention_score` INT DEFAULT 0,
+    `compliance_score` INT DEFAULT 0,
+    `billing_accuracy_score` INT DEFAULT 0,
+    `comment` TEXT,
+    `evaluated_by` BIGINT,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_evaluation_company_period` (`bp_company_id`, `period`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP評価記録';
+
+CREATE TABLE IF NOT EXISTS `t_bp_price_negotiation` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `tenant_id` BIGINT NOT NULL DEFAULT 1,
+    `bp_company_id` BIGINT NOT NULL,
+    `requested_at` DATE NOT NULL,
+    `responded_at` DATE,
+    `status` VARCHAR(50) NOT NULL DEFAULT 'REQUESTED',
+    `requested_amount` DECIMAL(15, 2),
+    `agreed_amount` DECIMAL(15, 2),
+    `summary` TEXT,
+    `document_id` BIGINT,
+    `deleted_flag` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_bp_price_neg_company` (`bp_company_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP価格協議記録';
 
 -- ============================================================
 -- DDL完了

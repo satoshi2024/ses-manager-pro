@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
@@ -8,74 +8,174 @@
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h3 mb-0 text-light"><i class="bi bi-bell me-2 text-primary"></i><span th:text="#{todo.title}">ToDo・通知</span></h2>
-        <button class="btn btn-outline-secondary text-muted hover-text-white border-dark shadow-sm" onclick="markAllAsRead()">
-            <i class="bi bi-check-all me-1"></i><span th:text="#{todo.btn.mark_all_read}">すべて既読にする</span>
-        </button>
-    </div>
-
-    <!-- 検索フィルター -->
-    <div class="card bg-card border-dark shadow-sm mb-4">
-        <div class="card-body">
-            <form id="searchForm" onsubmit="event.preventDefault(); loadTodos(1);" class="row g-3 align-items-end">
-                <div class="col-md-3">
-                    <label for="searchType" class="form-label text-muted small" th:text="#{todo.filter.type}">通知種別</label>
-                    <select class="form-select bg-dark border-secondary text-light" id="searchType" name="type">
-                        <option value="" th:text="#{todo.filter.type.all}">すべて</option>
-                        <option value="CONTRACT_END" th:text="#{todo.filter.type.contract_end}">契約終了</option>
-                        <option value="PROPOSAL_STALE" th:text="#{todo.filter.type.proposal_stale}">提案滞留</option>
-                        <option value="BENCH_LONG" th:text="#{todo.filter.type.bench_long}">長期待機</option>
-                        <option value="PROJECT_URGENT" th:text="#{todo.filter.type.project_urgent}">急募案件</option>
-                        <option value="RETIRING_ENGINEER" th:text="#{todo.filter.type.retiring_engineer}">退場予定</option>
-                        <option value="AI_MATCHING" th:text="#{todo.filter.type.ai_matching}">AIマッチング完了</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <div class="form-check mt-4 pt-1">
-                        <input class="form-check-input" type="checkbox" id="unreadOnly" name="unreadOnly" checked>
-                        <label class="form-check-label text-light" for="unreadOnly">
-                            <span th:text="#{todo.filter.unread_only}">未読のみ表示</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <button type="submit" class="btn btn-outline-primary w-100">
-                        <i class="bi bi-filter me-1"></i><span th:text="#{todo.btn.filter}">絞り込み</span>
-                    </button>
-                </div>
-            </form>
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-check2-square me-2 text-primary"></i><span th:text="#{todo.title}">ToDo・通知</span></h2>
+        <div>
+            <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#taskModal" onclick="openNewTaskModal()">
+                <i class="bi bi-plus-lg me-1"></i>新規タスク
+            </button>
+            <button class="btn btn-outline-secondary text-muted hover-text-white border-dark shadow-sm" onclick="markAllAsRead()">
+                <i class="bi bi-check-all me-1"></i><span th:text="#{todo.btn.mark_all_read}">すべて既読にする</span>
+            </button>
         </div>
     </div>
 
-    <!-- 一覧データテーブル -->
-    <div class="card bg-card border-dark shadow-sm">
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-dark table-hover table-striped mb-0 align-middle">
-                    <thead class="table-dark-header border-bottom border-dark">
-                        <tr>
-                            <th scope="col" class="ps-4" style="width: 60px;" th:text="#{todo.list.col.status}">状態</th>
-                            <th scope="col" style="width: 150px;" th:text="#{todo.list.col.date}">日時</th>
-                            <th scope="col" th:text="#{todo.list.col.content}">内容</th>
-                            <th scope="col" class="text-end pe-4" style="width: 120px;" th:text="#{todo.list.col.action}">アクション</th>
-                        </tr>
-                    </thead>
-                    <tbody id="todo-table-body">
-                        <!-- JS will populate results here -->
-                    </tbody>
-                </table>
-            </div>
-            
-            <!-- ページネーション -->
-            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
-                <div class="text-muted small ps-2" id="pagination-info">
-                    <!-- Populated by JS -->
+    <!-- タブ切替 (タスク / 通知) -->
+    <ul class="nav nav-tabs border-dark mb-4" id="todoTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active bg-dark text-white border-secondary me-2" id="tasks-tab" data-bs-toggle="tab" data-bs-target="#tasks-pane" type="button" role="tab" aria-controls="tasks-pane" aria-selected="true">
+                <i class="bi bi-list-check me-1 text-primary"></i>タスク一覧
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link bg-dark text-muted border-secondary" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="false">
+                <i class="bi bi-bell me-1 text-warning"></i>通知履歴
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="todoTabsContent">
+        <!-- タスク一覧タブ -->
+        <div class="tab-pane fade show active" id="tasks-pane" role="tabpanel" aria-labelledby="tasks-tab">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4" style="width: 110px;">ステータス</th>
+                                    <th scope="col" style="width: 90px;">優先度</th>
+                                    <th scope="col" style="width: 120px;">担当者</th>
+                                    <th scope="col">タスク件名 / 詳細</th>
+                                    <th scope="col" style="width: 130px;">期限</th>
+                                    <th scope="col" class="text-end pe-4" style="width: 150px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="task-table-body">
+                                <tr><td colspan="6" class="text-center text-muted py-4">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center" id="task-pagination">
+                    </div>
                 </div>
-                <nav aria-label="Page navigation">
-                    <ul class="pagination pagination-sm mb-0 pe-2" id="pagination-controls">
-                        <!-- Populated by JS -->
-                    </ul>
-                </nav>
+            </div>
+        </div>
+
+        <!-- 通知履歴タブ -->
+        <div class="tab-pane fade" id="notifications-pane" role="tabpanel" aria-labelledby="notifications-tab">
+            <!-- 検索フィルター -->
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-body">
+                    <form id="searchForm" onsubmit="event.preventDefault(); loadTodos(1);" class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label for="searchType" class="form-label text-muted small" th:text="#{todo.filter.type}">通知種別</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="searchType" name="type">
+                                <option value="" th:text="#{todo.filter.type.all}">すべて</option>
+                                <option value="CONTRACT_END" th:text="#{todo.filter.type.contract_end}">契約終了</option>
+                                <option value="PROPOSAL_STALE" th:text="#{todo.filter.type.proposal_stale}">提案滞留</option>
+                                <option value="BENCH_LONG" th:text="#{todo.filter.type.bench_long}">長期待機</option>
+                                <option value="PROJECT_URGENT" th:text="#{todo.filter.type.project_urgent}">急募案件</option>
+                                <option value="RETIRING_ENGINEER" th:text="#{todo.filter.type.retiring_engineer}">退場予定</option>
+                                <option value="AI_MATCHING" th:text="#{todo.filter.type.ai_matching}">AIマッチング完了</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check mt-4 pt-1">
+                                <input class="form-check-input" type="checkbox" id="unreadOnly" name="unreadOnly" checked>
+                                <label class="form-check-label text-light" for="unreadOnly">
+                                    <span th:text="#{todo.filter.unread_only}">未読のみ表示</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="bi bi-filter me-1"></i><span th:text="#{todo.btn.filter}">絞り込み</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 一覧データテーブル -->
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4" style="width: 60px;" th:text="#{todo.list.col.status}">状態</th>
+                                    <th scope="col" style="width: 150px;" th:text="#{todo.list.col.date}">日時</th>
+                                    <th scope="col" th:text="#{todo.list.col.content}">内容</th>
+                                    <th scope="col" class="text-end pe-4" style="width: 180px;" th:text="#{todo.list.col.action}">アクション</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todo-table-body">
+                                <!-- JS will populate results here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- ページネーション -->
+                    <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                        <div class="text-muted small ps-2" id="pagination-info">
+                            <!-- Populated by JS -->
+                        </div>
+                        <nav aria-label="Page navigation">
+                            <ul class="pagination pagination-sm mb-0 pe-2" id="pagination-controls">
+                                <!-- Populated by JS -->
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- タスク登録モーダル -->
+    <div class="modal fade" id="taskModal" tabindex="-1" aria-labelledby="taskModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-secondary text-white border-dark">
+                <div class="modal-header border-dark">
+                    <h5 class="modal-title" id="taskModalLabel">新規タスク登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="taskForm">
+                        <input type="hidden" id="task-id">
+                        <div class="mb-3">
+                            <label for="task-title" class="form-label">タスク件名 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control bg-dark text-white border-secondary" id="task-title" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="task-description" class="form-label">詳細・説明</label>
+                            <textarea class="form-control bg-dark text-white border-secondary" id="task-description" rows="3"></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="task-assignee-user-id" class="form-label">担当者 <span class="text-danger">*</span></label>
+                                <select class="form-select bg-dark text-white border-secondary" id="task-assignee-user-id" required>
+                                    <option value="">読み込み中...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="task-priority" class="form-label">優先度</label>
+                                <select class="form-select bg-dark text-white border-secondary" id="task-priority">
+                                    <option value="HIGH">高 (HIGH)</option>
+                                    <option value="MEDIUM" selected>中 (MEDIUM)</option>
+                                    <option value="LOW">低 (LOW)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="task-due-date" class="form-label">期限 (未設定は期限なし)</label>
+                            <input type="date" class="form-control bg-dark text-white border-secondary" id="task-due-date">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" onclick="saveTask()">登録</button>
+                </div>
             </div>
         </div>
     </div>

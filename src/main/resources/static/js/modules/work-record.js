@@ -1,23 +1,61 @@
-﻿$(document).ready(function() {
+let workRecordCurrentPage = 1;
+let workRecordPageSize = 50;
+let workRecordLastPage = 1;
+
+$(document).ready(function() {
     const now = new Date();
     const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
     $('#workMonth').val(currentMonth);
-    loadWorkRecords();
+    loadWorkRecords(1);
 });
 
-function loadWorkRecords() {
+function applyWorkRecordFilters() {
+    loadWorkRecords(1);
+}
+
+function changeWorkRecordPageSize(size) {
+    workRecordPageSize = Number(size) || 50;
+    loadWorkRecords(1);
+}
+
+function loadWorkRecords(requestedPage) {
     const month = $('#workMonth').val();
     if (!month) return;
 
+    if (requestedPage != null) {
+        workRecordCurrentPage = Math.max(1, Number(requestedPage) || 1);
+    }
+
+    const keyword = $('#workRecordKeyword').val() || '';
+    const status = $('#workRecordStatus').val() || '';
+
     $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('common.msg.loading') + '</td></tr>');
-    
+
     $.ajax({
-        url: '/api/work-records/grid',
+        url: '/api/work-records/grid/page',
         method: 'GET',
-        data: { month: month },
+        data: {
+            month: month,
+            current: workRecordCurrentPage,
+            size: workRecordPageSize,
+            keyword: keyword,
+            status: status
+        },
         success: function(res) {
-            if (res.code === 200) {
-                renderWorkRecords(res.data);
+            if (res.code === 200 && res.data) {
+                const pageData = res.data;
+                const records = pageData.records || [];
+                const total = pageData.total || 0;
+                const totalPages = Math.max(1, pageData.pages || 1);
+                workRecordLastPage = totalPages;
+
+                if (records.length === 0 && total > 0 && workRecordCurrentPage > totalPages) {
+                    loadWorkRecords(totalPages);
+                    return;
+                }
+
+                renderWorkRecords(records);
+                renderWorkRecordPagination(pageData);
             } else {
                 Toast.error(res.message || SES.i18n.t('common.msg.fetchFail'));
                 $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.fetchFail') + '</td></tr>');
@@ -29,6 +67,98 @@ function loadWorkRecords() {
             $('#work-record-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.networkError') + '</td></tr>');
         }
     });
+
+    loadPendingApprovalSummary(month);
+}
+
+function renderWorkRecordPagination(pageData) {
+    const total = pageData.total || 0;
+    const current = pageData.current || 1;
+    const pages = Math.max(1, pageData.pages || 1);
+    const size = pageData.size || 50;
+
+    const start = total === 0 ? 0 : (current - 1) * size + 1;
+    const end = Math.min(current * size, total);
+
+    $('#work-record-page-info').text(SES.i18n.t('common.page.info', [total, start, end]));
+
+    const $pagination = $('#work-record-pagination');
+    $pagination.empty();
+
+    if (pages <= 1) return;
+
+    $pagination.append(`
+        <li class="page-item ${current === 1 ? 'disabled' : ''}">
+            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current - 1}); return false;">前へ</a>
+        </li>
+    `);
+
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || (i >= current - 2 && i <= current + 2)) {
+            $pagination.append(`
+                <li class="page-item ${i === current ? 'active' : ''}">
+                    <a class="page-link ${i === current ? 'bg-primary text-white border-primary' : 'bg-secondary text-white border-dark'}" href="#" onclick="loadWorkRecords(${i}); return false;">${i}</a>
+                </li>
+            `);
+        } else if ((i === 2 && current > 4) || (i === pages - 1 && current < pages - 3)) {
+            $pagination.append('<li class="page-item disabled"><span class="page-link bg-secondary text-muted border-dark">...</span></li>');
+        }
+    }
+
+    $pagination.append(`
+        <li class="page-item ${current === pages ? 'disabled' : ''}">
+            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current + 1}); return false;">次へ</a>
+        </li>
+    `);
+}
+
+// 承認滞留の可視化（読み取り専用/トラックA3）: 提出済件数と滞留日数のサマリを表示する。
+function loadPendingApprovalSummary(month) {
+    $.ajax({
+        url: '/api/work-records/pending-approval-summary',
+        method: 'GET',
+        data: { month: month },
+        success: function(res) {
+            if (res.code === 200) {
+                renderPendingApprovalSummary(res.data);
+            } else {
+                $('#pending-approval-card').hide();
+            }
+        },
+        error: function(err) {
+            console.error(err);
+            $('#pending-approval-card').hide();
+        }
+    });
+}
+
+function renderPendingApprovalSummary(summary) {
+    const card = $('#pending-approval-card');
+    const body = $('#pending-approval-table-body');
+    body.empty();
+
+    if (!summary || summary.submittedCount === 0) {
+        card.hide();
+        return;
+    }
+
+    $('#pending-approval-summary').text(SES.i18n.t('workRecord.pending.summary', {
+        count: summary.submittedCount,
+        days: summary.maxPendingDays != null ? summary.maxPendingDays : 0
+    }));
+
+    (summary.items || []).forEach(item => {
+        const tr = `
+            <tr>
+                <td>${SES.escapeHtml(item.engineerName || '-')}</td>
+                <td class="font-monospace text-muted">${SES.escapeHtml(item.contractNo || '-')}</td>
+                <td>${SES.i18n.t('workRecord.pending.daysValue', { days: item.daysPending })}</td>
+            </tr>
+        `;
+        body.append(tr);
+    });
+
+    card.show();
 }
 
 function renderWorkRecords(list) {
@@ -41,12 +171,12 @@ function renderWorkRecords(list) {
     }
     
     list.forEach(item => {
-        // 保存可能なのは「入力中」「差戻し」のみ（提出済・確定は編集不可）
-        const editable = item.status === '入力中' || item.status === '差戻し';
+        // 保存可能なのは「未入力」「入力中」「差戻し」のみ（提出済・確定は編集不可）
+        const editable = !item.status || item.status === '未入力' || item.status === '入力中' || item.status === '差戻し';
         const readonly = editable ? '' : 'readonly';
         const hoursInput = `<input type="number" step="0.01" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark actual-hours-input"
                                 data-contract-id="${item.contractId}"
-                                value="${item.actualHours || ''}"
+                                value="${item.actualHours != null ? item.actualHours : ''}"
                                 ${readonly}
                                 onblur="saveHours(this)">`;
 
@@ -151,6 +281,7 @@ function saveHours(element) {
                 row.find('.billing-amount-' + contractId).text(rec.billingAmount ? '¥' + rec.billingAmount.toLocaleString() : '-');
                 row.find('.payment-amount-' + contractId).text(rec.paymentAmount ? '¥' + rec.paymentAmount.toLocaleString() : '-');
                 row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
+                if (rec.id != null) delete dailyCache[rec.id]; // 日次明細を再取得させ、古い内訳の表示を防ぐ
                 Toast.success(SES.i18n.t('common.msg.saveSuccess'));
             } else {
                 // 確定済み月の編集など業務エラーをユーザーに表示する

@@ -53,4 +53,11 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
 
     @Select("<script>SELECT * FROM t_engineer_account_link WHERE engineer_id IN <foreach collection='engineerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<EngineerAccountLink> selectByEngineerIds(@Param("engineerIds") List<Long> engineerIds);
+
+    /**
+     * 紐付け済みのログインユーザーID。ユーザー一覧で「要員ロールなのに紐付いていない」行を
+     * 1クエリで判定するために使う（1件ずつ {@link #selectByUserId} を引くとN+1になる）。
+     */
+    @Select("<script>SELECT sys_user_id FROM t_engineer_account_link WHERE sys_user_id IN <foreach collection='sysUserIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> selectLinkedUserIds(@Param("sysUserIds") List<Long> sysUserIds);
 }

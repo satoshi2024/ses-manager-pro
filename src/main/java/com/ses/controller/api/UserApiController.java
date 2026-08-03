@@ -51,7 +51,7 @@ public class UserApiController {
      * ユーザー一覧（ページネーション）
      */
     @GetMapping
-    public ApiResult<Page<SysUser>> page(
+    public ApiResult<Page<com.ses.dto.user.SysUserListDto>> page(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String username,
@@ -75,7 +75,29 @@ public class UserApiController {
         queryWrapper.orderByDesc(SysUser::getId);
         Page<SysUser> result = sysUserService.page(page, queryWrapper);
         result.getRecords().forEach(u -> u.setPassword(null));
-        return ApiResult.success(result);
+
+        // 要員ロールの行だけ紐付けの有無を付ける。紐付けの無い要員アカウントは
+        // ログインしても何も操作できないため、一覧で気づけるようにする。
+        java.util.List<Long> engineerRoleUserIds = result.getRecords().stream()
+                .filter(u -> "要員".equals(u.getRole()))
+                .map(SysUser::getId)
+                .collect(java.util.stream.Collectors.toList());
+        java.util.Set<Long> linkedUserIds = engineerAccountLinkService.findLinkedUserIds(engineerRoleUserIds);
+
+        java.util.List<com.ses.dto.user.SysUserListDto> records = new java.util.ArrayList<>();
+        for (SysUser u : result.getRecords()) {
+            com.ses.dto.user.SysUserListDto dto = new com.ses.dto.user.SysUserListDto();
+            org.springframework.beans.BeanUtils.copyProperties(u, dto);
+            if ("要員".equals(u.getRole())) {
+                dto.setEngineerLinked(linkedUserIds.contains(u.getId()));
+            }
+            records.add(dto);
+        }
+
+        Page<com.ses.dto.user.SysUserListDto> dtoPage =
+                new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        dtoPage.setRecords(records);
+        return ApiResult.success(dtoPage);
     }
 
     /**

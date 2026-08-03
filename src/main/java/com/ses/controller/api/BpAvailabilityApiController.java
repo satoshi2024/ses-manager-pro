@@ -49,6 +49,10 @@ public class BpAvailabilityApiController {
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @RequestBody BpAvailability bpAvailability) {
         bpAvailability.setId(id);
+        if (bpAvailability.getBpCompany() != null && !bpAvailability.getBpCompany().isBlank()
+                && bpAvailability.getBpCompanyId() == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.bpAvailability.bpCompanyRequired");
+        }
         com.ses.common.util.EntityProtectUtil.protectForUpdate(bpAvailability);
         return ApiResult.success(bpAvailabilityService.updateById(bpAvailability));
     }

@@ -37,6 +37,7 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
 
     private final SystemConfigService systemConfigService;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
 
     @Override
     public byte[] generate(InvoiceDetailDto detail) {
@@ -93,10 +94,44 @@ public class InvoicePdfServiceImpl implements InvoicePdfService {
             }
 
             document.close();
-            return baos.toByteArray();
+            byte[] pdfBytes = baos.toByteArray();
+            registerInvoiceToLedger(detail, pdfBytes);
+            return pdfBytes;
         } catch (DocumentException e) {
             log.error("請求書PDF生成に失敗しました: invoiceNo={}", detail.getInvoiceNo(), e);
             throw BusinessException.of("error.invoice.pdfGenerateFailed");
+        }
+    }
+
+    private void registerInvoiceToLedger(InvoiceDetailDto detail, byte[] pdfBytes) {
+        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
+        if (docService == null || detail == null || pdfBytes == null || pdfBytes.length == 0) {
+            return;
+        }
+        try {
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("INVOICE_OUT")
+                    .title("請求書 PDF: " + nz(detail.getInvoiceNo()))
+                    .documentNo(detail.getInvoiceNo())
+                    .counterpartyType("CUSTOMER")
+                    .counterpartyId(detail.getCustomerId())
+                    .transactionDate(detail.getIssuedDate())
+                    .amount(detail.getTotal())
+                    .direction("OUTGOING")
+                    .originalName("invoice_" + nz(detail.getInvoiceNo()) + ".pdf")
+                    .contentType("application/pdf")
+                    .sourceType("GENERATED")
+                    .businessKey("INVOICE:" + detail.getId())
+                    .versionDiscriminator(detail.getId() != null ? "inv-" + detail.getId() : "v1")
+                    .targetType("INVOICE")
+                    .targetId(detail.getId())
+                    .build();
+
+            try (java.io.InputStream is = new java.io.ByteArrayInputStream(pdfBytes)) {
+                docService.registerGenerated(req, is);
+            }
+        } catch (Exception e) {
+            log.warn("[帳票連携] 請求書PDFの法定文書台帳登録失敗: invoiceId={} error={}", detail.getId(), e.getMessage());
         }
     }
 

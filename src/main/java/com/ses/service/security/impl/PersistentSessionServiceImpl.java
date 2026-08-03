@@ -60,7 +60,10 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
             return;
         }
 
-        List<UserSession> active = userSessionMapper.selectActiveByUserForUpdate(tenantId(), userId, now);
+        // 同一userのquery→revoke→insertは上のsys_user行lockで直列化済み。
+        // sessionが0件のuserにFOR UPDATEを使うとInnoDBのgap lockが異なるuser間でも
+        // 競合するため、ここでは通常の参照queryを使用する。
+        List<UserSession> active = userSessionMapper.selectActiveByUser(tenantId(), userId, now);
         if (active == null) {
             throw new BusinessException("session上限を確認できないためsessionを発行できません");
         }

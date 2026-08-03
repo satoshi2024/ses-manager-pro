@@ -3,6 +3,7 @@ CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
+  bp_company_id      BIGINT,
   skills_json        LONGTEXT,
   unit_price         BIGINT,
   available_from     DATE,

@@ -16,6 +16,9 @@ public class MonthlyClosingApiController {
     @Autowired
     private MonthlyClosingService monthlyClosingService;
 
+    @Autowired
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
+
     @GetMapping("/summary")
     public ApiResult<?> summary(@RequestParam String month) {
         return ApiResult.success(monthlyClosingService.summary(month));
@@ -23,16 +26,14 @@ public class MonthlyClosingApiController {
 
     @PostMapping("/confirm")
     public ApiResult<?> confirm(@RequestBody MonthRequest request) {
-        monthlyClosingService.confirmClosing(request.getMonth(),
-                SecurityUtils.currentUserId(), SecurityUtils.currentRole());
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>(); command.put("operation", "confirm"); command.put("month", request.getMonth());
+        return ApiResult.success(approvalTargetAdapterRegistry.request("closing.confirm", "MONTHLY_CLOSING", null, command));
     }
 
     @PostMapping("/reopen")
     public ApiResult<?> reopen(@RequestBody MonthRequest request) {
-        monthlyClosingService.reopenClosing(request.getMonth(),
-                SecurityUtils.currentUserId(), SecurityUtils.currentRole());
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>(); command.put("operation", "reopen"); command.put("month", request.getMonth());
+        return ApiResult.success(approvalTargetAdapterRegistry.request("closing.reopen", "MONTHLY_CLOSING", null, command));
     }
 
     public static class MonthRequest {

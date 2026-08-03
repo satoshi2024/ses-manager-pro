@@ -11,6 +11,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * 実MySQL上で db/migration のFlywayマイグレーションを「空DBから通しで」適用できることを検証する
@@ -155,6 +156,37 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_bp_availability_ingestion");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability'");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-availability-ingestion'");
+
+            // BP会社マスタ・発注コンプライアンス(V70 / bp-company-master-procurement-compliance)
+            assertTableExists(st, "m_bp_company");
+            assertTableExists(st, "t_bp_contact");
+            assertTableExists(st, "t_bp_bank_account");
+            assertTableExists(st, "t_bp_terms");
+            assertTableExists(st, "t_engineer_bp_affiliation");
+            assertTableExists(st, "t_bp_evaluation");
+            assertTableExists(st, "t_bp_price_negotiation");
+            assertColumnExists(st, "m_bp_company", "normalized_name");
+            assertColumnExists(st, "m_bp_company", "compliance_applicability");
+            assertColumnExists(st, "m_bp_company", "version");
+            assertColumnExists(st, "t_bp_bank_account", "encrypted_account_number");
+            assertColumnExists(st, "t_bp_bank_account", "masked_label");
+            assertColumnExists(st, "t_bp_terms", "fee_bearer_exception_reason");
+            assertColumnExists(st, "t_bp_terms", "fee_bearer_approved_by");
+            assertColumnExists(st, "t_bp_availability", "bp_company_id");
+            assertColumnExists(st, "t_bp_payment", "bp_company_id");
+            assertColumnExists(st, "t_bp_payment", "bp_company_name_snapshot");
+            assertColumnExists(st, "t_bp_payment", "terms_snapshot_json");
+            assertColumnExists(st, "t_contract", "contract_date");
+            assertColumnExists(st, "t_contract", "job_description");
+            assertColumnExists(st, "t_contract", "work_location");
+            assertColumnExists(st, "t_contract", "inspection_due_date");
+            assertColumnExists(st, "t_contract", "payment_due_date");
+            assertColumnExists(st, "t_contract", "payment_method");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='bp-company'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='管理者' AND m.menu_key='bp-company'");
+            assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='procurement.payment-max-days'");
+            assertIndexExists(st, "m_bp_company", "uk_bp_company_normalized");
 
             // 資金繰り予測(V46, V48, V49) と スキルシートテンプレート(V55)
             assertRowExists(st, "SELECT 1 FROM m_system_config WHERE config_key='cashflow.opening-balance'");
@@ -313,6 +345,176 @@ class FlywayMigrationSmokeTest {
                     "WHERE c.deleted_flag = 0 LIMIT 1")) {
                 rs.next(); // 例外なく実行できればよい(0件でも可)
             }
+
+            // V67: 法定文書台帳 (legal-document-ledger-archive) テーブル存在とスキーマ同期のassert (S04-R02-P0-01)
+            assertTableExists(st, "m_document_type");
+            assertTableExists(st, "t_document");
+            assertTableExists(st, "t_document_version");
+            assertTableExists(st, "t_document_link");
+            assertTableExists(st, "t_document_access_log");
+            assertTableExists(st, "t_document_disposal_request");
+
+            assertColumnExists(st, "t_document_version", "tenant_id");
+            assertColumnExists(st, "t_document_version", "business_key");
+            assertColumnExists(st, "t_document_version", "version_discriminator");
+
+            // uk_document_idempotency が (tenant_id, source_type, business_key, version_discriminator) の4列インデックスであること
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT column_name FROM information_schema.statistics " +
+                    "WHERE table_schema=DATABASE() AND table_name='t_document_version' AND index_name='uk_document_idempotency' " +
+                    "ORDER BY seq_in_index ASC")) {
+                java.util.List<String> cols = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    cols.add(rs.getString("column_name"));
+                }
+                org.junit.jupiter.api.Assertions.assertEquals(
+                        java.util.List.of("tenant_id", "source_type", "business_key", "version_discriminator"),
+                        cols,
+                        "uk_document_idempotency は tenant_id を含む4列インデックスでなければならない");
+            }
+
+            // V68: 横断検索・実ToDo・保存ビュー・一括操作 (productivity-search-saved-view)
+            assertTableExists(st, "t_task");
+            assertTableExists(st, "m_saved_view");
+            assertTableExists(st, "t_task_notification_log");
+            assertColumnExists(st, "t_task", "assignee_user_id");
+            assertColumnExists(st, "t_task", "due_date");
+            assertColumnExists(st, "m_saved_view", "page_key");
+            assertColumnExists(st, "m_saved_view", "owner_user_id");
+
+            // V69: 生産性向上機能 メニュー・権限マスタ
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='search'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='tasks'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='saved-views'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='batch-operations'");
+
+            // V73: CRM複数担当者・商機管理 (crm-contact-opportunity)
+            assertTableExists(st, "t_customer_contact");
+            assertTableExists(st, "t_lead");
+            assertTableExists(st, "t_opportunity");
+            assertColumnExists(st, "t_customer_contact", "roles_json");
+            assertColumnExists(st, "t_customer_contact", "valid_from");
+            assertColumnExists(st, "t_customer_contact", "valid_to");
+            assertColumnExists(st, "t_customer_contact", "active_primary_customer_id");
+            assertColumnExists(st, "t_opportunity", "converted_project_id");
+            assertColumnExists(st, "t_opportunity", "converted_quotation_id");
+            assertColumnExists(st, "t_opportunity", "stage_changed_at");
+            assertColumnExists(st, "t_opportunity", "probability_override_reason");
+            assertColumnExists(st, "t_lead", "source_cost");
+            assertNumericColumn(st, "t_lead", "source_cost", 14, 0);
+            assertColumnExists(st, "t_lead", "company_name_normalized");
+            assertColumnExists(st, "t_lead", "contact_email_normalized");
+            assertColumnExists(st, "t_lead", "contact_phone_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_company_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_email_normalized");
+            assertIndexExists(st, "t_lead", "idx_lead_phone_normalized");
+            assertColumnExists(st, "t_proposal", "source_opportunity_id");
+            assertColumnExists(st, "t_mail_delivery", "contact_id");
+            assertColumnExists(st, "t_mail_delivery", "opportunity_id");
+            // MySQL JSON型の往復。H2(CLOB)だけでは不正なJSONを検出できないため、実MySQLで検証する。
+            st.execute("INSERT INTO t_customer_contact (customer_id, name, roles_json, valid_from, status) "
+                    + "SELECT id, 'roles-json-smoke', JSON_ARRAY('決裁者','請求'), CURDATE(), '有効' "
+                    + "FROM m_customer WHERE deleted_flag = 0 LIMIT 1");
+            assertRowExists(st, "SELECT 1 FROM t_customer_contact WHERE name='roles-json-smoke' "
+                    + "AND JSON_CONTAINS(roles_json, JSON_QUOTE('請求'))");
+            assertColumnExists(st, "t_lead", "converted_opportunity_id");
+            // t_sales_activity拡張はV6を編集せずV73のALTERで入る（fresh/legacy共通経路）
+            assertColumnExists(st, "t_sales_activity", "contact_id");
+            assertColumnExists(st, "t_sales_activity", "opportunity_id");
+            assertColumnExists(st, "t_sales_activity", "assignee_user_id");
+            // 冪等変換のUNIQUE（design §6.3）
+            assertColumnExists(st, "t_project", "source_opportunity_id");
+            assertColumnExists(st, "t_quotation", "source_opportunity_id");
+            assertIndexExists(st, "t_project", "uk_project_source_opportunity");
+            assertIndexExists(st, "t_quotation", "uk_quotation_source_opportunity");
+            // 主担当一意（生成列＋UNIQUE）。VIRTUALであること。
+            assertIndexExists(st, "t_customer_contact", "uk_customer_contact_active_primary");
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_customer_contact' AND column_name='active_primary_customer_id'"
+                    + " AND extra LIKE '%VIRTUAL GENERATED%'");
+            // メニューは 管理者/マネージャー/営業 の3ロールだけ（design §6.2）
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='crm-lead'"
+                    + " AND path_prefix='/crm/leads' AND api_prefix='/api/crm/leads'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='crm-opportunity'"
+                    + " AND path_prefix='/crm/opportunities' AND api_prefix='/api/crm/opportunities'");
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('crm-lead','crm-opportunity')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 6,
+                        "CRMメニュー2件 × 営業系3ロール = 6行が付与されているはず");
+            }
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('crm-lead','crm-opportunity')"
+                            + " AND rm.role IN ('HR','要員')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
+                        "HR/要員へCRMメニューを付与してはいけない（design §6.2）");
+            }
+            // 既存contactの移行: V2のseed顧客3件が初回contactへ移り、名称/emailが一致する
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM m_customer c JOIN t_customer_contact cc ON cc.customer_id = c.id"
+                            + " WHERE c.contact_person IS NOT NULL AND c.contact_person <> ''"
+                            + " AND c.deleted_flag = 0"
+                            + " AND cc.name = c.contact_person"
+                            + " AND (cc.email <=> c.contact_email)"
+                            + " AND cc.primary_flag = 1 AND cc.valid_to IS NULL")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 3,
+                        "V2のseed顧客3件が名称/emailを保ったまま初回contactへ移行されているはず");
+            }
+
+            // V74: action permission。menu層とaction層の母集団が一致していること。
+            // 片方だけだと MenuPermissionFilter が管理者を含む全roleを403にする（R08 Round 2 CRM-R2-P1-01）。
+            // crm(S08) と bp-company(S06) は 営業/マネージャー、
+            // search/task/saved-view/batch-operation(S05) は 営業/HR/マネージャー。
+            assertActionGrantedTo(st, "crm.*", "role-manager", "role-sales");
+            assertActionGrantedTo(st, "bp-company.*", "role-manager", "role-sales");
+            for (String action : new String[]{"search.*", "task.*", "saved-view.*", "batch-operation.*"}) {
+                assertActionGrantedTo(st, action, "role-hr", "role-manager", "role-sales");
+            }
+
+            // V75: 承認ワークフロー・内部統制 (approval-workflow-internal-control)
+            assertTableExists(st, "m_approval_route");
+            assertTableExists(st, "m_approval_route_step");
+            assertTableExists(st, "t_approval_request");
+            assertTableExists(st, "t_approval_action");
+            assertTableExists(st, "t_approval_delegation");
+            assertColumnExists(st, "m_approval_route", "min_amount");
+            assertColumnExists(st, "m_approval_route", "max_amount");
+            assertNumericColumn(st, "m_approval_route", "min_amount", 14, 0);
+            assertColumnExists(st, "t_approval_request", "route_snapshot_json");
+            assertColumnExists(st, "t_approval_request", "target_version");
+            assertColumnExists(st, "t_approval_request", "idempotency_key");
+            assertColumnExists(st, "t_approval_action", "approver_slot_user_id");
+            assertIndexExists(st, "m_approval_route", "idx_approval_route_lookup");
+            assertIndexExists(st, "t_approval_request", "idx_approval_request_applicant");
+            assertActionGrantedTo(st, "approval.*", "role-hr", "role-manager", "role-sales");
+            // t_approval_action.uk_approval_action_slot が二重action防止のUNIQUEであること
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM information_schema.statistics"
+                            + " WHERE table_schema = DATABASE() AND table_name = 't_approval_action'"
+                            + " AND index_name = 'uk_approval_action_slot' AND non_unique = 0")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) >= 1,
+                        "t_approval_action.uk_approval_action_slotがUNIQUEでない");
+            }
+        }
+    }
+
+    /** 当該actionを許可されている既定groupが、期待どおりの集合に一致すること。 */
+    private void assertActionGrantedTo(Statement st, String actionKey, String... expectedGroupKeys)
+            throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT g.group_key FROM t_permission_group_action a"
+                        + " JOIN m_permission_group g ON g.id = a.group_id"
+                        + " WHERE a.action_key = '" + actionKey + "' AND a.deny_flag = 0"
+                        + " AND g.group_key <> 'role-admin'"
+                        + " ORDER BY g.group_key")) {
+            java.util.List<String> actual = new java.util.ArrayList<>();
+            while (rs.next()) {
+                actual.add(rs.getString(1));
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    java.util.List.of(expectedGroupKeys), actual,
+                    actionKey + " の付与先groupがmenu付与と一致しません");
         }
     }
 
@@ -331,6 +533,18 @@ class FlywayMigrationSmokeTest {
                 "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                         + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
             org.junit.jupiter.api.Assertions.assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertNumericColumn(Statement st, String table, String column,
+                                     int precision, int scale) throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT numeric_precision, numeric_scale FROM information_schema.columns"
+                        + " WHERE table_schema=DATABASE() AND table_name='" + table
+                        + "' AND column_name='" + column + "'")) {
+            assertTrue(rs.next(), table + "." + column + " の数値型定義が存在するはず");
+            assertEquals(precision, rs.getInt(1));
+            assertEquals(scale, rs.getInt(2));
         }
     }
 

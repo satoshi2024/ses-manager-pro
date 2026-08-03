@@ -37,7 +37,7 @@ CROSS JOIN (VALUES
   ('payroll.*'), ('profile.*'), ('project-ingestion.*'), ('project.*'), ('proposal.*'),
   ('quotation.*'), ('reconciliation.*'), ('resume-ingestion.*'), ('sales-performance.*'),
   ('skill-tag.*'), ('skillsheet-template.*'), ('system-config.*'), ('work-record.*'),
-  ('export.execute')
+  ('export.execute'), ('document.*'), ('document-archive.*')
 ) a(action_key)
 WHERE NOT EXISTS (
   SELECT 1 FROM t_permission_group_action existing
@@ -45,6 +45,25 @@ WHERE NOT EXISTS (
     AND existing.group_id = g.group_id
     AND existing.action_key = a.action_key
 );
+
+-- V74: CRM(S08)は design §6.2 により営業(2)とマネージャー(4)だけ。HR(3)へは付与しない。
+-- 併せてV68/V69(S05)・V70(S06)のseed漏れも補完する（付与先は各specのmenu付与に合わせる）。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
+  ('default', 2, 'crm.*', 0, 0),
+  ('default', 4, 'crm.*', 0, 0),
+  ('default', 2, 'bp-company.*', 0, 0),
+  ('default', 4, 'bp-company.*', 0, 0);
+
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT 'default', g.group_id, a.action_key, 0, 0
+FROM (VALUES (2), (3), (4)) g(group_id)
+CROSS JOIN (VALUES ('search.*'), ('task.*'), ('saved-view.*'), ('batch-operation.*')) a(action_key);
+
+-- V75: approval-workflow-internal-control(S07)。営業(2)・HR(3)・マネージャー(4)へ付与。
+-- 要員(5)はSecurityConfigのanyRequestが4管理ロール限定のため対象外（既存仕様、V74と同型）。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag)
+SELECT 'default', g.group_id, 'approval.*', 0, 0
+FROM (VALUES (2), (3), (4)) g(group_id);
 
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
   ('default', 1, '*', 0, 0),

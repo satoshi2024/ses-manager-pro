@@ -80,4 +80,25 @@ public class EngineerAccountLinkServiceImpl implements EngineerAccountLinkServic
     public boolean isUserLinked(Long sysUserId) {
         return linkMapper.selectByUserId(sysUserId) != null;
     }
+
+    @Override
+    public java.util.Set<Long> findLinkedEngineerIds(java.util.Collection<Long> engineerIds) {
+        if (engineerIds == null || engineerIds.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return linkMapper.selectByEngineerIds(new java.util.ArrayList<>(engineerIds)).stream()
+                .map(EngineerAccountLink::getEngineerId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    @Override
+    public java.util.Set<Long> findLinkedUserIds(java.util.Collection<Long> sysUserIds) {
+        if (sysUserIds == null || sysUserIds.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return linkMapper.selectLinkedUserIds(new java.util.ArrayList<>(sysUserIds)).stream()
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+    }
 }

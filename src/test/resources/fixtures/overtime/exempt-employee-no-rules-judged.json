@@ -1,0 +1,22 @@
+{
+  "name": "exempt-employee-no-rules-judged",
+  "description": "overtime-rules.md §2 #14：管理監督者等の適用除外者はルール1〜6すべて対象外。入力値がどれほど大きくても（本fixtureは全項目で極端な超過値を与えている）findingは1件も出ない。agreementもnullにしており、適用除外の判定がAGREEMENT_MISSINGより先に効くことも併せて固定する。",
+  "legalEntityId": 1,
+  "targetMonth": "2026-04",
+  "applicableExemption": true,
+  "agreement": null,
+  "currentMonth": { "yearMonth": "2026-04", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+  "agreementYearMonths": [
+    { "yearMonth": "2026-01", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-02", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-03", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 10000, "totalMinutes": 10000 }
+  ],
+  "rollingWindowMonths": [
+    { "yearMonth": "2026-01", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-02", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-03", "overtimeMinutes": 10000, "totalMinutes": 10000 },
+    { "yearMonth": "2026-04", "overtimeMinutes": 10000, "totalMinutes": 10000 }
+  ],
+  "expectedFindings": []
+}

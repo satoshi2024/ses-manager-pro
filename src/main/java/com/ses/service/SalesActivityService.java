@@ -10,6 +10,6 @@ public interface SalesActivityService extends IService<SalesActivity> {
     SalesActivity getOwnedOrThrow(Long customerId, Long activityId);
     SalesActivity create(Long customerId, SalesActivityCreateRequest request);
     SalesActivity update(Long customerId, Long activityId, SalesActivityUpdateRequest request);
-    void complete(Long customerId, Long activityId);
-    void delete(Long customerId, Long activityId);
+    void complete(Long customerId, Long activityId, Integer version);
+    void delete(Long customerId, Long activityId, Integer version);
 }

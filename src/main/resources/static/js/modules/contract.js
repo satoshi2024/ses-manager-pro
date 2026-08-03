@@ -1,6 +1,18 @@
 let optionsPromise = null;
+let contractCurrentPage = 1;
+let contractPageSize = 20;
+let contractLastPage = 1;
 
 $(document).ready(function() {
+    $('#searchForm').on('submit', function(event) {
+        event.preventDefault();
+        applyContractFilters();
+    });
+    $('#contract-page-size').on('change', function() {
+        contractPageSize = Number($(this).val()) || 20;
+        loadContracts(1);
+    });
+
     loadSelectOptions().then(() => {
         const urlParams = new URLSearchParams(window.location.search);
         
@@ -39,19 +51,26 @@ function statusLabel(status) {
     }
 }
 
-function loadContracts() {
+function applyContractFilters() {
+    loadContracts(1);
+}
+
+function loadContracts(page = contractCurrentPage) {
+    const requestedPage = Math.max(1, Number(page) || 1);
     $('#contract-table-body').html('<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>' + SES.i18n.t('js.common.loading') + '</td></tr>');
 
     const salesVal = $('#search-salesUserId').val();
     const params = {
-        status: $('#search-form [name="status"]').val(),
+        current: requestedPage,
+        size: contractPageSize,
+        status: $('#searchForm [name="status"]').val(),
         customerId: $('#search-customerId').val(),
         // 'none' = 担当営業未設定(sales_user_id IS NULL)での絞り込み
         salesUserId: salesVal === 'none' ? null : salesVal,
         salesUnassigned: salesVal === 'none' ? true : null,
-        contractNo: $('#search-form [name="contractNo"]').val(),
-        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
-        endDateTo: $('#search-form [name="endDateTo"]').val()
+        contractNo: $('#searchForm [name="contractNo"]').val(),
+        endDateFrom: $('#searchForm [name="endDateFrom"]').val(),
+        endDateTo: $('#searchForm [name="endDateTo"]').val()
     };
 
     $.ajax({
@@ -60,7 +79,24 @@ function loadContracts() {
         data: params,
         success: function(res) {
             if (res.code === 200 && res.data) {
-                renderContracts(res.data.records || res.data);
+                const pageData = res.data;
+                const records = pageData.records || pageData;
+                const total = Number(pageData.total != null ? pageData.total : records.length);
+                const responseSize = Number(pageData.size) || contractPageSize;
+                const totalPages = Math.max(1, Number(pageData.pages) || Math.ceil(total / responseSize));
+
+                // 削除等で最終ページが消滅した場合だけ、直前の有効ページへ補正する。
+                if (records.length === 0 && total > 0 && requestedPage > totalPages) {
+                    loadContracts(totalPages);
+                    return;
+                }
+
+                contractCurrentPage = Math.max(1, Number(pageData.current) || requestedPage);
+                contractPageSize = responseSize;
+                contractLastPage = totalPages;
+                $('#contract-page-size').val(String(contractPageSize));
+                renderContracts(records);
+                renderContractPagination(pageData);
             } else {
                 Toast.error(SES.i18n.t('js.common.error_fetch'));
                 $('#contract-table-body').html(`<tr><td colspan="8" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_fetch')}</td></tr>`);
@@ -72,6 +108,57 @@ function loadContracts() {
             $('#contract-table-body').html(`<tr><td colspan="8" class="text-center text-muted py-4">${SES.i18n.t('js.common.error_network')}</td></tr>`);
         }
     });
+}
+
+function goToContractPage(page) {
+    const target = Number(page);
+    if (Number.isInteger(target) && target >= 1 && target <= contractLastPage && target !== contractCurrentPage) {
+        loadContracts(target);
+    }
+}
+
+function renderContractPagination(pageData) {
+    const total = Number(pageData.total) || 0;
+    const size = Number(pageData.size) || contractPageSize;
+    const current = Math.max(1, Number(pageData.current) || contractCurrentPage);
+    const pages = Math.max(1, Number(pageData.pages) || Math.ceil(total / size));
+    const start = total === 0 ? 0 : (current - 1) * size + 1;
+    const end = total === 0 ? 0 : Math.min(current * size, total);
+
+    $('#contract-page-info').text(total === 0
+        ? SES.i18n.t('common.page.totalZero')
+        : SES.i18n.t('common.page.info', [total, start, end]));
+    $('#contract-page-position').text(`${current} / ${pages}`);
+
+    const pagination = $('#contract-pagination');
+    pagination.empty();
+    pagination.append(contractPageButton(current - 1, SES.i18n.t('common.page.prev'), current <= 1));
+
+    const visiblePages = [];
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - current) <= 2) {
+            visiblePages.push(i);
+        }
+    }
+    let previous = 0;
+    visiblePages.forEach(function(pageNumber) {
+        if (previous !== 0 && pageNumber - previous > 1) {
+            pagination.append('<li class="page-item disabled"><span class="page-link bg-dark border-secondary text-muted">…</span></li>');
+        }
+        pagination.append(contractPageButton(pageNumber, String(pageNumber), false, pageNumber === current));
+        previous = pageNumber;
+    });
+
+    pagination.append(contractPageButton(current + 1, SES.i18n.t('common.page.next'), current >= pages));
+}
+
+function contractPageButton(page, label, disabled, active) {
+    const stateClass = active ? ' active' : (disabled ? ' disabled' : '');
+    const currentAttr = active ? ' aria-current="page"' : '';
+    const disabledAttr = disabled ? ' disabled aria-disabled="true"' : '';
+    return `<li class="page-item${stateClass}"${currentAttr}>
+        <button type="button" class="page-link bg-dark border-secondary text-light" onclick="goToContractPage(${page})"${disabledAttr}>${SES.escapeHtml(label)}</button>
+    </li>`;
 }
 
 function loadSelectOptions() {
@@ -173,7 +260,7 @@ function renderContracts(list) {
         // 遷移可能なステータスがあれば状態変更ボタンを表示
         const transitions = STATUS_TRANSITIONS[c.status] || [];
         const statusBtn = transitions.length > 0
-            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('contract.action.changeStatus')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
+            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('approval.request', '申請')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
             : '';
 
         const tr = `
@@ -330,7 +417,7 @@ function saveContract() {
         success: function(res) {
             if (res.code === 200) {
                 Toast.success(id ? SES.i18n.t('js.contract.success.update') : SES.i18n.t('js.contract.success.register'));
-                loadContracts();
+                loadContracts(contractCurrentPage);
                 const findings = (res.data && res.data.complianceFindings) || [];
                 const hasWarning = (res.data && res.data.negativeProfit) || findings.length > 0;
                 if (hasWarning) {
@@ -415,8 +502,8 @@ function postStatusChange(id, newStatus, cancelDate) {
         data: JSON.stringify({ status: newStatus, cancelDate: cancelDate }),
         success: function(res) {
             if (res.code === 200) {
-                Toast.success(SES.i18n.t('js.contract.success.update'));
-                loadContracts();
+                Toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
+                loadContracts(contractCurrentPage);
             } else {
                 Toast.error(res.message || SES.i18n.t('js.contract.error.register'));
             }
@@ -430,15 +517,15 @@ function postStatusChange(id, newStatus, cancelDate) {
     });
 }
 
-// 現在の検索条件(#search-form)を反映してExcel出力する。
+// 現在の検索条件(#searchForm)を反映してExcel出力する。
 async function exportContracts() {
     const params = {
-        status: $('#search-form [name="status"]').val(),
+        status: $('#searchForm [name="status"]').val(),
         customerId: $('#search-customerId').val(),
         salesUserId: $('#search-salesUserId').val(),
-        contractNo: $('#search-form [name="contractNo"]').val(),
-        endDateFrom: $('#search-form [name="endDateFrom"]').val(),
-        endDateTo: $('#search-form [name="endDateTo"]').val()
+        contractNo: $('#searchForm [name="contractNo"]').val(),
+        endDateFrom: $('#searchForm [name="endDateFrom"]').val(),
+        endDateTo: $('#searchForm [name="endDateTo"]').val()
     };
     await SES.download('/api/contracts/export?' + $.param(params, true), '契約一覧.xlsx');
 }
@@ -461,7 +548,7 @@ function deleteContract(id) {
                 success: function(res) {
                     if (res.code === 200) {
                         Toast.success(SES.i18n.t('js.project.delete.success'));
-                        loadContracts();
+                        loadContracts(contractCurrentPage);
                     } else {
                         Toast.error(res.message || SES.i18n.t('js.project.delete.error'));
                     }

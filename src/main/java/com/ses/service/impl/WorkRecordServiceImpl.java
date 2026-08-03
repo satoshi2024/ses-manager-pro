@@ -114,6 +114,31 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds);
     }
 
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> monthlyGridPage(String workMonth, Long current, Long size, String keyword, String status) {
+        List<WorkRecordGridDto> all = monthlyGrid(workMonth);
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.toLowerCase().trim();
+            all = all.stream()
+                    .filter(g -> (g.getEngineerName() != null && g.getEngineerName().toLowerCase().contains(kw)) ||
+                            (g.getProjectName() != null && g.getProjectName().toLowerCase().contains(kw)) ||
+                            (g.getContractNo() != null && g.getContractNo().toLowerCase().contains(kw)))
+                    .collect(Collectors.toList());
+        }
+        if (status != null && !status.isBlank()) {
+            all = all.stream()
+                    .filter(g -> status.equals(g.getStatus()) || (g.getStatus() == null && "未入力".equals(status)))
+                    .collect(Collectors.toList());
+        }
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> page = com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 50L : size, 100L);
+        int total = all.size();
+        page.setTotal(total);
+        int from = (int) Math.min((page.getCurrent() - 1) * page.getSize(), total);
+        int to = (int) Math.min(from + page.getSize(), total);
+        page.setRecords(all.subList(from, to));
+        return page;
+    }
+
     /** テストおよび保守ツールからリフレクション経由で利用する互換エントリーポイント。 */
     @SuppressWarnings("unused")
     private void assertContractScope(Contract contract, String workMonth) {
@@ -155,28 +180,26 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 }
                 throw BusinessException.of(404, "error.workRecord.notFound2");
             }
-            // UNKNOWN/未配賦の履歴は推測補完しない。既知のNULL履歴だけlegacy fallbackを許可する。
-            if (!"UNKNOWN".equals(history.getOrganizationHistoryStatus())
-                    && isHistoricalAccountLinkAllowed(contract, asOf)) {
-                return;
-            }
+            // 履歴行が存在する場合は、NULL/UNKNOWNを現在のaccount-linkへ補完しない。
+            // 明示NULLも履歴値そのものとして扱い、推測による過去月の可視化を防ぐ。
             throw BusinessException.of(404, "error.workRecord.notFound2");
         }
 
-        // 履歴がまだ作成されない当月だけは、現行直属組織を新規入力の基準にできる。
-        // 過去月では現行 organization_id を履歴の代用にしない。
+        // 履歴が未作成の過去月へ現在の Engineer 所属を補完しない。
+        // 現在値は当月の新規入力に限って利用し、過去月は明示された履歴または
+        // platform-invariantsで定めた既知の直属account-linkだけを参照する。
         if (YearMonth.from(asOf).equals(YearMonth.now())) {
             com.ses.entity.Engineer engineer = engineerMapper == null ? null
                     : engineerMapper.selectById(contract.getEngineerId());
-            if (engineer != null && engineer.getOrganizationId() != null
-                    && allowedOrganizationIds.contains(engineer.getOrganizationId())) {
-                return;
+            if (engineer != null && engineer.getOrganizationId() != null) {
+                if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
+                    return;
+                }
+                throw BusinessException.of(404, "error.workRecord.notFound2");
             }
             if (isDirectUserAllowed(contract, asOf)) {
                 return;
             }
-        } else if (history == null && isHistoricalAccountLinkAllowed(contract, asOf)) {
-            return;
         }
 
         throw BusinessException.of(404, "error.workRecord.notFound2");
@@ -189,14 +212,6 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
         Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
         return link != null && directUserIds != null && directUserIds.contains(link.getSysUserId());
-    }
-
-    private boolean isHistoricalAccountLinkAllowed(Contract contract, LocalDate asOf) {
-        if (engineerAccountLinkMapper == null) {
-            return false;
-        }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
-        return link != null && organizationScopeService.isAllowedUser(link.getSysUserId(), asOf);
     }
 
     @Override

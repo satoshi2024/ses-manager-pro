@@ -50,7 +50,7 @@ class MobileResponsiveLayoutTest {
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         org.mockito.Mockito.when(roleMenuService.getAllMenuKeys())
-            .thenReturn(java.util.List.of("engineer", "project", "customer", "proposal", "contract"));
+            .thenReturn(java.util.List.of("engineer", "project", "customer", "proposal", "contract", "crm-lead", "crm-opportunity"));
     }
 
     /** 共通レイアウト(base.html)を継承する全ページ。 */
@@ -63,6 +63,9 @@ class MobileResponsiveLayoutTest {
             "/contract/list",
             "/contract/gantt",
             "/proposal/kanban",
+            "/crm/leads",
+            "/crm/opportunities",
+            "/crm/opportunities/kpi",
             "/email/template/list",
             "/ai/matching"
     };
@@ -75,7 +78,7 @@ class MobileResponsiveLayoutTest {
     }
 
     private String readCss(String path) throws IOException {
-        return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
+        return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
     }
 
     @ParameterizedTest(name = "{0} はモバイル用の共通レイアウト部品を含む")
@@ -88,6 +91,9 @@ class MobileResponsiveLayoutTest {
             "/contract/list",
             "/contract/gantt",
             "/proposal/kanban",
+            "/crm/leads",
+            "/crm/opportunities",
+            "/crm/opportunities/kpi",
             "/email/template/list",
             "/ai/matching"
     })

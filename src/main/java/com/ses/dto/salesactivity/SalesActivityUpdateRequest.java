@@ -9,6 +9,12 @@ import java.time.LocalDate;
 
 @Data
 public class SalesActivityUpdateRequest {
+    @NotNull(message = "バージョンは必須です")
+    private Integer version;
+    private Long contactId;
+    private Long opportunityId;
+    private Long assigneeUserId;
+
     @NotBlank(message = "活動種別は必須です")
     @Size(max = 20, message = "活動種別は20文字以内で入力してください")
     private String activityType;

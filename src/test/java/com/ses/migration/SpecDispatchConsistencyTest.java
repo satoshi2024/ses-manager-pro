@@ -40,15 +40,14 @@ class SpecDispatchConsistencyTest {
 
     private static final Path EXPANSION = SPECS.resolve("customer-product-expansion-2026");
 
-    /** 実装対象の14 spec（S04〜S17）。S01は採番未定、S02/S03は適用済みのため対象外。 */
+    /** 実装対象の spec（S06〜S17）。S01は採番未定、S02〜S05は適用済みのため対象外。 */
     private static final Map<String, String> SPEC_BY_CONVERSATION = new LinkedHashMap<>();
 
     static {
-        SPEC_BY_CONVERSATION.put("S04", "legal-document-ledger-archive");
-        SPEC_BY_CONVERSATION.put("S05", "productivity-search-saved-view");
-        SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
+        // SPEC_BY_CONVERSATION.put("S05", "productivity-search-saved-view");
+        // SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
         SPEC_BY_CONVERSATION.put("S07", "approval-workflow-internal-control");
-        SPEC_BY_CONVERSATION.put("S08", "crm-contact-opportunity");
+        // SPEC_BY_CONVERSATION.put("S08", "crm-contact-opportunity"); // V73実装済み（予約→実在へ移行）
         SPEC_BY_CONVERSATION.put("S09", "order-acceptance-workflow");
         SPEC_BY_CONVERSATION.put("S10", "dispatch-outsourcing-compliance-ledger");
         SPEC_BY_CONVERSATION.put("S11", "attendance-leave-overtime-compliance");
@@ -84,6 +83,7 @@ class SpecDispatchConsistencyTest {
     @Test
     void 予約Migration番号が全ての派工資料で一致すること() throws Exception {
         String startConversations = read(EXPANSION.resolve("spec-start-conversations.md"));
+        String reviewConversations = read(EXPANSION.resolve("spec-review-conversations.md"));
 
         List<String> mismatches = new ArrayList<>();
 
@@ -119,6 +119,24 @@ class SpecDispatchConsistencyTest {
             if (jpVersion != expected) {
                 mismatches.add("spec-start-conversations.md " + conversation
                         + ": V" + jpVersion + " ≠ design.md V" + expected);
+            }
+
+            // Review側も同じ番号を指していること。
+            // ここを検査対象から外していたため、mainが採番を繰り上げた際にR09〜R17だけが
+            // 4つ古い番号のまま取り残された（Review AIが誤った番号で照合してしまう）。
+            String review = conversation.replace('S', 'R');
+            Path reviewTxt = EXPANSION.resolve("copyable-conversations")
+                    .resolve(review + "__" + spec + "__review.txt");
+            int reviewTxtVersion = firstGroup(MIGRATION_LINE, read(reviewTxt), reviewTxt + " の Migration行");
+            if (reviewTxtVersion != expected) {
+                mismatches.add(reviewTxt.getFileName() + ": V" + reviewTxtVersion
+                        + " ≠ design.md V" + expected);
+            }
+
+            int reviewDocVersion = versionInSection(reviewConversations, "## " + review + " — ", spec);
+            if (reviewDocVersion != expected) {
+                mismatches.add("spec-review-conversations.md " + review
+                        + ": V" + reviewDocVersion + " ≠ design.md V" + expected);
             }
         }
 

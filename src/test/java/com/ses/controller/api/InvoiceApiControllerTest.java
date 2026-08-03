@@ -6,6 +6,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
 import com.ses.service.BpPaymentService;
+import com.ses.service.CustomerContactService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +67,12 @@ class InvoiceApiControllerTest {
 
     @MockBean
     private com.ses.service.EmailTemplateService emailTemplateService;
+
+    @MockBean
+    private CustomerContactService customerContactService;
+
+    @MockBean
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     @Test
     @WithMockUser

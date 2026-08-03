@@ -91,11 +91,18 @@ function renderUsers(records) {
             ? `<span class="status-badge status-success">${SES.i18n.t('user.status.active')}</span>`
             : `<span class="status-badge status-secondary">${SES.i18n.t('user.status.inactive')}</span>`;
 
+        // 要員ロールなのに要員マスタと紐付いていないアカウントは、ログインしても
+        // マイ勤怠が常に403になり何も操作できない。一覧で気づけるよう明示する。
+        // engineerLinked が null の行（要員以外のロール）には何も出さない。
+        const unlinkedBadge = user.engineerLinked === false
+            ? ` <span class="status-badge status-warning" title="${SES.escapeHtml(SES.i18n.t('user.engineerLink.unlinked.hint'))}">${SES.escapeHtml(SES.i18n.t('user.engineerLink.unlinked'))}</span>`
+            : '';
+
         const tr = `
             <tr>
                 <td class="ps-4 py-3 fw-bold text-light">${SES.escapeHtml(user.username)}</td>
                 <td>${SES.escapeHtml(user.realName || '-')}</td>
-                <td><span class="status-badge status-primary">${SES.i18n.e('userRole', user.role)}</span></td>
+                <td><span class="status-badge status-primary">${SES.i18n.e('userRole', user.role)}</span>${unlinkedBadge}</td>
                 <td>${SES.escapeHtml(user.email || '-')}</td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">

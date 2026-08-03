@@ -73,6 +73,30 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(Candidate candidate) {
+        if (candidate == null || candidate.getId() == null) return false;
+        Candidate existing = getById(candidate.getId());
+        if (existing == null) return false;
+        boolean updated = super.updateById(candidate);
+        if (updated && existing.getConvertedEngineerId() != null) {
+            Long engineerId = existing.getConvertedEngineerId();
+            com.ses.entity.Engineer eng = engineerMapper.selectById(engineerId);
+            if (eng != null) {
+                boolean engChanged = false;
+                if (candidate.getDesiredRate() != null && !candidate.getDesiredRate().equals(eng.getExpectedUnitPrice())) {
+                    eng.setExpectedUnitPrice(candidate.getDesiredRate());
+                    engChanged = true;
+                }
+                if (engChanged) {
+                    engineerMapper.updateById(eng);
+                }
+            }
+        }
+        return updated;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void changeStage(Long candidateId, String newStage, String reason, String remarks) {
         Candidate candidate = this.getById(candidateId);
         if (candidate == null) {

@@ -1,0 +1,9 @@
+{
+  "name": "rule5-multi-month-average-boundary",
+  "description": "overtime-rules.md §1 ルール5（複数月平均80時間、休日労働を含む）。境界は「以内は適合」＝80時間ちょうどは適合。n=2の窓（直近2か月、各月をlimit+deltaで均一にする）で検証する。浮動小数を避けるため sum > limit*n で比較する。deltaは現在のlimit(MULTI_MONTH_AVERAGE_MINUTES)からの分単位オフセット。",
+  "cases": [
+    { "delta": -1, "expectedViolation": false },
+    { "delta": 0, "expectedViolation": false },
+    { "delta": 1, "expectedViolation": true }
+  ]
+}

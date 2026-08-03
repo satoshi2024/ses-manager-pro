@@ -62,6 +62,8 @@ class ContractApiControllerTest {
     private com.ses.service.security.MfaService mfaService;
     @MockBean
     private com.ses.service.security.PersistentSessionService persistentSessionService;
+    @MockBean
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {
@@ -242,6 +244,8 @@ class ContractApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        verify(contractService).changeStatus(eq(10L), eq("解約"), eq(LocalDate.of(2026, 7, 15)));
+        verify(approvalTargetAdapterRegistry).request(eq("contract.status"), eq("CONTRACT"), eq(10L),
+                argThat(command -> "解約".equals(command.get("status"))
+                        && "2026-07-15".equals(command.get("cancelDate"))));
     }
 }

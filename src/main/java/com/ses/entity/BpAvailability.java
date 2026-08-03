@@ -21,6 +21,7 @@ public class BpAvailability extends BaseEntity {
 
     private String initialName;
     private String bpCompany;
+    private Long bpCompanyId;
     private String skillsJson;
     private Long unitPrice;
     private LocalDate availableFrom;

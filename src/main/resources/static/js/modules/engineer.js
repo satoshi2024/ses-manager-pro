@@ -5,6 +5,23 @@ window.stationIndex = {};
 // (保存完了後にPUT /api/candidates/{id}/converted-engineerで紐付けるために保持する)
 let prefillCandidateId = null;
 
+const ENGINEER_STATUS_VALUES = ['稼動中', 'Bench', '提案中', '退場予定'];
+
+/** 旧bookmarkの「待機」だけをDB正規値へ寄せ、未知値はfilterへ適用しない。 */
+function normalizeEngineerListStatus(status) {
+    if (status === '待機') return 'Bench';
+    return ENGINEER_STATUS_VALUES.includes(status) ? status : '';
+}
+
+/** Dashboard導線・bookmarkのstatusを初回API取得より先にselectへ反映する。 */
+function applyEngineerListQueryFilters() {
+    const params = new URLSearchParams(window.location.search);
+    const status = normalizeEngineerListStatus(params.get('status'));
+    if (status) {
+        $('#searchStatus').val(status);
+    }
+}
+
 /**
  * 所属組織・原価部門の選択肢を読み込む。要員の所属組織は部門損益の帰属基準になるため、
  * ID直打ちではなくマスタから選ばせる。組織スコープはAPI側で適用済み。
@@ -26,8 +43,38 @@ function loadOrganizationOptions() {
 
 $(document).ready(function() {
     loadOrganizationOptions();
+    applyEngineerListQueryFilters();
     // Load engineers on page load
     loadEngineers();
+
+    if (window.SES && window.SES.savedView) {
+        SES.savedView.init('engineer_list', function(viewData) {
+            try {
+                const filters = viewData.filter || {};
+                $('#searchName').val(filters.fullName || '');
+                $('#searchStatus').val(filters.status || '');
+                $('#searchEmpType').val(filters.employmentType || '');
+                $('#searchSkill').val(filters.skillId || '');
+                $('#searchSalesUser').val(filters.salesUserId || '');
+                $('#searchRiskLevel').val(filters.riskLevel || '');
+                $('#searchAccountLink').val(filters.accountLinked || '');
+                loadEngineers(1);
+            } catch(e) { console.error(e); }
+        }, function() {
+            return {
+                filter: {
+                    fullName: $('#searchName').val(),
+                    status: $('#searchStatus').val(),
+                    employmentType: $('#searchEmpType').val(),
+                    skillId: $('#searchSkill').val(),
+                    salesUserId: $('#searchSalesUser').val(),
+                    riskLevel: $('#searchRiskLevel').val(),
+                    accountLinked: $('#searchAccountLink').val()
+                },
+                pageSize: 10
+            };
+        });
+    }
 
     // Load station names lazily when the modal is opened
     $('#engineerModal').on('show.bs.modal', function () {
@@ -116,29 +163,37 @@ function loadAllStations() {
         method: 'GET',
         dataType: 'json',
         success: function(res) {
-            if (res && res.length > 0) {
-                const datalist = $('#station-list');
-                datalist.empty();
-                // To prevent browser lag with 10k elements, modern browsers handle datalists very well,
-                // but we can just append them as strings.
-                let html = '';
-                const seenNames = {};
-                window.stationIndex = {};
-                res.forEach(item => {
-                    // 駅名 -> pref のインデックスを構築（重複 pref は除外）
-                    if (!window.stationIndex[item.name]) window.stationIndex[item.name] = [];
-                    if (window.stationIndex[item.name].indexOf(item.pref) === -1) {
-                        window.stationIndex[item.name].push(item.pref);
-                    }
-                    // datalist は駅名の重複を避けて 1 件だけ出す
-                    if (!seenNames[item.name]) {
-                        seenNames[item.name] = true;
-                        // Setting text content of <option> shows as lighter text on the right side in Chrome
-                        html += `<option value="${item.name}">${item.pref}</option>`;
-                    }
-                });
-                datalist.html(html);
-            }
+            if (!res || res.length === 0) return;
+
+            window.stationIndex = {};
+            const items = [];
+            const indexByName = {};
+            res.forEach(item => {
+                // 駅名 -> pref のインデックスを構築（重複 pref は除外）
+                if (!window.stationIndex[item.name]) window.stationIndex[item.name] = [];
+                if (window.stationIndex[item.name].indexOf(item.pref) === -1) {
+                    window.stationIndex[item.name].push(item.pref);
+                }
+                // 候補は駅名の重複を避けて 1 件だけ持つ。同名駅の都道府県は補足表示にまとめる
+                const prefecture = splitPref(item.pref).prefecture;
+                if (indexByName[item.name] === undefined) {
+                    indexByName[item.name] = items.length;
+                    items.push({ value: item.name, prefectures: prefecture ? [prefecture] : [] });
+                } else {
+                    const known = items[indexByName[item.name]].prefectures;
+                    if (prefecture && known.indexOf(prefecture) === -1) known.push(prefecture);
+                }
+            });
+            items.forEach(item => {
+                // 補足表示は都道府県のみ。路線名を出すと「東」で JR東海道… が並ぶ誤解を招くうえ、
+                // 路線は駅を選んだ後の路線セレクトで選ばせる。
+                item.label = item.prefectures.slice(0, 2).join('・')
+                    + (item.prefectures.length > 2 ? '…' : '');
+                delete item.prefectures;
+            });
+
+            // 前方一致サジェストを取り付ける（照合対象は駅名のみ。ラベルは表示専用）
+            SES.autocomplete.attach(document.getElementById('eng-nearestStation'), { items: items });
         },
         error: function(err) {
             console.error("Failed to load station names", err);
@@ -230,6 +285,7 @@ function loadEngineers(page = 1) {
         employmentType: $('#searchEmpType').val(),
         salesUserId: $('#searchSalesUser').val(),
         riskLevel: $('#searchRiskLevel').val(),
+        accountLinked: $('#searchAccountLink').val(),
         skillIds: selectedSkills // jQuery ajax will format this as skillIds[]=1&skillIds[]=2 or we can set traditional: true
     };
 

@@ -52,6 +52,33 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         return this.baseMapper.selectKanbanList();
     }
 
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<ProposalKanbanDto> getKanbanPage(String status, Long current, Long size, String keyword) {
+        List<ProposalKanbanDto> list = this.baseMapper.selectKanbanList();
+        if (dataScopeService != null && dataScopeService.isScoped()) {
+            Set<Long> allowed = dataScopeService.allowedProposalIds();
+            list = list.stream().filter(p -> allowed.contains(p.getId())).collect(java.util.stream.Collectors.toList());
+        }
+        if (status != null && !status.isBlank()) {
+            list = list.stream().filter(p -> status.equals(p.getStatus())).collect(java.util.stream.Collectors.toList());
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.toLowerCase().trim();
+            list = list.stream().filter(p ->
+                (p.getEngineerName() != null && p.getEngineerName().toLowerCase().contains(kw)) ||
+                (p.getProjectName() != null && p.getProjectName().toLowerCase().contains(kw)) ||
+                (p.getCustomerName() != null && p.getCustomerName().toLowerCase().contains(kw))
+            ).collect(java.util.stream.Collectors.toList());
+        }
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<ProposalKanbanDto> page = com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 20L : size, 100L);
+        int total = list.size();
+        page.setTotal(total);
+        int from = (int) Math.min((page.getCurrent() - 1) * page.getSize(), total);
+        int to = (int) Math.min(from + page.getSize(), total);
+        page.setRecords(list.subList(from, to));
+        return page;
+    }
+
     /**
      * 提案の新規作成。
      * 保存に加えて、Bench中の要員を「提案中」へ連動させる。

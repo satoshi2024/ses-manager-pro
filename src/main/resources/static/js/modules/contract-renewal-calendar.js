@@ -28,6 +28,7 @@ $(document).ready(function() {
     let anchorDate = new Date();
     let currentItemsByDate = {};   // 'YYYY-MM-DD' -> [item, ...]
     let currentDetailItem = null;
+    let loadRequestId = 0;   // 連打時に古い応答でグリッドが上書きされるのを防ぐ
 
     // ---- 日付ユーティリティ（ローカル日付、UTC変換によるズレを避ける） ----
     function fmtDate(d) {
@@ -89,12 +90,14 @@ $(document).ready(function() {
         const range = currentRange();
         const from = fmtDate(range.start);
         const to = fmtDate(range.end);
+        const requestId = ++loadRequestId;
 
         $.ajax({
             url: '/api/contracts/renewal-calendar',
             method: 'GET',
             data: { from: from, to: to },
             success: function(res) {
+                if (requestId !== loadRequestId) return; // 連打で後から発行されたリクエストがある場合は破棄
                 $('#renewal-calendar-loading').hide();
                 if (res.code !== 200 || !res.data) {
                     Toast.error(res.message || SES.i18n.t('js.renewalCalendar.error_fetch'));
@@ -124,6 +127,7 @@ $(document).ready(function() {
                 }
             },
             error: function(err) {
+                if (requestId !== loadRequestId) return;
                 console.error(err);
                 $('#renewal-calendar-loading').hide();
                 $('#renewal-calendar-target').html('<div class="text-center text-danger p-5">' + SES.i18n.t('js.renewalCalendar.error_network') + '</div>');

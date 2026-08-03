@@ -16,6 +16,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoicePdfService;
 import com.ses.service.InvoiceService;
 import com.ses.service.EmailTemplateService;
+import com.ses.service.CustomerContactService;
 import com.ses.service.export.ExcelExportService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -46,13 +47,19 @@ public class InvoiceApiController {
     private BpPaymentMapper bpPaymentMapper;
 
     @Autowired
-    private com.ses.service.BpPaymentService bpPaymentService;
+    private com.ses.service.approval.ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
 
     @Autowired
     private ExcelExportService excelExportService;
 
     @Autowired
+    private CustomerContactService customerContactService;
+
+    @Autowired
     private com.ses.service.security.DataScopeService dataScopeService;
+
+    @Autowired
+    private com.ses.service.BpPaymentService bpPaymentService;
 
     @Autowired
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
@@ -125,15 +132,17 @@ public class InvoiceApiController {
     @PutMapping("/{id}/status")
     public ApiResult<?> changeStatus(@PathVariable Long id, @RequestBody InvoiceStatusUpdateRequest request) {
         assertInvoiceVisible(id);
-        invoiceService.changeStatus(id, request.getStatus(), request.getPaidDate());
-        return ApiResult.success(null);
+        String requestType = "送付済".equals(request.getStatus()) ? "invoice.send" : "invoice.status";
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("operation", "send"); command.put("status", request.getStatus()); command.put("paidDate", request.getPaidDate());
+        return ApiResult.success(approvalTargetAdapterRegistry.request(requestType, "INVOICE", id, command));
     }
 
     @PutMapping("/{id}/void")
     public ApiResult<?> voidInvoice(@PathVariable Long id) {
         assertInvoiceVisible(id);
-        invoiceService.voidInvoice(id);
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>(); command.put("operation", "void");
+        return ApiResult.success(approvalTargetAdapterRegistry.request("invoice.void", "INVOICE", id, command));
     }
 
     // ===== 債権管理（ar-management / P2） =====
@@ -197,12 +206,20 @@ public class InvoiceApiController {
         return ApiResult.success(emailTemplateService.list());
     }
 
+    /** 請求書の顧客に対する、基準日時点で有効な督促宛先候補。 */
+    @GetMapping("/{id}/recipient-candidates")
+    public ApiResult<?> recipientCandidates(@PathVariable Long id) {
+        assertInvoiceVisible(id);
+        Invoice invoice = invoiceService.getById(id);
+        return ApiResult.success(customerContactService.recipientCandidates(invoice.getCustomerId(), LocalDate.now()));
+    }
+
 
 
     @PostMapping("/{id}/reminder")
     public ApiResult<?> sendReminder(@PathVariable Long id, @RequestBody ReminderRequest request) {
         assertInvoiceVisible(id);
-        return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId()));
+        return ApiResult.success(invoiceService.sendReminder(id, request.getTemplateId(), request.getContactId()));
     }
 
     /** 請求書単位の督促履歴（宛先・件名・状態・日時・失敗理由）を返す（R3R-23）。 */
@@ -240,8 +257,11 @@ public class InvoiceApiController {
 
     public static class ReminderRequest {
         private Long templateId;
+        private Long contactId;
         public Long getTemplateId() { return templateId; }
         public void setTemplateId(Long templateId) { this.templateId = templateId; }
+        public Long getContactId() { return contactId; }
+        public void setContactId(Long contactId) { this.contactId = contactId; }
     }
 
     @GetMapping("/bp-payments")
@@ -283,8 +303,9 @@ public class InvoiceApiController {
         // 誤り（BP支払IDを請求書IDとして扱ってしまう）。BP支払はメニュー権限で保護される管理業務であり、
         // データスコープ対象外のため請求書可視性検証は行わない（R3R-35）。
         bpPaymentService.assertAllowed(id);
-        invoiceService.changeBpPaymentStatus(id, request.getStatus(), request.getPaidDate());
-        return ApiResult.success(null);
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<>();
+        command.put("status", request.getStatus()); command.put("paidDate", request.getPaidDate());
+        return ApiResult.success(approvalTargetAdapterRegistry.request("bp_payment.confirm", "BP_PAYMENT", id, command));
     }
 
     private java.util.Set<Long> effectiveInvoiceIds(String month) {

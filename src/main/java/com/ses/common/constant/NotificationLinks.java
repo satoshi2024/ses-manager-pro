@@ -41,6 +41,9 @@ public final class NotificationLinks {
     /** ダッシュボード（/）— 資金繰り(CF)タブを含む経営KPI画面。 */
     public static final String DASHBOARD = "/";
 
+    /** 承認inbox（/approval/inbox）— 承認申請通知の遷移先。 */
+    public static final String APPROVAL_INBOX = "/approval/inbox";
+
     private NotificationLinks() {
     }
 

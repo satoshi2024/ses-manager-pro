@@ -10,16 +10,16 @@
 <div layout:fragment="content">
     <div class="card">
         <div class="card-body">
-            <div class="row mb-3 align-items-end">
+            <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
                 <div class="col-md-3">
-                    <input type="month" id="closingMonth" class="form-control">
+                    <input type="month" id="closingMonth" name="month" class="form-control">
                 </div>
                 <div class="col-md-6">
-                    <button id="btnLoadClosing" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
-                    <button th:if="${canConfirm}" id="btnConfirmClosing" class="btn btn-success" th:text="#{closing.btn.confirm}">締め完了</button>
-                    <button th:if="${canReopen}" id="btnReopenClosing" class="btn btn-outline-warning d-none" th:text="#{closing.btn.reopen}">締め解除</button>
+                    <button type="button" id="btnLoadClosing" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                    <button type="button" th:if="${canConfirm}" id="btnConfirmClosing" class="btn btn-success" th:text="#{approval.request}">締めを申請</button>
+                    <button type="button" th:if="${canReopen}" id="btnReopenClosing" class="btn btn-outline-warning d-none" th:text="#{approval.request}">再開を申請</button>
                 </div>
-            </div>
+            </form>
             <div id="closedBanner" class="alert alert-info d-none"></div>
             <div id="diffWarning" class="alert alert-warning d-none" th:text="#{closing.status.diffWarning}"></div>
             <div id="closingCards" class="row g-3"></div>

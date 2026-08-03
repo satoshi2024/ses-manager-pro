@@ -50,6 +50,24 @@ public class Contract extends BaseEntity {
     @NotNull(message = "契約開始日は必須です")
     private LocalDate startDate;
 
+    /** 委託日（発注コンプライアンス必須明示項目。R3.2） */
+    private LocalDate contractDate;
+
+    /** 役務内容（発注コンプライアンス必須明示項目。R3.2） */
+    private String jobDescription;
+
+    /** 提供場所（発注コンプライアンス必須明示項目。R3.2） */
+    private String workLocation;
+
+    /** 検査完了期日（発注コンプライアンス必須明示項目。R3.2） */
+    private LocalDate inspectionDueDate;
+
+    /** 具体的支払期日（発注コンプライアンス必須明示項目。R3.2） */
+    private LocalDate paymentDueDate;
+
+    /** 支払方法（発注コンプライアンス必須明示項目。R3.2） */
+    private String paymentMethod;
+
     /**
      * 契約終了日
      * updateStrategy=ALWAYS: グローバルの not_null 戦略を上書きし、編集で「無期限に戻す」(NULL更新)を
