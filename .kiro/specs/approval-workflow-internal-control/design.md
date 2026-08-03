@@ -242,6 +242,11 @@ ORDER BY r.requested_at DESC
 Java filterで除外してページング結果を壊してはならない。`EXISTS`で可視性を判定するため重複行は
 生成されず、`SELECT DISTINCT`は不要である。
 
+P2-14の代理対象種別の正本境界は次のとおり固定する。
+- 代理の書き込み（`ApprovalAdministrationServiceImpl.java:137`）では、代理親行のINSERT/DELETEと同一トランザクションで、`t_approval_delegation_type`の子行もINSERT/DELETEする。
+- 承認時の代理対象種別判定（`ApprovalEngineServiceImpl.java:367 requestTypeAllowed`）は、`t_approval_delegation_type`の子行を読む。
+- `request_types_json`はV78適用時の移行元および互換保持列としてのみ保持し、以後の読み取り判定の正本にしない。
+
 `PageUtils.safePage(current, size, mapper::selectPage, wrapper)`でページングし、Java側の
 全件取得・filter・`subList`による手動ページングは廃止する。participantとdelegation typeは
 承認一覧の可視性をSQL境界へ移すための正規化表であり、申請者・承認者・代理者のいずれも同じSQL

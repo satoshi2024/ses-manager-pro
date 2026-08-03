@@ -371,7 +371,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         this.update(new UpdateWrapper<Invoice>()
                 .eq("id", invoice.getId())
                 .set("status", status)
-                .set("paid_date", paidDate));
+                .set("paid_date", paidDate)
+                .setSql("version = version + 1"));
     }
 
     /**
@@ -557,7 +558,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     .eq("id", id)
                     .eq("status", oldStatus)
                     .set("status", status)
-                    .set("paid_date", paidDate != null ? paidDate : LocalDate.now()));
+                    .set("paid_date", paidDate != null ? paidDate : LocalDate.now())
+                    .setSql("version = version + 1"));
             if (updated == 0) {
                 throw BusinessException.of("error.common.optimisticLock");
             }
@@ -566,7 +568,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     .eq("id", id)
                     .eq("status", oldStatus)
                     .set("status", status)
-                    .set("paid_date", null));
+                    .set("paid_date", null)
+                    .setSql("version = version + 1"));
             if (updated == 0) {
                 throw BusinessException.of("error.common.optimisticLock");
             }

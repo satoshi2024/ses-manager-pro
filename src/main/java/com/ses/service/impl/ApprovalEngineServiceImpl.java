@@ -9,10 +9,14 @@ import com.ses.common.constant.NotificationLinks;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalDelegation;
+import com.ses.entity.ApprovalDelegationType;
+import com.ses.entity.ApprovalParticipant;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.ApprovalDelegationMapper;
+import com.ses.mapper.ApprovalDelegationTypeMapper;
+import com.ses.mapper.ApprovalParticipantMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
@@ -23,6 +27,7 @@ import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import com.ses.service.approval.RouteSnapshot;
+import com.ses.service.approval.RouteSlot;
 import com.ses.service.approval.RouteStepGroup;
 import jakarta.annotation.PostConstruct;
 import org.springframework.dao.DuplicateKeyException;
@@ -35,6 +40,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -55,6 +61,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     private final ApprovalRequestMapper approvalRequestMapper;
     private final ApprovalActionMapper approvalActionMapper;
     private final ApprovalDelegationMapper approvalDelegationMapper;
+    private final ApprovalDelegationTypeMapper approvalDelegationTypeMapper;
+    private final ApprovalParticipantMapper approvalParticipantMapper;
     private final SysUserMapper sysUserMapper;
     private final RouteResolverService routeResolverService;
     private final NotificationService notificationService;
@@ -65,6 +73,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     public ApprovalEngineServiceImpl(ApprovalRequestMapper approvalRequestMapper,
                                       ApprovalActionMapper approvalActionMapper,
                                       ApprovalDelegationMapper approvalDelegationMapper,
+                                      ApprovalDelegationTypeMapper approvalDelegationTypeMapper,
+                                      ApprovalParticipantMapper approvalParticipantMapper,
                                       SysUserMapper sysUserMapper,
                                       RouteResolverService routeResolverService,
                                       NotificationService notificationService,
@@ -74,6 +84,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         this.approvalRequestMapper = approvalRequestMapper;
         this.approvalActionMapper = approvalActionMapper;
         this.approvalDelegationMapper = approvalDelegationMapper;
+        this.approvalDelegationTypeMapper = approvalDelegationTypeMapper;
+        this.approvalParticipantMapper = approvalParticipantMapper;
         this.sysUserMapper = sysUserMapper;
         this.routeResolverService = routeResolverService;
         this.notificationService = notificationService;
@@ -130,15 +142,18 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .routeSnapshotJson(writeJson(snapshot))
                 .status(STATUS_IN_REVIEW)
                 .currentStep(firstStep.stepNo())
+                .roundNo(1)
                 .currentStepStartedAt(LocalDateTime.now())
                 .requestedAt(LocalDateTime.now())
                 .idempotencyKey(command.idempotencyKey())
+                .version(1)
                 .build();
         approvalRequestMapper.insert(entity);
         entity.setRequestNo("AR-" + entity.getId());
         approvalRequestMapper.update(null, new UpdateWrapper<ApprovalRequest>()
                 .eq("id", entity.getId())
                 .set("request_no", entity.getRequestNo()));
+        insertParticipants(entity, snapshot, 1);
         notifyApprovers(entity, firstStep);
         return entity;
     }
@@ -151,7 +166,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
 
         RouteSnapshot snapshot = readJson(request.getRouteSnapshotJson(), RouteSnapshot.class);
         RouteStepGroup currentStep = findStep(snapshot, request.getCurrentStep());
-        ApproverResolution resolution = authorizeActor(currentStep, actingUserId, request.getRequestType());
+        ApproverResolution resolution = authorizeActor(request, currentStep, actingUserId, request.getRequestType());
         if (resolution == null) {
             throw BusinessException.of(403, "error.approval.notApprover");
         }
@@ -161,11 +176,11 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             return; // 同一slotへの二重click/retry。既に記録済みのため何もしない（冪等）。
         }
         notifyApplicant(request, "APPROVAL_APPROVED", "承認申請が承認されました",
-                "approval-approved:" + requestId + ":step:" + currentStep.stepNo() + ":slot:" + resolution.slotOwnerId());
+                "approval-approved:" + requestId + ":round:" + roundNo(request) + ":step:" + currentStep.stepNo()
+                        + ":slot:" + resolution.slotOwnerId());
 
-        long approvedCount = countActions(requestId, currentStep.stepNo(), "APPROVE");
-        if (approvedCount < currentStep.approverUserIds().size()) {
-            return; // 並列group内でまだ全員揃っていない
+        if (!allSlotsSatisfied(request, currentStep)) {
+            return; // 各slotはany-of、stepは全slotが揃うまで進めない
         }
 
         RouteStepGroup nextStep = findNextStep(snapshot, currentStep.stepNo());
@@ -181,15 +196,27 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             return;
         }
 
-        // 最終step完了。design §3/§6.4の順序: target version再検証はF2(対象adapter)が担当する。
+        // 最終step完了。request lock後に対象versionを再検証し、古いsnapshotを適用しない。
         ApprovalTargetAdapter adapter = adaptersByType.get(request.getRequestType());
         if (adapter != null) {
+            long currentVersion = adapter.currentVersion(request.getTargetId());
+            if (!Objects.equals(request.getTargetVersion(), currentVersion)) {
+                boolean conflicted = casUpdate(request, w -> w.set("status", STATUS_CONFLICT));
+                if (!conflicted) {
+                    throw BusinessException.of("error.common.optimisticLock");
+                }
+                request.setStatus(STATUS_CONFLICT);
+                notifyApplicant(request, "APPROVAL_CONFLICT", "承認対象が変更されたため再申請が必要です",
+                        "approval-conflict:" + requestId + ":round:" + roundNo(request));
+                return;
+            }
             adapter.applyApproved(request);
         }
         boolean finalized = casUpdate(request, w -> w
                 .eq("current_step", request.getCurrentStep())
                 .set("status", STATUS_APPROVED)
-                .set("finalized_at", LocalDateTime.now()));
+                .set("finalized_at", LocalDateTime.now())
+                .set("idempotency_key", null));
         if (!finalized) {
             throw BusinessException.of("error.common.optimisticLock");
         }
@@ -203,7 +230,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
 
         RouteSnapshot snapshot = readJson(request.getRouteSnapshotJson(), RouteSnapshot.class);
         RouteStepGroup currentStep = findStep(snapshot, request.getCurrentStep());
-        ApproverResolution resolution = authorizeActor(currentStep, actingUserId, request.getRequestType());
+        ApproverResolution resolution = authorizeActor(request, currentStep, actingUserId, request.getRequestType());
         if (resolution == null) {
             throw BusinessException.of(403, "error.approval.notApprover");
         }
@@ -215,7 +242,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 "approval-rejected:" + requestId);
         boolean updated = casUpdate(request, w -> w
                 .set("status", STATUS_REJECTED)
-                .set("finalized_at", LocalDateTime.now()));
+                .set("finalized_at", LocalDateTime.now())
+                .set("idempotency_key", null));
         if (!updated) {
             throw BusinessException.of("error.common.optimisticLock");
         }
@@ -229,7 +257,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
 
         RouteSnapshot snapshot = readJson(request.getRouteSnapshotJson(), RouteSnapshot.class);
         RouteStepGroup currentStep = findStep(snapshot, request.getCurrentStep());
-        ApproverResolution resolution = authorizeActor(currentStep, actingUserId, request.getRequestType());
+        ApproverResolution resolution = authorizeActor(request, currentStep, actingUserId, request.getRequestType());
         if (resolution == null) {
             throw BusinessException.of(403, "error.approval.notApprover");
         }
@@ -250,8 +278,10 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     public ApprovalRequest resubmit(Long requestId, Long applicantId, Map<String, Object> updatedPayload,
                                      Map<String, Object> updatedDiff, BigDecimal updatedAmountSnapshot) {
         ApprovalRequest request = lockRequest(requestId);
-        requireStatus(request, STATUS_RETURNED);
-        if (!request.getApplicantId().equals(applicantId)) {
+        if (!STATUS_RETURNED.equals(request.getStatus()) && !STATUS_CONFLICT.equals(request.getStatus())) {
+            throw BusinessException.of("error.approval.invalidState");
+        }
+        if (!Objects.equals(request.getApplicantId(), applicantId)) {
             throw BusinessException.of(403, "error.approval.notApprover");
         }
         RouteSnapshot snapshot = readJson(request.getRouteSnapshotJson(), RouteSnapshot.class);
@@ -259,28 +289,78 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .min(Comparator.comparingInt(RouteStepGroup::stepNo))
                 .orElseThrow(() -> BusinessException.of("error.approval.approverUnresolved"));
 
+        boolean conflict = STATUS_CONFLICT.equals(request.getStatus());
+        Map<String, Object> payload = updatedPayload;
+        Map<String, Object> diff = updatedDiff;
+        BigDecimal amount = updatedAmountSnapshot;
+        Long targetVersion = request.getTargetVersion();
+        if (conflict) {
+            ApprovalTargetAdapter adapter = adaptersByType.get(request.getRequestType());
+            if (adapter == null) {
+                throw BusinessException.of("error.approval.targetUnsupported");
+            }
+            Map<String, Object> command = updatedPayload != null
+                    ? updatedPayload
+                    : readJson(request.getPayloadJson(), new TypeReference<Map<String, Object>>() {});
+            com.ses.service.approval.ApprovalSnapshot refreshed = adapter.snapshot(request.getTargetId(), command);
+            adapter.validateBeforeRequest(refreshed);
+            payload = refreshed.payload();
+            diff = refreshed.diff();
+            amount = refreshed.amountSnapshot();
+            targetVersion = refreshed.targetVersion();
+        }
+
+        int nextRound = roundNo(request) + 1;
+        final Map<String, Object> finalPayload = payload;
+        final Map<String, Object> finalDiff = diff;
+        final BigDecimal finalAmount = amount;
+        final Long finalTargetVersion = targetVersion;
         boolean updated = casUpdate(request, w -> {
             w.set("status", STATUS_IN_REVIEW)
                     .set("current_step", firstStep.stepNo())
+                    .set("round_no", nextRound)
                     .set("current_step_started_at", LocalDateTime.now())
                     .set("requested_at", LocalDateTime.now());
-            if (updatedPayload != null) {
-                w.set("payload_json", writeJson(updatedPayload));
-            }
-            if (updatedDiff != null) {
-                w.set("diff_json", writeJson(updatedDiff));
-            }
-            if (updatedAmountSnapshot != null) {
-                w.set("amount_snapshot", updatedAmountSnapshot);
+            if (conflict) {
+                // conflict再申請はadapterが現在値から再生成したsnapshotを完全置換する。
+                // 金額なし業務ではnullも意味のある値なので、条件付きsetで旧値を残さない。
+                w.set("payload_json", writeJson(finalPayload == null ? Map.of() : finalPayload))
+                        .set("diff_json", finalDiff == null ? null : writeJson(finalDiff))
+                        .set("amount_snapshot", finalAmount)
+                        .set("target_version", finalTargetVersion);
+            } else {
+                if (finalPayload != null) {
+                    w.set("payload_json", writeJson(finalPayload));
+                }
+                if (finalDiff != null) {
+                    w.set("diff_json", writeJson(finalDiff));
+                }
+                if (finalAmount != null) {
+                    w.set("amount_snapshot", finalAmount);
+                }
             }
             return w;
         });
         if (!updated) {
             throw BusinessException.of("error.common.optimisticLock");
         }
+
+        approvalParticipantMapper.deleteByRequestId(request.getId());
+        insertParticipants(request, snapshot, nextRound);
         request.setStatus(STATUS_IN_REVIEW);
         request.setCurrentStep(firstStep.stepNo());
+        request.setRoundNo(nextRound);
         request.setCurrentStepStartedAt(LocalDateTime.now());
+        if (conflict) {
+            request.setTargetVersion(finalTargetVersion);
+            request.setPayloadJson(writeJson(finalPayload == null ? Map.of() : finalPayload));
+            request.setDiffJson(finalDiff == null ? null : writeJson(finalDiff));
+            request.setAmountSnapshot(finalAmount);
+        } else {
+            if (finalPayload != null) request.setPayloadJson(writeJson(finalPayload));
+            if (finalDiff != null) request.setDiffJson(writeJson(finalDiff));
+            if (finalAmount != null) request.setAmountSnapshot(finalAmount);
+        }
         notifyApprovers(request, firstStep);
         return request;
     }
@@ -297,7 +377,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         }
         boolean updated = casUpdate(request, w -> w
                 .set("status", STATUS_WITHDRAWN)
-                .set("finalized_at", LocalDateTime.now()));
+                .set("finalized_at", LocalDateTime.now())
+                .set("idempotency_key", null));
         if (!updated) {
             throw BusinessException.of("error.common.optimisticLock");
         }
@@ -339,44 +420,93 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     }
 
     /** 解決済みslot(代理時は委任元)。design §6.4の「先着1件を有効」判定に使う。 */
-    private record ApproverResolution(Long slotOwnerId, boolean delegated) {
+    private record ApproverResolution(Long slotOwnerId, boolean delegated, int slotIndex) {
     }
 
-    /** 職務分離済みのstep候補に対し、本人一致または承認操作時点で有効な代理を認可する（design §6.1/§6.4）。 */
-    private ApproverResolution authorizeActor(RouteStepGroup step, Long actingUserId, String requestType) {
-        if (step.approverUserIds().contains(actingUserId)) {
-            return new ApproverResolution(actingUserId, false);
+    private int roundNo(ApprovalRequest request) {
+        return request.getRoundNo() == null ? 1 : request.getRoundNo();
+    }
+
+    /**
+     * 職務分離済みのstep候補に対し、本人一致または承認操作時点で有効な代理を認可する。
+     * 同一人物が複数slotの候補になっている場合は、snapshot順で最初の未充足slotだけを解決する。
+     */
+    private ApproverResolution authorizeActor(ApprovalRequest request, RouteStepGroup step,
+                                              Long actingUserId, String requestType) {
+        List<ApprovalAction> actions = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                .eq(ApprovalAction::getRequestId, request.getId())
+                .eq(ApprovalAction::getRoundNo, roundNo(request))
+                .eq(ApprovalAction::getStepNo, step.stepNo()));
+
+        ApprovalAction previousByActor = actions.stream()
+                .filter(a -> Objects.equals(a.getApproverUserId(), actingUserId))
+                .findFirst().orElse(null);
+        if (previousByActor != null) {
+            return new ApproverResolution(previousByActor.getApproverSlotUserId(),
+                    previousByActor.getDelegatedFrom() != null,
+                    previousByActor.getSlotIndex() == null ? 0 : previousByActor.getSlotIndex());
         }
+
         LocalDate today = LocalDate.now();
-        for (Long slotOwner : step.approverUserIds()) {
-            boolean delegated = approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
-                            .eq(ApprovalDelegation::getFromUserId, slotOwner)
-                            .eq(ApprovalDelegation::getToUserId, actingUserId)
-                            .le(ApprovalDelegation::getValidFrom, today)
-                            .and(w -> w.isNull(ApprovalDelegation::getValidTo).or().ge(ApprovalDelegation::getValidTo, today)))
-                    .stream()
-                    .anyMatch(d -> requestTypeAllowed(d, requestType));
-            if (delegated) {
-                return new ApproverResolution(slotOwner, true);
+        for (RouteSlot slot : step.slots()) {
+            for (Long slotOwner : slot.candidateUserIds()) {
+                if (slotOwner == null) {
+                    continue;
+                }
+                ApprovalAction occupied = actions.stream()
+                        .filter(a -> Objects.equals(a.getApproverSlotUserId(), slotOwner))
+                        .findFirst().orElse(null);
+                if (occupied != null) {
+                    // 本人が代理actionの後に再送した場合も同一slotの冪等retryとして扱う。
+                    if (Objects.equals(slotOwner, actingUserId)) {
+                        return new ApproverResolution(slotOwner, occupied.getDelegatedFrom() != null,
+                                occupied.getSlotIndex() == null ? slot.slotIndex() : occupied.getSlotIndex());
+                    }
+                    boolean delegatedRetry = approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
+                                    .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                                    .eq(ApprovalDelegation::getToUserId, actingUserId)
+                                    .le(ApprovalDelegation::getValidFrom, today)
+                                    .and(w -> w.isNull(ApprovalDelegation::getValidTo).or()
+                                            .ge(ApprovalDelegation::getValidTo, today)))
+                            .stream()
+                            .anyMatch(d -> requestTypeAllowed(d, requestType));
+                    if (delegatedRetry) {
+                        return new ApproverResolution(slotOwner, true, slot.slotIndex());
+                    }
+                    continue;
+                }
+                if (Objects.equals(slotOwner, actingUserId)) {
+                    return new ApproverResolution(slotOwner, false, slot.slotIndex());
+                }
+                boolean delegated = approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
+                                .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                                .eq(ApprovalDelegation::getToUserId, actingUserId)
+                                .le(ApprovalDelegation::getValidFrom, today)
+                                .and(w -> w.isNull(ApprovalDelegation::getValidTo).or()
+                                        .ge(ApprovalDelegation::getValidTo, today)))
+                        .stream()
+                        .anyMatch(d -> requestTypeAllowed(d, requestType));
+                if (delegated) {
+                    return new ApproverResolution(slotOwner, true, slot.slotIndex());
+                }
             }
         }
         return null;
     }
 
+    /** 子表を正本とする。子行0件は全種別対象。request_types_jsonは参照しない。 */
     private boolean requestTypeAllowed(ApprovalDelegation delegation, String requestType) {
-        if (delegation.getRequestTypesJson() == null) {
-            return true;
-        }
-        List<String> types = readJson(delegation.getRequestTypesJson(), new TypeReference<List<String>>() {
-        });
-        return types.contains(requestType);
+        List<String> types = approvalDelegationTypeMapper.selectRequestTypes(delegation.getId());
+        return types == null || types.isEmpty() || types.contains(requestType);
     }
 
     private boolean insertActionIdempotent(ApprovalRequest request, int stepNo, Long actingUserId,
                                             ApproverResolution resolution, String action, String comment) {
         ApprovalAction row = ApprovalAction.builder()
                 .requestId(request.getId())
+                .roundNo(roundNo(request))
                 .stepNo(stepNo)
+                .slotIndex(resolution.slotIndex())
                 .approverUserId(actingUserId)
                 .approverSlotUserId(resolution.slotOwnerId())
                 .action(action)
@@ -392,11 +522,36 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         }
     }
 
-    private long countActions(Long requestId, int stepNo, String action) {
-        return approvalActionMapper.selectCount(new LambdaQueryWrapper<ApprovalAction>()
-                .eq(ApprovalAction::getRequestId, requestId)
-                .eq(ApprovalAction::getStepNo, stepNo)
-                .eq(ApprovalAction::getAction, action));
+    /** 各slotのrequiredCountを満たした場合だけstep成立とする。現行requiredCountは1。 */
+    private boolean allSlotsSatisfied(ApprovalRequest request, RouteStepGroup step) {
+        List<ApprovalAction> approvals = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                .eq(ApprovalAction::getRequestId, request.getId())
+                .eq(ApprovalAction::getRoundNo, roundNo(request))
+                .eq(ApprovalAction::getStepNo, step.stepNo())
+                .eq(ApprovalAction::getAction, "APPROVE"));
+        return !step.slots().isEmpty() && step.slots().stream().allMatch(slot -> {
+            long count = approvals.stream()
+                    .filter(a -> (a.getSlotIndex() == null ? 0 : a.getSlotIndex()) == slot.slotIndex())
+                    .filter(a -> slot.candidateUserIds().contains(a.getApproverSlotUserId()))
+                    .map(ApprovalAction::getApproverSlotUserId)
+                    .distinct().count();
+            return count >= slot.requiredCount();
+        });
+    }
+
+    /** 申請時点の現在roundの申請者・全slot候補をSQL可視性用participantへ保存する。 */
+    private void insertParticipants(ApprovalRequest request, RouteSnapshot snapshot, int round) {
+        approvalParticipantMapper.insert(ApprovalParticipant.builder()
+                .requestId(request.getId()).userId(request.getApplicantId())
+                .participantRole("applicant").roundNo(round).build());
+        snapshot.steps().stream()
+                .flatMap(step -> step.slots().stream())
+                .flatMap(slot -> slot.candidateUserIds().stream())
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(userId -> approvalParticipantMapper.insert(ApprovalParticipant.builder()
+                        .requestId(request.getId()).userId(userId)
+                        .participantRole("approver").roundNo(round).build()));
     }
 
     /** status/current_step/versionの複合CASでUPDATEする（design §6.4）。呼出前にlockRequest済みであること。 */
@@ -405,16 +560,19 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         UpdateWrapper<ApprovalRequest> wrapper = new UpdateWrapper<ApprovalRequest>()
                 .eq("id", request.getId())
                 .eq("status", request.getStatus())
-                .eq("version", request.getVersion());
+                .eq("current_step", request.getCurrentStep())
+                .eq("version", request.getVersion() == null ? 1 : request.getVersion());
         wrapper = customize.apply(wrapper);
-        wrapper.set("version", request.getVersion() + 1);
+        int currentVersion = request.getVersion() == null ? 1 : request.getVersion();
+        wrapper.set("version", currentVersion + 1);
         return approvalRequestMapper.update(null, wrapper) > 0;
     }
 
     private void notifyApprovers(ApprovalRequest request, RouteStepGroup step) {
         String message = writeJson(List.of("notification.msg.APPROVAL_REQUESTED",
                 request.getRequestNo(), request.getRequestType()));
-        String dedupeKey = "approval-requested:" + request.getId() + ":step:" + step.stepNo();
+        String dedupeKey = "approval-requested:" + request.getId() + ":round:" + roundNo(request)
+                + ":step:" + step.stepNo();
         for (Long approverId : step.approverUserIds()) {
             notificationService.publishToUser(approverId, "APPROVAL_REQUESTED", "承認申請が届きました", message,
                     NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");
@@ -425,6 +583,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         String messageKey = switch (type) {
             case "APPROVAL_RETURNED" -> "notification.msg.APPROVAL_RETURNED";
             case "APPROVAL_REJECTED" -> "notification.msg.APPROVAL_REJECTED";
+            case "APPROVAL_CONFLICT" -> "notification.msg.APPROVAL_CONFLICT";
             default -> "notification.msg.APPROVAL_APPROVED";
         };
         String message = writeJson(List.of(messageKey, request.getRequestNo(), request.getCurrentStep()));

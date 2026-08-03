@@ -11,7 +11,6 @@ import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,7 +33,11 @@ public class BpPaymentApprovalAdapter implements ApprovalTargetAdapter {
         statusDiff.put("before", p.getStatus() == null ? "" : p.getStatus());
         statusDiff.put("after", nextStatus);
         diff.put("status", statusDiff);
-        return new ApprovalSnapshot(version(p.getUpdatedAt()), p.getAmount(), null, payload, diff);
+        return new ApprovalSnapshot(version(p.getVersion()), p.getAmount(), null, payload, diff);
+    }
+    @Override
+    public long currentVersion(Long targetId) {
+        return version(require(targetId).getVersion());
     }
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
     @Override public void applyApproved(ApprovalRequest request) {
@@ -43,5 +46,5 @@ public class BpPaymentApprovalAdapter implements ApprovalTargetAdapter {
     }
     private BpPayment require(Long id) { BpPayment p = id == null ? null : mapper.selectById(id); if (p == null) throw BusinessException.of(404, "error.scope.notFound"); return p; }
     private java.time.LocalDate parseDate(String v) { return v == null || v.isBlank() ? null : java.time.LocalDate.parse(v); }
-    private Long version(LocalDateTime t) { return t == null ? null : t.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(); }
+    private long version(Integer version) { return version == null ? 0L : version.longValue(); }
 }

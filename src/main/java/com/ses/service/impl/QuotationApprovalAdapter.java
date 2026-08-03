@@ -12,7 +12,6 @@ import com.ses.service.approval.ApprovalTargetAdapter;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 
@@ -42,7 +41,12 @@ public class QuotationApprovalAdapter implements ApprovalTargetAdapter {
         payload.put("createDraft", Boolean.TRUE.equals(command.get("createDraft")));
         Map<String, Object> diff = new java.util.LinkedHashMap<>();
         diff.put("status", Map.of("label", "見積ステータス", "before", q.getStatus() == null ? "" : q.getStatus(), "after", status == null ? "" : status));
-        return new ApprovalSnapshot(version(q.getUpdatedAt()), q.getUnitPrice(), null, payload, diff);
+        return new ApprovalSnapshot(version(q.getVersion()), q.getUnitPrice(), null, payload, diff);
+    }
+
+    @Override
+    public long currentVersion(Long targetId) {
+        return version(require(targetId).getVersion());
     }
 
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
@@ -62,5 +66,5 @@ public class QuotationApprovalAdapter implements ApprovalTargetAdapter {
         return q;
     }
 
-    private Long version(LocalDateTime updatedAt) { return updatedAt == null ? null : updatedAt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(); }
+    private long version(Integer version) { return version == null ? 0L : version.longValue(); }
 }

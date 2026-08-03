@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.AssertTrue;
@@ -165,6 +166,10 @@ public class Contract extends BaseEntity {
     /** 作成者ID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    /** 承認対象の楽観ロックバージョン */
+    @Version
+    private Integer version;
 
     @AssertTrue(message = "契約終了日は開始日以降を指定してください")
     public boolean isDateRangeValid() {

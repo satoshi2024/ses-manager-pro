@@ -14,10 +14,12 @@ import com.ses.dto.approval.ApprovalRouteStepRequest;
 import com.ses.dto.approval.ApprovalRouteStepView;
 import com.ses.dto.approval.ApprovalRouteView;
 import com.ses.entity.ApprovalDelegation;
+import com.ses.entity.ApprovalDelegationType;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalDelegationMapper;
+import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
 import com.ses.mapper.SysUserMapper;
@@ -45,6 +47,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     private final ApprovalRouteMapper routeMapper;
     private final ApprovalRouteStepMapper stepMapper;
     private final ApprovalDelegationMapper delegationMapper;
+    private final ApprovalDelegationTypeMapper delegationTypeMapper;
     private final SysUserMapper userMapper;
     private final RouteResolverService routeResolver;
     private final ObjectMapper objectMapper;
@@ -137,6 +140,10 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                 .validFrom(request.validFrom()).validTo(request.validTo()).requestTypesJson(types.isEmpty() ? null : writeJson(types))
                 .reason(request.reason().trim()).approvedBy(actorId).createdBy(actorId).build();
         delegationMapper.insert(row);
+        for (String type : types) {
+            delegationTypeMapper.insert(ApprovalDelegationType.builder()
+                    .delegationId(row.getId()).requestType(type).build());
+        }
         Map<Long, SysUser> users = Map.of(request.fromUserId(), userMapper.selectById(request.fromUserId()),
                 request.toUserId(), userMapper.selectById(request.toUserId()));
         return toDelegationView(row, users);
@@ -145,7 +152,11 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteDelegation(Long id) {
-        if (delegationMapper.selectById(id) == null || delegationMapper.deleteById(id) != 1) {
+        if (delegationMapper.selectById(id) == null) {
+            throw BusinessException.of(404, "error.approval.delegationNotFound");
+        }
+        delegationTypeMapper.deleteByDelegationId(id);
+        if (delegationMapper.deleteById(id) != 1) {
             throw BusinessException.of(404, "error.approval.delegationNotFound");
         }
     }
@@ -192,7 +203,10 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     }
 
     private ApprovalDelegationView toDelegationView(ApprovalDelegation row, Map<Long, SysUser> users) {
-        List<String> types = row.getRequestTypesJson() == null ? List.of() : readTypes(row.getRequestTypesJson());
+        List<String> types = delegationTypeMapper.selectRequestTypes(row.getId());
+        if (types == null) {
+            types = List.of();
+        }
         SysUser from = users.get(row.getFromUserId());
         SysUser to = users.get(row.getToUserId());
         return new ApprovalDelegationView(row.getId(), row.getFromUserId(), from == null ? null : from.getRealName(),

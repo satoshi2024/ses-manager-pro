@@ -12,6 +12,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
+import com.ses.service.approval.RouteSlot;
 import com.ses.service.approval.RouteStepGroup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -82,18 +83,26 @@ public class RouteResolverServiceImpl implements RouteResolverService {
 
         List<RouteStepGroup> stepGroups = new ArrayList<>();
         for (Map.Entry<Integer, List<ApprovalRouteStep>> entry : byStep.entrySet()) {
-            List<Long> approverIds = entry.getValue().stream()
-                    .flatMap(step -> resolveStepCandidates(step, applicantId, asOf).stream())
+            List<RouteSlot> slots = new ArrayList<>();
+            for (int slotIndex = 0; slotIndex < entry.getValue().size(); slotIndex++) {
+                ApprovalRouteStep step = entry.getValue().get(slotIndex);
+                List<Long> resolvedCandidates = resolveStepCandidates(step, applicantId, asOf).stream()
+                        .distinct().toList();
+                if (resolvedCandidates.isEmpty()) {
+                    throw BusinessException.of("error.approval.approverUnresolved");
+                }
+                slots.add(new RouteSlot(slotIndex,
+                        step.getApproverType(), resolvedCandidates, 1));
+            }
+            List<Long> approverIds = slots.stream()
+                    .flatMap(slot -> slot.candidateUserIds().stream())
                     .distinct()
                     .toList();
-            if (approverIds.isEmpty()) {
-                throw BusinessException.of("error.approval.approverUnresolved");
-            }
             Integer slaHours = entry.getValue().stream()
                     .map(ApprovalRouteStep::getSlaHours)
                     .filter(java.util.Objects::nonNull)
                     .findFirst().orElse(null);
-            stepGroups.add(new RouteStepGroup(entry.getKey(), slaHours, approverIds));
+            stepGroups.add(new RouteStepGroup(entry.getKey(), slaHours, approverIds, slots));
         }
 
         return new ResolvedRoute(route.getId(), route.getVersionNo(), route.getOrganizationId(), stepGroups);

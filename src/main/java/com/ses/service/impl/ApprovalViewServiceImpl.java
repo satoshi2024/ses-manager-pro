@@ -14,12 +14,14 @@ import com.ses.entity.ApprovalDelegation;
 import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.ApprovalDelegationMapper;
+import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRequestMapper;
+import com.ses.common.util.PageUtils;
 import com.ses.service.approval.ApprovalViewService;
 import com.ses.service.approval.RouteSnapshot;
 import com.ses.service.approval.RouteStepGroup;
 import com.ses.service.security.AuthorizationService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 
@@ -33,9 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-
 @Service
-@RequiredArgsConstructor
 public class ApprovalViewServiceImpl implements ApprovalViewService {
 
     private static final Set<String> TERMINAL = Set.of("approved", "rejected", "withdrawn", "conflict");
@@ -44,38 +44,37 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
     private final ApprovalDelegationMapper delegationMapper;
     private final ObjectMapper objectMapper;
     private final AuthorizationService authorizationService;
+    private final ApprovalDelegationTypeMapper delegationTypeMapper;
+
+    /** 既存の直接テストconstructorを維持する。child mapperが無いsliceでは全種別扱いにする。 */
+    public ApprovalViewServiceImpl(ApprovalRequestMapper requestMapper, ApprovalActionMapper actionMapper,
+                                   ApprovalDelegationMapper delegationMapper, ObjectMapper objectMapper,
+                                   AuthorizationService authorizationService) {
+        this(requestMapper, actionMapper, delegationMapper, objectMapper, authorizationService, null);
+    }
+
+    @Autowired
+    public ApprovalViewServiceImpl(ApprovalRequestMapper requestMapper, ApprovalActionMapper actionMapper,
+                                   ApprovalDelegationMapper delegationMapper, ObjectMapper objectMapper,
+                                   AuthorizationService authorizationService,
+                                   ApprovalDelegationTypeMapper delegationTypeMapper) {
+        this.requestMapper = requestMapper;
+        this.actionMapper = actionMapper;
+        this.delegationMapper = delegationMapper;
+        this.objectMapper = objectMapper;
+        this.authorizationService = authorizationService;
+        this.delegationTypeMapper = delegationTypeMapper;
+    }
 
     @Override
     public ApprovalRequestListResponse list(String view, String status, long current, long size,
                                             Long userId, String role, Authentication authentication) {
-        long page = Math.max(1, current);
-        long pageSize = Math.min(Math.max(1, size), 100);
-        LambdaQueryWrapper<ApprovalRequest> query = new LambdaQueryWrapper<ApprovalRequest>()
-                .orderByDesc(ApprovalRequest::getRequestedAt)
-                .orderByDesc(ApprovalRequest::getId);
-        if (status != null && !status.isBlank()) {
-            query.eq(ApprovalRequest::getStatus, status);
-        } else if ("completed".equals(view)) {
-            query.in(ApprovalRequest::getStatus, TERMINAL);
-        } else if ("inbox".equals(view)) {
-            query.in(ApprovalRequest::getStatus, List.of("requested", "in_review"));
-        }
-        // applicantの一覧はSQL側でも絞る。承認者/代理者はroute snapshotを検証してから公開する。
-        if ("mine".equals(view)) {
-            query.eq(ApprovalRequest::getApplicantId, userId);
-        }
-        List<ApprovalRequest> candidates = requestMapper.selectList(query);
-        List<ApprovalRequest> visible = candidates.stream()
-                .filter(r -> isVisible(r, userId, role))
-                .filter(r -> viewMatches(r, view, userId))
-                .toList();
-        long total = visible.size();
-        long pages = total == 0 ? 0 : (total + pageSize - 1) / pageSize;
-        int from = (int) Math.min((page - 1) * pageSize, total);
-        int to = (int) Math.min(from + pageSize, total);
-        List<ApprovalRequestListItem> records = visible.subList(from, to).stream()
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<ApprovalRequest> page =
+                PageUtils.safePage(current, size);
+        requestMapper.selectVisiblePage(page, userId, "管理者".equals(role), LocalDate.now(), view, status);
+        List<ApprovalRequestListItem> records = page.getRecords().stream()
                 .map(this::toListItem).toList();
-        return new ApprovalRequestListResponse(records, total, page, pages);
+        return new ApprovalRequestListResponse(records, page.getTotal(), page.getCurrent(), page.getPages());
     }
 
     @Override
@@ -149,9 +148,13 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
                 .stream().anyMatch(d -> requestTypeAllowed(d, request.getRequestType())));
     }
 
+    /** child table is the authority; no child rows mean all request types. */
     private boolean requestTypeAllowed(ApprovalDelegation d, String requestType) {
-        if (d.getRequestTypesJson() == null || d.getRequestTypesJson().isBlank()) return true;
-        return read(d.getRequestTypesJson(), new TypeReference<List<String>>() {}).contains(requestType);
+        if (delegationTypeMapper == null || d.getId() == null) {
+            return true;
+        }
+        List<String> types = delegationTypeMapper.selectRequestTypes(d.getId());
+        return types == null || types.isEmpty() || types.contains(requestType);
     }
 
     private List<ApprovalDiffItem> diffItems(String json, Authentication authentication) {
@@ -207,6 +210,8 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
                 ? "contract.cost.view"
                 : normalized.contains("salary") || normalized.contains("wage") || normalized.contains("payroll")
                 ? "payroll.view"
+                : normalized.contains("bank") || normalized.contains("account")
+                ? "bp-company.bank-account.view"
                 : "bp-company.view";
         return authorizationService.isAllowed(authentication, action);
     }
@@ -241,6 +246,7 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
         catch (Exception e) { return type == RouteSnapshot.class ? null : type.cast(Collections.emptyMap()); }
     }
 
+    @SuppressWarnings("unchecked")
     private <T> T read(String json, TypeReference<T> type) {
         try { return objectMapper.readValue(json, type); }
         catch (Exception e) { return (T) List.of(); }

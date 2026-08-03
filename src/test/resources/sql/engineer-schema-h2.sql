@@ -221,7 +221,8 @@ CREATE TABLE t_contract (
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag            TINYINT DEFAULT 0
+  deleted_flag            TINYINT DEFAULT 0,
+  version                 INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_quotation CASCADE;
@@ -243,7 +244,8 @@ CREATE TABLE t_quotation (
   created_by            BIGINT,
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag          TINYINT DEFAULT 0
+  deleted_flag          TINYINT DEFAULT 0,
+  version               INT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_quotation_source_opportunity ON t_quotation(source_opportunity_id);
 
@@ -318,7 +320,8 @@ CREATE TABLE t_invoice (
   created_by    BIGINT,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag  TINYINT DEFAULT 0
+  deleted_flag  TINYINT DEFAULT 0,
+  version       INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_invoice_item CASCADE;
@@ -361,6 +364,7 @@ CREATE TABLE t_bp_payment (
   deleted_flag       TINYINT NOT NULL DEFAULT 0,
   created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  version            INT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_work_record_layer (work_record_id, layer_order),
   CONSTRAINT fk_bp_payment_parent FOREIGN KEY (parent_payment_id) REFERENCES t_bp_payment(id)
 );

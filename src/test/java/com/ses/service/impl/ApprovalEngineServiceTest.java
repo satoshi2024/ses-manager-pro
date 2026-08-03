@@ -5,12 +5,14 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalDelegation;
+import com.ses.entity.ApprovalDelegationType;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.ApprovalDelegationMapper;
+import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
@@ -31,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,6 +62,8 @@ class ApprovalEngineServiceTest {
     private ApprovalActionMapper approvalActionMapper;
     @Autowired
     private ApprovalDelegationMapper approvalDelegationMapper;
+    @Autowired
+    private ApprovalDelegationTypeMapper approvalDelegationTypeMapper;
     @Autowired
     private SysUserMapper sysUserMapper;
 
@@ -105,9 +111,13 @@ class ApprovalEngineServiceTest {
     }
 
     private ApprovalRequest request(String requestType) {
+        return request(requestType, null);
+    }
+
+    private ApprovalRequest request(String requestType, String idempotencyKey) {
         return approvalEngineService.request(new ApprovalRequestCommand(
                 requestType, "TEST", 1L, 1L, applicantId, null, BigDecimal.valueOf(1000),
-                Map.of("k", "v"), null, null));
+                Map.of("k", "v"), null, idempotencyKey));
     }
 
     @Test
@@ -187,6 +197,39 @@ class ApprovalEngineServiceTest {
     }
 
     @Test
+    void 代理対象種別は子表を正本として判定する() {
+        String typeAllowed = "engine.delegate-type-allowed";
+        insertRoute(typeAllowed, List.of(List.of(approver1Id)));
+        ApprovalDelegation allowed = ApprovalDelegation.builder()
+                .fromUserId(approver1Id).toUserId(delegateId)
+                .validFrom(LocalDate.now().minusDays(1)).validTo(LocalDate.now().plusDays(1))
+                .requestTypesJson("[\"engine.delegate-type-denied\"]")
+                .build();
+        approvalDelegationMapper.insert(allowed);
+        approvalDelegationTypeMapper.insert(ApprovalDelegationType.builder()
+                .delegationId(allowed.getId()).requestType(typeAllowed).build());
+
+        ApprovalRequest allowedRequest = request(typeAllowed);
+        approvalEngineService.approve(allowedRequest.getId(), delegateId, "子表で許可");
+        assertEquals("approved", approvalRequestMapper.selectById(allowedRequest.getId()).getStatus());
+
+        String typeDenied = "engine.delegate-type-denied";
+        insertRoute(typeDenied, List.of(List.of(approver1Id)));
+        ApprovalDelegation denied = ApprovalDelegation.builder()
+                .fromUserId(approver1Id).toUserId(delegateId)
+                .validFrom(LocalDate.now().minusDays(1)).validTo(LocalDate.now().plusDays(1))
+                .requestTypesJson("[\"engine.delegate-type-denied\"]")
+                .build();
+        approvalDelegationMapper.insert(denied);
+        approvalDelegationTypeMapper.insert(ApprovalDelegationType.builder()
+                .delegationId(denied.getId()).requestType(typeAllowed).build());
+
+        ApprovalRequest deniedRequest = request(typeDenied);
+        assertThrows(BusinessException.class,
+                () -> approvalEngineService.approve(deniedRequest.getId(), delegateId, "子表で拒否"));
+    }
+
+    @Test
     void 代理期間外は代理者が承認できない() {
         insertRoute("engine.delegate-out", List.of(List.of(approver1Id)));
         approvalDelegationMapper.insert(ApprovalDelegation.builder()
@@ -234,6 +277,61 @@ class ApprovalEngineServiceTest {
                 .eq(ApprovalAction::getAction, "APPROVE"));
         assertEquals(1, count);
         assertEquals("in_review", approvalRequestMapper.selectById(req.getId()).getStatus());
+    }
+
+    @Test
+    void 差戻し後の再申請はroundを増分し前roundのactionを残す() {
+        String type = "engine.resubmit-round";
+        insertRoute(type, List.of(List.of(approver1Id)));
+        String key = "engine-resubmit-key-" + System.nanoTime();
+        ApprovalRequest first = request(type, key);
+
+        approvalEngineService.returnForRevision(first.getId(), approver1Id, "修正してください");
+        assertEquals("returned", approvalRequestMapper.selectById(first.getId()).getStatus());
+
+        ApprovalRequest resubmitted = approvalEngineService.resubmit(first.getId(), applicantId,
+                Map.of("k", "updated"), Map.of("k", Map.of("before", "v", "after", "updated")),
+                BigDecimal.valueOf(2000));
+        assertEquals("in_review", resubmitted.getStatus());
+        assertEquals(2, resubmitted.getRoundNo());
+        assertEquals(BigDecimal.valueOf(2000), resubmitted.getAmountSnapshot());
+
+        approvalEngineService.approve(first.getId(), approver1Id, "再承認");
+        ApprovalRequest completed = approvalRequestMapper.selectById(first.getId());
+        assertEquals("approved", completed.getStatus());
+        assertNull(completed.getIdempotencyKey());
+
+        List<ApprovalAction> actions = approvalActionMapper.selectList(
+                new LambdaQueryWrapper<ApprovalAction>().eq(ApprovalAction::getRequestId, first.getId()));
+        assertEquals(2, actions.size());
+        assertEquals(List.of(1, 2), actions.stream().map(ApprovalAction::getRoundNo).sorted().toList());
+    }
+
+    @Test
+    void 終端遷移でidempotencyKeyをclearして同一操作を再申請できる() {
+        String type = "engine.idempotency-terminal";
+        insertRoute(type, List.of(List.of(approver1Id)));
+
+        String rejectedKey = "engine-rejected-key-" + System.nanoTime();
+        ApprovalRequest rejected = request(type, rejectedKey);
+        approvalEngineService.reject(rejected.getId(), approver1Id, "却下");
+        assertNull(approvalRequestMapper.selectById(rejected.getId()).getIdempotencyKey());
+        ApprovalRequest afterReject = request(type, rejectedKey);
+        assertNotEquals(rejected.getId(), afterReject.getId());
+
+        String approvedKey = "engine-approved-key-" + System.nanoTime();
+        ApprovalRequest approved = request(type, approvedKey);
+        approvalEngineService.approve(approved.getId(), approver1Id, "承認");
+        assertNull(approvalRequestMapper.selectById(approved.getId()).getIdempotencyKey());
+        ApprovalRequest afterApprove = request(type, approvedKey);
+        assertNotEquals(approved.getId(), afterApprove.getId());
+
+        String withdrawnKey = "engine-withdrawn-key-" + System.nanoTime();
+        ApprovalRequest withdrawn = request(type, withdrawnKey);
+        approvalEngineService.withdraw(withdrawn.getId(), applicantId);
+        assertNull(approvalRequestMapper.selectById(withdrawn.getId()).getIdempotencyKey());
+        ApprovalRequest afterWithdraw = request(type, withdrawnKey);
+        assertNotEquals(withdrawn.getId(), afterWithdraw.getId());
     }
 
     @Test

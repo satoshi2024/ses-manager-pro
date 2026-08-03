@@ -11,6 +11,7 @@ import com.ses.entity.ApprovalDelegation;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalDelegationMapper;
+import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.approval.ApprovalAdministrationService;
@@ -31,6 +32,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
@@ -42,6 +44,7 @@ class ApprovalAdministrationServiceTest {
     @Autowired ApprovalEngineService approvalEngineService;
     @Autowired ApprovalRequestMapper requestMapper;
     @Autowired ApprovalDelegationMapper delegationMapper;
+    @Autowired ApprovalDelegationTypeMapper delegationTypeMapper;
     @Autowired SysUserMapper userMapper;
 
     private Long applicantId;
@@ -132,8 +135,13 @@ class ApprovalAdministrationServiceTest {
         assertEquals(approver1Id, created.fromUserId());
         assertEquals(delegateId, created.toUserId());
         assertEquals(List.of("contract.activate"), created.requestTypes());
+        assertEquals(List.of("contract.activate"), delegationTypeMapper.selectRequestTypes(created.id()));
         assertEquals("長期休暇", created.reason());
         assertEquals(applicantId, created.approvedBy());
+
+        administrationService.deleteDelegation(created.id());
+        assertTrue(delegationTypeMapper.selectRequestTypes(created.id()).isEmpty());
+        assertNull(delegationMapper.selectById(created.id()));
     }
 
     @Test

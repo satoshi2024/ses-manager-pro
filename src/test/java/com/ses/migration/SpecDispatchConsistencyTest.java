@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,6 +59,10 @@ class SpecDispatchConsistencyTest {
         SPEC_BY_CONVERSATION.put("S16", "jp-pint-digital-invoice");
         SPEC_BY_CONVERSATION.put("S17", "ai-feedback-learning");
     }
+
+    /** 実装済みspecは予約から実在へ移行済みなので、そのspec/versionだけ衝突検査の対象外とする。 */
+    private static final Map<String, Integer> REALIZED_RESERVED = Map.of(
+            "approval-workflow-internal-control", 78);
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
@@ -207,7 +212,8 @@ class SpecDispatchConsistencyTest {
             String spec = entry.getValue();
             int reserved = firstGroup(DESIGN_RESERVED, read(SPECS.resolve(spec).resolve("design.md")),
                     spec + " の予約V##");
-            if (existing.contains(reserved)) {
+            if (existing.contains(reserved)
+                    && !Objects.equals(REALIZED_RESERVED.get(spec), reserved)) {
                 conflicts.add(entry.getKey() + " " + spec + " が実在するV" + reserved + " を予約しています");
             }
         }

@@ -41,6 +41,8 @@ public class ApprovalRequest extends BaseEntity {
     /** draft/requested/in_review/returned/approved/rejected/withdrawn/conflict */
     private String status;
     private Integer currentStep;
+    /** 差戻し後の再申請ラウンド。初回は1。 */
+    private Integer roundNo;
     /** 現在stepの開始時刻。SLA判定はrequestedAtではなくこの値を使う。 */
     private LocalDateTime currentStepStartedAt;
     private LocalDateTime requestedAt;

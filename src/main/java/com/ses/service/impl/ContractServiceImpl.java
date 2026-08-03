@@ -580,7 +580,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         // 前提の指定のため、部分更新はカラムを明示する UpdateWrapper で行う。
         this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Contract>()
                 .eq("id", contractId)
-                .set("renewal_decision", decision));
+                .set("renewal_decision", decision)
+                .setSql("version = version + 1"));
     }
 
     /**

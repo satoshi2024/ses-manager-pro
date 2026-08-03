@@ -192,7 +192,8 @@ public class BpPaymentServiceImpl implements BpPaymentService {
                 .eq("id", id)
                 .eq("status", existing.getStatus())
                 .set(bpPayment.getAmount() != null, "amount", bpPayment.getAmount())
-                .set(bpPayment.getRemarks() != null, "remarks", bpPayment.getRemarks());
+                .set(bpPayment.getRemarks() != null, "remarks", bpPayment.getRemarks())
+                .setSql("version = version + 1");
         int updated = bpPaymentMapper.update(null, update);
         if (updated == 0) {
             throw BusinessException.of("error.common.optimisticLock");

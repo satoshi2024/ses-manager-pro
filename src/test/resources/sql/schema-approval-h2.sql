@@ -4,6 +4,8 @@
 -- 外部キーは張らない（schema-crm-h2.sql等と同じ方針。共有インメモリH2は複数contextで
 -- schema-locationsを再実行するため、FKを張るとDROP TABLE順序で他specの再生成が失敗しうる）。
 
+DROP TABLE IF EXISTS t_approval_participant CASCADE;
+DROP TABLE IF EXISTS t_approval_delegation_type CASCADE;
 DROP TABLE IF EXISTS t_approval_action CASCADE;
 DROP TABLE IF EXISTS t_approval_delegation CASCADE;
 DROP TABLE IF EXISTS t_approval_request CASCADE;
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS t_approval_request (
   route_snapshot_json CLOB          NOT NULL,
   status              VARCHAR(20)   NOT NULL DEFAULT 'draft',
   current_step        INT           NOT NULL DEFAULT 0,
+  round_no            INT           NOT NULL DEFAULT 1,
   current_step_started_at DATETIME,
   requested_at        DATETIME,
   finalized_at        DATETIME,
@@ -77,16 +80,18 @@ CREATE INDEX IF NOT EXISTS idx_approval_request_status ON t_approval_request(sta
 CREATE TABLE IF NOT EXISTS t_approval_action (
   id                    BIGINT      AUTO_INCREMENT PRIMARY KEY,
   request_id            BIGINT      NOT NULL,
+  round_no              INT         NOT NULL DEFAULT 1,
   step_no               INT         NOT NULL,
+  slot_index            INT         NOT NULL DEFAULT 0,
   approver_user_id      BIGINT      NOT NULL,
   approver_slot_user_id BIGINT      NOT NULL,
   action                VARCHAR(20) NOT NULL,
   comment               CLOB,
   delegated_from        BIGINT,
   acted_at              DATETIME    NOT NULL,
-  CONSTRAINT uk_approval_action_slot UNIQUE (request_id, step_no, approver_slot_user_id)
+  CONSTRAINT uk_approval_action_slot UNIQUE (request_id, round_no, step_no, approver_slot_user_id)
 );
-CREATE INDEX IF NOT EXISTS idx_approval_action_request ON t_approval_action(request_id, step_no);
+CREATE INDEX IF NOT EXISTS idx_approval_action_request ON t_approval_action(request_id, round_no, step_no);
 
 CREATE TABLE IF NOT EXISTS t_approval_delegation (
   id                 BIGINT      AUTO_INCREMENT PRIMARY KEY,
@@ -104,6 +109,29 @@ CREATE TABLE IF NOT EXISTS t_approval_delegation (
 );
 CREATE INDEX IF NOT EXISTS idx_approval_delegation_lookup
   ON t_approval_delegation(from_user_id, valid_from, valid_to);
+
+CREATE TABLE IF NOT EXISTS t_approval_participant (
+  id               BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  request_id       BIGINT       NOT NULL,
+  user_id          BIGINT       NOT NULL,
+  participant_role VARCHAR(20)  NOT NULL,
+  round_no         INT          NOT NULL DEFAULT 1,
+  CONSTRAINT uk_participant UNIQUE (request_id, round_no, user_id, participant_role)
+);
+CREATE INDEX IF NOT EXISTS idx_participant_user
+  ON t_approval_participant(user_id, participant_role);
+
+CREATE TABLE IF NOT EXISTS t_approval_delegation_type (
+  delegation_id BIGINT      NOT NULL,
+  request_type  VARCHAR(50) NOT NULL,
+  CONSTRAINT pk_approval_delegation_type PRIMARY KEY (delegation_id, request_type)
+);
+
+-- V78対象entityの楽観ロック列。MySQLのV78と同じ列形状にする。
+ALTER TABLE t_quotation ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+ALTER TABLE t_invoice ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
 
 -- action permission seed（V75と同内容。H2側はt_permission_group_actionもschema-locations経由で
 -- 別ファイルにより先に作成済みのため、ここではDMLのみ投入する）

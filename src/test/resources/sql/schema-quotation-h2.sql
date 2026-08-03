@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS t_quotation (
   created_by            BIGINT,
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag          TINYINT DEFAULT 0
+  deleted_flag          TINYINT DEFAULT 0,
+  version               INT NOT NULL DEFAULT 0
 );
 
 ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS quotation_id BIGINT;

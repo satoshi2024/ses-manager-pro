@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -57,6 +58,9 @@ public class Quotation {
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    @Version
+    private Integer version;
 
     @TableLogic
     private Integer deletedFlag;

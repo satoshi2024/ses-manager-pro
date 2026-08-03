@@ -22,6 +22,9 @@ public interface ApprovalTargetAdapter {
     /** 対象entityの現在値からsnapshotを作る。呼出元(F2の申請API)が{@link ApprovalRequestCommand}を組み立てる際に使う。 */
     ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command);
 
+    /** 最終承認直前に再取得する対象の楽観ロックversion。実装を省略してfail-openにしない。 */
+    long currentVersion(Long targetId);
+
     /** 申請受付前の対象固有バリデーション（既存serviceの入力検証を再利用し、再実装しない）。 */
     void validateBeforeRequest(ApprovalSnapshot snapshot);
 

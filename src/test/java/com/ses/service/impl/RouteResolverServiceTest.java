@@ -19,10 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * T042(F1) L1〜L3: design §6.2の金額帯境界(inclusive/inclusive)、
@@ -54,11 +56,15 @@ class RouteResolverServiceTest {
     }
 
     private Long insertUser(String prefix) {
+        return insertUser(prefix, "管理者");
+    }
+
+    private Long insertUser(String prefix, String role) {
         SysUser user = SysUser.builder()
                 .username(prefix + "-" + System.nanoTime())
                 .password("x")
                 .realName(prefix)
-                .role("管理者")
+                .role(role)
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -122,6 +128,28 @@ class RouteResolverServiceTest {
 
         insertRoute("route.noamount2", null, null, 1, null, approverId);
         assertNotNull(routeResolverService.resolve("route.noamount2", null, null, applicantId, LocalDate.now()));
+    }
+
+    @Test
+    void ROLEの1行は候補者のanyOfで1slotとして解決される() {
+        String role = "営業";
+        Long roleUser1 = insertUser("route-role-user1", role);
+        Long roleUser2 = insertUser("route-role-user2", role);
+        String type = "route.role-any-of." + System.nanoTime();
+        ApprovalRoute route = ApprovalRoute.builder()
+                .tenantId(1L).requestType(type).organizationId(null)
+                .minAmount(null).maxAmount(null).versionNo(1)
+                .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
+        approvalRouteMapper.insert(route);
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder()
+                .routeId(route.getId()).stepNo(1).parallelGroup(1)
+                .approverType("ROLE").approverValue(role).build());
+
+        ResolvedRoute resolved = resolve(type, BigDecimal.ONE);
+
+        assertEquals(1, resolved.steps().get(0).slots().size());
+        List<Long> candidates = resolved.steps().get(0).slots().get(0).candidateUserIds();
+        assertTrue(candidates.containsAll(List.of(roleUser1, roleUser2)));
     }
 
     @Test

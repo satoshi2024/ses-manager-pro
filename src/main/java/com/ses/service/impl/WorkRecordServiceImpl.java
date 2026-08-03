@@ -502,7 +502,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 int updated = bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()
                         .eq("id", root.getId())
                         .eq("status", "未払")
-                        .set("amount", record.getPaymentAmount()));
+                        .set("amount", record.getPaymentAmount())
+                        .setSql("version = version + 1"));
                 if (updated == 0) {
                     throw BusinessException.of("error.common.optimisticLock");
                 }

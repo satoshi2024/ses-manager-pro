@@ -28,7 +28,10 @@ public class ApprovalAction implements Serializable {
     private Long id;
 
     private Long requestId;
+    private Integer roundNo;
     private Integer stepNo;
+    /** slotのsnapshot上の位置（監査・表示用）。 */
+    private Integer slotIndex;
     /** 実際に操作したuser(代理時は代理者本人)。 */
     private Long approverUserId;
     /** 解決されたslotの持ち主(代理時は委任元)。 */

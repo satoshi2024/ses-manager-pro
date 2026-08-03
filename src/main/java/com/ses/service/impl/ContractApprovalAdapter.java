@@ -12,7 +12,6 @@ import com.ses.service.approval.ApprovalTargetAdapter;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,7 +44,12 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
         payload.put("cancelDate", command.getOrDefault("cancelDate", ""));
         Map<String, Object> diff = new java.util.LinkedHashMap<>();
         diff.put("operation", Map.of("label", "契約操作", "before", c.getStatus() == null ? "" : c.getStatus(), "after", operation));
-        return new ApprovalSnapshot(version(c.getUpdatedAt()), amount, null, payload, diff);
+        return new ApprovalSnapshot(version(c.getVersion()), amount, null, payload, diff);
+    }
+
+    @Override
+    public long currentVersion(Long targetId) {
+        return version(require(targetId).getVersion());
     }
     @Override public void validateBeforeRequest(ApprovalSnapshot snapshot) { }
 
@@ -63,5 +67,5 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
     }
     private Contract require(Long id) { Contract c = id == null ? null : mapper.selectById(id); if (c == null) throw BusinessException.of(404, "error.scope.notFound"); return c; }
     private java.time.LocalDate parseDate(String value) { return value == null || value.isBlank() ? null : java.time.LocalDate.parse(value); }
-    private Long version(LocalDateTime updatedAt) { return updatedAt == null ? null : updatedAt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(); }
+    private long version(Integer version) { return version == null ? 0L : version.longValue(); }
 }

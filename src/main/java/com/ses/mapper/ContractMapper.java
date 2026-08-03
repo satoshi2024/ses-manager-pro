@@ -219,8 +219,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
 
     /** 単価列のみを部分更新する（同期/改定が他項目を旧値で上書きしないようにする / R3R-29）。 */
     @org.apache.ibatis.annotations.Update(
-            "UPDATE t_contract SET selling_price = #{sellingPrice}, cost_price = #{costPrice} "
-            + "WHERE id = #{id} AND deleted_flag = 0")
+            "UPDATE t_contract SET selling_price = #{sellingPrice}, cost_price = #{costPrice}, "
+            + "version = version + 1 WHERE id = #{id} AND deleted_flag = 0")
     int updatePriceOnly(@org.apache.ibatis.annotations.Param("id") Long id,
                         @org.apache.ibatis.annotations.Param("sellingPrice") java.math.BigDecimal sellingPrice,
                         @org.apache.ibatis.annotations.Param("costPrice") java.math.BigDecimal costPrice);

@@ -496,6 +496,38 @@ class FlywayMigrationSmokeTest {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) >= 1,
                         "t_approval_action.uk_approval_action_slotがUNIQUEでない");
             }
+
+            // V78: Round/participant/delegation type と楽観ロックversionの実MySQLスキーマ。
+            assertColumnExists(st, "t_approval_request", "round_no");
+            assertColumnExists(st, "t_approval_action", "round_no");
+            assertColumnExists(st, "t_approval_action", "slot_index");
+            assertTableExists(st, "t_approval_participant");
+            assertColumnExists(st, "t_approval_participant", "request_id");
+            assertColumnExists(st, "t_approval_participant", "user_id");
+            assertColumnExists(st, "t_approval_participant", "participant_role");
+            assertColumnExists(st, "t_approval_participant", "round_no");
+            assertIndexExists(st, "t_approval_participant", "uk_participant");
+            assertIndexExists(st, "t_approval_participant", "idx_participant_user");
+            assertTableExists(st, "t_approval_delegation_type");
+            assertColumnExists(st, "t_approval_delegation_type", "delegation_id");
+            assertColumnExists(st, "t_approval_delegation_type", "request_type");
+            assertIndexExists(st, "t_approval_delegation_type", "PRIMARY");
+            assertIndexExists(st, "t_approval_action", "uk_approval_action_slot");
+            assertColumnExists(st, "t_quotation", "version");
+            assertColumnExists(st, "t_contract", "version");
+            assertColumnExists(st, "t_invoice", "version");
+            assertColumnExists(st, "t_bp_payment", "version");
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT column_name FROM information_schema.statistics "
+                            + "WHERE table_schema = DATABASE() AND table_name = 't_approval_action' "
+                            + "AND index_name = 'uk_approval_action_slot' ORDER BY seq_in_index")) {
+                java.util.List<String> columns = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    columns.add(rs.getString(1));
+                }
+                assertEquals(java.util.List.of("request_id", "round_no", "step_no", "approver_slot_user_id"),
+                        columns, "V78のaction UNIQUEはroundとslot userを含む必要がある");
+            }
         }
     }
 
