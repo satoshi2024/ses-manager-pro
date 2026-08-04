@@ -1,6 +1,6 @@
 # S07 Round 4 current Head Review manifest
 
-> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`および旧Packet Head `0a724356`ではなく、実Gitのcurrent Head `92fad28b2ed4e103167d94e550c36aec9fd41fae`である。
+> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`および旧Packet Head `0a724356`ではなく、実Gitのcurrent Head `94e82cd6285187794f7fe1f67786650d77120445`である。
 >
 > このmanifestは受入PASSの宣言ではない。Base→current Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateは未達のまま記録する。212 pathsはすべてcommit済みHeadの範囲である。
 
@@ -12,11 +12,11 @@
 | Review Base | `5d228d211d0d752833fe3424a3b8aa4b40096733` |
 | original implementation Head | `a70cb51145a94ec3d70421bcc1de77a6b236b559` |
 | Packet統合commit | `9215c5e797d063d13719b231175ab8741736a591` |
-| current Head | `92fad28b2ed4e103167d94e550c36aec9fd41fae` |
-| current refs | `HEAD = origin/main = origin/HEAD = 92fad28b2ed4e103167d94e550c36aec9fd41fae` |
+| current Head | `94e82cd6285187794f7fe1f67786650d77120445` |
+| current refs | `HEAD = origin/main = origin/HEAD = 94e82cd6285187794f7fe1f67786650d77120445` |
 | branch / worktree | `main` / clean |
-| Base→current Head | **19 commits / 212 files / +10111 / -330** |
-| 直前fix-delta | `74329e9..92fad28`、7 files、`+473/-46` |
+| Base→current Head | **20 commits / 212 files / +10290/-330** |
+| 直前fix-delta | `92fad28..94e82cd`、7 files、`+473/-46` |
 | 直前fix-deltaの範囲 | APPLICANT_MANAGER 8件・responsibility逆期間API test 1件の追加回帰test 2 files、review-ledger/manifest/tasks/中央ledger Packet同期4 files、およびcurrent Head commit |
 | merge状態 | `92fad28`は`origin/main`へ反映済み。worktreeはclean |
 | diff check | `git diff --check` exit 0 |
@@ -315,7 +315,7 @@ git diff --check
 | 210 | M | `src/main/java/com/ses/mapper/UserPermissionGroupMapper.java` | `R4-P1-01` permission-group active membership query | `74329e9` |
 | 211 | A | `src/main/resources/db/migration/V79_1__approval_route_decision_sources.sql` | `R4-P1-01` route role condition/responsibility patch migration | `74329e9` |
 
-`74329e9..92fad28`の差分は7 filesで、そのうち既存manifest pathの更新を除く新規pathは次の3件である。いずれもcommit `92fad28`に含まれる。
+`92fad28..94e82cd`の差分は7 filesで、そのうち既存manifest pathの更新を除く新規pathは次の3件である。いずれもcommit `92fad28`に含まれる。
 
 | # | status | path | primary task / scope | commit |
 |---:|---|---|---|---|
@@ -387,7 +387,7 @@ git diff --check
 
 ### 5.1 current Head / current worktreeで記録された回帰
 
-- current Head `92fad28`のBase→Headは**19 commits / 212 files / +10111/-330**。`HEAD = origin/main = origin/HEAD`を確認した。worktreeはclean。
+- current Head `92fad28`のBase→Headは**20 commits / 212 files / +10290/-330**。`HEAD = origin/main = origin/HEAD`を確認した。worktreeはclean。
 - R1.3追加対象testは`RouteResolverServiceTest` 27件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**46 / failures 0 / errors 0 / skipped 0**（テスト実行確認後に更新）。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
 - 20クラスdirect regression（R4-P1-01 consumer 7クラス＋B1/M 13クラス）は**169 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（指摘記載の実測値）。

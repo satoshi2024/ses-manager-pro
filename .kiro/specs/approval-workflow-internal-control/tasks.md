@@ -159,9 +159,9 @@
 
 ## R4 current Head correction（2026-08-04）
 
-- **current Head**: `92fad28b2ed4e103167d94e550c36aec9fd41fae`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。worktreeはclean。
-- **Base→current Head**: `5d228d2..92fad28`は**19 commits / 212 files / +10111/-330**。212 pathsはすべてcommit済みHead範囲。merge状態はorigin/main反映済みである。
+- **current Head**: `94e82cd6285187794f7fe1f67786650d77120445`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。worktreeはclean。
+- **Base→current Head**: `5d228d2..92fad28`は**20 commits / 212 files / +10290/-330**。212 pathsはすべてcommit済みHead範囲。merge状態はorigin/main反映済みである。
 - **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。実MySQL、複数JVM、実Webhook、rollback、desktop/390px browser、zero-skippedのrelease gate未達を完了扱いにしない。
 - **direct regression**: R1.3対象 46/0/0/0、migration/dispatch整合 35/0/0/0、20クラスdirect regression 169/0/0/0、すべてBUILD SUCCESS。定向greenはB1/M完了の代替ではない。
 - **L4**: `verify-like-ci.ps1`が実行した`mvn -B clean test`は**1454 tests以上 / failures 0 / errors 0 / skipped 12**。Maven本体BUILD SUCCESSでもCI契約のzero-skippedは未達である。
-- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head `92fad28`・212 paths・19 commitsへ同期したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。
+- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head `92fad28`・212 paths・20 commitsへ同期したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。
