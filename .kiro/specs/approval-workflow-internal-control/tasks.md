@@ -100,12 +100,14 @@
   - **Demo/未検証事項**: MockMvc/Thymeleafと定向テストで管理画面・snapshot・代理期間・監査表示を確認した。実ブラウザのdesktop/390px目視、MySQL/Docker fresh migration smoke、mvn全量は未実施。
   - **テスト要件**: L2〜L3。進行中申請のroute snapshot不変、申請後の代理期間開始/終了、解決不能拒否、本人/代理のslot二重承認防止をカバー。
 - [ ] R4-P1-01. route decision modelとapprover source不足の是正
-  - **状態**: 実装済み差分の定向検証まで完了。P1は実MySQL migration smoke未実行のため、受入上は`OPEN / P1`を維持する。
-  - **実装**: V79.1で`applicant_role_condition`と`t_approval_responsibility`を追加。route管理DTO/API/UI、`PERMISSION_GROUP`、`ORGANIZATION_MANAGER`、`FINANCE_MANAGER`の設定・as-of解決、H2 schemaを同期した。
-  - **定向検証**: compile成功、`RouteResolverServiceTest` 13件、`ApprovalAdministrationServiceTest` 10件、`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件がfailures 0 / errors 0。Flyway smokeはDocker unavailableのため2件skip。
-  - **残存gate**: V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、適用履歴照会、browser管理画面Demoは未達。B1/Mの未達状態も変更しない。
+  - **状態**: 実装済み差分の定向検証とR1.3 source別回帰まで完了。P1は実MySQL migration smoke未実行のため、受入上は`OPEN / P1`を維持する。
+  - **実装**: V79.1で`applicant_role_condition`と`t_approval_responsibility`を追加。route管理DTO/API/UI、`PERMISSION_GROUP`、`ORGANIZATION_MANAGER`、`FINANCE_MANAGER`の設定・as-of解決、H2 schemaを同期した。V75〜V79は変更していない。
+  - **追加した回帰**: `RouteResolverServiceTest`を13→19件へ拡張し、responsibility `valid_from`/`valid_to` inclusive境界・前後日、組織一致/不一致、FINANCE_MANAGERの組織別/全社assignment、permission groupの無効group・削除membership・disabled/deleted user、3 sourceの候補0件・申請者自身のみ・責任者disabled/deleted userを検証。`ApprovalAdministrationServiceTest`は13件で不正approver type、route/responsibility逆期間、不存在organization、無効user、error code/messageKeyを検証。新規`ApprovalAdministrationApiControllerTest` 5件でHTTP 400/404と`ApiResult.code`を検証した。
+  - **定向/static/direct実測**: 上記R1.3対象は**37 / failures 0 / errors 0 / skipped 0**。`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1のstatic計は**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01 consumer 7クラス＋B1/M 13クラスの20クラスdirect regressionは**153 / 0 / 0 / 0 / BUILD SUCCESS**。
+  - **L4相当実測**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。skipは12 test cases / 10 report classesである。
+  - **残存gate**: V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`照会、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時の実DB rollback、browser管理画面/desktop/390px Demo、CI zero-skippedは未達。B1/Mの未達状態も変更しない。
   - **Objective**: R1.2の申請者role条件route、R1.3の5種類のapprover sourceをroute設定からsnapshot解決まで同一契約で実証する。
-  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、候補0件fail-closed、管理APIの不正type/期間をカバーする。
+  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL/実browser/release gateの証拠が得られるまでcheckboxは`[ ]`のまま維持する。
 
 - [ ] B1. 通知/SLA/escalation
   - **状態**: 実装中（V79 outboxとround/step/slot対応dedupe keyを追加済み。Demo/release gate未達のため完了扱いにしない）。
@@ -132,11 +134,11 @@
   - **定向回帰実測**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、
     `ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を
     failures 0 / errors 0 / skipped 0で確認した。adapterは既存service委譲、月次締め最終承認者、registry idempotencyを確認した。
-  - **全量実測（current B1作業木、fixture修正後、2026-08-03）**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`が実行した`mvn -B clean test`は`1433 tests / failures 0 / errors 0 / skipped 12`でMaven本体はBUILD SUCCESS、scriptはskip検出によりexit 1。Node `v24.18.0`は利用可能でJS構文チェックは実行された。`EngineerFollowupServiceTest`のH2 fixtureへメニュー・role mappingを復元した結果、全量での`MobileResponsiveLayoutTest` `quick-add-label` failureは解消した。skipは12 test cases / 10 report classesで、Docker依存の`CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。current作業木の最新実測は1433 / 0 / 0 / 12である。
+  - **全量実測（current作業木、2026-08-04）**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`が実行した`mvn -B clean test`は`1454 tests / failures 0 / errors 0 / skipped 12`でMaven本体はBUILD SUCCESS、scriptはDocker依存skip検出によりexit 1。Node `v24.18.0`は利用可能でJS構文チェックは実行された。skipは12 test cases / 10 report classesである。
   - **M定向回帰の再測定**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、`ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を failures 0 / errors 0 / skipped 0で再確認した。
   - **migration/static回帰**: `MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`FlywayMigrationSmokeTest` 2件の計36件を実行し、failures 0 / errors 0 / skipped 2。後者2件はDocker daemon unavailableによるskipである。
   - **MySQL smoke**: current環境ではDocker daemonへ接続できず、V78/V79を含むfresh/legacy/upgrade/partial-repair/repair/concurrentの実MySQL検証は未実施である。過去のDocker利用可能時のPASS記録は履歴として保持するが、current作業木のrelease evidenceには再利用しない。
-  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通し、実MySQLでのV79適用・rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackは未確認である。全量failure 1、Docker依存skip 12も残るため、B1/Mはrelease gate未達としてPASS扱いにしない。
+  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通し、実MySQLでのV79適用・rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackは未確認である。全量failure 0まで到達したが、Docker依存skip 12、browser、実MySQL等が残るため、B1/Mはrelease gate未達としてPASS扱いにしない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     5業務のbrowser通し（desktop/390px）、既存Contract/Invoice/BpPayment/Closingの回帰、
     Node/JS syntax、`git diff --check`。

@@ -214,4 +214,51 @@ class ApprovalAdministrationServiceTest {
                 LocalDate.now(), LocalDate.now().minusDays(1), List.of("contract.activate"), "期間不正");
         assertThrows(BusinessException.class, () -> administrationService.createDelegation(request, applicantId));
     }
+
+    @Test
+    void 管理routeの不正approver_typeと逆期間を拒否する() {
+        String invalidType = "a2.invalid-approver-type." + System.nanoTime();
+        ApprovalRouteSaveRequest invalidTypeRequest = new ApprovalRouteSaveRequest(
+                null, invalidType, null, null, null, LocalDate.now(), null,
+                List.of(new ApprovalRouteStepRequest(1, 1, "UNKNOWN", null, null)));
+        assertBusinessFailure(() -> administrationService.createRouteVersion(invalidTypeRequest, applicantId),
+                400, "error.approval.approverType");
+
+        String reversePeriod = "a2.reverse-route-period." + System.nanoTime();
+        ApprovalRouteSaveRequest reversePeriodRequest = new ApprovalRouteSaveRequest(
+                null, reversePeriod, null, null, null, LocalDate.now(), LocalDate.now().minusDays(1),
+                List.of(new ApprovalRouteStepRequest(1, 1, "USER", String.valueOf(approver1Id), null)));
+        assertBusinessFailure(() -> administrationService.createRouteVersion(reversePeriodRequest, applicantId),
+                400, "error.approval.routePeriod");
+    }
+
+    @Test
+    void 管理responsibilityの不正typeと逆期間を拒否する() {
+        assertBusinessFailure(() -> administrationService.createResponsibility(
+                        new ApprovalResponsibilitySaveRequest("UNKNOWN", null, approver1Id,
+                                LocalDate.now(), null), applicantId),
+                400, "error.approval.responsibilityType");
+        assertBusinessFailure(() -> administrationService.createResponsibility(
+                        new ApprovalResponsibilitySaveRequest("FINANCE_MANAGER", null, approver1Id,
+                                LocalDate.now(), LocalDate.now().minusDays(1)), applicantId),
+                400, "error.approval.responsibilityPeriod");
+    }
+
+    @Test
+    void 管理responsibilityの不存在組織と無効userを拒否する() {
+        assertBusinessFailure(() -> administrationService.createResponsibility(
+                        new ApprovalResponsibilitySaveRequest("ORGANIZATION_MANAGER", 999999999L,
+                                approver1Id, LocalDate.now(), null), applicantId),
+                404, "error.approval.organizationNotFound");
+        assertBusinessFailure(() -> administrationService.createResponsibility(
+                        new ApprovalResponsibilitySaveRequest("FINANCE_MANAGER", null, 999999999L,
+                                LocalDate.now(), null), applicantId),
+                400, "error.approval.userInvalid");
+    }
+
+    private void assertBusinessFailure(Runnable action, int expectedCode, String expectedMessageKey) {
+        BusinessException exception = assertThrows(BusinessException.class, action::run);
+        assertEquals(expectedCode, exception.getCode());
+        assertEquals(expectedMessageKey, exception.getMessageKey());
+    }
 }

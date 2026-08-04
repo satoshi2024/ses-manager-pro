@@ -305,6 +305,233 @@ class RouteResolverServiceTest {
         assertTrue(resolvedIds.containsAll(List.of(groupApprover, organizationApprover, financeApprover)));
     }
 
+    @Test
+    void 責任者のvalid_from_valid_toと組織scopeは両端inclusiveで不一致を拒否する() {
+        LocalDate today = LocalDate.now();
+        Long organizationA = insertOrganization("route-boundary-org-a");
+        Long organizationB = insertOrganization("route-boundary-org-b");
+        String type = "route.responsibility-boundary." + System.nanoTime();
+
+        insertSourceRoute(type, "ORGANIZATION_MANAGER", null, null,
+                today.minusDays(2), today.plusDays(2));
+        insertResponsibility("ORGANIZATION_MANAGER", organizationA, approverId, today, today);
+
+        ResolvedRoute onStart = resolveAt(type, organizationA, today);
+        assertTrue(onStart.steps().get(0).approverUserIds().contains(approverId));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, organizationA, today.minusDays(1)));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, organizationA, today.plusDays(1)));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, organizationB, today));
+    }
+
+    @Test
+    void FINANCE_MANAGERは組織別と全社assignmentをasOfで解決する() {
+        LocalDate today = LocalDate.now();
+        Long organizationA = insertOrganization("route-finance-org-a");
+        Long organizationB = insertOrganization("route-finance-org-b");
+        Long organizationFinance = insertUser("route-finance-org-manager");
+        Long globalFinance = insertUser("route-finance-global-manager");
+        String type = "route.finance-scope." + System.nanoTime();
+
+        insertSourceRoute(type, "FINANCE_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("FINANCE_MANAGER", organizationA, organizationFinance,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("FINANCE_MANAGER", null, globalFinance,
+                today.minusDays(1), today.plusDays(1));
+
+        List<Long> organizationCandidates = resolveAt(type, organizationA, today)
+                .steps().get(0).approverUserIds();
+        assertTrue(organizationCandidates.containsAll(List.of(organizationFinance, globalFinance)));
+
+        List<Long> otherOrganizationCandidates = resolveAt(type, organizationB, today)
+                .steps().get(0).approverUserIds();
+        assertTrue(otherOrganizationCandidates.contains(globalFinance));
+        assertTrue(!otherOrganizationCandidates.contains(organizationFinance));
+
+        List<Long> tenantWideCandidates = resolveAt(type, null, today)
+                .steps().get(0).approverUserIds();
+        assertEquals(List.of(globalFinance), tenantWideCandidates);
+    }
+
+    @Test
+    void permission_groupは無効groupと削除済みmembershipと無効削除済みuserを候補から除外する() {
+        PermissionGroup group = insertPermissionGroup("route-active-group", 1);
+        Long activeMember = insertUser("route-group-active-member");
+        Long disabledMember = insertUser("route-group-disabled-member");
+        Long deletedMember = insertUser("route-group-deleted-member");
+        Long deletedMembershipMember = insertUser("route-group-membership");
+        insertMembership(group.getId(), activeMember);
+        insertMembership(group.getId(), disabledMember);
+        insertMembership(group.getId(), deletedMember);
+        UserPermissionGroup deletedMembership = insertMembership(group.getId(), deletedMembershipMember);
+
+        SysUser disabled = new SysUser();
+        disabled.setId(disabledMember);
+        disabled.setStatus(0);
+        sysUserMapper.updateById(disabled);
+        sysUserMapper.deleteById(deletedMember);
+        userPermissionGroupMapper.deleteById(deletedMembership.getId());
+
+        String type = "route.permission-group-filter." + System.nanoTime();
+        insertSourceRoute(type, "PERMISSION_GROUP", group.getGroupKey(), null,
+                LocalDate.now().minusDays(1), LocalDate.now().plusDays(1));
+        List<Long> candidates = resolve(type, BigDecimal.ONE).steps().get(0).approverUserIds();
+        assertEquals(List.of(activeMember), candidates);
+
+        PermissionGroup disabledGroup = insertPermissionGroup("route-disabled-group", 1);
+        insertMembership(disabledGroup.getId(), activeMember);
+        String disabledGroupType = "route.permission-group-disabled." + System.nanoTime();
+        insertSourceRoute(disabledGroupType, "PERMISSION_GROUP", disabledGroup.getGroupKey(), null,
+                LocalDate.now().minusDays(1), LocalDate.now().plusDays(1));
+        disabledGroup.setEnabled(0);
+        permissionGroupMapper.updateById(disabledGroup);
+        assertThrows(BusinessException.class, () -> resolve(disabledGroupType, BigDecimal.ONE));
+
+        PermissionGroup deletedGroup = insertPermissionGroup("route-deleted-group", 1);
+        insertMembership(deletedGroup.getId(), activeMember);
+        String deletedGroupType = "route.permission-group-deleted." + System.nanoTime();
+        insertSourceRoute(deletedGroupType, "PERMISSION_GROUP", deletedGroup.getGroupKey(), null,
+                LocalDate.now().minusDays(1), LocalDate.now().plusDays(1));
+        permissionGroupMapper.deleteById(deletedGroup.getId());
+        assertThrows(BusinessException.class, () -> resolve(deletedGroupType, BigDecimal.ONE));
+    }
+
+    @Test
+    void 各approver_sourceの候補0件はfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        PermissionGroup group = insertPermissionGroup("route-empty-group", 1);
+        String groupType = "route.empty-group." + System.nanoTime();
+        insertSourceRoute(groupType, "PERMISSION_GROUP", group.getGroupKey(), null,
+                today.minusDays(1), today.plusDays(1));
+
+        Long organization = insertOrganization("route-empty-responsibility-org");
+        String organizationType = "route.empty-organization-manager." + System.nanoTime();
+        insertSourceRoute(organizationType, "ORGANIZATION_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+
+        String financeType = "route.empty-finance-manager." + System.nanoTime();
+        insertSourceRoute(financeType, "FINANCE_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+
+        assertThrows(BusinessException.class, () -> resolve(groupType, BigDecimal.ONE));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(organizationType, organization, today));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(financeType, organization, today));
+    }
+
+    @Test
+    void 各approver_sourceで申請者自身しかいない場合はfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        PermissionGroup group = insertPermissionGroup("route-self-group", 1);
+        insertMembership(group.getId(), applicantId);
+        String groupType = "route.self-group." + System.nanoTime();
+        insertSourceRoute(groupType, "PERMISSION_GROUP", group.getGroupKey(), null,
+                today.minusDays(1), today.plusDays(1));
+
+        Long organization = insertOrganization("route-self-responsibility-org");
+        String organizationType = "route.self-organization-manager." + System.nanoTime();
+        insertSourceRoute(organizationType, "ORGANIZATION_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("ORGANIZATION_MANAGER", organization, applicantId,
+                today.minusDays(1), today.plusDays(1));
+
+        String financeType = "route.self-finance-manager." + System.nanoTime();
+        insertSourceRoute(financeType, "FINANCE_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("FINANCE_MANAGER", organization, applicantId,
+                today.minusDays(1), today.plusDays(1));
+
+        assertThrows(BusinessException.class, () -> resolve(groupType, BigDecimal.ONE));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(organizationType, organization, today));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(financeType, organization, today));
+    }
+
+    @Test
+    void 責任者の無効userと削除済みuserは候補0件として拒否される() {
+        LocalDate today = LocalDate.now();
+        Long organization = insertOrganization("route-invalid-responsibility-org");
+        Long disabledManager = insertUser("route-disabled-manager");
+        SysUser disabled = new SysUser();
+        disabled.setId(disabledManager);
+        disabled.setStatus(0);
+        sysUserMapper.updateById(disabled);
+        String organizationType = "route.disabled-organization-manager." + System.nanoTime();
+        insertSourceRoute(organizationType, "ORGANIZATION_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("ORGANIZATION_MANAGER", organization, disabledManager,
+                today.minusDays(1), today.plusDays(1));
+
+        Long deletedManager = insertUser("route-deleted-manager");
+        String financeType = "route.deleted-finance-manager." + System.nanoTime();
+        insertSourceRoute(financeType, "FINANCE_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(1));
+        insertResponsibility("FINANCE_MANAGER", null, deletedManager,
+                today.minusDays(1), today.plusDays(1));
+        sysUserMapper.deleteById(deletedManager);
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(organizationType, organization, today));
+        assertThrows(BusinessException.class,
+                () -> resolveAt(financeType, organization, today));
+    }
+
+    private Long insertOrganization(String prefix) {
+        OrganizationUnit organization = OrganizationUnit.builder()
+                .tenantId(1L).code(prefix + "-" + System.nanoTime()).name(prefix)
+                .type("部").validFrom(LocalDate.now().minusDays(10)).status("有効").version(0).build();
+        organizationUnitMapper.insert(organization);
+        return organization.getId();
+    }
+
+    private PermissionGroup insertPermissionGroup(String prefix, int enabled) {
+        PermissionGroup group = new PermissionGroup();
+        group.setTenantId("default");
+        group.setGroupKey(prefix + "-" + System.nanoTime());
+        group.setGroupName(prefix);
+        group.setEnabled(enabled);
+        permissionGroupMapper.insert(group);
+        return group;
+    }
+
+    private UserPermissionGroup insertMembership(Long groupId, Long userId) {
+        UserPermissionGroup membership = new UserPermissionGroup();
+        membership.setTenantId("default");
+        membership.setGroupId(groupId);
+        membership.setUserId(userId);
+        userPermissionGroupMapper.insert(membership);
+        return membership;
+    }
+
+    private Long insertSourceRoute(String requestType, String approverType, String approverValue,
+                                   Long organizationId, LocalDate validFrom, LocalDate validTo) {
+        ApprovalRoute route = ApprovalRoute.builder()
+                .tenantId(1L).requestType(requestType).organizationId(organizationId)
+                .minAmount(null).maxAmount(null).versionNo(1)
+                .validFrom(validFrom).validTo(validTo).activeFlag(1).build();
+        approvalRouteMapper.insert(route);
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder()
+                .routeId(route.getId()).stepNo(1).parallelGroup(1)
+                .approverType(approverType).approverValue(approverValue).build());
+        return route.getId();
+    }
+
+    private void insertResponsibility(String type, Long organizationId, Long userId,
+                                      LocalDate validFrom, LocalDate validTo) {
+        approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
+                .tenantId(1L).responsibilityType(type).organizationId(organizationId).userId(userId)
+                .validFrom(validFrom).validTo(validTo).activeFlag(1).build());
+    }
+
+    private ResolvedRoute resolveAt(String requestType, Long organizationId, LocalDate asOf) {
+        return routeResolverService.resolve(requestType, organizationId, BigDecimal.ONE, applicantId, asOf);
+    }
+
     private Long insertRoleRoute(String requestType, String applicantRole, Long approverUserId) {
         ApprovalRoute route = ApprovalRoute.builder()
                 .tenantId(1L).requestType(requestType).applicantRoleCondition(applicantRole)
