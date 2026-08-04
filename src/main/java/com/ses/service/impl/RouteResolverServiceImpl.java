@@ -2,14 +2,17 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.entity.ApprovalResponsibility;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
+import com.ses.mapper.ApprovalResponsibilityMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import com.ses.service.approval.RouteSlot;
@@ -41,10 +44,14 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     private final ApprovalRouteStepMapper approvalRouteStepMapper;
     private final SysUserMapper sysUserMapper;
     private final UserOrganizationMapper userOrganizationMapper;
+    private final UserPermissionGroupMapper userPermissionGroupMapper;
+    private final ApprovalResponsibilityMapper approvalResponsibilityMapper;
 
     @Override
     public ResolvedRoute resolve(String requestType, Long organizationId, BigDecimal amountSnapshot,
                                   Long applicantId, LocalDate asOf) {
+        SysUser applicant = applicantId == null ? null : sysUserMapper.selectById(applicantId);
+        String applicantRole = applicant == null ? null : applicant.getRole();
         List<ApprovalRoute> candidates = approvalRouteMapper.selectList(
                 new LambdaQueryWrapper<ApprovalRoute>()
                         .eq(ApprovalRoute::getTenantId, 1L)
@@ -57,9 +64,11 @@ public class RouteResolverServiceImpl implements RouteResolverService {
         BigDecimal absAmount = amountSnapshot == null ? null : amountSnapshot.abs();
         List<ApprovalRoute> matched = candidates.stream()
                 .filter(r -> matchesOrganization(r, organizationId))
+                .filter(r -> matchesApplicantRole(r, applicantRole))
                 .filter(r -> matchesAmount(r, absAmount))
                 .sorted(Comparator
-                        .comparingInt((ApprovalRoute r) -> r.getOrganizationId() != null ? 0 : 1)
+                        .comparingInt((ApprovalRoute r) -> r.getApplicantRoleCondition() != null ? 0 : 1)
+                        .thenComparingInt(r -> r.getOrganizationId() != null ? 0 : 1)
                         .thenComparing(this::bandWidth)
                         .thenComparing(Comparator.comparing(ApprovalRoute::getVersionNo).reversed()))
                 .toList();
@@ -86,7 +95,7 @@ public class RouteResolverServiceImpl implements RouteResolverService {
             List<RouteSlot> slots = new ArrayList<>();
             for (int slotIndex = 0; slotIndex < entry.getValue().size(); slotIndex++) {
                 ApprovalRouteStep step = entry.getValue().get(slotIndex);
-                List<Long> resolvedCandidates = resolveStepCandidates(step, applicantId, asOf).stream()
+                List<Long> resolvedCandidates = resolveStepCandidates(step, applicantId, organizationId, asOf).stream()
                         .distinct().toList();
                 if (resolvedCandidates.isEmpty()) {
                     throw BusinessException.of("error.approval.approverUnresolved");
@@ -112,6 +121,11 @@ public class RouteResolverServiceImpl implements RouteResolverService {
         return route.getOrganizationId() == null || route.getOrganizationId().equals(organizationId);
     }
 
+    private boolean matchesApplicantRole(ApprovalRoute route, String applicantRole) {
+        return route.getApplicantRoleCondition() == null
+                || route.getApplicantRoleCondition().equals(applicantRole);
+    }
+
     private boolean matchesAmount(ApprovalRoute route, BigDecimal absAmount) {
         if (absAmount == null) {
             // 金額なし申請は金額帯を持たないrouteへのみ流す（design §6.1）。
@@ -129,7 +143,8 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     }
 
     /** 職務分離(R1.4): 申請者自身をstepの承認候補から除外する。 */
-    private List<Long> resolveStepCandidates(ApprovalRouteStep step, Long applicantId, LocalDate asOf) {
+    private List<Long> resolveStepCandidates(ApprovalRouteStep step, Long applicantId,
+                                             Long organizationId, LocalDate asOf) {
         List<Long> ids = switch (step.getApproverType()) {
             case "USER" -> {
                 try {
@@ -143,10 +158,43 @@ public class RouteResolverServiceImpl implements RouteResolverService {
                                     .eq(SysUser::getRole, step.getApproverValue())
                                     .eq(SysUser::getStatus, 1))
                     .stream().map(SysUser::getId).toList();
+            case "PERMISSION_GROUP" -> resolvePermissionGroup(step.getApproverValue());
             case "APPLICANT_MANAGER" -> activeUserIds(resolveApplicantManager(applicantId, asOf));
+            case "ORGANIZATION_MANAGER" -> resolveResponsibilities("ORGANIZATION_MANAGER", organizationId, asOf);
+            case "FINANCE_MANAGER" -> resolveResponsibilities("FINANCE_MANAGER", organizationId, asOf);
             default -> List.of();
         };
         return ids.stream().filter(id -> !id.equals(applicantId)).toList();
+    }
+
+    private List<Long> resolvePermissionGroup(String groupKey) {
+        if (groupKey == null || groupKey.isBlank()) {
+            return List.of();
+        }
+        return userPermissionGroupMapper.selectActiveUserIdsByGroupKey("default", groupKey.trim());
+    }
+
+    private List<Long> resolveResponsibilities(String responsibilityType, Long organizationId, LocalDate asOf) {
+        if ("ORGANIZATION_MANAGER".equals(responsibilityType) && organizationId == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<ApprovalResponsibility> query = new LambdaQueryWrapper<ApprovalResponsibility>()
+                .eq(ApprovalResponsibility::getTenantId, 1L)
+                .eq(ApprovalResponsibility::getResponsibilityType, responsibilityType)
+                .eq(ApprovalResponsibility::getActiveFlag, 1)
+                .le(ApprovalResponsibility::getValidFrom, asOf)
+                .and(w -> w.isNull(ApprovalResponsibility::getValidTo)
+                        .or().ge(ApprovalResponsibility::getValidTo, asOf));
+        if ("ORGANIZATION_MANAGER".equals(responsibilityType)) {
+            query.eq(ApprovalResponsibility::getOrganizationId, organizationId);
+        } else if (organizationId == null) {
+            query.isNull(ApprovalResponsibility::getOrganizationId);
+        } else {
+            query.and(w -> w.isNull(ApprovalResponsibility::getOrganizationId)
+                    .or().eq(ApprovalResponsibility::getOrganizationId, organizationId));
+        }
+        return activeUserIds(approvalResponsibilityMapper.selectList(query).stream()
+                .map(ApprovalResponsibility::getUserId).toList());
     }
 
     private List<Long> resolveApplicantManager(Long applicantId, LocalDate asOf) {

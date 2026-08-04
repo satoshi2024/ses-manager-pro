@@ -490,12 +490,15 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_approval_delegation");
             assertColumnExists(st, "m_approval_route", "min_amount");
             assertColumnExists(st, "m_approval_route", "max_amount");
+            assertColumnExists(st, "m_approval_route", "applicant_role_condition");
             assertNumericColumn(st, "m_approval_route", "min_amount", 14, 0);
             assertColumnExists(st, "t_approval_request", "route_snapshot_json");
             assertColumnExists(st, "t_approval_request", "target_version");
             assertColumnExists(st, "t_approval_request", "idempotency_key");
             assertColumnExists(st, "t_approval_action", "approver_slot_user_id");
             assertIndexExists(st, "m_approval_route", "idx_approval_route_lookup");
+            assertTableExists(st, "t_approval_responsibility");
+            assertIndexExists(st, "t_approval_responsibility", "idx_approval_responsibility_lookup");
             assertIndexExists(st, "t_approval_request", "idx_approval_request_applicant");
             assertActionGrantedTo(st, "approval.*", "role-hr", "role-manager", "role-sales");
             // t_approval_action.uk_approval_action_slot が二重action防止のUNIQUEであること

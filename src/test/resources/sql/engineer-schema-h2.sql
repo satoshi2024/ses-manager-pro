@@ -1072,3 +1072,19 @@ CREATE TABLE t_persistent_session (
   expires_at DATETIME NOT NULL,
   UNIQUE (session_id)
 );
+
+-- 承認責任者entityのMyBatis生成SELECTが孤立schemaでも失敗しないよう最終形を再現する。
+CREATE TABLE IF NOT EXISTS t_approval_responsibility (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT NOT NULL DEFAULT 1,
+  responsibility_type VARCHAR(30) NOT NULL,
+  organization_id BIGINT,
+  user_id BIGINT NOT NULL,
+  valid_from DATE NOT NULL,
+  valid_to DATE,
+  active_flag TINYINT NOT NULL DEFAULT 1,
+  created_by BIGINT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0
+);

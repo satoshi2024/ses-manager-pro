@@ -8,7 +8,7 @@
 > 本specは「状態機械 × 期間 × 金額 × 権限」の四重交差であり、S02と同じ事故構造を持つ。
 > **design.md §6.2の金額帯境界を実装前に確定すること。実装中に決めない。**
 >
-> **Migration**: S07の正式migrationは **V75/V76/V77/V78/V79**。V75は承認DDL、V76は承認menu、V77はSLA開始時刻、V78はround/participant/version、V79はB1 notification outboxを担当する。BP(V70/V71)とCRM(V73/V74)のmerge後に採番を確定し、V72は永久欠番とする。
+> **Migration**: S07の正式migrationは **V75/V76/V77/V78/V79**。R1.2/R1.3のroute decision sourceは追加のpatch migration **V79.1**が担当する。V75は承認DDL、V76は承認menu、V77はSLA開始時刻、V78はround/participant/version、V79はB1 notification outboxを担当する。V75〜V79は変更せず、V79.1はV79適用後かつV80より前に適用する。
 > S09〜S17は **V80〜V88** を予約し、過去migrationの編集・削除・out-of-order適用は行わない。適用済みDBの`flyway_schema_history`はReview Packetで別途照会結果を記録する。
 
 - [x] 0. G7と対象操作inventory
@@ -47,9 +47,10 @@
     `MessageBundleConsistencyTest`（4クラス計51件）全green（回帰、L1〜L3+共有基盤の直接影響範囲）。
     `git diff --check` exit 0。MySQL fresh smokeの assert block は`FlywayMigrationSmokeTest`へ追加済みだが
     Docker未導入のため本環境では未実行（既存の全spec共通の制約、release gateとして継続管理）。
-  - **未実装・F2/A2/B1への申し送り**: `target_version`の実値取得・対象entityの`@Version`追加、
-    5対象adapterの登録(`ApprovalTargetAdapter`実装)はF2。`permission group`/`組織責任者`/`財務責任者`の
-    個別解決方式、routeのversion編集UIはA2。`escalate()`と`sla_hours`監視はB1。詳細はdesign.md §8。
+  - **未実装・F2/B1への申し送り**: `target_version`の実値取得・対象entityの`@Version`追加、
+    5対象adapterの登録(`ApprovalTargetAdapter`実装)はF2。`escalate()`と`sla_hours`監視はB1。R1.2/R1.3の
+    route decision source不足はR4-P1-01でV79.1・A2管理経路・resolver・H2/testまで実装したが、
+    実MySQL migrationの適用確認は未達として別gateに残す。
   - **Demo**: `RouteResolverServiceTest`の境界value test群（min-1/min/min+1/max-1/max/max+1）で
     金額帯ちょうどの申請が意図したrouteへ解決されることを自動テストで確認（本番相当の実ブラウザ/curl Demoは
     A1のUI実装後、Mで実施）。route未設定の場合の拒否+管理者通知は`request()`実装内で
@@ -93,11 +94,19 @@
 
 - [x] A2. route/代理管理
   - **状態**: 完了。route version登録・適用期間・approver preview、期間/対象付き代理登録・論理削除、代理監査表示を実装した。
-  - **実装**: 既存routeは更新せず新行へversionを採番し、申請時route snapshotを固定する。代理は承認操作時点の期間とrequest typeで判定し、本人/代理のslot重複は既存の一意制約で先着1件に抑制する。固定USERと申請者上長は有効ユーザーだけを候補にし、解決不能時は受付を拒否する。
+  - **実装**: 既存routeは更新せず新行へversionを採番し、申請時route snapshotを固定する。`applicant_role_condition`で申請者role条件を保存し、role条件routeを汎用routeより優先する。代理は承認操作時点の期間とrequest typeで判定し、本人/代理のslot重複は既存の一意制約で先着1件に抑制する。固定USER、permission group、申請者上長、組織責任者、財務責任者は有効期間・有効ユーザーだけを候補にし、解決不能時は受付を拒否する。責任者assignmentは`t_approval_responsibility`で管理する。
   - **権限・CSRF・i18n**: route/代理管理APIとページを管理者限定にし、更新操作は既存`SES.api`のCSRFヘッダー方式を維持した。4言語bundleと管理者向けsidebarリンクを追加した。
   - **自動検証**: `ApprovalAdministrationServiceTest`（version/snapshot、preview、代理期間開始/終了、監査項目、逆期間、不正USER値）、`RouteResolverServiceTest`（金額境界、未設定、自己承認、組織/帯幅/version優先、無効USER）各全件PASS。関連`ApprovalEngineServiceTest`、`ApprovalPageRenderTest`、`ApprovalUiContractTest`、`MessageBundleConsistencyTest`もPASS。Node `--check`と`git diff --check`もPASS。
   - **Demo/未検証事項**: MockMvc/Thymeleafと定向テストで管理画面・snapshot・代理期間・監査表示を確認した。実ブラウザのdesktop/390px目視、MySQL/Docker fresh migration smoke、mvn全量は未実施。
   - **テスト要件**: L2〜L3。進行中申請のroute snapshot不変、申請後の代理期間開始/終了、解決不能拒否、本人/代理のslot二重承認防止をカバー。
+- [ ] R4-P1-01. route decision modelとapprover source不足の是正
+  - **状態**: 実装済み差分の定向検証まで完了。P1は実MySQL migration smoke未実行のため、受入上は`OPEN / P1`を維持する。
+  - **実装**: V79.1で`applicant_role_condition`と`t_approval_responsibility`を追加。route管理DTO/API/UI、`PERMISSION_GROUP`、`ORGANIZATION_MANAGER`、`FINANCE_MANAGER`の設定・as-of解決、H2 schemaを同期した。
+  - **定向検証**: compile成功、`RouteResolverServiceTest` 13件、`ApprovalAdministrationServiceTest` 10件、`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件がfailures 0 / errors 0。Flyway smokeはDocker unavailableのため2件skip。
+  - **残存gate**: V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、適用履歴照会、browser管理画面Demoは未達。B1/Mの未達状態も変更しない。
+  - **Objective**: R1.2の申請者role条件route、R1.3の5種類のapprover sourceをroute設定からsnapshot解決まで同一契約で実証する。
+  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、候補0件fail-closed、管理APIの不正type/期間をカバーする。
+
 - [ ] B1. 通知/SLA/escalation
   - **状態**: 実装中（V79 outboxとround/step/slot対応dedupe keyを追加済み。Demo/release gate未達のため完了扱いにしない）。
   - **実装済み**: `ApprovalNotificationKeys`へ申請/承認/差戻し/却下/conflict/SLAの共通key生成を集約し、`requestId + round + step (+ slot)`でラウンド再利用を防止。`ApprovalSlaService`もroundを含むkeyへ統一した。V78は変更せず、V79で`t_notification_outbox`を追加し、通知保存と外部Webhook配信をcommit後worker・再送経路へ分離した。

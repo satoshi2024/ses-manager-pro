@@ -4,11 +4,13 @@
 
 ## 1. DDL（S07正式migration V75/V76/V77/V78/V79）
 
-S07の採番正本は、既存のV75/V76/V77、S07追加のV78、B1追加のV79である。S09以降はV80〜V88を使用し、V75〜V79の適用済みmigrationは編集・削除しない。
+S07の採番正本は、既存のV75/V76/V77/V78/V79と、R1.2/R1.3の不足を補うpatch migration **V79.1**である。V75〜V79は変更せず、V79.1はV79適用後かつV80より前に適用する。S09以降はV80〜V88を使用する。
 
-- `m_approval_route(id, tenant_id, request_type, organization_id, min/max_amount, version_no,
-  valid_from/to, active_flag)`。
-- `m_approval_route_step(route_id, step_no, parallel_group, approver_type, approver_value, sla_hours)`。
+- `m_approval_route(id, tenant_id, request_type, applicant_role_condition, organization_id, min/max_amount, version_no,
+  valid_from/to, active_flag)`。`applicant_role_condition IS NULL`は全role対象、値ありは申請者role一致。
+- `m_approval_route_step(route_id, step_no, parallel_group, approver_type, approver_value, sla_hours)`。approver_typeはUSER/ROLE/APPLICANT_MANAGER/PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER。
+- `t_approval_responsibility(id, tenant_id, responsibility_type, organization_id, user_id, valid_from/to, active_flag)`。
+  ORGANIZATION_MANAGERは組織単位、FINANCE_MANAGERは組織単位またはorganization_id=NULLの全社assignmentとしてas-of解決する。
 - `t_approval_request(id, request_no, request_type, target_type/id, target_version, applicant_id,
   organization_id, amount_snapshot, payload_json, diff_json, route_snapshot_json, status, current_step,
   round_no, requested_at, finalized_at, idempotency_key, version)`。
@@ -130,6 +132,14 @@ V78は適用済み可能性のあるmigrationとして編集せず、B1の外部
 通知本体とoutbox行は同一のDB transactionで保存する。transaction中には外部Webhookを呼ばず、commit後callbackから1件workerを起動する。schedulerはdue行を取得し、worker beanの`REQUIRES_NEW` transaction内でclaim→Webhook送信→`SENT`または指数backoffの`RETRY`/上限到達の`FAILED`更新を行う。claim競合は送信せず、30分以上の`PROCESSING`は再送可能へ戻す。Webhook URL未設定または対象外種別は配信対象外として`SENT`扱いにする。
 
 H2ではFlywayを実行しないため、`sql/schema-approval-h2.sql`へ同じ列・一意制約・due indexを反映する。V79はV78のchecksumやDDLを変更せず、適用済みV78の有無にかかわらずforward-onlyで適用できる追加migrationとする。
+
+### 1.3 V79.1（R4-P1-01 route decision sources）
+
+V75〜V79は公開済みのため変更せず、`V79_1__approval_route_decision_sources.sql`を追加する。`m_approval_route.applicant_role_condition VARCHAR(30) NULL`を冪等に追加し、`t_approval_responsibility`を新設する。組織責任者・財務責任者は既存の一般上長列を流用せず、assignmentの有効期間と組織scopeを申請時点の`asOf`で評価する。
+
+`PERMISSION_GROUP`は既存の`m_permission_group`と`t_user_permission_group`を正本とし、enabled・論理削除・有効ユーザーだけを候補にする。`ORGANIZATION_MANAGER`は対象organization必須、`FINANCE_MANAGER`は対象organizationまたは全社(`organization_id IS NULL`)を候補にする。いずれも申請者自身を除外し、候補0件はfail-closedで申請受付を拒否する。
+
+routeの該当順は、申請者role条件ありを汎用routeより優先し、その後に組織の具体性、金額帯の狭さ、`version_no`の新しさで決める。role条件なしはfallbackとして残す。H2 consolidated schema、管理API/UI、resolver、設定・snapshot回帰を同じ契約へ同期する。
 
 ## 2. Adapter
 
@@ -537,14 +547,13 @@ T042(F1)実装時に確定した、§1/§6の記述だけでは一意に決ま�
 §6.4の状態表自体は変更しない（`draft`はDBの`status`列が取り得る値として維持し、将来UIが
 下書き編集を必要とする場合はそこへ差し込む）。
 
-### 補足: approver_typeの実装範囲
+### 補足: approver_typeの実装範囲（R4-P1-01反映後）
 
-R1.3は承認者解決元として「特定user、permission group、申請者の上長、組織責任者、財務責任者」を挙げる。
-F1はG7推奨既定（組織上長→財務/管理者）を満たすために必要な3種——`USER`（固定user）、
-`ROLE`（`sys_user.role`一致の全員）、`APPLICANT_MANAGER`（申請時点の`t_user_organization.manager_user_id`）
-——のみ実装する。未対応の`approver_type`値は「承認者解決不能」としてfail-closedに扱う
-（推測実装せず拒否する）。`permission group`/`組織責任者`個別/`財務責任者`個別の追加解決方式が
-必要になった場合はA2（route/代理管理）で追加する。
+R1.3の承認者解決元は、`USER`（特定user）、`PERMISSION_GROUP`（既存permission groupの有効メンバー）、
+`APPLICANT_MANAGER`（申請時点の`t_user_organization.manager_user_id`）、`ORGANIZATION_MANAGER`
+（期間付き組織責任者assignment）、`FINANCE_MANAGER`（期間付き組織単位/全社assignment）を実装する。
+`ROLE`は既存互換として`sys_user.role`一致の候補集合を解決する。未対応または設定不備のtypeは空集合とし、
+resolverがfail-closedで申請受付を拒否する。責任者assignmentの管理はA2 route管理API/UIから行う。
 
 ### 補足: `resolveApprovers`の実現方法
 
@@ -576,21 +585,12 @@ design §3が挙げる`escalate`はF1では未実装。SLA期限監視・冪等s
 （通知/SLA/escalation）の担当であり、F1のtest matrixにも含まれない。`m_approval_route_step.sla_hours`
 列はDDLとして用意済みで、B1がそのまま参照できる。
 
-### 逸脱: 申請者 role 条件（R1.2）の将来拡張への繰延
+### R1.2の申請者role条件
 
-- **既定解（R1.2）**: route SHALL 対象種別、法人/組織、金額帯、**申請者 role** により決まる。
-- **本 spec の解**: F1/F2/A1/A2 の実装範囲では `applicant_role` を route 決定キーに含めない。
-  `RouteResolverServiceImpl` は `applicant_id` を自己承認除外にのみ使い、route 選択に使わない。
-- **根拠**: G7 推奨既定 route（組織上長→財務/管理者）と対象5業務の既存 role guard
-  （`MonthlyClosingServiceImpl.requireCloserRole`）は、申請者 role によって route を分岐させる
-  実業務要件を現時点では持たない。`operation-inventory.md` §3 の「マネージャー申請→管理者承認」は
-  route 定義の `approver_type=ROLE, value=管理者` で吸収できる。
-- **追加条件が生じた場合**: `m_approval_route.applicant_role_condition VARCHAR(30) NULL`
-  （NULL=条件なし）追加と `RouteResolverServiceImpl.resolve()` 拡張を将来の拡張 task で対応する。
-  A2 は完了済みのため、拡張を要する新機能 task として別途計上する。
-- **影響 consumer**: `RouteResolverServiceImpl`（`applicant_role` 引数が不在のまま）、`m_approval_route` DDL（列が不在）。
-  A2（route/代理管理）の完了後に評価する。
-- **追加テスト**: 列追加時に `RouteResolverServiceTest` へ申請者 role 分岐 fixture を追加する。
+`m_approval_route.applicant_role_condition`はNULLを全role対象、値ありを`sys_user.role`完全一致として扱う。
+`RouteResolverServiceImpl.resolve()`は既存API互換のため`applicantId`から申請者roleを取得し、該当するrole条件routeを汎用routeより優先する。
+同一role条件内では、組織の具体性→金額帯の狭さ→`version_no`の新しさで1件に決める。
+申請者が存在しない、またはrole条件に一致しない場合は汎用routeだけをfallback候補とする。
 
 ### 補足: 承認一覧 SQL 化の変遷（R2 P1-08対応）
 

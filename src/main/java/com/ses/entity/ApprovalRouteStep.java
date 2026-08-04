@@ -22,7 +22,7 @@ public class ApprovalRouteStep extends BaseEntity {
     private Long routeId;
     private Integer stepNo;
     private Integer parallelGroup;
-    /** USER / ROLE / APPLICANT_MANAGER */
+    /** USER / ROLE / PERMISSION_GROUP / APPLICANT_MANAGER / ORGANIZATION_MANAGER / FINANCE_MANAGER */
     private String approverType;
     private String approverValue;
     private Integer slaHours;

@@ -7,12 +7,16 @@ import com.ses.dto.approval.ApprovalRoutePreviewRequest;
 import com.ses.dto.approval.ApprovalRouteSaveRequest;
 import com.ses.dto.approval.ApprovalRouteStepRequest;
 import com.ses.dto.approval.ApprovalRouteView;
+import com.ses.dto.approval.ApprovalResponsibilitySaveRequest;
+import com.ses.dto.approval.ApprovalResponsibilityView;
 import com.ses.entity.ApprovalDelegation;
 import com.ses.entity.ApprovalRequest;
+import com.ses.entity.PermissionGroup;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRequestMapper;
+import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.approval.ApprovalAdministrationService;
 import com.ses.service.approval.ApprovalEngineService;
@@ -46,6 +50,7 @@ class ApprovalAdministrationServiceTest {
     @Autowired ApprovalDelegationMapper delegationMapper;
     @Autowired ApprovalDelegationTypeMapper delegationTypeMapper;
     @Autowired SysUserMapper userMapper;
+    @Autowired PermissionGroupMapper permissionGroupMapper;
 
     private Long applicantId;
     private Long approver1Id;
@@ -142,6 +147,56 @@ class ApprovalAdministrationServiceTest {
         administrationService.deleteDelegation(created.id());
         assertTrue(delegationTypeMapper.selectRequestTypes(created.id()).isEmpty());
         assertNull(delegationMapper.selectById(created.id()));
+    }
+
+    @Test
+    void route管理は申請者role条件とpermission_groupを保存する() {
+        PermissionGroup group = new PermissionGroup();
+        group.setTenantId("default");
+        group.setGroupKey("admin-approval-group-" + System.nanoTime());
+        group.setGroupName("承認group");
+        group.setEnabled(1);
+        permissionGroupMapper.insert(group);
+
+        String type = "a2.role-condition." + System.nanoTime();
+        ApprovalRouteSaveRequest request = new ApprovalRouteSaveRequest(null, type, null, null, null,
+                LocalDate.now(), null, "営業",
+                List.of(new ApprovalRouteStepRequest(1, 1, "PERMISSION_GROUP", group.getGroupKey(), null)));
+        ApprovalRouteView created = administrationService.createRouteVersion(request, applicantId);
+
+        assertEquals("営業", created.applicantRoleCondition());
+        assertEquals("PERMISSION_GROUP", created.steps().get(0).approverType());
+        assertEquals(group.getGroupKey(), created.steps().get(0).approverValue());
+    }
+
+    @Test
+    void 申請者roleで選択されたrouteが申請snapshotに固定される() {
+        String type = "a2.role-snapshot." + System.nanoTime();
+        ApprovalRouteSaveRequest request = new ApprovalRouteSaveRequest(null, type, null, null, null,
+                LocalDate.now(), null, "管理者",
+                List.of(new ApprovalRouteStepRequest(1, 1, "USER", String.valueOf(approver1Id), null)));
+        ApprovalRouteView route = administrationService.createRouteVersion(request, applicantId);
+        ApprovalRequest approval = approvalEngineService.request(new ApprovalRequestCommand(type, "TEST", 1L, 1L,
+                applicantId, null, BigDecimal.ONE, Map.of("role", "管理者"), null, null));
+
+        assertTrue(approval.getRouteSnapshotJson().contains(String.valueOf(route.id())));
+        assertTrue(approval.getRouteSnapshotJson().contains(String.valueOf(approver1Id)));
+    }
+
+    @Test
+    void 財務責任者assignmentは期間付きで登録表示削除できる() {
+        ApprovalResponsibilitySaveRequest request = new ApprovalResponsibilitySaveRequest(
+                "FINANCE_MANAGER", null, approver1Id, LocalDate.now(), null);
+        ApprovalResponsibilityView created = administrationService.createResponsibility(request, applicantId);
+
+        assertEquals("FINANCE_MANAGER", created.responsibilityType());
+        assertEquals(approver1Id, created.userId());
+        assertTrue(administrationService.listResponsibilities(LocalDate.now()).stream()
+                .anyMatch(row -> row.id().equals(created.id())));
+
+        administrationService.deleteResponsibility(created.id());
+        assertTrue(administrationService.listResponsibilities(LocalDate.now()).stream()
+                .noneMatch(row -> row.id().equals(created.id())));
     }
 
     @Test

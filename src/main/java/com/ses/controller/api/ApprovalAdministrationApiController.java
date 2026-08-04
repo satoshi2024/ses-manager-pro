@@ -8,6 +8,8 @@ import com.ses.dto.approval.ApprovalRoutePreviewRequest;
 import com.ses.dto.approval.ApprovalRoutePreviewView;
 import com.ses.dto.approval.ApprovalRouteSaveRequest;
 import com.ses.dto.approval.ApprovalRouteView;
+import com.ses.dto.approval.ApprovalResponsibilitySaveRequest;
+import com.ses.dto.approval.ApprovalResponsibilityView;
 import com.ses.service.approval.ApprovalAdministrationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -47,13 +49,33 @@ public class ApprovalAdministrationApiController {
     public ApiResult<ApprovalRouteView> editRoute(@PathVariable Long id,
                                                    @Valid @RequestBody ApprovalRouteSaveRequest request) {
         ApprovalRouteSaveRequest version = new ApprovalRouteSaveRequest(id, request.requestType(), request.organizationId(),
-                request.minAmount(), request.maxAmount(), request.validFrom(), request.validTo(), request.steps());
+                request.minAmount(), request.maxAmount(), request.validFrom(), request.validTo(),
+                request.applicantRoleCondition(), request.steps());
         return ApiResult.success(administrationService.createRouteVersion(version, SecurityUtils.currentUserId()));
     }
 
     @PostMapping("/routes/preview")
     public ApiResult<ApprovalRoutePreviewView> preview(@Valid @RequestBody ApprovalRoutePreviewRequest request) {
         return ApiResult.success(administrationService.preview(request));
+    }
+
+    @GetMapping("/responsibilities")
+    public ApiResult<List<ApprovalResponsibilityView>> responsibilities(
+            @RequestParam(required = false) LocalDate asOf) {
+        return ApiResult.success(administrationService.listResponsibilities(asOf));
+    }
+
+    @PostMapping("/responsibilities")
+    public ApiResult<ApprovalResponsibilityView> createResponsibility(
+            @Valid @RequestBody ApprovalResponsibilitySaveRequest request) {
+        return ApiResult.success(administrationService.createResponsibility(
+                request, SecurityUtils.currentUserId()));
+    }
+
+    @DeleteMapping("/responsibilities/{id}")
+    public ApiResult<Void> deleteResponsibility(@PathVariable Long id) {
+        administrationService.deleteResponsibility(id);
+        return ApiResult.success(null);
     }
 
     @GetMapping("/delegations")

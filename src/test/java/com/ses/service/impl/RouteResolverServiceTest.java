@@ -1,12 +1,21 @@
 package com.ses.service.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.entity.ApprovalResponsibility;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
+import com.ses.entity.OrganizationUnit;
+import com.ses.entity.PermissionGroup;
 import com.ses.entity.SysUser;
+import com.ses.entity.UserPermissionGroup;
+import com.ses.mapper.ApprovalResponsibilityMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
+import com.ses.mapper.OrganizationUnitMapper;
+import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +54,14 @@ class RouteResolverServiceTest {
     private ApprovalRouteStepMapper approvalRouteStepMapper;
     @Autowired
     private SysUserMapper sysUserMapper;
+    @Autowired
+    private ApprovalResponsibilityMapper approvalResponsibilityMapper;
+    @Autowired
+    private PermissionGroupMapper permissionGroupMapper;
+    @Autowired
+    private UserPermissionGroupMapper userPermissionGroupMapper;
+    @Autowired
+    private OrganizationUnitMapper organizationUnitMapper;
 
     private Long approverId;
     private Long applicantId;
@@ -207,6 +224,96 @@ class RouteResolverServiceTest {
         ResolvedRoute resolved = routeResolverService.resolve("route.tiebreak-version", null,
                 BigDecimal.valueOf(5000), applicantId, LocalDate.now());
         assertEquals(newerRouteId, resolved.routeId());
+    }
+
+    @Test
+    void 申請者role条件がroute選択に反映される() {
+        Long salesApplicant = insertUser("route-sales-applicant", "営業");
+        Long hrApplicant = insertUser("route-hr-applicant", "HR");
+        Long salesApprover = insertUser("route-sales-approver");
+        Long hrApprover = insertUser("route-hr-approver");
+        String type = "route.applicant-role." + System.nanoTime();
+        Long salesRoute = insertRoleRoute(type, "営業", salesApprover);
+        Long hrRoute = insertRoleRoute(type, "HR", hrApprover);
+
+        assertEquals(salesRoute, routeResolverService.resolve(type, null, BigDecimal.ONE,
+                salesApplicant, LocalDate.now()).routeId());
+        assertEquals(hrRoute, routeResolverService.resolve(type, null, BigDecimal.ONE,
+                hrApplicant, LocalDate.now()).routeId());
+    }
+
+    @Test
+    void 申請者role条件routeを汎用routeより優先し該当しなければ汎用へfallbackする() {
+        String type = "route.applicant-role-fallback." + System.nanoTime();
+        Long salesApplicant = insertUser("route-sales-fallback-applicant", "営業");
+        Long roleApprover = insertUser("route-sales-fallback-approver");
+        Long genericRoute = insertRoute(type, null, null, 1, null, approverId);
+        Long salesRoute = insertRoleRoute(type, "営業", roleApprover);
+
+        assertEquals(salesRoute, routeResolverService.resolve(type, null, BigDecimal.ONE,
+                salesApplicant, LocalDate.now()).routeId());
+        assertEquals(genericRoute, routeResolverService.resolve(type, null, BigDecimal.ONE,
+                insertUser("route-hr-fallback-applicant", "HR"), LocalDate.now()).routeId());
+    }
+
+    @Test
+    void 追加approver_sourceが設定値とasOf責任者から解決される() {
+        String type = "route.approver-sources." + System.nanoTime();
+        Long groupApprover = insertUser("route-group-approver");
+        Long organizationApprover = insertUser("route-organization-approver");
+        Long financeApprover = insertUser("route-finance-approver");
+
+        PermissionGroup group = new PermissionGroup();
+        group.setTenantId("default");
+        group.setGroupKey("approval-reviewers-" + System.nanoTime());
+        group.setGroupName("承認レビュー担当");
+        group.setEnabled(1);
+        permissionGroupMapper.insert(group);
+        UserPermissionGroup membership = new UserPermissionGroup();
+        membership.setTenantId("default");
+        membership.setUserId(groupApprover);
+        membership.setGroupId(group.getId());
+        userPermissionGroupMapper.insert(membership);
+
+        OrganizationUnit organization = OrganizationUnit.builder()
+                .tenantId(1L).code("APPROVAL-ORG-" + System.nanoTime()).name("承認対象組織")
+                .type("部").validFrom(LocalDate.now().minusDays(1)).status("有効").version(0).build();
+        organizationUnitMapper.insert(organization);
+        approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
+                .tenantId(1L).responsibilityType("ORGANIZATION_MANAGER")
+                .organizationId(organization.getId()).userId(organizationApprover)
+                .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build());
+        approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
+                .tenantId(1L).responsibilityType("FINANCE_MANAGER")
+                .organizationId(null).userId(financeApprover)
+                .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build());
+
+        ApprovalRoute route = ApprovalRoute.builder().tenantId(1L).requestType(type)
+                .organizationId(organization.getId()).versionNo(1)
+                .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
+        approvalRouteMapper.insert(route);
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder().routeId(route.getId()).stepNo(1)
+                .parallelGroup(1).approverType("PERMISSION_GROUP").approverValue(group.getGroupKey()).build());
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder().routeId(route.getId()).stepNo(1)
+                .parallelGroup(1).approverType("ORGANIZATION_MANAGER").build());
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder().routeId(route.getId()).stepNo(1)
+                .parallelGroup(1).approverType("FINANCE_MANAGER").build());
+
+        ResolvedRoute resolved = routeResolverService.resolve(type, organization.getId(), BigDecimal.ONE,
+                applicantId, LocalDate.now());
+        List<Long> resolvedIds = resolved.steps().get(0).approverUserIds();
+        assertTrue(resolvedIds.containsAll(List.of(groupApprover, organizationApprover, financeApprover)));
+    }
+
+    private Long insertRoleRoute(String requestType, String applicantRole, Long approverUserId) {
+        ApprovalRoute route = ApprovalRoute.builder()
+                .tenantId(1L).requestType(requestType).applicantRoleCondition(applicantRole)
+                .organizationId(null).minAmount(null).maxAmount(null).versionNo(1)
+                .validFrom(LocalDate.now().minusDays(1)).validTo(null).activeFlag(1).build();
+        approvalRouteMapper.insert(route);
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder().routeId(route.getId()).stepNo(1)
+                .parallelGroup(1).approverType("USER").approverValue(String.valueOf(approverUserId)).build());
+        return route.getId();
     }
 
     private ResolvedRoute resolve(String requestType, BigDecimal amount) {

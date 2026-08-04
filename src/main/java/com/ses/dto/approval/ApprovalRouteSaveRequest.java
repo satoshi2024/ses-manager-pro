@@ -18,5 +18,15 @@ public record ApprovalRouteSaveRequest(
         BigDecimal maxAmount,
         @NotNull LocalDate validFrom,
         LocalDate validTo,
+        String applicantRoleCondition,
         @NotEmpty List<@Valid ApprovalRouteStepRequest> steps) {
+
+    /** 既存のroute登録呼出しとのsource互換を保つ旧形式constructor。 */
+    public ApprovalRouteSaveRequest(Long routeId, String requestType, Long organizationId,
+                                    BigDecimal minAmount, BigDecimal maxAmount,
+                                    LocalDate validFrom, LocalDate validTo,
+                                    List<ApprovalRouteStepRequest> steps) {
+        this(routeId, requestType, organizationId, minAmount, maxAmount,
+                validFrom, validTo, null, steps);
+    }
 }

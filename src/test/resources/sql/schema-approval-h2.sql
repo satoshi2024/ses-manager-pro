@@ -5,6 +5,7 @@
 -- schema-locationsを再実行するため、FKを張るとDROP TABLE順序で他specの再生成が失敗しうる）。
 
 DROP TABLE IF EXISTS t_notification_outbox CASCADE;
+DROP TABLE IF EXISTS t_approval_responsibility CASCADE;
 DROP TABLE IF EXISTS t_approval_participant CASCADE;
 DROP TABLE IF EXISTS t_approval_delegation_type CASCADE;
 DROP TABLE IF EXISTS t_approval_action CASCADE;
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS m_approval_route (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
   tenant_id       BIGINT       NOT NULL DEFAULT 1,
   request_type    VARCHAR(50)  NOT NULL,
+  applicant_role_condition VARCHAR(30),
   organization_id BIGINT,
   min_amount      DECIMAL(14,0),
   max_amount      DECIMAL(14,0),
@@ -67,6 +69,25 @@ CREATE TABLE IF NOT EXISTS m_approval_route_step (
   deleted_flag   TINYINT      NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_approval_route_step_route ON m_approval_route_step(route_id, step_no);
+
+CREATE TABLE IF NOT EXISTS t_approval_responsibility (
+  id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           BIGINT       NOT NULL DEFAULT 1,
+  responsibility_type VARCHAR(30)  NOT NULL,
+  organization_id     BIGINT,
+  user_id             BIGINT       NOT NULL,
+  valid_from          DATE         NOT NULL,
+  valid_to            DATE,
+  active_flag         TINYINT      NOT NULL DEFAULT 1,
+  created_by          BIGINT,
+  created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag        TINYINT      NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_approval_responsibility_lookup
+  ON t_approval_responsibility(tenant_id, responsibility_type, organization_id, valid_from, valid_to);
+CREATE INDEX IF NOT EXISTS idx_approval_responsibility_user
+  ON t_approval_responsibility(tenant_id, user_id);
 
 CREATE TABLE IF NOT EXISTS t_approval_request (
   id                  BIGINT        AUTO_INCREMENT PRIMARY KEY,

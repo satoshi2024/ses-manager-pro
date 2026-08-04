@@ -1,31 +1,32 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-## Latest authoritative REVIEW PACKET — Round 4 current Head再基線（2026-08-04）
+## Latest authoritative REVIEW PACKET — Round 4 current Head / R4-P1-01 correction（2026-08-04）
 
 **requested verdict:** intermediate / re-baseline。通常Reviewの開始判定ではなく、現時点の判定は **NOT REVIEWABLE** とする。
 
 - **handbook version:** `execution-review-handbook.md` v2.0。Round 4以降は§11により通常Reviewを停止し、spec・時間モデル・scope inventory・migration fixture・test matrixを先に改訂する。
 - **spec/tasks:** `.kiro/specs/approval-workflow-internal-control/requirements.md`、`design.md`、`tasks.md`、T041〜T047。
-- **base / head / merge status:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、original implementation Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`、Packet統合commit=`9215c5e797d063d13719b231175ab8741736a591`、current Head=`76ffcbbac311643bbcbe3de0786fb195a7765d51`。実Gitでは`HEAD = origin/main = origin/HEAD = 76ffcbb`、branchは`main`である。今回のcurrent correction 4文書が未commitのため、作業木はdirtyである。`10dc316d..76ffcbb`はReview文書4 files、`+141/-15`のcommit済みdeltaであり、`76ffcbb`はorigin/mainへ反映済みである。local commit予定・未pushという旧記録は訂正する。
-- **scope inventory:** Base→current Headは**16 commits / 205 files / +8796/-328**。partitionはS07 spec packet 5、roadmap dispatch docs 25、other spec docs 18、production Java 88、migration SQL 5、frontend/resources 30、test Java 29、test resources 5、未分類0。205 pathの個別task/commit帰属は[`review-manifest-10dc316d.md`](review-manifest-10dc316d.md) §2に固定した。
-- **fix-delta scope:** `10dc316d..76ffcbb`は`review-ledger.md`、`review-manifest-10dc316d.md`、`tasks.md`、中央`spec-execution-ledger.md`の4文書のみで、production code・migration SQL・test・runtime contract変更はない。`git diff --check`はrange/worktreeともexit 0である。
-- **requirements/acceptance trace:** R1〜R5の20 ACについて、AC→実装/consumer→assert/evidence→Demo→状態をmanifest §3へ行単位で固定した。これは受入PASSの宣言ではなく、R4-REVIEW-01の独立再Reviewが再現できるtraceである。
-- **migration latest/reserved/applied:** 実ファイルはV75/V76/V77/V78/V79。S07正式migrationはV75〜V79、S09〜S17はV80〜V88を単一予約とする。適用済みDBの`flyway_schema_history`は未照会であり、applied判定は未確認。
-- **test / Demo evidence:** current Headの独立再Review記録はB1/M対象93件、migration/dispatch整合34件、合計127件をfailures 0 / errors 0 / skipped 0、BUILD SUCCESSとしている。これはdirect regression evidenceであり、L4最新`1433 / 0 / 0 / 12`、実MySQL、実browser、実Webhook、複数JVM、rollback、zero-skippedの代替ではない。
-- **known review blockers:** `R4-REVIEW-01`はcurrent Headの205 path個別manifestと20 AC traceを本Packetへ再提出したが独立確認前でOPEN。`R4-REVIEW-02`はV75〜V79実在集合、V80〜V88予約、direct regression 34/0/0/0を維持しVERIFIED_CLOSED。`R4-REVIEW-03`はB1/Mの実環境release gate未達でOPEN。`R4-REVIEW-04`は旧Head/merge状態不一致を訂正したPacket・中央ledgerを再提出したが独立確認前でOPEN。P0/P1/P2の通常ReviewはB1/M gate達成まで再開しない。
+- **base / head / merge status:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、original implementation Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`、Packet統合commit=`9215c5e797d063d13719b231175ab8741736a591`、current Head=`0a724356bfe8e1a05ef03d81ff0ca8c5b19d9e2e`。実Gitでは`HEAD = origin/main = origin/HEAD = 0a724356`、branchは`main`である。R4-P1-01の実装とPacket/台帳の修正は未commitの作業木にあり、今回もcommit/pushは行わない。
+- **scope inventory:** Base→current Headは**17 commits / 205 files / +9089/-328**。partitionはS07 spec packet 5、roadmap dispatch docs 25、other spec docs 18、production Java 88、migration SQL 5、frontend/resources 30、test Java 29、test resources 5、未分類0。205 pathの個別task/commit帰属は[`review-manifest-10dc316d.md`](review-manifest-10dc316d.md) §2に固定した。未commitのR4-P1-01差分はこのBase→Head統計には含めない。
+- **fix-delta scope:** 現作業木のR4-P1-01は、`m_approval_route.applicant_role_condition`と`t_approval_responsibility`を追加するV79.1、route entity/DTO/API/UI、`RouteResolverServiceImpl`のrole条件優先/fallback、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGERの候補解決、H2 schema/fixtureと回帰testを含む。V75〜V79は変更していない。Packet側は`design.md`、`tasks.md`、`review-manifest-10dc316d.md`、本ledger、中央ledgerのHead/未達状態を同期する。
+- **requirements/acceptance trace:** R1.2は申請者`SysUser.role`に一致するrouteを汎用routeより優先し、非該当時は汎用routeへfallbackする。R1.3は既存permission groupと期間付き責任者assignmentから候補を解決し、未対応・候補0件・自己承認をfail-closedにする。実装/H2/定向test/static testのtraceはmanifestと`tasks.md` A2記録へ反映済みだが、実MySQL適用証跡は未取得である。
+- **migration latest/reserved/applied:** 作業木の実ファイルはV75/V76/V77/V78/V79と未commitのV79.1。S07の正式migration集合はV75〜V79、R1.2/R1.3のpatchはV79.1、S09〜S17はV80〜V88を予約する。適用済みDBの`flyway_schema_history`は未照会であり、V79.1のfresh/legacy/repair/rollback適用判定は未確認。
+- **test / Demo evidence:** compileは`BUILD SUCCESS`。R4-P1-01定向testは**25 / failures 0 / errors 0 / skipped 2**（skip 2件はDocker unavailableによる`FlywayMigrationSmokeTest`）。migration/dispatch/JSのstatic testは**35 / 0 / 0 / 0**（`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1）。全量`mvn -B test`は**1440 / failures 2 / errors 0 / skipped 12**で完走したが、failure 2件は通常`powershell.exe`のExecutionPolicyに起因する`VerifyLikeCiPowerShellCompatibilityTest`、skip 12件はDocker依存testである。これらは定向/H2/static evidenceであり、実MySQL fresh/legacy/repair/rollback、複数JVM、Webhook、browser desktop/390px、L4 zero-skippedの代替ではない。
+- **known review blockers:** `R4-REVIEW-01`はcurrent Headの205 path個別manifestと20 AC traceの独立確認前でOPEN。`R4-REVIEW-02`はV75〜V79とV79.1 patchの静的整合を確認しVERIFIED_CLOSED。`R4-REVIEW-03`はB1/Mの実環境release gate未達でOPEN。`R4-REVIEW-04`はcurrent Head/Packet/中央ledgerの独立再確認前でOPEN。`R4-P1-01`はR1.2/R1.3のコード/H2/static実装を追加したが、実MySQL gate未達のためOPEN / P1を維持する。P0/P1/P2の通常ReviewはB1/M gate達成まで再開しない。
 - **out-of-scope changes:** other-spec 18 files、roadmap dispatch 25 files、shared Java/resource/testはmanifest §2の個別帰属でS07 production実装から分離する。別specの問題をS07の受入PASSへ加算しない。
-- **rollback:** current correctionは文書artifactのみで、production code・migration SQLは変更していない。`10dc316d..76ffcbb`のdeltaはcommit単位でrevert可能であり、V75〜V79を編集・削除しない。
+- **rollback:** commit/push前のため、R4-P1-01は作業木の対象file単位で元の`0a724356`へ戻せる。V75〜V79は編集・削除せず、V79.1を適用したDBを戻す場合はbackup復元または新しいforward migrationを使用する。
 
 ### Round 4 Issue Register（review process blocker。P分類ではない）
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
-| `R4-REVIEW-01` | **OPEN** | current Head `76ffcbb`のBase→Head 205 pathを個別task/commitへ帰属し、R1〜R5の20 AC traceをmanifestへ再提出した。独立Reviewによる完全性確認は未了 | current Headを対象にmanifestの205件、分類合計、AC trace、範囲外帰属を独立再確認 |
-| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、S09〜S17 V80〜V88単一予約、direct regression 34/0/0/0を維持 | クローズ維持。B1/Mや通常Reviewの証拠へ拡張しない |
+| `R4-REVIEW-01` | **OPEN** | current Head `0a724356`のBase→Head 205 pathを個別task/commitへ帰属し、R1〜R5の20 AC traceをmanifestへ再提出した。独立Reviewによる完全性確認は未了 | current Headを対象にmanifestの205件、分類合計、AC trace、範囲外帰属を独立再確認 |
+| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、V79.1 patch、S09〜S17 V80〜V88単一予約、static regression 35/0/0/0を確認した。実MySQL gateとは分離して扱う | クローズ維持。B1/Mや通常Reviewの証拠へ拡張しない |
 | `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047のcheckboxは`[ ]`。実MySQL/rollback/複数JVM/実Webhook/browser/zero-skipped未達 | B1/MのDoD・Demo・release gateを同一Headで実証するまでPASS・次Wave解放を行わない |
-| `R4-REVIEW-04` | **OPEN** | Packet・manifest・中央ledgerのHead=`76ffcbb`、Base→Head=`16 commits/205 files/+8796/-328`、merge=`origin/main反映済み`へ訂正したが、独立再Reviewは未了 | current HeadのPacket/中央ledger一致と通常Review再開根拠を独立確認 |
+| `R4-REVIEW-04` | **OPEN** | Packet・manifest・中央ledgerをcurrent Head `0a724356`、Base→Head=`17 commits/205 files/+9089/-328`、`origin/main`一致・dirty worktreeへ同期したが、独立再Reviewは未了 | current HeadのPacket/中央ledger一致と通常Review再開根拠を独立確認 |
+| `R4-P1-01` | **OPEN / P1** | R1.2/R1.3のroute decision model・approver source不足に対するV79.1/entity/API/UI/resolver/H2実装と定向/static検証は完了した。一方、Docker unavailableのため実MySQL fresh/legacy/repair/rollback、`flyway_schema_history`、複数JVM・browser gateは未確認 | V79.1を実MySQLで適用し、route selection・approver source・rollback/repairを実測するまでP1を閉じない |
 
-**現行判定:** **NOT REVIEWABLE**。R4-REVIEW-01/04はcurrent Head整合を修正提出したがOPEN継続、R4-REVIEW-03は未達継続、R4-REVIEW-02のみVERIFIED_CLOSED。P0/P1/P2の通常Review、L4全量の完了扱い、S09/Wave 2解放は行わない。
+**現行判定:** **NOT REVIEWABLE**。R4-REVIEW-01/03/04と`R4-P1-01`はOPEN継続、R4-REVIEW-02のみVERIFIED_CLOSED。B1/M、実MySQL、browser、zero-skippedの未達を維持し、S07をPASSへ変更せず、S09/Wave 2を解放しない。
 
 ## Round 3追跡Review訂正（2026-08-03、Head `a33a6e9`）
 

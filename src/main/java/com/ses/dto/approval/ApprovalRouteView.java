@@ -8,6 +8,7 @@ import java.util.List;
 public record ApprovalRouteView(
         Long id,
         String requestType,
+        String applicantRoleCondition,
         Long organizationId,
         BigDecimal minAmount,
         BigDecimal maxAmount,

@@ -10,28 +10,21 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 
-/**
- * 承認route定義エンティティ。current=有効かつ期間内、history=version_no+valid_from/to。
- */
+/** 承認者解決元となる組織責任者・財務責任者の期間付きassignment。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(callSuper = true)
-@TableName("m_approval_route")
-public class ApprovalRoute extends BaseEntity {
+@TableName("t_approval_responsibility")
+public class ApprovalResponsibility extends BaseEntity {
 
     private Long tenantId;
-    private String requestType;
-    /** NULLは全role対象。値があるrouteは同一条件の汎用routeより優先される。 */
-    private String applicantRoleCondition;
+    private String responsibilityType;
     private Long organizationId;
-    private BigDecimal minAmount;
-    private BigDecimal maxAmount;
-    private Integer versionNo;
+    private Long userId;
     private LocalDate validFrom;
     private LocalDate validTo;
     private Integer activeFlag;

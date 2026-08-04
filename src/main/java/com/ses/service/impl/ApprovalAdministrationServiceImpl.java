@@ -13,15 +13,23 @@ import com.ses.dto.approval.ApprovalRouteSaveRequest;
 import com.ses.dto.approval.ApprovalRouteStepRequest;
 import com.ses.dto.approval.ApprovalRouteStepView;
 import com.ses.dto.approval.ApprovalRouteView;
+import com.ses.dto.approval.ApprovalResponsibilitySaveRequest;
+import com.ses.dto.approval.ApprovalResponsibilityView;
 import com.ses.entity.ApprovalDelegation;
 import com.ses.entity.ApprovalDelegationType;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
+import com.ses.entity.ApprovalResponsibility;
+import com.ses.entity.OrganizationUnit;
+import com.ses.entity.PermissionGroup;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
+import com.ses.mapper.ApprovalResponsibilityMapper;
+import com.ses.mapper.OrganizationUnitMapper;
+import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.approval.ApprovalAdministrationService;
 import com.ses.service.approval.ResolvedRoute;
@@ -46,6 +54,9 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
 
     private final ApprovalRouteMapper routeMapper;
     private final ApprovalRouteStepMapper stepMapper;
+    private final ApprovalResponsibilityMapper responsibilityMapper;
+    private final OrganizationUnitMapper organizationUnitMapper;
+    private final PermissionGroupMapper permissionGroupMapper;
     private final ApprovalDelegationMapper delegationMapper;
     private final ApprovalDelegationTypeMapper delegationTypeMapper;
     private final SysUserMapper userMapper;
@@ -81,12 +92,15 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                 .eq(ApprovalRoute::getRequestType, request.requestType()));
         int version = sameKey.stream()
                 .filter(r -> Objects.equals(r.getOrganizationId(), request.organizationId()))
+                .filter(r -> Objects.equals(r.getApplicantRoleCondition(), normalizeOptional(request.applicantRoleCondition())))
                 .filter(r -> Objects.equals(r.getMinAmount(), request.minAmount()))
                 .filter(r -> Objects.equals(r.getMaxAmount(), request.maxAmount()))
                 .map(ApprovalRoute::getVersionNo).filter(Objects::nonNull)
                 .max(Comparator.naturalOrder()).orElse(0) + 1;
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(request.requestType()).organizationId(request.organizationId())
+                .tenantId(1L).requestType(request.requestType())
+                .applicantRoleCondition(normalizeOptional(request.applicantRoleCondition()))
+                .organizationId(request.organizationId())
                 .minAmount(request.minAmount()).maxAmount(request.maxAmount()).versionNo(version)
                 .validFrom(request.validFrom()).validTo(request.validTo()).activeFlag(1).createdBy(actorId).build();
         routeMapper.insert(route);
@@ -111,6 +125,53 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     private ApprovalRouteStepView toPreviewStep(RouteStepGroup step) {
         return new ApprovalRouteStepView(step.stepNo(), step.stepNo(), "RESOLVED", null,
                 step.slaHours(), step.approverUserIds());
+    }
+
+    @Override
+    public List<ApprovalResponsibilityView> listResponsibilities(LocalDate asOf) {
+        List<ApprovalResponsibility> rows = responsibilityMapper.selectList(new LambdaQueryWrapper<ApprovalResponsibility>()
+                .orderByAsc(ApprovalResponsibility::getResponsibilityType)
+                .orderByAsc(ApprovalResponsibility::getOrganizationId)
+                .orderByDesc(ApprovalResponsibility::getValidFrom)
+                .orderByDesc(ApprovalResponsibility::getId));
+        if (asOf != null) {
+            rows = rows.stream().filter(r -> Objects.equals(r.getActiveFlag(), 1))
+                    .filter(r -> !r.getValidFrom().isAfter(asOf))
+                    .filter(r -> r.getValidTo() == null || !r.getValidTo().isBefore(asOf)).toList();
+        }
+        Map<Long, SysUser> users = new LinkedHashMap<>();
+        rows.forEach(row -> users.putIfAbsent(row.getUserId(), userMapper.selectById(row.getUserId())));
+        return rows.stream().map(row -> toResponsibilityView(row, users)).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ApprovalResponsibilityView createResponsibility(ApprovalResponsibilitySaveRequest request, Long actorId) {
+        validateResponsibility(request);
+        ApprovalResponsibility row = ApprovalResponsibility.builder()
+                .tenantId(1L)
+                .responsibilityType(request.responsibilityType().trim().toUpperCase())
+                .organizationId(request.organizationId())
+                .userId(request.userId())
+                .validFrom(request.validFrom())
+                .validTo(request.validTo())
+                .activeFlag(1)
+                .createdBy(actorId)
+                .build();
+        if (responsibilityMapper.insert(row) != 1) {
+            throw BusinessException.of("error.approval.responsibilitySaveFailed");
+        }
+        SysUser user = userMapper.selectById(row.getUserId());
+        return toResponsibilityView(row, Map.of(row.getUserId(), user));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteResponsibility(Long id) {
+        if (responsibilityMapper.selectById(id) == null
+                || responsibilityMapper.deleteById(id) != 1) {
+            throw BusinessException.of(404, "error.approval.responsibilityNotFound");
+        }
     }
 
     @Override
@@ -178,9 +239,11 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
         }
         for (ApprovalRouteStepRequest step : request.steps()) {
             String type = step.approverType().trim().toUpperCase();
-            if (!List.of("USER", "ROLE", "APPLICANT_MANAGER").contains(type)
-                    || (List.of("USER", "ROLE").contains(type)
-                    && (step.approverValue() == null || step.approverValue().isBlank()))) {
+            List<String> supportedTypes = List.of("USER", "ROLE", "PERMISSION_GROUP",
+                    "APPLICANT_MANAGER", "ORGANIZATION_MANAGER", "FINANCE_MANAGER");
+            boolean valueRequired = List.of("USER", "ROLE", "PERMISSION_GROUP").contains(type);
+            if (!supportedTypes.contains(type)
+                    || (valueRequired && (step.approverValue() == null || step.approverValue().isBlank()))) {
                 throw BusinessException.of(400, "error.approval.approverType");
             }
             if ("USER".equals(type)) {
@@ -190,7 +253,45 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                     throw BusinessException.of(400, "error.approval.approverType");
                 }
             }
+            if ("PERMISSION_GROUP".equals(type)) {
+                PermissionGroup group = permissionGroupMapper.selectOne(new LambdaQueryWrapper<PermissionGroup>()
+                        .eq(PermissionGroup::getTenantId, "default")
+                        .eq(PermissionGroup::getGroupKey, step.approverValue().trim())
+                        .eq(PermissionGroup::getEnabled, 1));
+                if (group == null) {
+                    throw BusinessException.of(400, "error.approval.permissionGroupNotFound");
+                }
+            }
         }
+    }
+
+    private void validateResponsibility(ApprovalResponsibilitySaveRequest request) {
+        String type = request.responsibilityType() == null
+                ? "" : request.responsibilityType().trim().toUpperCase();
+        if (!List.of("ORGANIZATION_MANAGER", "FINANCE_MANAGER").contains(type)) {
+            throw BusinessException.of(400, "error.approval.responsibilityType");
+        }
+        if (request.validTo() != null && request.validFrom().isAfter(request.validTo())) {
+            throw BusinessException.of(400, "error.approval.responsibilityPeriod");
+        }
+        if ("ORGANIZATION_MANAGER".equals(type) && request.organizationId() == null) {
+            throw BusinessException.of(400, "error.approval.organizationRequired");
+        }
+        if (request.organizationId() != null && organizationUnitMapper.selectById(request.organizationId()) == null) {
+            throw BusinessException.of(404, "error.approval.organizationNotFound");
+        }
+        assertActiveUser(request.userId());
+    }
+
+    private String normalizeOptional(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.length() > 30) {
+            throw BusinessException.of(400, "error.approval.applicantRoleInvalid");
+        }
+        return normalized;
     }
 
     private ApprovalRouteView toRouteView(ApprovalRoute route, List<ApprovalRouteStepView> supplied) {
@@ -198,8 +299,16 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                 .eq(ApprovalRouteStep::getRouteId, route.getId()).orderByAsc(ApprovalRouteStep::getStepNo)
                 .orderByAsc(ApprovalRouteStep::getId)).stream().map(s -> new ApprovalRouteStepView(s.getStepNo(),
                 s.getParallelGroup(), s.getApproverType(), s.getApproverValue(), s.getSlaHours(), List.of())).toList() : supplied;
-        return new ApprovalRouteView(route.getId(), route.getRequestType(), route.getOrganizationId(), route.getMinAmount(),
-                route.getMaxAmount(), route.getVersionNo(), route.getValidFrom(), route.getValidTo(), route.getActiveFlag(), steps);
+        return new ApprovalRouteView(route.getId(), route.getRequestType(), route.getApplicantRoleCondition(),
+                route.getOrganizationId(), route.getMinAmount(), route.getMaxAmount(), route.getVersionNo(),
+                route.getValidFrom(), route.getValidTo(), route.getActiveFlag(), steps);
+    }
+
+    private ApprovalResponsibilityView toResponsibilityView(ApprovalResponsibility row, Map<Long, SysUser> users) {
+        SysUser user = users.get(row.getUserId());
+        return new ApprovalResponsibilityView(row.getId(), row.getResponsibilityType(), row.getOrganizationId(),
+                row.getUserId(), user == null ? null : user.getRealName(), row.getValidFrom(), row.getValidTo(),
+                row.getActiveFlag());
     }
 
     private ApprovalDelegationView toDelegationView(ApprovalDelegation row, Map<Long, SysUser> users) {

@@ -1,9 +1,11 @@
 $(function () {
     if (!$('#approvalRoutesPage').length) return;
     loadApprovalRoutes();
+    loadApprovalResponsibilities();
     loadApprovalDelegations();
     $('#approvalRouteForm').on('submit', function (e) { e.preventDefault(); saveApprovalRoute(); });
     $('#approvalPreviewForm').on('submit', function (e) { e.preventDefault(); previewApprovalRoute(); });
+    $('#approvalResponsibilityForm').on('submit', function (e) { e.preventDefault(); saveApprovalResponsibility(); });
     $('#approvalDelegationForm').on('submit', function (e) { e.preventDefault(); saveApprovalDelegation(); });
 });
 
@@ -19,13 +21,13 @@ function renderApprovalRoutes(routes) {
     (routes || []).forEach(function (r) {
         const period = (r.validFrom || '-') + '〜' + (r.validTo || SES.i18n.t('approval.routes.openEnded', '無期限'));
         const steps = (r.steps || []).map(function (s) { return 'step ' + SES.escapeHtml(s.stepNo) + ': ' + SES.escapeHtml(s.approverType) + ' ' + SES.escapeHtml(s.approverValue || ''); }).join('<br>');
-        body.append('<tr><td>' + SES.escapeHtml(r.id) + '</td><td>v' + SES.escapeHtml(r.versionNo) + '</td><td>' + SES.escapeHtml(r.requestType) + '</td><td>' + SES.escapeHtml(period) + '</td><td>' + steps + '</td></tr>');
+        body.append('<tr><td>' + SES.escapeHtml(r.id) + '</td><td>v' + SES.escapeHtml(r.versionNo) + '</td><td>' + SES.escapeHtml(r.requestType) + '<div class="small text-muted">role: ' + SES.escapeHtml(r.applicantRoleCondition || '全role') + '</div></td><td>' + SES.escapeHtml(period) + '</td><td>' + steps + '</td></tr>');
     });
     if (!routes || !routes.length) body.append('<tr><td colspan="5" class="text-center text-muted py-3">' + SES.escapeHtml(SES.i18n.t('approval.routes.empty', 'routeがありません')) + '</td></tr>');
 }
 async function saveApprovalRoute() {
     const f = $('#approvalRouteForm'); const steps = routeJson(f.find('[name=steps]').val()); if (!steps) return;
-    const body = { routeId: routeNumber(f.find('[name=routeId]').val()), requestType: f.find('[name=requestType]').val(), organizationId: routeNumber(f.find('[name=organizationId]').val()), minAmount: routeNumber(f.find('[name=minAmount]').val()), maxAmount: routeNumber(f.find('[name=maxAmount]').val()), validFrom: f.find('[name=validFrom]').val(), validTo: routeDate(f.find('[name=validTo]').val()), steps: steps };
+    const body = { routeId: routeNumber(f.find('[name=routeId]').val()), requestType: f.find('[name=requestType]').val(), applicantRoleCondition: f.find('[name=applicantRoleCondition]').val().trim() || null, organizationId: routeNumber(f.find('[name=organizationId]').val()), minAmount: routeNumber(f.find('[name=minAmount]').val()), maxAmount: routeNumber(f.find('[name=maxAmount]').val()), validFrom: f.find('[name=validFrom]').val(), validTo: routeDate(f.find('[name=validTo]').val()), steps: steps };
     try { await SES.api.post('/api/approval/routes', body); SES.toast.success(SES.i18n.t('approval.routes.saved', 'route versionを登録しました')); f[0].reset(); loadApprovalRoutes(); } catch (e) { }
 }
 async function previewApprovalRoute() {
@@ -36,6 +38,28 @@ async function saveApprovalDelegation() {
     const f = $('#approvalDelegationForm'); const raw = f.find('[name=requestTypes]').val().split(',').map(function (v) { return v.trim(); }).filter(Boolean);
     const body = { fromUserId: routeNumber(f.find('[name=fromUserId]').val()), toUserId: routeNumber(f.find('[name=toUserId]').val()), validFrom: f.find('[name=validFrom]').val(), validTo: routeDate(f.find('[name=validTo]').val()), requestTypes: raw, reason: f.find('[name=reason]').val() };
     try { await SES.api.post('/api/approval/delegations', body); SES.toast.success(SES.i18n.t('approval.routes.delegationSaved', '代理を登録しました')); f[0].reset(); } catch (e) { }
+}
+
+async function loadApprovalResponsibilities() {
+    try { renderApprovalResponsibilities(await SES.api.get('/api/approval/responsibilities')); } catch (e) { }
+}
+function renderApprovalResponsibilities(rows) {
+    const body = $('#approvalResponsibilitiesBody').empty();
+    (rows || []).forEach(function (r) {
+        const period = (r.validFrom || '-') + '〜' + (r.validTo || SES.i18n.t('approval.routes.openEnded', '無期限'));
+        const user = (r.userName || '-') + ' (' + (r.userId || '-') + ')';
+        body.append('<tr><td>' + SES.escapeHtml(r.id) + '</td><td>' + SES.escapeHtml(r.responsibilityType) + '</td><td>' + SES.escapeHtml(r.organizationId || '全社') + '</td><td>' + SES.escapeHtml(user) + '</td><td>' + SES.escapeHtml(period) + '</td><td><button class="btn btn-outline-danger btn-sm" data-responsibility-id="' + SES.escapeHtml(r.id) + '">削除</button></td></tr>');
+    });
+    if (!rows || !rows.length) body.append('<tr><td colspan="6" class="text-center text-muted py-3">責任者assignmentがありません</td></tr>');
+    body.find('button[data-responsibility-id]').on('click', function () { deleteApprovalResponsibility($(this).data('responsibility-id')); });
+}
+async function saveApprovalResponsibility() {
+    const f = $('#approvalResponsibilityForm');
+    const body = { responsibilityType: f.find('[name=responsibilityType]').val(), organizationId: routeNumber(f.find('[name=organizationId]').val()), userId: routeNumber(f.find('[name=userId]').val()), validFrom: f.find('[name=validFrom]').val(), validTo: routeDate(f.find('[name=validTo]').val()) };
+    try { await SES.api.post('/api/approval/responsibilities', body); SES.toast.success('責任者assignmentを登録しました'); f[0].reset(); loadApprovalResponsibilities(); } catch (e) { }
+}
+async function deleteApprovalResponsibility(id) {
+    try { await SES.api.delete('/api/approval/responsibilities/' + encodeURIComponent(id)); loadApprovalResponsibilities(); } catch (e) { }
 }
 
 async function loadApprovalDelegations() {
