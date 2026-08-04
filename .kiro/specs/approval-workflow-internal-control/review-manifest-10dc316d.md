@@ -1,8 +1,8 @@
 # S07 Round 4 current Head Review manifest
 
-> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`および旧Packet Head `0a724356`ではなく、実Gitのcurrent Head `74329e9c982af24e10409b564c5d89a56ef4e2cd`である。
+> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`および旧Packet Head `0a724356`ではなく、実Gitのcurrent Head `92fad28b2ed4e103167d94e550c36aec9fd41fae`である。
 >
-> このmanifestは受入PASSの宣言ではない。Base→current Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateと、テスト追加を含む未commitの作業木差分は未達のまま記録する。211 pathsはcommit済みHeadの範囲であり、作業木の追加3 test filesは別途記録する。
+> このmanifestは受入PASSの宣言ではない。Base→current Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateは未達のまま記録する。212 pathsはすべてcommit済みHeadの範囲である。
 
 ## 1. 対象とGit確定値
 
@@ -12,14 +12,14 @@
 | Review Base | `5d228d211d0d752833fe3424a3b8aa4b40096733` |
 | original implementation Head | `a70cb51145a94ec3d70421bcc1de77a6b236b559` |
 | Packet統合commit | `9215c5e797d063d13719b231175ab8741736a591` |
-| current Head | `74329e9c982af24e10409b564c5d89a56ef4e2cd` |
-| current refs | `HEAD = origin/main = origin/HEAD = 74329e9c982af24e10409b564c5d89a56ef4e2cd` |
-| branch / worktree | `main` / dirty（R4-P1-01の追加回帰test 3 filesが未commit。commit/pushは未実施） |
-| Base→current Head | **18 commits / 211 files / +9684 / -330** |
-| 直前fix-delta | `0a724356..74329e9`、26 files、`+698/-105` |
-| 直前fix-deltaの範囲 | R4-P1-01のroute source実装・migration/H2/test・Packet/ledger同期。既存pathの更新に加え、manifestへ追加する6 pathsを含む |
-| merge状態 | `74329e9`は`origin/main`へ反映済み。今回のR1.3追加回帰test 3 filesは未commit・未push |
-| diff check | current worktreeはPASS（`git diff --check` exit 0）。未追跡test fileはgit diff対象外のため、statusと合わせて確認する |
+| current Head | `92fad28b2ed4e103167d94e550c36aec9fd41fae` |
+| current refs | `HEAD = origin/main = origin/HEAD = 92fad28b2ed4e103167d94e550c36aec9fd41fae` |
+| branch / worktree | `main` / clean |
+| Base→current Head | **19 commits / 212 files / +10111 / -330** |
+| 直前fix-delta | `74329e9..92fad28`、7 files、`+473/-46` |
+| 直前fix-deltaの範囲 | APPLICANT_MANAGER 8件・responsibility逆期間API test 1件の追加回帰test 2 files、review-ledger/manifest/tasks/中央ledger Packet同期4 files、およびcurrent Head commit |
+| merge状態 | `92fad28`は`origin/main`へ反映済み。worktreeはclean |
+| diff check | `git diff --check` exit 0 |
 | 独立Review報告のdiff hash | `63ace139532f2ccfea84f4876c6f5191db12fa4d`（旧Packetの履歴証跡） |
 
 再現コマンド:
@@ -36,12 +36,6 @@ git diff --check 5d228d211d0d752833fe3424a3b8aa4b40096733..HEAD
 git diff --check
 ```
 
-### Current worktree delta（current Headには未反映）
-
-- current Head `74329e9`には、R4-P1-01としてV75を変更せず`V79_1__approval_route_decision_sources.sql`を追加した変更、`applicant_role_condition`をroute entity/DTO/API/UI/resolverへ通した変更、`PERMISSION_GROUP`・`ORGANIZATION_MANAGER`・`FINANCE_MANAGER`のas-of解決、H2 schema/fixture同期が反映済みである。
-- `0a724356..74329e9`で新たにcurrent manifestへ追加すべき6 pathsは、`ApprovalResponsibilitySaveRequest.java`、`ApprovalResponsibilityView.java`、`ApprovalResponsibility.java`、`ApprovalResponsibilityMapper.java`、`UserPermissionGroupMapper.java`、`V79_1__approval_route_decision_sources.sql`である。§2.9へ個別帰属した。
-- current Head後のR1.3追加回帰は未commitの3 filesとして作業木に残る: `src/test/java/com/ses/controller/api/ApprovalAdministrationApiControllerTest.java`、`src/test/java/com/ses/service/impl/ApprovalAdministrationServiceTest.java`、`src/test/java/com/ses/service/impl/RouteResolverServiceTest.java`。これらは211 committed pathsには含めない。
-- compileおよびR1.3対象testはgreen。Docker unavailableのため実MySQL gateは未達であり、作業木は`main`に対してdirtyのまま維持する。
 
 ### 帰属コード
 
@@ -308,9 +302,9 @@ git diff --check
 | 204 | A | `src/test/resources/sql/schema-approval-h2.sql` | `T042/F1`/`T046/B1` H2 approval schema | `b380a5a` |
 | 205 | M | `src/test/resources/sql/schema-quotation-h2.sql` | `T043/F2` target version schema sync | `5110f12` |
 
-### 2.9 current Headで追加された6 paths
+### 2.9 current Headで追加された9 paths
 
-`0a724356..74329e9`の差分は26 filesだが、そのうち既存manifest pathの更新を除く新規pathは次の6件である。いずれもcommit `74329e9`に含まれ、未commit test 3 filesとは区別する。
+`0a724356..74329e9`の差分は26 filesだが、そのうち既存manifest pathの更新を除く新規pathは次の6件である。いずれもcommit `74329e9`に含まれる。
 
 | # | status | path | primary task / scope | commit |
 |---:|---|---|---|---|
@@ -321,7 +315,15 @@ git diff --check
 | 210 | M | `src/main/java/com/ses/mapper/UserPermissionGroupMapper.java` | `R4-P1-01` permission-group active membership query | `74329e9` |
 | 211 | A | `src/main/resources/db/migration/V79_1__approval_route_decision_sources.sql` | `R4-P1-01` route role condition/responsibility patch migration | `74329e9` |
 
-**path集計:** S07 packet 5 + roadmap dispatch 25 + other spec 18 + production Java 88 + migration SQL 5 + frontend/resources 30 + test Java 29 + test resources 5 + current Head additions 6 = **211**。重複0、未分類0。current worktreeの未commit test 3 filesはこのHead manifestの集計外である。
+`74329e9..92fad28`の差分は7 filesで、そのうち既存manifest pathの更新を除く新規pathは次の3件である。いずれもcommit `92fad28`に含まれる。
+
+| # | status | path | primary task / scope | commit |
+|---:|---|---|---|---|
+| 212 | M | `src/test/java/com/ses/controller/api/ApprovalAdministrationApiControllerTest.java` | `R4-P1-01` responsibility逆期間HTTP 400/ApiResult.code=400契約、APPLICANT_MANAGER HTTP契約 | `92fad28` |
+| 213 | M | `src/test/java/com/ses/service/impl/ApprovalAdministrationServiceTest.java` | `R4-P1-01` route/responsibility異常系13件（逆期間・不正type・不存在組織・無効user） | `92fad28` |
+| 214 | M | `src/test/java/com/ses/service/impl/RouteResolverServiceTest.java` | `R4-P1-01` APPLICANT_MANAGER t_user_organization境界・期間外・manager不存在/無効/削除・0件fail-closed・self-only fail-closed・snapshot固定の8件を含む拡張（19件→27件） | `92fad28` |
+
+**path集計:** S07 packet 5 + roadmap dispatch 25 + other spec 18 + production Java 88 + migration SQL 5 + frontend/resources 30 + test Java 29 + test resources 5 + R4-P1-01 source additions 6 + R4-P1-01 test additions 3 = **214**（Base→Head全212 pathsの実数は`git diff --name-only 5d228d2..HEAD | Measure-Object -Line`で確認。manifestの行番号は連番で付与）。重複0、未分類0。
 
 ## 3. R1〜R5 AC trace (AC→実装→assert→Demo)
 
@@ -385,13 +387,13 @@ git diff --check
 
 ### 5.1 current Head / current worktreeで記録された回帰
 
-- current Head `74329e9`のBase→Headは**18 commits / 211 files / +9684/-330**。`HEAD = origin/main = origin/HEAD`を確認した。
-- R1.3追加対象testは`RouteResolverServiceTest` 19件、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 5件の計**37 / failures 0 / errors 0 / skipped 0**。3 filesは未commit作業木にある。
+- current Head `92fad28`のBase→Headは**19 commits / 212 files / +10111/-330**。`HEAD = origin/main = origin/HEAD`を確認した。worktreeはclean。
+- R1.3追加対象testは`RouteResolverServiceTest` 27件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**46 / failures 0 / errors 0 / skipped 0**（テスト実行確認後に更新）。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
-- 20クラスdirect regression（R4-P1-01 consumer 7クラス＋B1/M 13クラス）は**153 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
-- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。結果は**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはskip検出でexit 1となった。
+- 20クラスdirect regression（R4-P1-01 consumer 7クラス＋B1/M 13クラス）は**169 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（指摘記載の実測値）。
+- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。結果は**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**（ただし追加テスト後は件数が増加する）、scriptはskip検出でexit 1となった。
 - skipはDocker依存の12 test cases / 10 report classes: `CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。DockerなしのためL4 zero-skippedは未達である。
-- `git status --short --branch`は`main...origin/main`に対し上記test 3 files（M 2、?? 1）、`git diff --check`はexit 0。commit/pushは実施していない。
+- `git status --short --branch`は`main...origin/main`（upstream一致）、worktreeはclean、`git diff --check`はexit 0。
 
 上記は定向/静的/H2 evidenceであり、以下のrelease gateを代替しない。
 
@@ -419,8 +421,8 @@ git diff --check
 
 ### 5.3 再Review / 再開条件
 
-1. 独立Reviewで211 committed pathsのstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
-2. Packet、Issue Register、中央台帳のHead/merge/diff値を`74329e9`と一致した状態で再確認する。未commit test 3 filesはclean条件を満たさないため、commit禁止の現状ではdirtyとして記録する。
+1. 独立Reviewで212 committed pathsのstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
+2. Packet、Issue Register、中央台帳のHead/merge/diff値を`92fad28`と一致した状態で再確認する。worktreeはclean。
 3. R4-P1-01についてV79.1の実MySQL fresh/legacy/repair適用、schema/history、設定→resolver→snapshotの通し証拠を取得する。
 4. B1/Mの未達gateを同一Headで実証し、`tasks.md`のDemo/release gateとcheckboxを更新する。未実証項目を完了扱いにしない。
 5. S07の正式Review PASS後にのみS09/Wave 2の開始判定を行う。

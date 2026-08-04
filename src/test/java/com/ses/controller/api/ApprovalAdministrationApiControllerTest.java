@@ -110,4 +110,22 @@ class ApprovalAdministrationApiControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
     }
+
+    @Test
+    @WithMockUser(username = "1", roles = "管理者")
+    void responsibilityの逆期間はHTTP400かつApiResultcode400で返す() throws Exception {
+        mockMvc.perform(post("/api/approval/responsibilities")
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "responsibilityType": "FINANCE_MANAGER",
+                                  "userId": 1,
+                                  "validFrom": "2026-01-02",
+                                  "validTo": "2026-01-01"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
 }

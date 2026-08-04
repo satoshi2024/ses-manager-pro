@@ -62,6 +62,8 @@ class RouteResolverServiceTest {
     private UserPermissionGroupMapper userPermissionGroupMapper;
     @Autowired
     private OrganizationUnitMapper organizationUnitMapper;
+    @Autowired
+    private UserOrganizationMapper userOrganizationMapper;
 
     private Long approverId;
     private Long applicantId;
@@ -479,6 +481,162 @@ class RouteResolverServiceTest {
                 () -> resolveAt(organizationType, organization, today));
         assertThrows(BusinessException.class,
                 () -> resolveAt(financeType, organization, today));
+    }
+
+    // ==================== APPLICANT_MANAGER tests ====================
+
+    @Test
+    void APPLICANT_MANAGERはvalid_from当日を所属期間開始としてinclusiveで解決する() {
+        LocalDate today = LocalDate.now();
+        Long manager = insertUser("am-boundary-start-manager");
+        Long org = insertOrganization("am-boundary-start-org");
+        // valid_from = today, valid_to = today+1: asOf=today → 期間内（開始inclusive）
+        insertUserOrganization(applicantId, org, manager, today, today.plusDays(1));
+        String type = "route.am-boundary-start." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        List<Long> candidates = resolveAt(type, org, today).steps().get(0).approverUserIds();
+        assertTrue(candidates.contains(manager),
+                "valid_from当日はinclusiveなのでmanagerが候補に含まれる");
+    }
+
+    @Test
+    void APPLICANT_MANAGERはvalid_to当日を所属期間終了としてinclusiveで解決する() {
+        LocalDate today = LocalDate.now();
+        Long manager = insertUser("am-boundary-end-manager");
+        Long org = insertOrganization("am-boundary-end-org");
+        // valid_from = today-1, valid_to = today: asOf=today → 期間内（終了inclusive）
+        insertUserOrganization(applicantId, org, manager, today.minusDays(1), today);
+        String type = "route.am-boundary-end." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        List<Long> candidates = resolveAt(type, org, today).steps().get(0).approverUserIds();
+        assertTrue(candidates.contains(manager),
+                "valid_to当日はinclusiveなのでmanagerが候補に含まれる");
+    }
+
+    @Test
+    void APPLICANT_MANAGERは所属期間外のasOfでは候補0件になりfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long manager = insertUser("am-out-range-manager");
+        Long org = insertOrganization("am-out-range-org");
+        // valid_from = today-2, valid_to = today-1: asOf=today → 期間外
+        insertUserOrganization(applicantId, org, manager, today.minusDays(2), today.minusDays(1));
+        String type = "route.am-out-range." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(3), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "所属期間外asOfではAPPLICANT_MANAGERは0件になりfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERはmanager_user_idがNULLの場合は候補0件になりfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long org = insertOrganization("am-null-manager-org");
+        // manager_user_id = null: 上長未設定
+        insertUserOrganization(applicantId, org, null, today.minusDays(1), today.plusDays(1));
+        String type = "route.am-null-manager." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "manager_user_idがNULLの場合は候補0件でfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERは無効managerを候補から除外しfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long disabledManager = insertUser("am-disabled-manager");
+        Long org = insertOrganization("am-disabled-manager-org");
+        insertUserOrganization(applicantId, org, disabledManager, today.minusDays(1), today.plusDays(1));
+        // managerを無効化
+        SysUser patch = new SysUser();
+        patch.setId(disabledManager);
+        patch.setStatus(0);
+        sysUserMapper.updateById(patch);
+        String type = "route.am-disabled-manager." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "無効manager(status=0)は候補から除外されfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERは削除済みmanagerを候補から除外しfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long deletedManager = insertUser("am-deleted-manager");
+        Long org = insertOrganization("am-deleted-manager-org");
+        insertUserOrganization(applicantId, org, deletedManager, today.minusDays(1), today.plusDays(1));
+        // managerを論理削除
+        sysUserMapper.deleteById(deletedManager);
+        String type = "route.am-deleted-manager." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "論理削除済みmanagerは候補から除外されfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERで申請者本人しかmanager候補にいない場合はfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long org = insertOrganization("am-self-manager-org");
+        // manager_user_id = applicantId 自身
+        insertUserOrganization(applicantId, org, applicantId, today.minusDays(1), today.plusDays(1));
+        String type = "route.am-self-manager." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "申請者自身がmanagerの場合は職務分離(R1.4)で除外されfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERのroute解決はasOf時点のsnapshotで固定される() {
+        LocalDate today = LocalDate.now();
+        Long manager1 = insertUser("am-snapshot-manager-past");
+        Long manager2 = insertUser("am-snapshot-manager-current");
+        Long org = insertOrganization("am-snapshot-org");
+        // 過去期間(today-5 〜 today-2): manager1
+        insertUserOrganization(applicantId, org, manager1, today.minusDays(5), today.minusDays(2));
+        // 現在期間(today-1 〜 today+5): manager2
+        insertUserOrganization(applicantId, org, manager2, today.minusDays(1), today.plusDays(5));
+        String type = "route.am-snapshot." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(10), today.plusDays(10));
+
+        // asOf=today-3（過去期間内）: manager1が候補
+        List<Long> pastCandidates = resolveAt(type, org, today.minusDays(3)).steps().get(0).approverUserIds();
+        assertTrue(pastCandidates.contains(manager1), "過去asOfではmanager1が候補");
+        assertTrue(!pastCandidates.contains(manager2), "過去asOfではmanager2は候補外");
+
+        // asOf=today（現在期間内）: manager2が候補
+        List<Long> currentCandidates = resolveAt(type, org, today).steps().get(0).approverUserIds();
+        assertTrue(!currentCandidates.contains(manager1), "現在asOfではmanager1は候補外");
+        assertTrue(currentCandidates.contains(manager2), "現在asOfではmanager2が候補");
+    }
+
+    private void insertUserOrganization(Long userId, Long organizationId, Long managerUserId,
+                                        LocalDate validFrom, LocalDate validTo) {
+        com.ses.entity.UserOrganization uo = com.ses.entity.UserOrganization.builder()
+                .userId(userId)
+                .organizationId(organizationId)
+                .managerUserId(managerUserId)
+                .primaryFlag(1)
+                .validFrom(validFrom)
+                .validTo(validTo)  // valid_toを設定することでACTIVE_PRIMARY_USER_IDのUNIQUE制約に抵触しない
+                .version(0)
+                .build();
+        userOrganizationMapper.insert(uo);
     }
 
     private Long insertOrganization(String prefix) {

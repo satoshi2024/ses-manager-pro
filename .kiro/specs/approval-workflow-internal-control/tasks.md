@@ -103,11 +103,12 @@
   - **状態**: 実装済み差分の定向検証とR1.3 source別回帰まで完了。P1は実MySQL migration smoke未実行のため、受入上は`OPEN / P1`を維持する。
   - **実装**: V79.1で`applicant_role_condition`と`t_approval_responsibility`を追加。route管理DTO/API/UI、`PERMISSION_GROUP`、`ORGANIZATION_MANAGER`、`FINANCE_MANAGER`の設定・as-of解決、H2 schemaを同期した。V75〜V79は変更していない。
   - **追加した回帰**: `RouteResolverServiceTest`を13→19件へ拡張し、responsibility `valid_from`/`valid_to` inclusive境界・前後日、組織一致/不一致、FINANCE_MANAGERの組織別/全社assignment、permission groupの無効group・削除membership・disabled/deleted user、3 sourceの候補0件・申請者自身のみ・責任者disabled/deleted userを検証。`ApprovalAdministrationServiceTest`は13件で不正approver type、route/responsibility逆期間、不存在organization、無効user、error code/messageKeyを検証。新規`ApprovalAdministrationApiControllerTest` 5件でHTTP 400/404と`ApiResult.code`を検証した。
-  - **定向/static/direct実測**: 上記R1.3対象は**37 / failures 0 / errors 0 / skipped 0**。`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1のstatic計は**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01 consumer 7クラス＋B1/M 13クラスの20クラスdirect regressionは**153 / 0 / 0 / 0 / BUILD SUCCESS**。
-  - **L4相当実測**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。skipは12 test cases / 10 report classesである。
+  - **追加した回帰**: `RouteResolverServiceTest`を加えてAPPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from實日inclusive境界、valid_to實日inclusive境界、所属期間外fail-closed、manager_user_id NULL fail-closed、無効manager fail-closed、削除済みmanager fail-closed、申請者本人のみmanager候補のfail-closed（職務分離R1.4）、snapshot固定の8ケースを追加（19件→27件）。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間（validFrom>validTo）がHTTP 400かつApiResult.code=400になるテストを追加（5件→6件）。
+  - **定向/static/direct実測**: R1.3対象計**46 / failures 0 / errors 0 / skipped 0**（`RouteResolverServiceTest` 27、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6）。`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1のstatic計は**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01 consumer 7クラス＋B1/M 13クラスの20クラスdirect regressionは**169 / 0 / 0 / 0 / BUILD SUCCESS**（指摘記載の実測値）。
+  - **L4相当実測**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。**1454 tests以上 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。skipは12 test cases / 10 report classesである。
   - **残存gate**: V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`照会、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時の実DB rollback、browser管理画面/desktop/390px Demo、CI zero-skippedは未達。B1/Mの未達状態も変更しない。
   - **Objective**: R1.2の申請者role条件route、R1.3の5種類のapprover sourceをroute設定からsnapshot解決まで同一契約で実証する。
-  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL/実browser/release gateの証拠が得られるまでcheckboxは`[ ]`のまま維持する。
+  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、APPLICANT_MANAGERの`t_user_organization`期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL/実browser/release gateの証拠が得られるまでcheckboxは`[ ]`のまま維持する。
 
 - [ ] B1. 通知/SLA/escalation
   - **状態**: 実装中（V79 outboxとround/step/slot対応dedupe keyを追加済み。Demo/release gate未達のため完了扱いにしない）。
@@ -158,9 +159,9 @@
 
 ## R4 current Head correction（2026-08-04）
 
-- **current Head**: `76ffcbbac311643bbcbe3de0786fb195a7765d51`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。今回のcurrent correction 4文書が未commitのため、worktreeはdirtyである。
-- **Base→current Head**: `5d228d2..76ffcbb`は16 commits、205 files、`+8796/-328`。`10dc316d..76ffcbb`はReview文書4 files、`+141/-15`であり、production code・migration SQL・test・runtime contract変更はない。merge状態はorigin/main反映済みである。
+- **current Head**: `92fad28b2ed4e103167d94e550c36aec9fd41fae`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。worktreeはclean。
+- **Base→current Head**: `5d228d2..92fad28`は**19 commits / 212 files / +10111/-330**。212 pathsはすべてcommit済みHead範囲。merge状態はorigin/main反映済みである。
 - **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。実MySQL、複数JVM、実Webhook、rollback、desktop/390px browser、zero-skippedのrelease gate未達を完了扱いにしない。
-- **direct regression**: current Headの独立再Review記録はB1/M対象93件、migration/dispatch整合34件、合計127件をfailures 0 / errors 0 / skipped 0、BUILD SUCCESSとしている。定向greenはB1/M完了の代替ではない。
-- **L4**: 最新記録は`1433 / failures 0 / errors 0 / skipped 12`。Maven本体BUILD SUCCESSでもCI契約のzero-skippedは未達である。
-- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head整合を修正提出したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。
+- **direct regression**: R1.3対象 46/0/0/0、migration/dispatch整合 35/0/0/0、20クラスdirect regression 169/0/0/0、すべてBUILD SUCCESS。定向greenはB1/M完了の代替ではない。
+- **L4**: `verify-like-ci.ps1`が実行した`mvn -B clean test`は**1454 tests以上 / failures 0 / errors 0 / skipped 12**。Maven本体BUILD SUCCESSでもCI契約のzero-skippedは未達である。
+- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head `92fad28`・212 paths・19 commitsへ同期したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。

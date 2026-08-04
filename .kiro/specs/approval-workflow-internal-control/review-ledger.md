@@ -4,22 +4,22 @@
 
 **判定:** **NOT REVIEWABLE**。S07は`IN PROGRESS`、S09は`NOT READY — まだ開始不可`、Wave 2は解放不可。
 
-- **current Git:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、current Head=`74329e9c982af24e10409b564c5d89a56ef4e2cd`。`HEAD = origin/main = origin/HEAD`、branch=`main`を確認した。
-- **scope:** Base→Headは**18 commits / 211 files / +9684/-330**。旧205-path manifestへcurrent Head追加6 paths（responsibility DTO/entity/mapper、permission-group mapper、V79.1 patch migration）を追加した。current Head後のR1.3追加回帰test 3 filesは未commitの作業木にあり、211 committed pathsには含めない。
-- **worktree:** `main...origin/main`、追加test 3 filesがdirty（M 2、?? 1）。`git diff --check`はexit 0。commit/pushは行っていない。
-- **R4-P1-01:** V79.1、`applicant_role_condition`、`t_approval_responsibility`、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER、as-of/scope/fail-closedを実装済み。V75〜V79は変更していない。
-- **R1.3 evidence:** `RouteResolverServiceTest` 19、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 5、計**37 / failures 0 / errors 0 / skipped 0**。responsibility期間/組織境界、group membership/user disabled/deleted、3 sourceの候補0/self-only、管理API不正type/逆期間/不存在組織/無効userを含む。
-- **static/direct/full evidence:** migration/static/JSは**35 / 0 / 0 / 0 / BUILD SUCCESS**。20クラスdirect regressionは**153 / 0 / 0 / 0 / BUILD SUCCESS**。`verify-like-ci.ps1`の`mvn -B clean test`は**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。
-- **skip /未達:** Docker依存12 test cases / 10 report classes（Flyway系、並行性系）をskip。実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`、複数JVM ShedLock/claim、実Webhook、commit前例外時DB rollback、desktop/390px browser、zero-skippedは未確認。定向greenやMaven BUILD SUCCESSをrelease PASSへ拡張しない。
+- **current Git:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、current Head=`92fad28b2ed4e103167d94e550c36aec9fd41fae`。`HEAD = origin/main = origin/HEAD`、branch=`main`を確認した。
+- **scope:** Base→Headは**19 commits / 212 files / +10111/-330**。212 pathsはすべてcommit済みHead範囲である。
+- **worktree:** `main...origin/main`（upstream一致）、clean。`git diff --check`はexit 0。
+- **R4-P1-01:** V79.1、`applicant_role_condition`、`t_approval_responsibility`、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER、as-of/scope/fail-closedを実装済み。V75〜V79は変更していない。APPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from/valid_to両端境界、所属期間外、manager不存在/NULL、無効/削除済みmanager、候補0件fail-closed、申請者本人しかmanager候補にいない場合のfail-closed、snapshot固定の8ケースを`RouteResolverServiceTest`へ追加。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間がHTTP 400かつApiResult.code=400になるテストを追加。
+- **R1.3 evidence:** `RouteResolverServiceTest` 27、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6、計**46 / failures 0 / errors 0 / skipped 0**。responsibility期間/組織境界、group membership/user disabled/deleted、APPLICANT_MANAGER上長期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot固定、5 sourceの候補0/self-only、管理API不正type/逆期間/不存在組織/無効userを含む。
+- **static/direct/full evidence:** migration/static/JSは**35 / 0 / 0 / 0 / BUILD SUCCESS**。20クラスdirect regressionは**169 / 0 / 0 / 0 / BUILD SUCCESS**（指摘記載の実測値）。`verify-like-ci.ps1`の`mvn -B clean test`は**1454 tests以上 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。
+- **skip /未達:** Docker依存12 test cases / 10 report classes（Flyway系、並行性系）をskip。実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`、複数JVM ShedLock/claim、実Webhook、commit前例外時実DB rollback、desktop/390px browser、zero-skippedは未確認。定向greenやMaven BUILD SUCCESSをrelease PASSへ読み替えない。
 
 ### Current Issue Register（review process blocker。P分類ではない）
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
-| `R4-REVIEW-01` | **OPEN** | current Head 211 pathsへmanifestを拡張したが、独立Reviewによる完全性確認前 | 211件のstatus/count/個別帰属、AC trace、範囲外帰属を独立再確認 |
+| `R4-REVIEW-01` | **OPEN** | current Head 212 pathsへmanifestを拡張したが、独立Reviewによる完全性確認前 | 212件のstatus/count/個別帰属、AC trace、範囲外帰属を独立再確認 |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79、V79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認 | クローズ維持。実MySQL/B1/Mの証拠へ拡張しない |
 | `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。実環境release gate未達 | 実MySQL、rollback、複数JVM、Webhook、browser、zero-skippedを実証 |
-| `R4-REVIEW-04` | **OPEN** | Packet/manifest/中央ledgerをHead `74329e9`、211 paths、18 commitsへ同期したが独立再Review前 | current Head整合と通常Review再開根拠を独立確認 |
+| `R4-REVIEW-04` | **OPEN** | Packet/manifest/中央ledgerをHead `92fad28`、212 paths、19 commitsへ同期したが独立再Review前 | current Head整合と通常Review再開根拠を独立確認 |
 | `R4-P1-01` | **OPEN / P1** | source別境界/異常系回帰はgreenだが、V79.1の実MySQL適用・履歴・repair/rollback未確認 | V79.1を実MySQLで適用し、route/source/履歴/repairを実測 |
 
 **再確認しない判定:** B1/M、S07 PASS、S09開始、Wave 2解放は行わない。
