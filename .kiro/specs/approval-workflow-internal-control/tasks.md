@@ -135,11 +135,21 @@
   - **実装ガイダンス**: `design.md`§6決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
 
 
-## R4 current Head B1/M検証追記（2026-08-03）
+## R4 baseline B1/M検証追記（履歴: 2026-08-03、current Head `76ffcbb`で上書き）
 
-- **基準**: 検証開始時のreview baselineは`10dc316d003d7070b7b232056d2c17a240274bb8`。本追記を含む修正は別local commitへまとめ、pushは行わない。
+- **基準（履歴）**: 検証開始時のreview baselineは`10dc316d003d7070b7b232056d2c17a240274bb8`。local commit予定・未pushという記述は当時の状態であり、current Headのmerge状態ではない。current Headの正本は直下の「R4 current Head correction（2026-08-04）」とreview-ledger/manifest/中央台帳である。
 - **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。定向テストがgreenでも、未達release gateを完了扱いにしない。
 - **B1/M定向回帰**: `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`NotificationOutboxSchedulerIntegrationTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`QuotationApiControllerTest`、`ContractApiControllerTest`、`ContractPaginationTest`、`InvoiceApiControllerTest`、`ApprovalTargetAdapterTest`を現作業木で実行し、**93 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**を確認した。
 - **実MySQL gate**: Docker daemonは再確認時に利用可能だったが、`FlywayMigrationSmokeTest`はTestcontainers/FlywayのMySQL named lock取得で約8分停止した。Surefireの今回実行結果は生成されず、プロセスを停止したため、V79 fresh/legacy/rollback/lockのPASS証拠にはしない。
 - **未達gate**: 実MySQL smoke、実Webhook endpoint、複数JVMのShedLock/claim競合、commit前例外時の実DB rollback、desktop/390px browser Demo、CI zero-skipped。mysql CLI、DB接続環境変数、Chrome/Edge/Firefox/Playwright executableも未検出だった。
 - **判定**: B1/Mは実装・定向回帰・scheduler Demo相当まで確認済みだが、release gate未達のため完了・PASSへ変更しない。S07は`IN PROGRESS`、S09/Wave 2は解放不可。
+
+
+## R4 current Head correction（2026-08-04）
+
+- **current Head**: `76ffcbbac311643bbcbe3de0786fb195a7765d51`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。今回のcurrent correction 4文書が未commitのため、worktreeはdirtyである。
+- **Base→current Head**: `5d228d2..76ffcbb`は16 commits、205 files、`+8796/-328`。`10dc316d..76ffcbb`はReview文書4 files、`+141/-15`であり、production code・migration SQL・test・runtime contract変更はない。merge状態はorigin/main反映済みである。
+- **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。実MySQL、複数JVM、実Webhook、rollback、desktop/390px browser、zero-skippedのrelease gate未達を完了扱いにしない。
+- **direct regression**: current Headの独立再Review記録はB1/M対象93件、migration/dispatch整合34件、合計127件をfailures 0 / errors 0 / skipped 0、BUILD SUCCESSとしている。定向greenはB1/M完了の代替ではない。
+- **L4**: 最新記録は`1433 / failures 0 / errors 0 / skipped 12`。Maven本体BUILD SUCCESSでもCI契約のzero-skippedは未達である。
+- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head整合を修正提出したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。

@@ -1,32 +1,31 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-## Latest authoritative REVIEW PACKET — Round 4再基線 / fix-delta追跡（2026-08-03）
+## Latest authoritative REVIEW PACKET — Round 4 current Head再基線（2026-08-04）
 
 **requested verdict:** intermediate / re-baseline。通常Reviewの開始判定ではなく、現時点の判定は **NOT REVIEWABLE** とする。
 
 - **handbook version:** `execution-review-handbook.md` v2.0。Round 4以降は§11により通常Reviewを停止し、spec・時間モデル・scope inventory・migration fixture・test matrixを先に改訂する。
 - **spec/tasks:** `.kiro/specs/approval-workflow-internal-control/requirements.md`、`design.md`、`tasks.md`、T041〜T047。
-- **base / head / fix-delta status:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`（S07 merge `4edb399`のfirst parent）、original implementation Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`、Packet統合commit=`9215c5e797d063d13719b231175ab8741736a591`。review baseline Head=`10dc316d003d7070b7b232056d2c17a240274bb8`（この修正開始時点の`main` / `origin/main` / `origin/HEAD`一致、worktree clean）。`9215c5e..10dc316d`は未commit作業木ではなく、8ファイル・`+167/-69`のcommit済みfix-deltaである。今回のPacket/manifest/ledger correctionはこのbaselineから作成する新しいlocal commitに含め、pushは行わない。完全manifest・requirements trace・public contract inventoryは[`review-manifest-10dc316d.md`](review-manifest-10dc316d.md)に固定した。
-- **scope inventory:** Base→current Headは204 files、`+8670/-328`。path partitionはS07 spec packet 4、roadmap dispatch docs 25、other spec docs 18、production Java 88、migration SQL 5、frontend/resources 30、test Java 29、test resources 5、未分類0であり、完全manifestは`review-manifest-10dc316d.md`に固定した。Packet fix-delta `9215c5e..10dc316d`は8ファイル、`+167/-69`で、production code・migration SQLを変更していない。
-- **task別manifest / changed files:** `review-manifest-10dc316d.md` §2に、Base→current Headの204 pathを重複なく分類したpartition（合計204、未分類0）と、commit別のtask/範囲帰属を固定した。F1/T042、T043〜T045相当、Round 3修正、B1/M追跡、R4 fix-delta、Packet/ledger更新を混同せず、roadmap/他spec文書はS07 production実装の範囲外として明示した。
-- **functional fix-delta changed files:** `parallel-execution-plan.md`、S07の中央/copyable開始・Review入口4ファイル、`src/test/java/com/ses/migration/SpecDispatchConsistencyTest.java`の機能修正6ファイルに、`review-ledger.md`と中央`spec-execution-ledger.md`の追跡更新2ファイルを加えた計8ファイル。`9215c5e..10dc316d`としてcommit済みで、S07=V75〜V79、S09〜S17=V80〜V88のconsumer契約をcurrent Headへ同期した。
-- **requirements/acceptance trace:** R1〜R5は`requirements.md`に存在し、9操作とR1.1〜R4.1の行単位traceは`operation-inventory.md` §2にある。current Headの実装・直接test・未達gate・public contract consumerは`review-manifest-10dc316d.md` §3〜§4へ固定した。これは受入PASSの宣言ではなく、R4-REVIEW-01再Reviewが再現できるtraceである。
-- **migration latest/reserved/applied:** 実ファイルはV75/V76/V77/V78/V79。採用方針をS07正式migration=`V75/V76/V77/V78/V79`、S09〜S17=`V80〜V88`へ統一する。V75〜V77は既存、V78はround/participant/version、V79はB1 notification outbox。適用済みDBの`flyway_schema_history`は未照会であり、applied判定は未確認。
-- **test / Demo evidence:** current Head `10dc316d`で`mvn -B -Dtest=SpecDispatchConsistencyTest,MigrationScriptIntegrityTest test`を独立実行し、MigrationScriptIntegrityTest 26/26、SpecDispatchConsistencyTest 8/8、合計34 tests / failures 0 / errors 0 / skipped 0、BUILD SUCCESSを確認した。`git diff --check`もexit 0である。これはR4-REVIEW-02の採番direct regression evidenceであり、B1/Mの実MySQL・実browser・実Webhook・複数JVM・rollback・L4 zero-skippedの代替ではない。
-- **known review blockers:** `R4-REVIEW-01`はcurrent Headのcomplete manifest/requirements trace/public contract inventoryを`review-manifest-10dc316d.md`へ提出済みで、独立再Review待ち。`R4-REVIEW-02`はcommit済みfix-deltaのdirect regression 34/0/0/0を独立確認済みでVERIFIED_CLOSED。`R4-REVIEW-03`はB1/Mの実環境release gate未達でOPEN。`R4-REVIEW-04`は本Packet・中央ledgerのcurrent Head/Issue Register正規化を提出済みで、修正commitの独立再Review待ちである。P0/P1/P2の通常Reviewは対象範囲確定・B1/M gate達成まで再開しない。
-- **out-of-scope changes:** Base→current Headのother-spec 18 filesとroadmap dispatch docs 25 filesは、`review-manifest-10dc316d.md` §2でS07 production実装から分離している。共有Java/resource/testはcommit/path partitionで直接consumerを示し、別specの問題や旧Headのissueをcurrent HeadのP0/P1として再起票しない。
-- **rollback:** current Packet/manifest/ledger correctionは文書artifactのみで、production code・migration SQLは変更していない。`9215c5e..10dc316d`のfix-deltaはcommit単位でrevert可能であり、本修正のmanifest/ledger差分も同様に独立revertできる。V75〜V79を編集・削除しない。
+- **base / head / merge status:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、original implementation Head=`a70cb51145a94ec3d70421bcc1de77a6b236b559`、Packet統合commit=`9215c5e797d063d13719b231175ab8741736a591`、current Head=`76ffcbbac311643bbcbe3de0786fb195a7765d51`。実Gitでは`HEAD = origin/main = origin/HEAD = 76ffcbb`、branchは`main`である。今回のcurrent correction 4文書が未commitのため、作業木はdirtyである。`10dc316d..76ffcbb`はReview文書4 files、`+141/-15`のcommit済みdeltaであり、`76ffcbb`はorigin/mainへ反映済みである。local commit予定・未pushという旧記録は訂正する。
+- **scope inventory:** Base→current Headは**16 commits / 205 files / +8796/-328**。partitionはS07 spec packet 5、roadmap dispatch docs 25、other spec docs 18、production Java 88、migration SQL 5、frontend/resources 30、test Java 29、test resources 5、未分類0。205 pathの個別task/commit帰属は[`review-manifest-10dc316d.md`](review-manifest-10dc316d.md) §2に固定した。
+- **fix-delta scope:** `10dc316d..76ffcbb`は`review-ledger.md`、`review-manifest-10dc316d.md`、`tasks.md`、中央`spec-execution-ledger.md`の4文書のみで、production code・migration SQL・test・runtime contract変更はない。`git diff --check`はrange/worktreeともexit 0である。
+- **requirements/acceptance trace:** R1〜R5の20 ACについて、AC→実装/consumer→assert/evidence→Demo→状態をmanifest §3へ行単位で固定した。これは受入PASSの宣言ではなく、R4-REVIEW-01の独立再Reviewが再現できるtraceである。
+- **migration latest/reserved/applied:** 実ファイルはV75/V76/V77/V78/V79。S07正式migrationはV75〜V79、S09〜S17はV80〜V88を単一予約とする。適用済みDBの`flyway_schema_history`は未照会であり、applied判定は未確認。
+- **test / Demo evidence:** current Headの独立再Review記録はB1/M対象93件、migration/dispatch整合34件、合計127件をfailures 0 / errors 0 / skipped 0、BUILD SUCCESSとしている。これはdirect regression evidenceであり、L4最新`1433 / 0 / 0 / 12`、実MySQL、実browser、実Webhook、複数JVM、rollback、zero-skippedの代替ではない。
+- **known review blockers:** `R4-REVIEW-01`はcurrent Headの205 path個別manifestと20 AC traceを本Packetへ再提出したが独立確認前でOPEN。`R4-REVIEW-02`はV75〜V79実在集合、V80〜V88予約、direct regression 34/0/0/0を維持しVERIFIED_CLOSED。`R4-REVIEW-03`はB1/Mの実環境release gate未達でOPEN。`R4-REVIEW-04`は旧Head/merge状態不一致を訂正したPacket・中央ledgerを再提出したが独立確認前でOPEN。P0/P1/P2の通常ReviewはB1/M gate達成まで再開しない。
+- **out-of-scope changes:** other-spec 18 files、roadmap dispatch 25 files、shared Java/resource/testはmanifest §2の個別帰属でS07 production実装から分離する。別specの問題をS07の受入PASSへ加算しない。
+- **rollback:** current correctionは文書artifactのみで、production code・migration SQLは変更していない。`10dc316d..76ffcbb`のdeltaはcommit単位でrevert可能であり、V75〜V79を編集・削除しない。
 
 ### Round 4 Issue Register（review process blocker。P分類ではない）
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
-| `R4-REVIEW-01` | FIXED_PENDING_REVIEW | current Head `10dc316d`のBase→Head 204 path partition、task/commit帰属、R1〜R5 trace、public contract consumer inventoryを`review-manifest-10dc316d.md`へ固定した | current Headを対象に独立Reviewでmanifest完全性・範囲外帰属・traceを再確認 |
-| `R4-REVIEW-02` | VERIFIED_CLOSED | `9215c5e..10dc316d`の採番fix-deltaをcommit済み。S07 V75〜V79実在集合、S09〜S17 V80〜V88予約、direct regression 34/0/0/0を確認済み | クローズ維持。B1/Mや通常Reviewの証拠へ拡張しない |
-| `R4-REVIEW-03` | OPEN | B1/T046・M/T047のcheckboxは`[ ]`。実MySQL/rollback/複数JVM/実Webhook/browser/zero-skipped未達 | B1/MのDoD・Demo・release gateを同一Headで完了するまでPASS・次Wave解放を行わない |
-| `R4-REVIEW-04` | FIXED_PENDING_REVIEW | Packetと中央ledgerのcurrent Head、Issue Register、総合判定、S09/Wave 2停止条件を本修正で正規化した | 修正をcommitしたHeadで独立Reviewし、通常Review再開根拠を判定 |
+| `R4-REVIEW-01` | **OPEN** | current Head `76ffcbb`のBase→Head 205 pathを個別task/commitへ帰属し、R1〜R5の20 AC traceをmanifestへ再提出した。独立Reviewによる完全性確認は未了 | current Headを対象にmanifestの205件、分類合計、AC trace、範囲外帰属を独立再確認 |
+| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、S09〜S17 V80〜V88単一予約、direct regression 34/0/0/0を維持 | クローズ維持。B1/Mや通常Reviewの証拠へ拡張しない |
+| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047のcheckboxは`[ ]`。実MySQL/rollback/複数JVM/実Webhook/browser/zero-skipped未達 | B1/MのDoD・Demo・release gateを同一Headで実証するまでPASS・次Wave解放を行わない |
+| `R4-REVIEW-04` | **OPEN** | Packet・manifest・中央ledgerのHead=`76ffcbb`、Base→Head=`16 commits/205 files/+8796/-328`、merge=`origin/main反映済み`へ訂正したが、独立再Reviewは未了 | current HeadのPacket/中央ledger一致と通常Review再開根拠を独立確認 |
 
-**現行判定:** **NOT REVIEWABLE**。R4-REVIEW-01/04は修正提出済みで独立再Review待ち、R4-REVIEW-03は未達継続。P0/P1/P2の通常Review、L4全量、次Wave解放は行わない。
+**現行判定:** **NOT REVIEWABLE**。R4-REVIEW-01/04はcurrent Head整合を修正提出したがOPEN継続、R4-REVIEW-03は未達継続、R4-REVIEW-02のみVERIFIED_CLOSED。P0/P1/P2の通常Review、L4全量の完了扱い、S09/Wave 2解放は行わない。
 
 ## Round 3追跡Review訂正（2026-08-03、Head `a33a6e9`）
 
