@@ -1,25 +1,26 @@
-# S07 Round 4 current Head Review manifest
+# S07 Round 4 Review manifest — Review対象production Head
 
-> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`および旧Packet Head `0a724356`ではなく、実Gitのcurrent Head `94e82cd6285187794f7fe1f67786650d77120445`である。
+> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`、`74329e9`、`92fad28`、`94e82cd`の各Packet snapshotではなく、実Gitで確認したReview対象production Head `1e8a2243e0ed095bb211519b1242d4bcff17caef`である。これらの旧hashは履歴・commit帰属としてのみ扱い、現行Headの根拠には使用しない。
 >
-> このmanifestは受入PASSの宣言ではない。Base→current Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateは未達のまま記録する。212 pathsはすべてcommit済みHeadの範囲である。
+> このmanifestは受入PASSの宣言ではない。Base→Review対象production Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateは未達のまま記録する。212 pathsはすべてReview対象production Headにcommit済みの範囲であり、本修正後のPacket文書作業木は別管理する。
 
 ## 1. 対象とGit確定値
 
-| 項目 | current Headで確認した値 |
+| 項目 | Review対象production Headで確認した値 |
 |---|---|
 | 対象spec | `approval-workflow-internal-control`（S07） |
 | Review Base | `5d228d211d0d752833fe3424a3b8aa4b40096733` |
 | original implementation Head | `a70cb51145a94ec3d70421bcc1de77a6b236b559` |
 | Packet統合commit | `9215c5e797d063d13719b231175ab8741736a591` |
-| current Head | `94e82cd6285187794f7fe1f67786650d77120445` |
-| current refs | `HEAD = origin/main = origin/HEAD = 94e82cd6285187794f7fe1f67786650d77120445` |
-| branch / worktree | `main` / clean |
-| Base→current Head | **20 commits / 212 files / +10290/-330** |
-| 直前fix-delta | `92fad28..94e82cd`、7 files、`+473/-46` |
-| 直前fix-deltaの範囲 | APPLICANT_MANAGER 8件・responsibility逆期間API test 1件の追加回帰test 2 files、review-ledger/manifest/tasks/中央ledger Packet同期4 files、およびcurrent Head commit |
-| merge状態 | `92fad28`は`origin/main`へ反映済み。worktreeはclean |
-| diff check | `git diff --check` exit 0 |
+| Review対象production Head | `1e8a2243e0ed095bb211519b1242d4bcff17caef` |
+| production refs | `HEAD = origin/main = origin/HEAD = 1e8a2243e0ed095bb211519b1242d4bcff17caef` |
+| branch / production Head確認時worktree | `main` / clean（Packet修正開始前） |
+| Base→Review対象production Head | **21 commits / 212 files / +10290/-330** |
+| 直前production delta | `94e82cd..1e8a224`、4 files、`+14/-14` |
+| 直前production deltaの範囲 | `review-ledger.md`、本manifest、`tasks.md`、中央`spec-execution-ledger.md`のPacket統計同期。これはproduction Headに含まれる履歴であり、本Reviewで行う未commit文書修正とは分離する |
+| Packet文書commit | **未commit**（本Reviewはcommit/push禁止。修正は作業木で管理） |
+| Packet文書作業木 | 本文書を含む4文書の更新後はdirty。production Headのclean状態と混同しない |
+| diff check | production Head確認時の`git diff --check` exit 0 |
 | 独立Review報告のdiff hash | `63ace139532f2ccfea84f4876c6f5191db12fa4d`（旧Packetの履歴証跡） |
 
 再現コマンド:
@@ -37,6 +38,15 @@ git diff --check
 ```
 
 
+### 1.1 Current worktree delta（Review対象production Head外）
+
+Review対象production Head `1e8a224`には含まれない今回の未commit作業木は、Packet/回帰検証用の次の8ファイルである。これらを§2の212-path manifest、Base→Head統計、production Headのcommit帰属へ加算しない。
+
+- Packet/ledger: `.kiro/specs/approval-workflow-internal-control/review-ledger.md`、`review-manifest-10dc316d.md`、`tasks.md`、`.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md`
+- migration/test evidence: `src/main/resources/db/migration/V79_1__approval_route_decision_sources.sql`、`src/test/java/com/ses/migration/FlywayMigrationSmokeTest.java`、`src/test/java/com/ses/service/impl/ApprovalEngineServiceTest.java`、`src/test/java/com/ses/service/impl/RouteResolverServiceTest.java`
+
+V79.1のFK action変更は`ON UPDATE RESTRICT ON DELETE RESTRICT`であり、Review対象production Head後の未commitdeltaである。commit/pushは行わない。
+
 ### 帰属コード
 
 | コード | task / scope | Review上の扱い |
@@ -53,9 +63,9 @@ git diff --check
 | `R4-DOC` | Round 4 Packet/manifest/ledger correction | current HeadとworktreeのReview process record |
 | `SHARED` | S07以外の既存shared consumer・範囲外spec文書 | S07の受入PASSへ加算しない |
 
-## 2. Base→current Headの全path manifest
+## 2. Base→Review対象production Headの全path manifest
 
-以下は`git diff --name-status --no-renames 5d228d2..74329e9`の全211 pathである。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。current Head後の未commit test差分は§1のCurrent worktree deltaと§5で別管理する。
+以下はReview対象production Headに対する`git diff --name-status --no-renames 5d228d2..1e8a2243e0ed095bb211519b1242d4bcff17caef`の全212 pathである。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。Review対象production Head後の未commit test差分は§1のCurrent worktree deltaと§5で別管理する。
 
 ### 2.1 S07 spec packet（5 paths）
 
@@ -302,9 +312,9 @@ git diff --check
 | 204 | A | `src/test/resources/sql/schema-approval-h2.sql` | `T042/F1`/`T046/B1` H2 approval schema | `b380a5a` |
 | 205 | M | `src/test/resources/sql/schema-quotation-h2.sql` | `T043/F2` target version schema sync | `5110f12` |
 
-### 2.9 current Headで追加された9 paths
+### 2.9 Base→Review対象production Headで追加されたpathと履歴delta
 
-`0a724356..74329e9`の差分は26 filesだが、そのうち既存manifest pathの更新を除く新規pathは次の6件である。いずれもcommit `74329e9`に含まれる。
+`0a724356..74329e9`の差分に含まれるBase→Headの新規pathは次の6件である。いずれも`74329e9`に含まれる。
 
 | # | status | path | primary task / scope | commit |
 |---:|---|---|---|---|
@@ -315,15 +325,15 @@ git diff --check
 | 210 | M | `src/main/java/com/ses/mapper/UserPermissionGroupMapper.java` | `R4-P1-01` permission-group active membership query | `74329e9` |
 | 211 | A | `src/main/resources/db/migration/V79_1__approval_route_decision_sources.sql` | `R4-P1-01` route role condition/responsibility patch migration | `74329e9` |
 
-`92fad28..94e82cd`の差分は7 filesで、そのうち既存manifest pathの更新を除く新規pathは次の3件である。いずれもcommit `92fad28`に含まれる。
+`92fad28`では新規pathとして`ApprovalAdministrationApiControllerTest`が追加された。一方、`ApprovalAdministrationServiceTest`と`RouteResolverServiceTest`は既存manifestの#182/#192を更新したものであり、別行へ重複計上しない。#212はBase→Review対象production Headで一度だけ列挙する。
 
 | # | status | path | primary task / scope | commit |
 |---:|---|---|---|---|
-| 212 | M | `src/test/java/com/ses/controller/api/ApprovalAdministrationApiControllerTest.java` | `R4-P1-01` responsibility逆期間HTTP 400/ApiResult.code=400契約、APPLICANT_MANAGER HTTP契約 | `92fad28` |
-| 213 | M | `src/test/java/com/ses/service/impl/ApprovalAdministrationServiceTest.java` | `R4-P1-01` route/responsibility異常系13件（逆期間・不正type・不存在組織・無効user） | `92fad28` |
-| 214 | M | `src/test/java/com/ses/service/impl/RouteResolverServiceTest.java` | `R4-P1-01` APPLICANT_MANAGER t_user_organization境界・期間外・manager不存在/無効/削除・0件fail-closed・self-only fail-closed・snapshot固定の8件を含む拡張（19件→27件） | `92fad28` |
+| 212 | A | `src/test/java/com/ses/controller/api/ApprovalAdministrationApiControllerTest.java` | `R4-P1-01` responsibility逆期間HTTP 400/`ApiResult.code=400`、APPLICANT_MANAGER HTTP契約 | `92fad28` |
 
-**path集計:** S07 packet 5 + roadmap dispatch 25 + other spec 18 + production Java 88 + migration SQL 5 + frontend/resources 30 + test Java 29 + test resources 5 + R4-P1-01 source additions 6 + R4-P1-01 test additions 3 = **214**（Base→Head全212 pathsの実数は`git diff --name-only 5d228d2..HEAD | Measure-Object -Line`で確認。manifestの行番号は連番で付与）。重複0、未分類0。
+`94e82cd..1e8a224`は既存manifest pathである4文書のPacket統計を更新した履歴deltaであり、新規pathはない。該当pathは#003/#004/#005/#028に一度ずつ列挙済みである。
+
+**path集計:** S07 packet 5 + roadmap dispatch 25 + other spec 18 + production Java 88 + migration SQL 5 + frontend/resources 30 + test Java 29 + test resources 5 + R4-P1-01 source additions 6 + R4-P1-01 test addition 1 = **212 unique paths**。`git diff --name-only 5d228d2..HEAD | Sort-Object -Unique`相当で一意212件を確認し、manifestの#001〜#212は各pathを一度だけ列挙する。重複0、未分類0。`ApprovalAdministrationServiceTest`と`RouteResolverServiceTest`の追加回帰はそれぞれ既存#182/#192の更新として帰属する。
 
 ## 3. R1〜R5 AC trace (AC→実装→assert→Demo)
 
@@ -333,7 +343,7 @@ git diff --check
 |---|---|---|---|---|---|
 | R1.1 | 対象操作を直接確定せず、申請draftと差分snapshotを作る | `ApprovalEngineServiceImpl.request`、`ApprovalSnapshot`、`ApprovalApiController`、5 adapter、`operation-inventory.md` §2 | `ApprovalEngineServiceTest`、`ApprovalApiControllerTest`、`ApprovalTargetAdapterTest` | MockMvc/API契約と定向adapterで申請経路を確認。実5業務curl/browserは未実施 | 定向証拠あり、実Demo未達 |
 | R1.2 | routeを対象種別・組織・金額帯・申請者roleで決め、順次/並列stepを扱う | `RouteResolverServiceImpl`、`m_approval_route*`、`ApprovalRoute`/route DTO、`V79_1__approval_route_decision_sources.sql` | `RouteResolverServiceTest`のmin-1/min/min+1/max-1/max/max+1、組織具体性・帯幅・version優先、role条件優先/fallback | 境界・role fixture自動Demoあり。実MySQL migration/管理画面browser Demoは未実施 | 定向証拠あり、実MySQL/実Demo未達 |
-| R1.3 | USER/permission group/申請者上長/組織責任者/財務責任者からapproverを解決する | `RouteResolverServiceImpl`、`ApprovalAdministrationServiceImpl`、`ApprovalResponsibility`、route step DTO/API/UI | `RouteResolverServiceTest` 19件で3 source解決・responsibility期間/組織scope・group/user disabled/deleted・候補0/self-onlyを確認、`ApprovalAdministrationServiceTest` 13件で設定異常系、`ApprovalAdministrationApiControllerTest` 5件でHTTP 400/404と`ApiResult.code`を確認。R1.3対象計37/0/0/0 | H2 preview/管理画面契約あり。実MySQL・実role別browser Demoは未実施 | 定向証拠あり、実MySQL gate未達 |
+| R1.3 | USER/permission group/申請者上長/組織責任者/財務責任者からapproverを解決する | `RouteResolverServiceImpl`、`ApprovalAdministrationServiceImpl`、`ApprovalResponsibility`、route step DTO/API/UI | `RouteResolverServiceTest` 28件で3 source解決・responsibility期間/組織scope・group/user disabled/deleted・候補0/self-only・APPLICANT_MANAGER期間/mapper境界/snapshot永続化後のmanager変更不変を確認、`ApprovalAdministrationServiceTest` 13件で設定異常系、`ApprovalAdministrationApiControllerTest` 6件でHTTP 400/404と`ApiResult.code`を確認。R1.3対象計**47 / 0 / 0 / 0** | H2 preview/管理画面契約あり。実MySQL・実role別browser Demoは未実施 | 定向証拠あり、実MySQL gate未達 |
 | R1.4 | 申請者自身を承認不可。同一人物の複数step解決でも職務分離 | `ApprovalEngineServiceImpl`のself-approval除外、slot/quorum、`RouteSlot` | `ApprovalEngineServiceTest`の自己承認拒否、同一slot本人/代理先着、parallel quorum | 定向fixtureで確認。5業務の実ユーザー通しは未実施 | 定向証拠あり、実Demo未達 |
 | R1.5 | approve/return/reject/withdraw、comment・時刻・代理理由を記録 | `ApprovalAction`、`ApprovalEngineServiceImpl`、approval API/DTO、delegation action fields | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalPageRenderTest` | MockMvc render/history相当あり。実画面操作は未実施 | 定向証拠あり、実Demo未達 |
 | R2.1 | 申請時version/diffを保存し、対象変更時はconflictとして古いsnapshotを適用しない | `ApprovalSnapshot`、V78 version、5 adapter `currentVersion`、request lock→target lock | `ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、`MigrationScriptIntegrityTest` | H2/定向競合fixtureあり。V78/V79を含む実MySQL fresh/legacy/partial/repair/rollbackは未達 | 定向証拠あり、実MySQL gate未達 |
@@ -385,44 +395,41 @@ git diff --check
 
 ## 5. Verification / release gate
 
-### 5.1 current Head / current worktreeで記録された回帰
+### 5.1 Review対象production Head / current worktreeで記録された回帰
 
-- current Head `92fad28`のBase→Headは**20 commits / 212 files / +10290/-330**。`HEAD = origin/main = origin/HEAD`を確認した。worktreeはclean。
-- R1.3追加対象testは`RouteResolverServiceTest` 27件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**46 / failures 0 / errors 0 / skipped 0**（テスト実行確認後に更新）。
+- Review対象production Head `1e8a224`のBase→Headは**21 commits / 212 files / +10290/-330**。`HEAD = origin/main = origin/HEAD`を確認した。production Head確認開始時のworktreeはcleanだった。今回のPacket文書commitは未commitであり、文書・回帰追加後のdirty状態は最終監査で別記録する。
+- R1.3追加対象testは`RouteResolverServiceTest` 28件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**47 / failures 0 / errors 0 / skipped 0**。request作成時にDBへ保存した`route_snapshot_json`を再読込し、manager変更後も同一requestの承認者が不変であることを確認した。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
-- 20クラスdirect regression（R4-P1-01 consumer 7クラス＋B1/M 13クラス）は**169 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（指摘記載の実測値）。
-- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。結果は**1454 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**（ただし追加テスト後は件数が増加する）、scriptはskip検出でexit 1となった。
-- skipはDocker依存の12 test cases / 10 report classes: `CustomerContactPrimaryConcurrencyTest`、`FlywayLegacyV60MigrationSmokeTest`、`FlywayLegacyV71MigrationSmokeTest`、`FlywayMigrationSmokeTest`、`FlywayRepairRunbookTest`、`FlywayV62ClosedHistoryMigrationSmokeTest`、`FlywayV63UpgradeMigrationSmokeTest`、`FlywayV73PartialRepairSmokeTest`、`ConcurrentUpdateTest`、`ConcurrentLoginSessionSmokeTest`。DockerなしのためL4 zero-skippedは未達である。
-- `git status --short --branch`は`main...origin/main`（upstream一致）、worktreeはclean、`git diff --check`はexit 0。
+- 再Review対象direct consumer regressionはR4-P1-01（7クラス）＋B1/M（13クラス）の**20クラス、150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
+- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`の最終実測はDocker `29.6.1`、Node `v24.18.0`、`mvn -B clean test` **1465 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（54:26）。続くskip確認は**0 test cases / 0 report classes**で、script exit **0**。L4 zero-skippedは確認済みである。
+- V79.1実MySQLはfresh/legacy適用でv79.1到達を確認し、`flyway_schema_history`、checksum、FK/CHECK/index assertionも確認済み。V79.1-specific partial/repair/rollback、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時実DB rollback、desktop/390px browserは未達gateとしてPASS扱いしない。
 
-上記は定向/静的/H2 evidenceであり、以下のrelease gateを代替しない。
+上記は定向/静的/H2 evidenceと、fresh/legacyの実MySQL smokeを含むが、以下のrelease gateを代替しない。
 
-1. V79.1を含む実MySQL fresh/legacy/partial/repair/rollback/lock。
-2. `flyway_schema_history`の適用確認。
-3. 複数JVMのShedLock/claim競合。
-4. 実Webhook endpoint到達。
-5. commit前例外時の実DB rollback。
-6. desktop/390pxでの5業務通しbrowser Demo。
-7. L4 zero-skipped。
+1. V79.1-specific partial/repair/rollback。
+2. 複数JVMのShedLock/claim競合。
+3. 実Webhook endpoint到達。
+4. commit前例外時の実DB rollback。
+5. desktop/390pxでの5業務通しbrowser Demo。
 
 ### 5.2 Issue / task判定
 
-| ID / task | current Head / worktree判定 | 根拠 |
+| ID / task | Review対象production Head / worktree判定 | 根拠 |
 |---|---|---|
-| `R4-REVIEW-01` | **OPEN** | manifestをcurrent Head `74329e9`の211 committed pathsへ拡張し、追加6 pathsの個別帰属を記録した。未commit test 3 filesは別管理で、独立Reviewによる完全性確認前 |
-| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約の静的整合、およびstatic 35/0/0/0を維持。実MySQL gateとは分離 |
-| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。実環境DoD、browser、rollback、複数JVM、Webhook、zero-skipped未達 |
-| `R4-REVIEW-04` | **OPEN** | Packet/manifest/中央ledgerのcurrent Head値を`74329e9`、211 paths、18 commitsへ同期したが、独立Review再確認前 |
-| `approval-workflow-internal-control-R4-P1-01` | **OPEN / P1** | R1.2/R1.3のcode/H2/境界・異常系testは定向37/0/0/0、direct regressionはgreen。ただしV79.1実MySQL適用・履歴/repair/rollback未確認のため受入上は未解消 |
-| `T046/B1` | **未完了** | 定向B1/scheduler回帰はgreenだが、実MySQL/複数JVM/Webhook/rollback未達 |
-| `T047/M` | **未完了** | M定向回帰はgreen、L4はfailure 0まで到達したがskip 12、browser、実MySQL等未達 |
+| `R4-REVIEW-01` | **OPEN** | manifestをReview対象production Head `1e8a224`の212 unique committed pathsへ整理したが、今回の作業木修正後の独立Reviewによる完全性確認前 |
+| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
+| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。実環境DoD、browser、rollback、複数JVM、Webhookが未達。CI相当L4は1465/0/0/0、zero-skippedを確認済み |
+| `R4-REVIEW-04` | **OPEN** | Review対象production Head `1e8a224`、21 commits、212 pathsへ同期したが、Packet文書commitは未commitで独立Review再確認前 |
+| `approval-workflow-internal-control-R4-P1-01` | **OPEN / P1** | R1.2/R1.3のcode/H2/境界・異常系testは**47/0/0/0**、direct regressionはgreen。V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertionは確認済みだが、partial/repair/rollback未確認のため受入上は未解消 |
+| `T046/B1` | **未完了** | 定向B1/scheduler回帰はgreenだが、V79.1 partial/repair/rollback、複数JVM/Webhook/rollback未達 |
+| `T047/M` | **未完了** | M定向回帰はgreen、CI相当L4は**1465 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、browser、実MySQLのpartial/repair/rollback等が未達 |
 
 **総合判定:** `NOT REVIEWABLE`。S07は`IN PROGRESS`、S09およびWave 2は解放不可。R4-P1-01は追加回帰を提出済みだが、実MySQL等の検証gate完了までは`OPEN / P1`を維持する。
 
 ### 5.3 再Review / 再開条件
 
 1. 独立Reviewで212 committed pathsのstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
-2. Packet、Issue Register、中央台帳のHead/merge/diff値を`92fad28`と一致した状態で再確認する。worktreeはclean。
-3. R4-P1-01についてV79.1の実MySQL fresh/legacy/repair適用、schema/history、設定→resolver→snapshotの通し証拠を取得する。
+2. Packet、Issue Register、中央台帳のReview対象production Head/merge/diff値を`1e8a224`と一致した状態で再確認する。Packet文書commitは未commitとしてproduction Headと分離し、作業木のdirty/cleanは最終監査で明記する。
+3. R4-P1-01について、fresh/legacyのschema/historyと設定→resolver→snapshotの確認は取得済み。残るV79.1-specific partial/repair/rollbackの適用・復旧を実測し、route/source/snapshotの実環境gateを完了する。
 4. B1/Mの未達gateを同一Headで実証し、`tasks.md`のDemo/release gateとcheckboxを更新する。未実証項目を完了扱いにしない。
 5. S07の正式Review PASS後にのみS09/Wave 2の開始判定を行う。

@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalDelegation;
@@ -9,16 +10,21 @@ import com.ses.entity.ApprovalDelegationType;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
+import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
+import com.ses.entity.UserOrganization;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalDelegationTypeMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
+import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
+import com.ses.service.approval.RouteSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +72,12 @@ class ApprovalEngineServiceTest {
     private ApprovalDelegationTypeMapper approvalDelegationTypeMapper;
     @Autowired
     private SysUserMapper sysUserMapper;
+    @Autowired
+    private OrganizationUnitMapper organizationUnitMapper;
+    @Autowired
+    private UserOrganizationMapper userOrganizationMapper;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     private Long applicantId;
     private Long approver1Id;
@@ -110,6 +122,44 @@ class ApprovalEngineServiceTest {
         }
     }
 
+    private Long insertOrganization(String prefix) {
+        OrganizationUnit organization = OrganizationUnit.builder()
+                .tenantId(1L)
+                .code(prefix + "-" + System.nanoTime())
+                .name(prefix)
+                .type("部")
+                .validFrom(LocalDate.now().minusDays(10))
+                .status("有効")
+                .version(0)
+                .build();
+        organizationUnitMapper.insert(organization);
+        return organization.getId();
+    }
+
+    private UserOrganization insertUserOrganization(Long userId, Long organizationId, Long managerUserId) {
+        UserOrganization assignment = UserOrganization.builder()
+                .userId(userId)
+                .organizationId(organizationId)
+                .managerUserId(managerUserId)
+                .primaryFlag(1)
+                .validFrom(LocalDate.now().minusDays(1))
+                .version(0)
+                .build();
+        userOrganizationMapper.insert(assignment);
+        return assignment;
+    }
+
+    private void insertApplicantManagerRoute(String requestType, Long organizationId) {
+        ApprovalRoute route = ApprovalRoute.builder()
+                .tenantId(1L).requestType(requestType).organizationId(organizationId)
+                .minAmount(null).maxAmount(null).versionNo(1)
+                .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
+        approvalRouteMapper.insert(route);
+        approvalRouteStepMapper.insert(ApprovalRouteStep.builder()
+                .routeId(route.getId()).stepNo(1).parallelGroup(1)
+                .approverType("APPLICANT_MANAGER").approverValue(null).build());
+    }
+
     private ApprovalRequest request(String requestType) {
         return request(requestType, null);
     }
@@ -127,6 +177,43 @@ class ApprovalEngineServiceTest {
         assertEquals("in_review", req.getStatus());
         assertEquals(1, req.getCurrentStep());
         assertTrue(req.getRequestNo() != null && req.getRequestNo().startsWith("AR-"));
+    }
+
+    @Test
+    void 申請時に永続化したrouteSnapshotはmanager変更後も既存requestの承認者を固定する() throws Exception {
+        String type = "engine.manager-snapshot-persisted." + System.nanoTime();
+        Long organizationId = insertOrganization("engine-manager-snapshot-org");
+        Long managerBeforeId = insertUser("engine-manager-before");
+        Long managerAfterId = insertUser("engine-manager-after");
+        UserOrganization assignment = insertUserOrganization(applicantId, organizationId, managerBeforeId);
+        insertApplicantManagerRoute(type, organizationId);
+
+        ApprovalRequest request = approvalEngineService.request(new ApprovalRequestCommand(
+                type, "TEST", 1L, 1L, applicantId, organizationId, BigDecimal.valueOf(1000),
+                Map.of("snapshot", "before-manager-change"), null, null));
+        ApprovalRequest persisted = approvalRequestMapper.selectById(request.getId());
+        String persistedSnapshotJson = persisted.getRouteSnapshotJson();
+        RouteSnapshot persistedSnapshot = objectMapper.readValue(persistedSnapshotJson, RouteSnapshot.class);
+        assertTrue(persistedSnapshot.steps().get(0).approverUserIds().contains(managerBeforeId));
+        assertTrue(!persistedSnapshot.steps().get(0).approverUserIds().contains(managerAfterId));
+
+        userOrganizationMapper.update(null, new UpdateWrapper<UserOrganization>()
+                .eq("id", assignment.getId())
+                .set("manager_user_id", managerAfterId));
+
+        ApprovalRequest reloaded = approvalRequestMapper.selectById(request.getId());
+        assertEquals(persistedSnapshotJson, reloaded.getRouteSnapshotJson(),
+                "manager変更後もDBのroute_snapshot_jsonは申請時の値を保持する");
+        RouteSnapshot reloadedSnapshot = objectMapper.readValue(reloaded.getRouteSnapshotJson(), RouteSnapshot.class);
+        assertEquals(persistedSnapshot, reloadedSnapshot);
+        assertTrue(reloadedSnapshot.steps().get(0).approverUserIds().contains(managerBeforeId));
+        assertTrue(!reloadedSnapshot.steps().get(0).approverUserIds().contains(managerAfterId));
+
+        BusinessException changedManager = assertThrows(BusinessException.class,
+                () -> approvalEngineService.approve(request.getId(), managerAfterId, "変更後managerは既存申請を承認不可"));
+        assertEquals(403, changedManager.getCode());
+        approvalEngineService.approve(request.getId(), managerBeforeId, "申請時managerが承認");
+        assertEquals("approved", approvalRequestMapper.selectById(request.getId()).getStatus());
     }
 
     @Test

@@ -100,13 +100,14 @@
   - **Demo/未検証事項**: MockMvc/Thymeleafと定向テストで管理画面・snapshot・代理期間・監査表示を確認した。実ブラウザのdesktop/390px目視、MySQL/Docker fresh migration smoke、mvn全量は未実施。
   - **テスト要件**: L2〜L3。進行中申請のroute snapshot不変、申請後の代理期間開始/終了、解決不能拒否、本人/代理のslot二重承認防止をカバー。
 - [ ] R4-P1-01. route decision modelとapprover source不足の是正
-  - **状態**: 実装済み差分の定向検証とR1.3 source別回帰まで完了。P1は実MySQL migration smoke未実行のため、受入上は`OPEN / P1`を維持する。
+  - **状態**: 実装済み差分の定向検証とR1.3 source別回帰まで完了。V79.1の実MySQL fresh/legacy migration smoke、履歴/checksum/FK/CHECK/index assertionは確認済みだが、V79.1-specific partial/repair/rollback未実施のため、受入上は`OPEN / P1`を維持する。
+  - **Review対象production Head / Packet文書commit**: 対象Headは`1e8a2243e0ed095bb211519b1242d4bcff17caef`（Base→Head 21 commits / 212 files / +10290/-330）。Packet文書commitは未commitであり、commit/pushは禁止する。
   - **実装**: V79.1で`applicant_role_condition`と`t_approval_responsibility`を追加。route管理DTO/API/UI、`PERMISSION_GROUP`、`ORGANIZATION_MANAGER`、`FINANCE_MANAGER`の設定・as-of解決、H2 schemaを同期した。V75〜V79は変更していない。
   - **追加した回帰**: `RouteResolverServiceTest`を13→19件へ拡張し、responsibility `valid_from`/`valid_to` inclusive境界・前後日、組織一致/不一致、FINANCE_MANAGERの組織別/全社assignment、permission groupの無効group・削除membership・disabled/deleted user、3 sourceの候補0件・申請者自身のみ・責任者disabled/deleted userを検証。`ApprovalAdministrationServiceTest`は13件で不正approver type、route/responsibility逆期間、不存在organization、無効user、error code/messageKeyを検証。新規`ApprovalAdministrationApiControllerTest` 5件でHTTP 400/404と`ApiResult.code`を検証した。
-  - **追加した回帰**: `RouteResolverServiceTest`を加えてAPPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from實日inclusive境界、valid_to實日inclusive境界、所属期間外fail-closed、manager_user_id NULL fail-closed、無効manager fail-closed、削除済みmanager fail-closed、申請者本人のみmanager候補のfail-closed（職務分離R1.4）、snapshot固定の8ケースを追加（19件→27件）。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間（validFrom>validTo）がHTTP 400かつApiResult.code=400になるテストを追加（5件→6件）。
-  - **定向/static/direct実測**: R1.3対象計**46 / failures 0 / errors 0 / skipped 0**（`RouteResolverServiceTest` 27、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6）。`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1のstatic計は**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01 consumer 7クラス＋B1/M 13クラスの20クラスdirect regressionは**169 / 0 / 0 / 0 / BUILD SUCCESS**（指摘記載の実測値）。
-  - **L4相当実測**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`はNode `v24.18.0`を検出し、`mvn -B clean test`を完走。**1454 tests以上 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。skipは12 test cases / 10 report classesである。
-  - **残存gate**: V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`照会、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時の実DB rollback、browser管理画面/desktop/390px Demo、CI zero-skippedは未達。B1/Mの未達状態も変更しない。
+  - **追加した回帰**: `RouteResolverServiceTest`を加えてAPPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from實日inclusive境界、valid_to實日inclusive境界、所属期間外fail-closed、manager_user_id NULL fail-closed、無効manager fail-closed、削除済みmanager fail-closed、FK上直接fixtureできない不存在manager IDについてmapper境界の`null`とNULL assignmentのfail-closed、申請者本人のみmanager候補のfail-closed（職務分離R1.4）、snapshot固定の回帰を追加（19件→28件）。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間（validFrom>validTo）がHTTP 400かつApiResult.code=400になるテストを追加（5件→6件）。
+  - **定向/static/direct実測**: R1.3対象計**47 / failures 0 / errors 0 / skipped 0**（`RouteResolverServiceTest` 28、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6）。`MigrationScriptIntegrityTest` 26、`SpecDispatchConsistencyTest` 8、`JsSyntaxCheckTest` 1のstatic計は**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01 consumer 7クラス＋B1/M 13クラスの20クラスdirect regressionは**150 / 0 / 0 / 0 / BUILD SUCCESS**。request→DB `route_snapshot_json`再読込→manager変更後のsnapshot/承認者不変も実測済み。
+  - **L4相当実測**: Docker `29.6.1`、Node `v24.18.0`を検出したCI相当`verify-like-ci.ps1`が完走し、`mvn -B clean test`は**1465 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（54:26）。skip確認は**0 test cases / 0 report classes**、script exit **0**。L4 zero-skippedは確認済みで、Maven全量とDocker依存gateは別々に記録する。
+  - **残存gate**: V79.1の実MySQL fresh/legacy適用、`flyway_schema_history`、checksum/FK/CHECK/index assertionは確認済み。未達はV79.1-specific partial/repair/rollback、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時の実DB rollback、browser管理画面/desktop/390px Demoであり、B1/Mの未達状態も変更しない。
   - **Objective**: R1.2の申請者role条件route、R1.3の5種類のapprover sourceをroute設定からsnapshot解決まで同一契約で実証する。
   - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、APPLICANT_MANAGERの`t_user_organization`期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL/実browser/release gateの証拠が得られるまでcheckboxは`[ ]`のまま維持する。
 
@@ -116,7 +117,7 @@
   - **定向検証**: `ApprovalNotificationSlaTest` 6件、`NotificationServiceImplTest` 9件、`NotificationOutboxDispatcherTest` 5件、`NotificationOutboxServiceTest` 5件の計25件を failures 0 / errors 0 / skipped 0で確認。期限境界、同一超過の重複抑止、宛先限定、NULL SLA、round 1→2のRETURNED/REQUESTED/SLA key分離、outboxのclaim/成功/RETRY/FAILED/重複を含む。
   - **scheduler Demo相当**: `NotificationOutboxSchedulerIntegrationTest` 1件を追加実行し、Webhook未設定のSYSTEM通知をoutboxへ1件投入後、`NotificationOutboxScheduler.dispatchPending()`を2回起動。同一dedupe keyの行が1件のみ、`SENT`、`attempt_count=1`となることを確認（1回目のみdue行を処理し、2回目はdue対象なし）。
   - **広いB1回帰**: `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`WebhookNotifierTest`、`ApprovalNotificationSlaTest`、`NotificationOutboxSchedulerIntegrationTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`の8クラスを再実行し、計47件を failures 0 / errors 0 / skipped 0で確認した。
-  - **未検証**: 実MySQLのV79適用・rollback/lock、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前失敗時の実DBrollbackはDocker/接続情報不足のため未確認。CI相当全量も`MobileResponsiveLayoutTest` 1件とDocker依存skip 12件が残るため、B1はrelease gate未達としてPASS扱いにしない。
+  - **未検証**: V79/V79.1の実MySQL fresh/legacy適用、`flyway_schema_history`、checksum/FK/CHECK/index assertionは確認済み。未達はV79.1-specific partial/repair/rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前失敗時の実DBrollback。CI相当全量はDocker/Node可用環境で**1465 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、script exit **0**まで確認済みだが、B1は残存release gateのためPASS扱いにしない。
   - **Objective**: 申請・差戻し・承認・却下・期限超過が**対象本人だけ**に届く。
     stepごとのSLA期限を超えると上位責任者へescalateされ、同じ超過で二重に通知されない。
   - **実装ガイダンス**: recipient限定、冪等scheduler、`NotificationLinks`定数を使う。
@@ -135,11 +136,11 @@
   - **定向回帰実測**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、
     `ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を
     failures 0 / errors 0 / skipped 0で確認した。adapterは既存service委譲、月次締め最終承認者、registry idempotencyを確認した。
-  - **全量実測（current作業木、2026-08-04）**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`が実行した`mvn -B clean test`は`1454 tests / failures 0 / errors 0 / skipped 12`でMaven本体はBUILD SUCCESS、scriptはDocker依存skip検出によりexit 1。Node `v24.18.0`は利用可能でJS構文チェックは実行された。skipは12 test cases / 10 report classesである。
+  - **全量実測（R4-P1-01回帰追加後のcurrent作業木、2026-08-04）**: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`が実行した`mvn -B clean test`は**1465 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（54:26）。Docker `29.6.1`、Node `v24.18.0`を検出し、skip確認は0 test cases / 0 report classes、script exit **0**。L4 zero-skippedは確認済みである。
   - **M定向回帰の再測定**: `QuotationApiControllerTest` 4件、`ContractApiControllerTest` 12件、`ContractPaginationTest` 13件、`InvoiceApiControllerTest` 10件、`ApprovalTargetAdapterTest` 7件の計46件を failures 0 / errors 0 / skipped 0で再確認した。
-  - **migration/static回帰**: `MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`FlywayMigrationSmokeTest` 2件の計36件を実行し、failures 0 / errors 0 / skipped 2。後者2件はDocker daemon unavailableによるskipである。
-  - **MySQL smoke**: current環境ではDocker daemonへ接続できず、V78/V79を含むfresh/legacy/upgrade/partial-repair/repair/concurrentの実MySQL検証は未実施である。過去のDocker利用可能時のPASS記録は履歴として保持するが、current作業木のrelease evidenceには再利用しない。
-  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通し、実MySQLでのV79適用・rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackは未確認である。全量failure 0まで到達したが、Docker依存skip 12、browser、実MySQL等が残るため、B1/Mはrelease gate未達としてPASS扱いにしない。
+  - **migration/static回帰**: `MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件のstatic計35件、および`FlywayMigrationSmokeTest` 2件を failures 0 / errors 0 / skipped 0で確認した。
+  - **MySQL smoke**: Docker `29.6.1`で`FlywayMigrationSmokeTest`を実行し、V79.1のfresh/legacy適用、v79.1到達、`flyway_schema_history`、checksum、FK/CHECK/index assertionを確認した。V79.1-specific partial/repair/rollbackはこのsmokeの対象外であり未確認として残す。過去のV73等のpartial/repair経路をV79.1の証拠へ拡張しない。
+  - **未実施・未解決**: 実ブラウザdesktop/390pxの5業務通し、V79.1-specific partial/repair/rollback、複数JVMのShedLock/claim競合、実Webhook endpoint、commit前例外時の実DB rollbackは未確認である。L4はfailure 0・zero-skippedまで到達したが、上記gateが残るためB1/Mはrelease gate未達としてPASS扱いにしない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     5業務のbrowser通し（desktop/390px）、既存Contract/Invoice/BpPayment/Closingの回帰、
     Node/JS syntax、`git diff --check`。
@@ -157,11 +158,11 @@
 - **判定**: B1/Mは実装・定向回帰・scheduler Demo相当まで確認済みだが、release gate未達のため完了・PASSへ変更しない。S07は`IN PROGRESS`、S09/Wave 2は解放不可。
 
 
-## R4 current Head correction（2026-08-04）
+## R4 current production Head / Packet文書分離（2026-08-04）
 
-- **current Head**: `94e82cd6285187794f7fe1f67786650d77120445`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。worktreeはclean。
-- **Base→current Head**: `5d228d2..92fad28`は**20 commits / 212 files / +10290/-330**。212 pathsはすべてcommit済みHead範囲。merge状態はorigin/main反映済みである。
-- **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。実MySQL、複数JVM、実Webhook、rollback、desktop/390px browser、zero-skippedのrelease gate未達を完了扱いにしない。
-- **direct regression**: R1.3対象 46/0/0/0、migration/dispatch整合 35/0/0/0、20クラスdirect regression 169/0/0/0、すべてBUILD SUCCESS。定向greenはB1/M完了の代替ではない。
-- **L4**: `verify-like-ci.ps1`が実行した`mvn -B clean test`は**1454 tests以上 / failures 0 / errors 0 / skipped 12**。Maven本体BUILD SUCCESSでもCI契約のzero-skippedは未達である。
-- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/04はcurrent Head `92fad28`・212 paths・20 commitsへ同期したが独立再Review前、R4-REVIEW-02は`VERIFIED_CLOSED`、R4-REVIEW-03は`OPEN`を維持する。
+- **Review対象production Head**: `1e8a2243e0ed095bb211519b1242d4bcff17caef`。実Gitは`HEAD = origin/main = origin/HEAD`、branchは`main`。この確認開始時のproduction worktreeはcleanだった。
+- **Base→Review対象production Head**: `5d228d2..1e8a224`は**21 commits / 212 files / +10290/-330**。212 pathsはmanifest §2の#001〜#212へ一意に帰属する。
+- **Packet文書commit**: **未commit**。本Reviewはcommit/push禁止のため、`review-ledger.md`、manifest、tasks、中央ledgerの今回の修正は作業木で管理する。production HeadのcommitとPacket文書の未commit状態を同一hashとして記録しない。
+- **R4-P1-01回帰**: `RouteResolverServiceTest` 28件、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件の計**47 / 0 / 0 / 0**。APPLICANT_MANAGERの不存在manager ID mapper境界と、request→DB snapshot→manager変更後の不変性を確認した。
+- **B1/M checkbox**: B1/T046とM/T047は`[ ]`を維持する。V79.1の実MySQL fresh/legacy、`flyway_schema_history`、checksum/FK/CHECK/index assertionとCI相当L4 zero-skippedは確認済みだが、partial/repair/rollback、複数JVM、実Webhook、commit前例外時rollback、desktop/390px browserのrelease gate未達を完了扱いにしない。
+- **判定**: B1/T046・M/T047は未完了、S07は`IN PROGRESS`、総合`NOT REVIEWABLE`、S09/Wave 2は解放不可。R4-REVIEW-01/03/04とR4-P1-01は独立再Review・残存実環境gate完了までOPENを維持する。

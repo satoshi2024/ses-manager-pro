@@ -1,26 +1,26 @@
 # review-ledger — approval-workflow-internal-control (S07)
 
-## Current authoritative REVIEW PACKET — Round 4 current Head / R4-P1-01 correction（2026-08-04）
+## Current authoritative REVIEW PACKET — Review対象production Head / R4-P1-01 correction（2026-08-04）
 
 **判定:** **NOT REVIEWABLE**。S07は`IN PROGRESS`、S09は`NOT READY — まだ開始不可`、Wave 2は解放不可。
 
-- **current Git:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、current Head=`94e82cd6285187794f7fe1f67786650d77120445`。`HEAD = origin/main = origin/HEAD`、branch=`main`を確認した。
-- **scope:** Base→Headは**20 commits / 212 files / +10290/-330**。212 pathsはすべてcommit済みHead範囲である。
-- **worktree:** `main...origin/main`（upstream一致）、clean。`git diff --check`はexit 0。
-- **R4-P1-01:** V79.1、`applicant_role_condition`、`t_approval_responsibility`、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER、as-of/scope/fail-closedを実装済み。V75〜V79は変更していない。APPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from/valid_to両端境界、所属期間外、manager不存在/NULL、無効/削除済みmanager、候補0件fail-closed、申請者本人しかmanager候補にいない場合のfail-closed、snapshot固定の8ケースを`RouteResolverServiceTest`へ追加。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間がHTTP 400かつApiResult.code=400になるテストを追加。
-- **R1.3 evidence:** `RouteResolverServiceTest` 27、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6、計**46 / failures 0 / errors 0 / skipped 0**。responsibility期間/組織境界、group membership/user disabled/deleted、APPLICANT_MANAGER上長期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot固定、5 sourceの候補0/self-only、管理API不正type/逆期間/不存在組織/無効userを含む。
-- **static/direct/full evidence:** migration/static/JSは**35 / 0 / 0 / 0 / BUILD SUCCESS**。20クラスdirect regressionは**169 / 0 / 0 / 0 / BUILD SUCCESS**（指摘記載の実測値）。`verify-like-ci.ps1`の`mvn -B clean test`は**1454 tests以上 / failures 0 / errors 0 / skipped 12 / Maven BUILD SUCCESS**、scriptはDocker依存skip検出でexit 1。
-- **skip /未達:** Docker依存12 test cases / 10 report classes（Flyway系、並行性系）をskip。実MySQL fresh/legacy/partial/repair/rollback、`flyway_schema_history`、複数JVM ShedLock/claim、実Webhook、commit前例外時実DB rollback、desktop/390px browser、zero-skippedは未確認。定向greenやMaven BUILD SUCCESSをrelease PASSへ読み替えない。
+- **Review対象production Head:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、Head=`1e8a2243e0ed095bb211519b1242d4bcff17caef`。`HEAD = origin/main = origin/HEAD`、branch=`main`を確認した。`74329e9`/`92fad28`/`94e82cd`は旧Packet・修正履歴であり、現在のHead根拠ではない。
+- **scope:** Base→Review対象production Headは**21 commits / 212 files / +10290/-330**。212 pathsはすべてproduction Headにcommit済みの範囲である。
+- **Packet文書commit:** **未commit**。この再Reviewではcommit/pushを行わず、Packet更新は作業木で管理する。production Head確認開始時はcleanだったが、文書・回帰追加後のworktree状態は別途最終実測する。
+- **R4-P1-01:** V79.1、`applicant_role_condition`、`t_approval_responsibility`、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER、as-of/scope/fail-closedを実装済み。V75〜V79は変更していない。V79.1のFK action変更（`CASCADE/SET NULL`→`RESTRICT`）はReview対象production Head後の未commit worktree deltaであり、Headの212-path統計・manifestには含めない。APPLICANT_MANAGER（`t_user_organization.manager_user_id`）のvalid_from/valid_to両端境界、所属期間外、manager `NULL`/無効/削除済み、候補0件、申請者本人しかmanager候補にいない場合、mapper境界の不存在IDとsnapshot固定の回帰を`RouteResolverServiceTest`へ追加済み。`manager_user_id`はMySQL V60と共有H2 schemaの双方でFK制約があるため、存在しないIDの直接fixtureはできない。代わりにH2で`SysUserMapper.selectById`の不存在IDが`null`になる境界と、DBで表現可能な`NULL` assignmentのfail-closedを検証し、MySQLでは`fk_user_org_manager`の存在を検証する。`ApprovalAdministrationApiControllerTest`にresponsibility逆期間がHTTP 400かつApiResult.code=400になるテストを追加済み。
+- **R1.3 evidence（作業木追加回帰後）:** `RouteResolverServiceTest` 28、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6、計**47 / failures 0 / errors 0 / skipped 0**。responsibility期間/組織境界、group membership/user disabled/deleted、APPLICANT_MANAGER上長期間両端境界/期間外/NULL/無効/削除/0件/self-only、mapper境界の不存在ID、申請→DB `route_snapshot_json`永続化後のmanager変更でも承認者不変、5 sourceの候補0/self-only、管理API不正type/逆期間/不存在組織/無効userを含む。
+- **static/direct evidence（作業木追加回帰後）:** migration/static/JSは**35 / 0 / 0 / 0 / BUILD SUCCESS**。R4-P1-01（7クラス）＋B1/M（13クラス）の**20クラスdirect consumer regressionは150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。CI相当`verify-like-ci.ps1`の最終実測はDocker `29.6.1`、Node `v24.18.0`、`mvn -B clean test` **1465 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（54:26）、skip確認 **0 test cases / 0 report classes**、script exit **0**。L4 zero-skippedはこのrunで確認済みであり、Maven本体の結果とscriptのskip gateを分離して記録する。
+- **未達gate:** V79.1の実MySQL fresh/legacy適用、`flyway_schema_history`、checksum、FK/CHECK/index assertionは確認済み。未達はV79.1-specific partial/repair/rollback、複数JVM ShedLock/claim、実Webhook endpoint、commit前例外時実DB rollback、desktop/390px browserであり、個別に実測できるまでPASS扱いにしない。定向greenやMaven BUILD SUCCESSをrelease PASSへ読み替えない。
 
 ### Current Issue Register（review process blocker。P分類ではない）
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
-| `R4-REVIEW-01` | **OPEN** | current Head 212 pathsへmanifestを拡張したが、独立Reviewによる完全性確認前 | 212件のstatus/count/個別帰属、AC trace、範囲外帰属を独立再確認 |
+| `R4-REVIEW-01` | **OPEN** | Review対象production Headの212 unique pathsをmanifestへ整理したが、今回の作業木修正後の独立Reviewによる完全性確認前 | 212件のstatus/count/個別帰属、AC trace、範囲外帰属を独立再確認 |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79、V79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認 | クローズ維持。実MySQL/B1/Mの証拠へ拡張しない |
-| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。実環境release gate未達 | 実MySQL、rollback、複数JVM、Webhook、browser、zero-skippedを実証 |
-| `R4-REVIEW-04` | **OPEN** | Packet/manifest/中央ledgerをHead `92fad28`、212 paths、20 commitsへ同期したが独立再Review前 | current Head整合と通常Review再開根拠を独立確認 |
-| `R4-P1-01` | **OPEN / P1** | source別境界/異常系回帰はgreenだが、V79.1の実MySQL適用・履歴・repair/rollback未確認 | V79.1を実MySQLで適用し、route/source/履歴/repairを実測 |
+| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。実環境release gateの一部が未達。CI相当L4は1465/0/0/0、zero-skippedを確認済み | 実MySQL partial/repair/rollback、複数JVM、Webhook、browser、commit前例外時rollbackを実証 |
+| `R4-REVIEW-04` | **OPEN** | Review対象production Head `1e8a224`、21 commits、212 filesを確認したが、Packet文書commitは未commitで独立再Review前 | current HeadとPacket作業木の分離・通常Review再開根拠を独立確認 |
+| `R4-P1-01` | **OPEN / P1** | source別境界/異常系回帰、V79.1の実MySQL fresh/legacy適用・履歴・checksum/FK/CHECK/index assertionはgreenだが、V79.1-specific partial/repair/rollback未確認 | V79.1のpartial/repair/rollbackを実測し、route/source/snapshotの実環境gateを完了する |
 
 **再確認しない判定:** B1/M、S07 PASS、S09開始、Wave 2解放は行わない。
 

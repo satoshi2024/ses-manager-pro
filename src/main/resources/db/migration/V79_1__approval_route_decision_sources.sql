@@ -34,8 +34,11 @@ CREATE TABLE IF NOT EXISTS t_approval_responsibility (
     INDEX idx_approval_responsibility_lookup
         (tenant_id, responsibility_type, organization_id, valid_from, valid_to),
     INDEX idx_approval_responsibility_user (tenant_id, user_id),
+    -- organization_idは下記CHECK制約でも参照するため、MySQL 8の制約上、
+    -- CASCADE/SET NULLのreferential actionを付けない。組織は論理削除が正本であり、
+    -- assignmentが残る物理削除はDBで拒否する。
     CONSTRAINT fk_approval_responsibility_org FOREIGN KEY (organization_id)
-        REFERENCES m_organization_unit(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        REFERENCES m_organization_unit(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_approval_responsibility_user FOREIGN KEY (user_id)
         REFERENCES sys_user(id) ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_approval_responsibility_created_by FOREIGN KEY (created_by)

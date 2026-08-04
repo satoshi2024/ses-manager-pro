@@ -245,6 +245,10 @@ class FlywayMigrationSmokeTest {
             assertIndexExists(st, "m_organization_unit", "uk_organization_code");
             assertIndexExists(st, "t_user_organization", "uk_user_org_active_primary");
             assertIndexExists(st, "t_user_organization", "uk_user_org_period");
+            // 本番MySQLではmanager_user_idの不正IDを直接fixtureできないため、FKを実測する。
+            // H2の共有schemaはFKなしのため、resolverのmapper境界回帰はH2側で別途検証する。
+            assertForeignKeyExists(st, "t_user_organization", "fk_user_org_manager",
+                    "manager_user_id", "sys_user", "id");
             assertIndexExists(st, "t_management_budget", "uk_management_budget");
             // 「有効な主所属はユーザーごとに1件」がDBでも効くこと。
             assertRowExists(st, "SELECT 1 FROM m_organization_unit WHERE code='LEGACY'");
@@ -499,6 +503,25 @@ class FlywayMigrationSmokeTest {
             assertIndexExists(st, "m_approval_route", "idx_approval_route_lookup");
             assertTableExists(st, "t_approval_responsibility");
             assertIndexExists(st, "t_approval_responsibility", "idx_approval_responsibility_lookup");
+            assertIndexExists(st, "t_approval_responsibility", "idx_approval_responsibility_user");
+            assertForeignKeyExists(st, "t_approval_responsibility", "fk_approval_responsibility_org",
+                    "organization_id", "m_organization_unit", "id");
+            assertForeignKeyExists(st, "t_approval_responsibility", "fk_approval_responsibility_user",
+                    "user_id", "sys_user", "id");
+            assertForeignKeyExists(st, "t_approval_responsibility", "fk_approval_responsibility_created_by",
+                    "created_by", "sys_user", "id");
+            assertCheckConstraintExists(st, "t_approval_responsibility", "chk_approval_responsibility_type");
+            assertCheckConstraintExists(st, "t_approval_responsibility", "chk_approval_responsibility_period");
+            assertCheckConstraintExists(st, "t_approval_responsibility", "chk_approval_responsibility_organization");
+            // V79.1のroute decision sourceがhistory上もsuccessで適用され、checksumが記録されていること。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT success, checksum FROM flyway_schema_history"
+                            + " WHERE version = '79.1' ORDER BY installed_rank DESC LIMIT 1")) {
+                assertTrue(rs.next(), "Flyway historyにV79.1が存在するはず");
+                assertEquals(1, rs.getInt("success"), "V79.1はsuccessであるはず");
+                org.junit.jupiter.api.Assertions.assertNotNull(rs.getObject("checksum"),
+                        "V79.1のchecksumが記録されるはず");
+            }
             assertIndexExists(st, "t_approval_request", "idx_approval_request_applicant");
             assertActionGrantedTo(st, "approval.*", "role-hr", "role-manager", "role-sales");
             // t_approval_action.uk_approval_action_slot が二重action防止のUNIQUEであること
@@ -629,6 +652,33 @@ class FlywayMigrationSmokeTest {
                 "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                         + " AND table_name='" + table + "' AND index_name='" + index + "'")) {
             org.junit.jupiter.api.Assertions.assertTrue(rs.next(), table + "." + index + " が存在するはず");
+        }
+    }
+
+    private void assertForeignKeyExists(Statement st, String table, String constraint,
+                                        String column, String referencedTable, String referencedColumn)
+            throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT 1 FROM information_schema.KEY_COLUMN_USAGE"
+                        + " WHERE CONSTRAINT_SCHEMA=DATABASE()"
+                        + " AND TABLE_NAME='" + table + "'"
+                        + " AND CONSTRAINT_NAME='" + constraint + "'"
+                        + " AND COLUMN_NAME='" + column + "'"
+                        + " AND REFERENCED_TABLE_NAME='" + referencedTable + "'"
+                        + " AND REFERENCED_COLUMN_NAME='" + referencedColumn + "'")) {
+            assertTrue(rs.next(), table + "." + constraint + " が期待するFKを参照するはず");
+        }
+    }
+
+    private void assertCheckConstraintExists(Statement st, String table, String constraint)
+            throws Exception {
+        try (ResultSet rs = st.executeQuery(
+                "SELECT 1 FROM information_schema.table_constraints"
+                        + " WHERE constraint_schema=DATABASE()"
+                        + " AND table_name='" + table + "'"
+                        + " AND constraint_name='" + constraint + "'"
+                        + " AND constraint_type='CHECK'")) {
+            assertTrue(rs.next(), table + "." + constraint + " がCHECK制約として存在するはず");
         }
     }
 

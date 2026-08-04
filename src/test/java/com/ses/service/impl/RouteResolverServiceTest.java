@@ -32,6 +32,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -583,6 +584,26 @@ class RouteResolverServiceTest {
         assertThrows(BusinessException.class,
                 () -> resolveAt(type, org, today),
                 "論理削除済みmanagerは候補から除外されfail-closed");
+    }
+
+    @Test
+    void APPLICANT_MANAGERは存在しないmanager_user_idをmapper境界で除外しfail_closedになる() {
+        LocalDate today = LocalDate.now();
+        Long org = insertOrganization("am-nonexistent-manager-org");
+        // V1の共有H2 schemaと実MySQL V60はともにmanager_user_idへFKを持つため、
+        // 存在しないsys_user.idをt_user_organizationへ直接fixtureできない。
+        // 代替としてmapper境界の不存在ID→nullと、DBで表現可能なNULL assignmentの
+        // resolver fail-closedを同一回帰で確認する。実MySQL側のFK存在はFlyway smokeで検証する。
+        assertNull(sysUserMapper.selectById(999999999L),
+                "存在しないmanager_user_idはSysUserMapper境界でnullになる");
+        insertUserOrganization(applicantId, org, null, today.minusDays(1), today.plusDays(1));
+        String type = "route.am-nonexistent-manager." + System.nanoTime();
+        insertSourceRoute(type, "APPLICANT_MANAGER", null, null,
+                today.minusDays(1), today.plusDays(10));
+
+        assertThrows(BusinessException.class,
+                () -> resolveAt(type, org, today),
+                "FK上表現できない不存在IDもmapper null/NULL assignmentでは候補0件としてfail-closed");
     }
 
     @Test
