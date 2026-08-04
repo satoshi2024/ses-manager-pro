@@ -147,6 +147,10 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  scheduler:
+    lock:
+      # 本番の共有DBロックはDBサーバ時刻を使う。H2 test profileだけfalseで上書きする。
+      use-db-time: ${SCHEDULER_LOCK_USE_DB_TIME:true}
   # ===== 一覧エクスポート =====
   # 大量データはキーセットページング＋レスポンス直書きで処理し、同時実行数も制限する。
   export:

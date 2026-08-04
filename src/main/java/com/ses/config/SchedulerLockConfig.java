@@ -3,6 +3,7 @@ package com.ses.config;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,12 +27,17 @@ import javax.sql.DataSource;
 public class SchedulerLockConfig {
 
     @Bean
-    public LockProvider lockProvider(DataSource dataSource) {
-        return new JdbcTemplateLockProvider(
-                JdbcTemplateLockProvider.Configuration.builder()
-                        .withJdbcTemplate(new JdbcTemplate(dataSource))
-                        // DBサーバ時刻を使う（インスタンス間の時刻ずれでロックが早期解放されるのを防ぐ）
-                        .usingDbTime()
-                        .build());
+    public LockProvider lockProvider(
+            DataSource dataSource,
+            @Value("${app.scheduler.lock.use-db-time:true}") boolean useDbTime) {
+        JdbcTemplateLockProvider.Configuration.Builder builder = JdbcTemplateLockProvider.Configuration.builder()
+                .withJdbcTemplate(new JdbcTemplate(dataSource));
+        if (useDbTime) {
+            // 本番MySQLではDBサーバ時刻を使い、インスタンス間の時刻ずれでロックが早期解放されるのを防ぐ。
+            builder.usingDbTime();
+        }
+        // test profileのH2ではJVM時刻を使う。H2/プロキシDataSourceが未知のDB productを返す場合、
+        // ShedLock 5.10.2のusingDbTime()はUnsupportedOperationExceptionを投げるためである。
+        return new JdbcTemplateLockProvider(builder.build());
     }
 }

@@ -73,6 +73,10 @@ mybatis-plus:
     map-underscore-to-camel-case: true
 
 app:
+  scheduler:
+    lock:
+      # H2/unknown DB productでShedLock usingDbTime()の警告・例外を発生させない。
+      use-db-time: false
   upload:
     base-path: ./target/test-uploads
   security:
