@@ -357,6 +357,15 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 .orderByAsc(SalesOrderLine::getLineNo));
         List<Contract> contracts = new ArrayList<>();
         for (SalesOrderLine line : lines) {
+            // 注文明細の案件が未設定の場合は生成元見積の案件を引き継ぐ
+            // （t_contract.project_id はMySQLでNOT NULLのため、nullのままだと契約化が失敗する）
+            if (line.getProjectId() == null && order.getQuotationId() != null) {
+                Quotation quotation = quotationMapper.selectById(order.getQuotationId());
+                if (quotation != null && quotation.getProjectId() != null) {
+                    line.setProjectId(quotation.getProjectId());
+                    lineMapper.updateById(line);
+                }
+            }
             Contract existing = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
                     .eq(Contract::getOrderLineId, line.getId()).last("LIMIT 1"));
             if (existing != null) {

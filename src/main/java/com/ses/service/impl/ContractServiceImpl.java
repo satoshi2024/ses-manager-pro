@@ -416,6 +416,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 customerId = project.getCustomerId();
             }
         }
+        // t_contract.project_id はNOT NULLのため、案件が解決できない契約化は明確なエラーで拒否する
+        if (projectId == null) {
+            throw BusinessException.of(400, "error.order.projectRequired");
+        }
         DraftSource src = new DraftSource(
                 line.getEngineerId(),
                 projectId,

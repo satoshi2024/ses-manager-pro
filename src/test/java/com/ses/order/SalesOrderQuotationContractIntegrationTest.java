@@ -111,6 +111,7 @@ class SalesOrderQuotationContractIntegrationTest {
         req.setOrderDate(LocalDate.now());
         SalesOrderSaveRequest.Line line = new SalesOrderSaveRequest.Line();
         line.setEngineerId(engineerId);
+        line.setProjectId(projectId);
         line.setUnitPrice(new BigDecimal("550000"));
         line.setSettlementMin(new BigDecimal("140.0"));
         line.setSettlementMax(new BigDecimal("180.0"));
@@ -138,10 +139,12 @@ class SalesOrderQuotationContractIntegrationTest {
         req.setOrderDate(LocalDate.now());
         SalesOrderSaveRequest.Line l1 = new SalesOrderSaveRequest.Line();
         l1.setEngineerId(engineerId);
+        l1.setProjectId(projectId);
         l1.setUnitPrice(new BigDecimal("600000"));
         // 見積単価と同じ単価に揃える（見積由来の明細が差分にならないようにする）
         SalesOrderSaveRequest.Line l2 = new SalesOrderSaveRequest.Line();
         l2.setEngineerId(engineerId2);
+        l2.setProjectId(projectId);
         l2.setUnitPrice(new BigDecimal("600000"));
         req.setLines(List.of(l1, l2));
         orderService.updateFromRequest(order.getId(), req);
@@ -171,6 +174,41 @@ class SalesOrderQuotationContractIntegrationTest {
         orderService.changeStatus(order.getId(), "取消");
 
         assertThrows(BusinessException.class, () -> orderService.createContractDrafts(order.getId()));
+    }
+
+    @Test
+    @DisplayName("案件未設定の注文は契約化できず明確なエラーを返す（t_contract.project_id NOT NULL）")
+    void contractWithoutProjectRejected() {
+        Quotation q = newQuotation("F2案件なし", new BigDecimal("600000"), null, null);
+        SalesOrder order = orderService.createDraftFromQuotation(q.getId());
+        // 見積・注文明細とも案件を外す（案件未設定の注文）
+        jdbcTemplate.update("UPDATE t_quotation SET project_id = NULL WHERE id = ?", q.getId());
+        jdbcTemplate.update("UPDATE t_sales_order_line SET project_id = NULL WHERE order_id = ?", order.getId());
+        orderService.changeStatus(order.getId(), "受領確認");
+        orderService.changeStatus(order.getId(), "注文請提出");
+
+        // 見積に案件が無い → 注文明細の案件も無い → 契約化はエラー（SQLのNOT NULL違反ではなく明確なメッセージ）
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> orderService.createContractDrafts(order.getId()));
+        assertTrue(ex.getMessage().contains("error.order.projectRequired"), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("注文明細の案件未設定でも生成元見積の案件を引き継いで契約化できる")
+    void contractFallsBackToQuotationProject() {
+        Quotation q = newQuotation("F2見積案件引継ぎ", new BigDecimal("600000"), null, null);
+        // 見積に案件を設定
+        jdbcTemplate.update("UPDATE t_quotation SET project_id = ? WHERE id = ?", projectId, q.getId());
+
+        SalesOrder order = orderService.createDraftFromQuotation(q.getId());
+        // 明細の案件を意図的にnullへ戻す（fallback対象を作る）
+        jdbcTemplate.update("UPDATE t_sales_order_line SET project_id = NULL WHERE order_id = ?", order.getId());
+
+        orderService.changeStatus(order.getId(), "受領確認");
+        orderService.changeStatus(order.getId(), "注文請提出");
+        List<Contract> contracts = orderService.createContractDrafts(order.getId());
+        assertEquals(1, contracts.size());
+        assertEquals(projectId, contracts.get(0).getProjectId(), "生成元見積の案件を引き継ぐ");
     }
 
     @Test

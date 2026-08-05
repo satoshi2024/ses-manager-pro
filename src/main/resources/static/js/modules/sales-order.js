@@ -95,6 +95,7 @@ async function presetFromQuotation(quotationId) {
         onCustomerChanged();
         addLineRow({
             engineerId: quotation.engineerId,
+            projectId: quotation.projectId,
             unitPrice: quotation.unitPrice,
             settlementMin: quotation.settlementHoursMin,
             settlementMax: quotation.settlementHoursMax
