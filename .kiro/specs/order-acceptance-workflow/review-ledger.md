@@ -9,14 +9,14 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | FIX（R09 Round1指摘対応中） |
+| state | PASS（R09 Round2独立Review PASS確定） |
 | base | f523e11（main / origin/main 一致） |
-| head | a8bdfc0（branch codex/order-acceptance-workflow） |
+| head | 9b619c0（branch codex/order-acceptance-workflow） |
 | merge | unmerged（Review合格後にmerge） |
-| latest review | R09 round 1 / 2026-08-06 |
-| verdict | FAIL（P0=0 / P1=2 / P2=7 / NOTE=4）→ 対応中 |
-| issue count | P0=0 / P1=2 / P2=7 / NOTE=4（全て対応済み予定、Round2再Review待ち） |
-| next action | R09 Round2 差分再Review依頼 |
+| latest review | R09 round 2 / 2026-08-06 |
+| verdict | PASS（R09 Round2: P0=0 / P1=0 / P2=2 / NOTE=2） |
+| issue count | P0=0 / P1=0 / P2=2 / NOTE=2（R09 Round2 PASS） |
+| next action | merge（main）＋中央ledger row9をPASS化 → S10/S11解放 |
 
 ## 2. OPEN Issue Register
 
@@ -212,3 +212,19 @@
   - 内訳: run2の1512にR09修正由来の+7（案件fallback/未設定エラー2、AcceptanceDocumentTest 2、poDuplicate scope 1、MobileResponsiveLayoutTestの新URL 2）
   - Docker MySQL Flyway smoke（fresh V1→V80含む）・JsSyntaxCheckTest・MessageBundleConsistencyTest いずれも0 skipped
 - **現行判定のheadを実Head（b64ab6d）へ同期**: 最終HeadでのL4証拠が確定
+
+## 14. R09 Round 2 差分再Review PASS — 記録（2026-08-06）
+
+独立Review（R09 Round 2、read-only子Agent、Base 789deeb → Head 9b619c0）:
+- **判定 = PASS（P0=0 / P1=0 / P2=2 / NOTE=2 / open release gates=0）**
+- Round 1のP1 2件（L4証拠不一致・R3.1原本）は実装とL4証拠（1519/0/0/0）で解決。P2 7件も対応済み。
+- 新規P0/P1なし。最終HeadのコードtreeはL4証拠commit b64ab6dと同一（差分はledger文書のみ）。
+- 残P2（PASS非block・backlog）:
+  - R09-P2-03残: 請求×検収取消の直列化に専用test追加（本ledger更新にてInvoiceAcceptanceGuardTestへlock/件数照合testを追加済み）
+  - NOTE: uploadDocumentのstatus guard（検収済のみ）を本ledger更新にて追加済み
+- 次spec解放: 中央ledger row9をPASS化（Base f523e11 → Head 9b619c0、R09 Round 2 PASS）後、S10 dispatch / S11 attendance を解放可。
+
+### 最終Headでの追加対応（本ledger更新分）
+- `AcceptanceServiceImpl.uploadDocument`: 検収済のみ登録可とするstatus guard（R09 NOTE対応）
+- `InvoiceAcceptanceGuardTest`: R09-P2-03のlock/件数照合test（検収済→一致、取消後→不一致409相当）を追加
+- review-ledger §1現行判定のheadを9b619c0へ同期（R09-P2-05残の解消）

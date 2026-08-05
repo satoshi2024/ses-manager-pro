@@ -101,6 +101,14 @@ class AcceptanceDocumentTest {
     }
 
     @Test
+    @DisplayName("検収書原本は検収済レコードのみ登録できる（未提出/提出済は拒否）")
+    void uploadRequiresAcceptedStatus() {
+        Acceptance submitted = acceptanceService.submit(contractId, "2026-07");
+        // 提出済のまま登録は拒否
+        assertThrows(BusinessException.class, () -> acceptanceService.uploadDocument(submitted.getId(), pdf()));
+    }
+
+    @Test
     @DisplayName("検収書は1件まで（二重登録は拒否）")
     void duplicateAcceptanceDocumentRejected() {
         Acceptance withDoc = acceptanceService.uploadDocument(accepted().getId(), pdf());

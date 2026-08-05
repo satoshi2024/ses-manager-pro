@@ -34,6 +34,7 @@ class InvoiceAcceptanceGuardTest {
     @Autowired InvoiceService invoiceService;
     @Autowired AcceptanceService acceptanceService;
     @Autowired AcceptanceMapper acceptanceMapper;
+    @Autowired com.ses.mapper.InvoiceMapper invoiceMapper;
     @Autowired JdbcTemplate jdbcTemplate;
 
     private long customerId;
@@ -108,6 +109,26 @@ class InvoiceAcceptanceGuardTest {
         var invoice = invoiceService.generate(customerId, "2026-07");
         assertNotNull(invoice);
         assertEquals("2026-07", invoice.getBillingMonth());
+    }
+
+    @Test
+    @DisplayName("R09-P2-03: 検収済acceptanceのロック照合（競合時は件数不一致で409相当になる）")
+    void acceptanceLockMatchesRequiredCount() {
+        acceptanceService.submit(acceptanceRequiredContractId, "2026-07");
+        Acceptance submitted = acceptanceMapper.selectByContractAndMonth(acceptanceRequiredContractId, "2026-07");
+        acceptanceService.accept(submitted.getId(), null);
+
+        java.util.List<Long> wrIds = java.util.List.of(jdbcTemplate.queryForObject(
+                "SELECT id FROM t_work_record WHERE contract_id = ? AND work_month = '2026-07'",
+                Long.class, acceptanceRequiredContractId));
+        // 検収済1件 → ロック1件・検収要件数1件（一致）
+        assertEquals(1, invoiceMapper.lockAcceptedAcceptancesByWorkRecordIds(wrIds).size());
+        assertEquals(1, invoiceMapper.countAcceptanceRequiredWorkRecords(wrIds));
+
+        // 検収取消（承認適用）後 → ロック0件・検収要件数1件（不一致＝請求生成が409で失敗する状態）
+        acceptanceService.applyCancellation(submitted.getId());
+        assertEquals(0, invoiceMapper.lockAcceptedAcceptancesByWorkRecordIds(wrIds).size());
+        assertEquals(1, invoiceMapper.countAcceptanceRequiredWorkRecords(wrIds));
     }
 
     @Test

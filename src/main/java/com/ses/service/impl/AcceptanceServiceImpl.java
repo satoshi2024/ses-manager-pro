@@ -177,6 +177,11 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     public com.ses.entity.Acceptance uploadDocument(Long acceptanceId, org.springframework.web.multipart.MultipartFile file) {
         Acceptance acceptance = require(acceptanceId);
         assertAllowedAcceptance(acceptanceId);
+        // 検収書原本は検収済レコードに対してのみ登録可能（R09 NOTE対応。UIは検収済行のみにボタン表示）
+        if (!StatusConstants.ACCEPTANCE_ACCEPTED.equals(acceptance.getStatus())) {
+            throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
+                    acceptance.getStatus(), StatusConstants.ACCEPTANCE_ACCEPTED);
+        }
         if (acceptance.getDocumentId() != null) {
             throw BusinessException.of(409, "error.acceptance.documentAlreadyRegistered");
         }

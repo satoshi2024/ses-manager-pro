@@ -50,7 +50,7 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済み・G2開発方針決定済み |
 | 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V76, V77, V78, V79** | S07実装中・独立Review NOT REVIEWABLE |
 | 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80** | 仕様済み |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）** | 実装完了・R09 PASS（2026-08-06） |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V81** | 仕様済み・G2開発方針決定済み |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V82** | 仕様済み・G6決定済み |
 | 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V83** | 仕様済み |
