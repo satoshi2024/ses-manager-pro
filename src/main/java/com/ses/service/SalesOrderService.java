@@ -62,4 +62,23 @@ public interface SalesOrderService extends IService<SalesOrder> {
 
     /** PO番号を正規化して空白を除去する（重複判定・表示の共通化）。 */
     String normalizePo(String customerPoNo);
+
+    /**
+     * 受領した注文書原本を文書台帳（ORDER_RECEIVED）へ登録する（R1.4）。
+     * 同じ原本hash（SHA-256）の二重登録は拒否（R2.4）。登録済みの場合は拒否。
+     */
+    com.ses.entity.SalesOrder uploadSourceDocument(Long orderId, org.springframework.web.multipart.MultipartFile file);
+
+    /**
+     * 注文請書PDFを生成し文書台帳（ORDER_ACKNOWLEDGEMENT）へ登録する（R1.4 / design §3）。
+     * 受領確認→注文請提出へ状態遷移する（注文請の発行＝提出）。冪等: 同一注文からは1文書。
+     * @return 生成したPDFバイト列
+     */
+    byte[] generateAcknowledgementPdf(Long orderId, java.util.Locale locale);
+
+    /** documentId が当該注文の原本/注文請として紐づいていることを検証する（download scope）。 */
+    void assertDocumentLinkedToOrder(Long orderId, Long documentId);
+
+    /** 注文の原本/注文請文書をscopeチェック付きで開く（注文一覧と同じ母集団）。 */
+    java.io.InputStream downloadDocument(Long orderId, Long documentId);
 }

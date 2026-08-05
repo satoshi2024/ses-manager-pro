@@ -25,4 +25,20 @@ public interface DocumentMapper extends BaseMapper<Document> {
      */
     @Select("SELECT * FROM t_document WHERE deleted_flag = 0 AND status = 'CONFIRMED' AND retention_until IS NOT NULL AND retention_until <= #{today} AND legal_hold_flag = 0 ORDER BY retention_until ASC")
     List<Document> findDisposalCandidates(@Param("today") LocalDate today);
+
+    /**
+     * 同一原本hash（SHA-256）で既に登録済みの文書を返す（order-acceptance-workflow R2.4）。
+     * 注文書原本の二重登録拒否に使用する。
+     */
+    @Select("""
+        SELECT v.document_id
+        FROM t_document_version v
+        JOIN t_document d ON d.id = v.document_id AND d.deleted_flag = 0
+        WHERE v.sha256 = #{sha256}
+          AND d.document_type = #{documentType}
+          AND v.deleted_flag = 0
+        LIMIT 1
+        """)
+    Long findDocumentIdBySha256AndType(@org.apache.ibatis.annotations.Param("sha256") String sha256,
+                                       @org.apache.ibatis.annotations.Param("documentType") String documentType);
 }

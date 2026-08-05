@@ -42,6 +42,10 @@ public class FileScopeValidationService {
     private final DataScopeService dataScopeService;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
 
+    /** 注文文書（SALES_ORDER link）のscope解決用。テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.SalesOrderMapper salesOrderMapper;
+
     public void assertDownloadAllowed(String storedName) {
         // 1. t_resume_ingestion の原本ファイル
         ResumeIngestion ingestion = resumeIngestionMapper.selectOne(
@@ -132,6 +136,15 @@ public class FileScopeValidationService {
                                     dataScopeService.assertAllowedProposal(targetId);
                                     anyAllowed = true;
                                     break;
+                                } else if ("SALES_ORDER".equals(type)) {
+                                    // 注文書原本・注文請書は注文一覧と同じscope（顧客DataScope）で見せる
+                                    com.ses.entity.SalesOrder salesOrder = salesOrderMapper == null ? null
+                                            : salesOrderMapper.selectById(targetId);
+                                    if (salesOrder != null) {
+                                        dataScopeService.assertAllowedCustomer(salesOrder.getCustomerId());
+                                        anyAllowed = true;
+                                        break;
+                                    }
                                 }
                                 // 未対応・未定義のターゲットタイプは評価せず次のリンクへ（fail-closed）
                             } catch (BusinessException ignored) {

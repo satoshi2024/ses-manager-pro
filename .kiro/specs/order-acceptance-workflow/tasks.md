@@ -32,7 +32,7 @@
     approval経由の取消時のrollback、注文取消と契約化の競合。
   - **Demo**: 見積から注文2明細→契約2件。契約化ボタンを二重clickして契約が2件にならないことを確認。
 
-- [ ] A1. 注文画面/注文請PDF/archive
+- [x] A1. 注文画面/注文請PDF/archive
   - **Objective**: 注文の一覧・詳細・差分が見え、受領した注文書原本をuploadして注文請書PDFを発行できる。
     どちらもarchiveへ保存され、日付・金額・相手先で検索できる。同じ原本hashの二重登録は拒否される。
   - **実装ガイダンス**: CRUD、原本upload、PDF、document links。

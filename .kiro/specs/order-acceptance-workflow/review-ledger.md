@@ -86,3 +86,24 @@
 - **Demo**: UI未実装のため未実施。二重clickの契約2件防止は order_line_id UNIQUE + 冪等testで検証済み。実ブラウザDemoはT056/A1で実施。
 - **commit**: （T055 commit hashを記入）
 - **risk**: 条件差分の承認routeは管理者設定（approval spec）が前提。route未設定時は承認engineが設定不足通知を出す（既存挙動）。
+
+## 8. T056 A1 注文画面/注文請PDF/archive — 記録（2026-08-05）
+
+- **task**: T056 A1
+- **requirements**: R1.4（原本/注文請書をarchive保存・検索）、R2.4（PO重複は警告・同一hashは拒否）、R5（download scope）
+- **変更file**:
+  - `controller/page/SalesOrderPageController.java`（新規: /sales-order）
+  - `controller/api/SalesOrderApiController.java`（新規: CRUD/状態/原本upload/注文請PDF/download/承認申請/契約化）
+  - `service/SalesOrderPdfService.java` + `impl/SalesOrderPdfServiceImpl.java`（新規: 注文請書PDF・ORDER_ACKNOWLEDGEMENT登録）
+  - `service/SalesOrderService.java` + `impl/SalesOrderServiceImpl.java`（uploadSourceDocument / generateAcknowledgementPdf / downloadDocument）
+  - `mapper/DocumentMapper.java`（findDocumentIdBySha256AndType: 同一hash拒否）
+  - `service/impl/DocumentServiceImpl.java`（SALES_ORDERリンクのscope適用: assertDocumentAccessAllowed / applyDataScopeFilter）
+  - `service/security/impl/FileScopeValidationService.java`（SALES_ORDERリンクの顧客DataScope）
+  - `templates/sales-order/list.html` + `static/js/modules/sales-order.js`（新規）
+  - `templates/layout/sidebar.html`（sales-order / acceptanceメニュー）
+  - `common/constant/NotificationLinks.java`（SALES_ORDER）
+  - 4言語message bundle（menu.salesOrder / menu.acceptance / salesOrder.* / error.order.*）
+- **test**: `SalesOrderApiControllerTest` 4/0/0（PO警告・hash拒否409・download・detail）、`SalesOrderDocumentScopeTest` 3/0/0（document ACL / FileScopeValidationService / applyDataScopeFilterが注文scope）、`SalesOrderPdfServiceImplTest` 1/0/0（PDF生成）。直接回帰: JsSyntaxCheckTest / NotificationLinkRouteTest / MessageBundleConsistencyTest / MobileResponsiveLayoutTest / RoleNavigationVisibilityTest 全緑。
+- **Demo**: 実ブラウザDemoは未実施（ローカル起動のMySQLが必要。T059 Mで実施予定）。PO重複警告・同一hash拒否・原本→注文請の発行フローはAPI testで検証済み。
+- **commit**: （T056 commit hashを記入）
+- **risk**: 原本uploadはPDF/画像(10MB以内)のみ許可。scan失敗はfail-closed（DocumentService既存挙動）。

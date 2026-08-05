@@ -14,6 +14,8 @@ import com.ses.entity.SalesOrder;
 import com.ses.entity.SalesOrderLine;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
@@ -22,6 +24,8 @@ import com.ses.mapper.QuotationMapper;
 import com.ses.mapper.SalesOrderLineMapper;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.ContractService;
+import com.ses.service.DocumentService;
+import com.ses.service.SalesOrderPdfService;
 import com.ses.service.SalesOrderService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
@@ -68,6 +72,10 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     private final ApprovalRequestMapper approvalRequestMapper;
     private final ContractService contractService;
     private final DataScopeService dataScopeService;
+    private final DocumentService documentService;
+    private final DocumentMapper documentMapper;
+    private final DocumentVersionMapper documentVersionMapper;
+    private final SalesOrderPdfService salesOrderPdfService;
 
     // ===== 一覧・詳細・scope =====
 
@@ -483,6 +491,113 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 && request.getEndDate().isBefore(request.getStartDate())) {
             throw BusinessException.of("error.order.dateRangeInvalid");
         }
+    }
+
+
+    // ===== 文書（原本受領・注文請PDF・download） =====
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public com.ses.entity.SalesOrder uploadSourceDocument(Long orderId, org.springframework.web.multipart.MultipartFile file) {
+        SalesOrder order = require(orderId);
+        assertAllowedOrder(orderId);
+        if (order.getSourceDocumentId() != null) {
+            throw BusinessException.of(409, "error.order.sourceDocumentAlreadyRegistered");
+        }
+        if (file == null || file.isEmpty()) {
+            throw BusinessException.of(400, "error.order.sourceDocumentRequired");
+        }
+        if (file.getSize() > 10L * 1024 * 1024) {
+            throw BusinessException.of(400, "error.order.sourceDocumentTooLarge");
+        }
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (java.io.IOException e) {
+            throw BusinessException.of(400, "error.order.sourceDocumentReadFailed");
+        }
+        // 同一原本hashの二重登録は拒否（R2.4）。警告と拒否を混同しない。
+        String sha256 = com.ses.service.impl.DocumentServiceImpl.computeSha256(bytes);
+        Long existing = documentMapper.findDocumentIdBySha256AndType(sha256, "ORDER_RECEIVED");
+        if (existing != null) {
+            throw BusinessException.of(409, "error.order.duplicateSourceDocument");
+        }
+        com.ses.entity.Customer customer = customerMapper.selectById(order.getCustomerId());
+        com.ses.dto.document.DocumentRegisterRequest req =
+                com.ses.dto.document.DocumentRegisterRequest.builder()
+                        .documentType("ORDER_RECEIVED")
+                        .title("注文書（受領）: " + order.getOrderNo())
+                        .documentNo(order.getOrderNo())
+                        .counterpartyType("CUSTOMER")
+                        .counterpartyId(order.getCustomerId())
+                        .counterpartyNameSnapshot(customer == null ? null : customer.getCompanyName())
+                        .transactionDate(order.getOrderDate())
+                        .amount(order.getTotalAmountSnapshot())
+                        .direction("INCOMING")
+                        .originalName(file.getOriginalFilename())
+                        .contentType(file.getContentType())
+                        .sourceType("RECEIVED")
+                        .businessKey("ORDER_RECEIVED:" + order.getId())
+                        .versionDiscriminator("1")
+                        .targetType("SALES_ORDER")
+                        .targetId(order.getId())
+                        .build();
+        com.ses.entity.Document doc;
+        try (java.io.InputStream is = new java.io.ByteArrayInputStream(bytes)) {
+            doc = documentService.registerReceived(req, is);
+        } catch (java.io.IOException e) {
+            throw BusinessException.of(500, "error.order.sourceDocumentSaveFailed");
+        }
+        documentService.confirm(doc.getId());
+        // 部分更新はカラムを明示したUpdateWrapperで行う（@TableField(ALWAYS)混在のnull上書き防止）
+        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SalesOrder>()
+                .eq("id", orderId)
+                .set("source_document_id", doc.getId()));
+        return require(orderId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public byte[] generateAcknowledgementPdf(Long orderId, java.util.Locale locale) {
+        SalesOrder order = require(orderId);
+        assertAllowedOrder(orderId);
+        if (!Set.of(
+                StatusConstants.ORDER_RECEIVED,
+                StatusConstants.ORDER_ACK_SUBMITTED,
+                StatusConstants.ORDER_CONTRACTED,
+                StatusConstants.ORDER_COMPLETED).contains(order.getStatus())) {
+            throw BusinessException.of(409, "error.order.ackNotAllowed", order.getStatus());
+        }
+        byte[] pdf = salesOrderPdfService.generate(order, locale);
+        // 注文請の発行＝注文請提出（受領確認→注文請提出へ状態CAS遷移）
+        if (StatusConstants.ORDER_RECEIVED.equals(order.getStatus())) {
+            changeStatus(orderId, StatusConstants.ORDER_ACK_SUBMITTED);
+        }
+        // 文書台帳の注文請書documentIdを注文へ記録する（冪等登録済みを引く）
+        com.ses.entity.DocumentVersion ackVersion = documentVersionMapper.findByIdempotencyKey(
+                "default", "GENERATED", "ORDER_ACKNOWLEDGEMENT:" + orderId, "1");
+        if (ackVersion != null) {
+            this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SalesOrder>()
+                    .eq("id", orderId)
+                    .set("acknowledgement_document_id", ackVersion.getDocumentId()));
+        }
+        return pdf;
+    }
+
+    @Override
+    public void assertDocumentLinkedToOrder(Long orderId, Long documentId) {
+        SalesOrder order = require(orderId);
+        assertAllowedOrder(orderId);
+        if (!Objects.equals(order.getSourceDocumentId(), documentId)
+                && !Objects.equals(order.getAcknowledgementDocumentId(), documentId)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    /** 注文の原本/注文請文書をscopeチェック付きで開く。 */
+    public java.io.InputStream downloadDocument(Long orderId, Long documentId) {
+        assertDocumentLinkedToOrder(orderId, documentId);
+        return documentService.download(documentId, null);
     }
 
     private SalesOrder require(Long id) {

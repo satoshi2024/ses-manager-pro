@@ -117,6 +117,18 @@
                         <span th:text="#{menu.quotation}">見積管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('sales-order')}">
+                    <a th:href="@{/sales-order}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/sales-order') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-bag-check me-2"></i>
+                        <span th:text="#{menu.salesOrder}">注文管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('acceptance')}">
+                    <a th:href="@{/acceptance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/acceptance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-patch-check me-2"></i>
+                        <span th:text="#{menu.acceptance}">月次検収</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract')}">
                     <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-text me-2"></i>

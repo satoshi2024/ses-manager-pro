@@ -44,6 +44,9 @@ public final class NotificationLinks {
     /** 承認inbox（/approval/inbox）— 承認申請通知の遷移先。 */
     public static final String APPROVAL_INBOX = "/approval/inbox";
 
+    /** 注文一覧（/sales-order）— 注文未受領・注文請未返送通知の遷移先。 */
+    public static final String SALES_ORDER = "/sales-order";
+
     private NotificationLinks() {
     }
 
