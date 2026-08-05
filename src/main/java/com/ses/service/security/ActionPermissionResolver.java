@@ -53,6 +53,10 @@ public final class ActionPermissionResolver {
             Map.entry("reconciliation", "reconciliation"),
             Map.entry("resume-ingestions", "resume-ingestion"),
             Map.entry("role-menus", "permission"),
+            // order-acceptance-workflow(S09)。未登録のままだと/api/sales-orders・/api/acceptancesが
+            // 管理者を含む全roleで403になる(CRM-R2-P1-01と同じ罠)。V80の権限seedと対にする。
+            Map.entry("sales-orders", "sales-order"),
+            Map.entry("acceptances", "acceptance"),
             Map.entry("sales-performance", "sales-performance"),
             Map.entry("skill-tags", "skill-tag"),
             Map.entry("skillsheet-templates", "skillsheet-template"),

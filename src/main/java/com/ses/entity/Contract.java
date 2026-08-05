@@ -155,6 +155,15 @@ public class Contract extends BaseEntity {
     /** 生成元見積ID（見積受注からのドラフトのみ設定） */
     private Long quotationId;
 
+    /** 生成元注文明細ID（注文受注からのドラフトのみ設定。UNIQUEで1明細→1契約） */
+    private Long orderLineId;
+
+    /**
+     * 検収要否（true=要, false=不要）。NOT NULL DEFAULT TRUE。
+     * NULLを許すと「未設定＝検収不要」に化けてR3.3（未検収請求の禁止）が破れる。
+     */
+    private Boolean acceptanceRequired;
+
     /**
      * 更新判断（'CONTINUE':継続確定/'END':更新不要、NULL:未定）。
      * 契約更新カレンダーのエスカレーション停止条件として参照される。

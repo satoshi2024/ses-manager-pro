@@ -65,6 +65,15 @@ public interface ContractService extends IService<Contract> {
      */
     Contract createDraftFromQuotation(com.ses.entity.Quotation quotation);
 
+    /**
+     * 注文明細から契約ドラフト（準備中）を生成する（order-acceptance-workflow / R2.2）。
+     * t_contract.order_line_id のUNIQUEで1明細→1契約を保証する（二重clickでも1件、R5）。
+     * @param line   注文明細
+     * @param order  注文
+     * @return 生成（または既存）の契約
+     */
+    Contract createDraftFromSalesOrderLine(com.ses.entity.SalesOrderLine line, com.ses.entity.SalesOrder order);
+
     // ===== 契約単価の改定履歴（contract-price-history / P6） =====
     /**
      * 単価改定を登録する。初回改定なら契約開始月・現行単価の初期履歴を自動補完し、

@@ -9,7 +9,7 @@
 > **Migration**: 本specの予約番号は **V80**。approval(V75)のmerge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] F1. 注文/明細/検収DDL
+- [x] F1. 注文/明細/検収DDL
   - **Objective**: 顧客の注文書を注文番号・顧客PO番号・期間・金額・支払条件付きで登録でき、
     1要員1明細で複数要員の注文を表現できる。契約×月の検収が1件だけ作られる。
   - **実装ガイダンス**: **V80**/V1/H2(`sql/schema-order-acceptance-h2.sql`)/MySQL smoke、

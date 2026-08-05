@@ -352,6 +352,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 null, null,
                 "提案#" + proposal.getId() + "の成約により自動生成",
                 proposal.getId(),
+                null,
                 null);
         return buildAndSaveDraft(src);
     }
@@ -388,7 +389,44 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 quotation.getSettlementHoursMax(),
                 "見積#" + quotation.getQuotationNo() + "の受注により自動生成",
                 null,
-                quotation.getId());
+                quotation.getId(),
+                null);
+        return buildAndSaveDraft(src);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Contract createDraftFromSalesOrderLine(com.ses.entity.SalesOrderLine line,
+                                                  com.ses.entity.SalesOrder order) {
+        // 冪等: 同一注文明細から生成済みの契約があればそれを返す（order_line_id UNIQUEでも防御）。
+        Contract existing = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
+                .eq(Contract::getOrderLineId, line.getId())
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return existing;
+        }
+        if (line.getEngineerId() == null) {
+            throw BusinessException.of("error.order.engineerRequired");
+        }
+        Long projectId = line.getProjectId();
+        Long customerId = order.getCustomerId();
+        if (projectId != null) {
+            Project project = projectMapper.selectById(projectId);
+            if (project != null) {
+                customerId = project.getCustomerId();
+            }
+        }
+        DraftSource src = new DraftSource(
+                line.getEngineerId(),
+                projectId,
+                customerId != null ? customerId : order.getCustomerId(),
+                line.getUnitPrice(),
+                line.getSettlementMin(),
+                line.getSettlementMax(),
+                "注文#" + order.getOrderNo() + "明細" + line.getLineNo() + "の契約化により自動生成",
+                null,
+                order.getQuotationId(),
+                line.getId());
         return buildAndSaveDraft(src);
     }
 
@@ -401,6 +439,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         Contract contract = new Contract();
         contract.setProposalId(src.proposalId());
         contract.setQuotationId(src.quotationId());
+        contract.setOrderLineId(src.orderLineId());
         contract.setEngineerId(src.engineerId());
         contract.setProjectId(src.projectId());
         contract.setCustomerId(src.customerId());
@@ -596,6 +635,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             BigDecimal settlementMax,
             String remarks,
             Long proposalId,
-            Long quotationId) {
+            Long quotationId,
+            Long orderLineId) {
     }
 }

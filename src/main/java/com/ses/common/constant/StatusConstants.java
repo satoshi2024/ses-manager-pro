@@ -125,4 +125,38 @@ public interface StatusConstants {
             PROPOSAL_SECOND_INTERVIEW,
             PROPOSAL_WAITING_RESULT
     );
+
+    // ========== 注文ステータス（order-acceptance-workflow / S09） ==========
+
+    /** 注文ステータス: 下書き */
+    String ORDER_DRAFT = "下書き";
+
+    /** 注文ステータス: 受領確認 */
+    String ORDER_RECEIVED = "受領確認";
+
+    /** 注文ステータス: 注文請提出 */
+    String ORDER_ACK_SUBMITTED = "注文請提出";
+
+    /** 注文ステータス: 契約化 */
+    String ORDER_CONTRACTED = "契約化";
+
+    /** 注文ステータス: 完了 */
+    String ORDER_COMPLETED = "完了";
+
+    /** 注文ステータス: 取消 */
+    String ORDER_CANCELLED = "取消";
+
+    // ========== 月次検収ステータス（order-acceptance-workflow / S09） ==========
+
+    /** 検収ステータス: 未提出 */
+    String ACCEPTANCE_UNSUBMITTED = "未提出";
+
+    /** 検収ステータス: 提出済 */
+    String ACCEPTANCE_SUBMITTED = "提出済";
+
+    /** 検収ステータス: 検収済 */
+    String ACCEPTANCE_ACCEPTED = "検収済";
+
+    /** 検収ステータス: 差戻し */
+    String ACCEPTANCE_REJECTED = "差戻し";
 }
