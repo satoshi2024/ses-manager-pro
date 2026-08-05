@@ -36,7 +36,7 @@
 
 - seed: `seed-s07-browser-demo.sql` をアプリ起動（Flyway migration完了）後に適用する。適用例:
   `docker exec -i ses-app-mysql mysql --default-character-set=utf8mb4 -uroot -p123456 ses_manager_db < seed-s07-browser-demo.sql`
-  - 本seedは**S07固有business keyのみを子→親順で削除**する（見積番号`Q-202608-%`・契約番号`C-2026-000%`・請求番号`INV-202607-%`・BP支払key・S07 request_type集合のroute/request/action/participant・S07 Demo月のclosing記録）。**全route/request/action/participant削除は行わない**。
+  - 本seedは**S07固有business keyに対応する行だけを子→親順で削除**する。見積/契約/請求は番号完全一致（`Q-202608-0001/0002`・`C-2026-0001/0002`・`INV-202607-0001/0002`）、BP支払は`payeeCompanyName=株式会社BPデモ`かつ`layerOrder=1/2`、closingは`2026-04/05`。申請はこれらbusiness keyに対応する**request IDを一時表へ抽出**し、action/participant→requestの順で削除する。routeは**Demo専用version `990001` のroute IDだけ**を削除・再投入し、stepは新規Demo route ID（一時表）だけへINSERTする。closing JSONは他月を保持したまま2026-04/05だけを除去する。**全route/request/action/participant削除は行わない**。
   - `sys_user`の`sales1`/`mgr1`は削除せずUPSERT（参照行のFKを壊さない）。
   - **AUTO_INCREMENT固定IDに依存しない**。業務オブジェクトのIDは毎回変わるため、`demo2.js`がbusiness key（見積番号/契約番号/請求番号/BP支払のpayee+layerOrder）からAPIでIDを解決する。
 - 実行: `node demo2.js`（Playwright-core + 実Chrome、dialog accept付き、SweetAlert2/confirm/prompt対応）。

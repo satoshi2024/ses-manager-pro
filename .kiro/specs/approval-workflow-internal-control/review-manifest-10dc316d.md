@@ -6,7 +6,7 @@
 > - **現行Review evidence/result commit** = `646dbdafb3c6b77ec0e3b7bb581392f50be53491`（Base→commit **27 commits / 274 paths**、seed修正＋browser evidence再生成）。いずれもcode baseline Headと分離して管理する。
 > 直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱う。
 >
-> このmanifestは受入PASSの宣言ではない。R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載し、文書commit hashをcurrent Headとして自己参照しない。
+> このmanifestは受入PASSの宣言ではない。R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。Packet文書は本流`main`の履歴としてcommitされる。文書自身のcommit（例: `d13e726`は文書同期commit）は`git log -1 -- <path>`で解決するprovenanceとして記載し、code baseline Headや現行Review evidence/result commitとして自己参照しない。
 
 ## 1. 対象とGit確定値
 
@@ -25,7 +25,7 @@
 | Base→code baseline Head | **23 commits / 219 files / +11639/-337**（=219 paths） |
 | 直前production delta | `6680e7d..68fbbba`、12 files（うち新規7 unique paths） |
 | 直前production deltaの範囲 | 4 Packet文書、V79.1 runbook、scheduler設定・H2回帰、FlywayV79_1RepairSmokeTest、OperationalBoundary実MySQL回帰、Webhook loopback回帰。これらはすべて`68fbbba`に含まれるcommit済みの履歴である |
-| Packet文書commit / provenance | **独立Packet commitなし。文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceであり、code baseline Head（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）として自己参照しない** |
+| Packet文書commit / provenance | **Packet文書は本流`main`の履歴としてcommitされる。文書自身のcommit（例: `d13e726`は文書同期commit）は`git log -1 -- <path>`で解決するprovenanceであり、code baseline Head（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）や現行Review evidence/result commit（`646dbda`）として自己参照しない** |
 | Packet文書作業木 | 最終確認時はclean。今回の文書commit（`git log -1 -- <path>`で解決）はcode baseline Headの後のReview成果物として別管理する |
 | diff check | `git diff --check` exit 0（最終確認時） |
 | 独立Review報告のdiff hash | `63ace139532f2ccfea84f4876c6f5191db12fa4d`（旧Packetの履歴証跡） |
@@ -425,7 +425,7 @@ git diff --check
 
 ### 5.1 code baseline Headで記録された回帰と実測（現行Review evidence commit 646dbdaと分離）
 
-- **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 files / +11639/-337**）。`68fbbba`時点で`HEAD = origin/main = origin/HEAD`だった（**当時値**）。**初回Review evidence commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、履歴）と**現行Review evidence/result commit** `646dbdafb3c6b77ec0e3b7bb581392f50be53491`（Base→commit **27 commits / 274 paths**、seed修正＋browser evidence再生成）はcode baseline Headと分離して管理する。e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**。現在の文書同期commitは`git log -1 -- <path>`で解決され、68fbbbaのHEAD/origin一致は当時値であり矛盾しない。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
+- **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 files / +11639/-337**）。`68fbbba`時点で`HEAD = origin/main = origin/HEAD`だった（**当時値**）。**初回Review evidence commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、履歴）と**現行Review evidence/result commit** `646dbdafb3c6b77ec0e3b7bb581392f50be53491`（Base→commit **27 commits / 274 paths**、seed修正＋browser evidence再生成）はcode baseline Headと分離して管理する。e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**。現在の文書同期commitは`git log -1 -- <path>`で解決され、68fbbbaのHEAD/origin一致は当時値であり矛盾しない。Packet文書は本流`main`の履歴としてcommitされる。文書自身のcommit（例: `d13e726`は文書同期commit）は`git log -1 -- <path>`で解決するprovenanceとして記載し、code baseline Headや現行Review evidence/result commitとして自己参照しない。
 - R1.3追加対象testは`RouteResolverServiceTest` 28件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**47 / failures 0 / errors 0 / skipped 0**。request作成時にDBへ保存した`route_snapshot_json`を再読込し、manager変更後も同一requestの承認者が不変であることを確認した。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
 - 再Review対象direct consumer regressionはR4-P1-01（7クラス）＋B1/M（13クラス）の**20クラス、150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
@@ -434,7 +434,7 @@ git diff --check
 - scheduler H2はproduction既定の`app.scheduler.lock.use-db-time=true`を維持し、`application-test.yml`のtest profileだけ`false`へ切り替えた。`SchedulerLockH2IntegrationTest`でH2のlock warningを解消した回帰**3 / 0 / 0 / 0**を確認した。
 - shared JDBCの複数JVM ShedLock/claim、commit前例外時の実DB rollbackは`OperationalBoundaryMySqlIntegrationTest`で**3 / 0 / 0 / 0**、lock遷移`LOCK_ACQUIRED pid=...`→`LOCK_NOT_ACQUIRED pid=...`→`LOCK_RELEASED`→`LOCK_ACQUIRED pid=...`、outbox claimは`CLAIM_RESULT=1`/`CLAIM_RESULT=0`、DB状態`PROCESSING`、`attempt_count=1`を確認した。adapter後の意図的例外ではapproval action/request/Quotation対象行が実MySQL transactionでrollbackした。
 - Webhook loopbackは`WebhookNotifierLoopbackIntegrationTest` **1 / failures 0 / errors 0 / skipped 0**で、`127.0.0.1` endpointへの実`RestTemplate` JSON POSTを確認した。
-- desktop/390px 5業務browser Demoは実Chrome `150.0.7871.187`（Playwright経由、headless実ブラウザ）で**10経路（5業務×desktop/390px）全てPASS**した。各業務で（a）申請者単独では対象状態が変わらない（申請者単独確定不可）、（b）申請→承認→適用で対象状態が1回だけ変わる、（c）申請時の二重click/retryでも申請は1件のみ（idempotency key一意制約でdedupe）、（d）承認時の二重clickでもAPPROVE actionは1件のみ・retry後も業務操作は再適用されない（`error.approval.invalidState`で安全に拒否）を実browserで確認した。証拠は`evidence/browser-m/`配下のスクリーンショット40枚とJSON 11ファイル（各経路のbefore/after状態・申請数・action数・retry安定性）として記録済み。内訳: 見積提出（Q-202608-0001/0002 下書き→提出済）、契約稼動化（C-2026-0001/0002 準備中→稼動中）、請求送付（INV-202607-0001/0002 未送付→送付済）、BP支払確定（bp_payment 1/2 未払→支払済）、月次締め（2026-05/2026-04 open→closed、管理者が適用）。
+- desktop/390px 5業務browser Demoは実Chrome `150.0.7871.187`（Playwright経由、headless実ブラウザ）で**10経路（5業務×desktop/390px）全てPASS**した。各業務で（a）申請者単独では対象状態が変わらない（申請者単独確定不可）、（b）申請→承認→適用で対象状態が1回だけ変わる、（c）申請時の二重click/retryでも申請は1件のみ（idempotency key一意制約でdedupe）、（d）承認時の二重clickでもAPPROVE actionは1件のみ・retry後も業務操作は再適用されない（`error.approval.invalidState`で安全に拒否）を実browserで確認した。証拠は`evidence/browser-m/`配下のスクリーンショット40枚とJSON 11ファイル（各経路のbefore/after状態・申請数・action数・retry安定性）として記録済み。内訳: 見積提出（Q-202608-0001/0002 下書き→提出済）、契約稼動化（C-2026-0001/0002 準備中→稼動中）、請求送付（INV-202607-0001/0002 未送付→送付済）、BP支払確定（payeeCompanyName=株式会社BPデモ, layerOrder=1/2 未払→支払済）、月次締め（2026-05/2026-04 open→closed、管理者が適用）。
 
 上記は定向/静的/H2 evidence、fresh/legacyの実MySQL smoke、V79.1-specific partial/repair/rollback、複数JVM ShedLock/claim、commit前rollback、loopback Webhook、実browser 5業務Demoを含む。
 
@@ -452,16 +452,16 @@ git diff --check
 | `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047 checkboxは`[x]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhook、CI相当L4 1471/0/0/0 zero-skippedに加え、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerは§5.1.1のとおりN/A |
-| `R4-REVIEW-04` | **VERIFIED_CLOSED** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits、274 paths）へ同期し、worktree clean、Packet文書4ファイルの独立commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した |
+| `R4-REVIEW-04` | **OPEN（文書整合の独立再Review待ち）** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits、274 paths）へ同期したが、独立Reviewで(中央ledger row7前半の旧記載・manifest §5.1のBP固定ID表記・README seed説明・Packet commit記述)の文書不整合が指摘され、修正後の再確認前 |
 | `approval-workflow-internal-control-R4-P1-01` | **VERIFIED_CLOSED** | R1.2/R1.3のcode/H2/境界・異常系test **47/0/0/0**、direct regression green、V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの再開可能性（3 partial状態）、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを全て確認済み |
 | `T046/B1` | **完了** | 定向B1/scheduler回帰、H2 lock warning回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを確認。full application instance cron・外部providerは§5.1.1のとおりN/A |
 | `T047/M` | **完了** | M定向回帰 green、CI相当L4 **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollback、loopback送信、5業務desktop/390px browser Demo（10経路）を確認 |
 
-**総合判定:** **REVIEW（独立再Review待ち）**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/Mは`[x]`、R4-REVIEW-01/02/03/04はVERIFIED_CLOSED）。本manifestの文書同期（Head分離・AC trace同期）の整合を独立再Reviewで確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。それまではS09=`NOT READY`、Wave 2=`未解放`を維持する。
+**総合判定:** **REVIEW（独立再Review待ち）**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/Mは`[x]`、R4-REVIEW-01/02/03はVERIFIED_CLOSED（R4-REVIEW-04は文書整合の独立再Review待ち））。本manifestの文書同期（Head分離・AC trace同期）の整合を独立再Reviewで確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。それまではS09=`NOT READY`、Wave 2=`未解放`を維持する。
 
 ### 5.3 再Review / 再開条件
 
 1. 独立Reviewで219 committed paths（#001〜#212＋#213〜#219）のstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
-2. Packet、Issue Register、中央台帳の**code baseline Head** `68fbbba`（23 commits / 219 paths、`68fbbba`時点の`HEAD = origin/main = origin/HEAD`は当時値）と**初回Review evidence commit** `2978461`（履歴、24 commits / 272 paths）と**現行Review evidence/result commit** `646dbda`（27 commits / 274 paths）を分離した状態で再確認する（e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**）。現在の文書同期commitは`git log -1 -- <path>`で解決され、68fbbbaのHEAD/origin一致（当時値）と矛盾しないことを確認する。Packet文書の独立commitはなく、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
+2. Packet、Issue Register、中央台帳の**code baseline Head** `68fbbba`（23 commits / 219 paths、`68fbbba`時点の`HEAD = origin/main = origin/HEAD`は当時値）と**初回Review evidence commit** `2978461`（履歴、24 commits / 272 paths）と**現行Review evidence/result commit** `646dbda`（27 commits / 274 paths）を分離した状態で再確認する（e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**）。現在の文書同期commitは`git log -1 -- <path>`で解決され、68fbbbaのHEAD/origin一致（当時値）と矛盾しないことを確認する。Packet文書は本流`main`の履歴としてcommitされ、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
 3. `evidence/browser-m/`のスクリーンショットとJSON（5業務×desktop/390px、申請者単独確定不可・申請1件・適用1回・APPROVE action 1件・retry安定）を独立Reviewで確認する。
 4. 独立再Reviewで文書整合（Head分離・AC trace同期・中央ledger row 7〜9の統一）を確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。
