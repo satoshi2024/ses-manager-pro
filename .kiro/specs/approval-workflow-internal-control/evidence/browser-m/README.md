@@ -14,7 +14,7 @@
 | 見積提出 | `quotation.submit` | PASS | PASS | Q-202608-0001 / Q-202608-0002 下書き→提出済 |
 | 契約稼動化 | `contract.activate` | PASS | PASS | C-2026-0001 / C-2026-0002 準備中→稼動中 |
 | 請求送付 | `invoice.send` | PASS | PASS | INV-202607-0001 / INV-202607-0002 未送付→送付済 |
-| BP支払確定 | `bp_payment.confirm` | PASS | PASS | bp_payment id=1 / id=2 未払→支払済 |
+| BP支払確定 | `bp_payment.confirm` | PASS | PASS | bp_payment（payeeCompanyName=株式会社BPデモ, layerOrder=1/2）未払→支払済 |
 | 月次締め | `closing.confirm` | PASS | PASS | 2026-05 / 2026-04 open→closed |
 
 各経路で確認した4項目（JSONの該当step）:
