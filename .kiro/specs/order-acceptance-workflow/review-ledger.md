@@ -66,3 +66,23 @@
 - **risk/備考**:
   - t_acceptance の「work record version」は t_work_record にversion列が無いため、`work_record_updated_at`（DATETIME snapshot）で実装（design §5.1の意図を充足。後続B1で差戻し→再提出時に再snapshot）。
   - V1はfresh DBで最初に実行されるため、V1の新テーブルFKはV1内テーブル(m_customer/t_contract)のみ。V73以降のテーブル(t_customer_contact/t_document/t_quotation)へのFKはV80側にのみ定義（fresh/legacyで形状が僅かに非対称だがUNIQUE制約は両経路で同一。SmokeTestは列/索引でassert）。
+
+## 7. T055 F2 見積→注文→契約 — 記録（2026-08-05）
+
+- **task**: T055 F2
+- **requirements**: R2.1（見積→注文draft引継ぎ）、R2.2（注文→契約draft冪等）、R2.3（差分表示・承認対象）、R5（二重clickで重複契約なし）
+- **変更file**:
+  - `src/main/java/com/ses/service/impl/SalesOrderApprovalAdapter.java`（新規: order.cancel / order.conditionDiff）
+  - `src/main/java/com/ses/service/impl/SalesOrderServiceImpl.java`（computeDiffsをBigDecimal.compareTo比較に修正、hasApprovedConditionDiff）
+  - `src/test/java/com/ses/order/SalesOrderQuotationContractIntegrationTest.java`（新規）
+  - `src/test/java/com/ses/order/SalesOrderApprovalAdapterTest.java`（新規）
+- **実装**:
+  - createDraftFromQuotation: 顧客・要員・案件・単価・精算幅を引継ぎ、同一見積からは冪等に1件。
+  - createContractDrafts: 1明細→1契約。order_line_id UNIQUE＋既存チェックで二重契約化防止。全明細契約化後に注文を「契約化」へ状態CAS遷移。
+  - computeDiffs: 見積/契約との単価・精算幅差分（BigDecimalはscale違いでも金額等価としてcompareTo比較）。
+  - 条件差分がある注文は承認済みでない限り契約化不可（order.conditionDiff承認が監査証跡）。
+  - SalesOrderApprovalAdapter: order.cancel（承認適用でapplyCancellation）、order.conditionDiff（状態不変の監査証跡）。
+- **test**: `SalesOrderQuotationContractIntegrationTest` 5/0/0（条件引継ぎ・差分ブロック・契約化冪等・取消競合・承認適用取消）、`SalesOrderApprovalAdapterTest` 2/0/0。
+- **Demo**: UI未実装のため未実施。二重clickの契約2件防止は order_line_id UNIQUE + 冪等testで検証済み。実ブラウザDemoはT056/A1で実施。
+- **commit**: （T055 commit hashを記入）
+- **risk**: 条件差分の承認routeは管理者設定（approval spec）が前提。route未設定時は承認engineが設定不足通知を出す（既存挙動）。

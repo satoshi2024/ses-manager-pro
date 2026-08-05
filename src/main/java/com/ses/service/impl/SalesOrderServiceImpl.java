@@ -404,7 +404,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                         .eq("request_type", "order.conditionDiff")
                         .eq("target_type", "SALES_ORDER")
                         .eq("target_id", orderId)
-                        .eq("status", "APPROVED")) > 0;
+                        .eq("status", "approved")) > 0;
     }
 
     // ===== 内部ヘルパー =====
@@ -504,7 +504,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
 
     private void addDiff(List<SalesOrderDetailDto.DiffItem> diffs, String field, String label,
                          String engineerName, BigDecimal before, BigDecimal after, String target) {
-        if (!Objects.equals(before, after)) {
+        // BigDecimalはscale違い(600000.00 vs 600000)でも金額として等しいためcompareToで比較する
+        if (!amountEquals(before, after)) {
             SalesOrderDetailDto.DiffItem item = new SalesOrderDetailDto.DiffItem();
             item.setField(field);
             item.setLabel(label + "（" + engineerName + "）");
@@ -518,5 +519,15 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     private String engineerName(Long engineerId) {
         com.ses.entity.Engineer engineer = engineerId == null ? null : engineerMapper.selectById(engineerId);
         return engineer == null ? String.valueOf(engineerId) : engineer.getFullName();
+    }
+
+    private static boolean amountEquals(BigDecimal a, BigDecimal b) {
+        if (a == null && b == null) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        return a.compareTo(b) == 0;
     }
 }
