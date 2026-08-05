@@ -107,3 +107,22 @@
 - **Demo**: 実ブラウザDemoは未実施（ローカル起動のMySQLが必要。T059 Mで実施予定）。PO重複警告・同一hash拒否・原本→注文請の発行フローはAPI testで検証済み。
 - **commit**: （T056 commit hashを記入）
 - **risk**: 原本uploadはPDF/画像(10MB以内)のみ許可。scan失敗はfail-closed（DocumentService既存挙動）。
+
+## 9. T057 B1 月次検収service/UI — 記録（2026-08-05）
+
+- **task**: T057 B1
+- **requirements**: R3.1（契約×月の検収・work record・提出日・顧客確認者・結果・差戻し理由）、R3.2（状態機械）、R3.4（検収取消承認）、R3.5（内部代行入力）、R5
+- **変更file**:
+  - `service/AcceptanceService.java` + `impl/AcceptanceServiceImpl.java`（新規: submit/accept/reject/resubmit/applyCancellation）
+  - `service/impl/AcceptanceApprovalAdapter.java`（新規: acceptance.cancel）
+  - `mapper/AcceptanceMapper.java`（グリッドLEFT JOIN・FOR UPDATE・countUnacceptedForClosing等）
+  - `controller/api/AcceptanceApiController.java`（新規） / `controller/api/MyAcceptanceApiController.java`（新規: 要員向け状態のみ・金額非表示）
+  - `controller/page/AcceptancePageController.java`（新規）
+  - `service/impl/WorkRecordServiceImpl.java`（R3.4ガード: saveHours/saveDaily/reopenMonthで検収済を拒否）
+  - `templates/acceptance/list.html` + `static/js/modules/acceptance.js`（新規）
+  - `common/constant/StatusConstants.java`（勤怠・検収状態定数） / `common/constant/NotificationLinks.java`（ACCEPTANCE）
+  - 4言語message bundle（acceptance.* / error.acceptance.*）
+- **test**: `AcceptanceServiceImplTest` 6/0/0（提出snapshot・snapshot不変・状態機械・差戻し理由必須・検収不要契約拒否・承認適用取消・R3.4再openガード）、`AcceptanceApprovalAdapterTest` 1/0/0。直接回帰: WorkRecordServiceImplTest / WorkRecordReopenSecurityTest / JsSyntaxCheckTest / NotificationLinkRouteTest / MessageBundleConsistencyTest / MobileResponsiveLayoutTest 全緑。
+- **Demo**: 実ブラウザDemoはT059 Mで実施。状態遷移・二重提出・snapshot不変・再openガードは自動testで検証済み。
+- **commit**: （T057 commit hashを記入）
+- **risk**: work recordの「version」はt_work_recordにversion列が無いため、`work_record_updated_at`（更新日時snapshot）で実装（T054の備考と同様）。

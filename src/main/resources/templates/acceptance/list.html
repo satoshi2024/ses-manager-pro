@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{acceptance.title}">月次検収</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
+                <div class="col-md-2">
+                    <input type="month" id="acceptanceWorkMonth" name="workMonth" class="form-control">
+                </div>
+                <div class="col-md-2">
+                    <select id="acceptanceStatusFilter" name="status" class="form-select">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="未提出" th:text="#{acceptance.status.未提出}">未提出</option>
+                        <option value="提出済" th:text="#{acceptance.status.提出済}">提出済</option>
+                        <option value="検収済" th:text="#{acceptance.status.検収済}">検収済</option>
+                        <option value="差戻し" th:text="#{acceptance.status.差戻し}">差戻し</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select id="acceptanceCustomerFilter" name="customerId" class="form-select">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select id="acceptanceEngineerFilter" name="engineerId" class="form-select">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button type="button" id="btnSearchAcceptance" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                </div>
+            </form>
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped" id="acceptanceTable">
+                    <thead>
+                        <tr>
+                            <th th:text="#{acceptance.table.contractNo}">契約番号</th>
+                            <th th:text="#{acceptance.table.engineer}">要員</th>
+                            <th th:text="#{acceptance.table.customer}">顧客</th>
+                            <th th:text="#{acceptance.table.project}">案件</th>
+                            <th th:text="#{acceptance.table.workMonth}">対象月</th>
+                            <th th:text="#{acceptance.table.status}">状態</th>
+                            <th th:text="#{acceptance.table.hours}">工数</th>
+                            <th th:text="#{acceptance.table.amount}">検収金額</th>
+                            <th th:text="#{acceptance.table.submittedAt}">提出日</th>
+                            <th th:text="#{acceptance.table.actions}">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center"></div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/acceptance.js"></script>
+</th:block>
+</body>
+</html>

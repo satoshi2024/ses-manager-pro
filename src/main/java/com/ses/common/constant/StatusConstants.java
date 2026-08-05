@@ -146,6 +146,20 @@ public interface StatusConstants {
     /** 注文ステータス: 取消 */
     String ORDER_CANCELLED = "取消";
 
+    // ========== 勤怠（work record）ステータス ==========
+
+    /** 勤怠ステータス: 入力中 */
+    String WORK_RECORD_INPUT = "入力中";
+
+    /** 勤怠ステータス: 提出済 */
+    String WORK_RECORD_SUBMITTED = "提出済";
+
+    /** 勤怠ステータス: 差戻し */
+    String WORK_RECORD_REJECTED = "差戻し";
+
+    /** 勤怠ステータス: 確定 */
+    String WORK_RECORD_CONFIRMED = "確定";
+
     // ========== 月次検収ステータス（order-acceptance-workflow / S09） ==========
 
     /** 検収ステータス: 未提出 */

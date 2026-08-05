@@ -13,17 +13,20 @@ import java.util.List;
 
 /**
  * 月次検収マッパー。
- * グリッドは契約・要員・顧客・案件・顧客担当者とJOINする。
+ * グリッドは確定済みwork record（検収要契約）を出発点に、未提出行も含めて返す。
  */
 @Mapper
 public interface AcceptanceMapper extends BaseMapper<Acceptance> {
 
-    /** グリッド一覧。scopeは contractIds で絞る（空リストなら1=0で0件）。 */
+    /**
+     * グリッド一覧。確定済みwork record（検収要契約）を出発点に、未提出の行も含めて返す。
+     * scopeは contractIds で絞る（空リストなら1=0で0件）。
+     */
     @Select("""
         <script>
         SELECT
             a.id                   AS id,
-            a.contract_id          AS contractId,
+            c.id                   AS contractId,
             c.contract_no          AS contractNo,
             c.engineer_id          AS engineerId,
             e.full_name            AS engineerName,
@@ -31,9 +34,9 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             cst.company_name       AS customerName,
             c.project_id           AS projectId,
             p.project_name         AS projectName,
-            a.work_record_id       AS workRecordId,
-            a.work_month           AS workMonth,
-            a.status               AS status,
+            w.id                   AS workRecordId,
+            w.work_month           AS workMonth,
+            COALESCE(a.status, '未提出') AS status,
             a.submitted_at         AS submittedAt,
             a.customer_contact_id  AS customerContactId,
             cc.name                AS customerContactName,
@@ -43,24 +46,26 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             a.amount_snapshot      AS amountSnapshot,
             a.version              AS version,
             c.acceptance_required  AS acceptanceRequired
-        FROM t_acceptance a
-        INNER JOIN t_contract c ON c.id = a.contract_id AND c.deleted_flag = 0
+        FROM t_work_record w
+        INNER JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
         INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         LEFT JOIN m_customer cst ON cst.id = c.customer_id
         LEFT JOIN t_project p ON p.id = c.project_id
+        LEFT JOIN t_acceptance a ON a.contract_id = c.id AND a.work_month = w.work_month AND a.deleted_flag = 0
         LEFT JOIN t_customer_contact cc ON cc.id = a.customer_contact_id
-        WHERE a.deleted_flag = 0
-          <if test="workMonth != null and workMonth != ''">AND a.work_month = #{workMonth}</if>
-          <if test="status != null and status != ''">AND a.status = #{status}</if>
+        WHERE w.work_month = #{workMonth}
+          AND w.status = '確定'
+          AND c.acceptance_required = 1
+          <if test="status != null and status != ''">AND COALESCE(a.status, '未提出') = #{status}</if>
           <if test="customerId != null">AND c.customer_id = #{customerId}</if>
           <if test="engineerId != null">AND c.engineer_id = #{engineerId}</if>
           <if test="contractIds != null">
             <choose>
               <when test="contractIds.size() == 0">AND 1 = 0</when>
-              <otherwise>AND a.contract_id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach></otherwise>
+              <otherwise>AND c.id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach></otherwise>
             </choose>
           </if>
-        ORDER BY a.work_month DESC, a.id DESC
+        ORDER BY w.work_month DESC, c.id DESC
         </script>
         """)
     Page<AcceptanceGridDto> selectGridPage(Page<AcceptanceGridDto> page,
@@ -72,6 +77,12 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
 
     @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 FOR UPDATE")
     Acceptance selectByContractAndMonthForUpdate(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);
+
+    @Select("SELECT * FROM t_acceptance WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    Acceptance selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 LIMIT 1")
+    Acceptance selectByContractAndMonth(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);
 
     /** 月次締めchecklist用: 検収不要契約以外で、検収済でない実績の件数（scope適用）。 */
     @Select("""
@@ -142,5 +153,5 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
           </if>
         </script>
         """)
-    java.math.BigDecimal avgAcceptanceDays(@Param("contractIds") List<Long> contractIds);
+    BigDecimal avgAcceptanceDays(@Param("contractIds") List<Long> contractIds);
 }

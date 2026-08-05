@@ -47,6 +47,9 @@ public final class NotificationLinks {
     /** 注文一覧（/sales-order）— 注文未受領・注文請未返送通知の遷移先。 */
     public static final String SALES_ORDER = "/sales-order";
 
+    /** 月次検収（/acceptance）— 検収未提出・期限超過・差戻し通知の遷移先。 */
+    public static final String ACCEPTANCE = "/acceptance";
+
     private NotificationLinks() {
     }
 

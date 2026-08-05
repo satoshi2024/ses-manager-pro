@@ -42,7 +42,7 @@
     **PO重複が警告で登録は通ること**、同一hashの登録が拒否されること、mobile 390px。
   - **Demo**: 原本受領→注文請発行。同じPO番号で警告が出つつ登録でき、同じPDFの再uploadは拒否されることを確認。
 
-- [ ] B1. 月次検収service/UI
+- [x] B1. 月次検収service/UI
   - **Objective**: 月次の作業実績を提出し、顧客が検収または差戻しできる。差戻し後は再提出できる。
     提出後に工数が変わっても検収額は変わらない。
   - **実装ガイダンス**: submit/accept/reject/cancel、work record link。
