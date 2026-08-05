@@ -63,6 +63,10 @@ public class DashboardServiceImpl implements DashboardService {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
+
+    /** 未検収KPI（R4.3）。テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.AcceptanceMapper acceptanceMapper;
     /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通口径サービスで算出する(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
 
@@ -259,6 +263,21 @@ public class DashboardServiceImpl implements DashboardService {
         String scopeType = isScoped ? "LIMITED" : "COMPANY";
         String scopeDisplayName = isScoped ? "対象範囲" : "全社";
 
+        // 未検収売上・検収平均日数（R4.3）。母集団は同一のscope（契約ID集合）で揃える。
+        long unacceptedSales = 0L;
+        double avgAcceptanceDays = 0.0;
+        if (acceptanceMapper != null) {
+            List<Long> scopeContractIds = kpiScopeContractIds(allContracts);
+            java.math.BigDecimal unaccepted = acceptanceMapper.sumUnacceptedSales(scopeContractIds);
+            if (unaccepted != null) {
+                unacceptedSales = unaccepted.longValue();
+            }
+            java.math.BigDecimal avg = acceptanceMapper.avgAcceptanceDays(scopeContractIds);
+            if (avg != null) {
+                avgAcceptanceDays = avg.doubleValue();
+            }
+        }
+
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
                 .utilization(Math.round(utilization * 10.0) / 10.0)
                 .utilizationTrend(null)
@@ -269,6 +288,8 @@ public class DashboardServiceImpl implements DashboardService {
                 .profitTrend(profitTrend)
                 .scopeType(scopeType)
                 .scopeDisplayName(scopeDisplayName)
+                .unacceptedSales(unacceptedSales)
+                .avgAcceptanceDays(Math.round(avgAcceptanceDays * 10.0) / 10.0)
                 .build();
 
         DashboardSummaryDto.StatusChartDto statusChart = DashboardSummaryDto.StatusChartDto.builder()
@@ -408,6 +429,18 @@ public class DashboardServiceImpl implements DashboardService {
      * <p>R3.3 は export/notification と並んで dashboard にも同じ組織scopeを求める。
      * 部門責任者のKPIが全社値のままだと、R4「上長が配下のKPIだけを閲覧できる」が成立しない。
      */
+    /** KPIのscope母集団（契約ID）。unscopedならnull=全件。 */
+    private List<Long> kpiScopeContractIds(List<Contract> contracts) {
+        if (!dataScopeService.isScoped()
+                && (organizationScopeService == null || organizationScopeService.hasFullAccess())) {
+            return null; // 全件
+        }
+        if (contracts == null || contracts.isEmpty()) {
+            return java.util.List.of();
+        }
+        return contracts.stream().map(Contract::getId).collect(java.util.stream.Collectors.toList());
+    }
+
     private List<Contract> scopedContracts(QueryWrapper<Contract> query) {
         Set<Long> allowed = effectiveContractIds();
         if (allowed != null) {

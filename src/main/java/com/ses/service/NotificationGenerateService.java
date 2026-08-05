@@ -58,6 +58,9 @@ public class NotificationGenerateService {
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final com.ses.service.billing.CashFlowForecastService cashFlowForecastService;
     private final NotificationService notificationService;
+    private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
+    private final com.ses.mapper.SalesOrderLineMapper salesOrderLineMapper;
+    private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final SystemConfigService systemConfigService;
 
     public void generateAll() {
@@ -70,6 +73,11 @@ public class NotificationGenerateService {
         followupOverdue();
         cashflowAlert();
         attendanceUnsubmitted();
+        orderReceiptPending();
+        orderAckPending();
+        acceptanceUnsubmitted();
+        acceptanceOverdue();
+        acceptanceRejected();
     }
 
     /**
@@ -344,5 +352,182 @@ public class NotificationGenerateService {
 
     private String todayString() {
         return LocalDate.now().toString();
+    }
+
+    /**
+     * 注文未受領（R4.1）: 下書きのまま受領確認期限（config order.receipt-notify-days、既定3日）を
+     * 過ぎた注文を担当営業（その顧客の契約sales_user_id）と管理者へ通知する。
+     * 冪等: ORDER_RECEIVED_PENDING:{orderId}:{today}
+     */
+    public void orderReceiptPending() {
+        int days = systemConfigService.getInt("order.receipt-notify-days", 3);
+        LocalDate today = LocalDate.now();
+        List<com.ses.entity.SalesOrder> orders = salesOrderMapper.selectList(
+                new QueryWrapper<com.ses.entity.SalesOrder>()
+                        .eq("status", "下書き")
+                        .isNotNull("order_date")
+                        .le("order_date", today.minusDays(days)));
+        for (com.ses.entity.SalesOrder order : orders) {
+            String customerName = getCustomerName(order.getCustomerId());
+            String dedupeKey = "ORDER_RECEIVED_PENDING:" + order.getId() + ":" + today;
+            String message = "[\"notification.msg.ORDER_RECEIVED_PENDING\", \"" + order.getOrderNo() + "\", \"" + customerName + "\"]";
+            for (Long userId : resolveCustomerSalesUserIds(order.getCustomerId())) {
+                notificationService.publishToUser(userId, "ORDER_RECEIVED_PENDING", "注文未受領",
+                        message, NotificationLinks.SALES_ORDER, dedupeKey + "#u" + userId, "sales-order");
+            }
+        }
+    }
+
+    /**
+     * 注文請未返送（R4.1）: 受領確認のまま期限（config order.ack-notify-days、既定3日）を過ぎた注文を通知。
+     * 冪等: ORDER_ACK_PENDING:{orderId}:{today}
+     */
+    public void orderAckPending() {
+        int days = systemConfigService.getInt("order.ack-notify-days", 3);
+        LocalDate today = LocalDate.now();
+        List<com.ses.entity.SalesOrder> orders = salesOrderMapper.selectList(
+                new QueryWrapper<com.ses.entity.SalesOrder>()
+                        .eq("status", "受領確認")
+                        .isNotNull("order_date")
+                        .le("order_date", today.minusDays(days)));
+        for (com.ses.entity.SalesOrder order : orders) {
+            String customerName = getCustomerName(order.getCustomerId());
+            String dedupeKey = "ORDER_ACK_PENDING:" + order.getId() + ":" + today;
+            String message = "[\"notification.msg.ORDER_ACK_PENDING\", \"" + order.getOrderNo() + "\", \"" + customerName + "\"]";
+            for (Long userId : resolveCustomerSalesUserIds(order.getCustomerId())) {
+                notificationService.publishToUser(userId, "ORDER_ACK_PENDING", "注文請未返送",
+                        message, NotificationLinks.SALES_ORDER, dedupeKey + "#u" + userId, "sales-order");
+            }
+        }
+    }
+
+    /**
+     * 月次検収未提出（R4.1）: 対象月（config acceptance.submission-target-month-offset、既定1=前月）の
+     * 確定済み・検収要・未提出/未検収の実績を担当営業と管理者へ通知する。
+     * 冪等: ACCEPTANCE_UNSUBMITTED:{contractId}:{workMonth}
+     */
+    public void acceptanceUnsubmitted() {
+        int offset = systemConfigService.getInt("acceptance.submission-target-month-offset", 1);
+        String workMonth = YearMonth.from(LocalDate.now()).minusMonths(offset).toString();
+        List<Long> contractIds = unacceptedContractIds(workMonth);
+        for (Long contractId : contractIds) {
+            Contract contract = contractMapper.selectById(contractId);
+            if (contract == null) {
+                continue;
+            }
+            String name = getEngineerName(contract.getEngineerId());
+            String dedupeKey = "ACCEPTANCE_UNSUBMITTED:" + contractId + ":" + workMonth;
+            String message = "[\"notification.msg.ACCEPTANCE_UNSUBMITTED\", \"" + workMonth + "\", \"" + name + "\"]";
+            for (Long userId : resolveContractSalesUserIds(contract)) {
+                notificationService.publishToUser(userId, "ACCEPTANCE_UNSUBMITTED", "検収未提出",
+                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+            }
+        }
+    }
+
+    /**
+     * 月次検収の期限超過（R4.1）: 提出済のまま期限（config acceptance.accept-notify-days、既定7日）を
+     * 過ぎた検収を担当営業と管理者へ通知する。冪等: ACCEPTANCE_OVERDUE:{acceptanceId}:{today}
+     */
+    public void acceptanceOverdue() {
+        int days = systemConfigService.getInt("acceptance.accept-notify-days", 7);
+        LocalDate today = LocalDate.now();
+        List<com.ses.entity.Acceptance> pending = acceptanceMapper.selectList(
+                new QueryWrapper<com.ses.entity.Acceptance>()
+                        .eq("status", "提出済")
+                        .isNotNull("submitted_at")
+                        .le("submitted_at", today.minusDays(days).atStartOfDay()));
+        for (com.ses.entity.Acceptance acceptance : pending) {
+            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            if (contract == null) {
+                continue;
+            }
+            String name = getEngineerName(contract.getEngineerId());
+            String dedupeKey = "ACCEPTANCE_OVERDUE:" + acceptance.getId() + ":" + today;
+            String message = "[\"notification.msg.ACCEPTANCE_OVERDUE\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\", \"" + days + "日\"]";
+            for (Long userId : resolveContractSalesUserIds(contract)) {
+                notificationService.publishToUser(userId, "ACCEPTANCE_OVERDUE", "検収期限超過",
+                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+            }
+        }
+    }
+
+    /**
+     * 月次検収の差戻し（R4.1）: 差戻し状態の検収を担当営業と管理者へ通知する。
+     * 冪等: ACCEPTANCE_REJECTED:{acceptanceId}
+     */
+    public void acceptanceRejected() {
+        List<com.ses.entity.Acceptance> rejected = acceptanceMapper.selectList(
+                new QueryWrapper<com.ses.entity.Acceptance>().eq("status", "差戻し"));
+        for (com.ses.entity.Acceptance acceptance : rejected) {
+            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            if (contract == null) {
+                continue;
+            }
+            String name = getEngineerName(contract.getEngineerId());
+            String dedupeKey = "ACCEPTANCE_REJECTED:" + acceptance.getId();
+            String message = "[\"notification.msg.ACCEPTANCE_REJECTED\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\"]";
+            for (Long userId : resolveContractSalesUserIds(contract)) {
+                notificationService.publishToUser(userId, "ACCEPTANCE_REJECTED", "検収差戻し",
+                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+            }
+        }
+    }
+
+    /** 未提出/未検収の契約ID（確定済み・検収要・検収済acceptanceが無い実績の契約）。 */
+    private List<Long> unacceptedContractIds(String workMonth) {
+        List<com.ses.entity.WorkRecord> records = workRecordMapper.selectList(
+                new QueryWrapper<com.ses.entity.WorkRecord>()
+                        .eq("work_month", workMonth)
+                        .eq("status", "確定"));
+        Set<Long> result = new java.util.LinkedHashSet<>();
+        for (com.ses.entity.WorkRecord record : records) {
+            Contract contract = contractMapper.selectById(record.getContractId());
+            if (contract == null || Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
+                continue;
+            }
+            com.ses.entity.Acceptance acceptance = acceptanceMapper.selectByContractAndMonth(
+                    record.getContractId(), workMonth);
+            if (acceptance == null || !"検収済".equals(acceptance.getStatus())) {
+                result.add(record.getContractId());
+            }
+        }
+        return new java.util.ArrayList<>(result);
+    }
+
+    /** 顧客の担当営業（その顧客の契約sales_user_idの有効営業）＋管理者。 */
+    private List<Long> resolveCustomerSalesUserIds(Long customerId) {
+        List<Long> salesIds = contractMapper.selectList(
+                        new QueryWrapper<Contract>()
+                                .eq("customer_id", customerId)
+                                .isNotNull("sales_user_id")
+                                .select("sales_user_id"))
+                .stream().map(Contract::getSalesUserId).distinct().collect(Collectors.toList());
+        return resolveSalesRecipients(salesIds);
+    }
+
+    /** 契約の担当営業＋管理者。 */
+    private List<Long> resolveContractSalesUserIds(Contract contract) {
+        List<Long> salesIds = new java.util.ArrayList<>();
+        if (contract.getSalesUserId() != null) {
+            salesIds.add(contract.getSalesUserId());
+        }
+        return resolveSalesRecipients(salesIds);
+    }
+
+    private List<Long> resolveSalesRecipients(List<Long> salesIds) {
+        List<Long> recipients = new java.util.ArrayList<>();
+        for (Long salesId : salesIds) {
+            SysUser user = salesId == null ? null : sysUserMapper.selectById(salesId);
+            if (user != null && "営業".equals(user.getRole()) && Integer.valueOf(1).equals(user.getStatus())) {
+                recipients.add(salesId);
+            }
+        }
+        // 管理者へも常時通知（design §5.2 scheduler: 宛先は担当営業/管理者）
+        recipients.addAll(sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getRole, "管理者")
+                        .eq(SysUser::getStatus, 1))
+                .stream().map(SysUser::getId).collect(Collectors.toList()));
+        return recipients.stream().distinct().collect(Collectors.toList());
     }
 }

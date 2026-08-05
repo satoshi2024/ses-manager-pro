@@ -41,6 +41,9 @@ public class MonthlyClosingSummaryDto {
     /** (f) 労務コンプライアンスリスク該当契約（labor-compliance-check / FR-10）。締めを妨げない。 */
     private List<com.ses.dto.compliance.ContractComplianceDto> complianceFindings;
 
+    /** (g) 未検収件数（R4.2）: 閲覧者のscopeで数える（design §5.2）。 */
+    private int unacceptedCount;
+
     private int unenteredCount;
     private int unconfirmedCount;
     private int unbilledCount;

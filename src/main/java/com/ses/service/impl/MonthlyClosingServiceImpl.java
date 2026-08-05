@@ -64,6 +64,14 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.MonthlyAccountingSnapshotService monthlyAccountingSnapshotService;
 
+    /** 未検収件数（R4.2）。既存テストslice互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.AcceptanceMapper acceptanceMapper;
+
+    /** 未検収件数のscope母集団（閲覧者のscopeで数える。design §5.2）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.DataScopeService dataScopeService;
+
     /** compliance メニューを閲覧できるロールか（管理者は常に可。MenuPermissionFilter と同じ判定）。 */
     private boolean canViewCompliance() {
         org.springframework.security.core.Authentication auth =
@@ -165,6 +173,14 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
             group.getItems().add(item);
         }
         dto.setUnbilledConfirmed(new ArrayList<>(map.values()));
+
+        // (g) 未検収件数（R4.2）: 閲覧者のscopeで数える（design §5.2。全社件数を全員へ見せない）。
+        if (acceptanceMapper != null) {
+            List<Long> closingContractIds = scopedContractIdsForClosing();
+            dto.setUnacceptedCount((int) acceptanceMapper.countUnacceptedForClosing(month, closingContractIds));
+        } else {
+            dto.setUnacceptedCount(0);
+        }
 
         // (d) 未払BP
         dto.setUnpaidBp(bpPaymentMapper.selectListWithDetails(month, "未払"));
@@ -270,6 +286,15 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         if (records.stream().anyMatch(r -> month.equals(r.month))) {
             throw BusinessException.of(400, "error.closing.hardLocked");
         }
+    }
+
+    /** 未検収件数のscope母集団（空集合=全件ではなく、条件を付けない＝全件の意図を呼出側へ明示）。 */
+    private List<Long> scopedContractIdsForClosing() {
+        if (dataScopeService == null || !dataScopeService.isScoped()) {
+            return null; // 全件（SQL側で条件を付けない）
+        }
+        java.util.Set<Long> ids = dataScopeService.allowedContractIds();
+        return ids == null ? java.util.List.of() : new java.util.ArrayList<>(ids);
     }
 
     private ClosingRecord findRecord(String month) {

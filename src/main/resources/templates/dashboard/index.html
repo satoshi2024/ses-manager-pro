@@ -112,6 +112,40 @@
             </div>
         </div>
 
+        <!-- 未検収売上 KPI（R4.3） -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card bg-card border-dark shadow-sm h-100 hover-lift transition-base">
+                <div class="card-body p-4 position-relative overflow-hidden">
+                    <div class="position-absolute top-0 end-0 p-3 opacity-25">
+                        <i class="bi bi-hourglass-split text-accent-blue" style="font-size: 4rem;"></i>
+                    </div>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.unaccepted_sales}">未検収売上</h6>
+                    <h2 class="text-white fw-bold mb-0 me-2" id="kpi-unaccepted-sales">¥--</h2>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.unaccepted_sales_note}">確定済みで検収未了の売上</p>
+                </div>
+                <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
+                    <a href="/acceptance" class="text-accent-blue text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_acceptance}">月次検収を見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 検収平均日数 KPI（R4.3） -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card bg-card border-dark shadow-sm h-100 hover-lift transition-base">
+                <div class="card-body p-4 position-relative overflow-hidden">
+                    <div class="position-absolute top-0 end-0 p-3 opacity-25">
+                        <i class="bi bi-calendar2-check text-accent-green" style="font-size: 4rem;"></i>
+                    </div>
+                    <h6 class="text-muted fw-bold text-uppercase mb-2" th:text="#{dashboard.kpi.avg_acceptance_days}">検収平均日数</h6>
+                    <h2 class="text-white fw-bold mb-0 me-2" id="kpi-avg-acceptance-days">--</h2>
+                    <p class="text-muted small mb-0" th:text="#{dashboard.kpi.avg_acceptance_days_note}">提出から検収まで（日）</p>
+                </div>
+                <div class="card-footer bg-secondary border-dark py-2 px-4 text-center">
+                    <a href="/acceptance" class="text-accent-green text-decoration-none small fw-bold"><span th:text="#{dashboard.kpi.view_acceptance}">月次検収を見る</span> <i class="bi bi-chevron-right ms-1"></i></a>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Charts Row with Tabs -->

@@ -130,6 +130,8 @@ function renderKPIs(kpi) {
     
     $('#kpi-profit-margin').text(kpi.profitMargin + '%');
     updateTrendBadge($('#kpi-profit-trend'), kpi.profitTrend);
+    $('#kpi-unaccepted-sales').text('¥' + (kpi.unacceptedSales || 0).toLocaleString());
+    $('#kpi-avg-acceptance-days').text(kpi.avgAcceptanceDays != null ? kpi.avgAcceptanceDays + '日' : '--');
 }
 
 function updateTrendBadge($element, value) {

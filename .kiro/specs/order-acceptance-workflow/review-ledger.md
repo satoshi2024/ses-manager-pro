@@ -126,3 +126,21 @@
 - **Demo**: 実ブラウザDemoはT059 Mで実施。状態遷移・二重提出・snapshot不変・再openガードは自動testで検証済み。
 - **commit**: （T057 commit hashを記入）
 - **risk**: work recordの「version」はt_work_recordにversion列が無いため、`work_record_updated_at`（更新日時snapshot）で実装（T054の備考と同様）。
+
+## 10. T058 B2 請求/月次締め/通知統合 — 記録（2026-08-05）
+
+- **task**: T058 B2
+- **requirements**: R3.3（未検収契約から請求不可・検収不要契約は例外）、R4.1（注文未受領/注文請未返送/検収未提出・期限超過・差戻し通知）、R4.2（月次締めchecklistへ未検収件数）、R4.3（dashboard未検収売上・検収平均日数）、R5
+- **変更file**:
+  - `mapper/InvoiceMapper.java`（selectUnbilledWorkRecords / Scoped / All に acceptance_required=0 OR EXISTS(検収済) をWHERE句として追加。memory filter禁止）
+  - `service/impl/MonthlyClosingServiceImpl.java` + `dto/closing/MonthlyClosingSummaryDto.java`（(g)未検収件数。閲覧者scopeで集計）
+  - `static/js/modules/monthly-closing.js`（未検収カード）
+  - `service/NotificationGenerateService.java`（orderReceiptPending/orderAckPending/acceptanceUnsubmitted/acceptanceOverdue/acceptanceRejected + generateAllへ組込み）
+  - `service/impl/NotificationServiceImpl.java`（menuKeyForType: sales-order/acceptance）
+  - `service/impl/DashboardServiceImpl.java` + `dto/dashboard/DashboardSummaryDto.java`（未検収売上・検収平均日数KPI）
+  - `templates/dashboard/index.html` + `static/js/modules/dashboard.js`（KPIカード2枚）
+  - 4言語message bundle（notification.msg.* / dashboard.kpi.* / closing.item.unaccepted）
+- **test**: `InvoiceAcceptanceGuardTest` 3/0/0（未検収0件・検収後生成・検収不要契約は生成可）、`MonthlyClosingUnacceptedTest` 2/0/0（checklist未検収件数・scope適用・通知発行）。直接回帰: InvoiceServiceImplTest 41/0/0 / InvoiceApiControllerTest / MonthlyClosingServiceImplTest 12/0/0 / DashboardServiceImplTest / NotificationGenerateServiceTest（両パッケージ）/ JsSyntaxCheckTest / NotificationLinkRouteTest / MessageBundleConsistencyTest 全緑。
+- **Demo**: 実ブラウザDemoはT059 Mで実施。
+- **commit**: （T058 commit hashを記入）
+- **risk**: 通知の宛先は「契約sales_user_id（有効営業）∪管理者」。顧客レベルの担当営業が契約を持たない場合は管理者のみへ通知（設計§5.2のscheduler行）。
