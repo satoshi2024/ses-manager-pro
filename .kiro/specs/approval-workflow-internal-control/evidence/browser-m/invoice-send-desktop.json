@@ -10,13 +10,20 @@
       "url": "http://localhost:8080/dashboard"
     },
     {
+      "name": "resolved_business_keys",
+      "targetId": 5,
+      "businessKeys": {
+        "invoiceNo": "INV-202607-0001"
+      }
+    },
+    {
       "name": "applicant_page",
       "url": "/invoice?month=2026-07",
       "title": "請求・支払 | SES管理プロ"
     },
     {
       "name": "target_before_apply",
-      "id": 1,
+      "id": 5,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -31,9 +38,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 3,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 0,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -52,10 +59,10 @@
       },
       "items": [
         {
-          "id": 1,
-          "invoiceId": 1,
-          "workRecordId": 1,
-          "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+          "id": 3,
+          "invoiceId": 5,
+          "workRecordId": 3,
+          "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
       ],
@@ -66,7 +73,7 @@
     },
     {
       "name": "target_after_apply",
-      "id": 1,
+      "id": 5,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -81,9 +88,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 3,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 0,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -102,10 +109,10 @@
       },
       "items": [
         {
-          "id": 1,
-          "invoiceId": 1,
-          "workRecordId": 1,
-          "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+          "id": 3,
+          "invoiceId": 5,
+          "workRecordId": 3,
+          "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
       ],
@@ -118,7 +125,7 @@
       "name": "applicant_alone_cannot_finalize",
       "targetStateUnchanged": true,
       "before": {
-        "id": 1,
+        "id": 5,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -133,9 +140,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 3,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 0,
         "deletedFlag": 0,
         "customer": {
           "id": 1,
@@ -154,10 +161,10 @@
         },
         "items": [
           {
-            "id": 1,
-            "invoiceId": 1,
-            "workRecordId": 1,
-            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "id": 3,
+            "invoiceId": 5,
+            "workRecordId": 3,
+            "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
         ],
@@ -167,7 +174,7 @@
         "taxRatePercent": "10"
       },
       "after": {
-        "id": 1,
+        "id": 5,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -182,9 +189,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 3,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 0,
         "deletedFlag": 0,
         "customer": {
           "id": 1,
@@ -203,10 +210,10 @@
         },
         "items": [
           {
-            "id": 1,
-            "invoiceId": 1,
-            "workRecordId": 1,
-            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "id": 3,
+            "invoiceId": 5,
+            "workRecordId": 3,
+            "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
         ],
@@ -221,10 +228,10 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 40,
-          "requestNo": "AR-40",
+          "id": 51,
+          "requestNo": "AR-51",
           "status": "in_review",
-          "targetId": 1
+          "targetId": 5
         }
       ]
     },
@@ -234,7 +241,7 @@
     },
     {
       "name": "target_after_approve",
-      "id": 1,
+      "id": 5,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -249,9 +256,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 4,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 1,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -270,10 +277,10 @@
       },
       "items": [
         {
-          "id": 1,
-          "invoiceId": 1,
-          "workRecordId": 1,
-          "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+          "id": 3,
+          "invoiceId": 5,
+          "workRecordId": 3,
+          "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
       ],
@@ -286,7 +293,7 @@
       "name": "business_operation_applied_once",
       "targetStateChanged": true,
       "after": {
-        "id": 1,
+        "id": 5,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -301,9 +308,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 4,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 1,
         "deletedFlag": 0,
         "customer": {
           "id": 1,
@@ -322,10 +329,10 @@
         },
         "items": [
           {
-            "id": 1,
-            "invoiceId": 1,
-            "workRecordId": 1,
-            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "id": 3,
+            "invoiceId": 5,
+            "workRecordId": 3,
+            "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
         ],

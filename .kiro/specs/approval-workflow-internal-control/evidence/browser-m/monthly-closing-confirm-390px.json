@@ -10,6 +10,13 @@
       "url": "http://localhost:8080/dashboard"
     },
     {
+      "name": "resolved_business_keys",
+      "targetId": null,
+      "businessKeys": {
+        "month": "2026-04"
+      }
+    },
+    {
       "name": "applicant_page",
       "url": "/monthly-closing",
       "title": "月次締めチェックリスト | SES管理プロ"
@@ -105,8 +112,8 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 45,
-          "requestNo": "AR-45",
+          "id": 56,
+          "requestNo": "AR-56",
           "status": "in_review",
           "targetId": null
         }
@@ -135,7 +142,7 @@
       "closed": true,
       "closedBy": 1,
       "closedByName": "システム管理者",
-      "closedAt": "2026-08-05T11:15:32.5325489"
+      "closedAt": "2026-08-05T13:29:03.2863695"
     },
     {
       "name": "business_operation_applied_once",
@@ -158,7 +165,7 @@
         "closed": true,
         "closedBy": 1,
         "closedByName": "システム管理者",
-        "closedAt": "2026-08-05T11:15:32.5325489"
+        "closedAt": "2026-08-05T13:29:03.2863695"
       }
     },
     {

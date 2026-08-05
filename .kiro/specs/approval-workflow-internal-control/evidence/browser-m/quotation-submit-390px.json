@@ -10,13 +10,20 @@
       "url": "http://localhost:8080/dashboard"
     },
     {
+      "name": "resolved_business_keys",
+      "targetId": 6,
+      "businessKeys": {
+        "quotationNo": "Q-202608-0002"
+      }
+    },
+    {
       "name": "applicant_page",
       "url": "/quotation",
       "title": "見積管理 | SES管理プロ"
     },
     {
       "name": "target_before_apply",
-      "id": 2,
+      "id": 6,
       "quotationNo": "Q-202608-0002",
       "customerId": 1,
       "projectId": 1,
@@ -31,14 +38,14 @@
       "remarks": "S07ブラウザDemo用(390px)",
       "sourceOpportunityId": null,
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:10",
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "version": 0,
       "deletedFlag": 0
     },
     {
       "name": "target_after_apply",
-      "id": 2,
+      "id": 6,
       "quotationNo": "Q-202608-0002",
       "customerId": 1,
       "projectId": 1,
@@ -53,8 +60,8 @@
       "remarks": "S07ブラウザDemo用(390px)",
       "sourceOpportunityId": null,
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:10",
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "version": 0,
       "deletedFlag": 0
     },
@@ -62,7 +69,7 @@
       "name": "applicant_alone_cannot_finalize",
       "targetStateUnchanged": true,
       "before": {
-        "id": 2,
+        "id": 6,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -77,13 +84,13 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:10",
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "version": 0,
         "deletedFlag": 0
       },
       "after": {
-        "id": 2,
+        "id": 6,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -98,8 +105,8 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:10",
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "version": 0,
         "deletedFlag": 0
       }
@@ -109,10 +116,10 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 37,
-          "requestNo": "AR-37",
+          "id": 48,
+          "requestNo": "AR-48",
           "status": "in_review",
-          "targetId": 2
+          "targetId": 6
         }
       ]
     },
@@ -122,7 +129,7 @@
     },
     {
       "name": "target_after_approve",
-      "id": 2,
+      "id": 6,
       "quotationNo": "Q-202608-0002",
       "customerId": 1,
       "projectId": 1,
@@ -137,8 +144,8 @@
       "remarks": "S07ブラウザDemo用(390px)",
       "sourceOpportunityId": null,
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:10",
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "version": 1,
       "deletedFlag": 0
     },
@@ -146,7 +153,7 @@
       "name": "business_operation_applied_once",
       "targetStateChanged": true,
       "after": {
-        "id": 2,
+        "id": 6,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -161,8 +168,8 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:10",
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "version": 1,
         "deletedFlag": 0
       }

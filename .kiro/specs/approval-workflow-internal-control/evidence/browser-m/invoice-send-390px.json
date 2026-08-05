@@ -10,13 +10,20 @@
       "url": "http://localhost:8080/dashboard"
     },
     {
+      "name": "resolved_business_keys",
+      "targetId": 6,
+      "businessKeys": {
+        "invoiceNo": "INV-202607-0002"
+      }
+    },
+    {
       "name": "applicant_page",
       "url": "/invoice?month=2026-07",
       "title": "請求・支払 | SES管理プロ"
     },
     {
       "name": "target_before_apply",
-      "id": 2,
+      "id": 6,
       "invoiceNo": "INV-202607-0002",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -31,9 +38,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用(390px)",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 3,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 0,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -58,7 +65,7 @@
     },
     {
       "name": "target_after_apply",
-      "id": 2,
+      "id": 6,
       "invoiceNo": "INV-202607-0002",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -73,9 +80,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用(390px)",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 3,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 0,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -102,7 +109,7 @@
       "name": "applicant_alone_cannot_finalize",
       "targetStateUnchanged": true,
       "before": {
-        "id": 2,
+        "id": 6,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -117,9 +124,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 3,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 0,
         "deletedFlag": 0,
         "customer": {
           "id": 1,
@@ -143,7 +150,7 @@
         "taxRatePercent": "10"
       },
       "after": {
-        "id": 2,
+        "id": 6,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -158,9 +165,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 3,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 0,
         "deletedFlag": 0,
         "customer": {
           "id": 1,
@@ -189,10 +196,10 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 41,
-          "requestNo": "AR-41",
+          "id": 52,
+          "requestNo": "AR-52",
           "status": "in_review",
-          "targetId": 2
+          "targetId": 6
         }
       ]
     },
@@ -202,7 +209,7 @@
     },
     {
       "name": "target_after_approve",
-      "id": 2,
+      "id": 6,
       "invoiceNo": "INV-202607-0002",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -217,9 +224,9 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用(390px)",
       "createdBy": 1,
-      "createdAt": "2026-08-05T01:46:08",
-      "updatedAt": "2026-08-05T02:11:11",
-      "version": 4,
+      "createdAt": "2026-08-05T04:23:58",
+      "updatedAt": "2026-08-05T04:23:58",
+      "version": 1,
       "deletedFlag": 0,
       "customer": {
         "id": 1,
@@ -246,7 +253,7 @@
       "name": "business_operation_applied_once",
       "targetStateChanged": true,
       "after": {
-        "id": 2,
+        "id": 6,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -261,9 +268,9 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T01:46:08",
-        "updatedAt": "2026-08-05T02:11:11",
-        "version": 4,
+        "createdAt": "2026-08-05T04:23:58",
+        "updatedAt": "2026-08-05T04:23:58",
+        "version": 1,
         "deletedFlag": 0,
         "customer": {
           "id": 1,

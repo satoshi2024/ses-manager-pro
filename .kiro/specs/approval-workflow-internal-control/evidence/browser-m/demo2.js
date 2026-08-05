@@ -1,4 +1,5 @@
-// S07 M browser demo — per-viewport targets (desktop / 390px)
+// S07 M browser demo — approval workflow (見積/契約/請求/BP支払/月次締め)
+// IDはbusiness key（見積番号/契約番号/請求番号/BP支払key）からAPIで解決する。AUTO_INCREMENT固定IDに依存しない。
 const { chromium } = require('playwright-core');
 const fs = require('fs');
 const path = require('path');
@@ -60,6 +61,49 @@ async function apiGet(page, url) {
   }, url);
 }
 
+// ---- business key -> ID resolution（AUTO_INCREMENT固定IDに依存しない） ----
+async function findRecord(data, predicate) {
+  const rows = Array.isArray(data) ? data : (data && data.records) || [];
+  const hit = rows.find(predicate);
+  if (!hit) throw new Error('business key not found in API response');
+  return hit;
+}
+async function resolveQuotationId(page, quotationNo) {
+  const d = await apiGet(page, BASE + '/api/quotations?current=1&size=200');
+  const rec = await findRecord(d.data, q => q.quotationNo === quotationNo);
+  return rec.id;
+}
+async function resolveContractId(page, contractNo) {
+  const d = await apiGet(page, BASE + '/api/contracts?current=1&size=200');
+  const rec = await findRecord(d.data, c => c.contractNo === contractNo);
+  return rec.id;
+}
+async function resolveInvoiceId(page, invoiceNo) {
+  const d = await apiGet(page, BASE + '/api/invoices?current=1&size=200&month=2026-07');
+  const rec = await findRecord(d.data, i => i.invoiceNo === invoiceNo);
+  return rec.id;
+}
+async function resolveBpPaymentId(page, layerOrder) {
+  const d = await apiGet(page, BASE + '/api/invoices/bp-payments?month=2026-07');
+  const rec = await findRecord(d.data, b => b.payeeCompanyName === '株式会社BPデモ' && b.layerOrder === layerOrder);
+  return rec.id;
+}
+
+function statusReader(getUrl) { return async (page) => apiGet(page, BASE + getUrl); }
+function statusSame(a, b) { return a.data && b.data && a.data.status === b.data.status; }
+const bpReader = (month, id) => async (page) => {
+  const data = await apiGet(page, BASE + '/api/invoices/bp-payments?month=' + month);
+  const list = (data.data || []).filter(x => String(x.id) === String(id));
+  return { data: list.length > 0 ? { id: list[0].id, status: list[0].status, amount: list[0].amount } : { id, status: '(not found)' } };
+};
+const closingReader = (month) => async (page) => apiGet(page, BASE + '/api/monthly-closing/summary?month=' + month);
+const closingSame = (a, b) => a.data && b.data && a.data.closed === b.data.closed;
+const bpPrep = async (page) => {
+  await page.evaluate(() => { const m = document.getElementById('bpWorkMonth'); if (m) m.value = '2026-07'; });
+  await page.evaluate(() => { const b = document.getElementById('btnSearchBpPayment'); if (b) b.click(); });
+  await page.waitForTimeout(1800);
+};
+
 async function clickApply(spec, appPage) {
   if (spec.prep) { await spec.prep(appPage); }
   if (spec.clickApply) { return await spec.clickApply(appPage); }
@@ -86,7 +130,6 @@ async function runFlow(browser, spec, viewport) {
   const results = { flow: spec.key, name: spec.name, viewport: viewport.name, url: BASE, steps: [] };
   const step = (name, detail) => { results.steps.push({ name, ...(detail || {}) }); console.log('[' + spec.key + ':' + viewport.name + '] ' + name, JSON.stringify(detail || {})); };
 
-  const t = spec.targets[viewport.name];
   const ctxApp = await browser.newContext({ viewport: { width: viewport.w, height: viewport.h } });
   const appPage = await ctxApp.newPage();
   appPage.on('dialog', d => d.accept('2026-08-01').catch(() => {}));
@@ -94,6 +137,10 @@ async function runFlow(browser, spec, viewport) {
   await login(appPage, applicant);
   await appPage.waitForTimeout(600);
   step('applicant_login', { user: applicant.username, url: appPage.url() });
+
+  // business key -> ID 解決（申請者セッションで実行）
+  const t = await spec.setup(appPage, viewport);
+  step('resolved_business_keys', { targetId: t.targetId, businessKeys: t.businessKeys });
 
   await gotoReliable(appPage, BASE + t.applicantPage);
   await shot(appPage, '1-business-page', dir);
@@ -104,8 +151,7 @@ async function runFlow(browser, spec, viewport) {
 
   await clickApply({ ...spec, buttonOnclick: t.buttonOnclick, clickApply: t.clickApply, afterApplyClick: t.afterApplyClick, prep: t.prep }, appPage);
   await appPage.waitForTimeout(1500);
-  // retry (sequential second click) — same command -> same idempotency key -> 1 request only
-  await clickApply({ ...spec, buttonOnclick: t.buttonOnclick, clickApply: t.clickApply, afterApplyClick: t.afterApplyClick }, appPage).catch(() => false);
+  await clickApply({ ...spec, buttonOnclick: t.buttonOnclick, clickApply: t.clickApply, afterApplyClick: t.afterApplyClick, prep: t.prep }, appPage).catch(() => false);
   await appPage.waitForTimeout(2000);
   await shot(appPage, '2-after-apply-retry', dir);
   const afterApply = await t.readTarget(appPage);
@@ -132,7 +178,6 @@ async function runFlow(browser, spec, viewport) {
   await gotoReliable(apprPage, BASE + '/approval/requests/' + reqId);
   await shot(apprPage, '3-request-detail-before-approve', dir);
 
-  // double-click approve -> 2nd click must be idempotent no-op
   await apprPage.waitForSelector('button[data-action="approve"]', { timeout: 15000 }).catch(() => {});
   const approveClicked = await apprPage.evaluate(() => {
     const b = document.querySelector('button[data-action="approve"]');
@@ -157,7 +202,6 @@ async function runFlow(browser, spec, viewport) {
   step('approval_final_state', { requestStatus: detail.data && detail.data.status, approveActionCount, actions: actions.map(a => ({ action: a.action, stepNo: a.stepNo })) });
   if (approveActionCount !== 1) { throw new Error('ASSERT: 承認時二重clickでもAPPROVE actionは1件のみであること (actual=' + approveActionCount + ')'); }
 
-  // retry approve after completion -> no second business op
   await apprPage.evaluate(() => { const b = document.querySelector('button[data-action="approve"]'); if (b) b.click(); });
   await apprPage.waitForTimeout(1500);
   const afterRetry = await t.readTarget(apprPage);
@@ -168,97 +212,68 @@ async function runFlow(browser, spec, viewport) {
   return results;
 }
 
-function statusReader(getUrl) {
-  return async (page) => apiGet(page, BASE + getUrl);
-}
-function statusSame(a, b) { return a.data && b.data && a.data.status === b.data.status; }
-
-const bpReader = (month, id) => async (page) => {
-  const data = await apiGet(page, BASE + '/api/invoices/bp-payments?month=' + month);
-  const list = (data.data || []).filter(x => String(x.id) === String(id));
-  return { data: list.length > 0 ? { id: list[0].id, status: list[0].status, amount: list[0].amount } : { id, status: '(not found)' } };
-};
-
-const bpPrep = async (page) => {
-  await page.evaluate(() => { const m = document.getElementById('bpWorkMonth'); if (m) m.value = '2026-07'; });
-  await page.evaluate(() => { const b = document.getElementById('btnSearchBpPayment'); if (b) b.click(); });
-  await page.waitForTimeout(1800);
-};
-const closingReader = (month) => async (page) => apiGet(page, BASE + '/api/monthly-closing/summary?month=' + month);
-const closingSame = (a, b) => a.data && b.data && a.data.closed === b.data.closed;
-
 const specs = [
   {
     key: 'quotation-submit', name: '見積提出', requestType: 'quotation.submit', applicant: 'sales',
-    targets: {
-      desktop: { targetId: 1, applicantPage: '/quotation', buttonOnclick: "changeQuotationStatus(1, '提出済')", readTarget: statusReader('/api/quotations/1'), sameState: statusSame },
-      '390px': { targetId: 2, applicantPage: '/quotation', buttonOnclick: "changeQuotationStatus(2, '提出済')", readTarget: statusReader('/api/quotations/2'), sameState: statusSame }
+    setup: async (page, vp) => {
+      const no = vp.name === 'desktop' ? 'Q-202608-0001' : 'Q-202608-0002';
+      const id = await resolveQuotationId(page, no);
+      return { targetId: id, businessKeys: { quotationNo: no }, applicantPage: '/quotation',
+               buttonOnclick: `changeQuotationStatus(${id}, '提出済')`,
+               readTarget: statusReader('/api/quotations/' + id), sameState: statusSame };
     }
   },
   {
     key: 'contract-activate', name: '契約稼動化', requestType: 'contract.activate', applicant: 'sales',
-    targets: {
-      desktop: {
-        targetId: 2, applicantPage: '/contract/list', buttonOnclick: 'changeContractStatus(2,', readTarget: statusReader('/api/contracts/2'), sameState: statusSame,
-        afterApplyClick: async (page) => {
-          await page.waitForSelector('.swal2-modal', { timeout: 6000 });
-          await page.waitForTimeout(400);
-          await page.evaluate(() => { const sel = document.querySelector('.swal2-modal select'); if (sel) { sel.value = '稼動中'; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
-          await page.click('.swal2-confirm');
-          await page.waitForTimeout(1500);
-        }
-      },
-      '390px': {
-        targetId: 3, applicantPage: '/contract/list', buttonOnclick: 'changeContractStatus(3,', readTarget: statusReader('/api/contracts/3'), sameState: statusSame,
-        afterApplyClick: async (page) => {
-          await page.waitForSelector('.swal2-modal', { timeout: 6000 });
-          await page.waitForTimeout(400);
-          await page.evaluate(() => { const sel = document.querySelector('.swal2-modal select'); if (sel) { sel.value = '稼動中'; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
-          await page.evaluate(() => { const c = document.querySelector('.swal2-confirm'); if (c) c.click(); });
-          await page.waitForTimeout(1500);
-        }
-      }
+    setup: async (page, vp) => {
+      const no = vp.name === 'desktop' ? 'C-2026-0001' : 'C-2026-0002';
+      const id = await resolveContractId(page, no);
+      return { targetId: id, businessKeys: { contractNo: no }, applicantPage: '/contract/list',
+               buttonOnclick: `changeContractStatus(${id},`,
+               readTarget: statusReader('/api/contracts/' + id), sameState: statusSame,
+               afterApplyClick: async (pg) => {
+                 await pg.waitForSelector('.swal2-modal', { timeout: 6000 });
+                 await pg.waitForTimeout(400);
+                 await pg.evaluate(() => { const sel = document.querySelector('.swal2-modal select'); if (sel) { sel.value = '稼動中'; sel.dispatchEvent(new Event('change', { bubbles: true })); } });
+                 await pg.evaluate(() => { const c = document.querySelector('.swal2-confirm'); if (c) c.click(); });
+                 await pg.waitForTimeout(1500);
+               } };
     }
   },
   {
     key: 'invoice-send', name: '請求送付', requestType: 'invoice.send', applicant: 'sales',
-    targets: {
-      desktop: { targetId: 1, applicantPage: '/invoice?month=2026-07', buttonOnclick: "updateInvoiceStatus(1, '送付済')", readTarget: statusReader('/api/invoices/1'), sameState: statusSame },
-      '390px': { targetId: 2, applicantPage: '/invoice?month=2026-07', buttonOnclick: "updateInvoiceStatus(2, '送付済')", readTarget: statusReader('/api/invoices/2'), sameState: statusSame }
+    setup: async (page, vp) => {
+      const no = vp.name === 'desktop' ? 'INV-202607-0001' : 'INV-202607-0002';
+      const id = await resolveInvoiceId(page, no);
+      return { targetId: id, businessKeys: { invoiceNo: no }, applicantPage: '/invoice?month=2026-07',
+               buttonOnclick: `updateInvoiceStatus(${id}, '送付済')`,
+               readTarget: statusReader('/api/invoices/' + id), sameState: statusSame };
     }
   },
   {
     key: 'bp-payment-confirm', name: 'BP支払確定', requestType: 'bp_payment.confirm', applicant: 'sales',
-    targets: {
-      desktop: { targetId: 1, applicantPage: '/invoice?month=2026-07', buttonOnclick: "updateBpPaymentStatus(1, '支払済')", prep: bpPrep, readTarget: bpReader('2026-07', 1), sameState: statusSame },
-      '390px': { targetId: 2, applicantPage: '/invoice?month=2026-07', buttonOnclick: "updateBpPaymentStatus(2, '支払済')", prep: bpPrep, readTarget: bpReader('2026-07', 2), sameState: statusSame }
+    setup: async (page, vp) => {
+      const layer = vp.name === 'desktop' ? 1 : 2;
+      const id = await resolveBpPaymentId(page, layer);
+      return { targetId: id, businessKeys: { payeeCompanyName: '株式会社BPデモ', layerOrder: layer }, applicantPage: '/invoice?month=2026-07',
+               buttonOnclick: `updateBpPaymentStatus(${id}, '支払済')`, prep: bpPrep,
+               readTarget: bpReader('2026-07', id), sameState: statusSame };
     }
   },
   {
     key: 'monthly-closing-confirm', name: '月次締め', requestType: 'closing.confirm', applicant: 'mgr',
-    targets: {
-      desktop: {
-        targetId: null, applicantPage: '/monthly-closing', readTarget: closingReader('2026-05'), sameState: closingSame,
-        clickApply: async (page) => {
-          await page.evaluate(() => { const m = document.getElementById('closingMonth'); if (m) m.value = '2026-05'; });
-          await page.evaluate(() => { const b = document.getElementById('btnLoadClosing'); if (b) b.click(); });
-          await page.waitForTimeout(1800);
-          const st = await page.evaluate(() => { const b = document.getElementById('btnConfirmClosing'); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked'; });
-          if (st !== 'clicked') throw new Error('btnConfirmClosing ' + st);
-          await page.waitForTimeout(1500);
-        }
-      },
-      '390px': {
-        targetId: null, applicantPage: '/monthly-closing', readTarget: closingReader('2026-04'), sameState: closingSame,
-        clickApply: async (page) => {
-          await page.evaluate(() => { const m = document.getElementById('closingMonth'); if (m) m.value = '2026-04'; });
-          await page.evaluate(() => { const b = document.getElementById('btnLoadClosing'); if (b) b.click(); });
-          await page.waitForTimeout(1800);
-          const st = await page.evaluate(() => { const b = document.getElementById('btnConfirmClosing'); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked'; });
-          if (st !== 'clicked') throw new Error('btnConfirmClosing ' + st);
-          await page.waitForTimeout(1500);
-        }
-      }
+    setup: async (page, vp) => {
+      const month = vp.name === 'desktop' ? '2026-05' : '2026-04';
+      return { targetId: null, businessKeys: { month }, applicantPage: '/monthly-closing',
+               readTarget: closingReader(month), sameState: closingSame,
+               clickApply: async (pg) => {
+                 await pg.evaluate((m) => { const el = document.getElementById('closingMonth'); if (el) el.value = m; }, month);
+                 await pg.evaluate(() => { const b = document.getElementById('btnLoadClosing'); if (b) b.click(); });
+                 await pg.waitForTimeout(1800);
+                 const st = await pg.evaluate(() => { const b = document.getElementById('btnConfirmClosing'); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked'; });
+                 if (st !== 'clicked') throw new Error('btnConfirmClosing ' + st);
+                 await pg.waitForTimeout(1500);
+               } };
     }
   }
 ];

@@ -10,15 +10,22 @@
       "url": "http://localhost:8080/dashboard"
     },
     {
+      "name": "resolved_business_keys",
+      "targetId": 6,
+      "businessKeys": {
+        "contractNo": "C-2026-0001"
+      }
+    },
+    {
       "name": "applicant_page",
       "url": "/contract/list",
       "title": "契約一覧 - SES Manager Pro | SES管理プロ"
     },
     {
       "name": "target_before_apply",
-      "id": 2,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:10",
+      "id": 6,
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "deletedFlag": 0,
       "contractNo": "C-2026-0001",
       "proposalId": null,
@@ -57,9 +64,9 @@
     },
     {
       "name": "target_after_apply",
-      "id": 2,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:10",
+      "id": 6,
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "deletedFlag": 0,
       "contractNo": "C-2026-0001",
       "proposalId": null,
@@ -100,9 +107,9 @@
       "name": "applicant_alone_cannot_finalize",
       "targetStateUnchanged": true,
       "before": {
-        "id": 2,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:10",
+        "id": 6,
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,
@@ -140,9 +147,9 @@
         "dateRangeValid": true
       },
       "after": {
-        "id": 2,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:10",
+        "id": 6,
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,
@@ -185,10 +192,10 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 38,
-          "requestNo": "AR-38",
+          "id": 49,
+          "requestNo": "AR-49",
           "status": "in_review",
-          "targetId": 2
+          "targetId": 6
         }
       ]
     },
@@ -198,9 +205,9 @@
     },
     {
       "name": "target_after_approve",
-      "id": 2,
-      "createdAt": "2026-08-05T01:37:24",
-      "updatedAt": "2026-08-05T02:11:10",
+      "id": 6,
+      "createdAt": "2026-08-05T04:23:57",
+      "updatedAt": "2026-08-05T04:23:57",
       "deletedFlag": 0,
       "contractNo": "C-2026-0001",
       "proposalId": null,
@@ -241,9 +248,9 @@
       "name": "business_operation_applied_once",
       "targetStateChanged": true,
       "after": {
-        "id": 2,
-        "createdAt": "2026-08-05T01:37:24",
-        "updatedAt": "2026-08-05T02:11:10",
+        "id": 6,
+        "createdAt": "2026-08-05T04:23:57",
+        "updatedAt": "2026-08-05T04:23:57",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,

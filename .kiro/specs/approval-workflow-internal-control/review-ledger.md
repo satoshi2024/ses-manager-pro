@@ -21,10 +21,10 @@
 
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
-| `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをHead `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋7 unique paths #213〜#219）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した | クローズ維持。独立Reviewで219件・AC trace・帰属を最終確認 |
+| `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋7 unique paths #213〜#219）とReview evidence/result commit `2978461`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した | クローズ維持。独立Reviewで219件・AC trace・帰属を最終確認 |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、V79.1 patch、S09〜S17 V80〜V88単一予約、static regression 35/0/0/0を確認した | クローズ維持 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047は`[x]`。shared JDBC複数JVM ShedLock/claim、commit前rollback、loopback Webhook、CI相当L4 1471/0/0/0 zero-skipped、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerはN/A化 | クローズ維持。独立Reviewでbrowser証拠を確認 |
-| `R4-REVIEW-04` | **VERIFIED_CLOSED** | Packet・manifest・中央ledgerをHead `68fbbba`、Base→Head=**23 commits/219 files/+11639/-337**、`origin/main`一致・worktree cleanへ同期し、独立Packet commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した | クローズ維持。独立Reviewで再確認 |
+| `R4-REVIEW-04` | **VERIFIED_CLOSED** | Packet・manifest・中央ledgerをcode baseline Head `68fbbba`（Base→Head=**23 commits/219 files/+11639/-337**、`68fbbba`時点の`origin/main`一致は当時値）とReview evidence/result commit `2978461`（24 commits/272 paths）へ同期し、worktree clean、独立Packet commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した | クローズ維持。独立Reviewで再確認 |
 | `R4-P1-01` | **VERIFIED_CLOSED** | V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの3 partial状態からの再開可能性、複数JVM ShedLock/claim、commit前rollback、loopback Webhookを全て確認済み | クローズ維持 |
 
 **現行判定:** **REVIEW（独立再Review待ち）**。R4-REVIEW-01/02/03/04とR4-P1-01はVERIFIED_CLOSED、B1/T046・M/T047は`[x]`化（技術・機能gate確認済み）。S07はREVIEW状態で、文書整合の独立再Reviewを待つ。再Review確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。独立Reviewは本Packet（219-path inventory、`evidence/browser-m/`、実MySQL証拠、Head分離）を対象に最終確認する。

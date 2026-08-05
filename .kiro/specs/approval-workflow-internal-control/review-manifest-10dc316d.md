@@ -77,7 +77,7 @@ git diff --check
 
 ## 2. Base→Review対象production Headの全path manifest
 
-以下はReview対象code/evidence Headに対する`git diff --name-status --no-renames 5d228d211d0d752833fe3424a3b8aa4b40096733..68fbbba4dff8255b3a745ce61e73e686a78bef3e`の全219 pathである。#001〜#212は`6680e7d`時点の212 path、#213〜#219は`68fbbba`で追加された7 unique paths（§2.10）。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。
+以下はcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`に対する`git diff --name-status --no-renames 5d228d211d0d752833fe3424a3b8aa4b40096733..68fbbba4dff8255b3a745ce61e73e686a78bef3e`の全219 pathである（Review成果物commit `2978461`は§1/§2.10で分離管理）。#001〜#212は`6680e7d`時点の212 path、#213〜#219は`68fbbba`で追加された7 unique paths（§2.10）。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。
 
 ### 2.1 S07 spec packet（5 paths）
 
@@ -421,9 +421,9 @@ git diff --check
 
 ## 5. Verification / release gate
 
-### 5.1 Review対象code/evidence Headで記録された回帰と実測
+### 5.1 code baseline Headで記録された回帰と実測（Review成果物commit 2978461と分離）
 
-- **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 files / +11639/-337**）。**Review成果物commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、browser evidence・runbook/test修正・Packet文書を含む）はcode baseline Headと分離して管理する。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
+- **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 files / +11639/-337**）。`68fbbba`時点で`HEAD = origin/main = origin/HEAD`だった（**当時値**）。**Review evidence/result commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、browser evidence・runbook/test修正・Packet文書を含む）はcode baseline Headと分離して管理する。現在の文書同期commitは`git log -1 -- <path>`で`591b1de`以降へ解決され、68fbbbaのHEAD/origin一致は当時値であり矛盾しない。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
 - R1.3追加対象testは`RouteResolverServiceTest` 28件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**47 / failures 0 / errors 0 / skipped 0**。request作成時にDBへ保存した`route_snapshot_json`を再読込し、manager変更後も同一requestの承認者が不変であることを確認した。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
 - 再Review対象direct consumer regressionはR4-P1-01（7クラス）＋B1/M（13クラス）の**20クラス、150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
@@ -445,12 +445,12 @@ git diff --check
 
 ### 5.2 Issue / task判定
 
-| ID / task | Review対象code/evidence Head判定 | 根拠 |
+| ID / task | code baseline Head / Review evidence commit判定 | 根拠 |
 |---|---|---|
-| `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをReview対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
+| `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）とReview evidence/result commit `2978461`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047 checkboxは`[x]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhook、CI相当L4 1471/0/0/0 zero-skippedに加え、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerは§5.1.1のとおりN/A |
-| `R4-REVIEW-04` | **VERIFIED_CLOSED** | Review対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`、23 commits、219 pathsへ同期し、worktree clean、Packet文書4ファイルの独立commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した |
+| `R4-REVIEW-04` | **VERIFIED_CLOSED** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）とReview evidence/result commit `2978461`（24 commits、272 paths）へ同期し、worktree clean、Packet文書4ファイルの独立commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した |
 | `approval-workflow-internal-control-R4-P1-01` | **VERIFIED_CLOSED** | R1.2/R1.3のcode/H2/境界・異常系test **47/0/0/0**、direct regression green、V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの再開可能性（3 partial状態）、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを全て確認済み |
 | `T046/B1` | **完了** | 定向B1/scheduler回帰、H2 lock warning回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを確認。full application instance cron・外部providerは§5.1.1のとおりN/A |
 | `T047/M` | **完了** | M定向回帰 green、CI相当L4 **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollback、loopback送信、5業務desktop/390px browser Demo（10経路）を確認 |
@@ -460,6 +460,6 @@ git diff --check
 ### 5.3 再Review / 再開条件
 
 1. 独立Reviewで219 committed paths（#001〜#212＋#213〜#219）のstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
-2. Packet、Issue Register、中央台帳のReview対象code/evidence Head/merge/diff値を`68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits / 219 files / +11639/-337）と一致した状態で再確認する。Packet文書の独立commitはなく、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
+2. Packet、Issue Register、中央台帳の**code baseline Head** `68fbbba`（23 commits / 219 paths、`68fbbba`時点の`HEAD = origin/main = origin/HEAD`は当時値）と**Review evidence/result commit** `2978461`（24 commits / 272 paths）を分離した状態で再確認する。現在の文書同期commitは`git log -1 -- <path>`で`591b1de`以降へ解決され、68fbbbaのHEAD/origin一致（当時値）と矛盾しないことを確認する。Packet文書の独立commitはなく、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
 3. `evidence/browser-m/`のスクリーンショットとJSON（5業務×desktop/390px、申請者単独確定不可・申請1件・適用1回・APPROVE action 1件・retry安定）を独立Reviewで確認する。
 4. 独立再Reviewで文書整合（Head分離・AC trace同期・中央ledger row 7〜9の統一）を確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。
