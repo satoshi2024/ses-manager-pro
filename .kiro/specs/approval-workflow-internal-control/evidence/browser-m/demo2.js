@@ -113,9 +113,11 @@ async function runFlow(browser, spec, viewport) {
 
   const unchanged = t.sameState(beforeStatus, afterApply);
   step('applicant_alone_cannot_finalize', { targetStateUnchanged: unchanged, before: beforeStatus.data || beforeStatus, after: afterApply.data || afterApply });
+  if (!unchanged) { throw new Error('ASSERT: 申請者単独では対象状態が変化しないこと'); }
 
   const reqs = await countApprovalRequests(appPage, spec.requestType, t.targetId, spec.requestType === 'closing.confirm');
   step('approval_request_created_once', { requestCount: reqs.length, requests: reqs.map(r => ({ id: r.id, requestNo: r.requestNo, status: r.status, targetId: r.targetId })) });
+  if (reqs.length !== 1) { throw new Error('ASSERT: 二重click/retryでも申請は1件のみであること (actual=' + reqs.length + ')'); }
   await ctxApp.close();
 
   const ctxAppr = await browser.newContext({ viewport: { width: viewport.w, height: viewport.h } });
@@ -145,17 +147,23 @@ async function runFlow(browser, spec, viewport) {
 
   const afterApprove = await t.readTarget(apprPage);
   step('target_after_approve', afterApprove.data || afterApprove);
-  step('business_operation_applied_once', { targetStateChanged: !t.sameState(beforeStatus, afterApprove), after: afterApprove.data || afterApprove });
+  const targetStateChanged = !t.sameState(beforeStatus, afterApprove);
+  step('business_operation_applied_once', { targetStateChanged, after: afterApprove.data || afterApprove });
+  if (!targetStateChanged) { throw new Error('ASSERT: 承認後に業務操作が1回適用され対象状態が変化すること'); }
 
   const detail = await apiGet(apprPage, BASE + '/api/approval/requests/' + reqId);
   const actions = (detail.data && detail.data.actions) || [];
-  step('approval_final_state', { requestStatus: detail.data && detail.data.status, approveActionCount: actions.filter(a => a.action === 'APPROVE').length, actions: actions.map(a => ({ action: a.action, stepNo: a.stepNo })) });
+  const approveActionCount = actions.filter(a => a.action === 'APPROVE').length;
+  step('approval_final_state', { requestStatus: detail.data && detail.data.status, approveActionCount, actions: actions.map(a => ({ action: a.action, stepNo: a.stepNo })) });
+  if (approveActionCount !== 1) { throw new Error('ASSERT: 承認時二重clickでもAPPROVE actionは1件のみであること (actual=' + approveActionCount + ')'); }
 
   // retry approve after completion -> no second business op
   await apprPage.evaluate(() => { const b = document.querySelector('button[data-action="approve"]'); if (b) b.click(); });
   await apprPage.waitForTimeout(1500);
   const afterRetry = await t.readTarget(apprPage);
-  step('retry_approve_no_double_op', { stateStable: t.sameState(afterApprove, afterRetry) });
+  const retryStable = t.sameState(afterApprove, afterRetry);
+  step('retry_approve_no_double_op', { stateStable: retryStable });
+  if (!retryStable) { throw new Error('ASSERT: retry後も業務操作は再適用されないこと'); }
   await ctxAppr.close();
   return results;
 }
@@ -276,5 +284,10 @@ const specs = [
   }
   fs.writeFileSync(path.join(EVIDENCE, 'summary.json'), JSON.stringify(all, null, 2));
   await browser.close();
-  console.log('DONE. evidence at ' + EVIDENCE);
+  const failures = all.filter(f => f.error);
+  if (failures.length > 0) {
+    console.error('FAILED flows: ' + failures.map(f => f.flow + ':' + f.viewport).join(', '));
+    process.exit(1);
+  }
+  console.log('DONE all PASS. evidence at ' + EVIDENCE);
 })();

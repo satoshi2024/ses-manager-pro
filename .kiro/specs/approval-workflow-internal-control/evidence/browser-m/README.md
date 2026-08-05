@@ -34,5 +34,8 @@
 
 ## 再現
 
-- seed: アプリ起動後に`m_system_config`、`sys_user`(sales1/mgr1)、9 approval route（承認者=管理者ROLE）、顧客・要員・案件・見積・契約・実績・請求・BP支払を投入（本ディレクトリ外の一時SQL）。
+- seed: `seed-s07-browser-demo.sql` をアプリ起動（Flyway migration完了）後に適用する（ユーザー・9 approval route・顧客/要員/案件・見積/契約/実績/請求/BP支払を投入し、再実行時は初期状態へ戻す）。適用例:
+  `docker exec -i ses-app-mysql mysql --default-character-set=utf8mb4 -uroot -p123456 ses_manager_db < seed-s07-browser-demo.sql`
 - 実行: `node demo2.js`（Playwright-core + 実Chrome、dialog accept付き、SweetAlert2/confirm/prompt対応）。
+  - `demo2.js`は各経路でassertion（申請1件・申請者単独不変・適用1回・APPROVE action 1件・retry安定）を実行し、1経路でも失敗した場合は`process.exit(1)`で終了する。
+- 記録済みevidenceの再確認（再実行なし）: `node verify-evidence.js` が`summary.json`の全10経路をassertionで検証する（現行の記録済みevidenceは全て満たすことを確認済み: requestCount=1 / applicantAloneUnchanged=true / appliedOnce=true / approveActionCount=1 / retryStable=true）。

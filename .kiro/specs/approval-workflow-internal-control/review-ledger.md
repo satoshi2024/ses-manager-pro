@@ -1,10 +1,10 @@
 # review-ledger — approval-workflow-internal-control (S07)
-## Current authoritative REVIEW PACKET — Review対象code/evidence Head（2026-08-05、68fbbba確定）
+## Current authoritative REVIEW PACKET — code baseline Head 68fbbba / Review成果物commit 2978461（2026-08-05）
 
-**判定:** **PASS**。S07は`IN PROGRESS`→`REVIEW`→`PASS`へ更新する。R4-P1-01・B1/T046・M/T047は`[x]`、R4-REVIEW-01/03/04・R4-P1-01はVERIFIED_CLOSED。S09およびWave 2の開始判定を可能にする。
+**判定:** **REVIEW（独立再Review待ち）**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/T046・M/T047は`[x]`、R4-REVIEW-01/02/03/04・R4-P1-01はVERIFIED_CLOSED）。本Packetの文書整合（Head分離・AC trace同期・中央ledger row 7〜9の統一）を独立再Reviewで確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。それまではS09=`NOT READY`、Wave 2=`未解放`を維持する。
 
-- **Review対象code/evidence Head:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`、Head=`68fbbba4dff8255b3a745ce61e73e686a78bef3e`。`HEAD = origin/main = origin/HEAD`、branch=`main`を確認した。直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱う。最終確認時のworktreeは**clean**である。
-- **scope:** Base→Review対象code/evidence Headは**23 commits / 219 files / +11639/-337**。219 paths（#001〜#212＋今回の7 unique paths #213〜#219）はすべてHeadにcommit済みの範囲である。7 unique paths（`v79_1-fk-actions-forward-repair.sql`、`SchedulerLockConfig.java`、`application.yml`、`SchedulerLockH2IntegrationTest.java`、`FlywayV79_1RepairSmokeTest.java`、`OperationalBoundaryMySqlIntegrationTest.java`、`WebhookNotifierLoopbackIntegrationTest.java`）はmanifest §1.1/§2.10へ帰属済みである。
+- **code baseline Head / Review成果物commit:** Review Base=`5d228d211d0d752833fe3424a3b8aa4b40096733`。**code baseline Head**=`68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 paths**、`HEAD = origin/main = origin/HEAD`）。**Review成果物commit**=`2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、browser evidence・runbook/test修正・Packet文書を含む）はcode baseline Headと分離して管理する。直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱う。最終確認時のworktreeは**clean**。
+- **scope:** Base→code baseline Headは**23 commits / 219 files / +11639/-337**（=219 paths）。219 paths（#001〜#212＋`68fbbba`で追加された7 unique paths #213〜#219）はすべてcode baseline Headにcommit済みの範囲である。7 unique paths（`v79_1-fk-actions-forward-repair.sql`、`SchedulerLockConfig.java`、`application.yml`、`SchedulerLockH2IntegrationTest.java`、`FlywayV79_1RepairSmokeTest.java`、`OperationalBoundaryMySqlIntegrationTest.java`、`WebhookNotifierLoopbackIntegrationTest.java`）はmanifest §1.1/§2.10へ帰属済みである。Review成果物commit `2978461`はcode baseline Headに+53 files（browser evidence・runbook/test修正・Packet文書）を加えた**272 paths**。
 - **Packet文書commit / provenance:** **独立Packet commitなし。文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載し、文書commit hashをcurrent Headとして自己参照しない。**旧記録の「12ファイル未commit dirty」は、`68fbbba`（回帰test commit）で12ファイルが全てcommit済みとなったため削除する。
 - **R4-P1-01:** V79.1、`applicant_role_condition`、`t_approval_responsibility`、PERMISSION_GROUP/ORGANIZATION_MANAGER/FINANCE_MANAGER、as-of/scope/fail-closedを実装済み。V75〜V79は変更していない。APPLICANT_MANAGER（`t_user_organization.manager_user_id`）の境界・異常系、mapper境界、request→DB `route_snapshot_json`永続化後のmanager変更でも承認者不変、responsibility逆期間HTTP 400を回帰済み。V79.1のFK action変更（`CASCADE/SET NULL`→`RESTRICT`）はHeadに同梱済みであり、219-path統計・manifestに含まれる。
 - **R1.3 evidence:** `RouteResolverServiceTest` 28、`ApprovalAdministrationServiceTest` 13、`ApprovalAdministrationApiControllerTest` 6、計**47 / failures 0 / errors 0 / skipped 0**。
@@ -27,7 +27,7 @@
 | `R4-REVIEW-04` | **VERIFIED_CLOSED** | Packet・manifest・中央ledgerをHead `68fbbba`、Base→Head=**23 commits/219 files/+11639/-337**、`origin/main`一致・worktree cleanへ同期し、独立Packet commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した | クローズ維持。独立Reviewで再確認 |
 | `R4-P1-01` | **VERIFIED_CLOSED** | V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの3 partial状態からの再開可能性、複数JVM ShedLock/claim、commit前rollback、loopback Webhookを全て確認済み | クローズ維持 |
 
-**現行判定:** **PASS**。R4-REVIEW-01/02/03/04とR4-P1-01はVERIFIED_CLOSED、B1/T046・M/T047は`[x]`化。S07をPASSへ更新し、S09/Wave 2の開始判定を可能にする。独立Reviewは本Packet（219-path inventory、`evidence/browser-m/`、実MySQL証拠）を対象に最終確認する。
+**現行判定:** **REVIEW（独立再Review待ち）**。R4-REVIEW-01/02/03/04とR4-P1-01はVERIFIED_CLOSED、B1/T046・M/T047は`[x]`化（技術・機能gate確認済み）。S07はREVIEW状態で、文書整合の独立再Reviewを待つ。再Review確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。独立Reviewは本Packet（219-path inventory、`evidence/browser-m/`、実MySQL証拠、Head分離）を対象に最終確認する。
 ## Round 3追跡Review訂正（2026-08-03、Head `a33a6e9`）
 
 以下を現Headで直接確認した。後続に残るRound 3/Mの旧記録は履歴として保持するが、Docker可用性・全量test・commit状態については本節を正とし、旧記録をrelease PASSの証拠として再利用しない。

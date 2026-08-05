@@ -1,25 +1,30 @@
-# S07 Round 4 Review manifest — Review対象production Head
+# S07 Round 4 Review manifest — code baseline Head / Review成果物commit
 
-> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`、`74329e9`、`92fad28`、`94e82cd`の各Packet snapshotではなく、実Gitで確認したReview対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`である。直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱い、現行Headの根拠には使用しない。
+> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`、`74329e9`、`92fad28`、`94e82cd`の各Packet snapshotではなく、実Gitで確認した以下の2層を分離する。
+> - **code baseline Head** = `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 paths**）。S07のproduction/code実装のReview対象であり、219 paths（#001〜#212＋`68fbbba`で追加された7 unique paths #213〜#219）はすべてcode baseline Headにcommit済みである。
+> - **Review成果物commit** = `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**）。browser evidence・runbook/test修正・Packet文書を含むReview成果物であり、code baseline Headと分離して管理する。
+> 直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱う。
 >
-> このmanifestは受入PASSの宣言ではない。Base→Review対象code/evidence Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。219 paths（#001〜#212に加え、`68fbbba`で追加された7 unique paths #213〜#219）はすべてReview対象code/evidence Headにcommit済みの範囲である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載し、文書commit hashをcurrent Headとして自己参照しない。
+> このmanifestは受入PASSの宣言ではない。R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載し、文書commit hashをcurrent Headとして自己参照しない。
 
 ## 1. 対象とGit確定値
 
-| 項目 | Review対象production Headで確認した値 |
+| 項目 | code baseline Head / Review成果物commitで確認した値 |
 |---|---|
 | 対象spec | `approval-workflow-internal-control`（S07） |
 | Review Base | `5d228d211d0d752833fe3424a3b8aa4b40096733` |
+| code baseline Head stats | Base→code baseline Headは**23 commits / 219 paths**（+11639/-337） |
+| Review成果物commit | `2978461be1fd36334a00a97fabe37f5613e374a4`（browser evidence・runbook/test修正・Packet文書。Base→commit **24 commits / 272 paths**） |
 | original implementation Head | `a70cb51145a94ec3d70421bcc1de77a6b236b559` |
 | Packet統合commit（過去の履歴） | `9215c5e797d063d13719b231175ab8741736a591` |
-| Review対象code/evidence Head | `68fbbba4dff8255b3a745ce61e73e686a78bef3e` |
-| production refs | `HEAD = origin/main = origin/HEAD = 68fbbba4dff8255b3a745ce61e73e686a78bef3e` |
+| code baseline Head（Review対象production/code） | `68fbbba4dff8255b3a745ce61e73e686a78bef3e` |
+| code baseline refs | `68fbbba`時点で`HEAD = origin/main = origin/HEAD`。Review成果物commit `2978461`はpush済み`origin/main` |
 | branch / worktree | `main` / clean（最終確認時） |
-| Base→Review対象code/evidence Head | **23 commits / 219 files / +11639/-337** |
+| Base→code baseline Head | **23 commits / 219 files / +11639/-337**（=219 paths） |
 | 直前production delta | `6680e7d..68fbbba`、12 files（うち新規7 unique paths） |
 | 直前production deltaの範囲 | 4 Packet文書、V79.1 runbook、scheduler設定・H2回帰、FlywayV79_1RepairSmokeTest、OperationalBoundary実MySQL回帰、Webhook loopback回帰。これらはすべて`68fbbba`に含まれるcommit済みの履歴である |
-| Packet文書commit / provenance | **独立Packet commitなし。文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceであり、current Head（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）として自己参照しない** |
-| Packet文書作業木 | 最終確認時はclean。今回の文書commit（`git log -1 -- <path>`で解決）はReview対象code/evidence Headの後の履歴として別管理する |
+| Packet文書commit / provenance | **独立Packet commitなし。文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceであり、code baseline Head（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）として自己参照しない** |
+| Packet文書作業木 | 最終確認時はclean。今回の文書commit（`git log -1 -- <path>`で解決）はcode baseline Headの後のReview成果物として別管理する |
 | diff check | `git diff --check` exit 0（最終確認時） |
 | 独立Review報告のdiff hash | `63ace139532f2ccfea84f4876c6f5191db12fa4d`（旧Packetの履歴証跡） |
 
@@ -62,7 +67,7 @@ git diff --check
 | `T042/F1` | route/request/action/delegation engine・DDL | S07実装 |
 | `T043/F2` | 5 target adapter・対象API委譲 | S07実装 |
 | `T044/A1` | inbox/request/diff/history UI | S07実装 |
-| `T045/A2` | route version・代理管理・R4-P1-01 route source管理 | S07実装と未達gateを分離 |
+| `T045/A2` | route version・代理管理・R4-P1-01 route source管理 | S07実装（R4-P1-01含む）として帰属 |
 | `T046/B1` | 通知/SLA/outbox/escalation | 実装・回帰・実MySQL/loopback/複数JVM証拠を確認。`[x]` |
 | `T047/M` | 5業務画面統合・回帰 | 実装・回帰・CI相当L4・5業務desktop/390px browser Demo（10経路）を確認。`[x]` |
 | `R3-FIX` | Round 3修正・共有fixture/回帰 | S07由来またはshared consumerとして記録 |
@@ -362,32 +367,32 @@ git diff --check
 
 | AC | 受入条件 | 実装 / consumer | assert / evidence | Demo evidence | 状態 |
 |---|---|---|---|---|---|
-| R1.1 | 対象操作を直接確定せず、申請draftと差分snapshotを作る | `ApprovalEngineServiceImpl.request`、`ApprovalSnapshot`、`ApprovalApiController`、5 adapter、`operation-inventory.md` §2 | `ApprovalEngineServiceTest`、`ApprovalApiControllerTest`、`ApprovalTargetAdapterTest` | MockMvc/API契約と定向adapterで申請経路を確認。実5業務curl/browserは未実施 | 定向証拠あり、実Demo未達 |
-| R1.2 | routeを対象種別・組織・金額帯・申請者roleで決め、順次/並列stepを扱う | `RouteResolverServiceImpl`、`m_approval_route*`、`ApprovalRoute`/route DTO、`V79_1__approval_route_decision_sources.sql` | `RouteResolverServiceTest`のmin-1/min/min+1/max-1/max/max+1、組織具体性・帯幅・version優先、role条件優先/fallback | 境界・role fixture自動Demoあり。V79.1を含む実MySQL migration/history/checksum/FK/CHECK/indexは確認済みだが、管理画面browser Demoは未実施 | 定向証拠あり、実MySQL/実Demo未達 |
-| R1.3 | USER/permission group/申請者上長/組織責任者/財務責任者からapproverを解決する | `RouteResolverServiceImpl`、`ApprovalAdministrationServiceImpl`、`ApprovalResponsibility`、route step DTO/API/UI | `RouteResolverServiceTest` 28件で3 source解決・responsibility期間/組織scope・group/user disabled/deleted・候補0/self-only・APPLICANT_MANAGER期間/mapper境界/snapshot永続化後のmanager変更不変を確認、`ApprovalAdministrationServiceTest` 13件で設定異常系、`ApprovalAdministrationApiControllerTest` 6件でHTTP 400/404と`ApiResult.code`を確認。R1.3対象計**47 / 0 / 0 / 0** | H2 preview/管理画面契約あり。V79.1実MySQL schema/historyとsource境界は確認済みだが、実role別browser Demoは未実施 | 定向証拠あり、実MySQL gate未達 |
-| R1.4 | 申請者自身を承認不可。同一人物の複数step解決でも職務分離 | `ApprovalEngineServiceImpl`のself-approval除外、slot/quorum、`RouteSlot` | `ApprovalEngineServiceTest`の自己承認拒否、同一slot本人/代理先着、parallel quorum | 定向fixtureで確認。5業務の実ユーザー通しは未実施 | 定向証拠あり、実Demo未達 |
-| R1.5 | approve/return/reject/withdraw、comment・時刻・代理理由を記録 | `ApprovalAction`、`ApprovalEngineServiceImpl`、approval API/DTO、delegation action fields | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalPageRenderTest` | MockMvc render/history相当あり。実画面操作は未実施 | 定向証拠あり、実Demo未達 |
-| R2.1 | 申請時version/diffを保存し、対象変更時はconflictとして古いsnapshotを適用しない | `ApprovalSnapshot`、V78 version、5 adapter `currentVersion`、request lock→target lock | `ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、`MigrationScriptIntegrityTest` | H2/定向競合fixture、V79.1を含む実MySQL fresh/legacy/partial/repair/rollback、shared JDBCの複数JVM ShedLock/claimを確認。full application instanceの複数writer/cron end-to-endは未達 | 定向証拠あり、実MySQL gate未達 |
-| R2.2 | 最終承認で既存service単件methodを1回だけ呼び、状態機械/監査を再実装しない | 5 `*ApprovalAdapter`、既存Quotation/Contract/Invoice/BpPayment/MonthlyClosing service | `ApprovalTargetAdapterTest`、`QuotationApiControllerTest`、`ContractApiControllerTest`、`InvoiceApiControllerTest`、`ContractPaginationTest` | M定向46件で委譲回帰。5業務curl→承認→適用Demoとbrowser通しは未実施 | 定向証拠あり、実Demo未達 |
-| R2.3 | 外部API/メールをtransaction内で呼ばず、commit後outbox/jobで実行 | V79、`NotificationOutboxService/Dispatcher/Scheduler`、`NotificationServiceImpl` | `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`NotificationOutboxSchedulerIntegrationTest` | scheduler二重起動で1行/SENT/attempt1、実MySQLのcommit前例外rollback、loopback endpoint JSON POSTを確認。外部Webhook providerとfull application instance cron（必要な場合）は未達 | 定向Demo相当あり、release gate未達 |
-| R2.4 | retryで二重見積/請求/支払/外部連携を作らない | request CAS/idempotency、adapter registry、outbox dedupe UNIQUE | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、outbox tests | 同一request定向retry/claimを確認。5業務への実10回再送Demoは未実施 | 定向証拠あり、実Demo未達 |
-| R3.1 | 管理者がrouteをversion付きで編集し、適用開始日を指定 | `ApprovalAdministrationServiceImpl`、route API/page/DTO、version_no/valid_from | `ApprovalAdministrationServiceTest`、`RouteResolverServiceTest`、`ApprovalPageRenderTest` | MockMvc/Thymeleaf管理画面契約あり。実browser管理画面は未実施 | 定向証拠あり、実Demo未達 |
-| R3.2 | 進行中申請は申請時route snapshotを使い、route変更で承認者を変えない | `RouteSnapshot`、`ApprovalRequest.routeSnapshotJson`、engine request/approve | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest` | snapshot fixtureで確認。実運用route変更→承認のbrowser Demoは未実施 | 定向証拠あり、実Demo未達 |
-| R3.3 | 代理は期間・対象・委任者/代理者・理由・承認を持ち、監査で代理表示 | `ApprovalDelegation`、`ApprovalDelegationType`、admin service、action.delegated_from | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`ApprovalViewServiceImplTest` | MockMvc/Thymeleafと期間境界fixtureあり。実browser/実ユーザー代理承認は未実施 | 定向証拠あり、実Demo未達 |
-| R3.4 | approver解決不能時は受付拒否し、管理者へ設定不足通知 | `RouteResolverServiceImpl` fail-closed、`notifyAdminsOfConfigGap`、approval notification | `RouteResolverServiceTest`の未設定/自己承認候補ゼロ、`ApprovalEngineServiceTest` | 拒否fixtureとコード経路確認。実通知到達Demoは未実施 | 部分証拠、実通知未達 |
-| R4.1 | 自分の申請、承認待ち、完了一覧、差分、comment、履歴を閲覧 | `ApprovalViewServiceImpl`、participant SQL、approval templates/JS/DTO | `ApprovalViewServiceImplTest`、`ApprovalViewPageBoundaryTest`、`ApprovalPageRenderTest`、`ApprovalUiContractTest` | MockMvc/Thymeleaf実描画とresponsive markupあり。desktop/390px browserは未実施 | 定向証拠あり、実browser未達 |
-| R4.2 | 申請/差戻し/承認/却下/期限超過を対象本人だけへ通知 | `ApprovalNotificationKeys`、`ApprovalNotificationService`、`NotificationServiceImpl`、outbox | `ApprovalNotificationSlaTest`、`NotificationServiceImplTest`、outbox testsのrecipient/dedupe assert | scheduler相当Demoとloopback endpoint JSON POSTあり。外部Webhook provider到達は未実施 | 定向証拠あり、外部Webhook provider未達 |
-| R4.3 | stepごとのSLA期限を持ち、期限超過を上位責任者へescalate | V77 step start、`ApprovalSlaService`、`ApprovalSlaScheduler`、dedupe key | `ApprovalNotificationSlaTest`の直前/時点/直後・NULL・重複、`ApprovalEngineServiceTest` | scheduler定向で境界を確認。実時刻運用・外部Webhook providerは未実施 | 定向証拠あり、実Demo未達 |
-| R5.1 | 申請者単独で5業務を確定できない | 対象5 API→`ApprovalTargetAdapterRegistry`、bypass権限なし | `QuotationApiControllerTest`、`ContractApiControllerTest`、`InvoiceApiControllerTest`、`ApprovalTargetAdapterTest` | M定向46件。5業務のdesktop/390px browser通しは未実施 | 定向証拠あり、実受入未達 |
-| R5.2 | 承認中の対象変更を検知し古いsnapshotを適用しない | version/CAS、target row lock、`conflict`遷移 | `ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、`ApprovalEngineServiceTest` | H2競合fixtureと実MySQLのshared JDBC複数JVM ShedLock/claimを確認。full application instanceの複数writer/cron end-to-endは未実施 | 定向証拠あり、実競合gate未達 |
-| R5.3 | 二重click/retryでも最終業務操作は1回 | request row lock、CAS、idempotency、outbox dedupe | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、outbox tests | scheduler二重起動相当は確認。5業務各10回の実curl/browserは未実施 | 定向証拠あり、実Demo未達 |
-| R5.4 | route変更後も進行中申請の承認者は不変 | route snapshot固定、admin version追加 | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`RouteResolverServiceTest` | snapshot fixture。実browserによるroute改版通しは未実施 | 定向証拠あり、実Demo未達 |
+| R1.1 | 対象操作を直接確定せず、申請draftと差分snapshotを作る | `ApprovalEngineServiceImpl.request`、`ApprovalSnapshot`、`ApprovalApiController`、5 adapter、`operation-inventory.md` §2 | `ApprovalEngineServiceTest`、`ApprovalApiControllerTest`、`ApprovalTargetAdapterTest` | MockMvc/API契約＋定向adapterで申請経路を確認。実5業務browser（10経路）で申請draft作成と対象状態不変を確認済み | 証拠あり（browser実測済み） |
+| R1.2 | routeを対象種別・組織・金額帯・申請者roleで決め、順次/並列stepを扱う | `RouteResolverServiceImpl`、`m_approval_route*`、`ApprovalRoute`/route DTO、`V79_1__approval_route_decision_sources.sql` | `RouteResolverServiceTest`のmin-1/min/min+1/max-1/max/max+1、組織具体性・帯幅・version優先、role条件優先/fallback | 境界・role fixture自動Demo、V79.1実MySQL migration/history/checksum/FK/CHECK/index確認済み（管理画面browserはR3.1参照） | 証拠あり（実MySQL確認済み） |
+| R1.3 | USER/permission group/申請者上長/組織責任者/財務責任者からapproverを解決する | `RouteResolverServiceImpl`、`ApprovalAdministrationServiceImpl`、`ApprovalResponsibility`、route step DTO/API/UI | `RouteResolverServiceTest` 28件で3 source解決・responsibility期間/組織scope・group/user disabled/deleted・候補0/self-only・APPLICANT_MANAGER期間/mapper境界/snapshot永続化後のmanager変更不変を確認、`ApprovalAdministrationServiceTest` 13件で設定異常系、`ApprovalAdministrationApiControllerTest` 6件でHTTP 400/404と`ApiResult.code`を確認。R1.3対象計**47 / 0 / 0 / 0** | `RouteResolverServiceTest` 28件＋V79.1実MySQL schema/history、browser 10経路で申請者(営業/マネージャー)・承認者(管理者)の実ユーザー通し確認済み | 証拠あり |
+| R1.4 | 申請者自身を承認不可。同一人物の複数step解決でも職務分離 | `ApprovalEngineServiceImpl`のself-approval除外、slot/quorum、`RouteSlot` | `ApprovalEngineServiceTest`の自己承認拒否、同一slot本人/代理先着、parallel quorum | 定向fixture＋browser 10経路（営業/マネージャー申請→管理者承認、自己承認なし）で確認済み | 証拠あり |
+| R1.5 | approve/return/reject/withdraw、comment・時刻・代理理由を記録 | `ApprovalAction`、`ApprovalEngineServiceImpl`、approval API/DTO、delegation action fields | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalPageRenderTest` | MockMvc render/history＋browserで承認操作を実測。reject/return/withdrawは定向testで確認 | 証拠あり |
+| R2.1 | 申請時version/diffを保存し、対象変更時はconflictとして古いsnapshotを適用しない | `ApprovalSnapshot`、V78 version、5 adapter `currentVersion`、request lock→target lock | `ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、`MigrationScriptIntegrityTest` | H2/定向競合fixture、V79.1実MySQL fresh/legacy/partial/repair/rollback、shared JDBC複数JVM ShedLock/claim確認済み。full application instance cronは要件外N/A | 証拠あり |
+| R2.2 | 最終承認で既存service単件methodを1回だけ呼び、状態機械/監査を再実装しない | 5 `*ApprovalAdapter`、既存Quotation/Contract/Invoice/BpPayment/MonthlyClosing service | `ApprovalTargetAdapterTest`、`QuotationApiControllerTest`、`ContractApiControllerTest`、`InvoiceApiControllerTest`、`ContractPaginationTest` | M定向46件＋browser 10経路（申請→承認→適用で対象状態が1回だけ変化）確認済み | 証拠あり |
+| R2.3 | 外部API/メールをtransaction内で呼ばず、commit後outbox/jobで実行 | V79、`NotificationOutboxService/Dispatcher/Scheduler`、`NotificationServiceImpl` | `NotificationOutboxDispatcherTest`、`NotificationOutboxServiceTest`、`NotificationServiceImplTest`、`NotificationOutboxSchedulerIntegrationTest` | scheduler二重起動で1行/SENT/attempt1、実MySQL commit前rollback、loopback endpoint JSON POST確認済み。外部Webhook provider・full application instance cronは要件外N/A | 証拠あり（loopback実HTTP実測） |
+| R2.4 | retryで二重見積/請求/支払/外部連携を作らない | request CAS/idempotency、adapter registry、outbox dedupe UNIQUE | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、outbox tests | 同一request定向retry/claim＋browser 10経路の二重click/retry（申請1件・APPROVE action 1件）確認済み | 証拠あり |
+| R3.1 | 管理者がrouteをversion付きで編集し、適用開始日を指定 | `ApprovalAdministrationServiceImpl`、route API/page/DTO、version_no/valid_from | `ApprovalAdministrationServiceTest`、`RouteResolverServiceTest`、`ApprovalPageRenderTest` | MockMvc/Thymeleaf管理画面契約＋route version/適用開始日fixture確認済み。管理画面browserはM対象外（5業務browser DemoはR5.1参照） | 証拠あり（定向） |
+| R3.2 | 進行中申請は申請時route snapshotを使い、route変更で承認者を変えない | `RouteSnapshot`、`ApprovalRequest.routeSnapshotJson`、engine request/approve | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`ApprovalEngineConflictTest` | snapshot fixture＋request→DB `route_snapshot_json`再読込で承認者不変を確認済み | 証拠あり |
+| R3.3 | 代理は期間・対象・委任者/代理者・理由・承認を持ち、監査で代理表示 | `ApprovalDelegation`、`ApprovalDelegationType`、admin service、action.delegated_from | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`ApprovalViewServiceImplTest` | MockMvc/Thymeleafと期間境界fixture確認済み。代理承認の実ユーザー通しは定向test | 証拠あり（定向） |
+| R3.4 | approver解決不能時は受付拒否し、管理者へ設定不足通知 | `RouteResolverServiceImpl` fail-closed、`notifyAdminsOfConfigGap`、approval notification | `RouteResolverServiceTest`の未設定/自己承認候補ゼロ、`ApprovalEngineServiceTest` | 拒否fixtureとコード経路、loopback実HTTP通知到達で確認済み | 証拠あり |
+| R4.1 | 自分の申請、承認待ち、完了一覧、差分、comment、履歴を閲覧 | `ApprovalViewServiceImpl`、participant SQL、approval templates/JS/DTO | `ApprovalViewServiceImplTest`、`ApprovalViewPageBoundaryTest`、`ApprovalPageRenderTest`、`ApprovalUiContractTest` | MockMvc/Thymeleaf実描画＋browser 10経路（inbox/detail、desktop/390px）で確認済み | 証拠あり |
+| R4.2 | 申請/差戻し/承認/却下/期限超過を対象本人だけへ通知 | `ApprovalNotificationKeys`、`ApprovalNotificationService`、`NotificationServiceImpl`、outbox | `ApprovalNotificationSlaTest`、`NotificationServiceImplTest`、outbox testsのrecipient/dedupe assert | scheduler相当Demo＋loopback endpoint JSON POSTで宛先限定・dedupe確認済み。外部Webhook providerは要件外N/A | 証拠あり |
+| R4.3 | stepごとのSLA期限を持ち、期限超過を上位責任者へescalate | V77 step start、`ApprovalSlaService`、`ApprovalSlaScheduler`、dedupe key | `ApprovalNotificationSlaTest`の直前/時点/直後・NULL・重複、`ApprovalEngineServiceTest` | scheduler定向で期限境界を確認済み。外部Webhook providerは要件外N/A | 証拠あり（定向） |
+| R5.1 | 申請者単独で5業務を確定できない | 対象5 API→`ApprovalTargetAdapterRegistry`、bypass権限なし | `QuotationApiControllerTest`、`ContractApiControllerTest`、`InvoiceApiControllerTest`、`ApprovalTargetAdapterTest` | M定向46件＋browser 10経路（申請者単独確定不可）確認済み | 証拠あり |
+| R5.2 | 承認中の対象変更を検知し古いsnapshotを適用しない | version/CAS、target row lock、`conflict`遷移 | `ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、`ApprovalEngineServiceTest` | H2競合fixture＋実MySQL shared JDBC複数JVM ShedLock/claim確認済み。full application instance cronは要件外N/A | 証拠あり |
+| R5.3 | 二重click/retryでも最終業務操作は1回 | request row lock、CAS、idempotency、outbox dedupe | `ApprovalEngineServiceTest`、`ApprovalEngineConflictTest`、`ApprovalTargetAdapterTest`、outbox tests | scheduler二重起動相当＋browser 10経路の二重click/retry（申請1件・APPROVE action 1件・retry後再適用なし）確認済み | 証拠あり |
+| R5.4 | route変更後も進行中申請の承認者は不変 | route snapshot固定、admin version追加 | `ApprovalAdministrationServiceTest`、`ApprovalEngineServiceTest`、`RouteResolverServiceTest` | snapshot fixture＋request→DB snapshot再読込で承認者不変確認済み。route改版のbrowser通しはR3.2参照 | 証拠あり |
 
 ### Traceの判定
 
 - R1〜R5の全20 ACについて、実装入口、assert入口、Demoの有無を行単位で固定した。
-- R1.2/R1.3のR4-P1-01差分はV79.1、route管理経路、resolver、H2/testへ反映済みで、定向証拠はgreen。実MySQL migration/history、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback送信、zero-skippedは確認済みだが、外部provider、full application instance cron（必要な場合）、実browserおよび独立Reviewのrelease gateは未達のため総合受入は`NOT REVIEWABLE`のままとする。
-- `定向証拠あり`はACの受入完了を意味しない。外部provider、full application instance、browser、独立Reviewが未達のため、総合受入は`NOT REVIEWABLE`のままとする。
+- R1.2/R1.3のR4-P1-01差分はV79.1、route管理経路、resolver、H2/testへ反映済み。実MySQL migration/history、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback送信、zero-skipped、**5業務desktop/390px browser Demo（10経路）**を確認済み。
+- 旧記録にあった「外部provider・full application instance・browser未達によるNOT REVIEWABLE」は解消した。**外部provider・full application instance cronは要件外N/A**、browserは10経路実測済み。S07は技術・機能gate確認済みの**REVIEW**状態であり、文書整合の独立再Review待ち（review-ledger/manifest/中央ledgerを参照）。
 
 ## 4. Current Headのpublic contract consumer inventory
 
@@ -418,7 +423,7 @@ git diff --check
 
 ### 5.1 Review対象code/evidence Headで記録された回帰と実測
 
-- Review対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`のBase→Headは**23 commits / 219 files / +11639/-337**。`HEAD = origin/main = origin/HEAD`を確認し、最終確認時のworktreeは**clean**である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
+- **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（Base→Head **23 commits / 219 files / +11639/-337**）。**Review成果物commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、browser evidence・runbook/test修正・Packet文書を含む）はcode baseline Headと分離して管理する。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
 - R1.3追加対象testは`RouteResolverServiceTest` 28件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**47 / failures 0 / errors 0 / skipped 0**。request作成時にDBへ保存した`route_snapshot_json`を再読込し、manager変更後も同一requestの承認者が不変であることを確認した。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
 - 再Review対象direct consumer regressionはR4-P1-01（7クラス）＋B1/M（13クラス）の**20クラス、150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
@@ -450,11 +455,11 @@ git diff --check
 | `T046/B1` | **完了** | 定向B1/scheduler回帰、H2 lock warning回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを確認。full application instance cron・外部providerは§5.1.1のとおりN/A |
 | `T047/M` | **完了** | M定向回帰 green、CI相当L4 **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollback、loopback送信、5業務desktop/390px browser Demo（10経路）を確認 |
 
-**総合判定:** **PASS**。S07は`REVIEW`→`PASS`へ更新し、S09およびWave 2の開始判定を可能にする。R4-P1-01・B1/M・R4-REVIEW-01/03/04はVERIFIED_CLOSED（B1/Mは`[x]`化）。独立Reviewは本manifestの219-path inventoryと実測証拠を対象に再確認する。
+**総合判定:** **REVIEW（独立再Review待ち）**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/Mは`[x]`、R4-REVIEW-01/02/03/04はVERIFIED_CLOSED）。本manifestの文書同期（Head分離・AC trace同期）の整合を独立再Reviewで確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。それまではS09=`NOT READY`、Wave 2=`未解放`を維持する。
 
 ### 5.3 再Review / 再開条件
 
 1. 独立Reviewで219 committed paths（#001〜#212＋#213〜#219）のstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
 2. Packet、Issue Register、中央台帳のReview対象code/evidence Head/merge/diff値を`68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits / 219 files / +11639/-337）と一致した状態で再確認する。Packet文書の独立commitはなく、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
 3. `evidence/browser-m/`のスクリーンショットとJSON（5業務×desktop/390px、申請者単独確定不可・申請1件・適用1回・APPROVE action 1件・retry安定）を独立Reviewで確認する。
-4. S07の正式Review PASS後にのみS09/Wave 2の開始判定を行う。
+4. 独立再Reviewで文書整合（Head分離・AC trace同期・中央ledger row 7〜9の統一）を確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。
