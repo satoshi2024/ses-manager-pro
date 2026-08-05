@@ -12,7 +12,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 5,
+        "targetId": 11,
         "businessKeys": {
           "quotationNo": "Q-202608-0001"
         }
@@ -24,7 +24,7 @@
       },
       {
         "name": "target_before_apply",
-        "id": 5,
+        "id": 11,
         "quotationNo": "Q-202608-0001",
         "customerId": 1,
         "projectId": 1,
@@ -39,14 +39,14 @@
         "remarks": "S07ブラウザDemo用",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 0,
         "deletedFlag": 0
       },
       {
         "name": "target_after_apply",
-        "id": 5,
+        "id": 11,
         "quotationNo": "Q-202608-0001",
         "customerId": 1,
         "projectId": 1,
@@ -61,8 +61,8 @@
         "remarks": "S07ブラウザDemo用",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 0,
         "deletedFlag": 0
       },
@@ -70,7 +70,7 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 5,
+          "id": 11,
           "quotationNo": "Q-202608-0001",
           "customerId": 1,
           "projectId": 1,
@@ -85,13 +85,13 @@
           "remarks": "S07ブラウザDemo用",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 0,
           "deletedFlag": 0
         },
         "after": {
-          "id": 5,
+          "id": 11,
           "quotationNo": "Q-202608-0001",
           "customerId": 1,
           "projectId": 1,
@@ -106,8 +106,8 @@
           "remarks": "S07ブラウザDemo用",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 0,
           "deletedFlag": 0
         }
@@ -117,10 +117,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 46,
-            "requestNo": "AR-46",
+            "id": 76,
+            "requestNo": "AR-76",
             "status": "in_review",
-            "targetId": 5
+            "targetId": 11
           }
         ]
       },
@@ -130,7 +130,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 5,
+        "id": 11,
         "quotationNo": "Q-202608-0001",
         "customerId": 1,
         "projectId": 1,
@@ -145,8 +145,8 @@
         "remarks": "S07ブラウザDemo用",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 1,
         "deletedFlag": 0
       },
@@ -154,7 +154,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 5,
+          "id": 11,
           "quotationNo": "Q-202608-0001",
           "customerId": 1,
           "projectId": 1,
@@ -169,8 +169,8 @@
           "remarks": "S07ブラウザDemo用",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 1,
           "deletedFlag": 0
         }
@@ -205,7 +205,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 6,
+        "targetId": 12,
         "businessKeys": {
           "quotationNo": "Q-202608-0002"
         }
@@ -217,7 +217,7 @@
       },
       {
         "name": "target_before_apply",
-        "id": 6,
+        "id": 12,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -232,14 +232,14 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 0,
         "deletedFlag": 0
       },
       {
         "name": "target_after_apply",
-        "id": 6,
+        "id": 12,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -254,8 +254,8 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 0,
         "deletedFlag": 0
       },
@@ -263,7 +263,7 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 6,
+          "id": 12,
           "quotationNo": "Q-202608-0002",
           "customerId": 1,
           "projectId": 1,
@@ -278,13 +278,13 @@
           "remarks": "S07ブラウザDemo用(390px)",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 0,
           "deletedFlag": 0
         },
         "after": {
-          "id": 6,
+          "id": 12,
           "quotationNo": "Q-202608-0002",
           "customerId": 1,
           "projectId": 1,
@@ -299,8 +299,8 @@
           "remarks": "S07ブラウザDemo用(390px)",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 0,
           "deletedFlag": 0
         }
@@ -310,10 +310,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 48,
-            "requestNo": "AR-48",
+            "id": 77,
+            "requestNo": "AR-77",
             "status": "in_review",
-            "targetId": 6
+            "targetId": 12
           }
         ]
       },
@@ -323,7 +323,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 6,
+        "id": 12,
         "quotationNo": "Q-202608-0002",
         "customerId": 1,
         "projectId": 1,
@@ -338,8 +338,8 @@
         "remarks": "S07ブラウザDemo用(390px)",
         "sourceOpportunityId": null,
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "version": 1,
         "deletedFlag": 0
       },
@@ -347,7 +347,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 6,
+          "id": 12,
           "quotationNo": "Q-202608-0002",
           "customerId": 1,
           "projectId": 1,
@@ -362,8 +362,8 @@
           "remarks": "S07ブラウザDemo用(390px)",
           "sourceOpportunityId": null,
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "version": 1,
           "deletedFlag": 0
         }
@@ -398,7 +398,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 6,
+        "targetId": 12,
         "businessKeys": {
           "contractNo": "C-2026-0001"
         }
@@ -410,9 +410,9 @@
       },
       {
         "name": "target_before_apply",
-        "id": 6,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "id": 12,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,
@@ -446,14 +446,14 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 0,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "target_after_apply",
-        "id": 6,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "id": 12,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,
@@ -487,16 +487,16 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 0,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 6,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "id": 12,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0001",
           "proposalId": null,
@@ -530,13 +530,13 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 0,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         },
         "after": {
-          "id": 6,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "id": 12,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0001",
           "proposalId": null,
@@ -570,8 +570,8 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 0,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         }
       },
       {
@@ -579,10 +579,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 49,
-            "requestNo": "AR-49",
+            "id": 78,
+            "requestNo": "AR-78",
             "status": "in_review",
-            "targetId": 6
+            "targetId": 12
           }
         ]
       },
@@ -592,9 +592,9 @@
       },
       {
         "name": "target_after_approve",
-        "id": 6,
-        "createdAt": "2026-08-05T04:23:57",
-        "updatedAt": "2026-08-05T04:23:57",
+        "id": 12,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0001",
         "proposalId": null,
@@ -628,16 +628,16 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 1,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 6,
-          "createdAt": "2026-08-05T04:23:57",
-          "updatedAt": "2026-08-05T04:23:57",
+          "id": 12,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0001",
           "proposalId": null,
@@ -671,8 +671,8 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 1,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         }
       },
       {
@@ -705,7 +705,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 7,
+        "targetId": 13,
         "businessKeys": {
           "contractNo": "C-2026-0002"
         }
@@ -717,9 +717,9 @@
       },
       {
         "name": "target_before_apply",
-        "id": 7,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "id": 13,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0002",
         "proposalId": null,
@@ -753,14 +753,14 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 0,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "target_after_apply",
-        "id": 7,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "id": 13,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0002",
         "proposalId": null,
@@ -794,16 +794,16 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 0,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 7,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "id": 13,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0002",
           "proposalId": null,
@@ -837,13 +837,13 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 0,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         },
         "after": {
-          "id": 7,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "id": 13,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0002",
           "proposalId": null,
@@ -877,8 +877,8 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 0,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         }
       },
       {
@@ -886,10 +886,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 50,
-            "requestNo": "AR-50",
+            "id": 79,
+            "requestNo": "AR-79",
             "status": "in_review",
-            "targetId": 7
+            "targetId": 13
           }
         ]
       },
@@ -899,9 +899,9 @@
       },
       {
         "name": "target_after_approve",
-        "id": 7,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "id": 13,
+        "createdAt": "2026-08-05T05:15:21",
+        "updatedAt": "2026-08-05T05:15:21",
         "deletedFlag": 0,
         "contractNo": "C-2026-0002",
         "proposalId": null,
@@ -935,16 +935,16 @@
         "renewalDecision": null,
         "createdBy": 1,
         "version": 1,
-        "settlementHoursRangeValid": true,
-        "dateRangeValid": true
+        "dateRangeValid": true,
+        "settlementHoursRangeValid": true
       },
       {
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 7,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "id": 13,
+          "createdAt": "2026-08-05T05:15:21",
+          "updatedAt": "2026-08-05T05:15:21",
           "deletedFlag": 0,
           "contractNo": "C-2026-0002",
           "proposalId": null,
@@ -978,8 +978,8 @@
           "renewalDecision": null,
           "createdBy": 1,
           "version": 1,
-          "settlementHoursRangeValid": true,
-          "dateRangeValid": true
+          "dateRangeValid": true,
+          "settlementHoursRangeValid": true
         }
       },
       {
@@ -1012,7 +1012,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 5,
+        "targetId": 11,
         "businessKeys": {
           "invoiceNo": "INV-202607-0001"
         }
@@ -1024,7 +1024,7 @@
       },
       {
         "name": "target_before_apply",
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1039,8 +1039,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -1060,9 +1060,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
@@ -1074,7 +1074,7 @@
       },
       {
         "name": "target_after_apply",
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1089,8 +1089,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -1110,9 +1110,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
@@ -1126,7 +1126,7 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 5,
+          "id": 11,
           "invoiceNo": "INV-202607-0001",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1141,8 +1141,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 0,
           "deletedFlag": 0,
           "customer": {
@@ -1162,9 +1162,9 @@
           },
           "items": [
             {
-              "id": 3,
-              "invoiceId": 5,
-              "workRecordId": 3,
+              "id": 6,
+              "invoiceId": 11,
+              "workRecordId": 6,
               "description": "田中 太郎（デモ商事 基幹システム開発）",
               "amount": 600000
             }
@@ -1175,7 +1175,7 @@
           "taxRatePercent": "10"
         },
         "after": {
-          "id": 5,
+          "id": 11,
           "invoiceNo": "INV-202607-0001",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1190,8 +1190,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 0,
           "deletedFlag": 0,
           "customer": {
@@ -1211,9 +1211,9 @@
           },
           "items": [
             {
-              "id": 3,
-              "invoiceId": 5,
-              "workRecordId": 3,
+              "id": 6,
+              "invoiceId": 11,
+              "workRecordId": 6,
               "description": "田中 太郎（デモ商事 基幹システム開発）",
               "amount": 600000
             }
@@ -1229,10 +1229,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 51,
-            "requestNo": "AR-51",
+            "id": 80,
+            "requestNo": "AR-80",
             "status": "in_review",
-            "targetId": 5
+            "targetId": 11
           }
         ]
       },
@@ -1242,7 +1242,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1257,8 +1257,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 1,
         "deletedFlag": 0,
         "customer": {
@@ -1278,9 +1278,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
@@ -1294,7 +1294,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 5,
+          "id": 11,
           "invoiceNo": "INV-202607-0001",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1309,8 +1309,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 1,
           "deletedFlag": 0,
           "customer": {
@@ -1330,9 +1330,9 @@
           },
           "items": [
             {
-              "id": 3,
-              "invoiceId": 5,
-              "workRecordId": 3,
+              "id": 6,
+              "invoiceId": 11,
+              "workRecordId": 6,
               "description": "田中 太郎（デモ商事 基幹システム開発）",
               "amount": 600000
             }
@@ -1373,7 +1373,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 6,
+        "targetId": 12,
         "businessKeys": {
           "invoiceNo": "INV-202607-0002"
         }
@@ -1385,7 +1385,7 @@
       },
       {
         "name": "target_before_apply",
-        "id": 6,
+        "id": 12,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1400,8 +1400,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -1427,7 +1427,7 @@
       },
       {
         "name": "target_after_apply",
-        "id": 6,
+        "id": 12,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1442,8 +1442,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -1471,7 +1471,7 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 6,
+          "id": 12,
           "invoiceNo": "INV-202607-0002",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1486,8 +1486,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用(390px)",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 0,
           "deletedFlag": 0,
           "customer": {
@@ -1512,7 +1512,7 @@
           "taxRatePercent": "10"
         },
         "after": {
-          "id": 6,
+          "id": 12,
           "invoiceNo": "INV-202607-0002",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1527,8 +1527,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用(390px)",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 0,
           "deletedFlag": 0,
           "customer": {
@@ -1558,10 +1558,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 52,
-            "requestNo": "AR-52",
+            "id": 81,
+            "requestNo": "AR-81",
             "status": "in_review",
-            "targetId": 6
+            "targetId": 12
           }
         ]
       },
@@ -1571,7 +1571,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 6,
+        "id": 12,
         "invoiceNo": "INV-202607-0002",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -1586,8 +1586,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用(390px)",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 1,
         "deletedFlag": 0,
         "customer": {
@@ -1615,7 +1615,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 6,
+          "id": 12,
           "invoiceNo": "INV-202607-0002",
           "customerId": 1,
           "billingMonth": "2026-07",
@@ -1630,8 +1630,8 @@
           "dueDate": "2026-08-31",
           "remarks": "S07ブラウザDemo用(390px)",
           "createdBy": 1,
-          "createdAt": "2026-08-05T04:23:58",
-          "updatedAt": "2026-08-05T04:23:58",
+          "createdAt": "2026-08-05T05:15:22",
+          "updatedAt": "2026-08-05T05:15:22",
           "version": 1,
           "deletedFlag": 0,
           "customer": {
@@ -1686,7 +1686,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 5,
+        "targetId": 11,
         "businessKeys": {
           "payeeCompanyName": "株式会社BPデモ",
           "layerOrder": 1
@@ -1699,13 +1699,13 @@
       },
       {
         "name": "target_before_apply",
-        "id": 5,
+        "id": 11,
         "status": "未払",
         "amount": 480000
       },
       {
         "name": "target_after_apply",
-        "id": 5,
+        "id": 11,
         "status": "未払",
         "amount": 480000
       },
@@ -1713,12 +1713,12 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 5,
+          "id": 11,
           "status": "未払",
           "amount": 480000
         },
         "after": {
-          "id": 5,
+          "id": 11,
           "status": "未払",
           "amount": 480000
         }
@@ -1728,10 +1728,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 53,
-            "requestNo": "AR-53",
+            "id": 82,
+            "requestNo": "AR-82",
             "status": "in_review",
-            "targetId": 5
+            "targetId": 11
           }
         ]
       },
@@ -1741,7 +1741,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 5,
+        "id": 11,
         "status": "支払済",
         "amount": 480000
       },
@@ -1749,7 +1749,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 5,
+          "id": 11,
           "status": "支払済",
           "amount": 480000
         }
@@ -1784,7 +1784,7 @@
       },
       {
         "name": "resolved_business_keys",
-        "targetId": 6,
+        "targetId": 12,
         "businessKeys": {
           "payeeCompanyName": "株式会社BPデモ",
           "layerOrder": 2
@@ -1797,13 +1797,13 @@
       },
       {
         "name": "target_before_apply",
-        "id": 6,
+        "id": 12,
         "status": "未払",
         "amount": 480000
       },
       {
         "name": "target_after_apply",
-        "id": 6,
+        "id": 12,
         "status": "未払",
         "amount": 480000
       },
@@ -1811,12 +1811,12 @@
         "name": "applicant_alone_cannot_finalize",
         "targetStateUnchanged": true,
         "before": {
-          "id": 6,
+          "id": 12,
           "status": "未払",
           "amount": 480000
         },
         "after": {
-          "id": 6,
+          "id": 12,
           "status": "未払",
           "amount": 480000
         }
@@ -1826,10 +1826,10 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 54,
-            "requestNo": "AR-54",
+            "id": 83,
+            "requestNo": "AR-83",
             "status": "in_review",
-            "targetId": 6
+            "targetId": 12
           }
         ]
       },
@@ -1839,7 +1839,7 @@
       },
       {
         "name": "target_after_approve",
-        "id": 6,
+        "id": 12,
         "status": "支払済",
         "amount": 480000
       },
@@ -1847,7 +1847,7 @@
         "name": "business_operation_applied_once",
         "targetStateChanged": true,
         "after": {
-          "id": 6,
+          "id": 12,
           "status": "支払済",
           "amount": 480000
         }
@@ -1983,8 +1983,8 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 55,
-            "requestNo": "AR-55",
+            "id": 84,
+            "requestNo": "AR-84",
             "status": "in_review",
             "targetId": null
           }
@@ -2013,7 +2013,7 @@
         "closed": true,
         "closedBy": 1,
         "closedByName": "システム管理者",
-        "closedAt": "2026-08-05T13:28:34.9561062"
+        "closedAt": "2026-08-05T14:22:11.6667253"
       },
       {
         "name": "business_operation_applied_once",
@@ -2036,7 +2036,7 @@
           "closed": true,
           "closedBy": 1,
           "closedByName": "システム管理者",
-          "closedAt": "2026-08-05T13:28:34.9561062"
+          "closedAt": "2026-08-05T14:22:11.6667253"
         }
       },
       {
@@ -2170,8 +2170,8 @@
         "requestCount": 1,
         "requests": [
           {
-            "id": 56,
-            "requestNo": "AR-56",
+            "id": 85,
+            "requestNo": "AR-85",
             "status": "in_review",
             "targetId": null
           }
@@ -2200,7 +2200,7 @@
         "closed": true,
         "closedBy": 1,
         "closedByName": "システム管理者",
-        "closedAt": "2026-08-05T13:29:03.2863695"
+        "closedAt": "2026-08-05T14:22:34.2672488"
       },
       {
         "name": "business_operation_applied_once",
@@ -2223,7 +2223,7 @@
           "closed": true,
           "closedBy": 1,
           "closedByName": "システム管理者",
-          "closedAt": "2026-08-05T13:29:03.2863695"
+          "closedAt": "2026-08-05T14:22:34.2672488"
         }
       },
       {

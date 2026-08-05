@@ -11,7 +11,7 @@
     },
     {
       "name": "resolved_business_keys",
-      "targetId": 5,
+      "targetId": 11,
       "businessKeys": {
         "invoiceNo": "INV-202607-0001"
       }
@@ -23,7 +23,7 @@
     },
     {
       "name": "target_before_apply",
-      "id": 5,
+      "id": 11,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -38,8 +38,8 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T04:23:58",
-      "updatedAt": "2026-08-05T04:23:58",
+      "createdAt": "2026-08-05T05:15:22",
+      "updatedAt": "2026-08-05T05:15:22",
       "version": 0,
       "deletedFlag": 0,
       "customer": {
@@ -59,9 +59,9 @@
       },
       "items": [
         {
-          "id": 3,
-          "invoiceId": 5,
-          "workRecordId": 3,
+          "id": 6,
+          "invoiceId": 11,
+          "workRecordId": 6,
           "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
@@ -73,7 +73,7 @@
     },
     {
       "name": "target_after_apply",
-      "id": 5,
+      "id": 11,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -88,8 +88,8 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T04:23:58",
-      "updatedAt": "2026-08-05T04:23:58",
+      "createdAt": "2026-08-05T05:15:22",
+      "updatedAt": "2026-08-05T05:15:22",
       "version": 0,
       "deletedFlag": 0,
       "customer": {
@@ -109,9 +109,9 @@
       },
       "items": [
         {
-          "id": 3,
-          "invoiceId": 5,
-          "workRecordId": 3,
+          "id": 6,
+          "invoiceId": 11,
+          "workRecordId": 6,
           "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
@@ -125,7 +125,7 @@
       "name": "applicant_alone_cannot_finalize",
       "targetStateUnchanged": true,
       "before": {
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -140,8 +140,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -161,9 +161,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
@@ -174,7 +174,7 @@
         "taxRatePercent": "10"
       },
       "after": {
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -189,8 +189,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 0,
         "deletedFlag": 0,
         "customer": {
@@ -210,9 +210,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }
@@ -228,10 +228,10 @@
       "requestCount": 1,
       "requests": [
         {
-          "id": 51,
-          "requestNo": "AR-51",
+          "id": 80,
+          "requestNo": "AR-80",
           "status": "in_review",
-          "targetId": 5
+          "targetId": 11
         }
       ]
     },
@@ -241,7 +241,7 @@
     },
     {
       "name": "target_after_approve",
-      "id": 5,
+      "id": 11,
       "invoiceNo": "INV-202607-0001",
       "customerId": 1,
       "billingMonth": "2026-07",
@@ -256,8 +256,8 @@
       "dueDate": "2026-08-31",
       "remarks": "S07ブラウザDemo用",
       "createdBy": 1,
-      "createdAt": "2026-08-05T04:23:58",
-      "updatedAt": "2026-08-05T04:23:58",
+      "createdAt": "2026-08-05T05:15:22",
+      "updatedAt": "2026-08-05T05:15:22",
       "version": 1,
       "deletedFlag": 0,
       "customer": {
@@ -277,9 +277,9 @@
       },
       "items": [
         {
-          "id": 3,
-          "invoiceId": 5,
-          "workRecordId": 3,
+          "id": 6,
+          "invoiceId": 11,
+          "workRecordId": 6,
           "description": "田中 太郎（デモ商事 基幹システム開発）",
           "amount": 600000
         }
@@ -293,7 +293,7 @@
       "name": "business_operation_applied_once",
       "targetStateChanged": true,
       "after": {
-        "id": 5,
+        "id": 11,
         "invoiceNo": "INV-202607-0001",
         "customerId": 1,
         "billingMonth": "2026-07",
@@ -308,8 +308,8 @@
         "dueDate": "2026-08-31",
         "remarks": "S07ブラウザDemo用",
         "createdBy": 1,
-        "createdAt": "2026-08-05T04:23:58",
-        "updatedAt": "2026-08-05T04:23:58",
+        "createdAt": "2026-08-05T05:15:22",
+        "updatedAt": "2026-08-05T05:15:22",
         "version": 1,
         "deletedFlag": 0,
         "customer": {
@@ -329,9 +329,9 @@
         },
         "items": [
           {
-            "id": 3,
-            "invoiceId": 5,
-            "workRecordId": 3,
+            "id": 6,
+            "invoiceId": 11,
+            "workRecordId": 6,
             "description": "田中 太郎（デモ商事 基幹システム開発）",
             "amount": 600000
           }

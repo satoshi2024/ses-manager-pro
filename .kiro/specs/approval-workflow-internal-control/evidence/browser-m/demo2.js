@@ -55,10 +55,17 @@ async function shot(page, label, dir) {
 }
 
 async function apiGet(page, url) {
-  return await page.evaluate(async (u) => {
-    const res = await fetch(u, { credentials: 'same-origin' });
-    return await res.json();
-  }, url);
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    try {
+      return await page.evaluate(async (u) => {
+        const res = await fetch(u, { credentials: 'same-origin' });
+        return await res.json();
+      }, url);
+    } catch (e) {
+      if (attempt === 8) throw e;
+      await page.waitForTimeout(1200);
+    }
+  }
 }
 
 // ---- business key -> ID resolution（AUTO_INCREMENT固定IDに依存しない） ----
@@ -107,12 +114,22 @@ const bpPrep = async (page) => {
 async function clickApply(spec, appPage) {
   if (spec.prep) { await spec.prep(appPage); }
   if (spec.clickApply) { return await spec.clickApply(appPage); }
-  const clicked = await appPage.evaluate((n) => {
-    const btns = Array.from(document.querySelectorAll('button'));
-    const b = btns.find(x => (x.getAttribute('onclick') || '').includes(n));
-    if (!b) return false;
-    b.click(); return true;
-  }, spec.buttonOnclick);
+  const deadline = Date.now() + 10000;
+  let clicked = false;
+  while (Date.now() < deadline) {
+    try {
+      clicked = await appPage.evaluate((n) => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const b = btns.find(x => (x.getAttribute('onclick') || '').includes(n));
+        if (!b) return false;
+        b.click(); return true;
+      }, spec.buttonOnclick);
+    } catch (e) {
+      clicked = false; // ナビゲーション中の一時エラーは再試行
+    }
+    if (clicked) break;
+    await appPage.waitForTimeout(500);
+  }
   if (!clicked) throw new Error('apply button not found: ' + spec.buttonOnclick);
   if (spec.afterApplyClick) { await spec.afterApplyClick(appPage); }
   return true;
@@ -186,11 +203,16 @@ async function runFlow(browser, spec, viewport) {
     return true;
   });
   if (!approveClicked) throw new Error('approve button not found for ' + reqId);
-  await apprPage.waitForTimeout(3000);
+  // 承認後のページreloadが落ち着くのを待ち、詳細を再取得してから業務操作の適用（状態変化）をポーリングする
+  await apprPage.waitForTimeout(2500);
   await gotoReliable(apprPage, BASE + '/approval/requests/' + reqId);
+  const pollDeadline = Date.now() + 25000;
+  let afterApprove = await t.readTarget(apprPage);
+  while (t.sameState(beforeStatus, afterApprove) && Date.now() < pollDeadline) {
+    await apprPage.waitForTimeout(1000);
+    afterApprove = await t.readTarget(apprPage);
+  }
   await shot(apprPage, '4-request-detail-after-approve', dir);
-
-  const afterApprove = await t.readTarget(apprPage);
   step('target_after_approve', afterApprove.data || afterApprove);
   const targetStateChanged = !t.sameState(beforeStatus, afterApprove);
   step('business_operation_applied_once', { targetStateChanged, after: afterApprove.data || afterApprove });
@@ -269,8 +291,16 @@ const specs = [
                clickApply: async (pg) => {
                  await pg.evaluate((m) => { const el = document.getElementById('closingMonth'); if (el) el.value = m; }, month);
                  await pg.evaluate(() => { const b = document.getElementById('btnLoadClosing'); if (b) b.click(); });
-                 await pg.waitForTimeout(1800);
-                 const st = await pg.evaluate(() => { const b = document.getElementById('btnConfirmClosing'); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked'; });
+                 // 対象月のsummary反映後、締めボタンがenabledになるまでポーリング（最大12秒）
+                 const deadline = Date.now() + 12000;
+                 let st = 'disabled';
+                 while (Date.now() < deadline) {
+                   try {
+                     st = await pg.evaluate(() => { const b = document.getElementById('btnConfirmClosing'); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked'; });
+                   } catch (e) { st = 'disabled'; }
+                   if (st === 'clicked') break;
+                   await pg.waitForTimeout(600);
+                 }
                  if (st !== 'clicked') throw new Error('btnConfirmClosing ' + st);
                  await pg.waitForTimeout(1500);
                } };
