@@ -40,6 +40,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     private final WorkRecordMapper workRecordMapper;
     private final CustomerContactMapper customerContactMapper;
     private final DataScopeService dataScopeService;
+    private final com.ses.service.DocumentService documentService;
 
     @Override
     public Page<AcceptanceGridDto> pageGrid(long current, long size, String workMonth,
@@ -169,6 +170,72 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setRejectComment("検収取消（承認適用）");
         acceptance.setAcceptedAt(null);
         baseMapper.updateById(acceptance);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public com.ses.entity.Acceptance uploadDocument(Long acceptanceId, org.springframework.web.multipart.MultipartFile file) {
+        Acceptance acceptance = require(acceptanceId);
+        assertAllowedAcceptance(acceptanceId);
+        if (acceptance.getDocumentId() != null) {
+            throw BusinessException.of(409, "error.acceptance.documentAlreadyRegistered");
+        }
+        if (file == null || file.isEmpty()) {
+            throw BusinessException.of(400, "error.acceptance.documentRequired");
+        }
+        if (file.getSize() > 10L * 1024 * 1024) {
+            throw BusinessException.of(400, "error.acceptance.documentTooLarge");
+        }
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (java.io.IOException e) {
+            throw BusinessException.of(400, "error.acceptance.documentReadFailed");
+        }
+        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        com.ses.dto.document.DocumentRegisterRequest req =
+                com.ses.dto.document.DocumentRegisterRequest.builder()
+                        .documentType("ACCEPTANCE")
+                        .title("検収書: " + (contract == null ? "" : contract.getContractNo())
+                                + " / " + acceptance.getWorkMonth())
+                        .documentNo(contract == null ? null : contract.getContractNo())
+                        .counterpartyType("CUSTOMER")
+                        .counterpartyId(contract == null ? null : contract.getCustomerId())
+                        .counterpartyNameSnapshot(null)
+                        .transactionDate(acceptance.getAcceptedAt() == null ? java.time.LocalDate.now()
+                                : acceptance.getAcceptedAt().toLocalDate())
+                        .amount(acceptance.getAmountSnapshot())
+                        .direction("OUTGOING")
+                        .originalName(file.getOriginalFilename())
+                        .contentType(file.getContentType())
+                        .sourceType("RECEIVED")
+                        .businessKey("ACCEPTANCE:" + acceptance.getId())
+                        .versionDiscriminator("1")
+                        // 検収書は契約のscope（DataScope）で見せるためCONTRACTへリンクする
+                        .targetType("CONTRACT")
+                        .targetId(acceptance.getContractId())
+                        .build();
+        com.ses.entity.Document doc;
+        try (java.io.InputStream is = new java.io.ByteArrayInputStream(bytes)) {
+            doc = documentService.registerReceived(req, is);
+        } catch (java.io.IOException e) {
+            throw BusinessException.of(500, "error.acceptance.documentSaveFailed");
+        }
+        documentService.confirm(doc.getId());
+        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Acceptance>()
+                .eq("id", acceptanceId)
+                .set("document_id", doc.getId()));
+        return require(acceptanceId);
+    }
+
+    @Override
+    public java.io.InputStream downloadDocument(Long acceptanceId) {
+        Acceptance acceptance = require(acceptanceId);
+        assertAllowedAcceptance(acceptanceId);
+        if (acceptance.getDocumentId() == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        return documentService.download(acceptance.getDocumentId(), null);
     }
 
     @Override

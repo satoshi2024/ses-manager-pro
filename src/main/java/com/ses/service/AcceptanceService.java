@@ -32,6 +32,15 @@ public interface AcceptanceService extends IService<Acceptance> {
     /** 検収取消の承認適用（検収済→差戻し）。R3.4: 検収取消は承認必須。 */
     void applyCancellation(Long acceptanceId);
 
+    /**
+     * 検収書原本（ACCEPTANCE）を文書台帳へ登録し、acceptance.document_id に設定する（R3.1）。
+     * 冪等: 同一acceptanceからは1文書。scopeは検収一覧と同じ契約DataScope。
+     */
+    com.ses.entity.Acceptance uploadDocument(Long acceptanceId, org.springframework.web.multipart.MultipartFile file);
+
+    /** 検収書原本をscopeチェック付きで開く（download）。 */
+    java.io.InputStream downloadDocument(Long acceptanceId);
+
     /** 検収が現在のscopeで参照可能か検証する（404秘匿）。 */
     void assertAllowedAcceptance(Long acceptanceId);
 }

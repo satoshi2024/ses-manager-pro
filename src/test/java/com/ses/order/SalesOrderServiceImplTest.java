@@ -150,6 +150,15 @@ class SalesOrderServiceImplTest {
         assertThat(service.isCustomerPoDuplicate(10L, "   ")).isFalse();
     }
 
+    @Test
+    @DisplayName("R09-P2-06: scope外顧客のPO重複照会は拒否される（IDOR防止）")
+    void poDuplicateRejectsScopeOutsideCustomer() {
+        org.mockito.Mockito.doThrow(new BusinessException(404, "error.scope.notFound"))
+                .when(dataScopeService).assertAllowedCustomer(999L);
+        assertThatThrownBy(() -> service.isCustomerPoDuplicate(999L, "PO-001"))
+                .isInstanceOf(BusinessException.class);
+    }
+
     private SalesOrderLine line(Long id, String amount) {
         SalesOrderLine line = new SalesOrderLine();
         line.setId(id);

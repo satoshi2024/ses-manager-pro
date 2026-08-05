@@ -27,6 +27,8 @@ public class AcceptanceGridDto {
     private String rejectComment;
     private BigDecimal hoursSnapshot;
     private BigDecimal amountSnapshot;
+    /** 検収書原本document ID（R3.1）。 */
+    private Long documentId;
     private Integer version;
     /** 契約の検収要否（false=検収不要契約）。 */
     private Boolean acceptanceRequired;

@@ -86,6 +86,10 @@ function actionButtons(r) {
         }
     }
     if (r.status === '検収済') {
+        html += `<button type="button" class="btn btn-sm btn-outline-primary btn-doc-upload" data-id="${r.id}">${SES.i18n.t('acceptance.btn.docUpload', '検収書登録')}</button>`;
+        if (r.documentId) {
+            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/acceptances/${r.id}/document">${SES.i18n.t('acceptance.btn.docDownload', '検収書DL')}</a>`;
+        }
         html += `<button type="button" class="btn btn-sm btn-outline-danger btn-cancel-approval" data-id="${r.id}">${SES.i18n.t('acceptance.btn.cancelApproval', '取消を承認申請')}</button>`;
     }
     return html;
@@ -123,6 +127,29 @@ document.addEventListener('click', (e) => {
         SES.api.post(`/api/acceptances/${btn.dataset.id}/cancel-approval`, { reason: '' }).then(() => {
             SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
         });
+    } else if (e.target.closest('.btn-doc-upload')) {
+        const btn = e.target.closest('.btn-doc-upload');
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.png,.jpg,.jpeg';
+        input.onchange = () => {
+            if (!input.files.length) return;
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+            fetch(`/api/acceptances/${btn.dataset.id}/document`, {
+                method: 'POST',
+                headers: { 'X-XSRF-TOKEN': SES.csrf.token() },
+                body: formData
+            }).then(res => res.json()).then(result => {
+                if (result.code !== 200) {
+                    SES.toast.error(result.message || '処理に失敗しました。');
+                    return;
+                }
+                SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
+                loadAcceptances(1);
+            }).catch(() => SES.toast.error(SES.i18n.t('error.networkError', '通信エラー')));
+        };
+        input.click();
     }
 });
 

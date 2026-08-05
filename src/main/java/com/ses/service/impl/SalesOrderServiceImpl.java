@@ -229,6 +229,10 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
 
     @Override
     public boolean isCustomerPoDuplicate(Long customerId, String customerPoNo) {
+        // scope外顧客のPO存在をbooleanで漏らさない（R09-P2-06: IDOR防止）
+        if (customerId != null) {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
         String po = normalizePo(customerPoNo);
         if (po == null) {
             return false;

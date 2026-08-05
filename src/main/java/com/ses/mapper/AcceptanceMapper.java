@@ -44,6 +44,7 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             a.reject_comment       AS rejectComment,
             a.hours_snapshot       AS hoursSnapshot,
             a.amount_snapshot      AS amountSnapshot,
+            a.document_id          AS documentId,
             a.version              AS version,
             c.acceptance_required  AS acceptanceRequired
         FROM t_work_record w

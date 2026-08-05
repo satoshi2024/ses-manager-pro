@@ -7,6 +7,9 @@ import com.ses.entity.Acceptance;
 import com.ses.service.AcceptanceService;
 import com.ses.service.approval.ApprovalTargetAdapterRegistry;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -59,6 +62,23 @@ public class AcceptanceApiController {
     @PostMapping("/{id}/resubmit")
     public ApiResult<Acceptance> resubmit(@PathVariable Long id) {
         return ApiResult.success(acceptanceService.resubmit(id));
+    }
+
+    /** 検収書原本（ACCEPTANCE）を文書台帳へ登録する（R3.1）。 */
+    @PostMapping("/{id}/document")
+    public ApiResult<Acceptance> uploadDocument(@PathVariable Long id,
+                                                @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return ApiResult.success(acceptanceService.uploadDocument(id, file));
+    }
+
+    /** 検収書原本をdownloadする（検収一覧と同じscope）。 */
+    @GetMapping("/{id}/document")
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> downloadDocument(@PathVariable Long id) {
+        java.io.InputStream stream = acceptanceService.downloadDocument(id);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"acceptance_" + id + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(new org.springframework.core.io.InputStreamResource(stream));
     }
 
     /** 検収取消の承認申請（R3.4: 検収済work recordの再openには検収取消承認が必要）。 */

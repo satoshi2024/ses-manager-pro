@@ -272,4 +272,34 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           )
     """)
     List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsAll(@Param("billingMonth") String billingMonth);
+
+    /**
+     * 請求生成時に検収済acceptance行をFOR UPDATEでロックする（R09-P2-03 / design §5.3）。
+     * 検収取消（applyCancellation）と直列化し、競合した場合はこの件数と
+     * {@link #countAcceptanceRequiredWorkRecords} が一致せず請求生成を409で失敗させる。
+     */
+    @Select("""
+        <script>
+        SELECT a.id
+        FROM t_acceptance a
+        INNER JOIN t_contract c ON c.id = a.contract_id AND c.deleted_flag = 0
+        WHERE a.work_record_id IN <foreach collection="workRecordIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          AND a.status = '検収済' AND a.deleted_flag = 0
+          AND c.acceptance_required = 1
+        FOR UPDATE
+        </script>
+        """)
+    List<Long> lockAcceptedAcceptancesByWorkRecordIds(@Param("workRecordIds") List<Long> workRecordIds);
+
+    /** 請求生成対象のうち検収要（acceptance_required=1）のwork record件数。 */
+    @Select("""
+        <script>
+        SELECT COUNT(*)
+        FROM t_work_record w
+        INNER JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        WHERE w.id IN <foreach collection="workRecordIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          AND c.acceptance_required = 1
+        </script>
+        """)
+    long countAcceptanceRequiredWorkRecords(@Param("workRecordIds") List<Long> workRecordIds);
 }

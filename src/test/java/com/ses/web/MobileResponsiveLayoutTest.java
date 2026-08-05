@@ -50,7 +50,7 @@ class MobileResponsiveLayoutTest {
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         org.mockito.Mockito.when(roleMenuService.getAllMenuKeys())
-            .thenReturn(java.util.List.of("engineer", "project", "customer", "proposal", "contract", "crm-lead", "crm-opportunity"));
+            .thenReturn(java.util.List.of("engineer", "project", "customer", "proposal", "contract", "crm-lead", "crm-opportunity", "sales-order", "acceptance"));
     }
 
     /** 共通レイアウト(base.html)を継承する全ページ。 */
@@ -67,7 +67,10 @@ class MobileResponsiveLayoutTest {
             "/crm/opportunities",
             "/crm/opportunities/kpi",
             "/email/template/list",
-            "/ai/matching"
+            "/ai/matching",
+            // order-acceptance-workflow(S09) の新規ページ（R09-P2-07）
+            "/sales-order",
+            "/acceptance"
     };
 
     private String render(String uri) throws Exception {
@@ -95,7 +98,9 @@ class MobileResponsiveLayoutTest {
             "/crm/opportunities",
             "/crm/opportunities/kpi",
             "/email/template/list",
-            "/ai/matching"
+            "/ai/matching",
+            "/sales-order",
+            "/acceptance"
     })
     void 全ページにモバイル用レイアウト部品が差し込まれている(String uri) throws Exception {
         String html = render(uri);

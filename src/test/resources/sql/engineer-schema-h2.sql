@@ -226,6 +226,8 @@ CREATE TABLE t_contract (
   deleted_flag            TINYINT DEFAULT 0,
   version                 INT NOT NULL DEFAULT 0
 );
+-- R09-P2-04: 本番のuk_contract_order_line（1明細→1契約）をH2統合testでも検証できるようにする
+CREATE UNIQUE INDEX IF NOT EXISTS uk_contract_order_line ON t_contract(order_line_id);
 
 DROP TABLE IF EXISTS t_quotation CASCADE;
 

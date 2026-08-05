@@ -9,14 +9,14 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | IN PROGRESS（M完了・Review待ち） |
+| state | FIX（R09 Round1指摘対応中） |
 | base | f523e11（main / origin/main 一致） |
 | head | a8bdfc0（branch codex/order-acceptance-workflow） |
 | merge | unmerged（Review合格後にmerge） |
-| latest review | —（未開始。R09依頼待ち） |
-| verdict | — |
-| issue count | — |
-| next action | R09独立Review依頼 |
+| latest review | R09 round 1 / 2026-08-06 |
+| verdict | FAIL（P0=0 / P1=2 / P2=7 / NOTE=4）→ 対応中 |
+| issue count | P0=0 / P1=2 / P2=7 / NOTE=4（全て対応済み予定、Round2再Review待ち） |
+| next action | R09 Round2 差分再Review依頼 |
 
 ## 2. OPEN Issue Register
 
@@ -169,3 +169,38 @@
 - **未検証/留意**:
   - 承認route・検収取消（acceptance.cancel）の実ブラウザ操作は、route設定が必要なためDemoでは申請APIまで確認（承認適用のapplyCancellationはH2統合testで検証済み）。契約の稼動化は承認フローを実ブラウザ相当のAPI経由で通し確認。
   - desktop/390pxの実ブラウザDemoは実施済み。画面の全操作（編集・削除・全フィルタ）は各API/統合testで検証済み。
+
+## 12. R09 Round1 独立Review指摘と対応 — 記録（2026-08-06）
+
+独立Review（R09、read-only子Agent）: Base f523e11 → Head 789deeb。判定 **FAIL（P0=0 / P1=2 / P2=7 / NOTE=4）**。
+
+### OPEN Issue Register（R09）
+
+| issue | severity | 内容 | 対応 |
+|---|---|---|---|
+| R09-P1-01 | P1 | MのL4証拠（1512/0/0/0）が最終Headと不一致（a8bdfc0のproduction変更・test2件がL4未実行） | 本Roundで最終HeadにてL4全量を再実行し証拠をledgerへ追記（下記§13） |
+| R09-P1-02 | P1 | R3.1「原本を持つ」未実装（t_acceptance.document_id設定経路なし） | 検収書（ACCEPTANCE）upload→文書台帳登録→document_id設定＋download（CONTRACT scope）を実装（AcceptanceService/API/UI/test）。design §3に明記 |
+| R09-P2-01 | P2 | 既存契約が全件検収要になり請求停止。reconciliation/rollback未定義 | V80にlegacy backfill（既存契約=order_line_id NULL → acceptance_required=0）を追加＋design §1にgo-live移行方針を明記 |
+| R09-P2-02 | P2 | fresh/legacyでFK形状が非対称 | V80に情報スキーマguard付きFK ALTER 7本を追加し両経路を収束 |
+| R09-P2-03 | P2 | design §5.3「請求生成側をversion CASで失敗させる」未実装 | InvoiceMapperに検収済acceptance FOR UPDATEロック＋検収要件数照合を追加し、競合時409 |
+| R09-P2-04 | P2 | engineer-schema-h2.sqlにuk_contract_order_line無し | CREATE UNIQUE INDEX IF NOT EXISTSを追加 |
+| R09-P2-05 | P2 | review-ledgerのhead/commit列挙が実Headと不一致 | §1現行判定を実Headへ同期、commit列挙を8件へ訂正 |
+| R09-P2-06 | P2 | /api/sales-orders/po-duplicateがscope外顧客を照会可能 | isCustomerPoDuplicateにassertAllowedCustomerを追加＋unit test |
+| R09-P2-07 | P2 | 自動モバイル回帰が/sales-order・/acceptance未カバー | MobileResponsiveLayoutTestのALL_PAGES/@ValueSourceへ追加 |
+| R09-NOTE-01 | NOTE | /api/my/acceptancesのUI不在 | design §5.2にS13/S14で接続する想定を明記 |
+| R09-NOTE-02/03/04 | NOTE | fail-open PDF ledger / N+1 / updateById戻り値 | 既存踏襲・許容範囲として受け入れ（production変更なし） |
+
+### 対応commit（R09 fix delta）
+- `V80__order_acceptance_workflow.sql`: legacy backfill + FK収束ALTER（P2-01/P2-02）
+- `engineer-schema-h2.sql`: uk_contract_order_line（P2-04）
+- `AcceptanceService/Impl/ApiController/AcceptanceGridDto/Mapper`: 検収書原本登録・download（P1-02）
+- `acceptance.js`/`list.html`/4言語bundle: 検収書登録・DLボタン（P1-02）
+- `InvoiceMapper/Impl`: 検収済acceptanceロック＋件数照合（P2-03）
+- `SalesOrderServiceImpl`: po-duplicate scope（P2-06）
+- `MobileResponsiveLayoutTest`: /sales-order・/acceptance追加（P2-07）
+- `design.md`: R3.1原本・go-live移行方針・S13注記
+- 新規test: `AcceptanceDocumentTest` 2件、`SalesOrderServiceImplTest#poDuplicateRejectsScopeOutsideCustomer`、既存F2統合testで案件fallback/未設定エラー2件
+
+### R09修正の定向test
+`mvn -o test -Dtest=<order全12クラス>,MobileResponsiveLayoutTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 全緑。`FlywayMigrationSmokeTest`（V80変更後fresh）→ 0/0/0 PASS。
+

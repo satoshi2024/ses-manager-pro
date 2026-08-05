@@ -120,6 +120,12 @@ PREPARE acceptance_required_stmt FROM @acceptance_required_sql;
 EXECUTE acceptance_required_stmt;
 DEALLOCATE PREPARE acceptance_required_stmt;
 
+-- 【go-live移行方針（R09-P2-01対応）】V80適用時点で既に存在する契約（order_line_idがNULL=注文経由でない
+-- 既存契約）は、検収フロー導入前に稼働していた実績の請求が全面停止しないよう「検収不要」へ移行する。
+-- V80以後に注文経由で作成される新規契約はNOT NULL DEFAULT 1（検収要）のまま。このUPDATEはmigration
+-- 適用時点の既存行だけを対象とし、以後のINSERTへは影響しない。
+UPDATE t_contract SET acceptance_required = 0 WHERE order_line_id IS NULL;
+
 -- ============================================================
 -- 4. t_acceptance — 契約×月の検収
 -- ============================================================
@@ -154,6 +160,67 @@ CREATE TABLE IF NOT EXISTS t_acceptance (
   CONSTRAINT fk_acceptance_document FOREIGN KEY (document_id) REFERENCES t_document(id)
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月次検収テーブル';
+
+
+-- 【fresh/legacy FK収束（R09-P2-02対応）】
+-- fresh DBはV1が t_sales_order / t_acceptance をFK無しで作成するため、V80のCREATE TABLE IF NOT EXISTSが
+-- スキップされFKが欠落する。legacy DB（V80でCREATE）と同一形状へ収束させるため、constraint名が無い場合に
+-- だけ情報スキーマ判定付きでADDする（MySQL 8にADD CONSTRAINT IF NOT EXISTSは無い）。
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_sales_order' AND constraint_name = 'fk_sales_order_contact') = 0,
+    'ALTER TABLE t_sales_order ADD CONSTRAINT fk_sales_order_contact FOREIGN KEY (contact_id) REFERENCES t_customer_contact(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_sales_order' AND constraint_name = 'fk_sales_order_quotation') = 0,
+    'ALTER TABLE t_sales_order ADD CONSTRAINT fk_sales_order_quotation FOREIGN KEY (quotation_id) REFERENCES t_quotation(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_sales_order' AND constraint_name = 'fk_sales_order_source_doc') = 0,
+    'ALTER TABLE t_sales_order ADD CONSTRAINT fk_sales_order_source_doc FOREIGN KEY (source_document_id) REFERENCES t_document(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_sales_order' AND constraint_name = 'fk_sales_order_ack_doc') = 0,
+    'ALTER TABLE t_sales_order ADD CONSTRAINT fk_sales_order_ack_doc FOREIGN KEY (acknowledgement_document_id) REFERENCES t_document(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_acceptance' AND constraint_name = 'fk_acceptance_work_record') = 0,
+    'ALTER TABLE t_acceptance ADD CONSTRAINT fk_acceptance_work_record FOREIGN KEY (work_record_id) REFERENCES t_work_record(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_acceptance' AND constraint_name = 'fk_acceptance_contact') = 0,
+    'ALTER TABLE t_acceptance ADD CONSTRAINT fk_acceptance_contact FOREIGN KEY (customer_contact_id) REFERENCES t_customer_contact(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
+
+SET @fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_acceptance' AND constraint_name = 'fk_acceptance_document') = 0,
+    'ALTER TABLE t_acceptance ADD CONSTRAINT fk_acceptance_document FOREIGN KEY (document_id) REFERENCES t_document(id) ON UPDATE CASCADE ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE fk_stmt FROM @fk_sql; EXECUTE fk_stmt; DEALLOCATE PREPARE fk_stmt;
 
 -- ============================================================
 -- 5. m_menu / t_role_menu（要員ロールはマイメニューのみ。HRは不可視）

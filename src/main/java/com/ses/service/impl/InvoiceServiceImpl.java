@@ -115,6 +115,19 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             throw BusinessException.of("error.invoice.noWorkRecord");
         }
 
+        // 検収済acceptance行をFOR UPDATEでロックし、検収取消（applyCancellation）と直列化する
+        // （design §5.3: 競合した場合は請求生成側をversion CAS相当で失敗させる）。
+        // 検収不要契約は対象外のため、検収要のwork record件数とロックできた検収済acceptance件数が
+        // 一致しなければ、SELECT後に検収取消が確定したことを意味し409で中断する。
+        List<Long> workRecordIds = unbilledList.stream()
+                .map(UnbilledWorkRecordDto::getWorkRecordId)
+                .collect(java.util.stream.Collectors.toList());
+        long lockedAccepted = baseMapper.lockAcceptedAcceptancesByWorkRecordIds(workRecordIds).size();
+        long requiredAcceptance = baseMapper.countAcceptanceRequiredWorkRecords(workRecordIds);
+        if (lockedAccepted != requiredAcceptance) {
+            throw BusinessException.of(409, "error.invoice.acceptanceChanged");
+        }
+
         BigDecimal subtotal = BigDecimal.ZERO;
         for (UnbilledWorkRecordDto dto : unbilledList) {
             if (dto.getBillingAmount() != null) {
