@@ -104,6 +104,112 @@ class FlywayV79_1RepairSmokeTest {
         assertV79_1Schema(latest);
     }
 
+
+    /** V79.1 runbookの各partial状態（DROP後 / FK追加後 / CHECK追加後）からの再実行を実MySQLで検証する。 */
+    @Test
+    void V79_1runbookは各partial状態から再実行でき最終schemaとV79_1限定repair_validateに収束する()
+            throws Exception {
+        for (String partial : List.of("AFTER_DROP", "AFTER_FK_ADD", "AFTER_CHECK_ADD")) {
+            resetDatabase();
+            installOldV79_1SchemaAndHistory();
+            applyRunbookPartialState(partial);
+            assertRunbookPartialState(partial);
+
+            // 未適用のDDLだけをinformation_schema判定で実行し、どの状態からでも最終schemaへ収束する。
+            executeForwardRepairRunbook();
+            // 冪等性: 最終状態（中断点C）から再実行しても安全であること。
+            executeForwardRepairRunbook();
+            try (Connection connection = MYSQL.createConnection("");
+                 Statement statement = connection.createStatement()) {
+                assertReferentialAction(statement, "fk_approval_responsibility_org", "RESTRICT", "RESTRICT",
+                        "m_organization_unit", "id");
+                assertCheckConstraintExists(statement, "chk_approval_responsibility_organization");
+            }
+
+            // V79.1限定allowlist repair -> validate -> 最終schema。
+            Flyway repaired = flyway();
+            FlywayValidateException oldChecksumFailure = assertThrows(
+                    FlywayValidateException.class, repaired::validate);
+            assertValidationFailureMentionsV79_1(oldChecksumFailure);
+            repairOnlyAllowlistedV79_1Checksum(repaired);
+            repaired.validate();
+            assertV79_1Schema(repaired);
+        }
+    }
+
+    /** 中断点（A）DROP後 /（B）FK追加後 /（C）CHECK追加後のpartial状態を再現する。 */
+    private void applyRunbookPartialState(String partial) throws Exception {
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            switch (partial) {
+                case "AFTER_DROP" -> statement.execute(
+                        "ALTER TABLE t_approval_responsibility DROP FOREIGN KEY fk_approval_responsibility_org");
+                case "AFTER_FK_ADD" -> {
+                    statement.execute(
+                            "ALTER TABLE t_approval_responsibility DROP FOREIGN KEY fk_approval_responsibility_org");
+                    statement.execute("ALTER TABLE t_approval_responsibility ADD CONSTRAINT "
+                            + "fk_approval_responsibility_org FOREIGN KEY (organization_id) "
+                            + "REFERENCES m_organization_unit(id) ON UPDATE RESTRICT ON DELETE RESTRICT");
+                }
+                case "AFTER_CHECK_ADD" -> {
+                    statement.execute(
+                            "ALTER TABLE t_approval_responsibility DROP FOREIGN KEY fk_approval_responsibility_org");
+                    statement.execute("ALTER TABLE t_approval_responsibility ADD CONSTRAINT "
+                            + "fk_approval_responsibility_org FOREIGN KEY (organization_id) "
+                            + "REFERENCES m_organization_unit(id) ON UPDATE RESTRICT ON DELETE RESTRICT");
+                    statement.execute("ALTER TABLE t_approval_responsibility ADD CONSTRAINT "
+                            + "chk_approval_responsibility_organization CHECK "
+                            + "(responsibility_type = 'FINANCE_MANAGER' OR organization_id IS NOT NULL)");
+                }
+                default -> throw new IllegalArgumentException("unknown partial state: " + partial);
+            }
+        }
+    }
+
+    /** 各partial状態の前提（FK/CHECKの存在とaction）を確認する。 */
+    private void assertRunbookPartialState(String partial) throws Exception {
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            boolean fkExists = hasReferentialConstraint(statement, "fk_approval_responsibility_org");
+            boolean checkExists = hasCheckConstraint(statement, "chk_approval_responsibility_organization");
+            switch (partial) {
+                case "AFTER_DROP" -> {
+                    assertFalse(fkExists, "AFTER_DROPはFKが存在しない状態であるはず");
+                    assertFalse(checkExists, "AFTER_DROPはCHECKが存在しない状態であるはず");
+                }
+                case "AFTER_FK_ADD" -> {
+                    assertTrue(fkExists, "AFTER_FK_ADDはFKが存在する状態であるはず");
+                    assertReferentialAction(statement, "fk_approval_responsibility_org", "RESTRICT", "RESTRICT",
+                            "m_organization_unit", "id");
+                    assertFalse(checkExists, "AFTER_FK_ADDはCHECKが存在しない状態であるはず");
+                }
+                case "AFTER_CHECK_ADD" -> {
+                    assertTrue(fkExists, "AFTER_CHECK_ADDはFKが存在する状態であるはず");
+                    assertReferentialAction(statement, "fk_approval_responsibility_org", "RESTRICT", "RESTRICT",
+                            "m_organization_unit", "id");
+                    assertTrue(checkExists, "AFTER_CHECK_ADDはCHECKが存在する状態であるはず");
+                }
+                default -> throw new IllegalArgumentException("unknown partial state: " + partial);
+            }
+        }
+    }
+
+    private boolean hasReferentialConstraint(Statement statement, String constraint) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS rc "
+                        + "WHERE rc.CONSTRAINT_SCHEMA=DATABASE() AND rc.TABLE_NAME='t_approval_responsibility' "
+                        + "AND rc.CONSTRAINT_NAME='" + constraint + "'")) {
+            return resultSet.next();
+        }
+    }
+
+    private boolean hasCheckConstraint(Statement statement, String constraint) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() "
+                        + "AND table_name='t_approval_responsibility' AND constraint_name='" + constraint
+                        + "' AND constraint_type='CHECK'")) {
+            return resultSet.next();
+        }
+    }
+
     private void applyLegacyV79ThenCurrent() throws Exception {
         Flyway v79 = flywayTarget("79");
         v79.migrate();

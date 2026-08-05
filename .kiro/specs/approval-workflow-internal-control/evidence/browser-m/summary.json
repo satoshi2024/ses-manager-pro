@@ -1,0 +1,2174 @@
+[
+  {
+    "flow": "quotation-submit",
+    "name": "見積提出",
+    "viewport": "desktop",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/quotation",
+        "title": "見積管理 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 0,
+        "deletedFlag": 0
+      },
+      {
+        "name": "target_after_apply",
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 0,
+        "deletedFlag": 0
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 1,
+          "quotationNo": "Q-202608-0001",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "下書き",
+          "remarks": "S07ブラウザDemo用",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:06:18",
+          "version": 0,
+          "deletedFlag": 0
+        },
+        "after": {
+          "id": 1,
+          "quotationNo": "Q-202608-0001",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "下書き",
+          "remarks": "S07ブラウザDemo用",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:06:18",
+          "version": 0,
+          "deletedFlag": 0
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 36,
+            "requestNo": "AR-36",
+            "status": "in_review",
+            "targetId": 1
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "提出済",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 1,
+        "deletedFlag": 0
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 1,
+          "quotationNo": "Q-202608-0001",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "提出済",
+          "remarks": "S07ブラウザDemo用",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:06:18",
+          "version": 1,
+          "deletedFlag": 0
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "quotation-submit",
+    "name": "見積提出",
+    "viewport": "390px",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/quotation",
+        "title": "見積管理 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 2,
+        "quotationNo": "Q-202608-0002",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "version": 0,
+        "deletedFlag": 0
+      },
+      {
+        "name": "target_after_apply",
+        "id": 2,
+        "quotationNo": "Q-202608-0002",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "version": 0,
+        "deletedFlag": 0
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 2,
+          "quotationNo": "Q-202608-0002",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "下書き",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "version": 0,
+          "deletedFlag": 0
+        },
+        "after": {
+          "id": 2,
+          "quotationNo": "Q-202608-0002",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "下書き",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "version": 0,
+          "deletedFlag": 0
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 37,
+            "requestNo": "AR-37",
+            "status": "in_review",
+            "targetId": 2
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 2,
+        "quotationNo": "Q-202608-0002",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "提出済",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "version": 1,
+        "deletedFlag": 0
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 2,
+          "quotationNo": "Q-202608-0002",
+          "customerId": 1,
+          "projectId": 1,
+          "engineerId": 1,
+          "proposalId": null,
+          "title": "デモ商事 基幹システム開発（要員提供・モバイル）",
+          "unitPrice": 600000,
+          "settlementHoursMin": 140,
+          "settlementHoursMax": 180,
+          "validUntil": "2026-12-31",
+          "status": "提出済",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "sourceOpportunityId": null,
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "version": 1,
+          "deletedFlag": 0
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "contract-activate",
+    "name": "契約稼動化",
+    "viewport": "desktop",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/contract/list",
+        "title": "契約一覧 - SES Manager Pro | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 2,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0001",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "準備中",
+        "remarks": "S07ブラウザDemo用",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 0,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "target_after_apply",
+        "id": 2,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0001",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "準備中",
+        "remarks": "S07ブラウザDemo用",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 0,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 2,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0001",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "準備中",
+          "remarks": "S07ブラウザDemo用",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 0,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        },
+        "after": {
+          "id": 2,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0001",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "準備中",
+          "remarks": "S07ブラウザDemo用",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 0,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 38,
+            "requestNo": "AR-38",
+            "status": "in_review",
+            "targetId": 2
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 2,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0001",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "稼動中",
+        "remarks": "S07ブラウザDemo用",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 1,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 2,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0001",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "稼動中",
+          "remarks": "S07ブラウザDemo用",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 1,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "contract-activate",
+    "name": "契約稼動化",
+    "viewport": "390px",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/contract/list",
+        "title": "契約一覧 - SES Manager Pro | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 3,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0002",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "準備中",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 0,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "target_after_apply",
+        "id": 3,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0002",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "準備中",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 0,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 3,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0002",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "準備中",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 0,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        },
+        "after": {
+          "id": 3,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0002",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "準備中",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 0,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 39,
+            "requestNo": "AR-39",
+            "status": "in_review",
+            "targetId": 3
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 3,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:10",
+        "deletedFlag": 0,
+        "contractNo": "C-2026-0002",
+        "proposalId": null,
+        "engineerId": 1,
+        "projectId": 1,
+        "customerId": 1,
+        "contractType": "準委任",
+        "startDate": "2026-07-01",
+        "contractDate": "2026-06-15",
+        "jobDescription": "デモ商事 基幹システム開発",
+        "workLocation": "東京都千代田区",
+        "inspectionDueDate": null,
+        "paymentDueDate": null,
+        "paymentMethod": null,
+        "endDate": null,
+        "sellingPrice": 600000,
+        "costPrice": 480000,
+        "costCenterId": null,
+        "settlementHoursMin": null,
+        "settlementHoursMax": null,
+        "fractionRule": null,
+        "autoRenew": 1,
+        "status": "稼動中",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "directCommandFlag": false,
+        "salesUserId": null,
+        "commissionBaseType": null,
+        "commissionRate": null,
+        "renewedFromContractId": null,
+        "quotationId": null,
+        "renewalDecision": null,
+        "createdBy": 1,
+        "version": 1,
+        "settlementHoursRangeValid": true,
+        "dateRangeValid": true
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 3,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:10",
+          "deletedFlag": 0,
+          "contractNo": "C-2026-0002",
+          "proposalId": null,
+          "engineerId": 1,
+          "projectId": 1,
+          "customerId": 1,
+          "contractType": "準委任",
+          "startDate": "2026-07-01",
+          "contractDate": "2026-06-15",
+          "jobDescription": "デモ商事 基幹システム開発",
+          "workLocation": "東京都千代田区",
+          "inspectionDueDate": null,
+          "paymentDueDate": null,
+          "paymentMethod": null,
+          "endDate": null,
+          "sellingPrice": 600000,
+          "costPrice": 480000,
+          "costCenterId": null,
+          "settlementHoursMin": null,
+          "settlementHoursMax": null,
+          "fractionRule": null,
+          "autoRenew": 1,
+          "status": "稼動中",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "directCommandFlag": false,
+          "salesUserId": null,
+          "commissionBaseType": null,
+          "commissionRate": null,
+          "renewedFromContractId": null,
+          "quotationId": null,
+          "renewalDecision": null,
+          "createdBy": 1,
+          "version": 1,
+          "settlementHoursRangeValid": true,
+          "dateRangeValid": true
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "invoice-send",
+    "name": "請求送付",
+    "viewport": "desktop",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/invoice?month=2026-07",
+        "title": "請求・支払 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 1,
+        "invoiceNo": "INV-202607-0001",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "未送付",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 3,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [
+          {
+            "id": 1,
+            "invoiceId": 1,
+            "workRecordId": 1,
+            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "amount": 600000
+          }
+        ],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "target_after_apply",
+        "id": 1,
+        "invoiceNo": "INV-202607-0001",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "未送付",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 3,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [
+          {
+            "id": 1,
+            "invoiceId": 1,
+            "workRecordId": 1,
+            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "amount": 600000
+          }
+        ],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 1,
+          "invoiceNo": "INV-202607-0001",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "未送付",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 3,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [
+            {
+              "id": 1,
+              "invoiceId": 1,
+              "workRecordId": 1,
+              "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+              "amount": 600000
+            }
+          ],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        },
+        "after": {
+          "id": 1,
+          "invoiceNo": "INV-202607-0001",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "未送付",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 3,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [
+            {
+              "id": 1,
+              "invoiceId": 1,
+              "workRecordId": 1,
+              "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+              "amount": 600000
+            }
+          ],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 40,
+            "requestNo": "AR-40",
+            "status": "in_review",
+            "targetId": 1
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 1,
+        "invoiceNo": "INV-202607-0001",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "送付済",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 4,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [
+          {
+            "id": 1,
+            "invoiceId": 1,
+            "workRecordId": 1,
+            "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+            "amount": 600000
+          }
+        ],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 1,
+          "invoiceNo": "INV-202607-0001",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "送付済",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:37:24",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 4,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [
+            {
+              "id": 1,
+              "invoiceId": 1,
+              "workRecordId": 1,
+              "description": "鈴木 一郎（デモ商事 基幹システム開発）",
+              "amount": 600000
+            }
+          ],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "invoice-send",
+    "name": "請求送付",
+    "viewport": "390px",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/invoice?month=2026-07",
+        "title": "請求・支払 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 2,
+        "invoiceNo": "INV-202607-0002",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "未送付",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 3,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "target_after_apply",
+        "id": 2,
+        "invoiceNo": "INV-202607-0002",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "未送付",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 3,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 2,
+          "invoiceNo": "INV-202607-0002",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "未送付",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 3,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        },
+        "after": {
+          "id": 2,
+          "invoiceNo": "INV-202607-0002",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "未送付",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 3,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 41,
+            "requestNo": "AR-41",
+            "status": "in_review",
+            "targetId": 2
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 2,
+        "invoiceNo": "INV-202607-0002",
+        "customerId": 1,
+        "billingMonth": "2026-07",
+        "subtotal": 600000,
+        "tax": 60000,
+        "total": 660000,
+        "taxRate": null,
+        "costCenterId": null,
+        "status": "送付済",
+        "issuedDate": null,
+        "paidDate": null,
+        "dueDate": "2026-08-31",
+        "remarks": "S07ブラウザDemo用(390px)",
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:46:08",
+        "updatedAt": "2026-08-05T02:11:11",
+        "version": 4,
+        "deletedFlag": 0,
+        "customer": {
+          "id": 1,
+          "createdAt": "2026-08-05T01:33:36",
+          "updatedAt": "2026-08-05T01:33:36",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        },
+        "items": [],
+        "companyName": "SES Manager Pro",
+        "companyRegistrationNumber": "",
+        "companyAddress": "",
+        "taxRatePercent": "10"
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 2,
+          "invoiceNo": "INV-202607-0002",
+          "customerId": 1,
+          "billingMonth": "2026-07",
+          "subtotal": 600000,
+          "tax": 60000,
+          "total": 660000,
+          "taxRate": null,
+          "costCenterId": null,
+          "status": "送付済",
+          "issuedDate": null,
+          "paidDate": null,
+          "dueDate": "2026-08-31",
+          "remarks": "S07ブラウザDemo用(390px)",
+          "createdBy": 1,
+          "createdAt": "2026-08-05T01:46:08",
+          "updatedAt": "2026-08-05T02:11:11",
+          "version": 4,
+          "deletedFlag": 0,
+          "customer": {
+            "id": 1,
+            "createdAt": "2026-08-05T01:33:36",
+            "updatedAt": "2026-08-05T01:33:36",
+            "deletedFlag": 0,
+            "companyName": "株式会社アルファテクノロジー",
+            "companyNameKana": null,
+            "contactPerson": "佐藤 一郎",
+            "contactEmail": null,
+            "contactPhone": null,
+            "address": null,
+            "commercialFlow": "元請け",
+            "trustLevel": "A",
+            "remarks": null
+          },
+          "items": [],
+          "companyName": "SES Manager Pro",
+          "companyRegistrationNumber": "",
+          "companyAddress": "",
+          "taxRatePercent": "10"
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "bp-payment-confirm",
+    "name": "BP支払確定",
+    "viewport": "desktop",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/invoice?month=2026-07",
+        "title": "請求・支払 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 1,
+        "status": "未払",
+        "amount": 480000
+      },
+      {
+        "name": "target_after_apply",
+        "id": 1,
+        "status": "未払",
+        "amount": 480000
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 1,
+          "status": "未払",
+          "amount": 480000
+        },
+        "after": {
+          "id": 1,
+          "status": "未払",
+          "amount": 480000
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 42,
+            "requestNo": "AR-42",
+            "status": "in_review",
+            "targetId": 1
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 1,
+        "status": "支払済",
+        "amount": 480000
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 1,
+          "status": "支払済",
+          "amount": 480000
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "bp-payment-confirm",
+    "name": "BP支払確定",
+    "viewport": "390px",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "sales1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/invoice?month=2026-07",
+        "title": "請求・支払 | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "id": 2,
+        "status": "未払",
+        "amount": 480000
+      },
+      {
+        "name": "target_after_apply",
+        "id": 2,
+        "status": "未払",
+        "amount": 480000
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "id": 2,
+          "status": "未払",
+          "amount": 480000
+        },
+        "after": {
+          "id": 2,
+          "status": "未払",
+          "amount": 480000
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 43,
+            "requestNo": "AR-43",
+            "status": "in_review",
+            "targetId": 2
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "id": 2,
+        "status": "支払済",
+        "amount": 480000
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "id": 2,
+          "status": "支払済",
+          "amount": 480000
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "monthly-closing-confirm",
+    "name": "月次締め",
+    "viewport": "desktop",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "mgr1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/monthly-closing",
+        "title": "月次締めチェックリスト | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "month": "2026-05",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      },
+      {
+        "name": "target_after_apply",
+        "month": "2026-05",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "month": "2026-05",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": false,
+          "closedBy": null,
+          "closedByName": null,
+          "closedAt": null
+        },
+        "after": {
+          "month": "2026-05",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": false,
+          "closedBy": null,
+          "closedByName": null,
+          "closedAt": null
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 44,
+            "requestNo": "AR-44",
+            "status": "in_review",
+            "targetId": null
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "month": "2026-05",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": true,
+        "closedBy": 1,
+        "closedByName": "システム管理者",
+        "closedAt": "2026-08-05T11:15:05.9554679"
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "month": "2026-05",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": true,
+          "closedBy": 1,
+          "closedByName": "システム管理者",
+          "closedAt": "2026-08-05T11:15:05.9554679"
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  },
+  {
+    "flow": "monthly-closing-confirm",
+    "name": "月次締め",
+    "viewport": "390px",
+    "url": "http://localhost:8080",
+    "steps": [
+      {
+        "name": "applicant_login",
+        "user": "mgr1",
+        "url": "http://localhost:8080/dashboard"
+      },
+      {
+        "name": "applicant_page",
+        "url": "/monthly-closing",
+        "title": "月次締めチェックリスト | SES管理プロ"
+      },
+      {
+        "name": "target_before_apply",
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      },
+      {
+        "name": "target_after_apply",
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      },
+      {
+        "name": "applicant_alone_cannot_finalize",
+        "targetStateUnchanged": true,
+        "before": {
+          "month": "2026-04",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": false,
+          "closedBy": null,
+          "closedByName": null,
+          "closedAt": null
+        },
+        "after": {
+          "month": "2026-04",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": false,
+          "closedBy": null,
+          "closedByName": null,
+          "closedAt": null
+        }
+      },
+      {
+        "name": "approval_request_created_once",
+        "requestCount": 1,
+        "requests": [
+          {
+            "id": 45,
+            "requestNo": "AR-45",
+            "status": "in_review",
+            "targetId": null
+          }
+        ]
+      },
+      {
+        "name": "approver_login",
+        "user": "admin"
+      },
+      {
+        "name": "target_after_approve",
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": true,
+        "closedBy": 1,
+        "closedByName": "システム管理者",
+        "closedAt": "2026-08-05T11:15:32.5325489"
+      },
+      {
+        "name": "business_operation_applied_once",
+        "targetStateChanged": true,
+        "after": {
+          "month": "2026-04",
+          "unenteredWork": [],
+          "unconfirmedRecords": [],
+          "unbilledConfirmed": [],
+          "unpaidBp": [],
+          "overdueInvoices": [],
+          "complianceFindings": [],
+          "unenteredCount": 0,
+          "unconfirmedCount": 0,
+          "unbilledCount": 0,
+          "unpaidBpCount": 0,
+          "overdueCount": 0,
+          "complianceCount": 0,
+          "readyToClose": true,
+          "closed": true,
+          "closedBy": 1,
+          "closedByName": "システム管理者",
+          "closedAt": "2026-08-05T11:15:32.5325489"
+        }
+      },
+      {
+        "name": "approval_final_state",
+        "requestStatus": "approved",
+        "approveActionCount": 1,
+        "actions": [
+          {
+            "action": "APPROVE",
+            "stepNo": 1
+          }
+        ]
+      },
+      {
+        "name": "retry_approve_no_double_op",
+        "stateStable": true
+      }
+    ]
+  }
+]

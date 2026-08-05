@@ -1,0 +1,90 @@
+{
+  "flow": "bp-payment-confirm",
+  "name": "BP支払確定",
+  "viewport": "desktop",
+  "url": "http://localhost:8080",
+  "steps": [
+    {
+      "name": "applicant_login",
+      "user": "sales1",
+      "url": "http://localhost:8080/dashboard"
+    },
+    {
+      "name": "applicant_page",
+      "url": "/invoice?month=2026-07",
+      "title": "請求・支払 | SES管理プロ"
+    },
+    {
+      "name": "target_before_apply",
+      "id": 1,
+      "status": "未払",
+      "amount": 480000
+    },
+    {
+      "name": "target_after_apply",
+      "id": 1,
+      "status": "未払",
+      "amount": 480000
+    },
+    {
+      "name": "applicant_alone_cannot_finalize",
+      "targetStateUnchanged": true,
+      "before": {
+        "id": 1,
+        "status": "未払",
+        "amount": 480000
+      },
+      "after": {
+        "id": 1,
+        "status": "未払",
+        "amount": 480000
+      }
+    },
+    {
+      "name": "approval_request_created_once",
+      "requestCount": 1,
+      "requests": [
+        {
+          "id": 42,
+          "requestNo": "AR-42",
+          "status": "in_review",
+          "targetId": 1
+        }
+      ]
+    },
+    {
+      "name": "approver_login",
+      "user": "admin"
+    },
+    {
+      "name": "target_after_approve",
+      "id": 1,
+      "status": "支払済",
+      "amount": 480000
+    },
+    {
+      "name": "business_operation_applied_once",
+      "targetStateChanged": true,
+      "after": {
+        "id": 1,
+        "status": "支払済",
+        "amount": 480000
+      }
+    },
+    {
+      "name": "approval_final_state",
+      "requestStatus": "approved",
+      "approveActionCount": 1,
+      "actions": [
+        {
+          "action": "APPROVE",
+          "stepNo": 1
+        }
+      ]
+    },
+    {
+      "name": "retry_approve_no_double_op",
+      "stateStable": true
+    }
+  ]
+}

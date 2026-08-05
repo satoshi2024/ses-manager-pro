@@ -1,0 +1,186 @@
+{
+  "flow": "quotation-submit",
+  "name": "見積提出",
+  "viewport": "desktop",
+  "url": "http://localhost:8080",
+  "steps": [
+    {
+      "name": "applicant_login",
+      "user": "sales1",
+      "url": "http://localhost:8080/dashboard"
+    },
+    {
+      "name": "applicant_page",
+      "url": "/quotation",
+      "title": "見積管理 | SES管理プロ"
+    },
+    {
+      "name": "target_before_apply",
+      "id": 1,
+      "quotationNo": "Q-202608-0001",
+      "customerId": 1,
+      "projectId": 1,
+      "engineerId": 1,
+      "proposalId": null,
+      "title": "デモ商事 基幹システム開発（要員提供）",
+      "unitPrice": 600000,
+      "settlementHoursMin": 140,
+      "settlementHoursMax": 180,
+      "validUntil": "2026-12-31",
+      "status": "下書き",
+      "remarks": "S07ブラウザDemo用",
+      "sourceOpportunityId": null,
+      "createdBy": 1,
+      "createdAt": "2026-08-05T01:37:24",
+      "updatedAt": "2026-08-05T02:06:18",
+      "version": 0,
+      "deletedFlag": 0
+    },
+    {
+      "name": "target_after_apply",
+      "id": 1,
+      "quotationNo": "Q-202608-0001",
+      "customerId": 1,
+      "projectId": 1,
+      "engineerId": 1,
+      "proposalId": null,
+      "title": "デモ商事 基幹システム開発（要員提供）",
+      "unitPrice": 600000,
+      "settlementHoursMin": 140,
+      "settlementHoursMax": 180,
+      "validUntil": "2026-12-31",
+      "status": "下書き",
+      "remarks": "S07ブラウザDemo用",
+      "sourceOpportunityId": null,
+      "createdBy": 1,
+      "createdAt": "2026-08-05T01:37:24",
+      "updatedAt": "2026-08-05T02:06:18",
+      "version": 0,
+      "deletedFlag": 0
+    },
+    {
+      "name": "applicant_alone_cannot_finalize",
+      "targetStateUnchanged": true,
+      "before": {
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 0,
+        "deletedFlag": 0
+      },
+      "after": {
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "下書き",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 0,
+        "deletedFlag": 0
+      }
+    },
+    {
+      "name": "approval_request_created_once",
+      "requestCount": 1,
+      "requests": [
+        {
+          "id": 36,
+          "requestNo": "AR-36",
+          "status": "in_review",
+          "targetId": 1
+        }
+      ]
+    },
+    {
+      "name": "approver_login",
+      "user": "admin"
+    },
+    {
+      "name": "target_after_approve",
+      "id": 1,
+      "quotationNo": "Q-202608-0001",
+      "customerId": 1,
+      "projectId": 1,
+      "engineerId": 1,
+      "proposalId": null,
+      "title": "デモ商事 基幹システム開発（要員提供）",
+      "unitPrice": 600000,
+      "settlementHoursMin": 140,
+      "settlementHoursMax": 180,
+      "validUntil": "2026-12-31",
+      "status": "提出済",
+      "remarks": "S07ブラウザDemo用",
+      "sourceOpportunityId": null,
+      "createdBy": 1,
+      "createdAt": "2026-08-05T01:37:24",
+      "updatedAt": "2026-08-05T02:06:18",
+      "version": 1,
+      "deletedFlag": 0
+    },
+    {
+      "name": "business_operation_applied_once",
+      "targetStateChanged": true,
+      "after": {
+        "id": 1,
+        "quotationNo": "Q-202608-0001",
+        "customerId": 1,
+        "projectId": 1,
+        "engineerId": 1,
+        "proposalId": null,
+        "title": "デモ商事 基幹システム開発（要員提供）",
+        "unitPrice": 600000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "validUntil": "2026-12-31",
+        "status": "提出済",
+        "remarks": "S07ブラウザDemo用",
+        "sourceOpportunityId": null,
+        "createdBy": 1,
+        "createdAt": "2026-08-05T01:37:24",
+        "updatedAt": "2026-08-05T02:06:18",
+        "version": 1,
+        "deletedFlag": 0
+      }
+    },
+    {
+      "name": "approval_final_state",
+      "requestStatus": "approved",
+      "approveActionCount": 1,
+      "actions": [
+        {
+          "action": "APPROVE",
+          "stepNo": 1
+        }
+      ]
+    },
+    {
+      "name": "retry_approve_no_double_op",
+      "stateStable": true
+    }
+  ]
+}

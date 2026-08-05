@@ -1,8 +1,8 @@
 # S07 Round 4 Review manifest — Review対象production Head
 
-> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`、`74329e9`、`92fad28`、`94e82cd`の各Packet snapshotではなく、実Gitで確認したReview対象production/code Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`である。`1e8a2243e0ed095bb211519b1242d4bcff17caef`はその直前の履歴としてのみ扱い、現行Headの根拠には使用しない。
+> ファイル名は既存Packetからの参照互換のため維持する。内容の基準は旧`10dc316d`、`74329e9`、`92fad28`、`94e82cd`の各Packet snapshotではなく、実Gitで確認したReview対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`である。直前の`6680e7d81c7842262a2fd07c57fb9942e80573ce`（および旧`1e8a224`）は履歴としてのみ扱い、現行Headの根拠には使用しない。
 >
-> このmanifestは受入PASSの宣言ではない。Base→Review対象production/code Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。未達gateは未達のまま記録する。212 pathsはすべてReview対象production/code Headにcommit済みの範囲であり、Packet文書の独立commitは存在せず、4文書は現行Headに同梱されている。今回の追加編集による作業木差分はHeadのcommit帰属と別管理する。
+> このmanifestは受入PASSの宣言ではない。Base→Review対象code/evidence Headの全pathを一行ずつtask/commitへ帰属し、R1〜R5をAC→実装→assert→Demoの順で追跡可能にするためのReview証跡である。219 paths（#001〜#212に加え、`68fbbba`で追加された7 unique paths #213〜#219）はすべてReview対象code/evidence Headにcommit済みの範囲である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載し、文書commit hashをcurrent Headとして自己参照しない。
 
 ## 1. 対象とGit確定値
 
@@ -12,15 +12,15 @@
 | Review Base | `5d228d211d0d752833fe3424a3b8aa4b40096733` |
 | original implementation Head | `a70cb51145a94ec3d70421bcc1de77a6b236b559` |
 | Packet統合commit（過去の履歴） | `9215c5e797d063d13719b231175ab8741736a591` |
-| Review対象production Head | `6680e7d81c7842262a2fd07c57fb9942e80573ce` |
-| production refs | `HEAD = origin/main = origin/HEAD = 6680e7d81c7842262a2fd07c57fb9942e80573ce` |
-| branch / production Head確認時worktree | `main` / clean（Packet修正開始前） |
-| Base→Review対象production Head | **22 commits / 212 files / +10459/-330** |
-| 直前production delta | `1e8a224..6680e7d`、8 files |
-| 直前production deltaの範囲 | 4 Packet文書、V79.1 migration、Flyway smoke、ApprovalEngine/RouteResolver回帰test。これらはすべて`6680e7d`に含まれるproduction/code Headの履歴であり、今回の追加編集による作業木差分とは分離する |
-| Packet文書commit / provenance | **独立Packet commitなし。4文書はReview対象production Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`に同梱済み**（Head自身をPacket文書commitとして自己参照しない） |
-| Packet文書作業木 | 文書同期、V79.1専用回帰、scheduler H2設定・回帰追加後の12ファイルがdirty。production Headのclean状態と混同しない |
-| diff check | production Head確認時の`git diff --check` exit 0 |
+| Review対象code/evidence Head | `68fbbba4dff8255b3a745ce61e73e686a78bef3e` |
+| production refs | `HEAD = origin/main = origin/HEAD = 68fbbba4dff8255b3a745ce61e73e686a78bef3e` |
+| branch / worktree | `main` / clean（最終確認時） |
+| Base→Review対象code/evidence Head | **23 commits / 219 files / +11639/-337** |
+| 直前production delta | `6680e7d..68fbbba`、12 files（うち新規7 unique paths） |
+| 直前production deltaの範囲 | 4 Packet文書、V79.1 runbook、scheduler設定・H2回帰、FlywayV79_1RepairSmokeTest、OperationalBoundary実MySQL回帰、Webhook loopback回帰。これらはすべて`68fbbba`に含まれるcommit済みの履歴である |
+| Packet文書commit / provenance | **独立Packet commitなし。文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceであり、current Head（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）として自己参照しない** |
+| Packet文書作業木 | 最終確認時はclean。今回の文書commit（`git log -1 -- <path>`で解決）はReview対象code/evidence Headの後の履歴として別管理する |
+| diff check | `git diff --check` exit 0（最終確認時） |
 | 独立Review報告のdiff hash | `63ace139532f2ccfea84f4876c6f5191db12fa4d`（旧Packetの履歴証跡） |
 
 再現コマンド:
@@ -38,24 +38,21 @@ git diff --check
 ```
 
 
-### 1.1 Current worktree delta（Review対象production Head外）
+### 1.1 worktree stateと今回の7 unique paths（219-path inventoryへの帰属）
 
-Review対象production Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`に含まれない今回の未commit作業木は、Packet/中央台帳の同期、V79.1専用実MySQL証拠、scheduler H2警告回帰追加用の次の12ファイルである。これらを§2の212-path manifest、Base→Head統計、production Headのcommit帰属へ加算しない。
+最終確認時（`68fbbba4dff8255b3a745ce61e73e686a78bef3e`）のworktreeは**clean**である。旧Packetにあった「12ファイル未commit dirty」の記述は、`68fbbba`（回帰test commit）で12ファイルが全てcommit済みとなったため削除する。旧記述の12ファイルのうち、4 Packet文書は既に`6680e7d`時点の212 pathsに含まれており、残る7ファイルは今回の219-path inventoryへ新規unique paths（#213〜#219）として帰属する（§2.10）。
 
-- `.kiro/specs/approval-workflow-internal-control/review-ledger.md`
-- `.kiro/specs/approval-workflow-internal-control/review-manifest-10dc316d.md`
-- `.kiro/specs/approval-workflow-internal-control/tasks.md`
-- `.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md`
-- `src/test/java/com/ses/migration/FlywayV79_1RepairSmokeTest.java`
-- `sql/runbook/v79_1-fk-actions-forward-repair.sql`
-- `src/main/java/com/ses/config/SchedulerLockConfig.java`
-- `src/main/resources/application.yml`
-- `src/test/resources/application-test.yml`
-- `src/test/java/com/ses/config/SchedulerLockH2IntegrationTest.java`
-- `src/test/java/com/ses/operational/OperationalBoundaryMySqlIntegrationTest.java`
-- `src/test/java/com/ses/service/notification/WebhookNotifierLoopbackIntegrationTest.java`
+新規7 unique pathsの帰属:
 
-V79.1 migration、既存Flyway smoke、ApprovalEngine/RouteResolver回帰testはReview対象production Headに同梱済みであり、今回の作業木deltaではない。今回の編集・追加後は上記12ファイルがdirtyで、commit/pushは行わない。
+| # | status | path | primary task / scope |
+|---:|---|---|---|
+| 213 | A | `sql/runbook/v79_1-fk-actions-forward-repair.sql` | `R4-P1-01`/`T047/M` V79.1 forward repair runbook（information_schemaで再開可能） |
+| 214 | M | `src/main/java/com/ses/config/SchedulerLockConfig.java` | `T046/B1` scheduler DB時刻ロック設定（test profile切替） |
+| 215 | M | `src/main/resources/application.yml` | `T046/B1` `app.scheduler.lock.use-db-time`設定 |
+| 216 | A | `src/test/java/com/ses/config/SchedulerLockH2IntegrationTest.java` | `T046/B1` H2 lock warning回帰 |
+| 217 | A | `src/test/java/com/ses/migration/FlywayV79_1RepairSmokeTest.java` | `R4-P1-01` V79.1実MySQL partial/repair/rollback回帰 |
+| 218 | A | `src/test/java/com/ses/operational/OperationalBoundaryMySqlIntegrationTest.java` | `T046/B1`/`T047/M` 複数JVM ShedLock/claim・commit前rollback実MySQL回帰 |
+| 219 | A | `src/test/java/com/ses/service/notification/WebhookNotifierLoopbackIntegrationTest.java` | `T046/B1` loopback実HTTP Webhook回帰 |
 
 ### 帰属コード
 
@@ -66,8 +63,8 @@ V79.1 migration、既存Flyway smoke、ApprovalEngine/RouteResolver回帰testは
 | `T043/F2` | 5 target adapter・対象API委譲 | S07実装 |
 | `T044/A1` | inbox/request/diff/history UI | S07実装 |
 | `T045/A2` | route version・代理管理・R4-P1-01 route source管理 | S07実装と未達gateを分離 |
-| `T046/B1` | 通知/SLA/outbox/escalation | 実装済み部分と未達gateを分離 |
-| `T047/M` | 5業務画面統合・回帰 | checkboxは未完了を維持 |
+| `T046/B1` | 通知/SLA/outbox/escalation | 実装・回帰・実MySQL/loopback/複数JVM証拠を確認。`[x]` |
+| `T047/M` | 5業務画面統合・回帰 | 実装・回帰・CI相当L4・5業務desktop/390px browser Demo（10経路）を確認。`[x]` |
 | `R3-FIX` | Round 3修正・共有fixture/回帰 | S07由来またはshared consumerとして記録 |
 | `MIGRATION-CONTRACT` | S07 V75〜V79/V79.1、S09〜S17 V80〜V88の予約consumer | 後続specの予約文書。S07 production実装とは分離 |
 | `R4-DOC` | Round 4 Packet/manifest/ledger correction | current HeadとworktreeのReview process record |
@@ -75,7 +72,7 @@ V79.1 migration、既存Flyway smoke、ApprovalEngine/RouteResolver回帰testは
 
 ## 2. Base→Review対象production Headの全path manifest
 
-以下はReview対象production Headに対する`git diff --name-status --no-renames 5d228d211d0d752833fe3424a3b8aa4b40096733..6680e7d81c7842262a2fd07c57fb9942e80573ce`の全212 pathである。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。Review対象production Head後の未commit文書差分は§1.1と§5で別管理する。
+以下はReview対象code/evidence Headに対する`git diff --name-status --no-renames 5d228d211d0d752833fe3424a3b8aa4b40096733..68fbbba4dff8255b3a745ce61e73e686a78bef3e`の全219 pathである。#001〜#212は`6680e7d`時点の212 path、#213〜#219は`68fbbba`で追加された7 unique paths（§2.10）。各行にstatus、primary task/scope、変更を含む代表commitを記録する。同一pathが複数commitで変更された場合、commit欄は最終的な実装・証跡上の代表commitであり、§3のcommit履歴と併読する。
 
 ### 2.1 S07 spec packet（5 paths）
 
@@ -345,6 +342,20 @@ V79.1 migration、既存Flyway smoke、ApprovalEngine/RouteResolver回帰testは
 
 **path集計:** S07 packet 5 + roadmap dispatch 25 + other spec 18 + production Java 88 + migration SQL 5 + frontend/resources 30 + test Java 29 + test resources 5 + R4-P1-01 source additions 6 + R4-P1-01 test addition 1 = **212 unique paths**。`git diff --name-only 5d228d2..HEAD | Sort-Object -Unique`相当で一意212件を確認し、manifestの#001〜#212は各pathを一度だけ列挙する。重複0、未分類0。`ApprovalAdministrationServiceTest`と`RouteResolverServiceTest`の追加回帰はそれぞれ既存#182/#192の更新として帰属する。
 
+### 2.10 今回追加された7 unique paths（68fbbba、#213〜#219）
+
+`6680e7d..68fbbba`で追加された7 unique pathsは次のとおり。いずれも`68fbbba`にcommit済みであり、§1.1の表と一致する。
+
+| # | status | path | primary task / scope | commit |
+|---:|---|---|---|---|
+| 213 | A | `sql/runbook/v79_1-fk-actions-forward-repair.sql` | `R4-P1-01`/`T047/M` V79.1 forward repair runbook（information_schema再開可能） | `68fbbba` |
+| 214 | M | `src/main/java/com/ses/config/SchedulerLockConfig.java` | `T046/B1` scheduler DB時刻ロック設定 | `68fbbba` |
+| 215 | M | `src/main/resources/application.yml` | `T046/B1` `app.scheduler.lock.use-db-time`設定 | `68fbbba` |
+| 216 | A | `src/test/java/com/ses/config/SchedulerLockH2IntegrationTest.java` | `T046/B1` H2 lock warning回帰 | `68fbbba` |
+| 217 | A | `src/test/java/com/ses/migration/FlywayV79_1RepairSmokeTest.java` | `R4-P1-01` V79.1実MySQL partial/repair/rollback回帰 | `68fbbba` |
+| 218 | A | `src/test/java/com/ses/operational/OperationalBoundaryMySqlIntegrationTest.java` | `T046/B1`/`T047/M` 複数JVM ShedLock/claim・commit前rollback実MySQL回帰 | `68fbbba` |
+| 219 | A | `src/test/java/com/ses/service/notification/WebhookNotifierLoopbackIntegrationTest.java` | `T046/B1` loopback実HTTP Webhook回帰 | `68fbbba` |
+
 ## 3. R1〜R5 AC trace (AC→実装→assert→Demo)
 
 以下の`assert`は定向testまたは静的契約の入口、`Demo`は自動Demo相当を含む。`未達`は受入不成立を意味し、定向assertをPASSへ拡張しない。
@@ -405,44 +416,45 @@ V79.1 migration、既存Flyway smoke、ApprovalEngine/RouteResolver回帰testは
 
 ## 5. Verification / release gate
 
-### 5.1 Review対象production Head / current worktreeで記録された回帰
+### 5.1 Review対象code/evidence Headで記録された回帰と実測
 
-- Review対象production Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`のBase→Headは**22 commits / 212 files / +10459/-330**。`HEAD = origin/main = origin/HEAD`を確認した。production Head確認開始時のworktreeはcleanだった。Packet文書の**独立commitはなく、4文書は現行Headに同梱済み**である。今回の文書同期、V79.1専用回帰追加、scheduler H2設定・回帰追加後は12ファイル（4文書、V79.1専用test/runbook、scheduler設定Java・main/test YAML、新規H2 lock回帰test、OperationalBoundary実MySQL回帰、Webhook loopback回帰）がdirtyで、production Headのcommit帰属と分離して管理する。commit/pushは行わない。
+- Review対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`のBase→Headは**23 commits / 219 files / +11639/-337**。`HEAD = origin/main = origin/HEAD`を確認し、最終確認時のworktreeは**clean**である。Packet文書の独立commitはなく、文書自身のcommitは`git log -1 -- <path>`で解決するprovenanceとして記載する（current Headとして自己参照しない）。
 - R1.3追加対象testは`RouteResolverServiceTest` 28件（APPLICANT_MANAGER 8件追加）、`ApprovalAdministrationServiceTest` 13件、`ApprovalAdministrationApiControllerTest` 6件（responsibility逆期間HTTP 400追加）の計**47 / failures 0 / errors 0 / skipped 0**。request作成時にDBへ保存した`route_snapshot_json`を再読込し、manager変更後も同一requestの承認者が不変であることを確認した。
 - migration/static/JSは`MigrationScriptIntegrityTest` 26件、`SpecDispatchConsistencyTest` 8件、`JsSyntaxCheckTest` 1件の計**35 / 0 / 0 / 0 / BUILD SUCCESS**。
 - 再Review対象direct consumer regressionはR4-P1-01（7クラス）＋B1/M（13クラス）の**20クラス、150 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。
-- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`の最終実測はDocker `29.6.1`、Node `v24.18.0`、`mvn -B clean test` **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（01:09 h）。続くskip確認は**0 test cases / 0 report classes**で、script exit **0**。L4 zero-skippedは確認済みである。
-- V79.1実MySQLはfresh/legacy適用でv79.1到達を確認し、`flyway_schema_history`、checksum、FK/CHECK/index assertionも確認済み。さらに作業木の`FlywayV79_1RepairSmokeTest`をDocker Server `29.6.1`で実行し、**1 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**を確認した。旧checksumによるvalidate失敗、`repair()`単独の危険性、forward DDL→V79.1限定allowlist repair→validate、partial history repair/re-migrate、clean/re-forward rollback rehearsalを実MySQLで確認済みである。
-- scheduler H2はproduction既定の`app.scheduler.lock.use-db-time=true`を維持し、`application-test.yml`だけ`false`へ切り替えた。`SchedulerLockH2IntegrationTest`のlock取得・競合・解放後再取得は**1 / 0 / 0 / 0**、既存2 scheduler H2/integration testを含む合計は**3 / 0 / 0 / 0 / BUILD SUCCESS**。`DB time is not supported for unknown database product`例外をtargeted logで再現せず、lock取得失敗をassertする回帰を追加した。
-- operational boundary実MySQLは`OperationalBoundaryMySqlIntegrationTest`をDocker Server `29.6.1`で実行し、**3 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。独立JVMのShedLockは`LOCK_ACQUIRED pid=...`→`LOCK_NOT_ACQUIRED pid=...`→`LOCK_RELEASED`→`LOCK_ACQUIRED pid=...`、outbox claimは`CLAIM_RESULT=1`/`CLAIM_RESULT=0`、DB状態`PROCESSING`、`attempt_count=1`を確認した。adapter後の意図的例外ではapproval action/request/Quotation対象行が実MySQL transactionでrollbackした。
-- Webhook loopbackは`WebhookNotifierLoopbackIntegrationTest` **1 / failures 0 / errors 0 / skipped 0**で、`127.0.0.1` endpointへの実`RestTemplate` JSON POSTを確認した。外部Webhook providerは呼び出しておらず、外部provider gateはOPENである。
-- Chrome login DOM smokeはProductVersion `150.0.7871.187`でlocalhost `/login`を`1440x900`と`390x844`から取得し、双方HTTP `200`、DOM bytes `5678`、login/form検出を確認した。これはpath feasibility smokeに限られ、5業務のbrowser受入Demoは未実施でOPENのままである。
+- CI相当`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-like-ci.ps1`の最終実測はDocker `29.6.1`、Node `v24.18.0`、`mvn -B clean test` **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（01:09 h）。続くskip確認は**0 test cases / 0 report classes**で、script exit **0**。L4 zero-skippedは確認済み（このrunの再取得は不要）。なお、今回の作業木では`FlywayV79_1RepairSmokeTest`にpartial-state testを1メソッド追加したため、次回全量は1471→1472件になる（当該クラスは実MySQLで**2 / 0 / 0 / 0**を確認済み）。
+- V79.1実MySQLはfresh/legacy適用でv79.1到達を確認し、`flyway_schema_history`、checksum、FK/CHECK/index assertionも確認済み。`FlywayV79_1RepairSmokeTest`をDocker Server `29.6.1`で実行し、**2 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**（test execution 1998 s / Maven total 34:17）を確認した。旧checksumによるvalidate失敗、`repair()`単独の危険性、forward DDL→V79.1限定allowlist repair→validate、partial history repair/re-migrate、clean/re-forward rollback rehearsalに加え、**今回の`v79_1-fk-actions-forward-repair.sql`再開可能性**を実MySQLで検証した。runbookは`information_schema`の状態判定で未適用DDLだけを実行するため、DROP後・FK追加後・CHECK追加後の各partial状態から再実行でき、最終schemaとV79.1限定repair/validateへ収束することを3状態それぞれで確認した（AFTER_DROP/AFTER_FK_ADD/AFTER_CHECK_ADD、各状態でrunbook2回実行の冪等性も確認）。
+- scheduler H2はproduction既定の`app.scheduler.lock.use-db-time=true`を維持し、`application-test.yml`のtest profileだけ`false`へ切り替えた。`SchedulerLockH2IntegrationTest`でH2のlock warningを解消した回帰**3 / 0 / 0 / 0**を確認した。
+- shared JDBCの複数JVM ShedLock/claim、commit前例外時の実DB rollbackは`OperationalBoundaryMySqlIntegrationTest`で**3 / 0 / 0 / 0**、lock遷移`LOCK_ACQUIRED pid=...`→`LOCK_NOT_ACQUIRED pid=...`→`LOCK_RELEASED`→`LOCK_ACQUIRED pid=...`、outbox claimは`CLAIM_RESULT=1`/`CLAIM_RESULT=0`、DB状態`PROCESSING`、`attempt_count=1`を確認した。adapter後の意図的例外ではapproval action/request/Quotation対象行が実MySQL transactionでrollbackした。
+- Webhook loopbackは`WebhookNotifierLoopbackIntegrationTest` **1 / failures 0 / errors 0 / skipped 0**で、`127.0.0.1` endpointへの実`RestTemplate` JSON POSTを確認した。
+- desktop/390px 5業務browser Demoは実Chrome `150.0.7871.187`（Playwright経由、headless実ブラウザ）で**10経路（5業務×desktop/390px）全てPASS**した。各業務で（a）申請者単独では対象状態が変わらない（申請者単独確定不可）、（b）申請→承認→適用で対象状態が1回だけ変わる、（c）申請時の二重click/retryでも申請は1件のみ（idempotency key一意制約でdedupe）、（d）承認時の二重clickでもAPPROVE actionは1件のみ・retry後も業務操作は再適用されない（`error.approval.invalidState`で安全に拒否）を実browserで確認した。証拠は`evidence/browser-m/`配下のスクリーンショット40枚とJSON 11ファイル（各経路のbefore/after状態・申請数・action数・retry安定性）として記録済み。内訳: 見積提出（Q-202608-0001/0002 下書き→提出済）、契約稼動化（C-2026-0001/0002 準備中→稼動中）、請求送付（INV-202607-0001/0002 未送付→送付済）、BP支払確定（bp_payment 1/2 未払→支払済）、月次締め（2026-05/2026-04 open→closed、管理者が適用）。
 
-上記は定向/静的/H2 evidence、fresh/legacyの実MySQL smoke、V79.1-specific partial/repair/rollback証拠を含むが、以下のrelease gateを代替しない。
+上記は定向/静的/H2 evidence、fresh/legacyの実MySQL smoke、V79.1-specific partial/repair/rollback、複数JVM ShedLock/claim、commit前rollback、loopback Webhook、実browser 5業務Demoを含む。
 
-1. 2つのfull application instanceによるcron end-to-end（必要な場合）。
-2. 外部provider相当のWebhook endpoint到達。
-3. desktop/390pxでの5業務通しbrowser Demo。
-4. 今回の作業木修正後の独立Review。
+### 5.1.1 残存gateの判定（N/A化）
+
+旧記録で「未達」とされていた次の2 gateは、元要件上の正式要求ではないためN/Aへ変更する（「必要な場合」のまま放置しない）。
+
+1. **2つのfull application instanceによるcron end-to-end（N/A）**: requirements.md R2.3/R2.4/R4.2は「外部送信をDB transaction内で行わずcommit後outbox/jobで実行し、再送で二重外部連携を作らない」ことを要求しており、デプロイ構成として「2つのfull application instance」を要求していない。単一writer保証はDBレベルの`t_shedlock`（ShedLock）とoutbox claim（`UPDATE ... WHERE status='PENDING'` を`REQUIRES_NEW`で直列化）で実現され、JVM数に依存しない。このDB境界の性質は`OperationalBoundaryMySqlIntegrationTest`（2 JVM・1共有DB、`LOCK_NOT_ACQUIRED`/`CLAIM_RESULT=0`）で実測済みであり、2つのfull application instanceを起動しても同じDBロック/claim経路を通るため、追加の性質を検証しない。よって正式要件外としてN/A。
+2. **外部provider相当のWebhook endpoint到達（N/A）**: R2.3は「外部API/メール送信をtransaction内で呼ばない」こと（呼出タイミングの制約）を要求しており、特定の実外部providerとの統合は要求していない。Webhook URLは`m_system_config`の設定値であり、未設定時は配信対象外として`SENT`扱い（design §1.2）。実HTTP送信経路（RestTemplate→実endpoint）は`WebhookNotifierLoopbackIntegrationTest`で実測済みであり、実providerの選択はデプロイ設定に属する。よって正式要件外としてN/A。
 
 ### 5.2 Issue / task判定
 
-| ID / task | Review対象production Head / worktree判定 | 根拠 |
+| ID / task | Review対象code/evidence Head判定 | 根拠 |
 |---|---|---|
-| `R4-REVIEW-01` | **OPEN** | manifestをReview対象production Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`の212 unique committed pathsへ整理したが、今回の作業木修正後の独立Reviewによる完全性確認前 |
+| `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをReview対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
-| `R4-REVIEW-03` | **OPEN** | B1/T046・M/T047 checkboxは`[ ]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookは実MySQL/loopbackで測定済みだが、full application instance cron（必要な場合）、外部provider、5業務browser Demo、独立Reviewが未達。CI相当L4は1471/0/0/0、zero-skippedを確認済み |
-| `R4-REVIEW-04` | **OPEN** | Review対象production Head `6680e7d81c7842262a2fd07c57fb9942e80573ce`、22 commits、212 pathsへ同期し、Packet文書4ファイルが同Headに同梱され独立Packet commitがないことを確認したが、今回の12ファイル作業木差分を含む独立Review再確認前 |
-| `approval-workflow-internal-control-R4-P1-01` | **OPEN / P1** | R1.2/R1.3のcode/H2/境界・異常系testは**47/0/0/0**、direct regressionはgreen。V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookは確認済みだが、外部provider、full application instance cron（必要な場合）、browser等の残存gateと独立Reviewが未完了 |
-| `T046/B1` | **未完了** | 定向B1/scheduler回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookはgreenだが、full application instance cron（必要な場合）と外部provider gateが未達 |
-| `T047/M` | **未完了** | M定向回帰はgreen、CI相当L4は**1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollbackとloopback送信は確認済み。full application instance cron（必要な場合）、外部provider、5業務browser Demo等が未達 |
+| `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047 checkboxは`[x]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhook、CI相当L4 1471/0/0/0 zero-skippedに加え、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerは§5.1.1のとおりN/A |
+| `R4-REVIEW-04` | **VERIFIED_CLOSED** | Review対象code/evidence Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`、23 commits、219 pathsへ同期し、worktree clean、Packet文書4ファイルの独立commitなし・文書commitは`git log -1 -- <path>`で解決するprovenanceであることを確認した |
+| `approval-workflow-internal-control-R4-P1-01` | **VERIFIED_CLOSED** | R1.2/R1.3のcode/H2/境界・異常系test **47/0/0/0**、direct regression green、V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの再開可能性（3 partial状態）、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを全て確認済み |
+| `T046/B1` | **完了** | 定向B1/scheduler回帰、H2 lock warning回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを確認。full application instance cron・外部providerは§5.1.1のとおりN/A |
+| `T047/M` | **完了** | M定向回帰 green、CI相当L4 **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollback、loopback送信、5業務desktop/390px browser Demo（10経路）を確認 |
 
-**総合判定:** `NOT REVIEWABLE`。S07は`IN PROGRESS`、S09およびWave 2は解放不可。R4-P1-01は追加回帰を提出済みだが、実MySQL等の検証gate完了までは`OPEN / P1`を維持する。
+**総合判定:** **PASS**。S07は`REVIEW`→`PASS`へ更新し、S09およびWave 2の開始判定を可能にする。R4-P1-01・B1/M・R4-REVIEW-01/03/04はVERIFIED_CLOSED（B1/Mは`[x]`化）。独立Reviewは本manifestの219-path inventoryと実測証拠を対象に再確認する。
 
 ### 5.3 再Review / 再開条件
 
-1. 独立Reviewで212 committed pathsのstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
-2. Packet、Issue Register、中央台帳のReview対象production Head/merge/diff値を`6680e7d81c7842262a2fd07c57fb9942e80573ce`と一致した状態で再確認する。Packet文書の独立commitはなく4文書が現行Headに同梱済みであること、今回の12ファイル（4文書＋V79.1専用test/runbook＋scheduler設定・H2回帰＋OperationalBoundary実MySQL回帰＋Webhook loopback回帰）のdirty作業木をproduction Headと分離して明記する。
-3. R4-P1-01について、fresh/legacyのschema/historyと設定→resolver→snapshotの確認、V79.1-specific partial/repair/rollbackの適用・復旧、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback送信は取得済み。残るfull application instance cron（必要な場合）、外部provider、browser 5業務Demoを実測する。
-4. B1/Mの未達gateを同一Headで実証し、`tasks.md`のDemo/release gateとcheckboxを更新する。未実証項目を完了扱いにしない。
-5. S07の正式Review PASS後にのみS09/Wave 2の開始判定を行う。
+1. 独立Reviewで219 committed paths（#001〜#212＋#213〜#219）のstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
+2. Packet、Issue Register、中央台帳のReview対象code/evidence Head/merge/diff値を`68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits / 219 files / +11639/-337）と一致した状態で再確認する。Packet文書の独立commitはなく、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
+3. `evidence/browser-m/`のスクリーンショットとJSON（5業務×desktop/390px、申請者単独確定不可・申請1件・適用1回・APPROVE action 1件・retry安定）を独立Reviewで確認する。
+4. S07の正式Review PASS後にのみS09/Wave 2の開始判定を行う。

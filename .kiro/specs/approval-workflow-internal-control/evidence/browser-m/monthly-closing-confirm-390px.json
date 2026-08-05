@@ -1,0 +1,180 @@
+{
+  "flow": "monthly-closing-confirm",
+  "name": "月次締め",
+  "viewport": "390px",
+  "url": "http://localhost:8080",
+  "steps": [
+    {
+      "name": "applicant_login",
+      "user": "mgr1",
+      "url": "http://localhost:8080/dashboard"
+    },
+    {
+      "name": "applicant_page",
+      "url": "/monthly-closing",
+      "title": "月次締めチェックリスト | SES管理プロ"
+    },
+    {
+      "name": "target_before_apply",
+      "month": "2026-04",
+      "unenteredWork": [],
+      "unconfirmedRecords": [],
+      "unbilledConfirmed": [],
+      "unpaidBp": [],
+      "overdueInvoices": [],
+      "complianceFindings": [],
+      "unenteredCount": 0,
+      "unconfirmedCount": 0,
+      "unbilledCount": 0,
+      "unpaidBpCount": 0,
+      "overdueCount": 0,
+      "complianceCount": 0,
+      "readyToClose": true,
+      "closed": false,
+      "closedBy": null,
+      "closedByName": null,
+      "closedAt": null
+    },
+    {
+      "name": "target_after_apply",
+      "month": "2026-04",
+      "unenteredWork": [],
+      "unconfirmedRecords": [],
+      "unbilledConfirmed": [],
+      "unpaidBp": [],
+      "overdueInvoices": [],
+      "complianceFindings": [],
+      "unenteredCount": 0,
+      "unconfirmedCount": 0,
+      "unbilledCount": 0,
+      "unpaidBpCount": 0,
+      "overdueCount": 0,
+      "complianceCount": 0,
+      "readyToClose": true,
+      "closed": false,
+      "closedBy": null,
+      "closedByName": null,
+      "closedAt": null
+    },
+    {
+      "name": "applicant_alone_cannot_finalize",
+      "targetStateUnchanged": true,
+      "before": {
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      },
+      "after": {
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": false,
+        "closedBy": null,
+        "closedByName": null,
+        "closedAt": null
+      }
+    },
+    {
+      "name": "approval_request_created_once",
+      "requestCount": 1,
+      "requests": [
+        {
+          "id": 45,
+          "requestNo": "AR-45",
+          "status": "in_review",
+          "targetId": null
+        }
+      ]
+    },
+    {
+      "name": "approver_login",
+      "user": "admin"
+    },
+    {
+      "name": "target_after_approve",
+      "month": "2026-04",
+      "unenteredWork": [],
+      "unconfirmedRecords": [],
+      "unbilledConfirmed": [],
+      "unpaidBp": [],
+      "overdueInvoices": [],
+      "complianceFindings": [],
+      "unenteredCount": 0,
+      "unconfirmedCount": 0,
+      "unbilledCount": 0,
+      "unpaidBpCount": 0,
+      "overdueCount": 0,
+      "complianceCount": 0,
+      "readyToClose": true,
+      "closed": true,
+      "closedBy": 1,
+      "closedByName": "システム管理者",
+      "closedAt": "2026-08-05T11:15:32.5325489"
+    },
+    {
+      "name": "business_operation_applied_once",
+      "targetStateChanged": true,
+      "after": {
+        "month": "2026-04",
+        "unenteredWork": [],
+        "unconfirmedRecords": [],
+        "unbilledConfirmed": [],
+        "unpaidBp": [],
+        "overdueInvoices": [],
+        "complianceFindings": [],
+        "unenteredCount": 0,
+        "unconfirmedCount": 0,
+        "unbilledCount": 0,
+        "unpaidBpCount": 0,
+        "overdueCount": 0,
+        "complianceCount": 0,
+        "readyToClose": true,
+        "closed": true,
+        "closedBy": 1,
+        "closedByName": "システム管理者",
+        "closedAt": "2026-08-05T11:15:32.5325489"
+      }
+    },
+    {
+      "name": "approval_final_state",
+      "requestStatus": "approved",
+      "approveActionCount": 1,
+      "actions": [
+        {
+          "action": "APPROVE",
+          "stepNo": 1
+        }
+      ]
+    },
+    {
+      "name": "retry_approve_no_double_op",
+      "stateStable": true
+    }
+  ]
+}
