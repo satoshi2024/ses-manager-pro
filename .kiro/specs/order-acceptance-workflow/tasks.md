@@ -63,7 +63,7 @@
     通知の重複なし、月次締め件数のscope、検収取消と請求生成の競合。
   - **Demo**: 未検収請求拒否→検収後生成。検収不要契約が理由付きで請求できることを確認。
 
-- [ ] M. 全通し
+- [x] M. 全通し
   - **Objective**: 見積→注文→契約→勤怠→検収→請求がIDで追跡でき、
     既存のdocument/approval/contract/invoice機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、

@@ -9,14 +9,14 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | IN PROGRESS |
+| state | IN PROGRESS（M完了・Review待ち） |
 | base | f523e11（main / origin/main 一致） |
-| head | （T054 commit後に更新） |
-| merge | unmerged |
-| latest review | —（未開始） |
+| head | a8bdfc0（branch codex/order-acceptance-workflow） |
+| merge | unmerged（Review合格後にmerge） |
+| latest review | —（未開始。R09依頼待ち） |
 | verdict | — |
 | issue count | — |
-| next action | T055 F2 見積→注文→契約 |
+| next action | R09独立Review依頼 |
 
 ## 2. OPEN Issue Register
 
@@ -144,3 +144,28 @@
 - **Demo**: 実ブラウザDemoはT059 Mで実施。
 - **commit**: （T058 commit hashを記入）
 - **risk**: 通知の宛先は「契約sales_user_id（有効営業）∪管理者」。顧客レベルの担当営業が契約を持たない場合は管理者のみへ通知（設計§5.2のscheduler行）。
+
+## 11. T059 M 全通し — 記録（2026-08-06）
+
+- **task**: T059 M
+- **requirements**: R1〜R5全般、受入（見積→注文→契約→勤怠→検収→請求をIDで追跡）
+- **L4全量**: `mvn -o test` → **1512 tests / 0 failures / 0 errors / 0 skipped / BUILD SUCCESS**（full-test-run2.log）。
+  - うちDocker実MySQL Flyway smoke 9クラス全緑（fresh V1→V80 + legacy V60/V71/V63/V73/V79.1 repair/rollback。mysql:8.0使用）。
+  - JsSyntaxCheckTest（node v24）0 skipped。MessageBundleConsistencyTest（4言語）0 skipped。
+- **M回帰で検出し修正したもの**:
+  1. FlywayV79_1RepairSmokeTest: V80実在化によりvalidateがpending 80で失敗 → flyway() helperをtarget("79.1")固定。
+  2. InvoiceOrganizationScopeTest: invoice SQLに検収guard追加でfixture契約を検収不要契約（acceptance_required=0）へ更新。
+  3. Dashboard検収平均日数: H2のDATEDIFF方言差異（MySQL 2引数 vs H2 3引数）で500 → 日時行をJavaで平均算出に変更。
+  4. SpecDispatchConsistencyTest: S09をV80実在化（予約→実在へ移行、S08と同方式）＋order spec docs（design/tasks）を実在V80表記へ。
+  5. 実MySQL Demo: 案件未設定の注文が契約化でSQL NOT NULL違反（500）→ 生成元見積の案件を明細へfallback＋案件未設定は明確なerror.order.projectRequired（400）＋UIプリセットにprojectId追加。F2統合testを2件追加。
+- **Browser Demo（実Chrome相当のin-app browser、http://localhost:8080、MySQL 8コンテナ + Flyway V80適用済みDB）**:
+  - desktop: ログイン→dashboard（未検収売上¥0/検収平均日数0日KPI表示）→見積Q-202608-0001作成→`/sales-order?quotationId=`から注文O-202608-0001作成→受領確認（金額snapshot固定）→原本upload→**同一hashの再uploadが拒否（R2.4、実DBで409確認）**→注文請書PDF発行（受領確認→注文請提出へ自動遷移）→契約化（C-202609-0001、order_line_idで1明細→1契約）→契約の稼動化（S07承認フロー経由: route作成→申請in_review→管理者承認→稼動中）→勤怠入力160h→確定→検収提出（hours=160/amount=600000snapshot）→検収済→請求生成INV-202609-0001（subtotal 600,000/tax 60,000/total 660,000）。
+  - 検収ページ: C-202609-0001/田中 太郎/2026-09/**検収済**/160h/¥600,000/取消を承認申請ボタン。
+  - 請求ページ: INV-202609-0001（2026-09、未送付、発行2026-08-06、支払期限2026-10-31）。
+  - 注文詳細: 明細行に契約番号C-202609-0001のリンク（/contract/list?openId=2）＝ID追跡。
+  - 390px: 月次検収グリッド（検収済行表示）・注文一覧とも**横スクロールなし**（scrollWidth=390）。
+- **commit**: a8bdfc0（M修正）+ 各task commit（aa8ee4e/5153a87/b22f3e3/17b2ba7/e31c4eb）。
+- **Demo環境の注意**: 実ブラウザDemoは`ses-app-mysql`コンテナ（localhost:3307/ses_demo_db、fresh DBにV80適用）＋`mvn spring-boot:run`。実行後のアプリ/コンテナは停止済み（コンテナは既存のdemo用のため保持）。
+- **未検証/留意**:
+  - 承認route・検収取消（acceptance.cancel）の実ブラウザ操作は、route設定が必要なためDemoでは申請APIまで確認（承認適用のapplyCancellationはH2統合testで検証済み）。契約の稼動化は承認フローを実ブラウザ相当のAPI経由で通し確認。
+  - desktop/390pxの実ブラウザDemoは実施済み。画面の全操作（編集・削除・全フィルタ）は各API/統合testで検証済み。
