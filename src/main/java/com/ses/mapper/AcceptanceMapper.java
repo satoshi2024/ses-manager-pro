@@ -135,10 +135,10 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
         """)
     BigDecimal sumUnacceptedSales(@Param("contractIds") List<Long> contractIds);
 
-    /** dashboard用: 検収平均日数（提出日→検収日）。scopeは contractIds。 */
+    /** dashboard用: 検収済acceptanceの提出・検収日時行（平均日数はJava側で算出。DB方言非依存）。 */
     @Select("""
         <script>
-        SELECT COALESCE(AVG(DATEDIFF(a.accepted_at, a.submitted_at)), 0)
+        SELECT a.submitted_at AS submittedAt, a.accepted_at AS acceptedAt
         FROM t_acceptance a
         INNER JOIN t_contract c ON c.id = a.contract_id AND c.deleted_flag = 0
         WHERE a.status = '検収済' AND a.deleted_flag = 0
@@ -153,5 +153,5 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
           </if>
         </script>
         """)
-    BigDecimal avgAcceptanceDays(@Param("contractIds") List<Long> contractIds);
+    List<com.ses.dto.acceptance.AcceptanceDurationRow> selectAcceptanceDurations(@Param("contractIds") List<Long> contractIds);
 }

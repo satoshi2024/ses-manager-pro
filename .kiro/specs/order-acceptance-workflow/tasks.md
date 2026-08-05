@@ -6,7 +6,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V80**。approval(V75)のmerge後に着手する。
+> **Migration**: 本specの実在番号は **V80**。approval(V75)のmerge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [x] F1. 注文/明細/検収DDL

@@ -272,9 +272,16 @@ public class DashboardServiceImpl implements DashboardService {
             if (unaccepted != null) {
                 unacceptedSales = unaccepted.longValue();
             }
-            java.math.BigDecimal avg = acceptanceMapper.avgAcceptanceDays(scopeContractIds);
-            if (avg != null) {
-                avgAcceptanceDays = avg.doubleValue();
+            List<com.ses.dto.acceptance.AcceptanceDurationRow> durations =
+                    acceptanceMapper.selectAcceptanceDurations(scopeContractIds);
+            if (durations != null && !durations.isEmpty()) {
+                long totalDays = 0;
+                for (com.ses.dto.acceptance.AcceptanceDurationRow row : durations) {
+                    if (row.getSubmittedAt() != null && row.getAcceptedAt() != null) {
+                        totalDays += java.time.Duration.between(row.getSubmittedAt(), row.getAcceptedAt()).toDays();
+                    }
+                }
+                avgAcceptanceDays = (double) totalDays / durations.size();
             }
         }
 
