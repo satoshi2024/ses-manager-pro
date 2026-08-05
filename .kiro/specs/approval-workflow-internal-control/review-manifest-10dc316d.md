@@ -394,7 +394,7 @@ git diff --check
 
 - R1〜R5の全20 ACについて、実装入口、assert入口、Demoの有無を行単位で固定した。
 - R1.2/R1.3のR4-P1-01差分はV79.1、route管理経路、resolver、H2/testへ反映済み。実MySQL migration/history、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback送信、zero-skipped、**5業務desktop/390px browser Demo（10経路）**を確認済み。
-- 旧記録にあった「外部provider・full application instance・browser未達によるNOT REVIEWABLE」は解消した。**外部provider・full application instance cronは要件外N/A**、browserは10経路実測済み。S07は技術・機能gate確認済みの**REVIEW**状態であり、文書整合の独立再Review待ち（review-ledger/manifest/中央ledgerを参照）。
+- 旧記録にあった「外部provider・full application instance・browser未達によるNOT REVIEWABLE」は解消した。**外部provider・full application instance cronは要件外N/A**、browserは10経路実測済み。S07は技術・機能gateおよび文書整合を独立Review（commit `fa003f7`）で確認済みの**PASS**状態（review-ledger/manifest/中央ledgerを参照）。
 
 ## 4. Current Headのpublic contract consumer inventory
 
@@ -452,16 +452,16 @@ git diff --check
 | `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
 | `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047 checkboxは`[x]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhook、CI相当L4 1471/0/0/0 zero-skippedに加え、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerは§5.1.1のとおりN/A |
-| `R4-REVIEW-04` | **OPEN（文書整合の独立再Review待ち）** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits、274 paths）へ同期したが、独立Reviewで(中央ledger row7前半の旧記載・manifest §5.1のBP固定ID表記・README seed説明・Packet commit記述)の文書不整合が指摘され、修正後の再確認前 |
+| `R4-REVIEW-04` | **VERIFIED_CLOSED** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits、274 paths）へ同期し、指摘4件とrow7判定欄を修正。独立Review（commit `fa003f7`）でPASS・新規blocker 0件 |
 | `approval-workflow-internal-control-R4-P1-01` | **VERIFIED_CLOSED** | R1.2/R1.3のcode/H2/境界・異常系test **47/0/0/0**、direct regression green、V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの再開可能性（3 partial状態）、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを全て確認済み |
 | `T046/B1` | **完了** | 定向B1/scheduler回帰、H2 lock warning回帰、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを確認。full application instance cron・外部providerは§5.1.1のとおりN/A |
 | `T047/M` | **完了** | M定向回帰 green、CI相当L4 **1471 / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**、shared JDBCの複数JVM/commit rollback、loopback送信、5業務desktop/390px browser Demo（10経路）を確認 |
 
-**総合判定:** **REVIEW（独立再Review待ち）**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/Mは`[x]`、R4-REVIEW-01/02/03はVERIFIED_CLOSED（R4-REVIEW-04は文書整合の独立再Review待ち））。本manifestの文書同期（Head分離・AC trace同期）の整合を独立再Reviewで確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。それまではS09=`NOT READY`、Wave 2=`未解放`を維持する。
+**総合判定:** **PASS**。S07の技術・機能gateは独立Reviewで全て確認済み（R4-P1-01・B1/Mは`[x]`、R4-REVIEW-01/02/03/04・R4-P1-01は全てVERIFIED_CLOSED）。独立Review（commit `fa003f7`）で文書整合を確認し新規blocker 0件。S07=`PASS`、S09=`READY`、Wave 2=`解放`へ一括遷移済み。S09〜S17の開始は各specの依存条件による。
 
 ### 5.3 再Review / 再開条件
 
 1. 独立Reviewで219 committed paths（#001〜#212＋#213〜#219）のstatus/count/個別帰属、R1〜R5の20 AC trace、範囲外consumer分離を確認する。
 2. Packet、Issue Register、中央台帳の**code baseline Head** `68fbbba`（23 commits / 219 paths、`68fbbba`時点の`HEAD = origin/main = origin/HEAD`は当時値）と**初回Review evidence commit** `2978461`（履歴、24 commits / 272 paths）と**現行Review evidence/result commit** `646dbda`（27 commits / 274 paths）を分離した状態で再確認する（e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**）。現在の文書同期commitは`git log -1 -- <path>`で解決され、68fbbbaのHEAD/origin一致（当時値）と矛盾しないことを確認する。Packet文書は本流`main`の履歴としてcommitされ、文書commitは`git log -1 -- <path>`で解決するprovenanceとして記載されていることを確認する。
 3. `evidence/browser-m/`のスクリーンショットとJSON（5業務×desktop/390px、申請者単独確定不可・申請1件・適用1回・APPROVE action 1件・retry安定）を独立Reviewで確認する。
-4. 独立再Reviewで文書整合（Head分離・AC trace同期・中央ledger row 7〜9の統一）を確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。
+4. 独立Review（commit `fa003f7`）で文書整合（Head分離・AC trace同期・中央ledger row 6〜9の統一）を確認し、S07=`PASS`・S09=`READY`・Wave 2=`解放`へ一括遷移済み。

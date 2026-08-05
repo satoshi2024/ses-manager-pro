@@ -114,7 +114,7 @@
   - **残存gateの判定**: full application instance cron・外部provider相当Webhook endpointは要件外**N/A**（§R4確定参照）。desktop/390pxの5業務browser Demo（10経路）とbrowser管理画面の実測はMで確認済み。B1/Mは`[x]`化済み。残るgateは本Packetの文書整合を対象にした**独立再Review**のみである。
 
   - **Objective**: R1.2の申請者role条件route、R1.3の5種類のapprover sourceをroute設定からsnapshot解決まで同一契約で実証する。
-  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、APPLICANT_MANAGERの`t_user_organization`期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL（V79.1 partial/repair/rollback・runbook再開可能性）、実browser（5業務10経路）、release gateの証拠を確認済みでcheckboxは`[x]`。文書整合の独立再Review待ち。
+  - **テスト要件**: role-specific優先/fallback、permission group membership、責任者scope/asOf、APPLICANT_MANAGERの`t_user_organization`期間両端境界/期間外/NULL/無効/削除/0件/self-only/snapshot、候補0件fail-closed、管理APIの不正type/期間をカバーする。実MySQL（V79.1 partial/repair/rollback・runbook再開可能性）、実browser（5業務10経路）、release gateの証拠を確認済みでcheckboxは`[x]`。独立Review（`fa003f7`）で文書整合を確認済み。
 
 - [x] B1. 通知/SLA/escalation
   - **状態**: 完了。V79 outboxとround/step/slot対応dedupe key、commit後worker・再送経路、scheduler Demo相当、shared JDBC複数JVM ShedLock/claim、commit前例外時実DB rollback、loopback実HTTP Webhookを確認済み。full application instance cron・外部providerは要件外としてN/A化。
@@ -189,4 +189,4 @@
 - **残存gateのN/A化（「必要な場合」のまま放置しない）**:
   1. **2つのfull application instance cron → N/A**: requirements R2.3/R2.4/R4.2は「外部送信をDB transaction内で行わずcommit後outbox/jobで実行し、再送で二重外部連携を作らない」ことを要求しており、デプロイ構成として2 instanceを要求しない。単一writerはDBレベルの`t_shedlock`＋outbox claim（`REQUIRES_NEW`で直列化）で実現され、`OperationalBoundaryMySqlIntegrationTest`（2 JVM・1共有DB）で`LOCK_NOT_ACQUIRED`/`CLAIM_RESULT=0`を実測済み。2つのfull application instanceは同じDBロック/claim経路を通るため追加性質を検証しない。
   2. **外部provider相当のWebhook endpoint到達 → N/A**: R2.3は外部呼出をtransaction外にする**タイミング制約**であり、特定の実provider統合は要求しない。Webhook URLは`m_system_config`の設定値（未設定時は`SENT`扱い、design §1.2）。実HTTP送信経路は`WebhookNotifierLoopbackIntegrationTest`（RestTemplate→実endpoint）で実測済み。
-- **判定**: R4-P1-01・B1・Mを`[x]`へ更新し、review-ledger/manifest/中央台帳を同一判定（技術・機能gate確認済み・REVIEW待ち）へ揃えた。**code baseline Head**=`68fbbba`（23 commits/219 paths）、**初回Review evidence commit**=`2978461`（24 commits/272 paths、履歴）、**現行Review evidence/result commit**=`646dbda`（27 commits/274 paths）と分離して管理する（e88351d時点の基準はBase→26 commits/274 paths/+16873/-342）。現行状態はS07=`REVIEW`、S09=`NOT READY`、Wave 2=`未解放`であり、独立再Reviewで文書整合を確認後、S07 PASS・S09 READY・Wave 2解放へ一括遷移する。独立Reviewは219-path inventory、`evidence/browser-m/`、実MySQL証拠、Head分離を対象に最終確認する。
+- **判定**: R4-P1-01・B1・Mを`[x]`化し、review-ledger/manifest/中央台帳を同一判定（PASS・全VERIFIED_CLOSED）へ揃えた。**code baseline Head**=`68fbbba`（23 commits/219 paths）、**初回Review evidence commit**=`2978461`（24 commits/272 paths、履歴）、**現行Review evidence/result commit**=`646dbda`（27 commits/274 paths）と分離して管理する（e88351d時点の基準はBase→26 commits/274 paths/+16873/-342）。独立Review（commit `fa003f7`）で文書整合を確認し新規blocker 0件。**S07=`PASS`、S09=`READY`、Wave 2=`解放`へ一括遷移済み**。S09〜S17の開始は各specの依存条件による。
