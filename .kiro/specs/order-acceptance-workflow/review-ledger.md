@@ -203,3 +203,12 @@
 
 ### R09修正の定向test
 `mvn -o test -Dtest=<order全12クラス>,MobileResponsiveLayoutTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 全緑。`FlywayMigrationSmokeTest`（V80変更後fresh）→ 0/0/0 PASS。
+
+## 13. R09 Round1 対応後のL4全量証拠（P1-01対応）— 記録（2026-08-06）
+
+- **対象Head**: `b64ab6d`（branch codex/order-acceptance-workflow、working tree clean）
+- **実行**: `mvn -o test`（`target/full-test-run3.log`）
+- **結果**: **1519 / 0 / 0 / 0（Failures 0 / Errors 0 / Skipped 0）、BUILD SUCCESS**
+  - 内訳: run2の1512にR09修正由来の+7（案件fallback/未設定エラー2、AcceptanceDocumentTest 2、poDuplicate scope 1、MobileResponsiveLayoutTestの新URL 2）
+  - Docker MySQL Flyway smoke（fresh V1→V80含む）・JsSyntaxCheckTest・MessageBundleConsistencyTest いずれも0 skipped
+- **現行判定のheadを実Head（b64ab6d）へ同期**: 最終HeadでのL4証拠が確定
