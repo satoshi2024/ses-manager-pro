@@ -203,4 +203,3 @@
 
 ### R09修正の定向test
 `mvn -o test -Dtest=<order全12クラス>,MobileResponsiveLayoutTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 全緑。`FlywayMigrationSmokeTest`（V80変更後fresh）→ 0/0/0 PASS。
-
