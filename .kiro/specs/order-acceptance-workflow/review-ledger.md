@@ -11,12 +11,12 @@
 | handbook | v2.0 |
 | state | PASS（R09 Round2独立Review PASS確定） |
 | base | f523e11（main / origin/main 一致） |
-| head | 9b619c0（branch codex/order-acceptance-workflow） |
+| head | 5e74ec5（branch codex/order-acceptance-workflow） |
 | merge | unmerged（Review合格後にmerge） |
 | latest review | R09 round 2 / 2026-08-06 |
-| verdict | PASS（R09 Round2: P0=0 / P1=0 / P2=2 / NOTE=2） |
+| verdict | PASS（R09 Round2: P0=0 / P1=0 / P2=2 / NOTE=2、最終Head L4 1521/0/0/0） |
 | issue count | P0=0 / P1=0 / P2=2 / NOTE=2（R09 Round2 PASS） |
-| next action | merge（main）＋中央ledger row9をPASS化 → S10/S11解放 |
+| next action | merge（main）→ S10/S11解放 |
 
 ## 2. OPEN Issue Register
 
@@ -228,3 +228,9 @@
 - `AcceptanceServiceImpl.uploadDocument`: 検収済のみ登録可とするstatus guard（R09 NOTE対応）
 - `InvoiceAcceptanceGuardTest`: R09-P2-03のlock/件数照合test（検収済→一致、取消後→不一致409相当）を追加
 - review-ledger §1現行判定のheadを9b619c0へ同期（R09-P2-05残の解消）
+
+## 15. PASS後仕上げと最終HeadのL4全量証拠 — 記録（2026-08-06）
+
+- **PASS後仕上げ（5e74ec5）**: uploadDocumentを検収済のみに制限（R09 NOTE対応）、P2-03 lock/件数照合test、ledger/中央ledger/READMEをPASS同期。
+- **最終Head（5e74ec5）でのL4全量**: `mvn -o test` → **1521 / 0 / 0 / 0（Skipped 0、BUILD SUCCESS）**（`target/full-test-run4.log`）。production変更（status guard）後のpolicy §8要件を満たす最終証拠。
+- 中央ledger row9 = PASS（R09 Round 2）、次はmerge（main）→ S10/S11解放。
