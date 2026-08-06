@@ -271,3 +271,11 @@
 - 残P2（V1 DROP順のbackfill marker位置・実影響なし）は本ledger更新にて修正（markerをt_contractより先にDROP）。
 - 残NOTE: cancel invoice除外（fail-closedで安全側）・S07 flaky test修正（ledger §16に明記）・ledger headの文書同期commit扱い・通知N+1（従来許容）— いずれもPASS非block。
 - 次spec解放: merge後、中央ledger row9をPASS化（Base f523e11 → Head ba24814、R09 Round 4 PASS）し、S10 dispatch / S11 attendance を解放可。
+
+## 18. PASS後の最終Head検証（V1 DROP順修正の直接回帰）— 記録（2026-08-06）
+
+- 最終Head `5158912` は、R09 Round4 PASS時（ba24814）からV1のDROP順1行（t_contract_acceptance_backfillをt_contractより先へ）とledger文書のみの差分。
+- policy §8に従い、このV1変更の直接回帰を最終Headで実施:
+  - `FlywayMigrationSmokeTest`（fresh V1→V80、実MySQL）→ 0/0/0 PASS
+  - `OrderAcceptanceSchemaTest`（H2 replayのV1 DROP順）→ 0/0/0 PASS
+- L4全量証拠（1531/0/0/0）はコードtree同一の `1b8c5f2` にて取得済み（full-test-run6.log）。V1のDROP順修正はfresh適用ではno-op（DROP IF EXISTS）のため、L4結果に影響しない。
