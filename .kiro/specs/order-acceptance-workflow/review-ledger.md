@@ -32,9 +32,24 @@
 
 （なし）
 
-## 4. 最新Review Packet
+## 4. 最新Review Packet（Round6）
 
-（Review開始時に記入。T059 M完了後に確定）
+| 項目 | 値 |
+|---|---|
+| 対象spec | order-acceptance-workflow（T054〜T059） |
+| Round | R09 Round 6（Round5 FAIL指摘の差分再Review） |
+| prior Review基準 | R09 Round5（Base=2dbe83a / fix code Head=5158912 / evidence Head=4ee389d / merged Head=8a50eb1） |
+| 今回Base | 8a50eb1（main/origin/main、前Review済みHead） |
+| 今回Head | c109595（Round6対応commit） |
+| diff範囲 | 8a50eb1..c109595（12 files: DataScopeService/AcceptanceServiceImpl/NotificationGenerateService/ContractMapper/V80/NotificationGenerateServiceTest/AcceptanceAsOfScopeTest/FlywayV80RepairSmokeTest/design/ledger×2/README） |
+| Round5 OPEN issue | R3-P1-04（P1 REOPEN）、R3-P2-01〜P2-04（P2） |
+| 対応 | 本ledger §19参照（submit/通知asOf統一、manager直接test、V80 repair-safe化、ledger/design同期） |
+| 定向test | AcceptanceAsOfScopeTest 2 / AcceptanceServiceImplTest 8 / MonthlyClosingUnacceptedTest 3 / NotificationGenerateServiceTest 21+web1 / FlywayV80RepairSmokeTest 1 / MigrationScriptIntegrityTest 26 / OrderAcceptanceSchemaTest 5 / FlywayMigrationSmokeTest 2（実MySQL skip0） / SpecDispatchConsistencyTest 8 |
+| L4全量 | 最新Headで再実行（full-test-run7.log） |
+| Requirements trace | review-ledger §5 |
+| 次Review観点 | R3-P1-04（submit/notification asOf）、P2-01（manager直接test）、P2-02（V80 repair fixture）、P2-03/P2-04（ledger/design同期）、direct regression、L4証拠 |
+| 未検証 | postfix browser Demo（検収不要理由UI・manager通知クリック→対象可視）は本番前Demoとして別途管理 |
+
 
 ## 5. Requirements Trace
 
@@ -323,4 +338,10 @@ L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
 - `FlywayV80RepairSmokeTest` 1/0/0/0（実MySQL・skip 0）
 - `MigrationScriptIntegrityTest` 26/0/0/0、`OrderAcceptanceSchemaTest` 5/0/0/0
 - `FlywayMigrationSmokeTest` 2/0/0/0（fresh V1→V80 / legacy、実MySQL・skip 0）
-- V80 production変更後のpolicy §8に基づき、最新HeadでL4全量を再実行する
+- `SpecDispatchConsistencyTest` 8/0/0/0、`OrganizationScopeServiceImplTest` 8/0/0/0、
+  `InvoiceOrganizationScopeTest` 4/0/0/0、`NotificationOrganizationScopeTest` 3/0/0/0
+- **最新Head（c109595）でのL4全量**: `mvn -o test`（target/full-test-run7.log）→
+  **1540 / 0 / 0 / 0（Skipped 0、BUILD SUCCESS、Total 1:40h）**。
+  うちDocker実MySQL smoke（FlywayMigrationSmokeTest・FlywayV79_1RepairSmokeTest・
+  FlywayV80RepairSmokeTest・FlywayV73PartialRepairSmokeTest・OperationalBoundaryMySqlIntegrationTest・
+  ConcurrentUpdateTest 等）0 skipped。V80 production変更後のpolicy §8要件を満たす最終証拠。
