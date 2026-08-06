@@ -9,24 +9,31 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | FIX（R09 Round5独立Review FAIL → 本ledger更新で対応中） |
-| base | 2dbe83a（R09 Round3以降のprior evidence Base） |
-| head | 8a50eb1（main / origin/main = 現在のmerge済みHead） |
-| merge | merged済み（8a50eb1 = Merge PR #65）。ただしmergeは再発見P1を上書きしない |
-| latest review | R09 round 5 / 2026-08-06（FAIL） |
-| verdict | FAIL（R09 round5: P0=0 / P1=1 / P2=4 / NOTE=0） |
-| issue count | R09 round5: R3-P1-04 REOPEN、P2-01〜P2-04 OPEN |
-| next action | Round6対応（submit/通知のasOf統一・manager直接test・V80 repair fixture・ledger/design同期）を反映し、差分再ReviewでPASSを確認 |
+| state | PASS（R09 Round6独立差分再Review PASS確定） |
+| base | 8a50eb1（前Review済みmerged Head = main/origin/main） |
+| head | c109595（code Head）/ 7ed6a42（current Head＝ledger文書のみ差分） |
+| merge | merged済み（8a50eb1 = Merge PR #65）＋Round6対応をmainへpush済み（7ed6a42） |
+| latest review | R09 round 6 / 2026-08-06〜07（PASS） |
+| verdict | PASS（R09 round6: P0=0 / P1=0 / P2=1 / NOTE=2 / open release gates=0） |
+| issue count | R09 round6: Round5のR3-P1-04/P2-01〜04は全てVERIFIED_CLOSED |
+| next action | 中央ledger row9をPASS化 → S10 dispatch / S11 attendance（並行可）・Wave 2を解放 |
 
 ## 2. OPEN Issue Register
 
-| issue ID | severity | 内容 | 状態 |
+（現時点なし。R09 Round6でRound5のR3-P1-04（P1 REOPEN）とR3-P2-01〜04を全てVERIFIED_CLOSED）
+
+### Closed/Deferred Issue（R09 Round6）
+
+| issue ID | severity | 内容 | 対応 |
 |---|---|---|---|
-| order-acceptance-workflow-R3-P1-04 | P1 | 検収の初回submitとmanager通知が対象月asOf scopeへ未統一（current scope/organizationのまま） | Round6で対応中（assertAllowedContractAsOf・submit asOf化・通知のworkMonth asOf解決） |
-| order-acceptance-workflow-R3-P2-01 | P2 | ACCEPTANCE_*通知×同組織/異組織/無組織/重複roleのmanager recipient直接test不足 | Round6で対応中（NotificationGenerateServiceTestへ直接assert追加） |
-| order-acceptance-workflow-R3-P2-02 | P2 | V80 partial/repair/backfillのMySQL専用fixture不足。実測でmarker DMLが途中失敗でROLLBACKされることを発見し、V80へ明示COMMITを追加 | Round6で対応中（FlywayV80RepairSmokeTest追加・V80 repair-safe化） |
-| order-acceptance-workflow-R3-P2-03 | P2 | ledger provenanceがmerged Head（8a50eb1）と不一致 | Round6で対応中（本ledger・中央ledger同期） |
-| order-acceptance-workflow-R3-P2-04 | P2 | design.mdに「予約V73」残留（実在はV80） | Round6で対応済み（design §5.3を実在V80へ修正） |
+| order-acceptance-workflow-R3-P1-04 | P1 | 初回submitとmanager通知が対象月asOf scope未統一 | assertAllowedContractAsOf＋submit asOf化＋通知manager解決のworkMonth asOf化＋ContractMapper組織scopeのasOf統一。AcceptanceAsOfScopeTest 2/0/0で実DB検証（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R3-P2-01 | P2 | manager recipient直接test不足 | NotificationGenerateServiceTest 21/0/0（同/異/無組織・dedupe・V62解決・org SQL captor）（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R3-P2-02 | P2 | V80 partial/repair/backfill fixture不足 | V80へ明示COMMIT追加（repair-safe化）＋FlywayV80RepairSmokeTest 1/0/0（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R3-P2-03 | P2 | ledger provenance不一致 | review-ledger/中央ledgerをmerged Head 8a50eb1へ同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R3-P2-04 | P2 | design「予約V73」残留 | design.md §5.3を実在V80へ修正（VERIFIED_CLOSED） |
+
+残P2（PASS非block・backlog）: submitのworkMonth形式validation（任意改善提案、R09 Round6指摘）。
+NOTE: 通知バッチN+1（従来許容）、ContractMapper組織scope asOf統一の他consumer波及（既定解どおり・direct regression green）。
 
 ## 3. Closed/Deferred Issue
 
@@ -37,7 +44,7 @@
 | 項目 | 値 |
 |---|---|
 | 対象spec | order-acceptance-workflow（T054〜T059） |
-| Round | R09 Round 6（Round5 FAIL指摘の差分再Review） |
+| Round | R09 Round 6 = **PASS（P0=0 / P1=0 / P2=1 / NOTE=2 / open release gates=0）** |
 | prior Review基準 | R09 Round5（Base=2dbe83a / fix code Head=5158912 / evidence Head=4ee389d / merged Head=8a50eb1） |
 | 今回Base | 8a50eb1（main/origin/main、前Review済みHead） |
 | 今回Head | c109595（Round6対応commit） |
@@ -345,3 +352,19 @@ L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
   うちDocker実MySQL smoke（FlywayMigrationSmokeTest・FlywayV79_1RepairSmokeTest・
   FlywayV80RepairSmokeTest・FlywayV73PartialRepairSmokeTest・OperationalBoundaryMySqlIntegrationTest・
   ConcurrentUpdateTest 等）0 skipped。V80 production変更後のpolicy §8要件を満たす最終証拠。
+## 20. R09 Round6 独立差分再Review PASS — 記録（2026-08-06〜07）
+
+独立Review（R09 Round6、read-only、Base 8a50eb1 → code Head c109595 → current Head 7ed6a42）:
+判定 **PASS（P0=0 / P1=0 / P2=1 / NOTE=2 / open release gates=0）**。
+Round5のR3-P1-04（P1 REOPEN）とP2-01〜04を実diff・test・実MySQL fixture・ledger同期で全解決確認。
+新規P0/P1なし。
+
+- 最終Head `7ed6a42` のコードtreeはL4証拠commit `c109595` と同一（差分はreview-ledgerのみ＝docs-only）。
+- L4 **1540/0/0/0・BUILD SUCCESS・Skipped 0**（target/full-test-run7.log、Total 1:40h）。
+  Docker実MySQL smoke 0 skipped。初回L4のOperationalBoundaryMySqlIntegrationTest環境flaky（isolation 3/0/0/0 PASS）
+  は再実行L4で解消。
+- 残P2（PASS非block・backlog）: submitのworkMonth形式validation（任意改善提案）。
+- NOTE: 通知N+1（従来許容）、ContractMapper組織scope asOf統一の他consumer波及（既定解どおり・direct regression green）。
+- 未検証: postfix browser Demo（検収不要理由UI・manager通知クリック→対象可視）は本番前release gateとして継続管理。
+- 次spec解放: 中央ledger row9をPASS（Base 8a50eb1 → code Head c109595 / current Head 7ed6a42、R09 Round 6 PASS）へ
+  更新した時点で、S10 dispatch / S11 attendance（並行可・G2/G6決定済み）・Wave 2を解放可。
