@@ -9,14 +9,14 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | PASS（R09 Round2独立Review PASS確定） |
+| state | FIX→REVIEW（R09 Round3 FAIL指摘の修正済み、Round4再Review待ち） |
 | base | f523e11（main / origin/main 一致） |
-| head | 5e74ec5（branch codex/order-acceptance-workflow） |
+| head | 1b8c5f2（branch codex/order-acceptance-workflow） |
 | merge | unmerged（Review合格後にmerge） |
-| latest review | R09 round 2 / 2026-08-06 |
-| verdict | PASS（R09 Round2: P0=0 / P1=0 / P2=2 / NOTE=2、最終Head L4 1521/0/0/0） |
-| issue count | P0=0 / P1=0 / P2=2 / NOTE=2（R09 Round2 PASS） |
-| next action | merge（main）→ S10/S11解放 |
+| latest review | R09 round 3 / 2026-08-06（FAIL）→ 修正済み、round 4再Review待ち |
+| verdict | R09 round3: FAIL（P0=0/P1=6/P2=4）→ 全指摘修正済み、round4再Review待ち |
+| issue count | R09 round3: P0=0/P1=6/P2=4（全て対応済み、VERIFIED待ち） |
+| next action | R09 round4 差分再Review → PASS後にmerge |
 
 ## 2. OPEN Issue Register
 
@@ -234,3 +234,30 @@
 - **PASS後仕上げ（5e74ec5）**: uploadDocumentを検収済のみに制限（R09 NOTE対応）、P2-03 lock/件数照合test、ledger/中央ledger/READMEをPASS同期。
 - **最終Head（5e74ec5）でのL4全量**: `mvn -o test` → **1521 / 0 / 0 / 0（Skipped 0、BUILD SUCCESS）**（`target/full-test-run4.log`）。production変更（status guard）後のpolicy §8要件を満たす最終証拠。
 - 中央ledger row9 = PASS（R09 Round 2）、次はmerge（main）→ S10/S11解放。
+
+## 16. R09 Round3 独立Review（FAIL）と対応 — 記録（2026-08-06）
+
+独立Review（R09 Round3、read-only、Base f523e11 / code Head 5e74ec5 / evidence Head 2dbe83a）:
+判定 **FAIL（P0=0 / P1=6 / P2=4 / NOTE=0）**。対象L2/L3 49/0/0/0、同一code HeadのL4 1521/0/0/0は確認済み。
+
+### OPEN Issue Register（R09 Round3）と対応
+
+| issue | severity | 内容 | 対応（commit） |
+|---|---|---|---|
+| R3-P1-01 | P1 | 検収不要（acceptance_required=false）に理由・監査経路なし（R3.3「理由付きで可能」） | `acceptance_exemption_reason`列（V1/V80/H2/entity/DTO/UI/4言語）＋service検証（false時理由必須・true時クリア）＋legacy backfillに固定理由。ContractAcceptanceExemptionTest 2件（1a5c243） |
+| R3-P1-02 | P1 | 承認申請がscope外/対象外状態/差分ゼロでも作成可能（trust boundary） | SalesOrderApprovalAdapter.snapshot: assertAllowedOrder＋状態（cancel/conditionDiff）＋差分存在検証。AcceptanceApprovalAdapter.snapshot: assertAllowedAcceptance＋検収済のみ。adapter test 5件追加（1a5c243） |
+| R3-P1-03 | P1 | 請求生成後に検収取消が通り「有効請求×取消済検収」が併存 | applyCancellationでwork recordの有効invoice明細を検査し409。AcceptanceServiceImplTestに追加（1a5c243） |
+| R3-P1-04 | P1 | 顧客確認者名snapshotなし・対象月scopeを現在日時点で評価 | `customer_contact_name_snapshot`列（V1/V80/H2/entity）＋accept時に有効期間検証＋名称snapshot。DataScopeService.allowedContractIdsAsOf(asOf)を追加し、検収一覧/詳細/締め件数を対象月時点で解決。テスト追加（1a5c243） |
+| R3-P1-05 | P1 | t_contract.order_line_idにFK無し（孤児許容） | V80にfk_contract_order_line（guard付き）＋V1 DROP順修正＋H2 schemasにFK（REFERENTIAL_INTEGRITY復元）。OrderAcceptanceSchemaTestで孤児拒否＋UNIQUE検証（1a5c243） |
+| R3-P1-06 | P1 | 通知の未提出/期限超過/差戻しが非排他（提出済にも未提出通知） | unacceptedContractIdsを「acceptance行なし」のみへ限定。MonthlyClosingUnacceptedTestに排他test（1a5c243） |
+| R3-P2-01 | P2 | 通知宛先が決定表（マネージャー=自組織）と不整合 | 検収通知の宛先へ自組織マネージャー（engineer org → primary org の role=マネージャー）を追加（f7b4589） |
+| R3-P2-02 | P2 | V1 DROP順逆（acceptance→work_record）・fresh/legacy metadata非対称・V80 partial/repair assert不足 | V1 DROP順をchild-firstへ修正＋V80末尾で列をMODIFY（COMMENT・位置）収束＋FlywayMigrationSmokeTestにFK/列/marker assert追加（1a5c243） |
+| R3-P2-03 | P2 | ledger provenance不一致 | §1現行判定を実Head（1b8c5f2）へ同期し、本Roundの判定・issue・修正を記録（本ledger） |
+| R3-P2-04 | P2 | legacy backfillがrepair再実行で新規契約も0化 | `t_contract_acceptance_backfill` markerテーブル（V1/V80/H2）＋「marker空の時のみINSERT」でrepair-safe化。既存契約には固定理由を設定（1a5c243） |
+
+### 追加のtest-hygiene修正
+- `RouteResolverServiceTest`（S07所有・テストのみ）: request_typeをSystem.nanoTime()で生成しVARCHAR(50)超過になるflakyを修正（本specのL4証跡を妨げたため。production変更なし）（1b8c5f2）
+
+### 最終Head（1b8c5f2）のL4全量証拠
+- `mvn -o test`（target/full-test-run6.log）: **1531 / 0 / 0 / 0（Skipped 0、BUILD SUCCESS）**
+- うちDocker MySQL smoke（fresh V1→V80・legacy）0 skipped、Node/JS・4言語i18n 0 skipped
