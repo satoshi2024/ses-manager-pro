@@ -142,6 +142,58 @@ class FlywayV80RepairSmokeTest {
         }
     }
 
+    @Test
+    void V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない() throws Exception {
+        resetDatabase();
+        Path dir = prepareMigrationDir();
+
+        // 1) V79.1まで適用（legacy基盤、既存契約0件）
+        flywayFilesystem(dir, "79.1").migrate();
+
+        // 2) V80を「marker固定・UPDATE適用後、t_acceptance以前」で途中失敗させる
+        installFailingV80(dir);
+        Flyway failing = flywayFilesystem(dir, null);
+        FlywayException failure = assertThrows(FlywayException.class, failing::migrate);
+        assertTrue(allMessages(failure).contains("V80") || allMessages(failure).contains("syntax"),
+                "V80の途中失敗であるはず: " + allMessages(failure));
+
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            // 部分状態: markerテーブルは作成済み・sentinel 0が記録済み（legacy契約0件でもキャプチャ完了）
+            assertTrue(hasTable(statement, "t_contract_acceptance_backfill"),
+                    "markerテーブルが作成されているはず");
+            assertTrue(hasRow(statement, "SELECT 1 FROM t_contract_acceptance_backfill WHERE contract_id=0"),
+                    "legacy契約0件でもsentinel 0が固定されているはず");
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM t_contract_acceptance_backfill"),
+                    "marker行数はsentinel 0のみの1行であるはず");
+        }
+
+        // 3) 失敗中（marker固定後）に新規契約を追加。acceptance_requiredはDEFAULT 1
+        long newContractId = insertLegacyContract("SO-V80-NEW-ZERO-LEGACY");
+
+        // 4) 実scriptへ戻し、repairでfailed historyを除去して再適用
+        restoreRealV80(dir);
+        Flyway latest = flywayFilesystem(dir, null);
+        latest.repair();
+        latest.migrate();
+        latest.validate();
+
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            // 新規契約: 1のまま（初期0件からのrepair再適用でも0化されない）
+            assertEquals(1, queryInt(statement,
+                    "SELECT acceptance_required FROM t_contract WHERE id=" + newContractId),
+                    "初期0件でのrepair再適用でも、新規契約はbackfillで0化されない");
+            assertTrue(hasRow(statement,
+                    "SELECT 1 FROM t_contract WHERE id=" + newContractId
+                            + " AND acceptance_exemption_reason IS NULL"),
+                    "新規契約の理由はNULLのまま");
+            assertFalse(hasRow(statement, "SELECT 1 FROM t_contract_acceptance_backfill WHERE contract_id=" + newContractId),
+                    "markerに新規契約は含まれない");
+        }
+    }
+
     /** 全migrationをtemp dirへコピーする（V80は実scriptのまま）。 */
     private Path prepareMigrationDir() throws Exception {
         Path source = Paths.get(MIGRATION_DIR);

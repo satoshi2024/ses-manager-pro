@@ -86,7 +86,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.internalServerError().body(ApiResult.<Void>error("システムエラーが発生しました"));
     }
 
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class, java.time.format.DateTimeParseException.class})
     public ResponseEntity<ApiResult<Void>> handleRequestParameterException(Exception e) {
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
     }

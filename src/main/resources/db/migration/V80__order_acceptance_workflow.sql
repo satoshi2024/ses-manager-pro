@@ -154,20 +154,22 @@ CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill (
   backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
 
--- markerが空の時（初回適用）だけ既存契約ID集合を固定する。repair再実行時は追加しない。
+-- sentinel行（contract_id = 0）が存在しない時（初回適用）だけ既存契約ID集合を固定する。
+-- 対象が0件の場合でもsentinel行(0)を記録することで「キャプチャ完了」と「未キャプチャ」を区別し、
+-- 途中失敗→flyway repair→再実行時に失敗中追加された新規契約を誤って0化しない（R7-P1-01 / repair-safe）。
 SET @marker_sql = IF(
-    (SELECT COUNT(*) FROM t_contract_acceptance_backfill) = 0,
-    'INSERT INTO t_contract_acceptance_backfill (contract_id) SELECT id FROM t_contract WHERE order_line_id IS NULL',
+    (SELECT COUNT(*) FROM t_contract_acceptance_backfill WHERE contract_id = 0) = 0,
+    'INSERT INTO t_contract_acceptance_backfill (contract_id) SELECT id FROM t_contract WHERE order_line_id IS NULL UNION ALL SELECT 0',
     'SELECT 1'
 );
 PREPARE marker_stmt FROM @marker_sql;
 EXECUTE marker_stmt;
 DEALLOCATE PREPARE marker_stmt;
 
--- 【repair-safe（R09-P2-02対応）】FlywayはMySQLのDMLをトランザクションで実行するため、
+-- 【repair-safe（R09-P2-02/R7-P1-01対応）】FlywayはMySQLのDMLをトランザクションで実行するため、
 -- 途中失敗（構文エラーや後続DDLの失敗）があるとmarker行がROLLBACKされ、repair→再適用時に
--- 「marker空＝初回」と誤判定して失敗中に作られた新規契約まで0化してしまう。
--- ここで明示COMMITし、marker固定を後続失敗から独立させる（DDLはMySQLの暗黙COMMITで既に永続化済み）。
+-- 「marker未完了＝初回」と誤判定して失敗中に作られた新規契約まで0化してしまう。
+-- ここで明示COMMITし、marker固定（sentinel 0含む）を後続失敗から独立させる（DDLはMySQLの暗黙COMMITで既に永続化済み）。
 COMMIT;
 
 UPDATE t_contract c

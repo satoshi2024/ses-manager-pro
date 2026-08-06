@@ -998,10 +998,8 @@ CREATE TABLE t_acceptance (
 -- 29. t_contract_acceptance_backfill (V80 legacy backfillのrepair-safe marker)
 -- ============================================================
 CREATE TABLE t_contract_acceptance_backfill (
-  contract_id   BIGINT       PRIMARY KEY COMMENT 'V80適用時点の既存契約ID（検収不要へ移行対象）',
-  backfilled_at DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT 'marker登録日時',
-  CONSTRAINT fk_backfill_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
-    ON UPDATE CASCADE ON DELETE CASCADE
+  contract_id   BIGINT       PRIMARY KEY COMMENT 'V80適用時点の既存契約ID（0=sentinel）。検収不要へ移行対象',
+  backfilled_at DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT 'marker登録日時'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
 
 -- ============================================================

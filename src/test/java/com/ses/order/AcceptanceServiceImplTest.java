@@ -217,4 +217,20 @@ class AcceptanceServiceImplTest {
         WorkRecord updated = workRecordService.saveHours(contractId, "2026-07", new BigDecimal("170.00"), "修正");
         assertEquals(0, new BigDecimal("170.00").compareTo(updated.getActualHours()));
     }
+
+    @Test
+    @DisplayName("R7-P2-02: 不正なworkMonth形式は400業務例外を返す（2026-13やinvalid）")
+    void invalidWorkMonthReturns400() {
+        BusinessException ex1 = assertThrows(BusinessException.class,
+                () -> acceptanceService.submit(contractId, "2026-13"));
+        assertEquals(400, ex1.getCode());
+
+        BusinessException ex2 = assertThrows(BusinessException.class,
+                () -> acceptanceService.submit(contractId, "invalid"));
+        assertEquals(400, ex2.getCode());
+
+        BusinessException ex3 = assertThrows(BusinessException.class,
+                () -> acceptanceService.pageGrid(1, 10, "2026-99", null, null, null));
+        assertEquals(400, ex3.getCode());
+    }
 }

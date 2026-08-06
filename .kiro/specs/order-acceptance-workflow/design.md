@@ -66,7 +66,7 @@
 | HR | 不可視 | — | — | — |
 | 要員 | 自分が対象の検収状態のみ（金額非表示） | — | — | — |
 | portal user (顧客) | **本specでは非公開**（S13で自社分の検収を開放） | — | — | — |
-| scheduler principal | 全件 | — | 宛先は担当営業/管理者 | 期限超過、未提出 |
+| scheduler principal | 全件 | — | 宛先は担当営業、管理者、対象月時点の自組織マネージャー | 期限超過、未提出 |
 
 - 注文書原本・注文請書PDFのdownloadは、注文一覧と**同じscope**を通す（archive spec の
   `t_document_link`経由）。document側で別ACLを作らない。

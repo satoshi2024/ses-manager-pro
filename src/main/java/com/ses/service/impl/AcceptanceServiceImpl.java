@@ -303,9 +303,14 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     }
 
     private static java.time.LocalDate monthEnd(String workMonth) {
-        return workMonth == null || workMonth.isBlank()
-                ? java.time.LocalDate.now()
-                : java.time.YearMonth.parse(workMonth).atEndOfMonth();
+        if (workMonth == null || workMonth.isBlank()) {
+            return java.time.LocalDate.now();
+        }
+        try {
+            return java.time.YearMonth.parse(workMonth).atEndOfMonth();
+        } catch (java.time.format.DateTimeParseException e) {
+            throw BusinessException.of(400, "error.acceptance.invalidWorkMonth");
+        }
     }
 
     private Acceptance require(Long id) {
