@@ -62,6 +62,7 @@ public class NotificationGenerateService {
     private final com.ses.mapper.SalesOrderLineMapper salesOrderLineMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+    private final com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
     private final SystemConfigService systemConfigService;
 
     public void generateAll() {
@@ -419,7 +420,7 @@ public class NotificationGenerateService {
             String name = getEngineerName(contract.getEngineerId());
             String dedupeKey = "ACCEPTANCE_UNSUBMITTED:" + contractId + ":" + workMonth;
             String message = "[\"notification.msg.ACCEPTANCE_UNSUBMITTED\", \"" + workMonth + "\", \"" + name + "\"]";
-            for (Long userId : resolveContractSalesUserIds(contract)) {
+            for (Long userId : resolveContractSalesUserIds(contract, monthEnd(workMonth))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_UNSUBMITTED", "検収未提出",
                         message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
             }
@@ -446,7 +447,7 @@ public class NotificationGenerateService {
             String name = getEngineerName(contract.getEngineerId());
             String dedupeKey = "ACCEPTANCE_OVERDUE:" + acceptance.getId() + ":" + today;
             String message = "[\"notification.msg.ACCEPTANCE_OVERDUE\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\", \"" + days + "日\"]";
-            for (Long userId : resolveContractSalesUserIds(contract)) {
+            for (Long userId : resolveContractSalesUserIds(contract, monthEnd(acceptance.getWorkMonth()))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_OVERDUE", "検収期限超過",
                         message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
             }
@@ -468,7 +469,7 @@ public class NotificationGenerateService {
             String name = getEngineerName(contract.getEngineerId());
             String dedupeKey = "ACCEPTANCE_REJECTED:" + acceptance.getId();
             String message = "[\"notification.msg.ACCEPTANCE_REJECTED\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\"]";
-            for (Long userId : resolveContractSalesUserIds(contract)) {
+            for (Long userId : resolveContractSalesUserIds(contract, monthEnd(acceptance.getWorkMonth()))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_REJECTED", "検収差戻し",
                         message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
             }
@@ -508,25 +509,43 @@ public class NotificationGenerateService {
     }
 
     /** 契約の担当営業＋管理者。 */
-    private List<Long> resolveContractSalesUserIds(Contract contract) {
+    private List<Long> resolveContractSalesUserIds(Contract contract, LocalDate asOf) {
         List<Long> salesIds = new java.util.ArrayList<>();
         if (contract.getSalesUserId() != null) {
             salesIds.add(contract.getSalesUserId());
         }
         List<Long> recipients = resolveSalesRecipients(salesIds);
         // 決定表 §5.2: マネージャーへ自組織の未検収/差戻しを通知する（R09-P2-01対応）。
-        // 担当営業/管理者に加えて、対象契約の所属組織のマネージャーを宛先へ追加する。
-        Long orgId = resolveContractOrganizationId(contract);
+        // 組織・マネージャーの有効期間は通知対象のworkMonth（月末）時点で解決する（R09-P1-04）。
+        // 要員が月末前後に異動しても、履歴月の検収通知は旧組織マネージャーへ届き、
+        // 新組織マネージャーへは届かない（検収一覧/詳細のasOf scopeと同一母集団）。
+        Long orgId = resolveContractOrganizationId(contract, asOf);
         if (orgId != null) {
-            recipients.addAll(resolveOrgManagerUserIds(orgId));
+            recipients.addAll(resolveOrgManagerUserIds(orgId, asOf));
         }
         return recipients.stream().distinct().collect(Collectors.toList());
     }
 
-    /** 契約の所属組織（要員のorganization_idを正とし、アカウント連携の主所属へフォールバック）。 */
-    private Long resolveContractOrganizationId(Contract contract) {
+    /**
+     * 契約の所属組織を対象日(asOf)時点で解決する（R09-P1-04）。
+     *
+     * <p>解決順（platform-invariants §1.1の「履歴行の存在で分岐」に従う）:
+     * <ol>
+     *   <li>要員会計履歴（V62）の対象日時点の所属組織を正とする。履歴行が存在する場合は
+     *       履歴値が正であり、明示NULL/UNKNOWN（当時所属不明）は現在値へフォールバックしない。</li>
+     *   <li>履歴行が無い環境のみ、現在の {@code t_engineer.organization_id} へフォールバック。</li>
+     *   <li>それも無ければアカウント連携ユーザーの対象日時点の主所属（フォールバック限定）。</li>
+     * </ol>
+     */
+    private Long resolveContractOrganizationId(Contract contract, LocalDate asOf) {
         if (contract == null || contract.getEngineerId() == null) {
             return null;
+        }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        com.ses.entity.EngineerAccountingHistory history =
+                engineerAccountingHistoryMapper.selectAt(contract.getEngineerId(), date);
+        if (history != null) {
+            return history.getOrganizationId();
         }
         com.ses.entity.Engineer engineer = engineerMapper.selectById(contract.getEngineerId());
         if (engineer != null && engineer.getOrganizationId() != null) {
@@ -538,23 +557,30 @@ public class NotificationGenerateService {
                     new QueryWrapper<com.ses.entity.UserOrganization>()
                             .eq("user_id", link.getSysUserId())
                             .eq("primary_flag", 1)
-                            .isNull("valid_to")
+                            .le("valid_from", date)
+                            .and(w -> w.isNull("valid_to").or().ge("valid_to", date))
                             .last("LIMIT 1"));
             return primary == null ? null : primary.getOrganizationId();
         }
         return null;
     }
 
-    /** 所属組織のマネージャー（role=マネージャーの有効ユーザー）を返す。 */
-    private List<Long> resolveOrgManagerUserIds(Long orgId) {
+    /**
+     * 所属組織のマネージャー（role=マネージャーの有効ユーザー）を対象日(asOf)時点で返す（R09-P1-04）。
+     * マネージャー自身の所属有効期間もasOfで判定するため、異動前後の履歴月で
+     * 旧組織マネージャーへは届き、新組織マネージャーへは届かない。
+     */
+    private List<Long> resolveOrgManagerUserIds(Long orgId, LocalDate asOf) {
         if (orgId == null) {
             return java.util.List.of();
         }
+        LocalDate date = asOf == null ? LocalDate.now() : asOf;
         List<Long> userIds = userOrganizationMapper.selectList(
                         new QueryWrapper<com.ses.entity.UserOrganization>()
                                 .eq("organization_id", orgId)
                                 .eq("primary_flag", 1)
-                                .isNull("valid_to"))
+                                .le("valid_from", date)
+                                .and(w -> w.isNull("valid_to").or().ge("valid_to", date)))
                 .stream().map(com.ses.entity.UserOrganization::getUserId)
                 .filter(java.util.Objects::nonNull).collect(Collectors.toList());
         if (userIds.isEmpty()) {
@@ -565,6 +591,13 @@ public class NotificationGenerateService {
                         .eq(SysUser::getRole, "マネージャー")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).collect(Collectors.toList());
+    }
+
+    /** 対象月の月末日（asOf解決の基準日）。 */
+    private static LocalDate monthEnd(String workMonth) {
+        return workMonth == null || workMonth.isBlank()
+                ? LocalDate.now()
+                : YearMonth.parse(workMonth).atEndOfMonth();
     }
 
     private List<Long> resolveSalesRecipients(List<Long> salesIds) {

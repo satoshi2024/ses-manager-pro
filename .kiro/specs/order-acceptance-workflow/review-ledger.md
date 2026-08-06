@@ -9,18 +9,24 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | PASS（R09 Round4独立Review PASS確定） |
-| base | f523e11（main / origin/main 一致） |
-| head | 1b8c5f2（branch codex/order-acceptance-workflow） |
-| merge | unmerged（Review合格後にmerge） |
-| latest review | R09 round 4 / 2026-08-06（PASS） |
-| verdict | PASS（R09 round4: P0=0 / P1=0 / P2=0 / NOTE=4） |
-| issue count | R09 round4: P0=0 / P1=0 / P2=0 / NOTE=4 |
-| next action | merge（main）→ S10/S11解放 |
+| state | FIX（R09 Round5独立Review FAIL → 本ledger更新で対応中） |
+| base | 2dbe83a（R09 Round3以降のprior evidence Base） |
+| head | 8a50eb1（main / origin/main = 現在のmerge済みHead） |
+| merge | merged済み（8a50eb1 = Merge PR #65）。ただしmergeは再発見P1を上書きしない |
+| latest review | R09 round 5 / 2026-08-06（FAIL） |
+| verdict | FAIL（R09 round5: P0=0 / P1=1 / P2=4 / NOTE=0） |
+| issue count | R09 round5: R3-P1-04 REOPEN、P2-01〜P2-04 OPEN |
+| next action | Round6対応（submit/通知のasOf統一・manager直接test・V80 repair fixture・ledger/design同期）を反映し、差分再ReviewでPASSを確認 |
 
 ## 2. OPEN Issue Register
 
-（現時点なし）
+| issue ID | severity | 内容 | 状態 |
+|---|---|---|---|
+| order-acceptance-workflow-R3-P1-04 | P1 | 検収の初回submitとmanager通知が対象月asOf scopeへ未統一（current scope/organizationのまま） | Round6で対応中（assertAllowedContractAsOf・submit asOf化・通知のworkMonth asOf解決） |
+| order-acceptance-workflow-R3-P2-01 | P2 | ACCEPTANCE_*通知×同組織/異組織/無組織/重複roleのmanager recipient直接test不足 | Round6で対応中（NotificationGenerateServiceTestへ直接assert追加） |
+| order-acceptance-workflow-R3-P2-02 | P2 | V80 partial/repair/backfillのMySQL専用fixture不足。実測でmarker DMLが途中失敗でROLLBACKされることを発見し、V80へ明示COMMITを追加 | Round6で対応中（FlywayV80RepairSmokeTest追加・V80 repair-safe化） |
+| order-acceptance-workflow-R3-P2-03 | P2 | ledger provenanceがmerged Head（8a50eb1）と不一致 | Round6で対応中（本ledger・中央ledger同期） |
+| order-acceptance-workflow-R3-P2-04 | P2 | design.mdに「予約V73」残留（実在はV80） | Round6で対応済み（design §5.3を実在V80へ修正） |
 
 ## 3. Closed/Deferred Issue
 
@@ -34,11 +40,11 @@
 
 | requirement/AC | implementation | automatic test | Demo | verdict |
 |---|---|---|---|---|
-| R1.1〜R1.5 注文/状態機械 | T054〜T056 | OrderAcceptanceSchemaTest / SalesOrderServiceImplTest | T056で実施 | 実装中 |
-| R2.1〜R2.4 見積→注文→契約 | T055 | （T055で追加） | T055で実施 | 実装中 |
-| R3.1〜R3.5 月次検収 | T054/T057 | OrderAcceptanceSchemaTest | T057で実施 | 実装中 |
-| R4.1〜R4.3 通知/KPI | T058 | （T058で追加） | T058で実施 | 実装中 |
-| R5 受入 | T054〜T059 | 各task | T059で実施 | 実装中 |
+| R1.1〜R1.5 注文/状態機械 | T054〜T056 | OrderAcceptanceSchemaTest / SalesOrderServiceImplTest | T056で実施 | 実装済み（Round6対応後 差分再Review待ち） |
+| R2.1〜R2.4 見積→注文→契約 | T055 | SalesOrderServiceImplTest / adapter tests | T055で実施 | 実装済み（Round6対応後 差分再Review待ち） |
+| R3.1〜R3.5 月次検収 | T054/T057 | OrderAcceptanceSchemaTest / AcceptanceServiceImplTest / AcceptanceAsOfScopeTest / ContractAcceptanceExemptionTest | T057で実施 | 実装済み（Round6対応後 差分再Review待ち） |
+| R4.1〜R4.3 通知/KPI | T058 | NotificationGenerateServiceTest / MonthlyClosingUnacceptedTest | T058で実施 | 実装済み（Round6対応後 差分再Review待ち） |
+| R5 受入 | T054〜T059 | 各task + L4 | T059で実施 | 実装済み（Round6対応後 差分再Review待ち） |
 
 ## 6. T054 F1 注文/明細/検収DDL — 記録（2026-08-05）
 
@@ -279,3 +285,42 @@
   - `FlywayMigrationSmokeTest`（fresh V1→V80、実MySQL）→ 0/0/0 PASS
   - `OrderAcceptanceSchemaTest`（H2 replayのV1 DROP順）→ 0/0/0 PASS
 - L4全量証拠（1531/0/0/0）はコードtree同一の `1b8c5f2` にて取得済み（full-test-run6.log）。V1のDROP順修正はfresh適用ではno-op（DROP IF EXISTS）のため、L4結果に影響しない。
+## 19. R09 Round5 独立差分再Review（FAIL）とRound6対応 — 記録（2026-08-06）
+
+独立Review（R09 Round5、read-only、prior evidence Base=2dbe83a / fix code Head=5158912 /
+evidence Head=4ee389d / merged Head=8a50eb1=main=origin/main）:
+判定 **FAIL（P0=0 / P1=1 / P2=4 / NOTE=0）**。Reviewer定向test 33/0/0/0、
+L4 artifact full-test-run6.log 1531/0/0/0 は確認済み。
+
+### OPEN Issue とRound6対応
+
+| issue | severity | 内容 | Round6対応 |
+|---|---|---|---|
+| R3-P1-04（REOPEN） | P1 | list/detail/countはasOf化済みだが、初回submitはcurrent `assertAllowedContract`、manager通知はcurrent組織/主所属のまま | `DataScopeService.assertAllowedContractAsOf(contractId, asOf)`を追加し、`AcceptanceServiceImpl.submit()`を対象月（月末）時点のasOf scopeへ変更。通知のmanager解決をworkMonth（月末）時点へ統一: 要員会計履歴（V62）→現在のengineer組織→アカウント連携主所属（asOf）の順で契約組織を解決し、マネージャー所属の有効期間もasOfで判定。list/detail/count/submit/action/notificationが同一asOf scope契約に統一された |
+| R3-P2-01 | P2 | manager recipientの直接assertなし | NotificationGenerateServiceTestへ、ACCEPTANCE_UNSUBMITTED/OVERDUE/REJECTED × 同組織マネージャー受信・異組織マネージャー非受信・組織未設定で宛先なし・重複所属でdedupe、の直接testを追加（organization_id SQL filterもcaptorで検証） |
+| R3-P2-02 | P2 | V80 partial/repair/backfillのMySQL専用fixture不足 | 実MySQLでV80途中失敗を再現したところ、**marker INSERT/UPDATE（DML）がFlywayのトランザクションでROLLBACKされ、repair→再適用時に「marker空＝初回」と誤判定して失敗中に作られた新規契約まで0化する**ことを実測。V80へmarker固定とUPDATEの後に明示`COMMIT`を追加しrepair-safe化。`FlywayV80RepairSmokeTest`（専用Container）で「marker固定後に失敗→repair→再適用で新規契約が0化されない・既存契約は0+固定理由・metadata収束」を証明 |
+| R3-P2-03 | P2 | ledgerがmerged Headと不一致 | 本ledger §1現行判定・§2 Issue Register・中央ledger row9をmerged Head 8a50eb1へ同期し、Round5 FAILを記録 |
+| R3-P2-04 | P2 | designに「予約V73」残留 | design.md §5.3を「実在V80」へ修正（原issueを他のbackfill問題で置き換えず、本issueとして記録） |
+
+### 変更file（Round6対応）
+
+- `src/main/java/com/ses/service/security/DataScopeService.java`（assertAllowedContractAsOf追加）
+- `src/main/java/com/ses/service/impl/AcceptanceServiceImpl.java`（submitをasOf scope化）
+- `src/main/java/com/ses/service/NotificationGenerateService.java`（manager通知のworkMonth asOf解決）
+- `src/main/java/com/ses/mapper/ContractMapper.java`（selectContractIdsByOrganizationScopeを要員会計履歴(V62)のasOf解決へ統一。platform-invariants §1.1の「履歴行の存在で分岐」に従い、list/detail/count/submitと通知の母集団を同一化）
+- `src/main/resources/db/migration/V80__order_acceptance_workflow.sql`（backfillのrepair-safe化: 明示COMMIT追加）
+- `src/test/java/com/ses/service/NotificationGenerateServiceTest.java`（manager recipient直接test）
+- `src/test/java/com/ses/order/AcceptanceAsOfScopeTest.java`（新規: 月末異動のsubmit asOf直接test）
+- `src/test/java/com/ses/migration/FlywayV80RepairSmokeTest.java`（新規: V80 partial/repair/backfill専用fixture）
+- `.kiro/specs/order-acceptance-workflow/design.md`（V73残留修正）
+- `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
+
+### Round6定向test・直接回帰
+
+- `AcceptanceAsOfScopeTest` 2/0/0/0（account-link異動＋会計履歴異動の両経路）、`AcceptanceServiceImplTest` 8/0/0/0、
+  `MonthlyClosingUnacceptedTest` 3/0/0/0、`NotificationGenerateServiceTest` 20/0/0/0、
+  `web.NotificationGenerateServiceTest` 1/0/0/0
+- `FlywayV80RepairSmokeTest` 1/0/0/0（実MySQL・skip 0）
+- `MigrationScriptIntegrityTest` 26/0/0/0、`OrderAcceptanceSchemaTest` 5/0/0/0
+- `FlywayMigrationSmokeTest` 2/0/0/0（fresh V1→V80 / legacy、実MySQL・skip 0）
+- V80 production変更後のpolicy §8に基づき、最新HeadでL4全量を再実行する

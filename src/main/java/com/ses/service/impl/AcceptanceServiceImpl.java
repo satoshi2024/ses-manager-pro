@@ -61,7 +61,10 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         if (contract == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        dataScopeService.assertAllowedContract(contractId);
+        // 検収操作の母集団はlist/detail/countと同一の対象月(asOf)時点で評価する（R09-P1-04）。
+        // 異動前後の過去月でも旧組織マネージャーは提出でき、新組織マネージャーは対象月に
+        // 権限のないsubmitをAPIで実行できない。
+        dataScopeService.assertAllowedContractAsOf(contractId, monthEnd(workMonth));
         if (Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
             throw BusinessException.of(400, "error.acceptance.notRequired");
         }

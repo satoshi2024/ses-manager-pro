@@ -1,6 +1,6 @@
 -- ============================================================
 -- V80: 注文・注文請・月次検収 (order-acceptance-workflow / S09)
--- 予約番号V80。V79_1(approval)適用後に適用する。V59は永久欠番のため埋めない。
+-- 実在番号V80。V79_1(approval)適用後に適用する。V59は永久欠番のため埋めない。
 --
 -- 追加するDDL:
 --   t_sales_order          : 注文ヘッダ（注文番号/顧客PO/期間/金額snapshot/支払条件snapshot）
@@ -164,10 +164,20 @@ PREPARE marker_stmt FROM @marker_sql;
 EXECUTE marker_stmt;
 DEALLOCATE PREPARE marker_stmt;
 
+-- 【repair-safe（R09-P2-02対応）】FlywayはMySQLのDMLをトランザクションで実行するため、
+-- 途中失敗（構文エラーや後続DDLの失敗）があるとmarker行がROLLBACKされ、repair→再適用時に
+-- 「marker空＝初回」と誤判定して失敗中に作られた新規契約まで0化してしまう。
+-- ここで明示COMMITし、marker固定を後続失敗から独立させる（DDLはMySQLの暗黙COMMITで既に永続化済み）。
+COMMIT;
+
 UPDATE t_contract c
   JOIN t_contract_acceptance_backfill m ON m.contract_id = c.id
   SET c.acceptance_required = 0,
       c.acceptance_exemption_reason = '移行前契約（V80適用時点の既存契約）';
+
+-- UPDATEも同じ理由で明示COMMIT（後続の失敗でrollbackされても、repair→再適用時に
+-- marker行に対して冪等に再適用される）。
+COMMIT;
 
 -- ============================================================
 -- 4. t_acceptance — 契約×月の検収

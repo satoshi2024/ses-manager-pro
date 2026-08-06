@@ -99,6 +99,9 @@ class NotificationGenerateServiceTest {
     @Mock
     private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
 
+    @Mock
+    private com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
+
     @InjectMocks
     private NotificationGenerateService notificationGenerateService;
 
@@ -120,6 +123,10 @@ class NotificationGenerateServiceTest {
                 .thenReturn(null);
         org.mockito.Mockito.lenient().when(userOrganizationMapper.selectList(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(java.util.Collections.emptyList());
+        // 要員会計履歴（V62）のasOf解決（R09-P1-04）。既定は履歴なし→現在のengineer組織へフォールバック
+        org.mockito.Mockito.lenient().when(engineerAccountingHistoryMapper.selectAt(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(null);
     }
 
     @Test
@@ -424,4 +431,253 @@ class NotificationGenerateServiceTest {
         verify(notificationService, times(2)).publishToUser(
                 eq(888L), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), eq(expectedDedupeKey), eq("my-timesheet"));
     }
+
+    // ===== R09-P2-01 / R09-P1-04: 検収通知のマネージャー宛先（対象月asOfで組織・有効期間を解決） =====
+
+    private com.ses.entity.WorkRecord confirmedRecord(Long contractId, String workMonth) {
+        com.ses.entity.WorkRecord record = new com.ses.entity.WorkRecord();
+        record.setContractId(contractId);
+        record.setWorkMonth(workMonth);
+        return record;
+    }
+
+    private com.ses.entity.Contract contractWithSales(Long contractId, Long engineerId, Long salesUserId) {
+        com.ses.entity.Contract contract = contractWithEngineer(contractId, engineerId);
+        contract.setSalesUserId(salesUserId);
+        return contract;
+    }
+
+    private SysUser user(Long id, String role) {
+        SysUser user = new SysUser();
+        user.setId(id);
+        user.setRole(role);
+        user.setStatus(1);
+        return user;
+    }
+
+    private com.ses.entity.UserOrganization orgMember(Long userId, Long orgId, LocalDate validFrom, LocalDate validTo) {
+        return com.ses.entity.UserOrganization.builder()
+                .userId(userId).organizationId(orgId).primaryFlag(1)
+                .validFrom(validFrom).validTo(validTo).build();
+    }
+
+    private com.ses.entity.Engineer engineerOf(Long engineerId, Long organizationId) {
+        com.ses.entity.Engineer engineer = new com.ses.entity.Engineer();
+        engineer.setId(engineerId);
+        engineer.setOrganizationId(organizationId);
+        engineer.setFullName("要員" + engineerId);
+        return engineer;
+    }
+
+    private com.ses.entity.Acceptance acceptanceOf(Long acceptanceId, Long contractId, String workMonth, String status) {
+        com.ses.entity.Acceptance acceptance = new com.ses.entity.Acceptance();
+        acceptance.setId(acceptanceId);
+        acceptance.setContractId(contractId);
+        acceptance.setWorkMonth(workMonth);
+        acceptance.setStatus(status);
+        return acceptance;
+    }
+
+    @Test
+    void acceptanceUnsubmitted_同組織マネージャーが受信し異組織マネージャーは受信しない() {
+        when(systemConfigService.getInt("acceptance.submission-target-month-offset", 1)).thenReturn(1);
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+        LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
+
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
+
+        // 担当営業999・管理者1
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectList(any()))
+                .thenReturn(List.of(user(1L, "管理者")))       // resolveSalesRecipients: 管理者一覧
+                .thenReturn(List.of(user(500L, "マネージャー"))); // resolveOrgManagerUserIds: 組織100のマネージャー
+        // 要員10の所属組織は対象月末時点で100（会計履歴なし→現在のengineer組織）
+        when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        // 組織100のマネージャー所属は500のみ。600は組織200に所属するため解決されない
+        when(userOrganizationMapper.selectList(any()))
+                .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
+
+        notificationGenerateService.acceptanceUnsubmitted();
+
+        String type = "ACCEPTANCE_UNSUBMITTED";
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
+
+        // マネージャー所属の解決は対象契約の組織（100）に限定されること
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.UserOrganization>> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        verify(userOrganizationMapper).selectList(captor.capture());
+        // getSqlSegment()でパラメータ解決を確定させてから、組織IDフィルタを検証する
+        String sql = captor.getValue().getSqlSegment();
+        org.junit.jupiter.api.Assertions.assertTrue(sql.contains("organization_id"),
+                "マネージャー所属の解決はorganization_idで絞るSQLであるはず: " + sql);
+        // param値はMyBatis-Plusの型解決でInteger/Longどちらもあり得るため文字列で比較する
+        org.junit.jupiter.api.Assertions.assertTrue(
+                captor.getValue().getParamNameValuePairs().values().stream()
+                        .anyMatch(v -> v != null && "100".equals(v.toString())),
+                "組織100のマネージャー所属だけを解決するはず");
+    }
+
+    @Test
+    void acceptanceOverdue_同組織マネージャーが受信する() {
+        when(systemConfigService.getInt("acceptance.accept-notify-days", 7)).thenReturn(7);
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+        LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
+
+        com.ses.entity.Acceptance acceptance = acceptanceOf(200L, 100L, workMonth, "提出済");
+        acceptance.setSubmittedAt(LocalDate.now().minusDays(10).atStartOfDay());
+        when(acceptanceMapper.selectList(any())).thenReturn(List.of(acceptance));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectList(any()))
+                .thenReturn(List.of(user(1L, "管理者")))
+                .thenReturn(List.of(user(500L, "マネージャー")));
+        when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(userOrganizationMapper.selectList(any()))
+                .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
+
+        notificationGenerateService.acceptanceOverdue();
+
+        String type = "ACCEPTANCE_OVERDUE";
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void acceptanceRejected_同組織マネージャーが受信する() {
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+        LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
+
+        when(acceptanceMapper.selectList(any()))
+                .thenReturn(List.of(acceptanceOf(300L, 100L, workMonth, "差戻し")));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectList(any()))
+                .thenReturn(List.of(user(1L, "管理者")))
+                .thenReturn(List.of(user(500L, "マネージャー")));
+        when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(userOrganizationMapper.selectList(any()))
+                .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
+
+        notificationGenerateService.acceptanceRejected();
+
+        String type = "ACCEPTANCE_REJECTED";
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void acceptanceUnsubmitted_組織未設定はマネージャー宛先なし() {
+        when(systemConfigService.getInt("acceptance.submission-target-month-offset", 1)).thenReturn(1);
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
+
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectList(any())).thenReturn(List.of(user(1L, "管理者")));
+        // 会計履歴なし・engineer組織なし・アカウント連携なし → 組織解決不可
+        when(engineerAccountingHistoryMapper.selectAt(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(null);
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, null));
+        when(engineerAccountLinkMapper.selectByEngineerId(10L)).thenReturn(null);
+
+        notificationGenerateService.acceptanceUnsubmitted();
+
+        String type = "ACCEPTANCE_UNSUBMITTED";
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
+        // マネージャー所属は解決されない（組織未設定）
+        verify(userOrganizationMapper, never()).selectList(any());
+    }
+
+    @Test
+    void acceptanceUnsubmitted_同一受信者は重複配信されない() {
+        when(systemConfigService.getInt("acceptance.submission-target-month-offset", 1)).thenReturn(1);
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+        LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
+
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
+
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectList(any()))
+                .thenReturn(List.of(user(1L, "管理者")))
+                .thenReturn(List.of(user(500L, "マネージャー")));
+        when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        // 同じマネージャーが組織所属行を2件持つ場合も1回だけ配信する（distinct）
+        when(userOrganizationMapper.selectList(any()))
+                .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null),
+                        orgMember(500L, 100L, LocalDate.of(2026, 1, 1), null)));
+
+        notificationGenerateService.acceptanceUnsubmitted();
+
+        String type = "ACCEPTANCE_UNSUBMITTED";
+        verify(notificationService, times(1)).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService, times(1)).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
+    }
+
+
+    @Test
+    void acceptanceUnsubmitted_要員会計履歴の対象月組織でマネージャーを解決する() {
+        // 要員は現在のengineer組織が200だが、対象月（2026-07末）の会計履歴（V62）は組織100。
+        // 通知は「月末時点のengineer.organization_id」＝会計履歴の組織100で解決し、
+        // 旧組織100のマネージャー500へ届き、現組織200のマネージャー600へは届かない。
+        when(systemConfigService.getInt("acceptance.submission-target-month-offset", 1)).thenReturn(1);
+        String workMonth = YearMonth.now().minusMonths(1).toString();
+        LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
+
+        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
+
+        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        // 管理者一覧→1L、組織100のマネージャー一覧→500のみ（600は組織200所属のため対象外）
+        when(sysUserMapper.selectList(any()))
+                .thenReturn(List.of(user(1L, "管理者")))
+                .thenReturn(List.of(user(500L, "マネージャー")));
+        // 対象月時点の会計履歴（V62）: 組織100
+        com.ses.entity.EngineerAccountingHistory history = new com.ses.entity.EngineerAccountingHistory();
+        history.setEngineerId(10L);
+        history.setOrganizationId(100L);
+        when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(history);
+        // 現在のengineer組織は200（履歴が存在するためフォールバックしない）
+        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 200L));
+        // 組織100のマネージャー所属は500のみ
+        when(userOrganizationMapper.selectList(any()))
+                .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
+
+        notificationGenerateService.acceptanceUnsubmitted();
+
+        String type = "ACCEPTANCE_UNSUBMITTED";
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
+
+        // マネージャー所属の解決が会計履歴の組織100（現在の200でなく）で行われたこと
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.UserOrganization>> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        verify(userOrganizationMapper).selectList(captor.capture());
+        captor.getValue().getSqlSegment();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                captor.getValue().getParamNameValuePairs().values().stream()
+                        .anyMatch(v -> v != null && "100".equals(v.toString())),
+                "会計履歴の組織100でマネージャー所属を解決するはず");
+    }
+
 }

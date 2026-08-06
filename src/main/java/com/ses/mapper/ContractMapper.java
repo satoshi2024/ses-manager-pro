@@ -23,14 +23,25 @@ public interface ContractMapper extends BaseMapper<Contract> {
 
     /**
      * 組織スコープに入る契約ID。契約の帰属は要員の所属組織を基準にする。
-     * 帰属解決は {@code t_engineer.organization_id} を正とし、未設定時のみアカウント連携ユーザーの
-     * 主所属へフォールバックする（{@code EngineerAccountLinkMapper} と同じ順序）。
+     *
+     * <p>asOf解決はplatform-invariants §1.1の「履歴行の存在で分岐」に従う（R09-P1-04）:
+     * <ol>
+     *   <li>要員会計履歴（V62）の対象日時点の版が存在すれば履歴値の組織を正とする
+     *       （履歴行が明示NULL/UNKNOWNの場合は現在値・account-linkへフォールバックせず非該当）。</li>
+     *   <li>履歴が無い場合は現在の {@code t_engineer.organization_id} を正とし、
+     *       未設定時のみアカウント連携ユーザーの対象日時点の主所属へフォールバックする
+     *       （{@code EngineerAccountLinkMapper} と同じ順序）。</li>
+     * </ol>
      */
     @Select("""
         <script>
         SELECT DISTINCT c.id
         FROM t_contract c
         JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer_accounting_history h ON h.engineer_id = e.id
+             AND h.deleted_flag = 0
+             AND h.valid_from &lt;= #{asOf}
+             AND (h.valid_to IS NULL OR h.valid_to &gt;= #{asOf})
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
@@ -39,7 +50,9 @@ public interface ContractMapper extends BaseMapper<Contract> {
         WHERE c.deleted_flag = 0
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              CASE WHEN h.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
+                   ELSE h.organization_id END
+              IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>

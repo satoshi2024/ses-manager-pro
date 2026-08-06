@@ -88,7 +88,7 @@
 | 差戻し | →提出済（再提出） | 状態CAS | — | — |
 | 検収済 | →取消（**承認必須**、R3.4） | 状態CAS | 請求生成との競合 | 取消はapproval経由 |
 
-- **予約V73**: DDLマイグレーション`t_contract.order_line_id`に`UNIQUE`。二重clickでも1明細→1契約（R5）。
+- **実在V80**: DDLマイグレーション`t_contract.order_line_id`に`UNIQUE`。二重clickでも1明細→1契約（R5）。
   CAS＋UNIQUEの二重防御。
 - **PO重複**: `customer_po_no`は`(tenant_id, customer_id)`内で**重複警告**（拒否ではない）。
   同一原本hash ofの二重登録は**拒否**（R2.4）。警告と拒否を混同しない。

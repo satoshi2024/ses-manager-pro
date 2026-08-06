@@ -50,6 +50,18 @@ public interface DataScopeService {
     void assertAllowedCustomer(Long customerId);
     void assertAllowedEngineer(Long engineerId);
     void assertAllowedContract(Long contractId);
+
+    /**
+     * asOf時点の許可契約ID集合で契約へのアクセスを検証する（order-acceptance-workflow R09-P1-04）。
+     * マネージャーの組織scopeはasOf時点の所属で解決するため、異動前後の過去月でも
+     * 検収のlist/detail/count/submit/通知が同一母集団になる。営業のDataScopeは契約の
+     * 現行sales_user_id帰属（時変でない）のためasOfは影響しない。
+     */
+    default void assertAllowedContractAsOf(Long contractId, java.time.LocalDate asOf) {
+        if (isScoped() && !allowedContractIdsAsOf(asOf).contains(contractId)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
     void assertAllowedProject(Long projectId);
     void assertAllowedProposal(Long proposalId);
 }
