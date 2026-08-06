@@ -86,8 +86,41 @@ class NotificationGenerateServiceTest {
     @Mock
     private SystemConfigService systemConfigService;
 
+    // order-acceptance-workflow(S09)が追加した通知基盤の依存
+    @Mock
+    private com.ses.mapper.SalesOrderMapper salesOrderMapper;
+
+    @Mock
+    private com.ses.mapper.SalesOrderLineMapper salesOrderLineMapper;
+
+    @Mock
+    private com.ses.mapper.AcceptanceMapper acceptanceMapper;
+
+    @Mock
+    private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
     @InjectMocks
     private NotificationGenerateService notificationGenerateService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void stubNewNotificationDependencies() {
+        // 既存testが通知基盤の追加分で壊れないよう、新規通知は空を既定にする
+        org.mockito.Mockito.lenient().when(salesOrderMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Collections.emptyList());
+        org.mockito.Mockito.lenient().when(acceptanceMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Collections.emptyList());
+        org.mockito.Mockito.lenient().when(acceptanceMapper.selectByContractAndMonth(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(null);
+        // 検収未提出通知の対象抽出（既存testの特定スタブは優先される）
+        org.mockito.Mockito.lenient().when(workRecordMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Collections.emptyList());
+        // 組織マネージャー宛先解決（R09-P2-01）。既定は空（組織未設定・未帰属）
+        org.mockito.Mockito.lenient().when(userOrganizationMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(null);
+        org.mockito.Mockito.lenient().when(userOrganizationMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Collections.emptyList());
+    }
 
     @Test
     void testGenerateAll() {

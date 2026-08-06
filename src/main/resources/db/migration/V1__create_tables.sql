@@ -24,8 +24,12 @@ DROP TABLE IF EXISTS t_proposal_history;
 DROP TABLE IF EXISTS t_bp_payment;
 DROP TABLE IF EXISTS t_invoice_item;
 DROP TABLE IF EXISTS t_invoice;
+DROP TABLE IF EXISTS t_acceptance;
+DROP TABLE IF EXISTS t_contract_acceptance_backfill;
 DROP TABLE IF EXISTS t_work_record;
 DROP TABLE IF EXISTS t_contract;
+DROP TABLE IF EXISTS t_sales_order_line;
+DROP TABLE IF EXISTS t_sales_order;
 DROP TABLE IF EXISTS t_proposal;
 DROP TABLE IF EXISTS t_project_skill;
 DROP TABLE IF EXISTS t_project;
@@ -328,6 +332,9 @@ CREATE TABLE t_contract (
   auto_renew            TINYINT      DEFAULT 1                 COMMENT '自動更新(1:する 0:しない)',
   status                ENUM('準備中','稼動中','終了','解約') DEFAULT '準備中' COMMENT '契約ステータス',
   remarks               TEXT                                   COMMENT '備考',
+  order_line_id         BIGINT                                 COMMENT '注文明細ID（1明細→1契約）',
+  acceptance_required   TINYINT      NOT NULL DEFAULT 1        COMMENT '検収要否(1:要 0:不要。未設定を不要にしない)',
+  acceptance_exemption_reason VARCHAR(500)                     COMMENT '検収不要理由（acceptance_required=0時は必須。R3.3）',
   created_by            BIGINT                                 COMMENT '登録者ID',
   created_at            DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
   updated_at            DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
@@ -897,6 +904,105 @@ CREATE TABLE IF NOT EXISTS `t_bp_price_negotiation` (
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX `idx_bp_price_neg_company` (`bp_company_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='BP価格協議記録';
+
+
+-- ============================================================
+-- 28. t_sales_order (注文ヘッダ) / t_sales_order_line (注文明細) / t_acceptance (月次検収)
+-- ============================================================
+CREATE TABLE t_sales_order (
+  id                       BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id                VARCHAR(100)  NOT NULL DEFAULT 'default' COMMENT 'テナントID',
+  legal_entity_id          BIGINT        COMMENT '法人ID（将来multi-entity用）',
+  order_no                 VARCHAR(30)   NOT NULL COMMENT '注文番号',
+  customer_po_no           VARCHAR(100)  COMMENT '顧客PO番号',
+  customer_id              BIGINT        NOT NULL COMMENT '顧客ID',
+  contact_id               BIGINT        COMMENT '顧客担当者ID',
+  quotation_id             BIGINT        COMMENT '生成元見積ID',
+  order_date               DATE          NOT NULL COMMENT '注文日',
+  start_date               DATE          COMMENT '期間開始日',
+  end_date                 DATE          COMMENT '期間終了日',
+  status                   VARCHAR(20)   NOT NULL DEFAULT '下書き' COMMENT '状態: 下書き/受領確認/注文請提出/契約化/完了/取消',
+  total_amount_snapshot    DECIMAL(15,0) COMMENT '注文確定時点の総額snapshot（下書きはNULL）',
+  payment_terms_snapshot   VARCHAR(200)  COMMENT '注文確定時点の支払条件snapshot（下書きはNULL）',
+  source_document_id       BIGINT        COMMENT '受領注文書document ID',
+  acknowledgement_document_id BIGINT      COMMENT '注文請書document ID',
+  version                  INT           NOT NULL DEFAULT 0 COMMENT '楽観ロックバージョン',
+  created_by               BIGINT        COMMENT '登録者ID',
+  created_at               DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at               DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag             TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除',
+  UNIQUE KEY uk_sales_order_no (order_no),
+  INDEX idx_sales_order_customer (customer_id),
+  INDEX idx_sales_order_po (customer_id, customer_po_no),
+  INDEX idx_sales_order_date (order_date),
+  INDEX idx_sales_order_status (status),
+  CONSTRAINT fk_sales_order_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='注文テーブル';
+
+CREATE TABLE t_sales_order_line (
+  id             BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  order_id       BIGINT        NOT NULL COMMENT '注文ID',
+  line_no        INT           NOT NULL COMMENT '明細番号',
+  project_id     BIGINT        COMMENT '案件ID',
+  engineer_id    BIGINT        NOT NULL COMMENT '要員ID',
+  quantity       INT           NOT NULL DEFAULT 1 COMMENT '数量',
+  unit_price     DECIMAL(12,0) NOT NULL COMMENT '単価(円/月)',
+  settlement_min DECIMAL(5,1)  COMMENT '精算下限(h)',
+  settlement_max DECIMAL(5,1)  COMMENT '精算上限(h)',
+  amount         DECIMAL(12,0) COMMENT '明細金額(円)',
+  remarks        VARCHAR(500)  COMMENT '備考',
+  created_at     DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at     DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag   TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除',
+  UNIQUE KEY uk_sales_order_line (order_id, line_no),
+  INDEX idx_sales_order_line_engineer (engineer_id),
+  INDEX idx_sales_order_line_project (project_id),
+  CONSTRAINT fk_sales_order_line_order FOREIGN KEY (order_id) REFERENCES t_sales_order(id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_sales_order_line_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_sales_order_line_project FOREIGN KEY (project_id) REFERENCES t_project(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='注文明細テーブル';
+
+CREATE TABLE t_acceptance (
+  id                   BIGINT        AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  contract_id          BIGINT        NOT NULL COMMENT '契約ID',
+  work_record_id       BIGINT        COMMENT '対象work record ID',
+  work_month           CHAR(7)       NOT NULL COMMENT '対象月(YYYY-MM)',
+  status               VARCHAR(20)   NOT NULL DEFAULT '未提出' COMMENT '状態: 未提出/提出済/検収済/差戻し',
+  submitted_at         DATETIME      COMMENT '提出日時',
+  customer_contact_id  BIGINT        COMMENT '顧客確認者ID',
+  customer_contact_name_snapshot VARCHAR(100) COMMENT '顧客確認者名snapshot（検収実行時点。改名後も不変）',
+  accepted_at          DATETIME      COMMENT '検収日時',
+  reject_comment       VARCHAR(500)  COMMENT '差戻し理由',
+  document_id          BIGINT        COMMENT '検収書document ID',
+  hours_snapshot       DECIMAL(6,2)  COMMENT '提出時点の工数snapshot',
+  amount_snapshot      DECIMAL(12,0) COMMENT '提出時点の請求金額snapshot',
+  work_record_updated_at DATETIME    COMMENT '提出時点のwork record更新日時（version代用）',
+  version              INT           NOT NULL DEFAULT 0 COMMENT '楽観ロックバージョン',
+  created_by           BIGINT        COMMENT '登録者ID',
+  created_at           DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at           DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag         TINYINT       NOT NULL DEFAULT 0 COMMENT '論理削除',
+  UNIQUE KEY uk_acceptance_contract_month (contract_id, work_month),
+  INDEX idx_acceptance_work_record (work_record_id),
+  INDEX idx_acceptance_status_month (status, work_month),
+  CONSTRAINT fk_acceptance_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月次検収テーブル';
+
+
+-- ============================================================
+-- 29. t_contract_acceptance_backfill (V80 legacy backfillのrepair-safe marker)
+-- ============================================================
+CREATE TABLE t_contract_acceptance_backfill (
+  contract_id   BIGINT       PRIMARY KEY COMMENT 'V80適用時点の既存契約ID（検収不要へ移行対象）',
+  backfilled_at DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT 'marker登録日時',
+  CONSTRAINT fk_backfill_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
 
 -- ============================================================
 -- DDL完了

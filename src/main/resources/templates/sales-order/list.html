@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{salesOrder.title}">注文管理</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
+                <div class="col-md-3">
+                    <input type="text" id="salesOrderKeyword" name="keyword" class="form-control" th:placeholder="#{salesOrder.search.keyword}" placeholder="注文番号・PO番号">
+                </div>
+                <div class="col-md-2">
+                    <select id="salesOrderStatusFilter" name="status" class="form-select">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="下書き" th:text="#{salesOrder.status.下書き}">下書き</option>
+                        <option value="受領確認" th:text="#{salesOrder.status.受領確認}">受領確認</option>
+                        <option value="注文請提出" th:text="#{salesOrder.status.注文請提出}">注文請提出</option>
+                        <option value="契約化" th:text="#{salesOrder.status.契約化}">契約化</option>
+                        <option value="完了" th:text="#{salesOrder.status.完了}">完了</option>
+                        <option value="取消" th:text="#{salesOrder.status.取消}">取消</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <input type="date" id="salesOrderDateFrom" name="dateFrom" class="form-control" th:placeholder="#{salesOrder.search.dateFrom}" placeholder="注文日(From)">
+                </div>
+                <div class="col-md-2">
+                    <input type="date" id="salesOrderDateTo" name="dateTo" class="form-control" th:placeholder="#{salesOrder.search.dateTo}" placeholder="注文日(To)">
+                </div>
+                <div class="col-md-3">
+                    <button type="button" id="btnSearchSalesOrder" class="btn btn-secondary" th:text="#{common.btn.search}">検索</button>
+                    <button type="button" id="btnNewSalesOrder" class="btn btn-primary" th:text="#{salesOrder.btn.new}">注文作成</button>
+                </div>
+            </form>
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped" id="salesOrderTable">
+                    <thead>
+                        <tr>
+                            <th th:text="#{salesOrder.table.no}">注文番号</th>
+                            <th th:text="#{salesOrder.table.po}">PO番号</th>
+                            <th th:text="#{salesOrder.table.customer}">顧客</th>
+                            <th th:text="#{salesOrder.table.orderDate}">注文日</th>
+                            <th th:text="#{salesOrder.table.period}">期間</th>
+                            <th th:text="#{salesOrder.table.amount}">金額</th>
+                            <th th:text="#{salesOrder.table.status}">状態</th>
+                            <th th:text="#{salesOrder.table.actions}">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center"></div>
+        </div>
+    </div>
+
+    <!-- 注文作成/編集モーダル -->
+    <div class="modal fade" id="salesOrderModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{salesOrder.btn.new}">注文作成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="salesOrderForm" class="row g-2">
+                        <input type="hidden" name="id">
+                        <input type="hidden" name="quotationId">
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{salesOrder.modal.customer}">顧客</label>
+                            <select class="form-select" name="customerId" required></select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{salesOrder.modal.contact}">顧客担当者</label>
+                            <select class="form-select" name="contactId"></select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" th:text="#{salesOrder.modal.poNo}">顧客PO番号</label>
+                            <input type="text" class="form-control" name="customerPoNo">
+                            <div id="poWarningText" class="form-text text-warning" style="display:none;"></div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{salesOrder.modal.orderDate}">注文日</label>
+                            <input type="date" class="form-control" name="orderDate" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{salesOrder.modal.startDate}">期間開始</label>
+                            <input type="date" class="form-control" name="startDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{salesOrder.modal.endDate}">期間終了</label>
+                            <input type="date" class="form-control" name="endDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" th:text="#{salesOrder.modal.paymentTerms}">支払条件</label>
+                            <input type="text" class="form-control" name="paymentTerms">
+                        </div>
+                        <div class="col-12 mt-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label mb-0" th:text="#{salesOrder.modal.lines}">注文明細</label>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btnAddLine" th:text="#{salesOrder.btn.addLine}">明細追加</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="lineTable">
+                                    <thead>
+                                        <tr>
+                                            <th th:text="#{salesOrder.modal.line.engineer}">要員</th>
+                                            <th th:text="#{salesOrder.modal.line.project}">案件</th>
+                                            <th th:text="#{salesOrder.modal.line.unitPrice}">単価(円/月)</th>
+                                            <th th:text="#{salesOrder.modal.line.settlementMin}">精算下限</th>
+                                            <th th:text="#{salesOrder.modal.line.settlementMax}">精算上限</th>
+                                            <th th:text="#{salesOrder.modal.line.remarks}">備考</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveSalesOrder" th:text="#{common.btn.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 注文詳細モーダル -->
+    <div class="modal fade" id="salesOrderDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{salesOrder.detail.title}">注文詳細</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="salesOrderDetailBody">
+                    <div class="text-muted" th:text="#{common.loading}">読み込み中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/sales-order.js"></script>
+</th:block>
+</body>
+</html>

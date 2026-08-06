@@ -8,6 +8,10 @@ $(document).ready(function() {
         event.preventDefault();
         applyContractFilters();
     });
+    // 検収不要（未チェック）時に理由入力を表示（R3.3 / R09-P1-01）
+    $('#cont-acceptanceRequired').on('change', function() {
+        $('#cont-exemption-reason-wrap').toggle($(this).is(':checked') === false);
+    });
     $('#contract-page-size').on('change', function() {
         contractPageSize = Number($(this).val()) || 20;
         loadContracts(1);
@@ -332,6 +336,10 @@ function openEditContract(id) {
         $('#complianceWarning').addClass('d-none').text('');
         $('#cont-id').val(c.id);
         $('#cont-directCommandFlag').prop('checked', !!c.directCommandFlag);
+        // 検収要否（既定 true）と検収不要理由（R3.3 / R09-P1-01）
+        $('#cont-acceptanceRequired').prop('checked', c.acceptanceRequired !== false);
+        $('#cont-acceptanceExemptionReason').val(c.acceptanceExemptionReason || '');
+        $('#cont-exemption-reason-wrap').toggle($('#cont-acceptanceRequired').is(':checked') === false);
         $('#cont-engineerId').val(c.engineerId != null ? String(c.engineerId) : '');
         $('#cont-projectId').val(c.projectId != null ? String(c.projectId) : '');
         $('#cont-customerId').val(c.customerId != null ? String(c.customerId) : '');
@@ -387,6 +395,8 @@ function buildContractPayload() {
         settlementHoursMax: val('#cont-settlementHoursMax') ? parseFloat(val('#cont-settlementHoursMax')) : null,
         fractionRule: val('#cont-fractionRule'),
         directCommandFlag: $('#cont-directCommandFlag').is(':checked'),
+        acceptanceRequired: $('#cont-acceptanceRequired').is(':checked'),
+        acceptanceExemptionReason: val('#cont-acceptanceExemptionReason'),
         autoRenew: val('#cont-autoRenew') != null ? parseInt(val('#cont-autoRenew')) : 0,
         commissionBaseType: val('#cont-commissionBaseType'),
         commissionRate: val('#cont-commissionRate') ? parseFloat(val('#cont-commissionRate')) : null

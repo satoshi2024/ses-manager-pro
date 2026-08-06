@@ -218,14 +218,87 @@ CREATE TABLE t_contract (
   renewed_from_contract_id BIGINT,
   quotation_id            BIGINT,
   renewal_decision        VARCHAR(20),
+  order_line_id           BIGINT,
+  acceptance_required     TINYINT NOT NULL DEFAULT 1,
+  acceptance_exemption_reason VARCHAR(500),
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag            TINYINT DEFAULT 0,
   version                 INT NOT NULL DEFAULT 0
 );
+-- R09-P2-04: 本番のuk_contract_order_line（1明細→1契約）をH2統合testでも検証できるようにする
+CREATE UNIQUE INDEX IF NOT EXISTS uk_contract_order_line ON t_contract(order_line_id);
 
 DROP TABLE IF EXISTS t_quotation CASCADE;
+
+DROP TABLE IF EXISTS t_acceptance CASCADE;
+DROP TABLE IF EXISTS t_sales_order_line CASCADE;
+DROP TABLE IF EXISTS t_sales_order CASCADE;
+CREATE TABLE t_sales_order (
+  id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id                VARCHAR(100) NOT NULL DEFAULT 'default',
+  legal_entity_id          BIGINT,
+  order_no                 VARCHAR(30) NOT NULL,
+  customer_po_no           VARCHAR(100),
+  customer_id              BIGINT NOT NULL,
+  contact_id               BIGINT,
+  quotation_id             BIGINT,
+  order_date               DATE NOT NULL,
+  start_date               DATE,
+  end_date                 DATE,
+  status                   VARCHAR(20) NOT NULL DEFAULT '下書き',
+  total_amount_snapshot    DECIMAL(15,0),
+  payment_terms_snapshot   VARCHAR(200),
+  source_document_id       BIGINT,
+  acknowledgement_document_id BIGINT,
+  version                  INT NOT NULL DEFAULT 0,
+  created_by               BIGINT,
+  created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag             TINYINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_no ON t_sales_order(order_no);
+CREATE TABLE t_sales_order_line (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  order_id       BIGINT NOT NULL,
+  line_no        INT NOT NULL,
+  project_id     BIGINT,
+  engineer_id    BIGINT NOT NULL,
+  quantity       INT NOT NULL DEFAULT 1,
+  unit_price     DECIMAL(12,0) NOT NULL,
+  settlement_min DECIMAL(5,1),
+  settlement_max DECIMAL(5,1),
+  amount         DECIMAL(12,0),
+  remarks        VARCHAR(500),
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag   TINYINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_line ON t_sales_order_line(order_id, line_no);
+CREATE TABLE t_acceptance (
+  id                   BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_id          BIGINT NOT NULL,
+  work_record_id       BIGINT,
+  work_month           CHAR(7) NOT NULL,
+  status               VARCHAR(20) NOT NULL DEFAULT '未提出',
+  submitted_at         DATETIME,
+  customer_contact_id  BIGINT,
+  customer_contact_name_snapshot VARCHAR(100),
+  accepted_at          DATETIME,
+  reject_comment       VARCHAR(500),
+  document_id          BIGINT,
+  hours_snapshot       DECIMAL(6,2),
+  amount_snapshot      DECIMAL(12,0),
+  work_record_updated_at DATETIME,
+  version              INT NOT NULL DEFAULT 0,
+  created_by           BIGINT,
+  created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag         TINYINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_acceptance_contract_month ON t_acceptance(contract_id, work_month);
+
 CREATE TABLE t_quotation (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
   quotation_no          VARCHAR(30) NOT NULL UNIQUE,
@@ -1088,3 +1161,13 @@ CREATE TABLE IF NOT EXISTS t_approval_responsibility (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0
 );
+
+DROP TABLE IF EXISTS t_contract_acceptance_backfill CASCADE;
+CREATE TABLE t_contract_acceptance_backfill (
+  contract_id   BIGINT PRIMARY KEY,
+  backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- R09-P1-05: 孤児 order_line_id の拒否（t_sales_order_line 作成後にFKを追加）
+ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS fk_contract_order_line
+  FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id);

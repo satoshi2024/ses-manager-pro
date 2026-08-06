@@ -54,6 +54,8 @@ function renderCards() {
     cards.appendChild(card('closing.item.unbilled', s.unbilledCount));
     cards.appendChild(card('closing.item.unpaidBp', s.unpaidBpCount));
     cards.appendChild(card('closing.item.overdue', s.overdueCount, null, null, true));
+    // (g) 未検収件数（R4.2）: 締めは妨げない（overdueと同じ扱い）
+    cards.appendChild(card('closing.item.unaccepted', s.unacceptedCount, null, null, true));
     cards.appendChild(card('closing.item.compliance', s.complianceCount, null, null, true));
 
     const confirmBtn = document.getElementById('btnConfirmClosing');

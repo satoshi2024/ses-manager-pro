@@ -64,6 +64,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final DocumentStorage documentStorage;
     private final ObjectProvider<FileScanner> fileScannerProvider;
+    private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     private static final String DEFAULT_TENANT_ID = "default";
 
@@ -842,6 +843,15 @@ public class DocumentServiceImpl implements DocumentService {
                     dataScopeService.assertAllowedProposal(targetId);
                     anyAllowed = true;
                     break;
+                } else if ("SALES_ORDER".equals(type)) {
+                    // 注文書原本・注文請書は注文一覧と同じscope（顧客DataScope）で見せる
+                    com.ses.entity.SalesOrder salesOrder = salesOrderMapper == null ? null
+                            : salesOrderMapper.selectById(targetId);
+                    if (salesOrder != null) {
+                        dataScopeService.assertAllowedCustomer(salesOrder.getCustomerId());
+                        anyAllowed = true;
+                        break;
+                    }
                 }
                 // 未対応・未定義のターゲットタイプはスキップ（fail-closed）
             } catch (BusinessException ignored) {
@@ -894,6 +904,14 @@ public class DocumentServiceImpl implements DocumentService {
         if (allowedProposals != null && !allowedProposals.isEmpty()) {
             linkWrapper.or(w -> w.eq("target_type", "PROPOSAL").in("target_id", allowedProposals));
             hasCondition = true;
+        }
+        if (allowedCustomers != null && !allowedCustomers.isEmpty() && salesOrderMapper != null) {
+            List<Long> allowedOrderIds = salesOrderMapper.selectOrderIdsByCustomerScope(
+                    new java.util.ArrayList<>(allowedCustomers));
+            if (!allowedOrderIds.isEmpty()) {
+                linkWrapper.or(w -> w.eq("target_type", "SALES_ORDER").in("target_id", allowedOrderIds));
+                hasCondition = true;
+            }
         }
 
         if (!hasCondition) {

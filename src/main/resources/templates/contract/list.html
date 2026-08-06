@@ -168,6 +168,15 @@
                             <input type="checkbox" id="cont-directCommandFlag" class="form-check-input">
                             <label class="form-check-label text-muted small" for="cont-directCommandFlag" th:text="#{contract.directCommandFlag}">指揮命令の実態がある（発注者から直接の指揮命令を受けている）</label>
                         </div>
+                        <!-- 検収要否と検収不要理由（R3.3 / R09-P1-01） -->
+                        <div class="form-check mb-2">
+                            <input type="checkbox" id="cont-acceptanceRequired" class="form-check-input" checked>
+                            <label class="form-check-label text-muted small" for="cont-acceptanceRequired" th:text="#{contract.acceptanceRequired}">月次検収を要する（未チェック=検収不要契約）</label>
+                        </div>
+                        <div class="mb-3" id="cont-exemption-reason-wrap" style="display: none;">
+                            <label class="form-label text-muted small" for="cont-acceptanceExemptionReason" th:text="#{contract.acceptanceExemptionReason}">検収不要理由（必須）</label>
+                            <input type="text" id="cont-acceptanceExemptionReason" class="form-control form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                        </div>
                         <div id="complianceWarning" class="alert alert-warning d-none"></div>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">

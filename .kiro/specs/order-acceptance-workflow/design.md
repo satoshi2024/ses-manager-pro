@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V80）
+## 1. DDL（実在V80）
 
 - `t_sales_order(id, tenant_id, legal_entity_id, order_no, customer_po_no, customer_id, contact_id,
   quotation_id, order_date, start/end_date, status, total_amount_snapshot, payment_terms_snapshot,
@@ -13,6 +13,9 @@
 - `t_acceptance(id, contract_id, work_record_id, work_month, status, submitted_at, customer_contact_id,
   accepted_at, reject_comment, document_id, version)`、`UNIQUE(contract_id,work_month)`。
 - `t_contract.acceptance_required` default true。
+  - **go-live移行方針（R09-P2-01）**: V80適用時点で存在する既存契約（order_line_idがNULL）は、
+    検収フロー導入前の実績の請求が停止しないよう `acceptance_required=0`（検収不要）へ移行する。
+    V80以後に注文経由で作成される新規契約は `NOT NULL DEFAULT 1`（検収要）のまま。
 
 ## 2. Service
 
@@ -24,6 +27,8 @@
 ## 3. Document
 
 - 受領注文書は`ORDER_RECEIVED`、注文請書は`ORDER_ACKNOWLEDGEMENT`、検収書は`ACCEPTANCE`。
+  - R3.1「原本を持つ」: 検収書（ACCEPTANCE）はB1でupload→文書台帳登録→`t_acceptance.document_id`へ設定し、
+    downloadは検収一覧と同じ契約DataScopeで提供する（検収書はCONTRACTへリンクし、document側に別ACLを作らない）。
 - 注文請書PDFはcompany/legal entity、注文条件、明細、顧客PO参照を印字。
 
 ## 4. UI/API
@@ -65,6 +70,8 @@
 
 - 注文書原本・注文請書PDFのdownloadは、注文一覧と**同じscope**を通す（archive spec の
   `t_document_link`経由）。document側で別ACLを作らない。
+- 要員行の可視性は `/api/my/acceptances`（状態のみ・金額非表示）で提供する。このAPIを利用する
+  画面UIは本specでは持たず、S13/S14のポータル（要員セルフサービス）で接続する想定（R09-NOTE-01）。
 - 月次締めchecklistの未検収件数は、**閲覧者のscopeで数える**。全社件数を全員へ見せない。
 
 ### 5.3 状態機械と競合

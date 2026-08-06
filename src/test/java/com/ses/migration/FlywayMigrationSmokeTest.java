@@ -564,6 +564,87 @@ class FlywayMigrationSmokeTest {
                 assertEquals(java.util.List.of("request_id", "round_no", "step_no", "approver_slot_user_id"),
                         columns, "V78のaction UNIQUEはroundとslot userを含む必要がある");
             }
+
+            // V80: 注文・注文請・月次検収 (order-acceptance-workflow / S09)
+            assertTableExists(st, "t_sales_order");
+            assertTableExists(st, "t_sales_order_line");
+            assertTableExists(st, "t_acceptance");
+            assertColumnExists(st, "t_sales_order", "order_no");
+            assertColumnExists(st, "t_sales_order", "customer_po_no");
+            assertColumnExists(st, "t_sales_order", "total_amount_snapshot");
+            assertColumnExists(st, "t_sales_order", "payment_terms_snapshot");
+            assertColumnExists(st, "t_sales_order", "source_document_id");
+            assertColumnExists(st, "t_sales_order", "acknowledgement_document_id");
+            assertColumnExists(st, "t_sales_order", "version");
+            assertIndexExists(st, "t_sales_order", "uk_sales_order_no");
+            assertColumnExists(st, "t_sales_order_line", "order_id");
+            assertColumnExists(st, "t_sales_order_line", "line_no");
+            assertColumnExists(st, "t_sales_order_line", "engineer_id");
+            assertIndexExists(st, "t_sales_order_line", "uk_sales_order_line");
+            // t_contract.order_line_id（UNIQUEで1明細→1契約）と acceptance_required
+            assertColumnExists(st, "t_contract", "order_line_id");
+            assertColumnExists(st, "t_contract", "acceptance_required");
+            assertColumnExists(st, "t_contract", "acceptance_exemption_reason");
+            assertIndexExists(st, "t_contract", "uk_contract_order_line");
+            // R09-P1-05: 孤児order_line_idを拒否するFK（fresh/legacy同一形状）
+            assertForeignKeyExists(st, "t_contract", "fk_contract_order_line",
+                    "order_line_id", "t_sales_order_line", "id");
+            // R09-P2-04: legacy backfillのrepair-safe marker
+            assertTableExists(st, "t_contract_acceptance_backfill");
+            assertRowExists(st, "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_contract_acceptance_backfill'");
+            // acceptance_required は NOT NULL DEFAULT 1（未設定を「不要」に化けない）
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_contract' AND column_name='acceptance_required' "
+                    + "AND is_nullable='NO' AND column_default='1'");
+            assertColumnExists(st, "t_acceptance", "contract_id");
+            assertColumnExists(st, "t_acceptance", "work_month");
+            assertColumnExists(st, "t_acceptance", "status");
+            assertColumnExists(st, "t_acceptance", "hours_snapshot");
+            assertColumnExists(st, "t_acceptance", "amount_snapshot");
+            assertColumnExists(st, "t_acceptance", "version");
+            assertIndexExists(st, "t_acceptance", "uk_acceptance_contract_month");
+            // メニューとrole_menu（管理者・営業・マネージャーへ付与。HRは不可視）
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='sales-order'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='acceptance'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='営業' AND m.menu_key='sales-order'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='マネージャー' AND m.menu_key='acceptance'");
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                            + "WHERE rm.role='HR' AND m.menu_key IN ('sales-order','acceptance')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
+                        "HRへ注文/検収メニューを付与してはならない");
+            }
+            // document type種別（order-acceptance-workflow design §3）
+            assertRowExists(st, "SELECT 1 FROM m_document_type WHERE code='ORDER_RECEIVED'");
+            assertRowExists(st, "SELECT 1 FROM m_document_type WHERE code='ORDER_ACKNOWLEDGEMENT'");
+            assertRowExists(st, "SELECT 1 FROM m_document_type WHERE code='ACCEPTANCE'");
+            // action permission（営業・マネージャーへ付与。HRへは付与しない）
+            assertActionGrantedTo(st, "sales-order.*", "role-manager", "role-sales");
+            assertActionGrantedTo(st, "acceptance.*", "role-manager", "role-sales");
+            // 同一契約×同一月の検収がDBのUNIQUEでも1件に制限されること（R3 / R5）
+            st.execute("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, "
+                    + "start_date, selling_price, cost_price, status) "
+                    + "SELECT 'SO-SMOKE-1', e.id, p.id, p.customer_id, '2026-01-01', 500000, 300000, '準備中' "
+                    + "FROM t_engineer e, t_project p LIMIT 1");
+            long smokeContractId = -1;
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT id FROM t_contract WHERE contract_no='SO-SMOKE-1'")) {
+                if (rs.next()) { smokeContractId = rs.getLong(1); }
+            }
+            st.execute("INSERT INTO t_acceptance (contract_id, work_month, status) "
+                    + "VALUES (" + smokeContractId + ", '2026-01', '未提出')");
+            boolean duplicateAcceptanceRejected = false;
+            try {
+                st.execute("INSERT INTO t_acceptance (contract_id, work_month, status) "
+                        + "VALUES (" + smokeContractId + ", '2026-01', '未提出')");
+            } catch (java.sql.SQLException expected) {
+                duplicateAcceptanceRejected = true;
+            }
+            org.junit.jupiter.api.Assertions.assertTrue(duplicateAcceptanceRejected,
+                    "同一契約×同一月の検収はDBのUNIQUEでも拒否されるはず");
         }
     }
 

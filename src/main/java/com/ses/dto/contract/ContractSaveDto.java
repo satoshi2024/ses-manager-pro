@@ -54,6 +54,10 @@ public class ContractSaveDto {
     
     private Long renewedFromContractId;
     private Long quotationId;
+    /** 検収要否（false=検収不要契約。理由必須）。 */
+    private Boolean acceptanceRequired;
+    /** 検収不要理由（acceptanceRequired=false時は必須。R3.3）。 */
+    private String acceptanceExemptionReason;
 
     @AssertTrue(message = "契約終了日は開始日以降を指定してください")
     public boolean isDateRangeValid() {

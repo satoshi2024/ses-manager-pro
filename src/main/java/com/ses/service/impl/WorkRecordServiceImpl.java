@@ -73,6 +73,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    /** 検収済work recordの再open/金額変更ガード（R3.4）。任意依存。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.AcceptanceMapper acceptanceMapper;
+
     /**
      * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
      * 常に配線される。未配線は既存 {@code @InjectMocks} テストの全緑維持のための緩和であり、
@@ -261,6 +265,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
         assertContractScope(contract, workMonth, record);
+        assertAcceptanceNotAccepted(contractId, workMonth);
 
 
         // 保存許可状態は「入力中」「差戻し」のみ（提出済・確定は編集不可）。
@@ -548,6 +553,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return;
         }
 
+        // 検収済みwork recordの再openには検収取消承認が必要（R3.4）。
+        for (WorkRecord record : records) {
+            assertAcceptanceNotAccepted(record.getContractId(), record.getWorkMonth());
+        }
+
         List<Long> ids = records.stream().map(WorkRecord::getId).collect(Collectors.toList());
 
         List<String> nos = invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(ids);
@@ -582,6 +592,20 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 .eq("status", "未払"));
     }
 
+    /**
+     * 検収済みwork recordの再open/金額変更を拒否する（R3.4）。
+     * 検収取消は承認経由（acceptance.cancel）で行い、承認適用後に差戻し状態となってから編集可能。
+     */
+    private void assertAcceptanceNotAccepted(Long contractId, String workMonth) {
+        if (acceptanceMapper == null || contractId == null || workMonth == null) {
+            return;
+        }
+        com.ses.entity.Acceptance acceptance = acceptanceMapper.selectByContractAndMonth(contractId, workMonth);
+        if (acceptance != null && "検収済".equals(acceptance.getStatus())) {
+            throw BusinessException.of(409, "error.acceptance.approvalRequiredForEdit");
+        }
+    }
+
     // ===== 要員セルフサービス勤怠（engineer-self-service-timesheet / P1） =====
 
     @Override
@@ -598,6 +622,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
         assertContractScope(contract, workMonth, record);
+        assertAcceptanceNotAccepted(contractId, workMonth);
 
 
         if (contract.getStartDate() != null && daily.getWorkDate().isBefore(contract.getStartDate())) {

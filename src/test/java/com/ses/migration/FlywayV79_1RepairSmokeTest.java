@@ -441,9 +441,12 @@ class FlywayV79_1RepairSmokeTest {
     }
 
     private Flyway flyway() {
+        // 後続spec(S09 order-acceptance-workflow)がV80を実在化したため、
+        // validate/repair/migrateはV79.1を上限に固定する（未適用のV80をpending扱いで失敗させない）。
         return Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
+                .target("79.1")
                 .cleanDisabled(false)
                 .load();
     }

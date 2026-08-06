@@ -48,7 +48,8 @@ class SpecDispatchConsistencyTest {
         // SPEC_BY_CONVERSATION.put("S06", "bp-company-master-procurement-compliance");
         SPEC_BY_CONVERSATION.put("S07", "approval-workflow-internal-control");
         // SPEC_BY_CONVERSATION.put("S08", "crm-contact-opportunity"); // V73実装済み（予約→実在へ移行）
-        SPEC_BY_CONVERSATION.put("S09", "order-acceptance-workflow");
+        // SPEC_BY_CONVERSATION.put("S09", "order-acceptance-workflow"); // V80実装済み（予約→実在へ移行）
+
         SPEC_BY_CONVERSATION.put("S10", "dispatch-outsourcing-compliance-ledger");
         SPEC_BY_CONVERSATION.put("S11", "attendance-leave-overtime-compliance");
         SPEC_BY_CONVERSATION.put("S12", "staffing-capacity-planning");

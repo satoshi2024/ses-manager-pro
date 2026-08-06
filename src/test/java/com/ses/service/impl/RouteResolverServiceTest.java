@@ -464,14 +464,15 @@ class RouteResolverServiceTest {
         disabled.setId(disabledManager);
         disabled.setStatus(0);
         sysUserMapper.updateById(disabled);
-        String organizationType = "route.disabled-organization-manager." + System.nanoTime();
+        // S09 L4証跡のためテストのみ修正: System.nanoTime()桁数でVARCHAR(50)超過になるflakyを防ぐ
+        String organizationType = "route.disabled-org-manager-" + System.nanoTime();
         insertSourceRoute(organizationType, "ORGANIZATION_MANAGER", null, null,
                 today.minusDays(1), today.plusDays(1));
         insertResponsibility("ORGANIZATION_MANAGER", organization, disabledManager,
                 today.minusDays(1), today.plusDays(1));
 
         Long deletedManager = insertUser("route-deleted-manager");
-        String financeType = "route.deleted-finance-manager." + System.nanoTime();
+        String financeType = "route.deleted-finance-mgr-" + System.nanoTime();
         insertSourceRoute(financeType, "FINANCE_MANAGER", null, null,
                 today.minusDays(1), today.plusDays(1));
         insertResponsibility("FINANCE_MANAGER", null, deletedManager,

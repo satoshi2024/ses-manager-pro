@@ -30,6 +30,10 @@ public class DashboardSummaryDto {
         private String profitTrend;
         private String scopeType;
         private String scopeDisplayName;
+        /** 未検収売上（円）。検収要・確定済・未検収済の実績合計（R4.3）。 */
+        private long unacceptedSales;
+        /** 検収平均日数（提出→検収、日単位。R4.3）。 */
+        private double avgAcceptanceDays;
     }
 
     @Data

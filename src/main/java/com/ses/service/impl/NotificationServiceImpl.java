@@ -141,6 +141,8 @@ public class NotificationServiceImpl implements NotificationService {
             case "CASHFLOW_ALERT" -> "dashboard";
             case "APPROVAL_REQUESTED", "APPROVAL_RETURNED", "APPROVAL_APPROVED",
                     "APPROVAL_REJECTED", "APPROVAL_SLA_ESCALATED", "APPROVAL_CONFIG_GAP" -> "approval";
+            case "ORDER_RECEIVED_PENDING", "ORDER_ACK_PENDING" -> "sales-order";
+            case "ACCEPTANCE_UNSUBMITTED", "ACCEPTANCE_OVERDUE", "ACCEPTANCE_REJECTED" -> "acceptance";
             default -> null;
         };
     }
