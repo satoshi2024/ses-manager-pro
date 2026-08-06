@@ -9,14 +9,14 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | FIX→REVIEW（R09 Round3 FAIL指摘の修正済み、Round4再Review待ち） |
+| state | PASS（R09 Round4独立Review PASS確定） |
 | base | f523e11（main / origin/main 一致） |
 | head | 1b8c5f2（branch codex/order-acceptance-workflow） |
 | merge | unmerged（Review合格後にmerge） |
-| latest review | R09 round 3 / 2026-08-06（FAIL）→ 修正済み、round 4再Review待ち |
-| verdict | R09 round3: FAIL（P0=0/P1=6/P2=4）→ 全指摘修正済み、round4再Review待ち |
-| issue count | R09 round3: P0=0/P1=6/P2=4（全て対応済み、VERIFIED待ち） |
-| next action | R09 round4 差分再Review → PASS後にmerge |
+| latest review | R09 round 4 / 2026-08-06（PASS） |
+| verdict | PASS（R09 round4: P0=0 / P1=0 / P2=0 / NOTE=4） |
+| issue count | R09 round4: P0=0 / P1=0 / P2=0 / NOTE=4 |
+| next action | merge（main）→ S10/S11解放 |
 
 ## 2. OPEN Issue Register
 
@@ -261,3 +261,13 @@
 ### 最終Head（1b8c5f2）のL4全量証拠
 - `mvn -o test`（target/full-test-run6.log）: **1531 / 0 / 0 / 0（Skipped 0、BUILD SUCCESS）**
 - うちDocker MySQL smoke（fresh V1→V80・legacy）0 skipped、Node/JS・4言語i18n 0 skipped
+
+## 17. R09 Round4 差分再Review PASS — 記録（2026-08-06）
+
+独立Review（R09 Round 4、read-only、Base 2dbe83a → Head ba24814）:
+- **判定 = PASS（P0=0 / P1=0 / P2=1 / NOTE=4 / open release gates=0）**
+- Round 3のP1×6・P2×4を実diff・test・実MySQL smoke（fresh/legacy 0 skipped）で全解決確認。新規P0/P1なし。
+- 最終Head `ba24814` のコードtreeはL4証拠commit `1b8c5f2` と同一（差分はledger文書のみ）。L4 **1531/0/0/0・BUILD SUCCESS・Skipped 0**。
+- 残P2（V1 DROP順のbackfill marker位置・実影響なし）は本ledger更新にて修正（markerをt_contractより先にDROP）。
+- 残NOTE: cancel invoice除外（fail-closedで安全側）・S07 flaky test修正（ledger §16に明記）・ledger headの文書同期commit扱い・通知N+1（従来許容）— いずれもPASS非block。
+- 次spec解放: merge後、中央ledger row9をPASS化（Base f523e11 → Head ba24814、R09 Round 4 PASS）し、S10 dispatch / S11 attendance を解放可。
