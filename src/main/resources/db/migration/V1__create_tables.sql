@@ -24,11 +24,12 @@ DROP TABLE IF EXISTS t_proposal_history;
 DROP TABLE IF EXISTS t_bp_payment;
 DROP TABLE IF EXISTS t_invoice_item;
 DROP TABLE IF EXISTS t_invoice;
-DROP TABLE IF EXISTS t_work_record;
 DROP TABLE IF EXISTS t_acceptance;
+DROP TABLE IF EXISTS t_work_record;
+DROP TABLE IF EXISTS t_contract;
 DROP TABLE IF EXISTS t_sales_order_line;
 DROP TABLE IF EXISTS t_sales_order;
-DROP TABLE IF EXISTS t_contract;
+DROP TABLE IF EXISTS t_contract_acceptance_backfill;
 DROP TABLE IF EXISTS t_proposal;
 DROP TABLE IF EXISTS t_project_skill;
 DROP TABLE IF EXISTS t_project;
@@ -333,6 +334,7 @@ CREATE TABLE t_contract (
   remarks               TEXT                                   COMMENT '備考',
   order_line_id         BIGINT                                 COMMENT '注文明細ID（1明細→1契約）',
   acceptance_required   TINYINT      NOT NULL DEFAULT 1        COMMENT '検収要否(1:要 0:不要。未設定を不要にしない)',
+  acceptance_exemption_reason VARCHAR(500)                     COMMENT '検収不要理由（acceptance_required=0時は必須。R3.3）',
   created_by            BIGINT                                 COMMENT '登録者ID',
   created_at            DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
   updated_at            DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
@@ -972,6 +974,7 @@ CREATE TABLE t_acceptance (
   status               VARCHAR(20)   NOT NULL DEFAULT '未提出' COMMENT '状態: 未提出/提出済/検収済/差戻し',
   submitted_at         DATETIME      COMMENT '提出日時',
   customer_contact_id  BIGINT        COMMENT '顧客確認者ID',
+  customer_contact_name_snapshot VARCHAR(100) COMMENT '顧客確認者名snapshot（検収実行時点。改名後も不変）',
   accepted_at          DATETIME      COMMENT '検収日時',
   reject_comment       VARCHAR(500)  COMMENT '差戻し理由',
   document_id          BIGINT        COMMENT '検収書document ID',
@@ -989,6 +992,17 @@ CREATE TABLE t_acceptance (
   CONSTRAINT fk_acceptance_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='月次検収テーブル';
+
+
+-- ============================================================
+-- 29. t_contract_acceptance_backfill (V80 legacy backfillのrepair-safe marker)
+-- ============================================================
+CREATE TABLE t_contract_acceptance_backfill (
+  contract_id   BIGINT       PRIMARY KEY COMMENT 'V80適用時点の既存契約ID（検収不要へ移行対象）',
+  backfilled_at DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT 'marker登録日時',
+  CONSTRAINT fk_backfill_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
 
 -- ============================================================
 -- DDL完了

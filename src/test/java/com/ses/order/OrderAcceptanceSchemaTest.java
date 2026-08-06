@@ -116,21 +116,41 @@ class OrderAcceptanceSchemaTest {
     }
 
     @Test
-    @DisplayName("t_contract.order_line_id の UNIQUE が1明細→1契約を保証する（R5二重click）")
-    void contractOrderLineUnique() {
+    @DisplayName("t_contract.order_line_id の UNIQUE が1明細→1契約を保証し、FKが孤児を拒否する（R5）")
+    void contractOrderLineUniqueAndForeignKey() {
         long customerId = newCustomer("F1-LineUniq顧客");
         long engineerId = newEngineer("F1-LineUniq要員");
         long projectId = newProject("F1-LineUniq案件", customerId);
 
+        // 実在する注文明細を先に作る（R09-P1-05: FKで参照整合を検証するため）
+        jdbcTemplate.update(
+                "INSERT INTO t_sales_order (order_no, customer_id, order_date, status)"
+                        + " VALUES ('O-F1-LINE', ?, '2026-01-01', '下書き')", customerId);
+        long orderId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_sales_order WHERE order_no = 'O-F1-LINE'", Long.class);
+        jdbcTemplate.update(
+                "INSERT INTO t_sales_order_line (order_id, line_no, engineer_id, quantity, unit_price, amount)"
+                        + " VALUES (?, 1, ?, 1, 500000, 500000)", orderId, engineerId);
+        long lineId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_sales_order_line WHERE order_id = ?", Long.class, orderId);
+
+        // 同一明細から2件目の契約はUNIQUEで拒否（1明細→1契約）
         jdbcTemplate.update(
                 "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
                         + " start_date, selling_price, cost_price, status, acceptance_required, order_line_id)"
-                        + " VALUES ('F1-LINE-1', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1, 1001)",
-                engineerId, projectId, customerId);
+                        + " VALUES ('F1-LINE-1', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1, ?)",
+                engineerId, projectId, customerId, lineId);
         assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
                 "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
                         + " start_date, selling_price, cost_price, status, acceptance_required, order_line_id)"
-                        + " VALUES ('F1-LINE-2', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1, 1001)",
+                        + " VALUES ('F1-LINE-2', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1, ?)",
+                engineerId, projectId, customerId, lineId));
+
+        // 存在しない明細IDはFKで拒否（R09-P1-05: 孤児 order_line_id を許さない）
+        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
+                        + " start_date, selling_price, cost_price, status, acceptance_required, order_line_id)"
+                        + " VALUES ('F1-LINE-3', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1, 999999)",
                 engineerId, projectId, customerId));
     }
 

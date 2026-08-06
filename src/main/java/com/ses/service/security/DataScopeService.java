@@ -40,6 +40,13 @@ public interface DataScopeService {
     /** 担当契約から導出した組織ID。組織scopeとの積集合にのみ利用する。 */
     default Set<Long> allowedOrganizationIds() { return Set.of(); }
 
+    /**
+     * asOf時点の許可契約ID集合（order-acceptance-workflow R09-P1-04対応）。
+     * マネージャーの組織scopeはasOf時点の所属で解決し、異動前後の過去月でも母集団を一致させる。
+     * 営業のDataScopeは契約の現行sales_user_id帰属（時変でない）のためasOfは影響しない。
+     */
+    default Set<Long> allowedContractIdsAsOf(java.time.LocalDate asOf) { return allowedContractIds(); }
+
     void assertAllowedCustomer(Long customerId);
     void assertAllowedEngineer(Long engineerId);
     void assertAllowedContract(Long contractId);

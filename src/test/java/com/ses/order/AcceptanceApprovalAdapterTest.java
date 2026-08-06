@@ -1,6 +1,7 @@
 package com.ses.order;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.Acceptance;
 import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.AcceptanceMapper;
@@ -19,6 +20,7 @@ import org.mockito.quality.Strictness;
 import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +49,27 @@ class AcceptanceApprovalAdapterTest {
         a.setAmountSnapshot(new BigDecimal("600000"));
         a.setVersion(2);
         return a;
+    }
+
+    @Test
+    @DisplayName("R09-P1-02: scope外の検収は承認申請を作れない（assertAllowedAcceptanceが拒否）")
+    void cancelRejectsScopeOutsideAcceptance() {
+        when(mapper.selectById(2L)).thenReturn(acceptance(2L));
+        org.mockito.Mockito.doThrow(new BusinessException(404, "error.scope.notFound"))
+                .when(service).assertAllowedAcceptance(2L);
+        assertThatThrownBy(() -> adapter.snapshot(2L, java.util.Map.of()))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("R09-P1-02: 検収済以外（提出済等）の検収は取消申請を作れない")
+    void cancelRejectsNonAccepted() {
+        Acceptance submitted = acceptance(3L);
+        submitted.setStatus("提出済");
+        when(mapper.selectById(3L)).thenReturn(submitted);
+        assertThatThrownBy(() -> adapter.snapshot(3L, java.util.Map.of()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.acceptance.statusTransitionInvalid");
     }
 
     @Test

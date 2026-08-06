@@ -109,6 +109,18 @@ PREPARE order_line_uk_stmt FROM @order_line_uk_sql;
 EXECUTE order_line_uk_stmt;
 DEALLOCATE PREPARE order_line_uk_stmt;
 
+-- 注文明細→契約の参照整合（R09-P1-05対応）。孤児 order_line_id を拒否する。
+-- fresh/legacyともV1/V80にこのFKは無いため、guard付きで1本だけ追加し両経路を収束させる。
+SET @contract_line_fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_contract' AND constraint_name = 'fk_contract_order_line') = 0,
+    'ALTER TABLE t_contract ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id) ON UPDATE CASCADE ON DELETE RESTRICT',
+    'SELECT 1'
+);
+PREPARE contract_line_fk_stmt FROM @contract_line_fk_sql;
+EXECUTE contract_line_fk_stmt;
+DEALLOCATE PREPARE contract_line_fk_stmt;
+
 -- 検収要否（R3.3）。NOT NULL DEFAULT TRUE: 「未設定＝検収不要」に化けない。
 SET @acceptance_required_sql = IF(
     (SELECT COUNT(*) FROM information_schema.columns
@@ -120,11 +132,42 @@ PREPARE acceptance_required_stmt FROM @acceptance_required_sql;
 EXECUTE acceptance_required_stmt;
 DEALLOCATE PREPARE acceptance_required_stmt;
 
--- 【go-live移行方針（R09-P2-01対応）】V80適用時点で既に存在する契約（order_line_idがNULL=注文経由でない
--- 既存契約）は、検収フロー導入前に稼働していた実績の請求が全面停止しないよう「検収不要」へ移行する。
--- V80以後に注文経由で作成される新規契約はNOT NULL DEFAULT 1（検収要）のまま。このUPDATEはmigration
--- 適用時点の既存行だけを対象とし、以後のINSERTへは影響しない。
-UPDATE t_contract SET acceptance_required = 0 WHERE order_line_id IS NULL;
+-- 検収不要理由（P1-01対応）。acceptance_required=0時は必須（service層で検証）。NULL=検収要のまま。
+SET @exemption_reason_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 't_contract' AND column_name = 'acceptance_exemption_reason') = 0,
+    'ALTER TABLE t_contract ADD COLUMN acceptance_exemption_reason VARCHAR(500) NULL',
+    'SELECT 1'
+);
+PREPARE exemption_reason_stmt FROM @exemption_reason_sql;
+EXECUTE exemption_reason_stmt;
+DEALLOCATE PREPARE exemption_reason_stmt;
+
+-- 【go-live移行方針（R09-P2-01/P2-04/P1-01対応）】V80適用時点で既に存在する契約
+-- （order_line_idがNULL=注文経由でない既存契約）は、検収フロー導入前に稼働していた実績の請求が
+-- 全面停止しないよう「検収不要（acceptance_required=0）」へ移行する。理由は固定文言を設定する。
+-- V80以後の新規契約はNOT NULL DEFAULT 1（検収要）のまま。
+-- markerテーブルに初回適用時点の契約ID集合を固定し、UPDATEはmarker行だけを対象にする。
+-- 途中失敗→flyway repair→再実行でも、新規契約を誤って0へ書き換えない（repair-safe）。
+CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill (
+  contract_id   BIGINT PRIMARY KEY,
+  backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
+
+-- markerが空の時（初回適用）だけ既存契約ID集合を固定する。repair再実行時は追加しない。
+SET @marker_sql = IF(
+    (SELECT COUNT(*) FROM t_contract_acceptance_backfill) = 0,
+    'INSERT INTO t_contract_acceptance_backfill (contract_id) SELECT id FROM t_contract WHERE order_line_id IS NULL',
+    'SELECT 1'
+);
+PREPARE marker_stmt FROM @marker_sql;
+EXECUTE marker_stmt;
+DEALLOCATE PREPARE marker_stmt;
+
+UPDATE t_contract c
+  JOIN t_contract_acceptance_backfill m ON m.contract_id = c.id
+  SET c.acceptance_required = 0,
+      c.acceptance_exemption_reason = '移行前契約（V80適用時点の既存契約）';
 
 -- ============================================================
 -- 4. t_acceptance — 契約×月の検収
@@ -137,6 +180,7 @@ CREATE TABLE IF NOT EXISTS t_acceptance (
   status               VARCHAR(20)   NOT NULL DEFAULT '未提出' COMMENT '状態: 未提出/提出済/検収済/差戻し',
   submitted_at         DATETIME      COMMENT '提出日時',
   customer_contact_id  BIGINT        COMMENT '顧客確認者ID',
+  customer_contact_name_snapshot VARCHAR(100) COMMENT '顧客確認者名snapshot（検収実行時点。改名後も不変）',
   accepted_at          DATETIME      COMMENT '検収日時',
   reject_comment       VARCHAR(500)  COMMENT '差戻し理由',
   document_id          BIGINT        COMMENT '検収書document ID',
@@ -256,3 +300,14 @@ CROSS JOIN (SELECT 'sales-order.*' AS action_key UNION ALL SELECT 'acceptance.*'
 WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('role-sales', 'role-manager');
+
+-- ============================================================
+-- 8. fresh/legacy metadata収束（R09-P2-02対応）
+--    V1(fresh)はremarks直後に列を定義しCOMMENTを持つ。legacyはV80のADDでAFTER quotation_id・COMMENT無し
+--    で追加されるため、末尾で両列をV1と同一の完全定義（COMMENT・位置）へMODIFYして収束させる。
+--    MODIFYは既存データを変更せず、同一定義への再適用は冪等。
+-- ============================================================
+ALTER TABLE t_contract
+  MODIFY COLUMN order_line_id BIGINT NULL COMMENT '注文明細ID（1明細→1契約）' AFTER remarks,
+  MODIFY COLUMN acceptance_required TINYINT NOT NULL DEFAULT 1 COMMENT '検収要否(1:要 0:不要。未設定を不要にしない)' AFTER order_line_id,
+  MODIFY COLUMN acceptance_exemption_reason VARCHAR(500) NULL COMMENT '検収不要理由（acceptance_required=0時は必須。R3.3）' AFTER acceptance_required;

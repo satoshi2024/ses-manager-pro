@@ -42,6 +42,7 @@ class AcceptanceServiceImplTest {
     @Autowired ContractMapper contractMapper;
     @Autowired WorkRecordMapper workRecordMapper;
     @Autowired WorkRecordService workRecordService;
+    @Autowired com.ses.service.InvoiceService invoiceService;
     @Autowired JdbcTemplate jdbcTemplate;
 
     private long contractId;
@@ -67,6 +68,11 @@ class AcceptanceServiceImplTest {
                 "INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, status)"
                         + " VALUES (?, '2026-07', 160.00, 600000, '確定')",
                 contractId);
+    }
+
+    private long customerId() {
+        Contract c = contractMapper.selectById(contractId);
+        return c == null ? -1 : c.getCustomerId();
     }
 
     private WorkRecord workRecord() {
@@ -151,6 +157,47 @@ class AcceptanceServiceImplTest {
 
         Acceptance resubmitted = acceptanceService.resubmit(after.getId());
         assertEquals(StatusConstants.ACCEPTANCE_SUBMITTED, resubmitted.getStatus());
+    }
+
+    @Test
+    @DisplayName("R09-P1-03: 請求書の根拠となった検収は取消不可（applyCancellationが409）")
+    void cancellationBlockedByInvoice() {
+        Acceptance accepted = acceptanceService.accept(
+                acceptanceService.submit(contractId, "2026-07").getId(), null);
+        // 請求を生成
+        var invoice = invoiceService.generate(customerId(), "2026-07");
+        assertNotNull(invoice);
+
+        // 請求済みの検収は取消（承認適用）できない
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> acceptanceService.applyCancellation(accepted.getId()));
+        assertTrue(ex.getMessage().contains("error.acceptance.cancelBlockedByInvoice"), ex.getMessage());
+
+        // 請求が無い月の検収は取消できる
+        jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, status)"
+                + " VALUES (?, '2026-08', 160.00, 600000, '確定')", contractId);
+        Acceptance acceptedAug = acceptanceService.accept(
+                acceptanceService.submit(contractId, "2026-08").getId(), null);
+        acceptanceService.applyCancellation(acceptedAug.getId());
+        assertEquals("差戻し", acceptanceMapper.selectById(acceptedAug.getId()).getStatus());
+    }
+
+    @Test
+    @DisplayName("R09-P1-04: 検収時に顧客確認者名をsnapshotし、改名後も検収証跡は不変")
+    void contactNameSnapshotImmutable() {
+        jdbcTemplate.update("INSERT INTO t_customer_contact (customer_id, name, valid_from, valid_to)"
+                + " VALUES (?, '確認者 太郎', '2020-01-01', NULL)", customerId());
+        long contactId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_customer_contact WHERE name = '確認者 太郎'", Long.class);
+
+        Acceptance submitted = acceptanceService.submit(contractId, "2026-07");
+        Acceptance accepted = acceptanceService.accept(submitted.getId(), contactId);
+        assertEquals("確認者 太郎", accepted.getCustomerContactNameSnapshot(), "検収時点の名称がsnapshotされる");
+
+        // 改名してもsnapshotは変わらない
+        jdbcTemplate.update("UPDATE t_customer_contact SET name = '確認者 次郎' WHERE id = ?", contactId);
+        Acceptance reloaded = acceptanceMapper.selectById(accepted.getId());
+        assertEquals("確認者 太郎", reloaded.getCustomerContactNameSnapshot(), "改名後も過去の検収証跡は不変");
     }
 
     @Test

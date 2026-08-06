@@ -39,7 +39,8 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             COALESCE(a.status, '未提出') AS status,
             a.submitted_at         AS submittedAt,
             a.customer_contact_id  AS customerContactId,
-            cc.name                AS customerContactName,
+            COALESCE(a.customer_contact_name_snapshot, cc.name) AS customerContactName,
+            a.customer_contact_name_snapshot AS customerContactNameSnapshot,
             a.accepted_at          AS acceptedAt,
             a.reject_comment       AS rejectComment,
             a.hours_snapshot       AS hoursSnapshot,
@@ -78,6 +79,14 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
 
     @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 FOR UPDATE")
     Acceptance selectByContractAndMonthForUpdate(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);
+    /** 検収取消前に、対象work recordが有効な請求書明細へ使用済みかを確認する（R09-P1-03対応）。 */
+    @Select("""
+        SELECT COUNT(*)
+        FROM t_invoice_item ii
+        JOIN t_invoice i ON i.id = ii.invoice_id AND i.deleted_flag = 0
+        WHERE ii.work_record_id = #{workRecordId}
+        """)
+    long countActiveInvoiceItemsByWorkRecordId(@Param("workRecordId") Long workRecordId);
 
     @Select("SELECT * FROM t_acceptance WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Acceptance selectByIdForUpdate(@Param("id") Long id);

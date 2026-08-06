@@ -165,6 +165,13 @@ public class Contract extends BaseEntity {
     private Boolean acceptanceRequired;
 
     /**
+     * 検収不要理由（R3.3「検収不要契約は理由付きで可能」）。acceptance_required=false時は必須。
+     * updateStrategy=ALWAYS: 「検収要に戻す」=理由をNULLクリアするため（部分更新はしない単一経路）。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String acceptanceExemptionReason;
+
+    /**
      * 更新判断（'CONTINUE':継続確定/'END':更新不要、NULL:未定）。
      * 契約更新カレンダーのエスカレーション停止条件として参照される。
      * updateStrategy=ALWAYS: 「未定に戻す」= NULL 更新を反映させるため。

@@ -122,6 +122,16 @@ public class DataScopeServiceImpl implements DataScopeService {
     }
 
     @Override
+    public Set<Long> allowedContractIdsAsOf(java.time.LocalDate asOf) {
+        java.time.LocalDate date = asOf == null ? java.time.LocalDate.now() : asOf;
+        if (isOrganizationScoped()) {
+            return organizationScope().allowedContractIds(date);
+        }
+        // 営業DataScopeは契約の現行sales_user_id帰属（時変でない）のためasOfは影響しない
+        return computeContractIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
     public Set<Long> allowedProposalIds() {
         if (isOrganizationScoped()) {
             return organizationScope().allowedProposalIds(java.time.LocalDate.now());

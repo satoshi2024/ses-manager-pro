@@ -584,7 +584,15 @@ class FlywayMigrationSmokeTest {
             // t_contract.order_line_id（UNIQUEで1明細→1契約）と acceptance_required
             assertColumnExists(st, "t_contract", "order_line_id");
             assertColumnExists(st, "t_contract", "acceptance_required");
+            assertColumnExists(st, "t_contract", "acceptance_exemption_reason");
             assertIndexExists(st, "t_contract", "uk_contract_order_line");
+            // R09-P1-05: 孤児order_line_idを拒否するFK（fresh/legacy同一形状）
+            assertForeignKeyExists(st, "t_contract", "fk_contract_order_line",
+                    "order_line_id", "t_sales_order_line", "id");
+            // R09-P2-04: legacy backfillのrepair-safe marker
+            assertTableExists(st, "t_contract_acceptance_backfill");
+            assertRowExists(st, "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_contract_acceptance_backfill'");
             // acceptance_required は NOT NULL DEFAULT 1（未設定を「不要」に化けない）
             assertRowExists(st, "SELECT 1 FROM information_schema.columns "
                     + "WHERE table_schema=DATABASE() AND table_name='t_contract' AND column_name='acceptance_required' "

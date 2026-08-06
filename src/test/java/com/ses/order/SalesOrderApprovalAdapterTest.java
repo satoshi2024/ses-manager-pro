@@ -1,6 +1,7 @@
 package com.ses.order;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SalesOrder;
 import com.ses.mapper.SalesOrderMapper;
@@ -20,6 +21,7 @@ import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,9 +70,45 @@ class SalesOrderApprovalAdapterTest {
     }
 
     @Test
+    @DisplayName("R09-P1-02: scope外の注文は承認申請を作れない（assertAllowedOrderが拒否）")
+    void cancelRejectsScopeOutsideOrder() {
+        when(mapper.selectById(3L)).thenReturn(order(3L));
+        org.mockito.Mockito.doThrow(new BusinessException(404, "error.scope.notFound"))
+                .when(service).assertAllowedOrder(3L);
+        assertThatThrownBy(() -> adapter.snapshot(3L, java.util.Map.of("operation", "cancel")))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("R09-P1-02: 取消対象外状態（下書き）の注文は承認申請を作れない")
+    void cancelRejectsDraftOrder() {
+        SalesOrder draft = order(4L);
+        draft.setStatus("下書き");
+        when(mapper.selectById(4L)).thenReturn(draft);
+        assertThatThrownBy(() -> adapter.snapshot(4L, java.util.Map.of("operation", "cancel")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.order.statusTransitionInvalid");
+    }
+
+    @Test
+    @DisplayName("R09-P1-02: 差分が無い注文は条件差分の承認申請を作れない")
+    void conditionDiffRejectsNoDiff() {
+        SalesOrder noDiff = order(5L);
+        when(mapper.selectById(5L)).thenReturn(noDiff);
+        when(service.computeDiffs(noDiff)).thenReturn(java.util.List.of());
+        assertThatThrownBy(() -> adapter.snapshot(5L, java.util.Map.of("operation", "conditionDiff")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.order.conditionDiffApprovalRequired");
+    }
+
+    @Test
     @DisplayName("order.conditionDiff: 承認適用は注文を変更せず監査証跡として終わる")
     void conditionDiffApplyDoesNotMutateOrder() {
         when(mapper.selectById(2L)).thenReturn(order(2L));
+        // 差分が存在することを前提に、条件差分の申請を許可する
+        com.ses.dto.order.SalesOrderDetailDto.DiffItem diff = new com.ses.dto.order.SalesOrderDetailDto.DiffItem();
+        diff.setField("unitPrice");
+        when(service.computeDiffs(order(2L))).thenReturn(java.util.List.of(diff));
         ApprovalSnapshot snapshot = adapter.snapshot(2L, Map.of("operation", "conditionDiff", "reason", "単価改定"));
         assertThat(snapshot.payload().get("operation")).isEqualTo("conditionDiff");
 

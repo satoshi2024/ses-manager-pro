@@ -102,6 +102,14 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
      * `engineer-sales-commission` R3-2 と整合)。
      */
     private void validate(Contract c, Contract old) {
+        // 検収不要理由（R3.3: false時は理由必須、trueへ戻す場合は理由をクリア。R09-P1-01対応）
+        if (Boolean.FALSE.equals(c.getAcceptanceRequired())) {
+            if (!org.springframework.util.StringUtils.hasText(c.getAcceptanceExemptionReason())) {
+                throw BusinessException.of("error.contract.acceptanceExemptionReasonRequired");
+            }
+        } else if (Boolean.TRUE.equals(c.getAcceptanceRequired())) {
+            c.setAcceptanceExemptionReason(null);
+        }
         if (c.getEndDate() != null && c.getStartDate() != null && c.getEndDate().isBefore(c.getStartDate())) {
             throw BusinessException.of("error.contract.endDateInvalid");
         }

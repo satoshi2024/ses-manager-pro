@@ -42,6 +42,9 @@ public class Acceptance extends BaseEntity {
     /** 顧客確認者ID */
     private Long customerContactId;
 
+    /** 顧客確認者名snapshot（検収実行時点で固定。改名後も過去の検収証跡は不変） */
+    private String customerContactNameSnapshot;
+
     /** 検収日時 */
     private LocalDateTime acceptedAt;
 

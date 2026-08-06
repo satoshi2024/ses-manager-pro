@@ -48,7 +48,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         if (workMonth == null || workMonth.isBlank()) {
             throw BusinessException.of(400, "error.acceptance.workMonthRequired");
         }
-        List<Long> contractIds = scopedContractIds();
+        // 検収一覧は対象月時点の契約母集団で評価する（異動前後の過去月でも集合を一致。R09-P1-04）
+        List<Long> contractIds = scopedContractIds(monthEnd(workMonth));
         return baseMapper.selectGridPage(new Page<>(current, Math.min(size, 1000)),
                 workMonth, status, customerId, engineerId, contractIds);
     }
@@ -105,11 +106,14 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
                     acceptance.getStatus(), StatusConstants.ACCEPTANCE_ACCEPTED);
         }
         Contract contract = contractMapper.selectById(acceptance.getContractId());
+        com.ses.entity.CustomerContact contact = null;
         if (customerContactId != null) {
-            validateContactBelongsToCustomer(customerContactId, contract == null ? null : contract.getCustomerId());
+            contact = resolveEffectiveContact(customerContactId, contract == null ? null : contract.getCustomerId());
         }
         acceptance.setStatus(StatusConstants.ACCEPTANCE_ACCEPTED);
         acceptance.setCustomerContactId(customerContactId);
+        // 顧客確認者名を検収実行時点でsnapshot（改名後も過去の検収証跡は不変。R09-P1-04）
+        acceptance.setCustomerContactNameSnapshot(contact == null ? null : contact.getName());
         acceptance.setAcceptedAt(LocalDateTime.now());
         acceptance.setRejectComment(null);
         baseMapper.updateById(acceptance);
@@ -165,6 +169,12 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         if (!StatusConstants.ACCEPTANCE_ACCEPTED.equals(acceptance.getStatus())) {
             throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
                     acceptance.getStatus(), StatusConstants.ACCEPTANCE_REJECTED);
+        }
+        // 有効な請求書の根拠となっている検収は取消不可（R09-P1-03）。請求生成側のロックに加えて
+        // 取消側でもinvoice使用済みを拒否し、「有効請求×取消済検収」の併存を防ぐ。
+        if (acceptance.getWorkRecordId() != null
+                && baseMapper.countActiveInvoiceItemsByWorkRecordId(acceptance.getWorkRecordId()) > 0) {
+            throw BusinessException.of(409, "error.acceptance.cancelBlockedByInvoice");
         }
         acceptance.setStatus(StatusConstants.ACCEPTANCE_REJECTED);
         acceptance.setRejectComment("検収取消（承認適用）");
@@ -247,7 +257,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     public void assertAllowedAcceptance(Long acceptanceId) {
         Acceptance acceptance = require(acceptanceId);
         if (dataScopeService.isScoped()
-                && !dataScopeService.allowedContractIds().contains(acceptance.getContractId())) {
+                && !dataScopeService.allowedContractIdsAsOf(monthEnd(acceptance.getWorkMonth()))
+                        .contains(acceptance.getContractId())) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
     }
@@ -261,19 +272,37 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setWorkRecordUpdatedAt(workRecord.getUpdatedAt());
     }
 
-    private void validateContactBelongsToCustomer(Long contactId, Long customerId) {
+    /**
+     * 顧客確認者を検証して返す（R09-P1-04）。
+     * - 同じ顧客に属すること
+     * - 検収実行時点で有効期間（valid_from/to）内であること
+     */
+    private com.ses.entity.CustomerContact resolveEffectiveContact(Long contactId, Long customerId) {
         com.ses.entity.CustomerContact contact = contactId == null ? null : customerContactMapper.selectById(contactId);
         if (contact == null || !Objects.equals(contact.getCustomerId(), customerId)) {
             throw BusinessException.of(400, "error.acceptance.contactInvalid");
         }
+        java.time.LocalDate today = java.time.LocalDate.now();
+        if ((contact.getValidFrom() != null && today.isBefore(contact.getValidFrom()))
+                || (contact.getValidTo() != null && today.isAfter(contact.getValidTo()))) {
+            throw BusinessException.of(400, "error.acceptance.contactNotEffective");
+        }
+        return contact;
     }
 
-    private List<Long> scopedContractIds() {
+    /** 対象月(asOf)時点の許可契約ID集合。 */
+    private List<Long> scopedContractIds(java.time.LocalDate asOf) {
         if (!dataScopeService.isScoped()) {
             return null; // 全件
         }
-        Set<Long> ids = dataScopeService.allowedContractIds();
+        Set<Long> ids = dataScopeService.allowedContractIdsAsOf(asOf);
         return ids == null ? List.of() : new ArrayList<>(ids);
+    }
+
+    private static java.time.LocalDate monthEnd(String workMonth) {
+        return workMonth == null || workMonth.isBlank()
+                ? java.time.LocalDate.now()
+                : java.time.YearMonth.parse(workMonth).atEndOfMonth();
     }
 
     private Acceptance require(Long id) {

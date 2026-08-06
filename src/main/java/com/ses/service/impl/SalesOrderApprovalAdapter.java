@@ -47,7 +47,26 @@ public class SalesOrderApprovalAdapter implements ApprovalTargetAdapter {
     @Override
     public ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command) {
         SalesOrder order = require(targetId);
+        // 承認申請trust boundary（R09-P1-02）: 対象のDataScopeと操作適用可能性を申請作成前に検証する
+        service.assertAllowedOrder(targetId);
         String operation = String.valueOf(command.getOrDefault("operation", "cancel"));
+        if ("cancel".equals(operation)) {
+            if (!java.util.Set.of("受領確認", "注文請提出", "契約化").contains(order.getStatus())) {
+                throw BusinessException.of(409, "error.order.statusTransitionInvalid",
+                        order.getStatus(), "取消");
+            }
+        } else if ("conditionDiff".equals(operation)) {
+            if (!java.util.Set.of("受領確認", "注文請提出", "契約化").contains(order.getStatus())) {
+                throw BusinessException.of(409, "error.order.statusTransitionInvalid",
+                        order.getStatus(), "条件差分承認");
+            }
+            // 差分が無い注文を承認対象にできない
+            if (service.computeDiffs(order).isEmpty()) {
+                throw BusinessException.of(409, "error.order.conditionDiffApprovalRequired");
+            }
+        } else {
+            throw BusinessException.of(409, "error.approval.invalidState");
+        }
         BigDecimal amount = order.getTotalAmountSnapshot() != null
                 ? order.getTotalAmountSnapshot().abs()
                 : BigDecimal.ZERO;
@@ -71,7 +90,7 @@ public class SalesOrderApprovalAdapter implements ApprovalTargetAdapter {
 
     @Override
     public void validateBeforeRequest(ApprovalSnapshot snapshot) {
-        // 状態・scopeは申請API側の service.assertAllowedOrder / 状態機械が担保する。
+        // scope・状態・差分は snapshot() で検証済み（R09-P1-02）。
     }
 
     @Override

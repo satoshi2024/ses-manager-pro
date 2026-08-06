@@ -78,8 +78,31 @@ class MonthlyClosingUnacceptedTest {
         // scoped（マネージャー）で契約が許可集合に無い場合: 0件（全社件数を見せない）
         when(dataScopeService.isScoped()).thenReturn(true);
         when(dataScopeService.allowedContractIds()).thenReturn(Set.of(999999L));
+        when(dataScopeService.allowedContractIdsAsOf(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Set.of(999999L));
         MonthlyClosingSummaryDto scopedSummary = monthlyClosingService.summary("2026-07");
         assertEquals(0, scopedSummary.getUnacceptedCount(), "scope外の未検収は見せない");
+    }
+
+    @Test
+    @DisplayName("R09-P1-06: 提出済の検収には「未提出」通知を生成しない（状態母集団は排他的）")
+    void unsubmittedNotificationExcludesSubmitted() {
+        // 提出済（検収済でない）acceptanceを作る
+        com.ses.dto.acceptance.AcceptanceSubmitRequest req = new com.ses.dto.acceptance.AcceptanceSubmitRequest();
+        req.setContractId(contractId);
+        req.setWorkMonth("2026-07");
+        jdbcTemplate.update(
+                "INSERT INTO t_acceptance (contract_id, work_record_id, work_month, status, submitted_at)"
+                        + " SELECT c.id, w.id, w.work_month, '提出済', CURRENT_TIMESTAMP"
+                        + " FROM t_contract c JOIN t_work_record w ON w.contract_id = c.id"
+                        + " WHERE c.id = ? AND w.work_month = '2026-07'", contractId);
+
+        notificationGenerateService.acceptanceUnsubmitted();
+
+        Long notifications = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'ACCEPTANCE_UNSUBMITTED'"
+                        + " AND message LIKE '%2026-07%'", Long.class);
+        assertEquals(0L, notifications, "提出済の検収に「未提出」通知は出さない（R09-P1-06）");
     }
 
     @Test

@@ -23,6 +23,8 @@ public class AcceptanceGridDto {
     private LocalDateTime submittedAt;
     private Long customerContactId;
     private String customerContactName;
+    /** 検収実行時点の顧客確認者名snapshot（改名後も不変）。 */
+    private String customerContactNameSnapshot;
     private LocalDateTime acceptedAt;
     private String rejectComment;
     private BigDecimal hoursSnapshot;

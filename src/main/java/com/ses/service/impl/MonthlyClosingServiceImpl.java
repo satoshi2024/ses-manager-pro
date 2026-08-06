@@ -176,7 +176,8 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
 
         // (g) 未検収件数（R4.2）: 閲覧者のscopeで数える（design §5.2。全社件数を全員へ見せない）。
         if (acceptanceMapper != null) {
-            List<Long> closingContractIds = scopedContractIdsForClosing();
+            // 未検収件数は対象月時点の契約母集団で数える（R09-P1-04: 異動前後の過去月でも一致）
+            List<Long> closingContractIds = scopedContractIdsForClosing(month);
             dto.setUnacceptedCount((int) acceptanceMapper.countUnacceptedForClosing(month, closingContractIds));
         } else {
             dto.setUnacceptedCount(0);
@@ -288,12 +289,15 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         }
     }
 
-    /** 未検収件数のscope母集団（空集合=全件ではなく、条件を付けない＝全件の意図を呼出側へ明示）。 */
-    private List<Long> scopedContractIdsForClosing() {
+    /** 未検収件数のscope母集団（対象月時点。空集合=全件ではなく、条件を付けない＝全件の意図を呼出側へ明示）。 */
+    private List<Long> scopedContractIdsForClosing(String month) {
         if (dataScopeService == null || !dataScopeService.isScoped()) {
             return null; // 全件（SQL側で条件を付けない）
         }
-        java.util.Set<Long> ids = dataScopeService.allowedContractIds();
+        java.time.LocalDate asOf = month == null || month.isBlank()
+                ? java.time.LocalDate.now()
+                : java.time.YearMonth.parse(month).atEndOfMonth();
+        java.util.Set<Long> ids = dataScopeService.allowedContractIdsAsOf(asOf);
         return ids == null ? java.util.List.of() : new java.util.ArrayList<>(ids);
     }
 

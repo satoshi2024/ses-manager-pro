@@ -220,6 +220,7 @@ CREATE TABLE t_contract (
   renewal_decision        VARCHAR(20),
   order_line_id           BIGINT,
   acceptance_required     TINYINT NOT NULL DEFAULT 1,
+  acceptance_exemption_reason VARCHAR(500),
   created_by              BIGINT,
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -283,6 +284,7 @@ CREATE TABLE t_acceptance (
   status               VARCHAR(20) NOT NULL DEFAULT '未提出',
   submitted_at         DATETIME,
   customer_contact_id  BIGINT,
+  customer_contact_name_snapshot VARCHAR(100),
   accepted_at          DATETIME,
   reject_comment       VARCHAR(500),
   document_id          BIGINT,
@@ -1159,3 +1161,13 @@ CREATE TABLE IF NOT EXISTS t_approval_responsibility (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0
 );
+
+DROP TABLE IF EXISTS t_contract_acceptance_backfill CASCADE;
+CREATE TABLE t_contract_acceptance_backfill (
+  contract_id   BIGINT PRIMARY KEY,
+  backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- R09-P1-05: 孤児 order_line_id の拒否（t_sales_order_line 作成後にFKを追加）
+ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS fk_contract_order_line
+  FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id);

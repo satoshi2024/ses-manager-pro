@@ -45,6 +45,12 @@ public class AcceptanceApprovalAdapter implements ApprovalTargetAdapter {
     @Override
     public ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command) {
         Acceptance acceptance = require(targetId);
+        // 承認申請trust boundary（R09-P1-02）: 対象のDataScopeと状態（検収済のみ取消可能）を申請作成前に検証
+        service.assertAllowedAcceptance(targetId);
+        if (!"検収済".equals(acceptance.getStatus())) {
+            throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
+                    acceptance.getStatus(), "取消");
+        }
         BigDecimal amount = acceptance.getAmountSnapshot() != null
                 ? acceptance.getAmountSnapshot().abs() : BigDecimal.ZERO;
         Map<String, Object> payload = new java.util.LinkedHashMap<>();

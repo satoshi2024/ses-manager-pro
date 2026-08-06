@@ -488,7 +488,7 @@ public class NotificationGenerateService {
             }
             com.ses.entity.Acceptance acceptance = acceptanceMapper.selectByContractAndMonth(
                     record.getContractId(), workMonth);
-            if (acceptance == null || !"検収済".equals(acceptance.getStatus())) {
+            if (acceptance == null) {
                 result.add(record.getContractId());
             }
         }
