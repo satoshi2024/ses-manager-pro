@@ -61,6 +61,7 @@ public class NotificationGenerateService {
     private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.SalesOrderLineMapper salesOrderLineMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
+    private final com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
     private final SystemConfigService systemConfigService;
 
     public void generateAll() {
@@ -512,7 +513,58 @@ public class NotificationGenerateService {
         if (contract.getSalesUserId() != null) {
             salesIds.add(contract.getSalesUserId());
         }
-        return resolveSalesRecipients(salesIds);
+        List<Long> recipients = resolveSalesRecipients(salesIds);
+        // 決定表 §5.2: マネージャーへ自組織の未検収/差戻しを通知する（R09-P2-01対応）。
+        // 担当営業/管理者に加えて、対象契約の所属組織のマネージャーを宛先へ追加する。
+        Long orgId = resolveContractOrganizationId(contract);
+        if (orgId != null) {
+            recipients.addAll(resolveOrgManagerUserIds(orgId));
+        }
+        return recipients.stream().distinct().collect(Collectors.toList());
+    }
+
+    /** 契約の所属組織（要員のorganization_idを正とし、アカウント連携の主所属へフォールバック）。 */
+    private Long resolveContractOrganizationId(Contract contract) {
+        if (contract == null || contract.getEngineerId() == null) {
+            return null;
+        }
+        com.ses.entity.Engineer engineer = engineerMapper.selectById(contract.getEngineerId());
+        if (engineer != null && engineer.getOrganizationId() != null) {
+            return engineer.getOrganizationId();
+        }
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        if (link != null && link.getSysUserId() != null) {
+            com.ses.entity.UserOrganization primary = userOrganizationMapper.selectOne(
+                    new QueryWrapper<com.ses.entity.UserOrganization>()
+                            .eq("user_id", link.getSysUserId())
+                            .eq("primary_flag", 1)
+                            .isNull("valid_to")
+                            .last("LIMIT 1"));
+            return primary == null ? null : primary.getOrganizationId();
+        }
+        return null;
+    }
+
+    /** 所属組織のマネージャー（role=マネージャーの有効ユーザー）を返す。 */
+    private List<Long> resolveOrgManagerUserIds(Long orgId) {
+        if (orgId == null) {
+            return java.util.List.of();
+        }
+        List<Long> userIds = userOrganizationMapper.selectList(
+                        new QueryWrapper<com.ses.entity.UserOrganization>()
+                                .eq("organization_id", orgId)
+                                .eq("primary_flag", 1)
+                                .isNull("valid_to"))
+                .stream().map(com.ses.entity.UserOrganization::getUserId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+        if (userIds.isEmpty()) {
+            return java.util.List.of();
+        }
+        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .in(SysUser::getId, userIds)
+                        .eq(SysUser::getRole, "マネージャー")
+                        .eq(SysUser::getStatus, 1))
+                .stream().map(SysUser::getId).collect(Collectors.toList());
     }
 
     private List<Long> resolveSalesRecipients(List<Long> salesIds) {

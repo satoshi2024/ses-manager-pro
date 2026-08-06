@@ -96,6 +96,9 @@ class NotificationGenerateServiceTest {
     @Mock
     private com.ses.mapper.AcceptanceMapper acceptanceMapper;
 
+    @Mock
+    private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
     @InjectMocks
     private NotificationGenerateService notificationGenerateService;
 
@@ -111,6 +114,11 @@ class NotificationGenerateServiceTest {
                 .thenReturn(null);
         // 検収未提出通知の対象抽出（既存testの特定スタブは優先される）
         org.mockito.Mockito.lenient().when(workRecordMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Collections.emptyList());
+        // 組織マネージャー宛先解決（R09-P2-01）。既定は空（組織未設定・未帰属）
+        org.mockito.Mockito.lenient().when(userOrganizationMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(null);
+        org.mockito.Mockito.lenient().when(userOrganizationMapper.selectList(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(java.util.Collections.emptyList());
     }
 
