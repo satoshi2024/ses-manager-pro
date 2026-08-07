@@ -27,6 +27,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -285,16 +286,49 @@ class AcceptanceAsOfScopeTest {
     }
 
     @Test
-    @DisplayName("R7-P2-04: WHERE a.id = #{acceptanceId} フィルタが pagination 前に適用され定点1件を取得する")
-    void pageGrid_withAcceptanceId_whereFilterAppliesBeforePagination() {
+    @DisplayName("R7-P2-04: 通常1ページ目外（size=2設定時5件目）の目標検収が acceptanceId 定点抽出により取得できる")
+    void pageGrid_withAcceptanceId_beyondNormalPage1_returnsTargetItem() {
         setUpTransferFixture();
-
         authenticate(managerA);
-        Acceptance acceptance = acceptanceService.submit(contractId, "2026-07");
 
-        // 1ページ目（size=50）で定点抽出を指定した際、WHERE句がLIMIT句より前に評価され1件正しく取得できる
-        var page = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, acceptance.getId());
-        assertEquals(1, page.getRecords().size());
-        assertEquals(acceptance.getId(), page.getRecords().get(0).getId());
+        String suffix = "-BOUNDARY-" + System.nanoTime();
+        Long customerId = jdbcTemplate.queryForObject(
+                "SELECT customer_id FROM t_contract WHERE id = ?", Long.class, contractId);
+        Long projectId = jdbcTemplate.queryForObject(
+                "SELECT project_id FROM t_contract WHERE id = ?", Long.class, contractId);
+
+        // 契約1（最古、定点抽出ターゲット）を登録・提出
+        Acceptance targetAcceptance = acceptanceService.submit(contractId, "2026-07");
+        assertNotNull(targetAcceptance);
+
+        // 契約2〜5を登録し、c.id DESC順で1ページ目の上位を占有させる
+        for (int i = 2; i <= 5; i++) {
+            jdbcTemplate.update(
+                    "INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', '稼動中', ?)",
+                    "BOUNDARY要員" + i + suffix, orgAId);
+            Long engId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "BOUNDARY要員" + i + suffix);
+            jdbcTemplate.update(
+                    "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
+                            + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                    "BOUNDARY-C" + i + suffix, engId, projectId, customerId);
+            Long extraContractId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "BOUNDARY-C" + i + suffix);
+            jdbcTemplate.update(
+                    "INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, status) VALUES (?, '2026-07', 160.00, 600000, '確定')",
+                    extraContractId);
+        }
+
+        // 通常検索（size=2, acceptanceIdなし）: c.id DESC順により、最古のtargetAcceptanceは1ページ目（Top 2）に含まれない
+        var normalPage = acceptanceService.pageGrid(1, 2, "2026-07", null, null, null, null);
+        assertEquals(2, normalPage.getRecords().size());
+        boolean containedInNormalPage = normalPage.getRecords().stream()
+                .anyMatch(r -> targetAcceptance.getId().equals(r.getId()));
+        assertFalse(containedInNormalPage, "通常検索1ページ目（size=2）には最古のターゲット検収が含まれないこと");
+
+        // 定点抽出（size=2, acceptanceId指定）: WHERE a.id = #{acceptanceId} が LIMIT 前に適用され、1ページ目外のターゲットが1件正確に返る
+        var targetedPage = acceptanceService.pageGrid(1, 2, "2026-07", null, null, null, targetAcceptance.getId());
+        assertEquals(1, targetedPage.getRecords().size(), "定点抽出によりWHERE句がLIMIT前に評価され1件取得できること");
+        assertEquals(targetAcceptance.getId(), targetedPage.getRecords().get(0).getId());
     }
 }
