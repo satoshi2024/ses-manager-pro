@@ -10,14 +10,14 @@ const ACCEPTANCE_TRANSITIONS = {
 document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const paramMonth = urlParams.get('workMonth');
-    const targetId = urlParams.get('id');
+    const targetAcceptanceId = urlParams.get('acceptanceId') || urlParams.get('id');
     if (paramMonth && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(paramMonth)) {
         document.getElementById('acceptanceWorkMonth').value = paramMonth;
     } else {
         const now = new Date();
         document.getElementById('acceptanceWorkMonth').value = now.toISOString().slice(0, 7);
     }
-    loadAcceptances(1, targetId);
+    loadAcceptances(1, targetAcceptanceId);
     document.getElementById('btnSearchAcceptance').addEventListener('click', () => loadAcceptances(1));
     loadSelectOptions('/api/customers/options', document.getElementById('acceptanceCustomerFilter'), 'id', r => r.name);
     loadSelectOptions('/api/engineers/options', document.getElementById('acceptanceEngineerFilter'), 'id', r => r.name);
@@ -36,7 +36,7 @@ function loadSelectOptions(url, sel, valueField, labelFn) {
     });
 }
 
-function loadAcceptances(page, targetId) {
+function loadAcceptances(page, targetAcceptanceId) {
     const workMonth = document.getElementById('acceptanceWorkMonth').value;
     if (!workMonth) {
         SES.toast.error(SES.i18n.t('acceptance.workMonthRequired', '対象月を指定してください'));
@@ -45,7 +45,8 @@ function loadAcceptances(page, targetId) {
     const status = document.getElementById('acceptanceStatusFilter').value;
     const customerId = document.getElementById('acceptanceCustomerFilter').value;
     const engineerId = document.getElementById('acceptanceEngineerFilter').value;
-    const params = { current: page, size: 50, workMonth };
+    const pageSize = targetAcceptanceId ? 1000 : 50;
+    const params = { current: page, size: pageSize, workMonth };
     if (status) params.status = status;
     if (customerId) params.customerId = customerId;
     if (engineerId) params.engineerId = engineerId;
@@ -54,7 +55,7 @@ function loadAcceptances(page, targetId) {
         tbody.innerHTML = '';
         (data.records || []).forEach(r => {
             const tr = document.createElement('tr');
-            if (targetId && (String(r.id) === String(targetId) || String(r.contractId) === String(targetId))) {
+            if (targetAcceptanceId && String(r.id) === String(targetAcceptanceId)) {
                 tr.classList.add('table-warning');
             }
             tr.innerHTML = `

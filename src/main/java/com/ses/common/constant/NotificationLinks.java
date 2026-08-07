@@ -71,14 +71,14 @@ public final class NotificationLinks {
         return ACCEPTANCE + "?workMonth=" + workMonth;
     }
 
-    /** 月次検収への遷移リンク（/acceptance?workMonth={workMonth}&id={id}） */
+    /** 月次検収への遷移リンク（/acceptance?workMonth={workMonth}&acceptanceId={id}） */
     public static String acceptance(String workMonth, Long id) {
         if (id == null) {
             return acceptance(workMonth);
         }
         if (workMonth == null || workMonth.isBlank()) {
-            return ACCEPTANCE + "?id=" + id;
+            return ACCEPTANCE + "?acceptanceId=" + id;
         }
-        return ACCEPTANCE + "?workMonth=" + workMonth + "&id=" + id;
+        return ACCEPTANCE + "?workMonth=" + workMonth + "&acceptanceId=" + id;
     }
 }
