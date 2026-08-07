@@ -11,7 +11,8 @@
 | handbook | v2.0 |
 | state | PASS（R09 Round7独立差分再Review PASS確定） |
 | base | bfdac521e8f9df071c03ff00fb4eef2a94c98007 |
-| code Head | 08b54796520fbc178a9653327ec56936c8522524 |
+| previous current Head | a8a3cdfffc996821cdb0569fbf32d5452047cd5c |
+| code Head | 685257a0cfd2ebca88e67046e7f2ed29fb0fd080 |
 | current/docs Head | git log -1 -- .kiro/specs/order-acceptance-workflow/review-ledger.md で解決 |
 | merge | merged済み（8a50eb1 = Merge PR #65）＋Round7対応をmainへpush済み |
 | latest review | R09 round 7 / 2026-08-07（PASS） |
@@ -28,11 +29,11 @@
 | issue ID | severity | 内容 | 対応 |
 |---|---|---|---|
 | order-acceptance-workflow-R7-P1-01 | P1 | zero-legacy V80 repair fixtureがV2 seed契約を残しておりExpected 1/Actual 2で失敗 | `FlywayV80RepairSmokeTest.java`の`V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない()`にて、V79.1適用直後に`DELETE FROM t_contract`を実行し、V80前に`COUNT(*)=0`を確認した上でsentinel 0（contract_id=0）の固定とrepair後の新規契約保持（acceptance_required=1）を正常検証（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P1-02 | P1 | code Headでの全量L4検証証拠未取得 | CI同等全量テスト `verify-like-ci.ps1` を実行し、全1542件成功（Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS）を確認（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P1-02 | P1 | code Headでの全量L4検証証拠未取得 | 最新code Head `685257a0cfd2ebca88e67046e7f2ed29fb0fd080` 上で単一クリーン `verify-like-ci.ps1` を全量実行し、全1542件成功（Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS）の単一実行レポート群を確認（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-01 | P2 | design.md §5.2 意思決定表の不一致 | design.md の scheduler principal 行の通知宛先を「担当営業、管理者、対象月時点の自組織マネージャー」へ明確化（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code Head（`08b54796520fbc178a9653327ec56936c8522524`）、previous current Head（`bfdac521e8f9df071c03ff00fb4eef2a94c98007`）、current/docs Headを明確に完全SHA-1で分離記載し、判定状態・Traceと完全同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | `NotificationLinks.java`・`NotificationGenerateService.java`を改修し`/acceptance?workMonth=YYYY-MM&id=...`を生成。`acceptance.js`でURLクエリ`workMonth`・`id`を解釈して対象月自動選択＆対象行ハイライト（`table-warning`）を実装。1) 免除理由入力・保存（"過失なし免除理由"）、2) 旧組織マネージャー403拒否／新組織マネージャー200許可、3) 通知クリック遷移後のDesktop(1920x1080)・Mobile(390px)表示の3経路の実測検証完了（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code Head（`685257a0cfd2ebca88e67046e7f2ed29fb0fd080`）、previous current Head（`a8a3cdfffc996821cdb0569fbf32d5452047cd5c`）、current/docs Headを明確に完全SHA-1で分離記載し、判定状態・Requirements Traceと完全同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | `NotificationLinks.java`・`NotificationGenerateService.java`を改修し`/acceptance?workMonth=YYYY-MM&acceptanceId=...`を生成。`acceptance.js`でURLクエリ`acceptanceId`・`id`を解釈して対象月自動選択＆対象行のみの厳格一致判定（曖昧なcontractId一致を排除）および`size: 1000`による51件目以降対象取得を実装。1) 免除理由入力・保存（"過失なし免除理由"）、2) 旧組織マネージャー403拒否／新組織マネージャー200許可、3) 通知クリック遷移後のDesktop(1920x1080)・Mobile(390px)表示の3経路の実測検証完了（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（"对象月份格式不正确（YYYY-MM）"）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
 
 ## 3. Closed/Deferred Issue
@@ -46,12 +47,12 @@
 | 対象spec | order-acceptance-workflow（T054〜T059） |
 | Round | R09 Round 7 = **PASS（P0=0 / P1=0 / P2=0 / NOTE=0 / open release gates=0）** |
 | Base | b237c8494ad09cda9aa68340744808efa255a63e |
-| previous current Head | bfdac521e8f9df071c03ff00fb4eef2a94c98007 |
-| code Head | 08b54796520fbc178a9653327ec56936c8522524 |
+| previous current Head | a8a3cdfffc996821cdb0569fbf32d5452047cd5c |
+| code Head | 685257a0cfd2ebca88e67046e7f2ed29fb0fd080 |
 | current/docs Head | git log -1 -- .kiro/specs/order-acceptance-workflow/review-ledger.md で解決 |
 | Round7 OPEN issue | R7-P1-01（V80 zero-legacy fixture）、R7-P1-02（最新Head L4）、R7-P2-01（design宛先）、R7-P2-02（workMonth 400）、R7-P2-03（ledger Head分離）、R7-P2-04（通知リンク＆postfix Browser Demo）、R7-P2-05（zh_CN/ko i18n key） |
 | 定向test | FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 9/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
-| L4全量 | `verify-like-ci.ps1`: Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS |
+| L4全量 | `verify-like-ci.ps1`: Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS (clean run on code Head 685257a) |
 | Requirements trace | review-ledger §5 |
 
 ## 5. Requirements Trace
