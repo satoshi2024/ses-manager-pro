@@ -1,0 +1,48 @@
+{
+  "spec": "order-acceptance-workflow",
+  "executionTimestamp": "2026-08-07T18:05:00+09:00",
+  "environment": {
+    "browser": "Google Chrome 133.0.6943.127 (Official Build) (64-bit)",
+    "resolutions": ["1920x1080 (Desktop)", "390x844 (Mobile Viewport)"],
+    "backend": "Spring Boot 3.3 + H2/MySQL 8"
+  },
+  "scenarios": [
+    {
+      "scenario": "1. 検収免除理由の入力・保存",
+      "userRole": "管理者",
+      "targetContractId": 1,
+      "exemptionReasonInput": "過失なし免除理由",
+      "apiCall": "PUT /api/contracts/1/acceptance-exemption",
+      "apiStatus": 200,
+      "verificationResult": "db value updated to '過失なし免除理由', acceptance_required updated to false"
+    },
+    {
+      "scenario": "2. 組織異動前後の過去月権限検証（as-of組織判別）",
+      "userRoleOld": "旧組織マネージャー (mgr_old)",
+      "userRoleNew": "新組織マネージャー (mgr_new)",
+      "targetMonth": "2026-06",
+      "apiCallOld": "POST /api/acceptances/submit (workMonth: 2026-06, contractId: 10)",
+      "apiStatusOld": 200,
+      "apiCallNew": "POST /api/acceptances/submit (workMonth: 2026-06, contractId: 10)",
+      "apiStatusNew": 403,
+      "verificationResult": "異動前過去月は旧マネージャーのみ提出許可、新マネージャーは403拒否"
+    },
+    {
+      "scenario": "3. 通知リンククリックからの定点遷移・高亮表示",
+      "targetUrl": "/acceptance?workMonth=2026-07&acceptanceId=101",
+      "desktopResolution": "1920x1080",
+      "mobileResolution": "390x844",
+      "apiCall": "GET /api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=101",
+      "apiStatus": 200,
+      "apiResultCount": 1,
+      "consoleErrors": 0,
+      "referenceErrorOccurred": false,
+      "uiEffects": {
+        "workMonthAutoSelected": "2026-07",
+        "targetRowHighlighted": true,
+        "highlightClass": "table-warning",
+        "scrollIntoViewInvoked": true
+      }
+    }
+  ]
+}

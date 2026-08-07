@@ -233,4 +233,20 @@ class AcceptanceServiceImplTest {
                 () -> acceptanceService.pageGrid(1, 10, "2026-99", null, null, null, null));
         assertEquals(400, ex3.getCode());
     }
+
+    @Test
+    @DisplayName("R7-P2-04: acceptanceId定点抽出の動作検証（指定IDのみ1件抽出）")
+    void pageGrid_withAcceptanceId_returnsOnlyTargetAcceptance() {
+        Acceptance submitted = acceptanceService.submit(contractId, "2026-07");
+        var page = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, submitted.getId());
+        assertEquals(1, page.getRecords().size(), "定点抽出により指定した1件のみ取得されること");
+        assertEquals(submitted.getId(), page.getRecords().get(0).getId());
+    }
+
+    @Test
+    @DisplayName("R7-P2-04: 存在しないまたはscope外のacceptanceId指定時は0件を返す")
+    void pageGrid_withAcceptanceId_outOfScope_returnsEmptyPage() {
+        var page = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, 999999L);
+        assertEquals(0, page.getRecords().size(), "存在しないまたはscope外のID指定時は0件であること");
+    }
 }
