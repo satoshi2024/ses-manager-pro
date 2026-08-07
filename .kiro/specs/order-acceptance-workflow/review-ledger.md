@@ -10,50 +10,48 @@
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
 | state | PASS（R09 Round7独立差分再Review PASS確定） |
-| base | 8a50eb1（前Review済みmerged Head = main/origin/main） |
-| head | 9853a11（code Head） |
+| base | b237c8494ad09cda9aa68340744808efa255a63e |
+| code Head | fee9e379361ad22f0efea985fc8ee70ea7a10eb9 |
+| current/docs Head | 本ledger更新commit |
 | merge | merged済み（8a50eb1 = Merge PR #65）＋Round7対応をmainへpush済み |
 | latest review | R09 round 7 / 2026-08-07（PASS） |
 | verdict | PASS（R09 round7: P0=0 / P1=0 / P2=0 / NOTE=0 / open release gates=0） |
-| issue count | R09 round7: Round7のR7-P1-01（P1）、R7-P2-01〜04（P2×4）は全てVERIFIED_CLOSED |
-| next action | 中央ledger row9をPASS化 → S10 dispatch / S11 attendance（並行可）・Wave 2を解放 |
+| issue count | R09 round7: 指摘全件（R7-P1-01, R7-P1-02, R7-P2-01〜R7-P2-05）VERIFIED_CLOSED |
+| next action | 中央ledger row9をPASS化 → S10 dispatch / S11 attendance（並行可）・Wave 2を正式解放 |
 
 ## 2. OPEN Issue Register
 
-（全件解消。R09 Round7でR7-P1-01（P1）およびR7-P2-01〜04（P2×4）を全てVERIFIED_CLOSED）
+（全件解消。R09 Round7でR7-P1-01, R7-P1-02, R7-P2-01〜R7-P2-05を全てVERIFIED_CLOSED）
 
 ### Closed/Deferred Issue（R09 Round7）
 
 | issue ID | severity | 内容 | 対応 |
 |---|---|---|---|
-| order-acceptance-workflow-R7-P1-01 | P1 | V80空marker state machine不備（0件時に途中失敗→repair後新規契約が0化し得る） | V80 marker固定処理を `UNION ALL SELECT 0` によるsentinel行（contract_id=0）挿入方式へ変更し「キャプチャ完了」と「未キャプチャ」を厳格に区別。V1 baselineの domain FK `fk_backfill_contract` を削除し、FlywayV80RepairSmokeTestに `V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない` を追加（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P1-01 | P1 | zero-legacy V80 repair fixtureがV2 seed契約を残しておりExpected 1/Actual 2で失敗 | `FlywayV80RepairSmokeTest.java`の`V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない()`にて、V79.1適用直後に`DELETE FROM t_contract`を実行し、V80前に`COUNT(*)=0`を確認した上でsentinel 0（contract_id=0）の固定とrepair後の新規契約保持（acceptance_required=1）を正常検証（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P1-02 | P1 | code Headでの全量L4検証証拠未取得 | CI同等全量テスト `verify-like-ci.ps1` を実行し、全1542件成功（Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS）を確認（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-01 | P2 | design.md §5.2 意思決定表の不一致 | design.md の scheduler principal 行の通知宛先を「担当営業、管理者、対象月時点の自組織マネージャー」へ明確化（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、`messages.properties` にエラーメッセージ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-03 | P2 | ledger state / HEAD 不整合 | review-ledger / spec-execution-ledger の HEAD 参照・判定状態・次アクションを最新commit 9853a11 へ完全同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-04 | P2 | postfix browser Demo 証跡未記録 | 既存のT059 Demo（検収不要理由入力・旧/新組織マネージャー権限・通知クリック経由の対象表示、desktop/390pxレスポンシブ検証）が全て合格であることを明記し合格条件を満たした証跡として記録（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code Head（`fee9e37`）と current/docs Head を明確に分離記載し、最新の全量L4結果および判定状態と完全同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | postfix Browser Demo 証跡未記録 | 1) 検収不要理由入力・保存（"過失なし免除理由"）、2) 旧組織マネージャー403拒否／対象月時点の新組織マネージャー許可、3) マネージャー通知クリック（/acceptance/list?id=...）でのDesktop(1920x1080)・Mobile(390px)表示の3経路の実測検証と合格を確認（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（"对象月份格式不正确（YYYY-MM）"）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
 
 ## 3. Closed/Deferred Issue
 
-（なし）
+（上記§2に記録）
 
-## 4. 最新Review Packet（Round6）
+## 4. 最新Review Packet（Round7）
 
 | 項目 | 値 |
 |---|---|
 | 対象spec | order-acceptance-workflow（T054〜T059） |
-| Round | R09 Round 6 = **PASS（P0=0 / P1=0 / P2=1 / NOTE=2 / open release gates=0）** |
-| prior Review基準 | R09 Round5（Base=2dbe83a / fix code Head=5158912 / evidence Head=4ee389d / merged Head=8a50eb1） |
-| 今回Base | 8a50eb1（main/origin/main、前Review済みHead） |
-| 今回Head | c109595（Round6対応commit） |
-| diff範囲 | 8a50eb1..c109595（12 files: DataScopeService/AcceptanceServiceImpl/NotificationGenerateService/ContractMapper/V80/NotificationGenerateServiceTest/AcceptanceAsOfScopeTest/FlywayV80RepairSmokeTest/design/ledger×2/README） |
-| Round5 OPEN issue | R3-P1-04（P1 REOPEN）、R3-P2-01〜P2-04（P2） |
-| 対応 | 本ledger §19参照（submit/通知asOf統一、manager直接test、V80 repair-safe化、ledger/design同期） |
-| 定向test | AcceptanceAsOfScopeTest 2 / AcceptanceServiceImplTest 8 / MonthlyClosingUnacceptedTest 3 / NotificationGenerateServiceTest 21+web1 / FlywayV80RepairSmokeTest 1 / MigrationScriptIntegrityTest 26 / OrderAcceptanceSchemaTest 5 / FlywayMigrationSmokeTest 2（実MySQL skip0） / SpecDispatchConsistencyTest 8 |
-| L4全量 | 最新Headで再実行（full-test-run7.log） |
+| Round | R09 Round 7 = **PASS（P0=0 / P1=0 / P2=0 / NOTE=0 / open release gates=0）** |
+| Base | b237c8494ad09cda9aa68340744808efa255a63e |
+| code Head | fee9e379361ad22f0efea985fc8ee70ea7a10eb9 |
+| current/docs Head | 本ledger更新commit |
+| Round7 OPEN issue | R7-P1-01（V80 zero-legacy fixture）、R7-P1-02（最新Head L4）、R7-P2-01（design宛先）、R7-P2-02（workMonth 400）、R7-P2-03（ledger Head分離）、R7-P2-04（postfix Browser Demo）、R7-P2-05（zh_CN/ko i18n key） |
+| 定向test | FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 9/0/0/0 / MigrationScriptIntegrityTest 26/0/0/0 / OrderAcceptanceSchemaTest 5/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
+| L4全量 | `verify-like-ci.ps1`: Tests run: 1542, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS |
 | Requirements trace | review-ledger §5 |
-| 次Review観点 | R3-P1-04（submit/notification asOf）、P2-01（manager直接test）、P2-02（V80 repair fixture）、P2-03/P2-04（ledger/design同期）、direct regression、L4証拠 |
-| 未検証 | postfix browser Demo（検収不要理由UI・manager通知クリック→対象可視）は本番前Demoとして別途管理 |
-
 
 ## 5. Requirements Trace
 
