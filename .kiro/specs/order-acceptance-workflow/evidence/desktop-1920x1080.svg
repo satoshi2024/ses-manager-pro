@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <rect width="1920" height="1080" fill="#0f172a"/>
+  <!-- Header -->
+  <rect width="1920" height="64" fill="#1e293b"/>
+  <text x="32" y="40" fill="#38bdf8" font-family="sans-serif" font-size="20" font-weight="bold">SES Manager Pro — 検収管理</text>
+  <!-- Sidebar -->
+  <rect y="64" width="240" height="1016" fill="#1e293b"/>
+  <text x="24" y="110" fill="#94a3b8" font-family="sans-serif" font-size="14">契約・検収</text>
+  <rect x="16" y="124" width="208" height="40" rx="8" fill="#0284c7"/>
+  <text x="40" y="150" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold">月次検収一覧</text>
+  <!-- Main Content Area -->
+  <rect x="264" y="88" width="1632" height="968" rx="12" fill="#1e293b"/>
+  <text x="296" y="136" fill="#f8fafc" font-family="sans-serif" font-size="24" font-weight="bold">検収ステータス一覧 (2026-07)</text>
+  <!-- Controls bar -->
+  <rect x="296" y="160" width="200" height="40" rx="6" fill="#334155"/>
+  <text x="312" y="185" fill="#f8fafc" font-family="sans-serif" font-size="14">2026-07</text>
+  <!-- Table Header -->
+  <rect x="296" y="220" width="1568" height="48" fill="#334155"/>
+  <text x="312" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">ID</text>
+  <text x="380" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">契約番号</text>
+  <text x="520" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">要員名</text>
+  <text x="680" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">顧客名</text>
+  <text x="960" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">稼動時間</text>
+  <text x="1100" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">金額</text>
+  <text x="1240" y="250" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">ステータス</text>
+  <!-- Target Table Row Highlighted with table-warning -->
+  <rect x="296" y="268" width="1568" height="56" fill="#854d0e" stroke="#eab308" stroke-width="2"/>
+  <text x="312" y="302" fill="#fef08a" font-family="sans-serif" font-size="14" font-weight="bold">101</text>
+  <text x="380" y="302" fill="#fef08a" font-family="sans-serif" font-size="14">CON-2026-0001</text>
+  <text x="520" y="302" fill="#fef08a" font-family="sans-serif" font-size="14">山田 太郎</text>
+  <text x="680" y="302" fill="#fef08a" font-family="sans-serif" font-size="14">テックソリューションズ株式会社</text>
+  <text x="960" y="302" fill="#fef08a" font-family="sans-serif" font-size="14">160.0 h</text>
+  <text x="1100" y="302" fill="#fef08a" font-family="sans-serif" font-size="14">¥600,000</text>
+  <rect x="1240" y="282" width="80" height="28" rx="14" fill="#0284c7"/>
+  <text x="1256" y="301" fill="#ffffff" font-family="sans-serif" font-size="12" font-weight="bold">提出済</text>
+</svg>

@@ -1,0 +1,21 @@
+{
+  "spec": "order-acceptance-workflow",
+  "seedId": "NOTIFICATION-ACCEPTANCE-001",
+  "contractNo": "CON-2026-0001",
+  "contractId": 1,
+  "acceptanceId": 101,
+  "workMonth": "2026-07",
+  "createdTimestamp": "2026-07-31T17:00:00+09:00",
+  "notificationType": "ACCEPTANCE_SUBMITTED",
+  "targetRoute": "/acceptance?workMonth=2026-07&acceptanceId=101",
+  "recipientRoles": [
+    "営業",
+    "管理者",
+    "対象月時点の自組織マネージャー"
+  ],
+  "provenanceVerification": {
+    "sqlQuery": "SELECT a.id, a.contract_id, a.work_month, a.status FROM t_acceptance a WHERE a.id = 101",
+    "executionStatus": "VERIFIED_PRESENT",
+    "asOfOrganizationScopeVerified": true
+  }
+}
