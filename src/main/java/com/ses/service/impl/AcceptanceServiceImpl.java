@@ -44,14 +44,14 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
 
     @Override
     public Page<AcceptanceGridDto> pageGrid(long current, long size, String workMonth,
-                                            String status, Long customerId, Long engineerId) {
+                                            String status, Long customerId, Long engineerId, Long acceptanceId) {
         if (workMonth == null || workMonth.isBlank()) {
             throw BusinessException.of(400, "error.acceptance.workMonthRequired");
         }
         // 検収一覧は対象月時点の契約母集団で評価する（異動前後の過去月でも集合を一致。R09-P1-04）
         List<Long> contractIds = scopedContractIds(monthEnd(workMonth));
         return baseMapper.selectGridPage(new Page<>(current, Math.min(size, 1000)),
-                workMonth, status, customerId, engineerId, contractIds);
+                workMonth, status, customerId, engineerId, acceptanceId, contractIds);
     }
 
     @Override

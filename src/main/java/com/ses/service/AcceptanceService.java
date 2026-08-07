@@ -12,7 +12,7 @@ public interface AcceptanceService extends IService<Acceptance> {
 
     /** 検収グリッド（scope適用）。work record確定・検収要契約を出発点に、未提出行も含む。 */
     com.baomidou.mybatisplus.extension.plugins.pagination.Page<AcceptanceGridDto> pageGrid(
-            long current, long size, String workMonth, String status, Long customerId, Long engineerId);
+            long current, long size, String workMonth, String status, Long customerId, Long engineerId, Long acceptanceId);
 
     /**
      * 提出（未提出→提出済 / 差戻し→再提出）。提出時点のwork record工数・金額・更新日時をsnapshotする。

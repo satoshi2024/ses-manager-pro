@@ -50,6 +50,7 @@ function loadAcceptances(page, targetAcceptanceId) {
     if (status) params.status = status;
     if (customerId) params.customerId = customerId;
     if (engineerId) params.engineerId = engineerId;
+    if (targetAcceptanceId) params.acceptanceId = targetAcceptanceId;
     SES.api.get('/api/acceptances', params).then(data => {
         const tbody = document.querySelector('#acceptanceTable tbody');
         tbody.innerHTML = '';
@@ -73,7 +74,7 @@ function loadAcceptances(page, targetAcceptanceId) {
             tbody.appendChild(tr);
         });
         renderPagination(data, 'loadAcceptances');
-        if (targetId) {
+        if (targetAcceptanceId) {
             const highlighted = tbody.querySelector('.table-warning');
             if (highlighted) {
                 highlighted.scrollIntoView({ behavior: 'smooth', block: 'center' });

@@ -230,7 +230,7 @@ class AcceptanceServiceImplTest {
         assertEquals(400, ex2.getCode());
 
         BusinessException ex3 = assertThrows(BusinessException.class,
-                () -> acceptanceService.pageGrid(1, 10, "2026-99", null, null, null));
+                () -> acceptanceService.pageGrid(1, 10, "2026-99", null, null, null, null));
         assertEquals(400, ex3.getCode());
     }
 }

@@ -33,8 +33,9 @@ public class AcceptanceApiController {
                              @RequestParam String workMonth,
                              @RequestParam(required = false) String status,
                              @RequestParam(required = false) Long customerId,
-                             @RequestParam(required = false) Long engineerId) {
-        return ApiResult.success(acceptanceService.pageGrid(current, size, workMonth, status, customerId, engineerId));
+                             @RequestParam(required = false) Long engineerId,
+                             @RequestParam(required = false) Long acceptanceId) {
+        return ApiResult.success(acceptanceService.pageGrid(current, size, workMonth, status, customerId, engineerId, acceptanceId));
     }
 
     /** 提出（未提出→提出済）。work record確定済みであること。 */

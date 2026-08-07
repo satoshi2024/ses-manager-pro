@@ -61,6 +61,7 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
           <if test="status != null and status != ''">AND COALESCE(a.status, '未提出') = #{status}</if>
           <if test="customerId != null">AND c.customer_id = #{customerId}</if>
           <if test="engineerId != null">AND c.engineer_id = #{engineerId}</if>
+          <if test="acceptanceId != null">AND a.id = #{acceptanceId}</if>
           <if test="contractIds != null">
             <choose>
               <when test="contractIds.size() == 0">AND 1 = 0</when>
@@ -75,6 +76,7 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             @Param("status") String status,
             @Param("customerId") Long customerId,
             @Param("engineerId") Long engineerId,
+            @Param("acceptanceId") Long acceptanceId,
             @Param("contractIds") List<Long> contractIds);
 
     @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 FOR UPDATE")
