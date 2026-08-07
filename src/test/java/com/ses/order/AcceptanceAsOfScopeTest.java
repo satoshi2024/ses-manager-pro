@@ -2,6 +2,7 @@ package com.ses.order;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
+import com.ses.entity.Acceptance;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
@@ -26,6 +27,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -261,4 +263,38 @@ class AcceptanceAsOfScopeTest {
                 + " VALUES (?, '2026-08', 160.00, 600000, '確定')", contractId);
     }
 
+    @Test
+    @DisplayName("R7-P2-04: 定点ID指定のpageGridで実在する越権検収は0件、権限あり主体は1件を返す")
+    void pageGrid_withAcceptanceId_scopeIsolation_unauthorizedRoleReturnsEmpty() {
+        setUpTransferFixture();
+
+        // 2026-07時点の対象契約に対する検収を提出（組織Aに帰属）
+        authenticate(managerA);
+        Acceptance acceptance = acceptanceService.submit(contractId, "2026-07");
+        assertNotNull(acceptance);
+
+        // 組織Aマネージャー（権限あり）: 2026-07の定点抽出で1件取得できる
+        var pageA = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, acceptance.getId());
+        assertEquals(1, pageA.getRecords().size(), "権限ありマネージャーAは定点IDの検収を1件取得できること");
+        assertEquals(acceptance.getId(), pageA.getRecords().get(0).getId());
+
+        // 組織Bマネージャー（越権主体）: 2026-07時点の同検収は越権のため0件（アクセス不可）
+        authenticate(managerB);
+        var pageB = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, acceptance.getId());
+        assertEquals(0, pageB.getRecords().size(), "実在する検収であっても越権マネージャーBからは0件（Scope遮断）となること");
+    }
+
+    @Test
+    @DisplayName("R7-P2-04: WHERE a.id = #{acceptanceId} フィルタが pagination 前に適用され定点1件を取得する")
+    void pageGrid_withAcceptanceId_whereFilterAppliesBeforePagination() {
+        setUpTransferFixture();
+
+        authenticate(managerA);
+        Acceptance acceptance = acceptanceService.submit(contractId, "2026-07");
+
+        // 1ページ目（size=50）で定点抽出を指定した際、WHERE句がLIMIT句より前に評価され1件正しく取得できる
+        var page = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, acceptance.getId());
+        assertEquals(1, page.getRecords().size());
+        assertEquals(acceptance.getId(), page.getRecords().get(0).getId());
+    }
 }
