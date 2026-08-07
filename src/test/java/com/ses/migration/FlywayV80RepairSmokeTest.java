@@ -147,8 +147,13 @@ class FlywayV80RepairSmokeTest {
         resetDatabase();
         Path dir = prepareMigrationDir();
 
-        // 1) V79.1まで適用（legacy基盤、既存契約0件）
+        // 1) V79.1まで適用（legacy基盤、既存契約0件にするためV2のseed契約を削除）
         flywayFilesystem(dir, "79.1").migrate();
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            statement.execute("DELETE FROM t_contract");
+            assertEquals(0, queryInt(statement, "SELECT COUNT(*) FROM t_contract"), "V80前に既存契約は0件のはず");
+        }
 
         // 2) V80を「marker固定・UPDATE適用後、t_acceptance以前」で途中失敗させる
         installFailingV80(dir);
