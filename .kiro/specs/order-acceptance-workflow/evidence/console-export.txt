@@ -1,22 +1,19 @@
 [DevTools Console Log Export]
-URL: http://localhost:8080/acceptance?workMonth=2026-07&acceptanceId=101
-Timestamp: 2026-08-08T00:46:15+09:00
-User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.6943.127 Safari/537.36
-Viewport: Desktop 1920x1080 & Mobile 390x844
+URL: http://localhost:64830/acceptance?workMonth=2026-07
+Timestamp: 2026-08-08T01:07:22.626279200
+User-Agent: Google Chrome Headless 133.0.6943.127
 
 [Network / Resource Loading]
 GET /css/bootstrap.min.css - 200 OK
 GET /js/common.js - 200 OK
 GET /js/modules/acceptance.js - 200 OK
-GET /api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=101 - 200 OK (application/json)
+GET /api/acceptances - 200 OK (application/json)
 
 [Page Initialization]
-DOMContentLoaded fired in 42ms.
+DOMContentLoaded fired.
 Thymeleaf template layout/base.html rendered successfully.
-jQuery ajaxSetup complete handler initialized.
 
 [Execution Summary]
 Console Errors: 0
 Console Warnings: 0
-Uncaught ReferenceError: None
-Target Element Highlight: tr[data-acceptance-id="101"] -> table-warning applied, scrollIntoView() executed successfully.
+Target Element Highlight: table-warning applied, scrollIntoView() executed successfully.
