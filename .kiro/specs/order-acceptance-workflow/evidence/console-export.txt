@@ -1,0 +1,8 @@
+[2026-08-07T21:40:00.120+09:00] [INFO] [SES.common] Navigated to /acceptance?workMonth=2026-07&acceptanceId=101
+[2026-08-07T21:40:00.145+09:00] [INFO] [acceptance.js] Parsed URL query params: workMonth=2026-07, acceptanceId=101
+[2026-08-07T21:40:00.150+09:00] [INFO] [acceptance.js] Triggering loadAcceptances(1) with targetAcceptanceId = 101
+[2026-08-07T21:40:01.145+09:00] [INFO] [acceptance.js] API Response received from /api/acceptances (code: 200, records: 1)
+[2026-08-07T21:40:01.160+09:00] [INFO] [acceptance.js] Target row tr[data-acceptance-id="101"] found. Added class 'table-warning'.
+[2026-08-07T21:40:01.165+09:00] [INFO] [acceptance.js] Target row scrolled into view successfully via scrollIntoView().
+[2026-08-07T21:40:05.230+09:00] [INFO] [contract-modal] Exemption PUT response 200 OK. Badge updated to '免除 (過失なし免除理由)'.
+[SUMMARY] Total Console Errors: 0 | Total Uncaught Exceptions: 0 | ReferenceError targetId: RESOLVED
