@@ -22,7 +22,6 @@ if ($LaunchChrome) {
     if (-not (Test-Path $chromePath)) {
         $chromePath = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
     }
-    
     if (Test-Path $chromePath) {
         $windowSize = if ($Viewport -eq "mobile") { "--window-size=390,844" } else { "--window-size=1920,1080" }
         Write-Host "Launching Google Chrome at $url..."

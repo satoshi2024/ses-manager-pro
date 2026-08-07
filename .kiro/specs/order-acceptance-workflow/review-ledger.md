@@ -57,11 +57,11 @@
 
 | requirement/AC | implementation | automatic test | Demo | verdict |
 |---|---|---|---|---|
-| R1.1〜R1.5 注文/状態機械 | T054〜T056 | OrderAcceptanceSchemaTest / SalesOrderServiceImplTest | T056で実施 | 実装済み（Round6対応後 差分再Review待ち） |
-| R2.1〜R2.4 見積→注文→契約 | T055 | SalesOrderServiceImplTest / adapter tests | T055で実施 | 実装済み（Round6対応後 差分再Review待ち） |
-| R3.1〜R3.5 月次検収 | T054/T057 | OrderAcceptanceSchemaTest / AcceptanceServiceImplTest / AcceptanceAsOfScopeTest / ContractAcceptanceExemptionTest | T057で実施 | 実装済み（Round6対応後 差分再Review待ち） |
-| R4.1〜R4.3 通知/KPI | T058 | NotificationGenerateServiceTest / MonthlyClosingUnacceptedTest | T058で実施 | 実装済み（Round6対応後 差分再Review待ち） |
-| R5 受入 | T054〜T059 | 各task + L4 | T059で実施 | 実装済み（Round6対応後 差分再Review待ち） |
+| R1.1〜R1.5 注文/状態機械 | T054〜T056 | OrderAcceptanceSchemaTest / SalesOrderServiceImplTest | T056で実施 | VERIFIED_CLOSED（Round7独立Review確認済み） |
+| R2.1〜R2.4 見積→注文→契約 | T055 | SalesOrderServiceImplTest / adapter tests | T055で実施 | VERIFIED_CLOSED（Round7独立Review確認済み） |
+| R3.1〜R3.5 月次検収 | T054/T057 | OrderAcceptanceSchemaTest / AcceptanceServiceImplTest / AcceptanceAsOfScopeTest / AcceptanceIdMySqlIntegrationTest / ContractAcceptanceExemptionTest | T057で実施 | VERIFIED_CLOSED（Round7独立Review確認済み） |
+| R4.1〜R4.3 通知/KPI | T058 | NotificationGenerateServiceTest / MonthlyClosingUnacceptedTest | T058で実施 | REVIEW（Browser Demo実行証跡待ち） |
+| R5 受入 | T054〜T059 | 各task + L4 | T059で実施 | FAIL（Browser gate未達） |
 
 ## 6. T054 F1 注文/明細/検収DDL — 記録（2026-08-05）
 

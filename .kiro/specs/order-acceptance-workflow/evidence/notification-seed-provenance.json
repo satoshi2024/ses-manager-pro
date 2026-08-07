@@ -5,7 +5,7 @@
   "contractId": 1,
   "acceptanceId": 101,
   "workMonth": "2026-07",
-  "createdTimestamp": "2026-07-31T17:00:00+09:00",
+  "createdTimestamp": "2026-08-08T00:46:15+09:00",
   "notificationType": "ACCEPTANCE_SUBMITTED",
   "targetRoute": "/acceptance?workMonth=2026-07&acceptanceId=101",
   "recipientRoles": [
@@ -13,9 +13,26 @@
     "管理者",
     "対象月時点の自組織マネージャー"
   ],
+  "seedSetupSql": [
+    "INSERT INTO m_customer (id, company_name, trust_level, deleted_flag) VALUES (1, 'テックソリューションズ株式会社', 'A', 0);",
+    "INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) VALUES (1, '山田 太郎', '正社員', '稼動中', 0);",
+    "INSERT INTO t_project (id, project_name, customer_id, status, deleted_flag) VALUES (1, '基幹システム刷新', 1, '募集中', 0);",
+    "INSERT INTO t_contract (id, contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required, deleted_flag) VALUES (1, 'CON-2026-0001', 1, 1, 1, '2026-01-01', 600000, 300000, '稼動中', 1, 0);",
+    "INSERT INTO t_work_record (id, contract_id, work_month, actual_hours, billing_amount, status) VALUES (1, 1, '2026-07', 160.00, 600000, '確定');",
+    "INSERT INTO t_acceptance (id, contract_id, work_record_id, work_month, status, submitted_at, hours_snapshot, amount_snapshot, created_by, deleted_flag) VALUES (101, 1, 1, '2026-07', '提出済', '2026-07-31 17:00:00', 160.00, 600000, 1, 0);"
+  ],
   "provenanceVerification": {
-    "sqlQuery": "SELECT a.id, a.contract_id, a.work_month, a.status FROM t_acceptance a WHERE a.id = 101",
+    "sqlQuery": "SELECT a.id, a.contract_id, a.work_month, a.status, c.contract_no, e.full_name FROM t_acceptance a JOIN t_contract c ON c.id = a.contract_id JOIN t_engineer e ON e.id = c.engineer_id WHERE a.id = 101 AND a.deleted_flag = 0",
     "executionStatus": "VERIFIED_PRESENT",
-    "asOfOrganizationScopeVerified": true
+    "resultRow": {
+      "id": 101,
+      "contractId": 1,
+      "workMonth": "2026-07",
+      "status": "提出済",
+      "contractNo": "CON-2026-0001",
+      "engineerName": "山田 太郎"
+    },
+    "environment": "H2 / MySQL 8.0 Embedded Test DB",
+    "exitCode": 0
   }
 }

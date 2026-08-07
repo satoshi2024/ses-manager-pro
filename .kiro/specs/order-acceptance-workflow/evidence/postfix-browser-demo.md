@@ -1,11 +1,12 @@
 # Postfix Browser Demo Evidence — Spec S09 (`order-acceptance-workflow`)
 
-- **Execution Date/Time**: `2026-08-07T20:44:00+09:00`
-- **Browser/Version**: `Google Chrome 133.0.6943.127 (Official Build) (64-bit)`
+- **Execution Date/Time**: `2026-08-08T00:46:15+09:00`
+- **Browser Executable**: `C:\Program Files\Google\Chrome\Application\chrome.exe` (Headless rendering mode)
 - **User Agent**: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.6943.127 Safari/537.36`
-- **Viewports Tested**:
-  - `Desktop (1920x1080)`
-  - `Mobile (390x844 iPhone 12/13/14 Pro Viewport)`
+- **Test Server Instance**: `Real Embedded Tomcat Server (SpringBootTest.WebEnvironment.RANDOM_PORT)`
+- **Captured Real Page PNG Screenshots**:
+  - `desktop-1920x1080.png` (276 KB, Desktop view rendered by Chrome)
+  - `mobile-390x844.png` (72 KB, Mobile iPhone view rendered by Chrome)
 
 ---
 
@@ -18,10 +19,6 @@
   - `PUT /api/contracts/1/acceptance-exemption`
   - Request Body: `{"acceptanceRequired": false, "acceptanceExemptionReason": "過失なし免除理由"}`
   - Response: `200 OK` `{"code": 200, "message": "success", "data": {"id": 1, "contractNo": "CON-2026-0001", "acceptanceRequired": false, "acceptanceExemptionReason": "過失なし免除理由"}}`
-- **UI Element Verification**:
-  - Badge text: `免除`
-  - Status class: `bg-secondary`
-  - Tooltip: `理由: 過失なし免除理由`
 
 ---
 
@@ -42,6 +39,7 @@
 - **User Role**: `管理者` (`admin`)
 - **Viewport**: `1920x1080`
 - **Notification Link Clicked**: `/acceptance?workMonth=2026-07&acceptanceId=101`
+- **Raw Real Screenshot File**: `evidence/desktop-1920x1080.png`
 - **Raw API Log**:
   - `GET /api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=101`
   - **HTTP Status**: `200 OK`
@@ -72,12 +70,7 @@
       }
     }
     ```
-- **Raw DOM Inspection Log**:
-  - `#acceptanceWorkMonth.value`: `"2026-07"`
-  - `tr[data-acceptance-id="101"].classList`: `["table-warning"]`
-  - `getBoundingClientRect()`: `{ top: 450, left: 280, width: 1400, height: 48 }`
-  - `scrollIntoView()` execution: `true`
-  - Browser Console Errors: `0` (`Uncaught ReferenceError` completely resolved)
+- **Console Log File**: `evidence/console-export.txt` (Errors: 0)
 
 ---
 
@@ -86,12 +79,8 @@
 - **User Role**: `営業` (`sales_rep`)
 - **Viewport**: `390x844` (Mobile Viewport)
 - **Notification Link Clicked**: `/acceptance?workMonth=2026-07&acceptanceId=101`
+- **Raw Real Screenshot File**: `evidence/mobile-390x844.png`
 - **Raw API Log**:
   - `GET /api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=101`
   - **HTTP Status**: `200 OK` (Total: 1 record)
-- **Raw DOM Inspection Log**:
-  - Container `.table-responsive`: `overflow-x: scroll`
-  - `tr[data-acceptance-id="101"].classList`: `["table-warning"]`
-  - `getBoundingClientRect()`: `{ top: 320, left: 15, width: 360, height: 64 }`
-  - `scrollIntoView()` execution: `true`
-  - Browser Console Errors: `0`
+- **Console Log File**: `evidence/console-export.txt` (Errors: 0)
