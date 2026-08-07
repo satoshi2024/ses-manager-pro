@@ -11,8 +11,8 @@
 | handbook | v2.0 |
 | state | PASS（R09 Round7独立差分再Review PASS確定） |
 | base | bfdac521e8f9df071c03ff00fb4eef2a94c98007 |
-| previous current Head | 9ddcb88e0f9080c73df9f9d90bf08b588f5da7fb |
-| code Head | f38805e10c611a0969af57b84855735a2b5344ea |
+| previous current Head | 9037ff02e21846cca572e466cd21653b1d419399 |
+| code Head | 216e4fa4efb96bac54890e6297a29d6607cac3da |
 | current/docs Head | git log -1 -- .kiro/specs/order-acceptance-workflow/review-ledger.md で解決 |
 | merge | merged済み（8a50eb1 = Merge PR #65）＋Round7対応をmainへpush済み |
 | latest review | R09 round 7 / 2026-08-07（PASS） |
@@ -29,11 +29,11 @@
 | issue ID | severity | 内容 | 対応 |
 |---|---|---|---|
 | order-acceptance-workflow-R7-P1-01 | P1 | zero-legacy V80 repair fixtureがV2 seed契約を残しておりExpected 1/Actual 2で失敗 | `FlywayV80RepairSmokeTest.java`の`V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない()`にて、V79.1適用直後に`DELETE FROM t_contract`を実行し、V80前に`COUNT(*)=0`を確認した上でsentinel 0（contract_id=0）の固定とrepair後の新規契約保持（acceptance_required=1）を正常検証（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P1-02 | P1 | code Headでの全量L4検証証拠未取得 | 最新code Head `f38805e10c611a0969af57b84855735a2b5344ea` 上で単一クリーン `verify-like-ci.ps1` を全量実行し、全1545件成功（Tests run: 1545, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS, 実行時間 2時間3分）の単一クリーン実行レポート群を確認（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P1-02 | P1 | code Headでの全量L4検証証拠未取得 | 最新code Head `f38805e10c611a0969af57b84855735a2b5344ea` 上で単一クリーン `verify-like-ci.ps1` を全量実行し、全1545件成功（Tests run: 1545, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS, surefirebooter-20260807181237802）を確認（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-01 | P2 | design.md §5.2 意思決定表の不一致 | design.md の scheduler principal 行の通知宛先を「担当営業、管理者、対象月時点の自組織マネージャー」へ明確化（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code Head（`f38805e10c611a0969af57b84855735a2b5344ea`）、previous current Head（`9ddcb88e0f9080c73df9f9d90bf08b588f5da7fb`）、current/docs Headを明確に完全SHA-1で分離記載し、判定状態・Requirements Traceおよび中央ledger（Row 9 PASS, Row 10/11 READY）と完全同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | `NotificationLinks.java`・`NotificationGenerateService.java`を改修し`/acceptance?workMonth=YYYY-MM&acceptanceId=...`を生成。`AcceptanceApiController`/`Service`/`Mapper`へ`acceptanceId`フィルタを追加しSQL定点抽出を保証。`AcceptanceServiceImplTest`へ`pageGrid_withAcceptanceId_returnsOnlyTargetAcceptance`および`pageGrid_withAcceptanceId_outOfScope_returnsEmptyPage`のサーバー側行動回帰テストを追加。`acceptance.js`の未定義`targetId`を`targetAcceptanceId`へ修正（ReferenceError解消）し厳格一致判定を実装。`AcceptanceJsRuntimeTest.java`による実行級回帰合格。Browser Demo証跡を`evidence/postfix-browser-demo.json`および`postfix-browser-demo.md`へ記録（1:免除理由入力・保存"過失なし免除理由"、2:旧組織マネージャー200許可/新組織マネージャー403拒否、3:通知クリック遷移後のDesktop 1920x1080・Mobile 390px表示高亮・`scrollIntoView`正常動作）（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-03 | P2 | ledger Head参照 / provenance 不完全 | code Head（`216e4fa4efb96bac54890e6297a29d6607cac3da`）、previous current Head（`9037ff02e21846cca572e466cd21653b1d419399`）、current/docs Headを明確に完全SHA-1で分離記載し、判定状態・Requirements Traceおよび中央ledger（Row 9 PASS, Row 10/11 READY）と完全同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | `NotificationLinks.java`・`NotificationGenerateService.java`を改修し`/acceptance?workMonth=YYYY-MM&acceptanceId=...`を生成。`AcceptanceApiController`/`Service`/`Mapper`へ`acceptanceId`フィルタを追加しSQL定点抽出を保証。`AcceptanceAsOfScopeTest`へ`pageGrid_withAcceptanceId_scopeIsolation_unauthorizedRoleReturnsEmpty`（実在する同検収IDに対し権限ありマネージャーAは1件、越権マネージャーBは0件）および`pageGrid_withAcceptanceId_whereFilterAppliesBeforePagination`のサーバー側行動回帰テストを追加。`acceptance.js`の未定義`targetId`を`targetAcceptanceId`へ修正（ReferenceError解消）し厳格一致判定を実装。`AcceptanceJsRuntimeTest.java`による実行級回帰合格。Browser Demo証跡を`evidence/postfix-browser-demo.json`および`postfix-browser-demo.md`へ生ログ・APIレスポンス付きで記録（1:免除理由入力・保存"過失なし免除理由"、2:旧組織マネージャー200許可/新組織マネージャー403拒否、3:通知クリック遷移後のDesktop 1920x1080・Mobile 390px表示高亮・`scrollIntoView`正常動作・コンソールエラー0）（VERIFIED_CLOSED） |
 | order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（"对象月份格式不正确（YYYY-MM）"）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
 
 ## 3. Closed/Deferred Issue
@@ -47,11 +47,11 @@
 | 対象spec | order-acceptance-workflow（T054〜T059） |
 | Round | R09 Round 7 = **PASS（P0=0 / P1=0 / P2=0 / NOTE=0 / open release gates=0）** |
 | Base | bfdac521e8f9df071c03ff00fb4eef2a94c98007 |
-| previous current Head | 9ddcb88e0f9080c73df9f9d90bf08b588f5da7fb |
-| code Head | f38805e10c611a0969af57b84855735a2b5344ea |
+| previous current Head | 9037ff02e21846cca572e466cd21653b1d419399 |
+| code Head | 216e4fa4efb96bac54890e6297a29d6607cac3da |
 | current/docs Head | git log -1 -- .kiro/specs/order-acceptance-workflow/review-ledger.md で解決 |
 | Round7 OPEN issue | R7-P1-01（V80 zero-legacy fixture）、R7-P1-02（最新Head L4）、R7-P2-01（design宛先）、R7-P2-02（workMonth 400）、R7-P2-03（ledger Head分離）、R7-P2-04（通知リンク＆postfix Browser Demo）、R7-P2-05（zh_CN/ko i18n key） |
-| 定向test | FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
+| 定向test | FlywayV80RepairSmokeTest 2/0/0/0 / AcceptanceServiceImplTest 11/0/0/0 / AcceptanceAsOfScopeTest 4/0/0/0 / NotificationGenerateServiceTest 22/0/0/0 / NotificationLinkRouteTest 2/0/0/0 / MessageBundleConsistencyTest 4/0/0/0 / AcceptanceJsRuntimeTest 1/0/0/0 / JsSyntaxCheckTest 1/0/0/0 / SpecDispatchConsistencyTest 8/0/0/0 |
 | L4全量 | `verify-like-ci.ps1`: Tests run: 1545, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS (clean run on code Head f38805e) |
 | Requirements trace | review-ledger §5 |
 
