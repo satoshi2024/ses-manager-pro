@@ -1,5 +1,6 @@
 package com.ses.service;
 
+import com.ses.common.constant.NotificationLinks;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
@@ -503,9 +504,9 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.acceptanceUnsubmitted();
 
         String type = "ACCEPTANCE_UNSUBMITTED";
-        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), eq(NotificationLinks.acceptance(workMonth)), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), eq(NotificationLinks.acceptance(workMonth)), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), eq(NotificationLinks.acceptance(workMonth)), any(), any());
         verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
 
         // マネージャー所属の解決は対象契約の組織（100）に限定されること
@@ -546,9 +547,10 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.acceptanceOverdue();
 
         String type = "ACCEPTANCE_OVERDUE";
-        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        String expectedLink = NotificationLinks.acceptance(workMonth, 200L);
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), eq(expectedLink), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), eq(expectedLink), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), eq(expectedLink), any(), any());
         verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
     }
 
@@ -573,9 +575,10 @@ class NotificationGenerateServiceTest {
         notificationGenerateService.acceptanceRejected();
 
         String type = "ACCEPTANCE_REJECTED";
-        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), any(), any(), any());
-        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), any(), any(), any());
+        String expectedLink = NotificationLinks.acceptance(workMonth, 300L);
+        verify(notificationService).publishToUser(eq(999L), eq(type), any(), any(), eq(expectedLink), any(), any());
+        verify(notificationService).publishToUser(eq(1L), eq(type), any(), any(), eq(expectedLink), any(), any());
+        verify(notificationService).publishToUser(eq(500L), eq(type), any(), any(), eq(expectedLink), any(), any());
         verify(notificationService, never()).publishToUser(eq(600L), any(), any(), any(), any(), any(), any());
     }
 

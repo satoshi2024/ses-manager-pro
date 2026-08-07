@@ -8,9 +8,16 @@ const ACCEPTANCE_TRANSITIONS = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    const now = new Date();
-    document.getElementById('acceptanceWorkMonth').value = now.toISOString().slice(0, 7);
-    loadAcceptances(1);
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramMonth = urlParams.get('workMonth');
+    const targetId = urlParams.get('id');
+    if (paramMonth && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(paramMonth)) {
+        document.getElementById('acceptanceWorkMonth').value = paramMonth;
+    } else {
+        const now = new Date();
+        document.getElementById('acceptanceWorkMonth').value = now.toISOString().slice(0, 7);
+    }
+    loadAcceptances(1, targetId);
     document.getElementById('btnSearchAcceptance').addEventListener('click', () => loadAcceptances(1));
     loadSelectOptions('/api/customers/options', document.getElementById('acceptanceCustomerFilter'), 'id', r => r.name);
     loadSelectOptions('/api/engineers/options', document.getElementById('acceptanceEngineerFilter'), 'id', r => r.name);
@@ -29,7 +36,7 @@ function loadSelectOptions(url, sel, valueField, labelFn) {
     });
 }
 
-function loadAcceptances(page) {
+function loadAcceptances(page, targetId) {
     const workMonth = document.getElementById('acceptanceWorkMonth').value;
     if (!workMonth) {
         SES.toast.error(SES.i18n.t('acceptance.workMonthRequired', '対象月を指定してください'));
@@ -47,6 +54,9 @@ function loadAcceptances(page) {
         tbody.innerHTML = '';
         (data.records || []).forEach(r => {
             const tr = document.createElement('tr');
+            if (targetId && (String(r.id) === String(targetId) || String(r.contractId) === String(targetId))) {
+                tr.classList.add('table-warning');
+            }
             tr.innerHTML = `
                 <td>${SES.escapeHtml(r.contractNo || '')}</td>
                 <td>${SES.escapeHtml(r.engineerName || '')}</td>
@@ -62,6 +72,12 @@ function loadAcceptances(page) {
             tbody.appendChild(tr);
         });
         renderPagination(data, 'loadAcceptances');
+        if (targetId) {
+            const highlighted = tbody.querySelector('.table-warning');
+            if (highlighted) {
+                highlighted.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
     });
 }
 

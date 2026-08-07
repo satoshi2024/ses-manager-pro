@@ -62,4 +62,23 @@ public final class NotificationLinks {
     public static String customer(Long customerId) {
         return "/customer/" + customerId;
     }
+
+    /** 月次検収への遷移リンク（/acceptance?workMonth={workMonth}） */
+    public static String acceptance(String workMonth) {
+        if (workMonth == null || workMonth.isBlank()) {
+            return ACCEPTANCE;
+        }
+        return ACCEPTANCE + "?workMonth=" + workMonth;
+    }
+
+    /** 月次検収への遷移リンク（/acceptance?workMonth={workMonth}&id={id}） */
+    public static String acceptance(String workMonth, Long id) {
+        if (id == null) {
+            return acceptance(workMonth);
+        }
+        if (workMonth == null || workMonth.isBlank()) {
+            return ACCEPTANCE + "?id=" + id;
+        }
+        return ACCEPTANCE + "?workMonth=" + workMonth + "&id=" + id;
+    }
 }

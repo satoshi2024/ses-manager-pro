@@ -422,7 +422,7 @@ public class NotificationGenerateService {
             String message = "[\"notification.msg.ACCEPTANCE_UNSUBMITTED\", \"" + workMonth + "\", \"" + name + "\"]";
             for (Long userId : resolveContractSalesUserIds(contract, monthEnd(workMonth))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_UNSUBMITTED", "検収未提出",
-                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+                        message, NotificationLinks.acceptance(workMonth), dedupeKey + "#u" + userId, "acceptance");
             }
         }
     }
@@ -449,7 +449,7 @@ public class NotificationGenerateService {
             String message = "[\"notification.msg.ACCEPTANCE_OVERDUE\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\", \"" + days + "日\"]";
             for (Long userId : resolveContractSalesUserIds(contract, monthEnd(acceptance.getWorkMonth()))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_OVERDUE", "検収期限超過",
-                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+                        message, NotificationLinks.acceptance(acceptance.getWorkMonth(), acceptance.getId()), dedupeKey + "#u" + userId, "acceptance");
             }
         }
     }
@@ -471,7 +471,7 @@ public class NotificationGenerateService {
             String message = "[\"notification.msg.ACCEPTANCE_REJECTED\", \"" + acceptance.getWorkMonth() + "\", \"" + name + "\"]";
             for (Long userId : resolveContractSalesUserIds(contract, monthEnd(acceptance.getWorkMonth()))) {
                 notificationService.publishToUser(userId, "ACCEPTANCE_REJECTED", "検収差戻し",
-                        message, NotificationLinks.ACCEPTANCE, dedupeKey + "#u" + userId, "acceptance");
+                        message, NotificationLinks.acceptance(acceptance.getWorkMonth(), acceptance.getId()), dedupeKey + "#u" + userId, "acceptance");
             }
         }
     }
