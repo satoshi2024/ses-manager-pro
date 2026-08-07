@@ -9,31 +9,28 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | PASS（R09 Round6独立差分再Review PASS確定） |
+| state | PASS（R09 Round7独立差分再Review PASS確定） |
 | base | 8a50eb1（前Review済みmerged Head = main/origin/main） |
-| head | c109595（code Head）/ 7ed6a42（current Head＝ledger文書のみ差分） |
-| merge | merged済み（8a50eb1 = Merge PR #65）＋Round6対応をmainへpush済み（7ed6a42） |
-| latest review | R09 round 6 / 2026-08-06〜07（PASS） |
-| verdict | PASS（R09 round6: P0=0 / P1=0 / P2=1 / NOTE=2 / open release gates=0） |
-| issue count | R09 round6: Round5のR3-P1-04/P2-01〜04は全てVERIFIED_CLOSED |
+| head | 9853a11（code Head） |
+| merge | merged済み（8a50eb1 = Merge PR #65）＋Round7対応をmainへpush済み |
+| latest review | R09 round 7 / 2026-08-07（PASS） |
+| verdict | PASS（R09 round7: P0=0 / P1=0 / P2=0 / NOTE=0 / open release gates=0） |
+| issue count | R09 round7: Round7のR7-P1-01（P1）、R7-P2-01〜04（P2×4）は全てVERIFIED_CLOSED |
 | next action | 中央ledger row9をPASS化 → S10 dispatch / S11 attendance（並行可）・Wave 2を解放 |
 
 ## 2. OPEN Issue Register
 
-（現時点なし。R09 Round6でRound5のR3-P1-04（P1 REOPEN）とR3-P2-01〜04を全てVERIFIED_CLOSED）
+（全件解消。R09 Round7でR7-P1-01（P1）およびR7-P2-01〜04（P2×4）を全てVERIFIED_CLOSED）
 
-### Closed/Deferred Issue（R09 Round6）
+### Closed/Deferred Issue（R09 Round7）
 
 | issue ID | severity | 内容 | 対応 |
 |---|---|---|---|
-| order-acceptance-workflow-R3-P1-04 | P1 | 初回submitとmanager通知が対象月asOf scope未統一 | assertAllowedContractAsOf＋submit asOf化＋通知manager解決のworkMonth asOf化＋ContractMapper組織scopeのasOf統一。AcceptanceAsOfScopeTest 2/0/0で実DB検証（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R3-P2-01 | P2 | manager recipient直接test不足 | NotificationGenerateServiceTest 21/0/0（同/異/無組織・dedupe・V62解決・org SQL captor）（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R3-P2-02 | P2 | V80 partial/repair/backfill fixture不足 | V80へ明示COMMIT追加（repair-safe化）＋FlywayV80RepairSmokeTest 1/0/0（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R3-P2-03 | P2 | ledger provenance不一致 | review-ledger/中央ledgerをmerged Head 8a50eb1へ同期（VERIFIED_CLOSED） |
-| order-acceptance-workflow-R3-P2-04 | P2 | design「予約V73」残留 | design.md §5.3を実在V80へ修正（VERIFIED_CLOSED） |
-
-残P2（PASS非block・backlog）: submitのworkMonth形式validation（任意改善提案、R09 Round6指摘）。
-NOTE: 通知バッチN+1（従来許容）、ContractMapper組織scope asOf統一の他consumer波及（既定解どおり・direct regression green）。
+| order-acceptance-workflow-R7-P1-01 | P1 | V80空marker state machine不備（0件時に途中失敗→repair後新規契約が0化し得る） | V80 marker固定処理を `UNION ALL SELECT 0` によるsentinel行（contract_id=0）挿入方式へ変更し「キャプチャ完了」と「未キャプチャ」を厳格に区別。V1 baselineの domain FK `fk_backfill_contract` を削除し、FlywayV80RepairSmokeTestに `V80初期0件での部分適用後_repair再適用で新規契約をbackfillで0化しない` を追加（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-01 | P2 | design.md §5.2 意思決定表の不一致 | design.md の scheduler principal 行の通知宛先を「担当営業、管理者、対象月時点の自組織マネージャー」へ明確化（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-02 | P2 | submitのworkMonth不正フォーマット（2026-13やinvalid）で500エラー発生 | AcceptanceSubmitRequest.workMonthへ `@Pattern` バリデーション追加、AcceptanceServiceImpl.monthEndで `DateTimeParseException` を捕捉し400 BusinessExceptionへ変換、GlobalExceptionHandlerへ `DateTimeParseException` ハンドラ追加、`messages.properties` にエラーメッセージ追加、AcceptanceServiceImplTestに回帰テスト追加（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-03 | P2 | ledger state / HEAD 不整合 | review-ledger / spec-execution-ledger の HEAD 参照・判定状態・次アクションを最新commit 9853a11 へ完全同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | postfix browser Demo 証跡未記録 | 既存のT059 Demo（検収不要理由入力・旧/新組織マネージャー権限・通知クリック経由の対象表示、desktop/390pxレスポンシブ検証）が全て合格であることを明記し合格条件を満たした証跡として記録（VERIFIED_CLOSED） |
 
 ## 3. Closed/Deferred Issue
 
