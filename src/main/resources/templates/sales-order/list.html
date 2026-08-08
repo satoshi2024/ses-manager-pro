@@ -58,45 +58,49 @@
     </div>
 
     <!-- 注文作成/編集モーダル -->
-    <div class="modal fade" id="salesOrderModal" tabindex="-1">
+    <div class="modal fade" id="salesOrderModal" tabindex="-1" aria-labelledby="salesOrderModalTitle" aria-hidden="true">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" th:text="#{salesOrder.btn.new}">注文作成</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h5 class="modal-title" id="salesOrderModalTitle" th:text="#{salesOrder.btn.new}">注文作成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
                 </div>
                 <div class="modal-body">
                     <form id="salesOrderForm" class="row g-2">
                         <input type="hidden" name="id">
                         <input type="hidden" name="quotationId">
-                        <div class="col-md-4">
-                            <label class="form-label" th:text="#{salesOrder.modal.customer}">顧客</label>
-                            <select class="form-select" name="customerId" required></select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label" th:text="#{salesOrder.modal.contact}">顧客担当者</label>
-                            <select class="form-select" name="contactId"></select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label" th:text="#{salesOrder.modal.poNo}">顧客PO番号</label>
-                            <input type="text" class="form-control" name="customerPoNo">
-                            <div id="poWarningText" class="form-text text-warning" style="display:none;"></div>
+                        <div class="col-md-3">
+                            <label for="soCustomerId" class="form-label" th:text="#{salesOrder.modal.customer}">顧客</label>
+                            <select id="soCustomerId" class="form-select" name="customerId" required></select>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label" th:text="#{salesOrder.modal.orderDate}">注文日</label>
-                            <input type="date" class="form-control" name="orderDate" required>
+                            <label for="soContactId" class="form-label" th:text="#{salesOrder.modal.contact}">顧客担当者</label>
+                            <select id="soContactId" class="form-select" name="contactId"></select>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label" th:text="#{salesOrder.modal.startDate}">期間開始</label>
-                            <input type="date" class="form-control" name="startDate">
+                            <label for="soLegalEntityId" class="form-label" th:text="#{salesOrder.modal.legalEntity}">自社発行法人</label>
+                            <select id="soLegalEntityId" class="form-select" name="legalEntityId"></select>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label" th:text="#{salesOrder.modal.endDate}">期間終了</label>
-                            <input type="date" class="form-control" name="endDate">
+                            <label for="soCustomerPoNo" class="form-label" th:text="#{salesOrder.modal.poNo}">顧客PO番号</label>
+                            <input id="soCustomerPoNo" type="text" class="form-control" name="customerPoNo">
+                            <div id="poWarningText" class="form-text text-warning" aria-live="polite" style="display:none;"></div>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label" th:text="#{salesOrder.modal.paymentTerms}">支払条件</label>
-                            <input type="text" class="form-control" name="paymentTerms">
+                            <label for="soOrderDate" class="form-label" th:text="#{salesOrder.modal.orderDate}">注文日</label>
+                            <input id="soOrderDate" type="date" class="form-control" name="orderDate" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="soStartDate" class="form-label" th:text="#{salesOrder.modal.startDate}">期間開始</label>
+                            <input id="soStartDate" type="date" class="form-control" name="startDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="soEndDate" class="form-label" th:text="#{salesOrder.modal.endDate}">期間終了</label>
+                            <input id="soEndDate" type="date" class="form-control" name="endDate">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="soPaymentTerms" class="form-label" th:text="#{salesOrder.modal.paymentTerms}">支払条件</label>
+                            <input id="soPaymentTerms" type="text" class="form-control" name="paymentTerms">
                         </div>
                         <div class="col-12 mt-2">
                             <div class="d-flex justify-content-between align-items-center mb-1">

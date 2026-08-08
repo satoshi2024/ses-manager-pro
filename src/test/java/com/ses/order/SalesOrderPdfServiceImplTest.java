@@ -69,7 +69,14 @@ class SalesOrderPdfServiceImplTest {
         PdfProperties pdfProps = new PdfProperties();
         org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> provider =
                 Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
-        return new SalesOrderPdfServiceImpl(cfg, cm, em, pm, lm, new com.ses.common.util.PdfFontUtils(pdfProps), provider, messageSource);
+        com.ses.service.DocumentService mockDocService = Mockito.mock(com.ses.service.DocumentService.class);
+        com.ses.entity.Document dummyDoc = new com.ses.entity.Document();
+        dummyDoc.setId(100L);
+        when(mockDocService.registerGenerated(any(), any())).thenReturn(dummyDoc);
+        when(provider.getIfAvailable()).thenReturn(mockDocService);
+        org.springframework.beans.factory.ObjectProvider<com.ses.mapper.OrganizationUnitMapper> orgUnitProvider =
+                Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        return new SalesOrderPdfServiceImpl(cfg, cm, em, pm, lm, new com.ses.common.util.PdfFontUtils(pdfProps), provider, orgUnitProvider, messageSource);
     }
 
     @Test

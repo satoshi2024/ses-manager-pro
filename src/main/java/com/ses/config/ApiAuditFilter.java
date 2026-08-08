@@ -74,7 +74,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         username != null ? username : "-", method, uri, status);
                 if (auditLogService != null) {
                     String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
-                            : "GET".equals(method) && uri.startsWith("/api/files/")
+                            : "GET".equals(method) && isDownloadUri(uri)
                             ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
                             : "ses-manager";
                     auditLogService.record(username, method, uri, status, applicationCode,
@@ -82,6 +82,15 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 }
             }
         }
+    }
+
+    private static boolean isDownloadUri(String uri) {
+        if (uri == null) return false;
+        return uri.startsWith("/api/files/")
+                || uri.endsWith("/download") || uri.contains("/download/")
+                || uri.matches("/api/sales-orders/\\d+/documents/\\d+(/.*)?")
+                || uri.matches("/api/sales-orders/\\d+/acknowledgement/pdf(/.*)?")
+                || uri.matches("/api/acceptances/\\d+/document(/.*)?");
     }
 
     /**
@@ -97,7 +106,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         }
         String method = request.getMethod();
         return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method)
-                || ("GET".equals(method) && uri.startsWith("/api/files/"));
+                || ("GET".equals(method) && isDownloadUri(uri));
     }
 
     private boolean isBreakGlassRequest(HttpServletRequest request) {

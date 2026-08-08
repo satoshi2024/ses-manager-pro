@@ -54,7 +54,7 @@ class AcceptanceApprovalAdapterTest {
     @Test
     @DisplayName("R09-P1-02: scope外の検収は承認申請を作れない（assertAllowedAcceptanceが拒否）")
     void cancelRejectsScopeOutsideAcceptance() {
-        when(mapper.selectById(2L)).thenReturn(acceptance(2L));
+        when(mapper.selectByIdForUpdate(2L)).thenReturn(acceptance(2L));
         org.mockito.Mockito.doThrow(new BusinessException(404, "error.scope.notFound"))
                 .when(service).assertAllowedAcceptance(2L);
         assertThatThrownBy(() -> adapter.snapshot(2L, java.util.Map.of()))
@@ -66,7 +66,7 @@ class AcceptanceApprovalAdapterTest {
     void cancelRejectsNonAccepted() {
         Acceptance submitted = acceptance(3L);
         submitted.setStatus("提出済");
-        when(mapper.selectById(3L)).thenReturn(submitted);
+        when(mapper.selectByIdForUpdate(3L)).thenReturn(submitted);
         assertThatThrownBy(() -> adapter.snapshot(3L, java.util.Map.of()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("error.acceptance.statusTransitionInvalid");
@@ -75,7 +75,7 @@ class AcceptanceApprovalAdapterTest {
     @Test
     @DisplayName("acceptance.cancel: snapshotは金額・状態を載せ、承認適用で applyCancellation を呼ぶ")
     void snapshotAndApply() {
-        when(mapper.selectById(1L)).thenReturn(acceptance(1L));
+        when(mapper.selectByIdForUpdate(1L)).thenReturn(acceptance(1L));
         ApprovalSnapshot snapshot = adapter.snapshot(1L, java.util.Map.of("reason", "数量訂正"));
         assertThat(snapshot.amountSnapshot()).isEqualByComparingTo("600000");
         assertThat(snapshot.targetVersion()).isEqualTo(2L);

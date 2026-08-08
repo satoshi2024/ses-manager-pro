@@ -141,6 +141,12 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 throw BusinessException.of("error.contract.salesUserInvalid");
             }
         }
+
+        if (Boolean.FALSE.equals(c.getAcceptanceRequired())) {
+            if (c.getAcceptanceExemptionReason() == null || c.getAcceptanceExemptionReason().isBlank()) {
+                throw BusinessException.of(400, "error.contract.exemptionReasonRequired");
+            }
+        }
     }
 
     @Override
@@ -472,7 +478,18 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
         contract.setSalesUserId(primaryId);
 
-        saveWithBusinessRules(contract);
+        try {
+            saveWithBusinessRules(contract);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            if (src.orderLineId() != null) {
+                Contract existing = baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getOrderLineId, src.orderLineId()).last("LIMIT 1"));
+                if (existing != null) {
+                    return existing;
+                }
+            }
+            throw e;
+        }
         return contract;
     }
 

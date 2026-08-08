@@ -47,7 +47,12 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
     private final SalesOrderLineMapper lineMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.OrganizationUnitMapper> organizationUnitMapperProvider;
     private final MessageSource messageSource;
+
+    private com.ses.mapper.OrganizationUnitMapper getOrganizationUnitMapper() {
+        return organizationUnitMapperProvider.getIfAvailable();
+    }
 
     private String msg(String key, Locale locale) {
         return messageSource.getMessage(key, null, key, locale == null ? Locale.JAPANESE : locale);
@@ -126,12 +131,30 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
             document.add(new Paragraph(" "));
 
             String companyName = systemConfigService.getString("company.name", "SES Manager Pro");
-            document.add(new Paragraph(companyName, normalFont));
             String companyAddress = systemConfigService.getString("company.address", "");
+            String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
+
+            if (order.getLegalEntityId() != null && getOrganizationUnitMapper() != null) {
+                com.ses.entity.OrganizationUnit legalEntity = getOrganizationUnitMapper().selectById(order.getLegalEntityId());
+                if (legalEntity != null) {
+                    if (StringUtils.hasText(legalEntity.getName())) {
+                        companyName = legalEntity.getName();
+                    }
+                    String customAddress = systemConfigService.getString("legal_entity." + legalEntity.getId() + ".address", null);
+                    if (StringUtils.hasText(customAddress)) {
+                        companyAddress = customAddress;
+                    }
+                    String customReg = systemConfigService.getString("legal_entity." + legalEntity.getId() + ".invoice-registration-number", null);
+                    if (StringUtils.hasText(customReg)) {
+                        registrationNo = customReg;
+                    }
+                }
+            }
+
+            document.add(new Paragraph(companyName, normalFont));
             if (StringUtils.hasText(companyAddress)) {
                 document.add(new Paragraph(companyAddress, normalFont));
             }
-            String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
             if (StringUtils.hasText(registrationNo)) {
                 document.add(new Paragraph(msg("salesOrder.pdf.registrationNo", targetLocale) + " " + registrationNo, normalFont));
             }
@@ -148,8 +171,11 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
 
     private void registerToLedger(SalesOrder order, byte[] pdfBytes) {
         com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
-        if (docService == null || order == null || pdfBytes == null || pdfBytes.length == 0) {
-            return;
+        if (docService == null) {
+            throw BusinessException.of(500, "error.order.documentServiceUnavailable");
+        }
+        if (order == null || pdfBytes == null || pdfBytes.length == 0) {
+            throw BusinessException.of(400, "error.order.pdfDataInvalid");
         }
         try {
             com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
@@ -170,10 +196,16 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
                     .targetId(order.getId())
                     .build();
             try (java.io.InputStream is = new java.io.ByteArrayInputStream(pdfBytes)) {
-                docService.registerGenerated(req, is);
+                com.ses.entity.Document doc = docService.registerGenerated(req, is);
+                if (doc == null || doc.getId() == null) {
+                    throw BusinessException.of(500, "error.order.acknowledgementArchiveFailed");
+                }
             }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            log.warn("[帳票連携] 注文請書PDFの文書台帳登録失敗: orderId={} error={}", order.getId(), e.getMessage());
+            log.error("[帳票連携] 注文請書PDFの文書台帳登録失敗: orderId={}", order.getId(), e);
+            throw BusinessException.of(500, "error.order.acknowledgementArchiveFailed");
         }
     }
 

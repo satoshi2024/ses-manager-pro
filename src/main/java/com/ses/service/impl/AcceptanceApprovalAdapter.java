@@ -79,7 +79,7 @@ public class AcceptanceApprovalAdapter implements ApprovalTargetAdapter {
     }
 
     private Acceptance require(Long id) {
-        Acceptance acceptance = id == null ? null : mapper.selectById(id);
+        Acceptance acceptance = id == null ? null : mapper.selectByIdForUpdate(id);
         if (acceptance == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }

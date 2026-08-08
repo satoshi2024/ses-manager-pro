@@ -65,6 +65,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentStorage documentStorage;
     private final ObjectProvider<FileScanner> fileScannerProvider;
     private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
+    private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
 
     private static final String DEFAULT_TENANT_ID = "default";
 
@@ -812,6 +813,27 @@ public class DocumentServiceImpl implements DocumentService {
             return;
         }
 
+        String currentRole = com.ses.common.util.SecurityUtils.currentRole();
+        if ("人事".equals(currentRole)) {
+            if (Set.of("ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE").contains(doc.getDocumentType())) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+        }
+
+        if ("ACCEPTANCE".equals(doc.getDocumentType()) && acceptanceMapper != null) {
+            com.ses.entity.Acceptance acceptance = acceptanceMapper.selectOne(
+                    new LambdaQueryWrapper<com.ses.entity.Acceptance>().eq(com.ses.entity.Acceptance::getDocumentId, doc.getId()));
+            if (acceptance != null) {
+                java.time.LocalDate monthEnd = acceptance.getWorkMonth() != null && !acceptance.getWorkMonth().isBlank()
+                        ? java.time.YearMonth.parse(acceptance.getWorkMonth()).atEndOfMonth()
+                        : java.time.LocalDate.now();
+                Set<Long> allowedContracts = dataScopeService.allowedContractIdsAsOf(monthEnd);
+                if (allowedContracts != null && !allowedContracts.contains(acceptance.getContractId())) {
+                    throw BusinessException.of(403, "error.forbidden");
+                }
+            }
+        }
+
         List<DocumentLink> links = documentLinkMapper.selectList(
                 new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, doc.getId()));
         if (links.isEmpty()) {
@@ -832,6 +854,22 @@ public class DocumentServiceImpl implements DocumentService {
                     anyAllowed = true;
                     break;
                 } else if ("CONTRACT".equals(type)) {
+                    if ("ACCEPTANCE".equals(doc.getDocumentType()) && acceptanceMapper != null) {
+                        com.ses.entity.Acceptance acc = acceptanceMapper.selectOne(
+                                new LambdaQueryWrapper<com.ses.entity.Acceptance>().eq(com.ses.entity.Acceptance::getDocumentId, doc.getId()));
+                        if (acc != null) {
+                            java.time.LocalDate monthEnd = acc.getWorkMonth() != null && !acc.getWorkMonth().isBlank()
+                                    ? java.time.YearMonth.parse(acc.getWorkMonth()).atEndOfMonth()
+                                    : java.time.LocalDate.now();
+                            Set<Long> allowedContracts = dataScopeService.allowedContractIdsAsOf(monthEnd);
+                            if (allowedContracts != null && allowedContracts.contains(acc.getContractId())) {
+                                anyAllowed = true;
+                                break;
+                            } else {
+                                throw BusinessException.of(403, "error.forbidden");
+                            }
+                        }
+                    }
                     dataScopeService.assertAllowedContract(targetId);
                     anyAllowed = true;
                     break;
@@ -844,6 +882,9 @@ public class DocumentServiceImpl implements DocumentService {
                     anyAllowed = true;
                     break;
                 } else if ("SALES_ORDER".equals(type)) {
+                    if ("人事".equals(currentRole)) {
+                        throw BusinessException.of(403, "error.forbidden");
+                    }
                     // 注文書原本・注文請書は注文一覧と同じscope（顧客DataScope）で見せる
                     com.ses.entity.SalesOrder salesOrder = salesOrderMapper == null ? null
                             : salesOrderMapper.selectById(targetId);
@@ -870,8 +911,16 @@ public class DocumentServiceImpl implements DocumentService {
             return;
         }
 
-        if (!dataScopeService.isScoped()) {
-            return;
+        String currentRole = com.ses.common.util.SecurityUtils.currentRole();
+        if ("人事".equals(currentRole)) {
+            wrapper.notIn(Document::getDocumentType, "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
+            if (!dataScopeService.isScoped()) {
+                return;
+            }
+        } else {
+            if (!dataScopeService.isScoped()) {
+                return;
+            }
         }
 
         // 非管理者の場合: 許可されたターゲットID集合により SQL レベルで絞り込み

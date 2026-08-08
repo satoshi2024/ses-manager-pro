@@ -263,10 +263,10 @@ public class DashboardServiceImpl implements DashboardService {
         String scopeType = isScoped ? "LIMITED" : "COMPANY";
         String scopeDisplayName = isScoped ? "対象範囲" : "全社";
 
-        // 未検収売上・検収平均日数（R4.3）。母集団は同一のscope（契約ID集合）で揃える。
+        // 未検収売上・検収平均日数（R4.3）。母集団は同一のscope（契約ID集合）で揃える（HRは0）。
         long unacceptedSales = 0L;
         double avgAcceptanceDays = 0.0;
-        if (acceptanceMapper != null) {
+        if (acceptanceMapper != null && !"人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
             List<Long> scopeContractIds = kpiScopeContractIds(allContracts);
             java.math.BigDecimal unaccepted = acceptanceMapper.sumUnacceptedSales(scopeContractIds);
             if (unaccepted != null) {

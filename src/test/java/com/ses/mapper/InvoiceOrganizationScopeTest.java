@@ -51,7 +51,7 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
         insertContract(9005L, 9005L, 9005L);
         // order-acceptance-workflow R3.3: 未検収契約は請求対象外のため、
         // 組織scopeの未請求実績検証に使う契約9004だけを明示的に検収不要契約にする。
-        jdbcTemplate.update("UPDATE t_contract SET acceptance_required = 0 WHERE id = 9004");
+        jdbcTemplate.update("UPDATE t_contract SET acceptance_required = 0, acceptance_exemption_reason = '検収不要特約' WHERE id = 9004");
         insertWorkRecord(9001L, 9001L, 100L, 1);
         insertWorkRecord(9002L, 9002L, 200L, 1);
         insertWorkRecord(9003L, 9003L, 100L, 1);

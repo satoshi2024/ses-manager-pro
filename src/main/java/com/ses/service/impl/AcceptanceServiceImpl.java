@@ -57,7 +57,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Acceptance submit(Long contractId, String workMonth) {
-        Contract contract = contractId == null ? null : contractMapper.selectById(contractId);
+        // ロック順: Contract -> WorkRecord -> Acceptance （reopenMonthと完全同一順序でデッドロックとTOCTOUを防ぐ）
+        Contract contract = contractId == null ? null : contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -68,10 +69,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         if (Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
             throw BusinessException.of(400, "error.acceptance.notRequired");
         }
-        WorkRecord workRecord = workRecordMapper.selectOne(new LambdaQueryWrapper<WorkRecord>()
-                .eq(WorkRecord::getContractId, contractId)
-                .eq(WorkRecord::getWorkMonth, workMonth)
-                .last("LIMIT 1"));
+        WorkRecord workRecord = workRecordMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
         if (workRecord == null || !StatusConstants.WORK_RECORD_CONFIRMED.equals(workRecord.getStatus())) {
             throw BusinessException.of(409, "error.acceptance.workRecordNotConfirmed");
         }
@@ -258,6 +256,9 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
 
     @Override
     public void assertAllowedAcceptance(Long acceptanceId) {
+        if ("人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
         Acceptance acceptance = require(acceptanceId);
         if (dataScopeService.isScoped()
                 && !dataScopeService.allowedContractIdsAsOf(monthEnd(acceptance.getWorkMonth()))
@@ -295,6 +296,9 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
 
     /** 対象月(asOf)時点の許可契約ID集合。 */
     private List<Long> scopedContractIds(java.time.LocalDate asOf) {
+        if ("人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
+            return List.of();
+        }
         if (!dataScopeService.isScoped()) {
             return null; // 全件
         }

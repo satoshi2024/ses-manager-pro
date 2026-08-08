@@ -18,6 +18,7 @@ public class SalesOrderDetailDto {
     private String contactName;
     private Long quotationId;
     private String quotationNo;
+    private Long legalEntityId;
     private LocalDate orderDate;
     private LocalDate startDate;
     private LocalDate endDate;

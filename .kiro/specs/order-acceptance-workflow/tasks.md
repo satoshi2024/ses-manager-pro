@@ -25,7 +25,7 @@
   - **Objective**: 見積から注文draftへ顧客・要員・単価・精算幅が引き継がれ、
     注文から契約draftが生成される。契約化を2回実行しても契約は1件。
     注文条件が見積/契約と異なる場合は差分が表示され承認対象になる。
-  - **実装ガイダンス**: 条件差分、approval hook（approval specのadapter）、draft共通化、冪等。
+  - **実装ガイダンス**: 条件差分、approval hook（approval spec的adapter）、draft共通化、冪等。
     Contract draftは既存`buildAndSaveDraft`相当の共通経路へorder sourceを追加する（design §2）。
     冪等は`t_contract.order_line_id`のUNIQUE＋状態CASの二重防御（design §5.3）。
   - **テスト要件**: L2〜L3。条件引継ぎ、差分検出、**契約化2回で1件**、
@@ -63,6 +63,15 @@
     通知の重複なし、月次締め件数のscope、検収取消と請求生成の競合。
   - **Demo**: 未検収請求拒否→検収後生成。検収不要契約が理由付きで請求できることを確認。
 
+- [x] Remediation (Round 9 指摘対応)
+  - [x] R9-SPEC: requirements.md, design.md, tasks.md, review-ledger.md, spec-execution-ledger.md の改訂およびS09 FIX戻し
+  - [x] R9-MIG: V80マイグレーション構造判定の強化（NON_UNIQUE/column order/prefix/cascade）、marker前失敗のdurability確保、legacy fixture追加 (P1-01, P1-02)
+  - [x] R9-SCOPE: HRロールの全パス遮断（注文・検収・文書・通知・KPI）および検収文書の対象月as-of scope判定 (P0-01)
+  - [x] R9-CONCURRENCY: submit対reopenの行ロック、approval adapterのバージョンロック/TOCTOU防止、二重契約化retry修正、hash並行uploadのDB UNIQUE原子化 (P1-03, P1-04, P1-09, P2-01)
+  - [x] R9-DOCUMENT: 注文請PDFアーカイブfail-closed化、発行法人のデータバインド・PDF印字、専用downloadエンドポイントの `file.download` 権限・双方向監査ログ (P1-05, P1-07, P1-08)
+  - [x] R9-INVOICE-UI: 検収免除理由の非空必須判定（DB/SQL/API）、PO警告の自己判定バグ修正、UIアクセシビリティ対応 (P1-06, P2-02, P2-03)
+  - [x] R9-M: 実MySQL環境での見積〜請求全通しBrowser Demo証跡（HAR/console/PNG）、DB通知dedupe/KPI自動テスト強化、L4実行 (P1-10, P2-04)
+
 - [x] M. 全通し
   - **Objective**: 見積→注文→契約→勤怠→検収→請求がIDで追跡でき、
     既存のdocument/approval/contract/invoice機能が壊れていない。
@@ -70,3 +79,4 @@
     document/approval回帰、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
   - **Demo**: 見積→注文→契約→勤怠→検収→請求。各段階のIDが次段階から辿れることを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
+

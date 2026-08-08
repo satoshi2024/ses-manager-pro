@@ -106,6 +106,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         dto.setQuotationId(order.getQuotationId());
         Quotation quotation = order.getQuotationId() == null ? null : quotationMapper.selectById(order.getQuotationId());
         dto.setQuotationNo(quotation == null ? null : quotation.getQuotationNo());
+        dto.setLegalEntityId(order.getLegalEntityId());
         dto.setOrderDate(order.getOrderDate());
         dto.setStartDate(order.getStartDate());
         dto.setEndDate(order.getEndDate());
@@ -176,6 +177,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         order.setCustomerId(request.getCustomerId());
         order.setContactId(request.getContactId());
         order.setQuotationId(request.getQuotationId());
+        order.setLegalEntityId(request.getLegalEntityId());
         order.setCustomerPoNo(normalizePo(request.getCustomerPoNo()));
         order.setOrderDate(request.getOrderDate());
         order.setStartDate(request.getStartDate());
@@ -203,6 +205,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         order.setCustomerId(request.getCustomerId() != null ? request.getCustomerId() : order.getCustomerId());
         order.setContactId(request.getContactId());
         order.setQuotationId(request.getQuotationId());
+        order.setLegalEntityId(request.getLegalEntityId());
         order.setCustomerPoNo(normalizePo(request.getCustomerPoNo()));
         order.setOrderDate(request.getOrderDate());
         order.setStartDate(request.getStartDate());
@@ -229,6 +232,11 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
 
     @Override
     public boolean isCustomerPoDuplicate(Long customerId, String customerPoNo) {
+        return isCustomerPoDuplicate(customerId, customerPoNo, null);
+    }
+
+    @Override
+    public boolean isCustomerPoDuplicate(Long customerId, String customerPoNo, Long excludeOrderId) {
         // scope外顧客のPO存在をbooleanで漏らさない（R09-P2-06: IDOR防止）
         if (customerId != null) {
             dataScopeService.assertAllowedCustomer(customerId);
@@ -237,9 +245,13 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         if (po == null) {
             return false;
         }
-        return this.baseMapper.selectCount(new LambdaQueryWrapper<SalesOrder>()
+        LambdaQueryWrapper<SalesOrder> wrapper = new LambdaQueryWrapper<SalesOrder>()
                 .eq(SalesOrder::getCustomerId, customerId)
-                .eq(SalesOrder::getCustomerPoNo, po)) > 0;
+                .eq(SalesOrder::getCustomerPoNo, po);
+        if (excludeOrderId != null) {
+            wrapper.ne(SalesOrder::getId, excludeOrderId);
+        }
+        return this.baseMapper.selectCount(wrapper) > 0;
     }
 
     // ===== 状態機械 =====
@@ -558,6 +570,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         com.ses.entity.Document doc;
         try (java.io.InputStream is = new java.io.ByteArrayInputStream(bytes)) {
             doc = documentService.registerReceived(req, is);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw BusinessException.of(409, "error.order.duplicateSourceDocument");
         } catch (java.io.IOException e) {
             throw BusinessException.of(500, "error.order.sourceDocumentSaveFailed");
         }

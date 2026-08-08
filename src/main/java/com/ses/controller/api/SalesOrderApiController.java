@@ -50,18 +50,20 @@ public class SalesOrderApiController {
     /** PO重複の警告判定（拒否しない。R2.4の警告と拒否を混同しない）。 */
     @GetMapping("/po-duplicate")
     public ApiResult<Map<String, Object>> poDuplicate(@RequestParam Long customerId,
-                                                      @RequestParam(required = false) String customerPoNo) {
+                                                      @RequestParam(required = false) String customerPoNo,
+                                                      @RequestParam(required = false) Long excludeOrderId) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("duplicate", salesOrderService.isCustomerPoDuplicate(customerId, customerPoNo));
+        data.put("duplicate", salesOrderService.isCustomerPoDuplicate(customerId, customerPoNo, excludeOrderId));
         return ApiResult.success(data);
     }
 
     @PostMapping
     public ApiResult<Map<String, Object>> create(@jakarta.validation.Valid @RequestBody SalesOrderSaveRequest request) {
+        boolean poWarning = salesOrderService.isCustomerPoDuplicate(request.getCustomerId(), request.getCustomerPoNo(), null);
         SalesOrder order = salesOrderService.createFromRequest(request);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("order", order);
-        data.put("poWarning", salesOrderService.isCustomerPoDuplicate(order.getCustomerId(), order.getCustomerPoNo()));
+        data.put("poWarning", poWarning);
         return ApiResult.success(data);
     }
 
@@ -71,7 +73,7 @@ public class SalesOrderApiController {
         SalesOrder order = salesOrderService.updateFromRequest(id, request);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("order", order);
-        data.put("poWarning", salesOrderService.isCustomerPoDuplicate(order.getCustomerId(), order.getCustomerPoNo()));
+        data.put("poWarning", salesOrderService.isCustomerPoDuplicate(order.getCustomerId(), order.getCustomerPoNo(), id));
         return ApiResult.success(data);
     }
 
@@ -86,7 +88,8 @@ public class SalesOrderApiController {
         return ApiResult.success(salesOrderService.changeStatus(id, body.get("status")));
     }
 
-    @PostMapping("/{id}/contracts")
+    /** 注文から契約ドラフトを生成する（R2.2）。1明細→1契約（冪等）。 */
+    @PostMapping("/{id}/contract-drafts")
     public ApiResult<?> createContracts(@PathVariable Long id) {
         return ApiResult.success(salesOrderService.createContractDrafts(id));
     }
@@ -99,7 +102,8 @@ public class SalesOrderApiController {
     }
 
     /** 注文請書PDFを生成・文書台帳（ORDER_ACKNOWLEDGEMENT）へ登録する（R1.4）。 */
-    @PostMapping("/{id}/acknowledgement-pdf")
+    @GetMapping({"/{id}/acknowledgement-pdf", "/{id}/acknowledgement-pdf/download"})
+    @PostMapping({"/{id}/acknowledgement-pdf", "/{id}/acknowledgement-pdf/download"})
     public ResponseEntity<byte[]> acknowledgementPdf(@PathVariable Long id,
                                                      @RequestParam(required = false) String lang,
                                                      java.util.Locale locale) {
@@ -112,7 +116,7 @@ public class SalesOrderApiController {
     }
 
     /** 注文の原本/注文請書をdownloadする（注文一覧と同じscope。document側に別ACLを作らない）。 */
-    @GetMapping("/{id}/documents/{documentId}")
+    @GetMapping({"/{id}/documents/{documentId}", "/{id}/documents/{documentId}/download"})
     public ResponseEntity<InputStreamResource> downloadDocument(@PathVariable Long id,
                                                                 @PathVariable Long documentId) {
         java.io.InputStream stream = salesOrderService.downloadDocument(id, documentId);

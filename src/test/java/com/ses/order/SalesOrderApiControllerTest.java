@@ -50,7 +50,7 @@ class SalesOrderApiControllerTest {
         order.setCustomerId(1L);
         order.setCustomerPoNo("PO-1");
         when(salesOrderService.createFromRequest(any())).thenReturn(order);
-        when(salesOrderService.isCustomerPoDuplicate(eq(1L), eq("PO-1"))).thenReturn(true);
+        when(salesOrderService.isCustomerPoDuplicate(eq(1L), any(), any())).thenReturn(true);
 
         SalesOrderSaveRequest req = new SalesOrderSaveRequest();
         req.setCustomerId(1L);

@@ -108,7 +108,7 @@ public class SalesOrderApprovalAdapter implements ApprovalTargetAdapter {
     }
 
     private SalesOrder require(Long id) {
-        SalesOrder order = id == null ? null : mapper.selectById(id);
+        SalesOrder order = id == null ? null : mapper.selectByIdForUpdate(id);
         if (order == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }

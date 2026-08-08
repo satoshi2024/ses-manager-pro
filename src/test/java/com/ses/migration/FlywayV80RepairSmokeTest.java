@@ -199,6 +199,92 @@ class FlywayV80RepairSmokeTest {
         }
     }
 
+    @Test
+    void V80適用前に非UNIQUE索引が存在した場合_非UNIQUE索引をdropしUNIQUE索引を再作成する() throws Exception {
+        resetDatabase();
+        Path dir = prepareMigrationDir();
+
+        // 1) V79.1まで適用
+        flywayFilesystem(dir, "79.1").migrate();
+
+        // 2) 誤定義: 同名だが非UNIQUEの索引 uk_contract_order_line をあらかじめ作成しておく
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE t_contract ADD INDEX uk_contract_order_line (order_line_id)");
+            assertTrue(hasRow(statement, "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_contract' AND index_name='uk_contract_order_line' AND non_unique=1"),
+                    "事前の誤定義非UNIQUE索引が存在するはず");
+        }
+
+        // 3) V80を適用
+        Flyway latest = flywayFilesystem(dir, null);
+        latest.migrate();
+        latest.validate();
+
+        // 4) 検証: 非UNIQUEがdropされ、UNIQUE索引へ修正再作成されていること
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            assertTrue(hasRow(statement, "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_contract' AND index_name='uk_contract_order_line' AND non_unique=0"),
+                    "V80再適用で非UNIQUE索引がdropされUNIQUE索引へ再作成されているはず");
+        }
+    }
+
+    @Test
+    void V80のDDL前に既存契約をdurable_captureし_marker作成前失敗からのrepairでも新規契約を0化しない() throws Exception {
+        resetDatabase();
+        Path dir = prepareMigrationDir();
+
+        // 1) V79.1まで適用
+        flywayFilesystem(dir, "79.1").migrate();
+
+        // 2) V80前の既存契約を投入
+        long preExistingId = insertLegacyContract("SO-PRE-MARKER-1");
+
+        // 3) Section 0 (marker固定) の直後、Section 1 (DDL) の直前で失敗させる
+        installEarlyFailingV80(dir);
+        Flyway failing = flywayFilesystem(dir, null);
+        FlywayException failure = assertThrows(FlywayException.class, failing::migrate);
+
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            // Section 0 はCOMMIT済みのため marker テーブルと preExistingId は永続化されている
+            assertTrue(hasTable(statement, "t_contract_acceptance_backfill"),
+                    "DDL前のSection 0でmarkerテーブルが作成されているはず");
+            assertTrue(hasRow(statement, "SELECT 1 FROM t_contract_acceptance_backfill WHERE contract_id=" + preExistingId),
+                    "DDL前の既存契約がmarkerに固定されているはず");
+        }
+
+        // 4) 失敗中に新規契約を投入
+        long duringFailureId = insertLegacyContract("SO-DURING-FAILURE-1");
+
+        // 5) 実scriptへ戻し、repairして再適用
+        restoreRealV80(dir);
+        Flyway latest = flywayFilesystem(dir, null);
+        latest.repair();
+        latest.migrate();
+        latest.validate();
+
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            assertEquals(0, queryInt(statement, "SELECT acceptance_required FROM t_contract WHERE id=" + preExistingId),
+                    "Pre-existing契約は0（検収不要）");
+            assertEquals(1, queryInt(statement, "SELECT acceptance_required FROM t_contract WHERE id=" + duringFailureId),
+                    "失敗中に追加された新規契約は1（検収要）のまま");
+        }
+    }
+
+    /** V80を「section 1（t_sales_order）の直前」で打ち切り、構文エラーを足す。 */
+    private void installEarlyFailingV80(Path dir) throws Exception {
+        Path v80 = dir.resolve("V80__order_acceptance_workflow.sql");
+        String original = Files.readString(v80, StandardCharsets.UTF_8);
+        int cut = original.indexOf("-- 1. t_sales_order");
+        assertTrue(cut > 0, "V80のsection1開始位置が見つかるはず");
+        String truncated = original.substring(0, cut);
+        Files.writeString(v80, truncated + "\n-- V80早期失敗fixture用の強制構文エラー\nTHIS_IS_NOT_VALID_SQL;\n",
+                StandardCharsets.UTF_8);
+    }
+
     /** 全migrationをtemp dirへコピーする（V80は実scriptのまま）。 */
     private Path prepareMigrationDir() throws Exception {
         Path source = Paths.get(MIGRATION_DIR);

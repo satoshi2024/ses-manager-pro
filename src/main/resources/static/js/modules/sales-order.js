@@ -16,6 +16,23 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btnSaveSalesOrder').addEventListener('click', saveSalesOrder);
     document.getElementById('btnAddLine').addEventListener('click', addLineRow);
     document.getElementById('salesOrderForm').customerId.addEventListener('change', onCustomerChanged);
+    document.getElementById('salesOrderForm').customerPoNo.addEventListener('blur', async () => {
+        const form = document.getElementById('salesOrderForm');
+        const customerId = form.customerId.value;
+        const poNo = form.customerPoNo.value;
+        const orderId = form.id.value;
+        if (customerId && poNo) {
+            const url = `/api/sales-orders/po-duplicate?customerId=${customerId}&customerPoNo=${encodeURIComponent(poNo)}` + (orderId ? `&excludeOrderId=${orderId}` : '');
+            const res = await SES.api.get(url);
+            const warn = document.getElementById('poWarningText');
+            if (res && res.duplicate) {
+                warn.textContent = SES.i18n.t('salesOrder.po.duplicateWarning', '同じPO番号の注文が既にあります');
+                warn.style.display = 'block';
+            } else {
+                warn.style.display = 'none';
+            }
+        }
+    });
 
     // 見積からの導線（?quotationId=ID）
     const params = new URLSearchParams(location.search);
@@ -120,18 +137,21 @@ function openSalesOrderModal(id) {
             form.customerId.value = detail.customerId;
             form.contactId.value = detail.contactId || '';
             form.quotationId.value = detail.quotationId || '';
+            form.legalEntityId.value = detail.legalEntityId || '';
             form.customerPoNo.value = detail.customerPoNo || '';
             form.orderDate.value = detail.orderDate || '';
             form.startDate.value = detail.startDate || '';
             form.endDate.value = detail.endDate || '';
             form.paymentTerms.value = detail.paymentTermsSnapshot || '';
             loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
+            loadSelect('/api/organization-units/options', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
             onCustomerChanged();
             detail.lines.forEach(l => addLineRow(l));
         });
     } else {
         title.textContent = SES.i18n.t('salesOrder.btn.new', '注文作成');
         loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
+        loadSelect('/api/organization-units/options', form.legalEntityId, 'id', r => r.name);
         addLineRow();
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal')).show();
@@ -155,6 +175,7 @@ async function saveSalesOrder() {
         customerId: form.customerId.value,
         contactId: form.contactId.value || null,
         quotationId: form.quotationId.value || null,
+        legalEntityId: form.legalEntityId.value || null,
         customerPoNo: form.customerPoNo.value || null,
         orderDate: form.orderDate.value,
         startDate: form.startDate.value || null,

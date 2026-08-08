@@ -15,6 +15,7 @@ public class SalesOrderSaveRequest {
     private Long customerId;
     private Long contactId;
     private Long quotationId;
+    private Long legalEntityId;
     private String customerPoNo;
     @NotNull(message = "注文日は必須です")
     private LocalDate orderDate;

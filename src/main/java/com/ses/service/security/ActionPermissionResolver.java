@@ -230,7 +230,10 @@ public final class ActionPermissionResolver {
 
     private static boolean isDownloadPath(String uri) {
         return uri.endsWith("/download") || uri.contains("/download/")
-                || uri.endsWith(".pdf") || uri.endsWith(".xlsx") || uri.endsWith(".csv");
+                || uri.endsWith(".pdf") || uri.endsWith(".xlsx") || uri.endsWith(".csv")
+                || uri.matches("/api/sales-orders/\\d+/documents/\\d+(/.*)?")
+                || uri.matches("/api/sales-orders/\\d+/acknowledgement/pdf(/.*)?")
+                || uri.matches("/api/acceptances/\\d+/document(/.*)?");
     }
 
     private static boolean isCrmCustomerPath(String uri) {

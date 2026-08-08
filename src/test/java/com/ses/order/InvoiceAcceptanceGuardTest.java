@@ -67,11 +67,12 @@ class InvoiceAcceptanceGuardTest {
     }
 
     private long insertContract(String no, long engineerId, long projectId, int acceptanceRequired) {
+        String reason = acceptanceRequired == 0 ? "検収不要特約" : null;
         jdbcTemplate.update(
                 "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
-                        + " selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', ?)",
-                no, engineerId, projectId, customerId, acceptanceRequired);
+                        + " selling_price, cost_price, status, acceptance_required, acceptance_exemption_reason)"
+                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', ?, ?)",
+                no, engineerId, projectId, customerId, acceptanceRequired, reason);
         return jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, no);
     }
 

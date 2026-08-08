@@ -60,6 +60,9 @@ public interface SalesOrderService extends IService<SalesOrder> {
     /** 同一顧客×同一PO番号の既存注文が存在するか（PO重複の警告用。拒否はしない）。 */
     boolean isCustomerPoDuplicate(Long customerId, String customerPoNo);
 
+    /** 同一顧客×同一PO番号の既存注文が存在するか（自ID除外オプション付き）。 */
+    boolean isCustomerPoDuplicate(Long customerId, String customerPoNo, Long excludeOrderId);
+
     /** PO番号を正規化して空白を除去する（重複判定・表示の共通化）。 */
     String normalizePo(String customerPoNo);
 

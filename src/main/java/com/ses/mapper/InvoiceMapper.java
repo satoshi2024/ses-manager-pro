@@ -151,7 +151,7 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           AND c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
-          AND (c.acceptance_required = 0 OR EXISTS (
+          AND ((c.acceptance_required = 0 AND c.acceptance_exemption_reason IS NOT NULL AND TRIM(c.acceptance_exemption_reason) != '') OR EXISTS (
               SELECT 1 FROM t_acceptance a
               WHERE a.contract_id = c.id AND a.work_month = w.work_month
                 AND a.status = '検収済' AND a.deleted_flag = 0
@@ -184,7 +184,7 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
           AND c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
-          AND (c.acceptance_required = 0 OR EXISTS (
+          AND ((c.acceptance_required = 0 AND c.acceptance_exemption_reason IS NOT NULL AND TRIM(c.acceptance_exemption_reason) != '') OR EXISTS (
               SELECT 1 FROM t_acceptance a
               WHERE a.contract_id = c.id AND a.work_month = w.work_month
                 AND a.status = '検収済' AND a.deleted_flag = 0
@@ -261,7 +261,7 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         WHERE c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
-          AND (c.acceptance_required = 0 OR EXISTS (
+          AND ((c.acceptance_required = 0 AND c.acceptance_exemption_reason IS NOT NULL AND TRIM(c.acceptance_exemption_reason) != '') OR EXISTS (
               SELECT 1 FROM t_acceptance a
               WHERE a.contract_id = c.id AND a.work_month = w.work_month
                 AND a.status = '検収済' AND a.deleted_flag = 0
