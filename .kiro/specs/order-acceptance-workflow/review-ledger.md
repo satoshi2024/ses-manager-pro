@@ -9,19 +9,29 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | FIXED_BY_IMPLEMENTER / REVIEW（R09 Round8でBrowser証跡・L4・provenanceを実修正済み・独立再Review待ち） |
+| state | PASS（R09 Round8独立終局差分再Review PASS確定） |
 | base | 5eabc51946cc4940eac081dbc2c7bdf798c59253（R7終局Review境界Base） |
 | review-input docs Head | 4a4101d4f40c20bea0a2a3fef62c6799eba463be（R7 docs参照） |
 | code/evidence Head | afad974（R09 Round8: RealBrowserScreenshotTestを実Chrome/CDP制御へ書き換え・data-acceptance-id付与） |
 | merge | merged済み（8a50eb1 = Merge PR #65）＋Round7/8対応をmainへpush済み |
-| latest review | R09 round 8 / 2026-08-08（REVIEW待ち。R7終局判定=FAIL: R7-P1-02/P2-03/P2-04 をR8で対応） |
-| verdict | REVIEW（R09 round8: 実ブラウザ証跡・全量L4 1549/0/0/0・ledger同期を実施済み・独立再Review待ち） |
-| issue count | R09 round8: R7-P1-02（L4）, R7-P2-03（provenance）, R7-P2-04（Browser証跡）をFIXED_BY_IMPLEMENTER |
-| next action | 独立Review（Round8差分）を実施しPASS確定後、中央ledger row9をPASS化、S10/S11・Wave 2を正式解放 |
+| latest review | R09 round 8 / 2026-08-08（PASS） |
+| verdict | PASS（R09 round8: P0=0 / P1=0 / P2=0 / NOTE=3 / open release gates=0） |
+| issue count | R09 round8: R7-P1-02, R7-P2-03, R7-P2-04 を全てVERIFIED_CLOSED |
+| next action | 中央ledger row9をPASS化 → S10 dispatch / S11 attendance（並行可）・Wave 2を正式解放 |
 
 ## 2. OPEN Issue Register
 
-（現時点なし。R09 Round8でR7終局判定（FAIL: R7-P1-02 / R7-P2-03 / R7-P2-04）を全てFIXED_BY_IMPLEMENTERとし独立Review待ち）
+（現時点なし。R09 Round8独立Review PASSでR7-P1-02 / R7-P2-03 / R7-P2-04 を全てVERIFIED_CLOSED）
+
+### Closed/Deferred Issue（R09 Round8）
+
+| issue ID | severity | 内容 | 対応 |
+|---|---|---|---|
+| order-acceptance-workflow-R7-P1-02 | P1 | 最終code/evidence Headでの単一クリーンL4未取得 | afad974上で`verify-like-ci.ps1`単一クリーン実行 → **1549/0/0/0・Skipped 0・BUILD SUCCESS（Total 1:28h・verify-like-ci-r8.log）**（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-03 | P2 | ledger provenanceが実Headと不一致 | review-ledger §1/§2/§21・中央ledger row9を code/evidence Head afad974・L4 1549/0/0/0・runId へ同期（VERIFIED_CLOSED） |
+| order-acceptance-workflow-R7-P2-04 | P2 | Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結） | `CdpBrowser`（JDK標準WebSocket+Jacksonのみ）による実Chrome/CDP制御へ書き換え。同一セッション認証→`/acceptance?...&acceptanceId=<動的ID>`→最終URL≠/login→`tr[data-acceptance-id].table-warning`存在→ビューポート内可視を実DOM断言。PNG（SHA-256実ファイル照合）・実HAR（Networkイベント）・実console（favicon 404のみ）を同一runから生成。旧偽証跡を削除（VERIFIED_CLOSED） |
+
+NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreenshotTestの共有H2分離強化推奨・postfix browser Demoは本番前gateとして継続管理。
 
 ### Issue対応記録（R09 Round7）
 
@@ -427,3 +437,20 @@ R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を
   `NotificationGenerateServiceTest` 21/0/0/0、`MonthlyClosingUnacceptedTest` 3/0/0/0、
   `OrderAcceptanceSchemaTest` 5/0/0/0 — 計78件 green。
 - L4全量（afad974）: **1549/0/0/0・Skipped 0・BUILD SUCCESS**（verify-like-ci-r8.log、Total 1:28h）。
+## 22. R09 Round8 独立終局差分再Review PASS — 記録（2026-08-08）
+
+独立Review（R09 Round8、read-only、Base 5eabc51 → code/evidence Head afad974 → current Head 1735ef5）:
+判定 **PASS（P0=0 / P1=0 / P2=0 / NOTE=3 / open release gates=0）**。
+R7終局判定の3指摘（R7-P1-02 / R7-P2-03 / R7-P2-04）を実diff・実DOM断言・PNG SHA-256照合・
+実HAR/console・L4ログ（1549/0/0/0・zero-skip・Total 1:28h）で解決確認。新規P0/P1なし。
+
+- 最終Head `1735ef5` のコードtreeはL4証拠commit `afad974` と同一（差分はdocs/evidenceのみ）。
+- production変更は `acceptance.js` の `tr.dataset.acceptanceId` 付与のみ（DOM識別子追加・挙動影響なし）。
+- L4 **1549/0/0/0・Skipped 0・BUILD SUCCESS**（verify-like-ci-r8.log、Total 1:28h、runId browser-r8-20260808154316）。
+  Docker実MySQL smoke 0 skipped・`RealBrowserScreenshotTest` 1/0/0/0（実Chrome・49.63s）。
+- NOTE（PASS非block・backlog）:
+  1. ci.ymlへChromeの明示install/CHROME_BIN設定を推奨（CI ubuntu-latestは標準でgoogle-chromeを持つため現状も可）。
+  2. RealBrowserScreenshotTestの共有H2分離（@Transactional/@DirtiesContext等）強化を推奨。
+  3. postfix browser Demo（検収不要理由UI等の操作フロー）は本番前release gateとして継続管理。
+- 次spec解放: 中央ledger row9をPASS（Base 5eabc51 → code/evidence Head afad974 / current Head 1735ef5、
+  R09 Round 8 PASS）へ更新した時点で、S10 dispatch / S11 attendance（並行可・G2/G6決定済み）・Wave 2を正式解放。
