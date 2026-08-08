@@ -9,19 +9,19 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | FIXED_BY_IMPLEMENTER / REVIEW（R09 Round7指摘全件対応完了・独立再Review待ち） |
-| base | bfdac521e8f9df071c03ff00fb4eef2a94c98007 |
-| review-input docs Head | 4a4101d4f40c20bea0a2a3fef62c6799eba463be |
-| code/evidence Head | 4c2a77aad450d609879f1626f2f29140f8186d21 |
-| merge | merged済み（8a50eb1 = Merge PR #65）＋Round7対応をmainへpush済み |
-| latest review | R09 round 7 / 2026-08-07（REVIEW） |
-| verdict | REVIEW（R09 round7: 指摘対応完了、全量L4 1548/0/0/0取得済み・独立再Review待ち） |
-| issue count | R09 round7: 指摘全件（R7-P1-01, R7-P1-02, R7-P2-01〜R7-P2-05）FIXED_BY_IMPLEMENTER |
-| next action | 独立Reviewを実施しPASS確定後、中央ledger row9をPASS化、S10/S11・Wave 2を正式解放 |
+| state | FIXED_BY_IMPLEMENTER / REVIEW（R09 Round8でBrowser証跡・L4・provenanceを実修正済み・独立再Review待ち） |
+| base | 5eabc51946cc4940eac081dbc2c7bdf798c59253（R7終局Review境界Base） |
+| review-input docs Head | 4a4101d4f40c20bea0a2a3fef62c6799eba463be（R7 docs参照） |
+| code/evidence Head | afad974（R09 Round8: RealBrowserScreenshotTestを実Chrome/CDP制御へ書き換え・data-acceptance-id付与） |
+| merge | merged済み（8a50eb1 = Merge PR #65）＋Round7/8対応をmainへpush済み |
+| latest review | R09 round 8 / 2026-08-08（REVIEW待ち。R7終局判定=FAIL: R7-P1-02/P2-03/P2-04 をR8で対応） |
+| verdict | REVIEW（R09 round8: 実ブラウザ証跡・全量L4 1549/0/0/0・ledger同期を実施済み・独立再Review待ち） |
+| issue count | R09 round8: R7-P1-02（L4）, R7-P2-03（provenance）, R7-P2-04（Browser証跡）をFIXED_BY_IMPLEMENTER |
+| next action | 独立Review（Round8差分）を実施しPASS確定後、中央ledger row9をPASS化、S10/S11・Wave 2を正式解放 |
 
 ## 2. OPEN Issue Register
 
-（実装者対応完了。R09 Round7でR7-P1-01, R7-P1-02, R7-P2-01〜R7-P2-05を全てFIXED_BY_IMPLEMENTERとし独立Review待ち）
+（現時点なし。R09 Round8でR7終局判定（FAIL: R7-P1-02 / R7-P2-03 / R7-P2-04）を全てFIXED_BY_IMPLEMENTERとし独立Review待ち）
 
 ### Issue対応記録（R09 Round7）
 
@@ -363,3 +363,67 @@ Round5のR3-P1-04（P1 REOPEN）とP2-01〜04を実diff・test・実MySQL fixtur
 - 未検証: postfix browser Demo（検収不要理由UI・manager通知クリック→対象可視）は本番前release gateとして継続管理。
 - 次spec解放: 中央ledger row9をPASS（Base 8a50eb1 → code Head c109595 / current Head 7ed6a42、R09 Round 6 PASS）へ
   更新した時点で、S10 dispatch / S11 attendance（並行可・G2/G6決定済み）・Wave 2を解放可。
+## 21. R09 Round8 終局差分対応（R7-P1-02 / R7-P2-03 / R7-P2-04） — 記録（2026-08-08）
+
+R07終局判定（Base 5eabc51 / code-evidence Head 327e87c / FAIL: P0=0/P1=1/P2=2）の3指摘へ対応した。
+
+### R7-P2-04（REOPEN・P2）: Browser証跡が偽（ログインページのまま・HAR/consoleをJava文字列連結）
+
+対応: `RealBrowserScreenshotTest` を書き換え、**Chrome DevTools Protocol（CDP）でブラウザ自体を制御**する
+`CdpBrowser`（JDK標準 `java.net.http.WebSocket` + Jacksonのみ・新規依存なし）を新設。
+
+- **同一ブラウザセッション内でログイン**（フォーム送信・CSRF hidden inputはフォームが保持）→
+  通知遷移URL `/acceptance?workMonth=2026-07&acceptanceId=<動的ID>` へ遷移。
+- **最終URLが /login でない**ことを実DOM（`location.href`）で断言。
+- **`tr[data-acceptance-id='<動的ID>'].table-warning` が存在**することを実DOMで断言
+  （`acceptance.js` に `tr.dataset.acceptanceId` 付与を追加しDOM検証可能化）。
+- **ビューポート内可視**（`getBoundingClientRect`）でscrollIntoViewの結果を断言。
+- **PNG / HAR / console を同一ブラウザrunから生成**: HARはCDP `Network.*` 実イベント、
+  consoleはCDP `Runtime.consoleAPICalled` / `Log.entryAdded` 実イベントから構成。
+  結論（"0 errors"等）をJava文字列で連結しない。
+- **共通run ID・動的acceptance ID・各PNGのSHA-256**を `evidence/browser-r8/summary.json`・`run-id.txt` に保存。
+- Desktop（1920x1080）とMobile（390x844）を独立セッションで実行し、両方とも
+  `finalUrl=/acceptance`・`targetRowTableWarning=true`・`targetRowVisibleInViewport=true` を実測。
+  console error は実favicon 404の1件のみ（実ブラウザ挙動・ベニン）。
+- 旧偽証跡（auto-login-redirect.html / browser-runner.ps1 / 偽console・HAR・provenance / postfix-browser-demo）を削除。
+- `AcceptanceJsRuntimeTest` に dataset モックと data-acceptance-id 断言を追加。
+
+### R7-P1-02（REOPEN・P1）: 最終code/evidence Headでの単一クリーンL4未取得
+
+対応: Browser修正後にcode/evidence Head `afad974` を固定し、**同一Head上で単一クリーン
+`scripts/verify-like-ci.ps1`（=`mvn -B clean test`＋zero-skip判定）を実行**。
+
+- 結果: **Tests run: 1549, Failures: 0, Errors: 0, Skipped: 0, BUILD SUCCESS（Total 1:28h）**。
+- 完全ログ: `verify-like-ci-r8.log`（repo root）。Docker実MySQL smoke（FlywayMigrationSmokeTest 2 /
+  FlywayV79_1RepairSmokeTest 2 / FlywayV80RepairSmokeTest 1 / FlywayV73PartialRepairSmokeTest 1 /
+  FlywayRepairRunbookTest 1 / FlywayV62/V63/V60/V71各1 / AcceptanceIdMySqlIntegrationTest 1 /
+  OperationalBoundaryMySqlIntegrationTest 3 / ConcurrentUpdateTest 1）0 skipped。
+- `RealBrowserScreenshotTest` 1/0/0/0（L4内で実Chrome実行・49.63s）0 skipped。
+- L4後にテストコード・Browser evidence生成コードを変更していない。
+
+### R7-P2-03（REOPEN・P2）: ledger provenanceが実Headと不一致
+
+対応: 本ledger §1現行判定を code/evidence Head `afad974`（R8）へ同期し、R7終局判定のFAILと
+R8対応（Browser修正・L4 1549/0/0/0・runId browser-r8-20260808154316）を記録。
+中央ledger row9も `FIX / REVIEW` のままHead/provenanceを更新（S10/S11=NOT READY、Wave 2未解放）。
+
+### 変更file（Round8）
+
+- `src/test/java/com/ses/web/RealBrowserScreenshotTest.java`（実Chrome/CDP制御へ書き換え）
+- `src/test/java/com/ses/web/CdpBrowser.java`（新規: 最小CDPクライアント）
+- `src/main/resources/static/js/modules/acceptance.js`（tr.dataset.acceptanceId付与）
+- `src/test/java/com/ses/web/AcceptanceJsRuntimeTest.java`（datasetモック＋断言）
+- `.kiro/specs/order-acceptance-workflow/evidence/browser-r8/*`（実証跡: PNG/HAR/console/summary/seed-provenance）
+- `.kiro/specs/order-acceptance-workflow/evidence/` 旧偽証跡削除
+- `.kiro/specs/order-acceptance-workflow/review-ledger.md`（本ledger）
+- `.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md`（row9同期）
+
+### Round8定向test・直接回帰
+
+- `RealBrowserScreenshotTest` 1/0/0/0（実Chrome desktop+mobile）、`AcceptanceJsRuntimeTest` 1/0/0/0、
+  `JsSyntaxCheckTest` 1/0/0/0、`MobileResponsiveLayoutTest` 25/0/0/0、
+  `NotificationLinkRouteTest` 2/0/0/0、`MessageBundleConsistencyTest` 4/0/0/0、
+  `AcceptanceAsOfScopeTest` 2/0/0/0、`AcceptanceServiceImplTest` 8/0/0/0、
+  `NotificationGenerateServiceTest` 21/0/0/0、`MonthlyClosingUnacceptedTest` 3/0/0/0、
+  `OrderAcceptanceSchemaTest` 5/0/0/0 — 計78件 green。
+- L4全量（afad974）: **1549/0/0/0・Skipped 0・BUILD SUCCESS**（verify-like-ci-r8.log、Total 1:28h）。

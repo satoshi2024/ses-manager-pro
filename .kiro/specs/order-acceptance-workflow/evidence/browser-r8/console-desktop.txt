@@ -1,7 +1,10 @@
 [Real Browser Console Export - desktop]
-URL: http://localhost:50977/acceptance?workMonth=2026-07&acceptanceId=1
-Timestamp: 2026-08-08T13:21:12.675491300
+URL: http://localhost:60892/acceptance?workMonth=2026-07&acceptanceId=1
+Timestamp: 2026-08-08T15:43:45.152391
 
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
 [verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
 [verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
 [verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o

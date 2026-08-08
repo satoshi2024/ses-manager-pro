@@ -6,16 +6,16 @@
       "version" : "captured"
     },
     "pages" : [ {
-      "startedDateTime" : "2026-08-08T13:21:12.576672100",
+      "startedDateTime" : "2026-08-08T15:43:44.821633100",
       "id" : "page_1",
       "title" : "月次検収 - SES Manager Pro"
     } ],
     "entries" : [ {
-      "startedDateTime" : "2026-08-08T13:21:12.576672100",
+      "startedDateTime" : "2026-08-08T15:43:44.821633100",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/login",
+        "url" : "http://localhost:60892/login",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -70,11 +70,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.594141",
+      "startedDateTime" : "2026-08-08T15:43:44.868416900",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap/bootstrap.min.css",
+        "url" : "http://localhost:60892/lib/bootstrap/bootstrap.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -135,11 +135,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.599835600",
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/css/common.css",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/bootstrap-icons.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -200,11 +200,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.599835600",
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "url" : "http://localhost:60892/css/common.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -265,76 +265,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.599835600",
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "font/woff2"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.601832400",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/js/i18n.js?lang=ja",
+        "url" : "http://localhost:60892/js/i18n.js?lang=ja",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -380,11 +315,76 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.606835",
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/favicon.ico",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "font/woff2"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/favicon.ico",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -439,11 +439,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.608835500",
+      "startedDateTime" : "2026-08-08T15:43:44.869499800",
       "time" : 0,
       "request" : {
         "method" : "POST",
-        "url" : "http://localhost:50977/login",
+        "url" : "http://localhost:60892/login",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -498,11 +498,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.608835500",
+      "startedDateTime" : "2026-08-08T15:43:44.879306300",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/css/common.css",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/bootstrap-icons.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -563,11 +563,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.608835500",
+      "startedDateTime" : "2026-08-08T15:43:44.879306300",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "url" : "http://localhost:60892/css/common.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -628,11 +628,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.610277",
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap/bootstrap.min.css",
+        "url" : "http://localhost:60892/lib/bootstrap/bootstrap.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -693,417 +693,7 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.611314300",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "font/woff2"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.611314300",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/acceptance?workMonth=2026-07&acceptanceId=1",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/html"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.612314",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap/bootstrap.min.css",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/css"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/bootstrap-icons.min.css",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/css"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/css/common.css",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/css"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "font/woff2"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "OK",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "image/svg+xml"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
       "time" : 0,
       "request" : {
         "method" : "GET",
@@ -1129,11 +719,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.613313900",
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/sweetalert2/sweetalert2.min.css",
+        "url" : "http://localhost:60892/lib/sweetalert2/sweetalert2.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1194,466 +784,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/lib/bootstrap/bootstrap.bundle.min.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/js/profile.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/js/common.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/chartjs/chart.umd.min.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/sweetalert2/sweetalert2.all.min.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/lib/jquery/jquery.min.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.614312800",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/js/modules/acceptance.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:50977/js/i18n.js?lang=ja&v=1786162868925",
+        "url" : "http://localhost:60892/js/i18n.js?lang=ja&v=1786171414728",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1699,15 +834,535 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/favicon.ico",
+        "url" : "http://localhost:60892/js/common.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
-        "status" : 404,
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "font/woff2"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.880306600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/sweetalert2/sweetalert2.all.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.881298700",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/bootstrap/bootstrap.bundle.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.881803500",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/modules/dashboard.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/jquery/jquery.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/chartjs/chart.umd.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/profile.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/acceptance?workMonth=2026-07&acceptanceId=1",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
         "statusText" : "",
         "httpVersion" : "HTTP/1.1",
         "content" : {
@@ -1750,6 +1405,68 @@
         }, {
           "name" : "",
           "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/css/common.css",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/css"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
         }, {
           "name" : "",
           "value" : ""
@@ -1761,11 +1478,763 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/api/notifications",
+        "url" : "http://localhost:60892/lib/bootstrap/bootstrap.min.css",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/css"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/css"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/jquery/jquery.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/sweetalert2/sweetalert2.min.css",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/css"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/bootstrap/bootstrap.bundle.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/modules/acceptance.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/chartjs/chart.umd.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/lib/sweetalert2/sweetalert2.all.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "OK",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "image/svg+xml"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "OK",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "image/svg+xml"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/profile.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/common.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/js/i18n.js?lang=ja&v=1786171419370",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "application/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/api/notifications",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1817,11 +2286,76 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/api/engineers/options",
+        "url" : "http://localhost:60892/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "font/woff2"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/api/notifications/unread-count",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1873,11 +2407,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/api/customers/options",
+        "url" : "http://localhost:60892/api/engineers/options",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1929,11 +2463,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.616314600",
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/api/notifications/unread-count",
+        "url" : "http://localhost:60892/api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=1",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1985,11 +2519,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-08T13:21:12.617313300",
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:50977/api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=1",
+        "url" : "http://localhost:60892/api/customers/options",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2001,6 +2535,68 @@
           "mimeType" : "application/json"
         },
         "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-08T15:43:44.882489600",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:60892/favicon.ico",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 404,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/html"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
           "name" : "",
           "value" : ""
         }, {
