@@ -56,6 +56,8 @@ function loadAcceptances(page, targetAcceptanceId) {
         tbody.innerHTML = '';
         (data.records || []).forEach(r => {
             const tr = document.createElement('tr');
+            // 通知遷移先のDOM検証（tr[data-acceptance-id='...']）とE2E/ブラウザDemoのための識別子（R7-P2-04）
+            tr.dataset.acceptanceId = String(r.id);
             if (targetAcceptanceId && String(r.id) === String(targetAcceptanceId)) {
                 tr.classList.add('table-warning');
             }

@@ -1,0 +1,13 @@
+[Real Browser Console Export - mobile]
+URL: http://localhost:50977/acceptance?workMonth=2026-07&acceptanceId=1
+Timestamp: 2026-08-08T13:21:22.260260900
+
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+[error] Failed to load resource: the server responded with a status of 404 ()
+
+Console Error Count: 1

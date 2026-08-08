@@ -14,6 +14,10 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,31 +26,35 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.math.BigDecimal;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 起動中の実Webサーバー（Tomcat）に対して認証ログイン後、
- * SES Manager Pro 実際のHTML/CSS/JS描画結果（/acceptance?workMonth=...&acceptanceId=...）の
- * PNGスクリーンショット、ネットワーク/HARログ、コンソールログ、通知Seed証跡を多重検証・生成する（R7-P2-04）。
+ * R7-P2-04（REOPEN）対応: 実Chrome（headless）をCDPで制御し、<b>同一ブラウザセッション内で
+ * ログイン→通知遷移URL（/acceptance?workMonth=...&acceptanceId=...）→DOM検証→スクリーンショット</b>
+ * を実施する。スクリーンショット・HAR（実ネットワークイベント）・コンソール（実イベント）は
+ * すべて同一ブラウザrunから生成し、Java側で結論を文字列連結しない。
+ *
+ * <p>Desktop（1920x1080）とMobile（390x844）を独立セッションで実行し、共通run ID・動的
+ * acceptance ID・各PNGのSHA-256・最終URL・DOM検証結果を `evidence/browser-r8/` へ保存する。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class RealBrowserScreenshotTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @LocalServerPort
     private int port;
@@ -61,9 +69,9 @@ class RealBrowserScreenshotTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("R7-P2-04: Chrome Headlessによる認証後実網頁（/acceptance）Desktop/Mobile PNGスクリーンショット及び関連証跡の生成")
+    @DisplayName("R7-P2-04: 実Chromeで同一セッション認証→/acceptance通知遷移→DOM検証→PNG/HAR/Console生成")
     void captureRealWebpageScreenshotsWithAuthentication() throws Exception {
-        // 1. Admin ユーザーの確保
+        // ---- 1. Seed（管理者・顧客・要員・案件・契約・勤怠・検収） ----
         SysUser adminUser = sysUserMapper.selectByUsername("admin");
         if (adminUser == null) {
             adminUser = new SysUser();
@@ -75,8 +83,7 @@ class RealBrowserScreenshotTest {
             sysUserMapper.insert(adminUser);
         }
 
-        // 2. Seed データの投入
-        String suffix = "-REAL-" + System.currentTimeMillis();
+        String suffix = "-R8-" + System.currentTimeMillis();
         Customer customer = new Customer();
         customer.setCompanyName("テックソリューションズ株式会社" + suffix);
         customer.setTrustLevel("A");
@@ -95,12 +102,10 @@ class RealBrowserScreenshotTest {
         projectMapper.insert(project);
 
         Contract contract = new Contract();
-        contract.setContractNo("CON-2026-0001");
-        // 既存のCON-2026-0001と重複を避けるため
-        Integer existingCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_contract WHERE contract_no = 'CON-2026-0001'", Integer.class);
-        if (existingCount != null && existingCount > 0) {
-            contract.setContractNo("CON-2026-REAL-" + System.currentTimeMillis());
-        }
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_contract WHERE contract_no = 'CON-2026-0001'", Integer.class);
+        contract.setContractNo((existing != null && existing > 0)
+                ? "CON-2026-REAL-" + System.currentTimeMillis() : "CON-2026-0001");
         contract.setEngineerId(engineer.getId());
         contract.setProjectId(project.getId());
         contract.setCustomerId(customer.getId());
@@ -130,218 +135,271 @@ class RealBrowserScreenshotTest {
         acceptance.setCreatedBy(adminUser.getId());
         acceptanceMapper.insert(acceptance);
 
-        Long dynamicAcceptanceId = acceptance.getId();
-        assertNotNull(dynamicAcceptanceId);
+        Long acceptanceId = acceptance.getId();
+        assertNotNull(acceptanceId, "動的acceptance IDが採番されること");
 
-        // 3. GET /login で CSRF トークンと初期 Cookie を取得
-        URL loginPageUrl = new URL("http://localhost:" + port + "/login");
-        HttpURLConnection getConn = (HttpURLConnection) loginPageUrl.openConnection();
-        getConn.setRequestMethod("GET");
-        getConn.connect();
+        String baseUrl = "http://localhost:" + port;
+        Path evidenceDir = Path.of(".kiro", "specs", "order-acceptance-workflow", "evidence", "browser-r8");
+        Files.createDirectories(evidenceDir);
+        String runId = "browser-r8-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\nacceptanceId=" + acceptanceId + "\n");
 
-        String initCookie = null;
-        List<String> initCookies = getConn.getHeaderFields().get("Set-Cookie");
-        if (initCookies != null) {
-            initCookie = String.join("; ", initCookies);
+        // ---- 2. Desktop セッション（同一ブラウザでログイン→遷移→検証→証跡） ----
+        ObjectNode desktop = MAPPER.createObjectNode();
+        Path desktopProfile = Files.createTempDirectory("cdp-desktop-");
+        try (CdpBrowser browser = CdpBrowser.launch(CdpBrowser.chromeExecutable(), desktopProfile, 1920, 1080)) {
+            browser.setDeviceMetrics(1920, 1080, false, 1.0);
+            runAuthenticatedFlow(browser, baseUrl, acceptanceId, "desktop", evidenceDir, runId, desktop);
+        } finally {
+            deleteRecursively(desktopProfile);
         }
 
-        String pageContent = new String(getConn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String csrfToken = "";
-        int csrfIdx = pageContent.indexOf("name=\"_csrf\"");
-        if (csrfIdx != -1) {
-            int valueIdx = pageContent.indexOf("value=\"", csrfIdx);
-            if (valueIdx != -1) {
-                int endIdx = pageContent.indexOf("\"", valueIdx + 7);
-                csrfToken = pageContent.substring(valueIdx + 7, endIdx);
-            }
+        // ---- 3. Mobile（390x844）セッション ----
+        ObjectNode mobile = MAPPER.createObjectNode();
+        Path mobileProfile = Files.createTempDirectory("cdp-mobile-");
+        try (CdpBrowser browser = CdpBrowser.launch(CdpBrowser.chromeExecutable(), mobileProfile, 390, 844)) {
+            browser.setDeviceMetrics(390, 844, true, 1.0);
+            runAuthenticatedFlow(browser, baseUrl, acceptanceId, "mobile", evidenceDir, runId, mobile);
+        } finally {
+            deleteRecursively(mobileProfile);
         }
 
-        // POST /login で認証
-        URL loginUrl = new URL("http://localhost:" + port + "/login");
-        HttpURLConnection conn = (HttpURLConnection) loginUrl.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setInstanceFollowRedirects(false);
-        conn.setDoOutput(true);
-        if (initCookie != null) {
-            conn.setRequestProperty("Cookie", initCookie);
-        }
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-        String postData = "username=admin&password=admin123&_csrf=" + csrfToken;
-        conn.getOutputStream().write(postData.getBytes(StandardCharsets.UTF_8));
-        conn.connect();
+        // ---- 4. Seed provenance（実DB行）とサマリ ----
+        Acceptance stored = acceptanceMapper.selectById(acceptanceId);
+        // テスト用H2スキーマはV12以降の列を含まないため、entityの全列SELECTではなく特定列のみJDBCで取得する
+        String storedContractNo = (stored != null && stored.getContractId() != null)
+                ? jdbcTemplate.queryForObject(
+                        "SELECT contract_no FROM t_contract WHERE id = ?", String.class, stored.getContractId())
+                : null;
+        ObjectNode provenance = MAPPER.createObjectNode();
+        provenance.put("spec", "order-acceptance-workflow");
+        provenance.put("runId", runId);
+        provenance.put("acceptanceId", acceptanceId);
+        provenance.put("contractNo", storedContractNo);
+        provenance.put("engineerName", engineer.getFullName());
+        provenance.put("customerName", customer.getCompanyName());
+        provenance.put("workMonth", stored == null ? null : stored.getWorkMonth());
+        provenance.put("status", stored == null ? null : stored.getStatus());
+        provenance.put("sqlQuery",
+                "SELECT id, contract_id, work_month, status FROM t_acceptance WHERE id = " + acceptanceId);
+        provenance.put("verifiedPresent", stored != null);
+        provenance.put("environment", "H2 / Spring Boot Embedded Web Container");
+        Files.writeString(evidenceDir.resolve("seed-provenance.json"),
+                MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(provenance));
 
-        int responseCode = conn.getResponseCode();
-        assertTrue(responseCode == 302 || responseCode == 200, "ログイン応答が成功(302/200)であること (actual: " + responseCode + ")");
+        ObjectNode summary = MAPPER.createObjectNode();
+        summary.put("runId", runId);
+        summary.put("acceptanceId", acceptanceId);
+        summary.set("desktop", desktop);
+        summary.set("mobile", mobile);
+        summary.put("note",
+                "全PNG/HAR/consoleは同一ブラウザセッション（同一Cookieコンテキスト）の実CDPイベントから生成。"
+                        + "Java側で結論文字列を連結していない。");
+        Files.writeString(evidenceDir.resolve("summary.json"),
+                MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(summary));
+    }
 
-        String sessionCookie = null;
-        List<String> cookies = conn.getHeaderFields().get("Set-Cookie");
-        if (cookies != null) {
-            for (String cookie : cookies) {
-                if (cookie.startsWith("JSESSIONID=")) {
-                    sessionCookie = cookie.split(";")[0];
+    /** ブラウザでログイン→通知URL遷移→DOM/スクロール検証→PNG/HAR/Console保存を行う。 */
+    private void runAuthenticatedFlow(CdpBrowser browser, String baseUrl, Long acceptanceId,
+                                      String viewport, Path evidenceDir, String runId, ObjectNode out) throws Exception {
+        // ログインページへ
+        browser.navigate(baseUrl + "/login");
+        assertTrue(browser.waitFor(
+                "document.readyState === 'complete' && document.getElementById('username') !== null",
+                Duration.ofSeconds(40)), "[" + viewport + "] ログインフォームが表示されること");
+
+        // 同一ブラウザセッションでフォーム送信（CSRF hidden inputはフォームが保持）
+        browser.evaluate("(function(){"
+                + "var u=document.getElementById('username');"
+                + "var p=document.getElementById('password');"
+                + "if(!u||!p){return 'MISSING_FIELDS';}"
+                + "u.value='admin';p.value='admin123';"
+                + "var f=u.closest('form');"
+                + "if(!f){return 'NO_FORM';}"
+                + "f.submit();return 'SUBMITTED';})()");
+        boolean loggedIn = browser.waitFor("location.pathname !== '/login'", Duration.ofSeconds(40));
+        String afterLoginUrl = browser.currentUrl();
+        assertTrue(loggedIn, "[" + viewport + "] ログインで/loginから離脱すること");
+        assertFalse(afterLoginUrl.contains("/login"),
+                "[" + viewport + "] 最終URLが/loginでないこと: " + afterLoginUrl);
+
+        // 通知遷移URL（動的acceptanceId）
+        String targetUrl = baseUrl + "/acceptance?workMonth=2026-07&acceptanceId=" + acceptanceId;
+        browser.navigate(targetUrl);
+        boolean gridLoaded = browser.waitFor(
+                "document.readyState === 'complete' && document.querySelector('#acceptanceTable tbody tr') !== null",
+                Duration.ofSeconds(40));
+        assertTrue(gridLoaded, "[" + viewport + "] 検収グリッドが描画されること");
+        // acceptance.jsのscrollIntoView({behavior:'smooth'})完了を待つ
+        Thread.sleep(800);
+
+        boolean targetRowExists = browser.evaluate(
+                "document.querySelector(\"tr[data-acceptance-id='" + acceptanceId + "'].table-warning\") !== null")
+                .asBoolean();
+        assertTrue(targetRowExists,
+                "[" + viewport + "] 対象行 tr[data-acceptance-id='" + acceptanceId + "'].table-warning が存在すること");
+
+        boolean targetVisible = browser.evaluate("(function(){"
+                + "var el=document.querySelector(\"tr[data-acceptance-id='" + acceptanceId + "']\");"
+                + "if(!el){return false;}"
+                + "var r=el.getBoundingClientRect();"
+                + "return r.top >= 0 && r.bottom <= window.innerHeight;})()").asBoolean();
+        assertTrue(targetVisible, "[" + viewport + "] 対象行がビューポート内に見えていること（scrollIntoView）");
+
+        double scrollY = browser.evaluate("window.scrollY").asDouble(0);
+        byte[] png = browser.screenshot();
+        String hash = sha256Hex(png);
+        String fileName = ("desktop".equals(viewport) ? "desktop-1920x1080.png" : "mobile-390x844.png");
+        Files.write(evidenceDir.resolve(fileName), png);
+
+        writeRealHar(browser, evidenceDir.resolve("network-" + viewport + ".json"), viewport, baseUrl, acceptanceId);
+        writeRealConsole(browser, evidenceDir.resolve("console-" + viewport + ".txt"), viewport, targetUrl);
+
+        out.put("viewport", viewport);
+        out.put("finalUrl", browser.currentUrl());
+        out.put("afterLoginUrl", afterLoginUrl);
+        out.put("targetRowTableWarning", targetRowExists);
+        out.put("targetRowVisibleInViewport", targetVisible);
+        out.put("scrollY", scrollY);
+        out.put("screenshotFile", fileName);
+        out.put("screenshotSha256", hash);
+        out.put("consoleErrorCount", realConsoleErrorCount(browser));
+    }
+
+    /** CDPの実NetworkイベントからHAR 1.2を組み立てる（リクエストとレスポンスをrequestIdで対応付ける）。 */
+    private void writeRealHar(CdpBrowser browser, Path file, String viewport, String baseUrl, Long acceptanceId)
+            throws Exception {
+        ObjectNode har = MAPPER.createObjectNode();
+        ObjectNode log = har.putObject("log");
+        log.put("version", "1.2");
+        ObjectNode creator = log.putObject("creator");
+        creator.put("name", "CDP Network events (Chrome DevTools Protocol)");
+        creator.put("version", "captured");
+        ArrayNode pages = log.putArray("pages");
+        ObjectNode page = pages.addObject();
+        page.put("startedDateTime", LocalDateTime.now().toString());
+        page.put("id", "page_1");
+        page.put("title", "月次検収 - SES Manager Pro");
+        ArrayNode entries = log.putArray("entries");
+        for (JsonNode response : browser.networkResponses()) {
+            String requestId = response.path("params").path("requestId").asText();
+            JsonNode req = null;
+            for (JsonNode r : browser.networkRequests()) {
+                if (requestId.equals(r.path("params").path("requestId").asText())) {
+                    req = r;
                     break;
                 }
             }
+            if (req == null) {
+                continue;
+            }
+            JsonNode respParams = response.path("params");
+            JsonNode reqParams = req.path("params");
+            ObjectNode entry = entries.addObject();
+            entry.put("startedDateTime", respParams.path("response").path("responseTime").asLong(0) == 0
+                    ? LocalDateTime.now().toString() : LocalDateTime.now().toString());
+            entry.put("time", 0);
+            ObjectNode request = entry.putObject("request");
+            request.put("method", reqParams.path("request").path("method").asText());
+            request.put("url", reqParams.path("request").path("url").asText());
+            request.put("httpVersion", "HTTP/1.1");
+            ObjectNode responseNode = entry.putObject("response");
+            responseNode.put("status", respParams.path("response").path("status").asInt(0));
+            responseNode.put("statusText", respParams.path("response").path("statusText").asText());
+            responseNode.put("httpVersion", "HTTP/1.1");
+            ObjectNode content = responseNode.putObject("content");
+            content.put("size", respParams.path("response").path("bodySize").asLong(0));
+            content.put("mimeType", respParams.path("response").path("mimeType").asText());
+            ArrayNode headers = responseNode.putArray("headers");
+            for (JsonNode h : respParams.path("response").path("headers")) {
+                ObjectNode header = headers.addObject();
+                header.put("name", h.path("name").asText());
+                header.put("value", h.path("value").asText());
+            }
+            ObjectNode timings = entry.putObject("timings");
+            timings.put("send", 0);
+            timings.put("wait", 0);
+            timings.put("receive", 0);
         }
-        if (sessionCookie == null && initCookie != null) {
-            for (String part : initCookie.split(";")) {
-                if (part.trim().startsWith("JSESSIONID=")) {
-                    sessionCookie = part.trim();
-                    break;
+        // 注: このHARはChromeの実Networkイベントのみから構成される。Javaで結論を連結していない。
+        Files.writeString(file, MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(har));
+    }
+
+    /** CDPの実Console/Logイベントを書き出す（空なら「実イベントなし」と正直に記録）。 */
+    private void writeRealConsole(CdpBrowser browser, Path file, String viewport, String targetUrl) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[Real Browser Console Export - ").append(viewport).append("]\n");
+        sb.append("URL: ").append(targetUrl).append("\n");
+        sb.append("Timestamp: ").append(LocalDateTime.now()).append("\n\n");
+        int errorCount = 0;
+        for (JsonNode event : browser.consoleEvents()) {
+            String method = event.path("method").asText();
+            JsonNode params = event.path("params");
+            String level = "log";
+            String text = "";
+            if ("Runtime.consoleAPICalled".equals(method)) {
+                level = params.path("type").asText("log");
+                StringBuilder args = new StringBuilder();
+                for (JsonNode arg : params.path("args")) {
+                    if (args.length() > 0) {
+                        args.append(" ");
+                    }
+                    args.append(arg.path("value").asText(arg.path("description").asText("")));
                 }
+                text = args.toString();
+            } else if ("Log.entryAdded".equals(method)) {
+                level = params.path("entry").path("level").asText("log");
+                text = params.path("entry").path("text").asText();
+            }
+            if ("error".equals(level)) {
+                errorCount++;
+            }
+            sb.append("[").append(level).append("] ").append(text).append("\n");
+        }
+        if (browser.consoleEvents().isEmpty()) {
+            sb.append("（このrunのCDPイベントではコンソール出力なし）\n");
+        }
+        sb.append("\nConsole Error Count: ").append(errorCount).append("\n");
+        Files.writeString(file, sb.toString());
+    }
+
+    private int realConsoleErrorCount(CdpBrowser browser) {
+        int count = 0;
+        for (JsonNode event : browser.consoleEvents()) {
+            String method = event.path("method").asText();
+            JsonNode params = event.path("params");
+            String level = "Runtime.consoleAPICalled".equals(method)
+                    ? params.path("type").asText("log")
+                    : params.path("entry").path("level").asText("log");
+            if ("error".equals(level)) {
+                count++;
             }
         }
-        assertNotNull(sessionCookie, "JSESSIONID Cookieが取得できること");
-
-        // 4. 認証クッキーを付与して /acceptance ページのHTMLが正常取得（200 OK）できることを検証
-        URL targetUrl = new URL("http://localhost:" + port + "/acceptance?workMonth=2026-07&acceptanceId=" + dynamicAcceptanceId);
-        HttpURLConnection targetConn = (HttpURLConnection) targetUrl.openConnection();
-        targetConn.setRequestProperty("Cookie", sessionCookie);
-        targetConn.connect();
-        assertEquals(200, targetConn.getResponseCode(), "認証クッキー付与時の/acceptanceアクセスが200 OKであること");
-
-        String pageHtml;
-        try (InputStream in = targetConn.getInputStream()) {
-            pageHtml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        assertTrue(pageHtml.contains("acceptanceTable"), "レスポンスHTMLに検収テーブル(#acceptanceTable)が含まれること");
-        assertFalse(targetConn.getURL().toString().contains("/login"), "最終URLが/loginへリダイレクトされていないこと");
-
-        // 5. 自動ログイン＆リダイレクト用 HTML ランディングページを作成
-        File targetDir = new File(".kiro/specs/order-acceptance-workflow/evidence");
-        if (!targetDir.exists()) targetDir.mkdirs();
-
-        File autoLoginForm = new File(targetDir, "auto-login-redirect.html");
-        String autoLoginHtml = "<!DOCTYPE html><html><body>"
-                + "<form id='f' method='POST' action='http://localhost:" + port + "/login'>"
-                + "<input type='hidden' name='username' value='admin'/>"
-                + "<input type='hidden' name='password' value='admin123'/>"
-                + "</form>"
-                + "<script>"
-                + "document.cookie = '" + sessionCookie + "; path=/';"
-                + "window.location.href = 'http://localhost:" + port + "/acceptance?workMonth=2026-07&acceptanceId=" + dynamicAcceptanceId + "';"
-                + "</script></body></html>";
-        try (FileOutputStream fos = new FileOutputStream(autoLoginForm)) {
-            fos.write(autoLoginHtml.getBytes(StandardCharsets.UTF_8));
-        }
-
-        // 6. Chrome 実行ファイルの確認（存在しない場合はテスト失敗とする）
-        String chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-        File chromeFile = new File(chromePath);
-        if (!chromeFile.exists()) {
-            chromePath = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe";
-            chromeFile = new File(chromePath);
-        }
-        assertTrue(chromeFile.exists(), "Google Chrome 実行ファイルが存在すること");
-
-        // 7. Chrome Headless により Desktop (1920x1080) & Mobile (390x844) の実PNGスクリーンショットを生成
-        File desktopPng = new File(targetDir, "desktop-1920x1080.png");
-        File mobilePng = new File(targetDir, "mobile-390x844.png");
-
-        String fullPageUrl = "http://localhost:" + port + "/acceptance?workMonth=2026-07&acceptanceId=" + dynamicAcceptanceId;
-
-        // Note: Cookieを指定して直接/acceptanceへ直接Headlessナビゲーション
-        ProcessBuilder pbDesktop = new ProcessBuilder(
-                chromePath, "--headless", "--disable-gpu", "--window-size=1920,1080",
-                "--header=Cookie: " + sessionCookie,
-                "--screenshot=" + desktopPng.getAbsolutePath(), fullPageUrl
-        );
-        Process procD = pbDesktop.start();
-        int exitD = procD.waitFor();
-        assertEquals(0, exitD, "Desktop Chromeプロセスの終了コードが0であること");
-
-        ProcessBuilder pbMobile = new ProcessBuilder(
-                chromePath, "--headless", "--disable-gpu", "--window-size=390,844",
-                "--header=Cookie: " + sessionCookie,
-                "--screenshot=" + mobilePng.getAbsolutePath(), fullPageUrl
-        );
-        Process procM = pbMobile.start();
-        int exitM = procM.waitFor();
-        assertEquals(0, exitM, "Mobile Chromeプロセスの終了コードが0であること");
-
-        assertTrue(desktopPng.exists() && desktopPng.length() > 1000, "認証後の実Desktop網頁PNGが生成されること");
-        assertTrue(mobilePng.exists() && mobilePng.length() > 1000, "認証後の実Mobile網頁PNGが生成されること");
-
-        // 8. 整合性のある動的証跡ファイル（console-export.txt, network-export.json, notification-seed-provenance.json）の生成
-        generateDynamicConsoleLog(targetDir);
-        generateDynamicNetworkLog(targetDir, dynamicAcceptanceId, contract.getContractNo(), engineer.getFullName(), customer.getCompanyName(), project.getProjectName());
-        generateDynamicSeedProvenance(targetDir, dynamicAcceptanceId, contract.getContractNo(), engineer.getFullName(), customer.getCompanyName());
+        return count;
     }
 
-    private void generateDynamicConsoleLog(File dir) throws Exception {
-        String logText = "[DevTools Console Log Export]\n"
-                + "URL: http://localhost:" + port + "/acceptance?workMonth=2026-07\n"
-                + "Timestamp: " + LocalDateTime.now() + "\n"
-                + "User-Agent: Google Chrome Headless 133.0.6943.127\n\n"
-                + "[Network / Resource Loading]\n"
-                + "GET /css/bootstrap.min.css - 200 OK\n"
-                + "GET /js/common.js - 200 OK\n"
-                + "GET /js/modules/acceptance.js - 200 OK\n"
-                + "GET /api/acceptances - 200 OK (application/json)\n\n"
-                + "[Page Initialization]\n"
-                + "DOMContentLoaded fired.\n"
-                + "Thymeleaf template layout/base.html rendered successfully.\n\n"
-                + "[Execution Summary]\n"
-                + "Console Errors: 0\n"
-                + "Console Warnings: 0\n"
-                + "Target Element Highlight: table-warning applied, scrollIntoView() executed successfully.\n";
-        try (FileOutputStream fos = new FileOutputStream(new File(dir, "console-export.txt"))) {
-            fos.write(logText.getBytes(StandardCharsets.UTF_8));
+    private static String sha256Hex(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(bytes);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) {
+            sb.append(String.format("%02x", b));
         }
+        return sb.toString();
     }
 
-    private void generateDynamicNetworkLog(File dir, Long acceptanceId, String contractNo, String engineerName, String customerName, String projectName) throws Exception {
-        String harJson = "{\n"
-                + "  \"log\": {\n"
-                + "    \"version\": \"1.2\",\n"
-                + "    \"creator\": { \"name\": \"Google Chrome DevTools\", \"version\": \"133.0.6943.127\" },\n"
-                + "    \"pages\": [{ \"startedDateTime\": \"" + LocalDateTime.now() + "\", \"id\": \"page_1\", \"title\": \"月次検収 - SES Manager Pro\" }],\n"
-                + "    \"entries\": [{\n"
-                + "      \"startedDateTime\": \"" + LocalDateTime.now() + "\",\n"
-                + "      \"time\": 35,\n"
-                + "      \"request\": {\n"
-                + "        \"method\": \"GET\",\n"
-                + "        \"url\": \"http://localhost:" + port + "/api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=" + acceptanceId + "\",\n"
-                + "        \"httpVersion\": \"HTTP/1.1\",\n"
-                + "        \"headers\": [{ \"name\": \"Accept\", \"value\": \"application/json\" }],\n"
-                + "        \"queryString\": [{ \"name\": \"acceptanceId\", \"value\": \"" + acceptanceId + "\" }],\n"
-                + "        \"cookies\": [], \"headersSize\": 245, \"bodySize\": 0\n"
-                + "      },\n"
-                + "      \"response\": {\n"
-                + "        \"status\": 200, \"statusText\": \"OK\", \"httpVersion\": \"HTTP/1.1\",\n"
-                + "        \"headers\": [{ \"name\": \"Content-Type\", \"value\": \"application/json;charset=UTF-8\" }],\n"
-                + "        \"cookies\": [],\n"
-                + "        \"content\": { \"size\": 412, \"mimeType\": \"application/json\", \"text\": \"{\\\"code\\\":200,\\\"message\\\":\\\"success\\\",\\\"data\\\":{\\\"records\\\":[{\\\"id\\\":" + acceptanceId + ",\\\"contractNo\\\":\\\"" + contractNo + "\\\",\\\"engineerName\\\":\\\"" + engineerName + "\\\",\\\"customerName\\\":\\\"" + customerName + "\\\",\\\"projectName\\\":\\\"" + projectName + "\\\",\\\"workMonth\\\":\\\"2026-07\\\",\\\"status\\\":\\\"提出済\\\"}],\\\"total\\\":1}}\" },\n"
-                + "        \"redirectURL\": \"\", \"headersSize\": 190, \"bodySize\": 412\n"
-                + "      },\n"
-                + "      \"cache\": {}, \"timings\": { \"send\": 0.4, \"wait\": 32.1, \"receive\": 1.3 }\n"
-                + "    }]\n"
-                + "  }\n"
-                + "}\n";
-        try (FileOutputStream fos = new FileOutputStream(new File(dir, "network-export.json"))) {
-            fos.write(harJson.getBytes(StandardCharsets.UTF_8));
+    private static void deleteRecursively(Path root) throws Exception {
+        if (root == null || !Files.exists(root)) {
+            return;
         }
-    }
-
-    private void generateDynamicSeedProvenance(File dir, Long acceptanceId, String contractNo, String engineerName, String customerName) throws Exception {
-        String json = "{\n"
-                + "  \"spec\": \"order-acceptance-workflow\",\n"
-                + "  \"acceptanceId\": " + acceptanceId + ",\n"
-                + "  \"contractNo\": \"" + contractNo + "\",\n"
-                + "  \"engineerName\": \"" + engineerName + "\",\n"
-                + "  \"customerName\": \"" + customerName + "\",\n"
-                + "  \"workMonth\": \"2026-07\",\n"
-                + "  \"createdTimestamp\": \"" + LocalDateTime.now() + "\",\n"
-                + "  \"provenanceVerification\": {\n"
-                + "    \"sqlQuery\": \"SELECT a.id, a.contract_id, a.work_month, a.status FROM t_acceptance a WHERE a.id = " + acceptanceId + "\",\n"
-                + "    \"executionStatus\": \"VERIFIED_PRESENT\",\n"
-                + "    \"resultRow\": { \"id\": " + acceptanceId + ", \"status\": \"提出済\", \"contractNo\": \"" + contractNo + "\" },\n"
-                + "    \"environment\": \"H2 / Spring Boot Embedded Web Container\",\n"
-                + "    \"exitCode\": 0\n"
-                + "  }\n"
-                + "}\n";
-        try (FileOutputStream fos = new FileOutputStream(new File(dir, "notification-seed-provenance.json"))) {
-            fos.write(json.getBytes(StandardCharsets.UTF_8));
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                    // ignore
+                }
+            });
         }
     }
 }

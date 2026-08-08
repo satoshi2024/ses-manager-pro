@@ -40,6 +40,7 @@ class AcceptanceJsRuntimeTest {
             let scrolled = false;
             let warningAdded = false;
             let apiRequestedParams = null;
+            let datasetOk = false;
 
             global.window = {
                 location: { search: '?workMonth=2026-09&acceptanceId=123' }
@@ -61,6 +62,7 @@ class AcceptanceJsRuntimeTest {
                             innerHTML: '',
                             appendChild: (tr) => {
                                 if (tr.classList && tr.classList.contains('table-warning')) warningAdded = true;
+                                if (tr.dataset && tr.dataset.acceptanceId === '123') datasetOk = true;
                             },
                             querySelector: (s) => {
                                 if (s === '.table-warning' && warningAdded) {
@@ -76,6 +78,7 @@ class AcceptanceJsRuntimeTest {
                     const classes = new Set();
                     return {
                         tagName: tag,
+                        dataset: {},
                         classList: {
                             add: (cls) => { classes.add(cls); if (cls === 'table-warning') warningAdded = true; },
                             contains: (cls) => classes.has(cls)
@@ -121,6 +124,10 @@ class AcceptanceJsRuntimeTest {
                 }
                 if (!apiRequestedParams || apiRequestedParams.acceptanceId !== '123') {
                     console.error('acceptanceId was not passed in API params: ' + JSON.stringify(apiRequestedParams));
+                    process.exit(1);
+                }
+                if (!datasetOk) {
+                    console.error('tr[data-acceptance-id] was not set on the target row');
                     process.exit(1);
                 }
                 console.log('SUCCESS');
