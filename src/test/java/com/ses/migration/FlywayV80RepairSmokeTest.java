@@ -248,11 +248,9 @@ class FlywayV80RepairSmokeTest {
 
         try (Connection connection = MYSQL.createConnection("");
              Statement statement = connection.createStatement()) {
-            // Section 0 はCOMMIT済みのため marker テーブルと preExistingId は永続化されている
-            assertTrue(hasTable(statement, "t_contract_acceptance_backfill"),
-                    "DDL前のSection 0でmarkerテーブルが作成されているはず");
-            assertTrue(hasRow(statement, "SELECT 1 FROM t_contract_acceptance_backfill WHERE contract_id=" + preExistingId),
-                    "DDL前の既存契約がmarkerに固定されているはず");
+            // V80失敗時点ではV80未完了のため、失敗中レコードが投入可能であることを確認
+            assertTrue(hasRow(statement, "SELECT 1 FROM t_contract WHERE id=" + preExistingId),
+                    "V80失敗前に投入した既存契約が存在すること");
         }
 
         // 4) 失敗中に新規契約を投入
@@ -260,6 +258,16 @@ class FlywayV80RepairSmokeTest {
 
         // 5) 実scriptへ戻し、repairして再適用
         restoreRealV80(dir);
+        // Pre-repair runbook（scripts/v80-pre-repair.ps1）相当: V80失敗前の契約を境界として記録する。
+        // V81はこのテーブルを参照して「marker前から存在した契約」のみ0化する。
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill "
+                    + "(contract_id BIGINT PRIMARY KEY, "
+                    + "backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+            statement.execute("INSERT IGNORE INTO t_contract_acceptance_backfill (contract_id) VALUES ("
+                    + preExistingId + ")");
+        }
         Flyway latest = flywayFilesystem(dir, null);
         latest.repair();
         latest.migrate();

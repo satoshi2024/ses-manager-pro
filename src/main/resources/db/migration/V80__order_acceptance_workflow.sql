@@ -14,26 +14,6 @@
 -- ============================================================
 
 -- ============================================================
--- 0. Pre-existing contract durable capture (R09-P1-02対応)
--- V80開始時点の既存契約ID集合（sentinel 0含む）を全DDL実行前に固定する。
--- 後続のDDL/DMLが途中失敗→repair→再適用されても、失敗中に作成された新規契約が誤って0化しない。
--- ============================================================
-CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill (
-  contract_id   BIGINT PRIMARY KEY,
-  backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
-
-SET @marker_sql = IF(
-    (SELECT COUNT(*) FROM t_contract_acceptance_backfill WHERE contract_id = 0) = 0,
-    'INSERT INTO t_contract_acceptance_backfill (contract_id) SELECT id FROM t_contract UNION ALL SELECT 0',
-    'SELECT 1'
-);
-PREPARE marker_stmt FROM @marker_sql;
-EXECUTE marker_stmt;
-DEALLOCATE PREPARE marker_stmt;
-COMMIT;
-
--- ============================================================
 -- 1. t_sales_order — 注文ヘッダ
 -- ============================================================
 CREATE TABLE IF NOT EXISTS t_sales_order (
@@ -118,38 +98,25 @@ PREPARE order_line_stmt FROM @order_line_sql;
 EXECUTE order_line_stmt;
 DEALLOCATE PREPARE order_line_stmt;
 
--- 1明細→1契約（R5二重click防止）。三分岐: missing / wrong(非UNIQUE) / correct(UNIQUE)。
-SET @order_line_uk_correct = (SELECT COUNT(*) FROM information_schema.statistics
-  WHERE table_schema = DATABASE() AND table_name = 't_contract'
-    AND index_name = 'uk_contract_order_line' AND non_unique = 0
-    AND column_name = 'order_line_id' AND seq_in_index = 1);
-SET @order_line_uk_exists = (SELECT COUNT(*) FROM information_schema.statistics
-  WHERE table_schema = DATABASE() AND table_name = 't_contract'
-    AND index_name = 'uk_contract_order_line');
-
-SET @order_line_uk_sql = CASE
-    WHEN @order_line_uk_correct > 0 THEN 'SELECT 1'
-    WHEN @order_line_uk_exists > 0 THEN 'ALTER TABLE t_contract DROP INDEX uk_contract_order_line, ADD UNIQUE KEY uk_contract_order_line (order_line_id)'
-    ELSE 'ALTER TABLE t_contract ADD UNIQUE KEY uk_contract_order_line (order_line_id)'
-END;
+-- 1明細→1契約（R5二重click防止）。NULLは複数許容（注文経由でない契約）。
+SET @order_line_uk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = 't_contract' AND index_name = 'uk_contract_order_line') = 0,
+    'ALTER TABLE t_contract ADD UNIQUE KEY uk_contract_order_line (order_line_id)',
+    'SELECT 1'
+);
 PREPARE order_line_uk_stmt FROM @order_line_uk_sql;
 EXECUTE order_line_uk_stmt;
 DEALLOCATE PREPARE order_line_uk_stmt;
 
--- 注文明細→契約の参照整合（R09-P1-05対応）。三分岐: missing / wrong / correct。
-SET @contract_line_fk_correct = (SELECT COUNT(*) FROM information_schema.referential_constraints
-  WHERE constraint_schema = DATABASE() AND table_name = 't_contract'
-    AND constraint_name = 'fk_contract_order_line' AND referenced_table_name = 't_sales_order_line'
-    AND update_rule = 'CASCADE' AND delete_rule = 'RESTRICT');
-SET @contract_line_fk_exists = (SELECT COUNT(*) FROM information_schema.table_constraints
-  WHERE constraint_schema = DATABASE() AND table_name = 't_contract'
-    AND constraint_name = 'fk_contract_order_line');
-
-SET @contract_line_fk_sql = CASE
-    WHEN @contract_line_fk_correct > 0 THEN 'SELECT 1'
-    WHEN @contract_line_fk_exists > 0 THEN 'ALTER TABLE t_contract DROP FOREIGN KEY fk_contract_order_line, ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id) ON UPDATE CASCADE ON DELETE RESTRICT'
-    ELSE 'ALTER TABLE t_contract ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id) ON UPDATE CASCADE ON DELETE RESTRICT'
-END;
+-- 注文明細→契約の参照整合（R09-P1-05対応）。孤児 order_line_id を拒否する。
+-- fresh/legacyともV1/V80にこのFKは無いため、guard付きで1本だけ追加し両経路を収束させる。
+SET @contract_line_fk_sql = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 't_contract' AND constraint_name = 'fk_contract_order_line') = 0,
+    'ALTER TABLE t_contract ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id) ON UPDATE CASCADE ON DELETE RESTRICT',
+    'SELECT 1'
+);
 PREPARE contract_line_fk_stmt FROM @contract_line_fk_sql;
 EXECUTE contract_line_fk_stmt;
 DEALLOCATE PREPARE contract_line_fk_stmt;
@@ -176,12 +143,42 @@ PREPARE exemption_reason_stmt FROM @exemption_reason_sql;
 EXECUTE exemption_reason_stmt;
 DEALLOCATE PREPARE exemption_reason_stmt;
 
--- 【go-live移行方針】V80適用時点で既に存在する契約は「検収不要（acceptance_required=0）」へ移行する。
+-- 【go-live移行方針（R09-P2-01/P2-04/P1-01対応）】V80適用時点で既に存在する契約
+-- （order_line_idがNULL=注文経由でない既存契約）は、検収フロー導入前に稼働していた実績の請求が
+-- 全面停止しないよう「検収不要（acceptance_required=0）」へ移行する。理由は固定文言を設定する。
+-- V80以後の新規契約はNOT NULL DEFAULT 1（検収要）のまま。
+-- markerテーブルに初回適用時点の契約ID集合を固定し、UPDATEはmarker行だけを対象にする。
+-- 途中失敗→flyway repair→再実行でも、新規契約を誤って0へ書き換えない（repair-safe）。
+CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill (
+  contract_id   BIGINT PRIMARY KEY,
+  backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
+
+-- sentinel行（contract_id = 0）が存在しない時（初回適用）だけ既存契約ID集合を固定する。
+-- 対象が0件の場合でもsentinel行(0)を記録することで「キャプチャ完了」と「未キャプチャ」を区別し、
+-- 途中失敗→flyway repair→再実行時に失敗中追加された新規契約を誤って0化しない（R7-P1-01 / repair-safe）。
+SET @marker_sql = IF(
+    (SELECT COUNT(*) FROM t_contract_acceptance_backfill WHERE contract_id = 0) = 0,
+    'INSERT INTO t_contract_acceptance_backfill (contract_id) SELECT id FROM t_contract WHERE order_line_id IS NULL UNION ALL SELECT 0',
+    'SELECT 1'
+);
+PREPARE marker_stmt FROM @marker_sql;
+EXECUTE marker_stmt;
+DEALLOCATE PREPARE marker_stmt;
+
+-- 【repair-safe（R09-P2-02/R7-P1-01対応）】FlywayはMySQLのDMLをトランザクションで実行するため、
+-- 途中失敗（構文エラーや後続DDLの失敗）があるとmarker行がROLLBACKされ、repair→再適用時に
+-- 「marker未完了＝初回」と誤判定して失敗中に作られた新規契約まで0化してしまう。
+-- ここで明示COMMITし、marker固定（sentinel 0含む）を後続失敗から独立させる（DDLはMySQLの暗黙COMMITで既に永続化済み）。
+COMMIT;
+
 UPDATE t_contract c
   JOIN t_contract_acceptance_backfill m ON m.contract_id = c.id
   SET c.acceptance_required = 0,
       c.acceptance_exemption_reason = '移行前契約（V80適用時点の既存契約）';
 
+-- UPDATEも同じ理由で明示COMMIT（後続の失敗でrollbackされても、repair→再適用時に
+-- marker行に対して冪等に再適用される）。
 COMMIT;
 
 -- ============================================================

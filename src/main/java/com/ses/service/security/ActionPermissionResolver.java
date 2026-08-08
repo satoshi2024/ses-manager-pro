@@ -110,6 +110,12 @@ public final class ActionPermissionResolver {
         if (isExportPath(uri)) {
             return "export.execute";
         }
+        if ("POST".equals(method) && uri.matches("/api/sales-orders/\\d+/acknowledgement-pdf")) {
+            return "sales-order.edit";
+        }
+        if ("POST".equals(method) && uri.matches("/api/acceptances/\\d+/document")) {
+            return "file.upload";
+        }
         if (isDownloadPath(uri)) {
             return "file.download";
         }
@@ -187,7 +193,7 @@ public final class ActionPermissionResolver {
         if (actionKey.equals("export.execute") || actionKey.equals("file.download")
                 || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
                 || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")
-                || actionKey.equals("mfa.reset")) {
+                || actionKey.equals("mfa.reset") || actionKey.equals("sales-order.edit")) {
             return true;
         }
         int separator = actionKey.indexOf('.');
@@ -232,8 +238,7 @@ public final class ActionPermissionResolver {
         return uri.endsWith("/download") || uri.contains("/download/")
                 || uri.endsWith(".pdf") || uri.endsWith(".xlsx") || uri.endsWith(".csv")
                 || uri.matches("/api/sales-orders/\\d+/documents/\\d+(/.*)?")
-                || uri.matches("/api/sales-orders/\\d+/acknowledgement/pdf(/.*)?")
-                || uri.matches("/api/acceptances/\\d+/document(/.*)?");
+                || uri.matches("/api/acceptances/\\d+/document/download(/.*)?");
     }
 
     private static boolean isCrmCustomerPath(String uri) {

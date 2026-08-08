@@ -97,6 +97,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_acceptance_contract_month ON t_acceptance(c
 CREATE INDEX IF NOT EXISTS idx_acceptance_work_record ON t_acceptance(work_record_id);
 CREATE INDEX IF NOT EXISTS idx_acceptance_status_month ON t_acceptance(status, work_month);
 
+CREATE TABLE IF NOT EXISTS t_document_hash_claim (
+  tenant_id     VARCHAR(100) NOT NULL,
+  document_type VARCHAR(50)  NOT NULL,
+  sha256        VARCHAR(64)  NOT NULL,
+  document_id   BIGINT       NOT NULL,
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, document_type, sha256)
+);
+
 -- R09-P1-05: 孤児 order_line_id の拒否（t_sales_order_line 作成後にFKを追加）
 ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS fk_contract_order_line
   FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id);

@@ -813,8 +813,8 @@ public class DocumentServiceImpl implements DocumentService {
             return;
         }
 
-        String currentRole = com.ses.common.util.SecurityUtils.currentRole();
-        if ("人事".equals(currentRole)) {
+        boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();
+        if (isHr) {
             if (Set.of("ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE").contains(doc.getDocumentType())) {
                 throw BusinessException.of(403, "error.forbidden");
             }
@@ -882,7 +882,7 @@ public class DocumentServiceImpl implements DocumentService {
                     anyAllowed = true;
                     break;
                 } else if ("SALES_ORDER".equals(type)) {
-                    if ("人事".equals(currentRole)) {
+                    if (isHr) {
                         throw BusinessException.of(403, "error.forbidden");
                     }
                     // 注文書原本・注文請書は注文一覧と同じscope（顧客DataScope）で見せる
@@ -911,8 +911,8 @@ public class DocumentServiceImpl implements DocumentService {
             return;
         }
 
-        String currentRole = com.ses.common.util.SecurityUtils.currentRole();
-        if ("人事".equals(currentRole)) {
+        boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();
+        if (isHr) {
             wrapper.notIn(Document::getDocumentType, "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
             if (!dataScopeService.isScoped()) {
                 return;
@@ -943,6 +943,7 @@ public class DocumentServiceImpl implements DocumentService {
             hasCondition = true;
         }
         if (allowedContracts != null && !allowedContracts.isEmpty()) {
+            // ACCEPTANCE文書以外は契約の現在DataScopeを適用
             linkWrapper.or(w -> w.eq("target_type", "CONTRACT").in("target_id", allowedContracts));
             hasCondition = true;
         }
@@ -960,6 +961,39 @@ public class DocumentServiceImpl implements DocumentService {
             if (!allowedOrderIds.isEmpty()) {
                 linkWrapper.or(w -> w.eq("target_type", "SALES_ORDER").in("target_id", allowedOrderIds));
                 hasCondition = true;
+            }
+        }
+
+        // ACCEPTANCE 文書の月別複合タプルスコープ判定 (R9-P0-01)
+        // 異なる月ごとに allowedContractIdsAsOf(monthEnd) を個別に取得して合致する document_id 集合を事前構築
+        if (acceptanceMapper != null) {
+            List<com.ses.entity.Acceptance> acceptances = acceptanceMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.Acceptance>()
+                            .isNotNull(com.ses.entity.Acceptance::getDocumentId)
+                            .isNotNull(com.ses.entity.Acceptance::getWorkMonth));
+            if (acceptances != null && !acceptances.isEmpty()) {
+                Set<Long> allowedAcceptanceDocIds = new java.util.HashSet<>();
+                // 月別にグループ化して複合タプル (contract_id, work_month) の許可を厳格判定
+                java.util.Map<String, List<com.ses.entity.Acceptance>> monthGroup = acceptances.stream()
+                        .collect(Collectors.groupingBy(com.ses.entity.Acceptance::getWorkMonth));
+                for (java.util.Map.Entry<String, List<com.ses.entity.Acceptance>> entry : monthGroup.entrySet()) {
+                    String month = entry.getKey();
+                    java.time.LocalDate monthEnd = month != null && !month.isBlank()
+                            ? java.time.YearMonth.parse(month).atEndOfMonth()
+                            : java.time.LocalDate.now();
+                    Set<Long> allowedContractsForMonth = dataScopeService.allowedContractIdsAsOf(monthEnd);
+                    if (allowedContractsForMonth != null && !allowedContractsForMonth.isEmpty()) {
+                        for (com.ses.entity.Acceptance acc : entry.getValue()) {
+                            if (allowedContractsForMonth.contains(acc.getContractId())) {
+                                allowedAcceptanceDocIds.add(acc.getDocumentId());
+                            }
+                        }
+                    }
+                }
+                if (!allowedAcceptanceDocIds.isEmpty()) {
+                    linkWrapper.or(w -> w.in("document_id", allowedAcceptanceDocIds));
+                    hasCondition = true;
+                }
             }
         }
 

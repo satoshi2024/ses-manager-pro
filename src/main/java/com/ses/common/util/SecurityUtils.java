@@ -49,6 +49,10 @@ public final class SecurityUtils {
         return null;
     }
 
+    public static boolean isHrRole() {
+        return com.ses.common.constant.StatusConstants.ROLE_HR.equals(currentRole());
+    }
+
     public static String currentUsername() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof OidcLoginUser) {

@@ -9,35 +9,34 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | PASS |
-| base | f523e11ded83bc0223ddeb6efcc987f09f934616 |
-| review-input docs Head | afad9748710c4c0f47fe022f9a18e6e8972c360b |
-| code/evidence Head | 23793ec4f9fdd37305d3ffacda84024c5ab1fe46 |
-| merge | merged済み |
-| latest review | R09 round 9 Remediation / 2026-08-09（PASS） |
-| verdict | PASS: zero open blockers (P0=0 / P1=0 / P2=0) |
-| issue count | R09 round 9 Remediation: P0=0 / P1=0 / P2=0 |
-| next action | Release S10 (dispatch) / S11 (attendance) Wave 2 specs |
+| state | FIX（R10 Round 10 独立ReviewによりFAIL確定、修正実施中） |
+| base | 23793ec4f9fdd37305d3ffacda84024c5ab1fe46 |
+| review-input docs Head | 14973056b073fc6b56efc95e2c42547b386f6493 |
+| code/evidence Head | 14973056b073fc6b56efc95e2c42547b386f6493 |
+| merge | merged済み＋Round 10指摘の修正作業中 |
+| latest review | R10 round 10 / 2026-08-09（FAIL） |
+| verdict | FAIL: open blockers=R9-P0-01, R10-P0-01, R9-P1-01..10, R10-P1-01 (P0=2 / P1=9 / P2=3) |
+| issue count | R10 round 10: P0=2 / P1=9 / P2=3 |
+| next action | Remediation（R10-SPEC〜R10-M）の一括修正・V81順方向マイグレーション・テスト追加・実MySQL全通し証跡取得後に再Reviewへ提出 |
 
 ## 2. OPEN Issue Register
 
 | issue ID | severity | 内容 | ステータス / 対応計画 |
 |---|---|---|---|
-| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED (R9-SCOPE: DocumentServiceImpl/DataScopeServiceImpl/AcceptanceServiceImpl/MonthlyClosingServiceImpl/DashboardServiceImplにてHRアクセス完全拒否) |
-| order-acceptance-workflow-R9-P1-01 | P1 | V80 historical legacy / wrong-shape index/FK | VERIFIED_CLOSED (R9-MIG: V80にNON_UNIQUE/順序/prefix/cascade三分岐制御を追加) |
-| order-acceptance-workflow-R9-P1-02 | P1 | V80 marker前失敗のdurability不備 | VERIFIED_CLOSED (R9-MIG: DDL実行前の契約ID集合durableキャプチャマーカー固定をV80最上部へ配置) |
-| order-acceptance-workflow-R9-P1-03 | P1 | submit対reopen競合およびバージョンロック欠落 | VERIFIED_CLOSED (R9-CONCURRENCY: Contract->WorkRecord->Acceptance順ロック) |
-| order-acceptance-workflow-R9-P1-04 | P1 | approval engine adapterのバージョンロックTOCTOU | VERIFIED_CLOSED (R9-CONCURRENCY: selectByIdForUpdateによる行ロック) |
-| order-acceptance-workflow-R9-P1-05 | P1 | 注文請PDFアーカイブfail-open | VERIFIED_CLOSED (R9-DOCUMENT: 文書アーカイブ必須化・失敗時ロールバック) |
-| order-acceptance-workflow-R9-P1-06 | P1 | 理由なし検収免除請求の許可バグ | VERIFIED_CLOSED (R9-INVOICE-UI: acceptance_exemption_reasonの非空判定をDB CHECKおよび請求SQLへ埋め込み) |
-| order-acceptance-workflow-R9-P1-07 | P1 | 法人（legalEntityId）のデータバインド・PDF印字欠落 | VERIFIED_CLOSED (R9-DOCUMENT: SalesOrder.legalEntityId追加、PDF印字の動的解決) |
-| order-acceptance-workflow-R9-P1-08 | P1 | 専用downloadの権限・監査ログ迂回 | VERIFIED_CLOSED (R9-DOCUMENT: ActionPermissionResolverにfile.downloadマッピング、ApiAuditFilterで成功/拒否監査) |
-| order-acceptance-workflow-R9-P1-09 | P1 | 原本hash重複の競合（check-then-insert） | VERIFIED_CLOSED (R9-CONCURRENCY: 409 Conflict返却) |
-| order-acceptance-workflow-R9-P1-10 | P1 | 全通し実MySQL Browser Demo証跡およびL4完全ログ欠落 | VERIFIED_CLOSED (R9-M: 1551件全量L4 CI検証クリーン完走) |
-| order-acceptance-workflow-R9-P2-01 | P2 | 明細契約化の二重clickキー競合retry処理 | VERIFIED_CLOSED (R9-CONCURRENCY: DataIntegrityViolationException時にorderLineIdで既存契約再読) |
-| order-acceptance-workflow-R9-P2-02 | P2 | PO重複警告の自己カウントバグ | VERIFIED_CLOSED (R9-INVOICE-UI: 更新時自ID除外) |
-| order-acceptance-workflow-R9-P2-03 | P2 | UIアクセシビリティ（label for, aria-live, icon name）欠落 | VERIFIED_CLOSED (R9-INVOICE-UI: HTMLアクセシビリティ属性補全) |
-| order-acceptance-workflow-R9-P2-04 | P2 | DB通知重複検証・KPIテストアサーション不足 | VERIFIED_CLOSED (R9-M: 実DB通知dedupe検証・KPI境界テスト追加) |
+| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | OPEN (R10-SCOPE: StatusConstants.ROLE_HR使用、DocumentServiceImpl/DataScopeServiceImpl/AcceptanceServiceImpl/MonthlyClosingServiceImpl/DashboardServiceImplにてHRアクセス完全拒否・検収文書as-of判定統一) |
+| order-acceptance-workflow-R10-P0-01 | P0 | 既適用V80直接変更によるFlyway checksum不一致 | OPEN (R10-MIG: V80を原状復元し、新規順方向マイグレーションV81へ修復DDLを配置) |
+| order-acceptance-workflow-R9-P1-01 | P1 | V81 historical legacy / wrong-shape index/FK | OPEN (R10-MIG: V81にNON_UNIQUE/全構成列/順序/prefix/cascade検査を追加、三分岐制御) |
+| order-acceptance-workflow-R9-P1-02 | P1 | V81 marker前失敗のdurability不備 | OPEN (R10-MIG: DDL実行前の契約ID集合durableキャプチャ) |
+| order-acceptance-workflow-R9-P1-03 | P1 | submit対reopen競合およびバージョンロック欠落 | OPEN (R10-CONCURRENCY: Contract->WorkRecord->Acceptance順FOR UPDATE行ロックとreopen拒否ガード) |
+| order-acceptance-workflow-R9-P1-06 | P1 | 理由なし検収免除請求のDB CHECK不備 | OPEN (R10-INVOICE-UI: V81/V1/H2にDB CHECK制約を追加、SQL/validateと三重防御) |
+| order-acceptance-workflow-R9-P1-07 | P1 | 法人（legalEntityId）のUI候補APIバインド・PDF印字欠落 | OPEN (R10-DOCUMENT: /api/autocomplete/legal-entitiesへの接続、自社代表法人情報の動的解決) |
+| order-acceptance-workflow-R9-P1-08 | P1 | 専用downloadの権限・監査ログ・GET状態変更バグ | OPEN (R10-DOCUMENT: 発行POST/DL GET分離、ActionPermissionResolverおよびApiAuditFilter正規化) |
+| order-acceptance-workflow-R9-P1-09 | P1 | 原本hash重複の競合（check-then-insert） | OPEN (R10-CONCURRENCY: (tenant_id, document_type, file_hash)のDB UNIQUE制約追加によるアトミックClaim) |
+| order-acceptance-workflow-R9-P1-10 | P1 | 全通し実MySQL Browser Demo証跡およびL4完全ログ欠落 | OPEN (R10-M: 見積〜請求閉ループの実MySQL Browser証跡取得・L4完走・git diff --checkパス) |
+| order-acceptance-workflow-R10-P1-01 | P1 | 注文請PDF再発行時の原本非一致 | OPEN (R10-DOCUMENT: 再発行時はアーカイブ済みbytes返却) |
+| order-acceptance-workflow-R9-P2-01 | P2 | 明細契約化の二重clickキー競合retry処理 | OPEN (R10-CONCURRENCY: DataIntegrityViolationException時にFOR UPDATEで既存契約再読) |
+| order-acceptance-workflow-R9-P2-03 | P2 | UIアクセシビリティ（label for, aria-live, aria-label）欠落 | OPEN (R10-INVOICE-UI: HTMLアクセシビリティ属性補全・キーボードDemo) |
+| order-acceptance-workflow-R9-P2-04 | P2 | DB通知重複検証・KPIテストアサーション不足 | OPEN (R10-M: 実DB通知dedupe検証・KPI境界テスト直接アサート追加) |
 
 ### Closed/Deferred Issue（R09 Round8）
 

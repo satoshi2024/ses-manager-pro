@@ -62,7 +62,8 @@ class SpecDispatchConsistencyTest {
 
     /** S07は複数migrationを実装済み。後続specの単一予約と同じ契約で扱わない。 */
     private static final Map<String, List<Integer>> REALIZED_MIGRATIONS = Map.of(
-            "approval-workflow-internal-control", List.of(75, 76, 77, 78, 79));
+            "approval-workflow-internal-control", List.of(75, 76, 77, 78, 79),
+            "order-acceptance-workflow", List.of(80, 81));
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
     private static final Pattern DESIGN_REALIZED = Pattern.compile("S07正式migration V(\\d+(?:/V\\d+)*)");

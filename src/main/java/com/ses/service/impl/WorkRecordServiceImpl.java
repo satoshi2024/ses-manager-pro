@@ -593,16 +593,21 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     /**
-     * 検収済みwork recordの再open/金額変更を拒否する（R3.4）。
-     * 検収取消は承認経由（acceptance.cancel）で行い、承認適用後に差戻し状態となってから編集可能。
+     * 検収済み・提出済み work record の再open/金額変更を拒否する（R3.4, R9-P1-03）。
+     * ロック獲得順序: Step 1 Contract FOR UPDATE -> Step 2 WorkRecord FOR UPDATE -> Step 3 Acceptance FOR UPDATE。
      */
     private void assertAcceptanceNotAccepted(Long contractId, String workMonth) {
         if (acceptanceMapper == null || contractId == null || workMonth == null) {
             return;
         }
-        com.ses.entity.Acceptance acceptance = acceptanceMapper.selectByContractAndMonth(contractId, workMonth);
-        if (acceptance != null && "検収済".equals(acceptance.getStatus())) {
-            throw BusinessException.of(409, "error.acceptance.approvalRequiredForEdit");
+        com.ses.entity.Acceptance acceptance = acceptanceMapper.selectByContractAndMonthForUpdate(contractId, workMonth);
+        if (acceptance != null) {
+            if ("検収済".equals(acceptance.getStatus())) {
+                throw BusinessException.of(409, "error.acceptance.approvalRequiredForEdit");
+            }
+            if ("提出済".equals(acceptance.getStatus())) {
+                throw BusinessException.of(409, "error.acceptance.alreadySubmittedOrAccepted");
+            }
         }
     }
 

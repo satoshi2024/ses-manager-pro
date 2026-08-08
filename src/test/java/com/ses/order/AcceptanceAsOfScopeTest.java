@@ -331,4 +331,62 @@ class AcceptanceAsOfScopeTest {
         assertEquals(1, targetedPage.getRecords().size(), "定点抽出によりWHERE句がLIMIT前に評価され1件取得できること");
         assertEquals(targetAcceptance.getId(), targetedPage.getRecords().get(0).getId());
     }
+
+    @Test
+    @DisplayName("R9-P0-01: 同一合同で7月許可・8月禁止時の composite tuple scope 防漏検証 (list/total/detail/download/empty/dataScope-ON-OFF)")
+    void monthTupleScope_JulyAllowedAugustRestricted_allEndpointsEnforced() {
+        setUpTransferFixture();
+
+        // 7月・8月の検収レコード作成
+        authenticate(managerA);
+        Acceptance julyAcc = acceptanceService.submit(contractId, "2026-07");
+        assertNotNull(julyAcc);
+
+        authenticate(managerB);
+        Acceptance augustAcc = acceptanceService.submit(contractId, "2026-08");
+        assertNotNull(augustAcc);
+
+        // --- 1. DataScope ON (Manager A: 7月のみ許可、8月禁止) ---
+        authenticate(managerA);
+
+        // Pagination list & total for 2026-07
+        var pageJuly = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, null);
+        assertEquals(1, pageJuly.getTotal(), "7月は契約が許可スコープ内のため total = 1");
+        assertEquals(1, pageJuly.getRecords().size(), "7月は list 1件返却");
+        assertEquals(julyAcc.getId(), pageJuly.getRecords().get(0).getId());
+
+        // Pagination list & total for 2026-08
+        var pageAugust = acceptanceService.pageGrid(1, 50, "2026-08", null, null, null, null);
+        assertEquals(0, pageAugust.getTotal(), "8月は異動後のため total = 0 (漏洩防ぐ)");
+        assertEquals(0, pageAugust.getRecords().size(), "8月は list 0件返却");
+
+        // Detail / Targeted single record lookup check (pageGrid with acceptanceId & assertAllowedAcceptance)
+        var detailJuly = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, julyAcc.getId());
+        assertEquals(1, detailJuly.getRecords().size(), "7月は対象IDでのグリッド詳細取得 1件");
+
+        var detailAugust = acceptanceService.pageGrid(1, 50, "2026-08", null, null, null, augustAcc.getId());
+        assertEquals(0, detailAugust.getRecords().size(), "8月は対象IDでのグリッド詳細取得 0件 (Scope遮断)");
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> acceptanceService.assertAllowedAcceptance(julyAcc.getId()));
+        BusinessException detailDenied = assertThrows(BusinessException.class, () -> acceptanceService.assertAllowedAcceptance(augustAcc.getId()));
+        assertEquals("error.scope.notFound", detailDenied.getMessage());
+
+        // Download check (assertAllowedAcceptance)
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> acceptanceService.assertAllowedAcceptance(julyAcc.getId()));
+        BusinessException downloadDenied = assertThrows(BusinessException.class, () -> acceptanceService.assertAllowedAcceptance(augustAcc.getId()));
+        assertEquals("error.scope.notFound", downloadDenied.getMessage());
+
+        // --- 2. DataScope OFF / Superuser (管理者) ---
+        SysUser admin = insertUser("asof-admin-" + System.nanoTime(), "管理者", "管理者");
+        authenticate(admin);
+
+        var adminJuly = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, null);
+        assertEquals(1, adminJuly.getTotal(), "管理者は 7月 1件");
+
+        var adminAugust = acceptanceService.pageGrid(1, 50, "2026-08", null, null, null, null);
+        assertEquals(1, adminAugust.getTotal(), "管理者は 8月 1件");
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> acceptanceService.assertAllowedAcceptance(julyAcc.getId()));
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> acceptanceService.assertAllowedAcceptance(augustAcc.getId()));
+    }
 }

@@ -141,7 +141,7 @@ class AcceptanceServiceImplTest {
         assertThrows(BusinessException.class, () -> acceptanceService.reject(submitted.getId(), "  "));
 
         // 検収不要契約
-        jdbcTemplate.update("UPDATE t_contract SET acceptance_required = 0 WHERE id = ?", contractId);
+        jdbcTemplate.update("UPDATE t_contract SET acceptance_required = 0, acceptance_exemption_reason = 'テスト免除理由' WHERE id = ?", contractId);
         assertThrows(BusinessException.class, () -> acceptanceService.submit(contractId, "2026-08"));
     }
 

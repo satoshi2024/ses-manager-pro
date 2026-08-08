@@ -291,7 +291,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
 
     /** 未検収件数のscope母集団（対象月時点。空集合=全件ではなく、条件を付けない＝全件の意図を呼出側へ明示）。 */
     private List<Long> scopedContractIdsForClosing(String month) {
-        if ("人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
+        if (com.ses.common.util.SecurityUtils.isHrRole()) {
             return java.util.List.of(); // HRは未検収件数0
         }
         if (dataScopeService == null || !dataScopeService.isScoped()) {

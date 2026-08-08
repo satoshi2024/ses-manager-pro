@@ -12,10 +12,10 @@
         <div class="card-body">
             <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
                 <div class="col-md-2">
-                    <input type="month" id="acceptanceWorkMonth" name="workMonth" class="form-control">
+                    <input type="month" id="acceptanceWorkMonth" name="workMonth" class="form-control" aria-label="対象月">
                 </div>
                 <div class="col-md-2">
-                    <select id="acceptanceStatusFilter" name="status" class="form-select">
+                    <select id="acceptanceStatusFilter" name="status" class="form-select" aria-label="状態">
                         <option value="" th:text="#{common.all}">すべて</option>
                         <option value="未提出" th:text="#{acceptance.status.未提出}">未提出</option>
                         <option value="提出済" th:text="#{acceptance.status.提出済}">提出済</option>
@@ -24,12 +24,12 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <select id="acceptanceCustomerFilter" name="customerId" class="form-select">
+                    <select id="acceptanceCustomerFilter" name="customerId" class="form-select" aria-label="顧客">
                         <option value="" th:text="#{common.all}">すべて</option>
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <select id="acceptanceEngineerFilter" name="engineerId" class="form-select">
+                    <select id="acceptanceEngineerFilter" name="engineerId" class="form-select" aria-label="要員">
                         <option value="" th:text="#{common.all}">すべて</option>
                     </select>
                 </div>

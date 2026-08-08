@@ -88,11 +88,11 @@ class OrderAcceptanceSchemaTest {
                 "SELECT acceptance_required FROM t_contract WHERE contract_no = 'F1-NOTNULL-2'", Integer.class);
         assertEquals(1, defaultValue);
 
-        // 明示0（検収不要契約）は許可される
+        // 明示0（検収不要契約）は理由を付与して許可される
         jdbcTemplate.update(
                 "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
-                        + " start_date, selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES ('F1-NOTNULL-3', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 0)",
+                        + " start_date, selling_price, cost_price, status, acceptance_required, acceptance_exemption_reason)"
+                        + " VALUES ('F1-NOTNULL-3', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 0, '一括請負のため')",
                 engineerId, projectId, customerId);
         Integer value = jdbcTemplate.queryForObject(
                 "SELECT acceptance_required FROM t_contract WHERE contract_no = 'F1-NOTNULL-3'", Integer.class);

@@ -225,10 +225,20 @@ CREATE TABLE t_contract (
   created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag            TINYINT DEFAULT 0,
-  version                 INT NOT NULL DEFAULT 0
+  version                 INT NOT NULL DEFAULT 0,
+  CONSTRAINT chk_contract_acceptance_exemption CHECK (acceptance_required = 1 OR (acceptance_exemption_reason IS NOT NULL AND TRIM(acceptance_exemption_reason) != ''))
 );
 -- R09-P2-04: 本番のuk_contract_order_line（1明細→1契約）をH2統合testでも検証できるようにする
 CREATE UNIQUE INDEX IF NOT EXISTS uk_contract_order_line ON t_contract(order_line_id);
+
+CREATE TABLE IF NOT EXISTS t_document_hash_claim (
+  tenant_id     VARCHAR(100) NOT NULL,
+  document_type VARCHAR(50)  NOT NULL,
+  sha256        VARCHAR(64)  NOT NULL,
+  document_id   BIGINT       NOT NULL,
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, document_type, sha256)
+);
 
 DROP TABLE IF EXISTS t_quotation CASCADE;
 

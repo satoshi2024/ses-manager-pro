@@ -135,16 +135,27 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
             String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
 
             if (order.getLegalEntityId() != null && getOrganizationUnitMapper() != null) {
-                com.ses.entity.OrganizationUnit legalEntity = getOrganizationUnitMapper().selectById(order.getLegalEntityId());
+                java.time.LocalDate effectiveDate = order.getOrderDate() != null ? order.getOrderDate() : java.time.LocalDate.now();
+                com.ses.entity.OrganizationUnit legalEntity = getOrganizationUnitMapper().selectOne(
+                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.OrganizationUnit>()
+                                .eq("tenant_id", order.getTenantId() != null ? order.getTenantId() : "default")
+                                .eq("legal_entity_id", order.getLegalEntityId())
+                                .eq("deleted_flag", 0)
+                                .eq("status", "有効")
+                                .and(w -> w.isNull("valid_from").or().le("valid_from", effectiveDate))
+                                .and(w -> w.isNull("valid_to").or().ge("valid_to", effectiveDate))
+                                .orderByDesc("parent_id IS NULL")
+                                .orderByAsc("id")
+                                .last("LIMIT 1"));
                 if (legalEntity != null) {
                     if (StringUtils.hasText(legalEntity.getName())) {
                         companyName = legalEntity.getName();
                     }
-                    String customAddress = systemConfigService.getString("legal_entity." + legalEntity.getId() + ".address", null);
+                    String customAddress = systemConfigService.getString("legal_entity." + order.getLegalEntityId() + ".address", null);
                     if (StringUtils.hasText(customAddress)) {
                         companyAddress = customAddress;
                     }
-                    String customReg = systemConfigService.getString("legal_entity." + legalEntity.getId() + ".invoice-registration-number", null);
+                    String customReg = systemConfigService.getString("legal_entity." + order.getLegalEntityId() + ".invoice-registration-number", null);
                     if (StringUtils.hasText(customReg)) {
                         registrationNo = customReg;
                     }

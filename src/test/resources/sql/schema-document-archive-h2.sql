@@ -1,12 +1,13 @@
 -- 法定文書台帳 (V67 legal-document-ledger-archive) H2用スキーマ
 -- MySQL固有構文(ENGINE,COLLATE,ON UPDATE)を除去したH2互換版
 
-DROP TABLE IF EXISTS t_document_disposal_request;
-DROP TABLE IF EXISTS t_document_access_log;
-DROP TABLE IF EXISTS t_document_link;
-DROP TABLE IF EXISTS t_document_version;
-DROP TABLE IF EXISTS t_document;
-DROP TABLE IF EXISTS m_document_type;
+DROP TABLE IF EXISTS t_document_hash_claim CASCADE;
+DROP TABLE IF EXISTS t_document_disposal_request CASCADE;
+DROP TABLE IF EXISTS t_document_access_log CASCADE;
+DROP TABLE IF EXISTS t_document_link CASCADE;
+DROP TABLE IF EXISTS t_document_version CASCADE;
+DROP TABLE IF EXISTS t_document CASCADE;
+DROP TABLE IF EXISTS m_document_type CASCADE;
 
 CREATE TABLE m_document_type (
   id                     BIGINT        AUTO_INCREMENT PRIMARY KEY,
@@ -103,4 +104,13 @@ CREATE TABLE t_document_disposal_request (
   created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   deleted_flag  TINYINT       NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS t_document_hash_claim (
+  tenant_id     VARCHAR(100) NOT NULL,
+  document_type VARCHAR(50)  NOT NULL,
+  sha256        VARCHAR(64)  NOT NULL,
+  document_id   BIGINT       NOT NULL,
+  created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, document_type, sha256)
 );

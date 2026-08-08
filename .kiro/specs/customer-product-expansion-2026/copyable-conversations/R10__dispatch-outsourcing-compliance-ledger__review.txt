@@ -15,7 +15,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V81
+- Migration: V82
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2の公式様式field mappingと法務受入責任者が確定済み。
 - 期待するtask順: 0→F1→F2→(A1 || B1 || B2)→M

@@ -483,7 +483,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             if (src.orderLineId() != null) {
                 Contract existing = baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                        .eq(Contract::getOrderLineId, src.orderLineId()).last("LIMIT 1"));
+                        .eq(Contract::getOrderLineId, src.orderLineId()).last("LIMIT 1 FOR UPDATE"));
                 if (existing != null) {
                     return existing;
                 }

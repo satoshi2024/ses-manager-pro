@@ -358,7 +358,9 @@ CREATE TABLE t_contract (
     ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT fk_contract_customer
     FOREIGN KEY (customer_id) REFERENCES m_customer(id)
-    ON UPDATE CASCADE ON DELETE RESTRICT
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_contract_acceptance_exemption
+    CHECK (acceptance_required = 1 OR (acceptance_exemption_reason IS NOT NULL AND TRIM(acceptance_exemption_reason) != ''))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='契約テーブル';
 
 
@@ -1001,6 +1003,19 @@ CREATE TABLE t_contract_acceptance_backfill (
   contract_id   BIGINT       PRIMARY KEY COMMENT 'V80適用時点の既存契約ID（0=sentinel）。検収不要へ移行対象',
   backfilled_at DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT 'marker登録日時'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='V80 legacy backfill marker';
+
+-- ============================================================
+-- 30. t_document_hash_claim (文書HashアトミックClaim)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_document_hash_claim (
+  tenant_id     VARCHAR(100) NOT NULL COMMENT 'テナントID',
+  document_type VARCHAR(50)  NOT NULL COMMENT '文書種別',
+  sha256        VARCHAR(64)  NOT NULL COMMENT 'ファイルHash (SHA-256)',
+  document_id   BIGINT       NOT NULL COMMENT '関連文書ID',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, document_type, sha256),
+  CONSTRAINT fk_document_hash_claim_document FOREIGN KEY (document_id) REFERENCES t_document(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書HashアトミックClaimテーブル';
 
 -- ============================================================
 -- DDL完了

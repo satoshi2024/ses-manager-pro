@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V81）
+## 1. DDL（予約V82）
 
 - `m_workplace(id, customer_id, name, address, organization_unit, phone)`。
 - `t_contract_compliance_profile(contract_id, contract_type_detail, workplace_id, work_description,

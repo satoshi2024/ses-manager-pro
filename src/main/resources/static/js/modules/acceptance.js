@@ -184,9 +184,9 @@ function renderPagination(pageData, loadFuncName) {
     let html = `<div class="text-muted small ps-2">${SES.i18n.t('common.page.info', [pageData.total, start, end])}</div>
         <nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
     if (pageData.current > 1) {
-        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" aria-label="${SES.i18n.t('common.page.prev', '前へ')}" onclick="${loadFuncName}(${pageData.current - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
     } else {
-        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-muted" href="javascript:void(0)" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left"></i></a></li>`;
+        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-muted" href="javascript:void(0)" tabindex="-1" aria-disabled="true" aria-label="${SES.i18n.t('common.page.prev', '前へ')}"><i class="bi bi-chevron-left"></i></a></li>`;
     }
     for (let i = 1; i <= pageData.pages; i++) {
         if (i === pageData.current) {
@@ -198,7 +198,7 @@ function renderPagination(pageData, loadFuncName) {
         }
     }
     if (pageData.current < pageData.pages) {
-        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" aria-label="${SES.i18n.t('common.page.next', '次へ')}" onclick="${loadFuncName}(${pageData.current + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
     }
     html += '</ul></nav>';
     paginationContainer.html(html);

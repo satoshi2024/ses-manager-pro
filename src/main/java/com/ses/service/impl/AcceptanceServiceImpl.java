@@ -256,7 +256,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
 
     @Override
     public void assertAllowedAcceptance(Long acceptanceId) {
-        if ("人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
+        if (com.ses.common.util.SecurityUtils.isHrRole()) {
             throw BusinessException.of(403, "error.forbidden");
         }
         Acceptance acceptance = require(acceptanceId);
@@ -296,7 +296,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
 
     /** 対象月(asOf)時点の許可契約ID集合。 */
     private List<Long> scopedContractIds(java.time.LocalDate asOf) {
-        if ("人事".equals(com.ses.common.util.SecurityUtils.currentRole())) {
+        if (com.ses.common.util.SecurityUtils.isHrRole()) {
             return List.of();
         }
         if (!dataScopeService.isScoped()) {
