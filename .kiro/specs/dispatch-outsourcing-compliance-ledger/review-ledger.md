@@ -2,7 +2,7 @@
 
 ## 現行判定
 
-`R10 Round 4 packet: T060 PASS / R4-P1-01 VERIFIED_CLOSED / T061 V84 START ALLOWED`。R10 Round 4はT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定し、R4-P1-01もVERIFIED_CLOSEDとした。CI/TestcontainersのV83実在・V82不在、正式decisionによるS10=V84繰上げ、予約資料・fixture同期、direct regressionを独立確認済みである。T061/V84の開発は開始可だが、production release/apply authorizationは付与しない。S11 attendanceの別track差分は混入させない。
+`R10 Round 4 packet: T060 PASS / R4-P1-01 VERIFIED_CLOSED / T061 V84 IMPLEMENTER COMPLETE`。R10 Round 4はT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定し、R4-P1-01もVERIFIED_CLOSEDとした。CI/TestcontainersのV83実在・V82不在、正式decisionによるS10=V84繰上げ、予約資料・fixture同期、direct regressionを独立確認済みである。T061/V84の開発成果（DDL/entity/H2/MySQL/direct regression）は実装済みで、R10のT061独立Review待ち。production release/apply authorizationは付与しない。S11 attendanceの別track差分は混入させない。
 
 R4-P1-01のunblock fixとして、reserved <= latestを検出するguard、CI/TestcontainersのFlyway履歴read-only証跡、V83実在/V82欠番の正式decision、V84〜V90の予約資料同期、legacy fixtureを追加した。`SpecDispatchConsistencyTest`は9/0/0/0 PASSへ復帰し、R10独立確認でR4-P1-01がVERIFIED_CLOSEDとなった。T061開始時にmerge済み`db/migration`のlatestを再確認し、V84でDDLを実装する。
 
@@ -78,6 +78,13 @@ T060からT061へ進む条件は、R10 Round 4で確認済みのT060判定に加
 - **Changed files boundary**: migration/DDL/SecurityConfig/production code/tasks checkboxは変更なし。R4証跡・decision・docs・test fixture/direct regressionだけを変更し、S11の別track差分は混入していない。rollbackは本deltaのdocs/test commit revertのみでDB rollback不要。
 - **Review result**: R10がenvironment packet、formal decision、V84〜V90の全資料同期、fixture、9件direct regression、実在SHA/Base/Headを独立確認し、R4-P1-01を`VERIFIED_CLOSED`とした。
 - **Provenance**: Base `df7f6b1f5e27b64876133d26debd95422d29379a` → **R10 reviewed Head `b75af1a1eff16e6c5723a2a2310a31ec324e7f80`**。同期内容commit `08eb09802d07c6e272473495ac22f5057cd4bbba`、provenance predecessor `23e48e0689deabeab49f8888c3aac1bc8c11a97f`。R10 reviewed Head後のcurrent main `7f60738a0dd1b3a9314cc3b115dae1173673358d`はS11中央ledger 1 fileのみでS10 Review対象外。CI evidence run `31306415759`は全体1629/0/0/0、`SpecDispatchConsistencyTest` 9/0/0/0、`FlywayEnvironmentEvidenceTest` 1/0/0/0。
+
+## T061 review packet synchronization（2026-08-09）
+
+- T061 F1は実装完了。Base `856ab1faf09f07abcd7a5b34453a5037173ce553` → implementation Head `e7f7f19434e0e45d54888d6b468e9d8704c6056f`。この後のledger同期commitを含むcurrent HeadをR10 packet送付時に固定する。
+- Changed boundary: V1/V84、4 entity/mapper、H2専用schema、engineer-schema/application-test、migration guard、H2/MySQL smoke、tasks/design/ledgerのみ。SecurityConfig、UI、B1/B2、S11 attendanceは変更していない。
+- Test packet: MySQL V84 fresh `FlywayDispatchComplianceSchemaSmokeTest` 1/0/0/0、H2 `DispatchComplianceSchemaH2Test` 1/0/0/0、`SpecDispatchConsistencyTest` 9/0/0/0、`ContractServiceImplTest` 48/0/0/0、`ComplianceApiControllerTest` 1/0/0/0、`git diff --check` exit 0。
+- Demo evidence: profileのsnapshot_json/workplace_snapshot_json/worker_snapshot_json不変、limitation_date NULL＝未算定、事業所期間逆転拒否、finding `(contract_id, code, condition_fingerprint)`重複拒否、V84の契約/文書/contact FKを確認。UI/export/PDFの実maskはT063/T064のgateとして残す。
 
 ## R10 final Review synchronization（2026-08-09）
 
