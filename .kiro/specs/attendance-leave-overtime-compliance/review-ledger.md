@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `FIX / REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T070 code Head=`cc7c15c60bc26bf7b19fbca7759b6e65f572a725`、evidence/current merged Head=`4789c192a733d2d64b13c9941ab53e3780aefbe9`（`HEAD=origin/main`、worktree clean） |
-| merge | `cc7c15c`、証跡同期`4789c19`、T068/V83=`b327b1b`、T069=`d395797`はいずれもcurrent `origin/main`の祖先。V82はtreeに存在せず、V83の本番適用有無は未検証 |
-| latest review | `R11 Round 2 / T070独立Review 2026-08-09` |
-| verdict | `FAIL`。T070にP1×4、V82前にV83がmainへ入ったmigration順序にP1×1。R1-P2-01は現行GitとPacketが再び不一致のため`OPEN`のまま。T070の実ブラウザDemoはP2 |
-| issue count | `P0=0 / P1=5 / P2=3 / NOTE=0` |
-| next action | 元の実装対話でR2-P1-01〜05を修正し、再現test＋直接回帰（共有scope/migrationはL3）を提出する。T071はR2-P1-02〜04の共有calendar/scope契約がVERIFIED_CLOSEDになるまで開始しない。R1-P2-01とR2-P2-01〜02だけでは次taskを止めない |
+| head | T070 R2 fix code Head=`1fb54d4`、evidence/current merged Head=`9af70718cc34ec18522219273e8f18e745777a9e`（`HEAD=origin/main`、review開始時worktree clean） |
+| merge | fix delta base=`4789c19`。`1fb54d4`と証跡同期`9af7071`はいずれもcurrent `origin/main`へmerge済み。V83はtreeに存在しV82は不在、全environmentの適用有無は未検証のためdeploy/apply freeze継続 |
+| latest review | `R11 Round 2 fix delta / T070独立再Review 2026-08-09` |
+| verdict | `FAIL`。R2-P1-05は`VERIFIED_CLOSED`、R1-P2-01もPacket/Git同期を確認して`VERIFIED_CLOSED`。ただしR2-P1-02〜04はfix deltaに残存欠陥がありOPEN、R2-P1-01は環境証拠待ちでOPEN。T070の実ブラウザDemoとpagingはP2 |
+| issue count | `P0=0 / P1=4 / P2=2 / NOTE=0` |
+| next action | 元の実装対話でR2-P1-02〜04の残存条件を最小修正し、明示NULL/履歴不存在、calendar scope、休憩配賦を直接回帰する。R2-P1-01は全environmentの`flyway_schema_history`確認までOPEN/deploy freeze。T071はR2-P1-02〜04が独立`VERIFIED_CLOSED`になるまで開始しない。R2-P2-01〜02だけでは次taskを止めない |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -21,12 +21,10 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,40-50` | `HEAD=origin/main=4789c19`かつ`b327b1b`が祖先なのに、Packet/台帳がV83とT070を未mergeと記録 | Review範囲・migration配備判断の誤認 | code Head、evidence Head、merged/apply状態を実Gitと環境証拠で分離 | `git rev-parse`、`merge-base --is-ancestor`、tree内V82/V83 | OPEN | — | Round 2でFIXEDを不受理 |
 | attendance-leave-overtime-compliance-R2-P1-01 | P1 | design §1、tasks T068 migration順、handbook §4 | `design.md:5`; `tasks.md:33`; `src/main/resources/db/migration/V83__attendance_leave_overtime_compliance.sql:1` | V81 DBへcurrent mainを配備するとV82不在のままV83が適用対象になる | 後日V82追加時にout-of-order/validate失敗し得る | current mainを配備停止し、V82を先に取り込む。V83適用済み環境があれば順方向の再採番/復旧計画を固定 | V81→V82→V83 legacy/fresh、適用済み環境inventory | OPEN | — | — |
-| attendance-leave-overtime-compliance-R2-P1-02 | P1 | R1.1/R1.2/R3.1/R5、design §2/§5.1、overtime-rules §1.2 | `AttendanceServiceImpl.java:276-301,304-321` | 所定480分の通常日に09:00〜23:00、休憩0分を本人保存 | 法定時間外・深夜が0になり36協定判定入力を誤る | 勤務日asOfのcalendarを解決するAttendanceCalculatorで法定内/外・所定/法定休日・深夜を分計算し、clientのworkTypeを法定区分の正にしない | 8h境界、22時境界、跨夜、所定/法定休日、calendar NULL/0、週40h | OPEN | — | — |
-| attendance-leave-overtime-compliance-R2-P1-03 | P1 | T070 Objective、design §5.3 HR法人scope、R5権限外閲覧拒否 | `AttendanceServiceImpl.java:68-77,174-177,195-229,332-354,421-430` | 同一DBに法人A/Bがあり、法人A担当HRが管理一覧または法人B要員をclose | 法人Bの勤怠PIIを閲覧・締め可能 | HRの担当法人をserver側で解決し、月次/dayへlegal entity・organization snapshotを保存、list/actionをSQL境界で同じ法人集合へ制限 | HR A→B list/detail/close拒否、NULL/未知法人fail-closed、管理者全件 | OPEN | — | — |
-| attendance-leave-overtime-compliance-R2-P1-04 | P1 | T070 Objective、design §5.3 manager scope、platform-invariants §1/§2 | `AttendanceServiceImpl.java:75-77,421-431`; `EngineerAccountLinkMapper.java:17-39` | scope無効時、または対象月後に要員が組織異動済みの過去月をmanagerが照会/承認 | scope無効時は0件、過去月は現在所属で誤許可/誤拒否 | `hasFullAccess()`の無制限sentinelを先に扱い、対象月末の履歴所属をCASE/共通ResolverでSQL解決する | scope on/off、空集合、直属追加、異動前/当日/後、履歴なし/ありNULL | OPEN | — | — |
-| attendance-leave-overtime-compliance-R2-P1-05 | P1 | G6手動修正統制、R1.4、design §5.4 締め済み再open | `AttendanceApiController.java:69-72`; `AttendanceServiceImpl.java:180-193`; `AttendanceMonth.java:41` | 管理者が理由なしでreopen APIをPOST | 申請/承認理由を残さず締め済みsnapshotを編集可能状態へ進められる | reason必須のcommand、承認境界、version/state CAS、業務監査への保存を追加し、空理由・自己完結を拒否 | reason必須、申請者≠承認者、二重reopen、rollback、監査再読 | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P1-02 | P1 | R1.1/R1.2/R3.1/R5、design §5.1、overtime-rules §1.2 | `AttendanceCalculator.java:46-55,75-103`; `AttendanceCalculatorTest.java:60-70,99-121` | 同一法人に「別要員の個人calendar」と法人既定calendarを置き、対象要員を計算する。また21:00〜23:00のうち21:00〜22:00を休憩として深夜時間を計算する | 別要員calendarが法人一致だけで候補となり、より新しい版なら誤選択される。休憩総分を常に退勤直前へ置く未決定規則により深夜時間も誤る | calendar tierを排他的scope条件で解決し、他要員/他組織calendarを法人fallbackへ混入させない。休憩の時刻帯を保持するか、spec決定表で配賦規則を確定して実装する | 他要員/他組織/法人既定の競合、validFrom同日、休憩が深夜前/中/後、8h/週40h/22時/跨夜 | OPEN | `4dadfb3`ほか | fix deltaで残存 |
+| attendance-leave-overtime-compliance-R2-P1-03 | P1 | T070 Objective、design §5.3 HR法人scope、R5、platform-invariants §1.1 | `AttendanceScopeResolver.java:45-54`; `AttendanceScopeMapper.java:47-51`; `AttendanceServiceImpl.java:86-90,469-474` | 履歴行を`KNOWN`かつ`organization_id=NULL`で作り、linked userのprimary organizationを法人Aに置いてA担当HRでlist/actionする | 履歴行の明示NULLはfail-closedで0件/404であるべきだが、`COALESCE(eh.organization_id, uo.organization_id)`とJava fallbackで法人Aへ復活し、PII閲覧・締めを許可する | `CASE WHEN eh.id IS NULL`の時だけcurrent/user組織へfallbackし、履歴行ありはNULLを含め履歴値を採用する。snapshot/list/actionを同じResolver規則へ統一する | HR A/B、履歴なし/KNOWN NULL/UNKNOWN、月初/月末、list/detail/count/close/reject/reopen | OPEN | `34654f2`、`356d9ee`ほか | fix deltaで残存 |
+| attendance-leave-overtime-compliance-R2-P1-04 | P1 | T070 Objective、design §5.3、platform-invariants §1.1/§2、OrganizationScope public contract | `EngineerAccountLinkMapper.java:28-43`; `AttendanceServiceImpl.java:91-94,476-480` | manager配下要員に対象月末の履歴行`KNOWN, organization_id=NULL`を置き、linked userのprimary organizationをmanager配下へ置いてlist/actionする | full-access先判定は修正済みだが、履歴明示NULLがuser組織へfallbackし、対象外要員をmanager母集団へ混入させる | shared mapperを`CASE WHEN eh.id IS NULL THEN ... ELSE eh.organization_id END`へ直し、履歴ありNULLをDB側0件にする。全consumerで同じasOf規則を維持する | full-access/有限scope、空集合、直属追加、履歴なし/ありNULL/UNKNOWN、前日/当日/翌日、list/action | OPEN | `34654f2`、`146046e`ほか | fix deltaで残存 |
 | attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN | — | — |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN | — | — |
 
@@ -38,6 +36,8 @@
 | attendance-leave-overtime-compliance-R1-P1-02 | VERIFIED_CLOSED | release gate期限と実装契約の不足 | `3b03a94` | R11再Review: ATT-GATE-05/06、内部正/外部正、UNKNOWN/findingを確認 | R1 fix delta再Review | gate契約変更時 |
 | attendance-leave-overtime-compliance-R1-P2-02 | VERIFIED_CLOSED | V5初期形のみ記載 | `3b03a94` | R11再Review: V5 `DECIMAL(5,1)`/V39 `DECIMAL(6,2)`を確認 | R1 fix delta再Review | 現行migration変更時 |
 | attendance-leave-overtime-compliance-R1-P2-03 | VERIFIED_CLOSED | L0 commandの再現情報不足 | `2299fbc` | R11再Review: script実行1/0/0/0、exit 0を確認 | R1 fix delta再Review | script契約変更時 |
+| attendance-leave-overtime-compliance-R1-P2-01 | VERIFIED_CLOSED | code/evidence Headとmerged/apply状態の混同 | `9af7071` | fix base=`4789c19`、code=`1fb54d4`、HEAD=origin/main=`9af7071`をGitで確認。V83 tree内/V82不在と適用証拠未取得も分離記録 | R2 fix delta再Review | Packetと実GitのBase/Head/mergeが再度不一致になった場合 |
+| attendance-leave-overtime-compliance-R2-P1-05 | VERIFIED_CLOSED | reopenを直接状態遷移として実装しapproval境界が無かった | `b91dc99`ほか | 理由DTO/API、申請時CLOSED維持、approval adapterのstatus/version CASを読解。指定29件と共通approval engine 45件が各skip 0でPASSし、申請者除外・route fail-closed・競合・監査契約を確認 | R2 fix delta再Review | `attendance.reopen` adapter/approval engine/route契約変更時 |
 
 ## 4. 最新Review Packet
 
