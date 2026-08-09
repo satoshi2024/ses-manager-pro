@@ -1,6 +1,7 @@
 -- 雇用勤怠・休暇・時間外コンプライアンスのH2 replay shape（V83対応）。
 -- H2ではMySQLのENGINE/FK方言を避け、制約と列契約を直接検証する。
 SET REFERENTIAL_INTEGRITY FALSE;
+DROP TABLE IF EXISTS t_leave_ledger CASCADE;
 DROP TABLE IF EXISTS t_overtime_followup CASCADE;
 DROP TABLE IF EXISTS m_overtime_agreement CASCADE;
 DROP TABLE IF EXISTS t_leave_request CASCADE;
@@ -144,6 +145,31 @@ CREATE TABLE t_leave_request (
   CONSTRAINT chk_leave_request_minutes CHECK (requested_minutes > 0)
 );
 
+CREATE TABLE t_leave_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL,
+  legal_entity_id BIGINT,
+  leave_type VARCHAR(30) NOT NULL,
+  ledger_type VARCHAR(20) NOT NULL,
+  amount_minutes INT NOT NULL,
+  entry_date DATE NOT NULL,
+  leave_request_id BIGINT,
+  source VARCHAR(20) NOT NULL DEFAULT 'manual',
+  source_external_id VARCHAR(200),
+  remarks VARCHAR(500),
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_leave_ledger_source UNIQUE (source, source_external_id),
+  CONSTRAINT chk_leave_ledger_type CHECK (ledger_type IN ('GRANT', 'CONSUME')),
+  CONSTRAINT chk_leave_ledger_amount CHECK (amount_minutes > 0),
+  CONSTRAINT chk_leave_ledger_source CHECK (
+    (source IN ('manual', 'system') AND source_external_id IS NULL)
+    OR (source = 'import' AND source_external_id IS NOT NULL)
+  )
+);
+
 CREATE TABLE m_overtime_agreement (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id BIGINT NOT NULL,
@@ -202,6 +228,9 @@ INSERT IGNORE INTO m_system_config (config_key, config_value, description) VALUE
   ('overtime.limit.exceed-month-count', '6', '45時間超過月数上限（回）'),
   ('overtime.prorate-partial-month', 'false', '月中入社・退職の按分有無'),
   ('overtime.warning.threshold-percent', '80', '予兆警告閾値（%）'),
-  ('overtime.warning.recipients', 'self,manager,hr', '時間外警告の通知先');
+  ('overtime.warning.recipients', 'self,manager,hr', '時間外警告の通知先'),
+  ('leave.balance.source', 'internal', '休暇残数の正（internal=本システム台帳/G6既定、external=外部人事システム参照のみ）'),
+  ('leave.balance.types', '有給,半休,時間休,代休,特別休暇', '残数チェック対象の休暇種別（欠勤は無給のため対象外）'),
+  ('leave.sales-notification.types', '有給,特別休暇', '客先報告が必要な休暇種別（承認時に担当営業へ通知）');
 
 SET REFERENTIAL_INTEGRITY TRUE;

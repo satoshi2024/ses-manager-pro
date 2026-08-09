@@ -156,6 +156,10 @@ public class SecurityConfig {
                 // 新雇用勤怠の管理画面/API。営業には客先工数のwork-record権限があっても見せない。
                 .requestMatchers("/work-record/attendance/**", "/api/work-records/attendance/**")
                 .hasAnyRole("管理者", "HR", "マネージャー")
+                // 休暇管理（T071/A2）。営業は休暇scopeを持たず、客先報告が必要な休暇の通知だけを受ける（design §5.3）。
+                // 本人申請 /my/leave は要員ロールの /my/** 規則が先に適用される。
+                .requestMatchers("/leave/**", "/api/leave/**")
+                .hasAnyRole("管理者", "HR", "マネージャー")
                 // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
                 .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
                 // ===== 要員を含む全認証ユーザーが利用できる共通経路 =====

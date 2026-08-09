@@ -134,6 +134,33 @@ public class AttendanceCalculator {
         return sorted;
     }
 
+    /**
+     * 勤務日の所定分を返す（休暇申請の分計算用、T071）。
+     * 所定なし（NULL=休日）は0分。勤務カレンダーが未解決の場合はfail-closedで拒否する。
+     */
+    public int scheduledMinutes(LocalDate workDate, Long engineerId, Long legalEntityId,
+                                Long organizationId) {
+        Integer value = scheduledMinutesOrNull(workDate, engineerId, legalEntityId, organizationId);
+        return value == null ? 0 : value;
+    }
+
+    /**
+     * 勤務日の所定分を返す。カレンダー版は解決するが当日の定義行が無い場合は
+     * null（所定なし=休日相当）を返す。カレンダー自体が未解決の場合はfail-closedで拒否する。
+     */
+    public Integer scheduledMinutesOrNull(LocalDate workDate, Long engineerId, Long legalEntityId,
+                                          Long organizationId) {
+        WorkCalendar calendar = resolveCalendar(workDate, engineerId, legalEntityId, organizationId);
+        WorkCalendarDay day = workCalendarDayMapper.selectOne(new LambdaQueryWrapper<WorkCalendarDay>()
+                .eq(WorkCalendarDay::getCalendarId, calendar.getId())
+                .eq(WorkCalendarDay::getCalendarDate, workDate)
+                .last("LIMIT 1"));
+        if (day == null || day.getDayType() == null || day.getDayType().isBlank()) {
+            return null;
+        }
+        return day.getScheduledMinutes();
+    }
+
     private WorkCalendar resolveCalendar(LocalDate workDate, Long engineerId, Long legalEntityId,
                                          Long organizationId) {
         if (workDate == null || engineerId == null || legalEntityId == null) {

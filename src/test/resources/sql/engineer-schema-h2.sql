@@ -1184,6 +1184,7 @@ ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS fk_contract_order_line
   FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id);
 
 -- S11/T068: engineer-schema-h2でも雇用勤怠entityのSELECT列を再現する。
+DROP TABLE IF EXISTS t_leave_ledger CASCADE;
 DROP TABLE IF EXISTS t_overtime_followup CASCADE;
 DROP TABLE IF EXISTS m_overtime_agreement CASCADE;
 DROP TABLE IF EXISTS t_leave_request CASCADE;
@@ -1320,6 +1321,30 @@ CREATE TABLE t_leave_request (
   deleted_flag TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT chk_leave_request_period CHECK (start_date <= end_date),
   CONSTRAINT chk_leave_request_minutes CHECK (requested_minutes > 0)
+);
+CREATE TABLE t_leave_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  engineer_id BIGINT NOT NULL,
+  legal_entity_id BIGINT,
+  leave_type VARCHAR(30) NOT NULL,
+  ledger_type VARCHAR(20) NOT NULL,
+  amount_minutes INT NOT NULL,
+  entry_date DATE NOT NULL,
+  leave_request_id BIGINT,
+  source VARCHAR(20) NOT NULL DEFAULT 'manual',
+  source_external_id VARCHAR(200),
+  remarks VARCHAR(500),
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_leave_ledger_source UNIQUE (source, source_external_id),
+  CONSTRAINT chk_leave_ledger_type CHECK (ledger_type IN ('GRANT', 'CONSUME')),
+  CONSTRAINT chk_leave_ledger_amount CHECK (amount_minutes > 0),
+  CONSTRAINT chk_leave_ledger_source CHECK (
+    (source IN ('manual', 'system') AND source_external_id IS NULL)
+    OR (source = 'import' AND source_external_id IS NOT NULL)
+  )
 );
 CREATE TABLE m_overtime_agreement (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

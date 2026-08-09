@@ -157,6 +157,64 @@ class FlywayAttendanceSchemaSmokeTest {
         }
     }
 
+    /** T071のV98（t_leave_ledger + 休暇config/menu seed）をfresh/legacy共通shapeで検証する。 */
+    @Test
+    void 休暇残数台帳V98のshapeとconfigとmenuのseedがMySQLで成立する() throws Exception {
+        String v98 = new String(getClass().getClassLoader()
+                .getResourceAsStream("db/migration/V98__leave_ledger.sql").readAllBytes(),
+                StandardCharsets.UTF_8);
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            for (String ddl : v98.split(";")) {
+                if (!ddl.trim().isEmpty()) {
+                    statement.execute(ddl);
+                }
+            }
+            assertTableExists(statement, "t_leave_ledger");
+            assertIndexExists(statement, "t_leave_ledger", "uk_leave_ledger_source");
+            assertCheckExists(statement, "t_leave_ledger", "chk_leave_ledger_type");
+            assertCheckExists(statement, "t_leave_ledger", "chk_leave_ledger_amount");
+            assertEquals(3, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_system_config WHERE config_key LIKE 'leave.%'"));
+            assertEquals(2, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_menu WHERE menu_key IN ('myLeave', 'leaveManagement')"));
+
+            statement.executeUpdate("INSERT INTO t_engineer "
+                    + "(full_name, employment_type, status) VALUES ('T098-mysql-engineer', '正社員', 'Bench')");
+            long engineerId = queryLong(statement,
+                    "SELECT id FROM t_engineer WHERE full_name='T098-mysql-engineer'");
+            statement.executeUpdate("INSERT INTO t_leave_ledger "
+                    + "(engineer_id, leave_type, ledger_type, amount_minutes, entry_date, source) "
+                    + "VALUES (" + engineerId + ", '有給', 'GRANT', 4800, '2026-04-01', 'manual')");
+            statement.executeUpdate("INSERT INTO t_leave_ledger "
+                    + "(engineer_id, leave_type, ledger_type, amount_minutes, entry_date, source) "
+                    + "VALUES (" + engineerId + ", '有給', 'CONSUME', 480, '2026-08-03', 'system')");
+            assertEquals(4320, queryInt(statement,
+                    "SELECT COALESCE(SUM(CASE WHEN ledger_type='GRANT' THEN amount_minutes "
+                            + "ELSE -amount_minutes END), 0) FROM t_leave_ledger "
+                            + "WHERE engineer_id=" + engineerId + " AND leave_type='有給'"));
+
+            boolean negativeRejected = false;
+            try {
+                statement.executeUpdate("INSERT INTO t_leave_ledger "
+                        + "(engineer_id, leave_type, ledger_type, amount_minutes, entry_date, source) "
+                        + "VALUES (" + engineerId + ", '有給', 'CONSUME', -1, '2026-08-03', 'manual')");
+            } catch (SQLException expected) {
+                negativeRejected = true;
+            }
+            assertTrue(negativeRejected, "負数の付与/消化量を拒否するはず");
+
+            boolean invalidTypeRejected = false;
+            try {
+                statement.executeUpdate("INSERT INTO t_leave_ledger "
+                        + "(engineer_id, leave_type, ledger_type, amount_minutes, entry_date, source) "
+                        + "VALUES (" + engineerId + ", '有給', 'HOLD', 60, '2026-08-03', 'manual')");
+            } catch (SQLException expected) {
+                invalidTypeRejected = true;
+            }
+            assertTrue(invalidTypeRejected, "GRANT/CONSUME以外のledger_typeを拒否するはず");
+        }
+    }
+
     private void assertTableExists(Statement statement, String table) throws Exception {
         assertTrue(queryInt(statement, "SELECT COUNT(*) FROM information_schema.tables "
                 + "WHERE table_schema=DATABASE() AND table_name='" + table + "'") == 1,

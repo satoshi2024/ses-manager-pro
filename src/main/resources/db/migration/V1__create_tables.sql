@@ -1217,6 +1217,38 @@ CREATE TABLE IF NOT EXISTS t_leave_request (
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='休暇申請';
 
+-- 休暇残数付与/消化台帳（G6: 本システムが正、V98と同じ最終shapeを統合baselineに保持）。
+CREATE TABLE IF NOT EXISTS t_leave_ledger (
+  id                  BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id         BIGINT NOT NULL COMMENT '要員ID',
+  legal_entity_id     BIGINT COMMENT '法人ID（scope snapshot）',
+  leave_type          VARCHAR(30) NOT NULL COMMENT '有給/半休/時間休/代休/欠勤/特別休暇',
+  ledger_type         VARCHAR(20) NOT NULL COMMENT 'GRANT（付与）/CONSUME（消化）',
+  amount_minutes      INT NOT NULL COMMENT '分単位の付与/消化量（正の整数）',
+  entry_date          DATE NOT NULL COMMENT '付与/消化の発生日',
+  leave_request_id    BIGINT COMMENT '消化の由来となる休暇申請ID（GRANTはNULL）',
+  source              VARCHAR(20) NOT NULL DEFAULT 'manual' COMMENT 'manual/system/import',
+  source_external_id  VARCHAR(200) COMMENT '外部sourceの冪等ID',
+  remarks             VARCHAR(500) COMMENT '備考',
+  version             INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at          DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag        TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_leave_ledger_source (source, source_external_id),
+  INDEX idx_leave_ledger_engineer_type (engineer_id, leave_type, entry_date),
+  INDEX idx_leave_ledger_request (leave_request_id),
+  CONSTRAINT chk_leave_ledger_type CHECK (ledger_type IN ('GRANT', 'CONSUME')),
+  CONSTRAINT chk_leave_ledger_amount CHECK (amount_minutes > 0),
+  CONSTRAINT chk_leave_ledger_source CHECK (
+    (source IN ('manual', 'system') AND source_external_id IS NULL)
+    OR (source = 'import' AND source_external_id IS NOT NULL)
+  ),
+  CONSTRAINT fk_leave_ledger_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_leave_ledger_request FOREIGN KEY (leave_request_id) REFERENCES t_leave_request(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='休暇残数付与/消化台帳（G6: 本システムが正）';
+
 CREATE TABLE IF NOT EXISTS m_overtime_agreement (
   id                                  BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   legal_entity_id                     BIGINT NOT NULL COMMENT '法人ID',

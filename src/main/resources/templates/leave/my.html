@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{leave.my.title}">休暇申請</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div id="leaveState" class="mb-3" aria-live="polite"></div>
+            <div id="leaveError" class="alert alert-danger d-none" role="alert"></div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="leaveTable">
+                    <thead><tr>
+                        <th th:text="#{leave.leaveType}">休暇種別</th>
+                        <th th:text="#{leave.dateFrom}">開始日</th>
+                        <th th:text="#{leave.dateTo}">終了日</th>
+                        <th th:text="#{leave.timeRange}">時刻</th>
+                        <th th:text="#{leave.minutes}">申請分</th>
+                        <th th:text="#{leave.status}">状態</th>
+                        <th th:text="#{leave.actions}">操作</th>
+                    </tr></thead>
+                    <tbody id="leaveBody"></tbody>
+                </table>
+            </div>
+            <div class="border-top pt-3 mt-3">
+                <h6 th:text="#{leave.apply}">休暇を申請</h6>
+                <form id="leaveApplyForm" class="row g-2 align-items-end">
+                    <div class="col-6 col-md-2"><label class="form-label" for="leaveType" th:text="#{leave.leaveType}">休暇種別</label><select id="leaveType" class="form-select"><option value="有給" th:text="#{leave.type.paid}">有給</option><option value="半休" th:text="#{leave.type.half}">半休</option><option value="時間休" th:text="#{leave.type.hourly}">時間休</option><option value="代休" th:text="#{leave.type.substitute}">代休</option><option value="欠勤" th:text="#{leave.type.absence}">欠勤</option><option value="特別休暇" th:text="#{leave.type.special}">特別休暇</option></select></div>
+                    <div class="col-6 col-md-2"><label class="form-label" for="leaveStartDate" th:text="#{leave.dateFrom}">開始日</label><input id="leaveStartDate" type="date" class="form-control" required></div>
+                    <div class="col-6 col-md-2"><label class="form-label" for="leaveEndDate" th:text="#{leave.dateTo}">終了日</label><input id="leaveEndDate" type="date" class="form-control"></div>
+                    <div class="col-6 col-md-2"><label class="form-label" for="leaveStartTime" th:text="#{leave.timeFrom}">開始時刻</label><input id="leaveStartTime" type="time" class="form-control"></div>
+                    <div class="col-6 col-md-2"><label class="form-label" for="leaveEndTime" th:text="#{leave.timeTo}">終了時刻</label><input id="leaveEndTime" type="time" class="form-control"></div>
+                    <div class="col-12 col-md-2"><label class="form-label" for="leaveReason" th:text="#{leave.reason}">理由</label><input id="leaveReason" type="text" maxlength="500" class="form-control"></div>
+                    <div class="col-12 col-md-2"><button type="submit" class="btn btn-success w-100" th:text="#{leave.apply}">申請</button></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js"><script src="/js/modules/leave-my.js"></script></th:block>
+</body>
+</html>

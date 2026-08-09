@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{leave.management.title}">休暇管理</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+                <div>
+                    <label for="leaveMonth" class="form-label" th:text="#{leave.month}">対象月</label>
+                    <input id="leaveMonth" type="month" class="form-control">
+                </div>
+                <div>
+                    <label for="leaveBalanceEngineer" class="form-label" th:text="#{leave.balance}">残数照会</label>
+                    <input id="leaveBalanceEngineer" type="number" class="form-control" placeholder="engineerId">
+                </div>
+                <button id="leaveBalanceLoad" type="button" class="btn btn-outline-secondary" th:text="#{leave.balanceShow}">残数を表示</button>
+            </div>
+            <div id="leaveError" class="alert alert-danger d-none" role="alert"></div>
+            <div id="leaveBalanceResult" class="mb-3"></div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="leaveManagementTable">
+                    <thead><tr>
+                        <th th:text="#{leave.engineer}">要員</th>
+                        <th th:text="#{leave.leaveType}">休暇種別</th>
+                        <th th:text="#{leave.dateFrom}">開始日</th>
+                        <th th:text="#{leave.dateTo}">終了日</th>
+                        <th th:text="#{leave.minutes}">申請分</th>
+                        <th th:text="#{leave.status}">状態</th>
+                        <th th:text="#{leave.approvalStatus}">承認状態</th>
+                    </tr></thead>
+                    <tbody id="leaveManagementBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js"><script src="/js/modules/leave-management.js"></script></th:block>
+</body>
+</html>
