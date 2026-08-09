@@ -4,8 +4,8 @@
 
 - Decision ID: `S10-R4-P1-01-V83-REALIZED-RENUMBER`
 - Decision date: 2026-08-09 (JST)
-- Status: `IMPLEMENTER_DECISION_SUBMITTED / R10 INDEPENDENT VERIFICATION REQUIRED`
-- Implementer Head: `23e48e0689deabeab49f8888c3aac1bc8c11a97f`（Base `df7f6b1f5e27b64876133d26debd95422d29379a`、同期内容commit `08eb09802d07c6e272473495ac22f5057cd4bbba`）
+- Status: `R10 VERIFIED_CLOSED / T061 V84 START ALLOWED`
+- Provenance: Base `df7f6b1f5e27b64876133d26debd95422d29379a` → **R10 reviewed Head `b75af1a1eff16e6c5723a2a2310a31ec324e7f80`**。同期内容commit `08eb09802d07c6e272473495ac22f5057cd4bbba`、provenance predecessor `23e48e0689deabeab49f8888c3aac1bc8c11a97f`。reviewed Head後のcurrent main `7f60738a0dd1b3a9314cc3b115dae1173673358d`はS11中央ledger 1 fileのみ。
 - Scope: repository-known local development DB and CI/Testcontainers ephemeral MySQL
 - Production release authorization: **なし**。本decisionは採番と資料の整合を決めるもので、T061のDDL適用や本番交付を許可しない。
 
@@ -39,4 +39,4 @@ CI/Testcontainersの履歴照会はrepeatable migration（`version IS NULL`）�
 
 ## Gate and rollback
 
-R10が本decision、environment packet、同期資料、fixture、`SpecDispatchConsistencyTest` PASSを独立確認するまで、R4-P1-01は自己判定で閉じない。確認完了まではdeploy freeze、T061、V84 DDL、production変更を停止する。rollbackはこの文書・資料・fixture・testのcommitをrevertするだけで、production DB rollbackは不要（本deltaでmigration/DDLを作成していない）。
+R10は本decision、environment packet、同期資料、fixture、`SpecDispatchConsistencyTest` PASSを独立確認し、R4-P1-01を`VERIFIED_CLOSED`とした。T061/V84の開発は開始できるが、production release/apply authorizationは付与しない。rollbackはこの文書・資料・fixture・testのcommitをrevertするだけで、production DB rollbackは不要（本deltaでmigration/DDLを作成していない）。
