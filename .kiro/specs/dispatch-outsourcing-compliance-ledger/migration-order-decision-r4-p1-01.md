@@ -23,9 +23,9 @@ CI/Testcontainersの履歴照会はrepeatable migration（`version IS NULL`）�
 ## Formal decision
 
 1. V83はrepoの`src/main/resources/db/migration/V83__attendance_leave_overtime_compliance.sql`として実在し、Testcontainers fresh DBで適用成功した。V82はrepoにも証跡環境にも存在しないため、V82を後から作成・補填しない。
-2. S10 `dispatch-outsourcing-compliance-ledger`の予約をV82から**V84**へ繰り上げる。S11は実在V83として扱う。
+2. S10 `dispatch-outsourcing-compliance-ledger`の正式migrationをV82から**V84**へ繰り上げる。S11は実在V83として扱う。
 3. 後続予約は同じdecisionでS12=V85、S13=V86、S14=V87、S15=V88、S16=V89、S17=V90へ繰り上げる。V59、V72、V82は欠番として保持する。
-4. 過去migrationの編集、out-of-order適用、V82のlegacy backfillは行わない。新しいS10 migrationを作る場合の番号はV84である。
+4. 過去migrationの編集、out-of-order適用、V82のlegacy backfillは行わない。S10のmigrationはV84で実装する。
 5. staging/production等の外部管理環境が後からinventoryへ追加された場合は、このdecisionを自動的に本番証拠とは扱わず、環境別read-only `flyway_schema_history`を追加取得してR10/M gateを再開する。
 
 ## Synchronized artifacts

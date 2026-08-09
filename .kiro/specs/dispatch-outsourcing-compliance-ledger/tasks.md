@@ -6,8 +6,9 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V84**。order(V80/V81)のmerge後、attendance(V83)と並行可。V83実在のためV82は欠番として保持する。
+> **Migration**: 本specの正式migrationは **V84**。order(V80/V81)のmerge後、attendance(V83)と並行可。V83実在のためV82は欠番として保持する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
+> S10の正式migrationは **V84**。V82は欠番として保持する。
 
 - [x] 0. G2公式様式field mapping
   - **Objective**: 派遣元管理台帳・就業条件明示書・派遣先通知書・個別契約書の各法定項目が、
@@ -23,7 +24,7 @@
     付いていること、mapping lifecycleとhash固定、特定自然人の事前固定なし、実actor承認event不在が開発baselineを
     blockしないこと、`git diff --check` exit 0。
 
-- [ ] F1. workplace/profile/finding/delivery DDL
+- [x] F1. workplace/profile/finding/delivery DDL
   - **Objective**: 契約ごとに就業先・業務内容・就業時間・指揮命令者・責任者・抵触日・待遇方式を登録でき、
     契約時点のsnapshotが保持される。マスタを変更しても過去帳票の内容が変わらない。
   - **実装ガイダンス**: **V84**/V1/H2(`sql/schema-dispatch-compliance-h2.sql`)/MySQL smoke、snapshot/permission。
