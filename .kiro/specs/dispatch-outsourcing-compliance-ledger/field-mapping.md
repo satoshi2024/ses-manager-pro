@@ -1,6 +1,6 @@
 # G2 公式様式 field mapping（T060 draft）
 
-> **状態: PROVISIONAL MAPPING COMPLETE / L0 PASS候補**
+> **状態: R1 FIXED BY IMPLEMENTER / T060 NOT COMPLETE（承認証跡待ち）**
 >
 > 本書は `dispatch-outsourcing-compliance-ledger` T060 の成果物であり、現時点では
 > production code、DDL、migration、SecurityConfigを変更しない。項目をシステムへ対応付ける文書であり、
@@ -25,9 +25,13 @@
 | version | effective period | 適用方針 |
 |---|---|---|
 | `MAPPING-2026-07` | 2026-07-01〜2026-09-30 | 令和8年7月版の項目を適用する。2026-10-01施行分の追加通知項目を過去の交付物へ遡及しない。 |
-| `MAPPING-2026-10` | 2026-10-01〜 | 令和8年10月改正対応版を新versionとして適用する。待遇差説明を求める権利の通知項目はこのversionにだけ紐付ける。 |
+| `MAPPING-2026-10` | 2026-10-01〜 | 令和8年10月改正対応版を新versionとして保持する。待遇差説明を求める権利の通知項目は、公式一次source・正確な文言・対象が確定するまで未確定gateとし、旧版へ遡及しない。 |
 
-契約・交付物は `template_version`、`effective_from`、`effective_to`、`snapshot_hash` を保持して、同じsnapshotを旧versionの帳票へ再計算しない。`2026-10-01` の具体的な法的文言・適用対象は `GATE-T060-2026-10` の承認対象とし、mapping作成者が法的適否を推測して補完しない。
+契約・交付物は `template_version`、`effective_from`、`effective_to`、`snapshot_hash` を保持して、同じsnapshotを旧versionの帳票へ再計算しない。`2026-10-01` の具体的な法的文言・適用対象は、4公式PDFに確認できないためmapping表へ追加せず、`GATE-T060-2026-10` で直接示す一次sourceが特定されるまで未確定とする。mapping作成者が法的適否を推測して補完しない。
+
+### 1.2 公式4PDFにない2026-10項目の扱い
+
+`待遇差説明を求める権利の通知` は、今回照合したSRC-C/SRC-E/SRC-N/SRC-Lの公式記載例4PDF（計9ページ）に項目名・正確な文言・対象範囲を確認できなかったため、4帳票のfield mapping行には含めない。2026-10-01版のversion/effective periodだけを保持し、当該通知を追加する場合は、別の公式一次source URL、版、確認日、施行開始/終了、対象帳票、画面/出力位置を `GATE-T060-2026-10` で確定してから別行として起票する。`MAPPING-2026-07`へ遡及適用しない。
 
 ## 2. 既存資産・候補フィールドの凡例
 
@@ -127,8 +131,8 @@
 | 紹介予定派遣 | 予定労働条件を条件付き明示 | 紹介予定派遣の場合のみ | 要追加候補 `planned_introduction_terms` | 条件付きセクション | ⑪別紙 | worker-specific snapshot | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | sub-field分解とS14公開境界 |
 | 紛争防止措置 | 派遣先雇用時の申出/手数料等 | 条件付き | 要追加候補 `direct_hire_dispute_prevention` | 紛争防止措置 | ⑰ | 条件成立時のみsnapshot | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 職業紹介可否/手数料表のowner確認 |
 | 派遣料金 | 月額/日額/時間額 | 同上 | 既存 `t_contract.selling_price`（意味が一致するか要確認）; 要追加候補 `dispatch_fee` | 契約金額 | ⑳ | 契約時の金額snapshot。円・BigDecimal | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 売上単価と法定帳票の派遣料金を同一視するかGATE-T060-ROLE |
+| 社会保険の加入手続きが完了していない場合の理由（⑱） | 社会保険の加入手続きが未完了の場合のみ理由を記載する公式項目。完了済みを理由欄へ補完しない | 同上 | 要追加候補 `social_insurance_procedure_incomplete_reason`（SRC-Eの単一理由欄。健康/年金/雇用の個別状態とは別） | 就業条件明示書profileの社会保険手続欄。未完了時のみ入力可能 | 就業条件明示書 備考⑱ | 明示書作成時の手続状態と理由をworker-specific snapshot。明示NULLは未確認であり、理由なしを安全扱いしない | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF`（理由詳細はmask） | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | F1で列名・未完了条件・maskをこの1行から分岐なしに実装する |
 | 保険/賃金/就業場所/喫煙措置（予定労働条件） | 紹介予定派遣の場合の条件付き項目 | 紹介予定派遣の場合のみ | 要追加候補 `planned_introduction_terms` の sub-field | 条件付きセクション | 別紙 | worker-specific snapshot | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 法定明示と予定条件を別versionで保持 |
-| 2026-10-01待遇差説明を求める権利の通知 | 令和8年10月改正対応版で追加・変更される通知項目 | `MAPPING-2026-10`のみ／2026-10-01〜 | 要追加候補 `treatment_difference_explanation_right_notice` | profile/交付設定のversion別項目 | 明示書の改正対応箇所 | `MAPPING-2026-07`へ遡及せず、改正versionでのみsnapshot | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`（待遇詳細mask） | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | **GATE-T060-2026-10**: exact wording/対象/適用日をroleが承認 |
 
 ### 3.3 派遣先通知書（SRC-N）
 
@@ -160,6 +164,7 @@
 | 無期/有期雇用・雇用期間 | 派遣期間と異なるため別記載 | 同上 | 要追加候補 `employment_term_type/from/to` | worker/ledger | ③ | worker-specific snapshot | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
 | 協定対象派遣労働者か否か | 労使協定方式/均等均衡方式 | 同上 | F1候補 `treatment_scheme`; 要追加候補 flag | ledger profile | ② | snapshot | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
 | 派遣期間 | 雇用期間と分けて記録 | 同上 | 既存 `start_date`,`end_date` | contract/ledger | ④ | snapshot | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
+| 60歳以上か否かの別（④） | 派遣労働者が60歳以上か60歳未満かを個人別台帳へ記載する公式項目 | 同上 | 既存 `birth_date`; 要追加候補 `over60_flag_snapshot` | worker/ledger profileの年齢区分。基準日を表示 | 派遣元管理台帳 ④ | 台帳作成時の基準日と判定結果をworker-specific snapshot。現在年齢で過去台帳を再計算しない | `R3Y` | `P0_FULL`,`P1_MASK`（年齢詳細mask）, `P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | F1で判定基準日・年齢PII・maskをこの独立行に対応付ける |
 | 健康保険の提出有無・未加入理由・取得予定日 | 保険ごとに有/無、無の理由/手続状況 | 同上 | 要追加候補 `health_insurance_status/reason/expected_date` | insurance section | ⑰ | worker-specific snapshot | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | F1で3保険を独立field化 |
 | 厚生年金保険の提出有無・未加入理由・取得予定日 | 同上 | 同上 | 要追加候補 `pension_insurance_status/reason/expected_date` | insurance section | ⑰ | 同上 | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
 | 雇用保険の提出有無・未加入理由・取得予定日 | 同上 | 同上 | 要追加候補 `employment_insurance_status/reason/expected_date` | insurance section | ⑰ | 同上 | `R3Y` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
@@ -242,8 +247,12 @@
 - [x] 4帳票を別表に分け、反復項目と条件付き項目（差異通知、期間制限例外、紹介予定派遣、苦情/教育/キャリア/雇用安定履歴）を分解した。
 - [x] 事業所snapshot、組織snapshot、2種抵触日、責任の程度、福利厚生、派遣人員、協定/無期/60歳制限、苦情、雇用安定措置、保険3種の状態/理由/予定日、worker-specific snapshotをmappingまたは欠落候補へ記載した。
 - [x] permission、retention、snapshot/asOf、未決gate列を全mapping表へ付与した。
-- [x] `2026-10-01`版を別versionとし、旧版へ待遇差説明を求める権利の通知項目を遡及しない方針を明記した。
+- [x] `2026-10-01`版を別versionとして保持し、4公式PDFにない待遇差説明を求める権利の通知項目をmapping表へ追加せず、一次source特定gateへ戻した。旧版へ遡及しない。
+- [x] SRC-Eの「社会保険の加入手続きが完了していない場合の理由（⑱）」を独立mapping行としてDB候補・画面・出力位置へ対応付けた。
+- [x] SRC-Lの「60歳以上か否かの別（④）」を独立mapping行としてDB候補・画面・出力位置へ対応付けた。
+- [x] 公式4PDF（SRC-C/E/N/L）の項目番号→mapping行の照合で、今回問題となった欠落2件と根拠なしの2026-10行を除去した。
 - [x] `COMPLIANCE_RESPONSIBLE` role code、承認可能操作、3状態、監査項目、runtime assignment/交代、未指名時fail-closedを定義した。
 - [x] 法定の派遣元責任者・派遣先責任者を内部mapping承認roleと分離し、runtime有効期間と帳票生成時snapshotを定義した。
 - [x] 特定の自然人名またはuser IDを事前固定せず、承認event時のactor ID・表示名snapshot・role・日時・mapping version/hash・根拠資料を保存する規則を定義した。
-- [x] `git diff --check` はreview-ledger更新後に実行する。
+- [ ] 社内コンプライアンス責任者による承認event（active assignment、承認権限、実actor、承認日時、mapping version/hash、公式source版）のrepo証跡。証跡未取得のためT060は未完了。
+- [x] `git diff --check` はT060の3文書に対してexit 0。R10 direct regressionはform mapping 96行、SRC-E ⑱=1行、SRC-L ④=1行、根拠なし2026-10 mapping行=0行を確認した。
