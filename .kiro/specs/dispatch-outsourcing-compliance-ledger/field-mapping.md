@@ -1,6 +1,6 @@
 # G2 公式様式 field mapping（T060 provisional baseline）
 
-> **状態: PROVISIONAL_REVIEWED / T060 COMPLETE（G2-DEV-GATE改訂、R10再Review待ち）**
+> **状態: PROVISIONAL_REVIEWED / T060 COMPLETE（R10 T060 PASS、R4-P1-01は環境証跡待ち）**
 >
 > 本書は `dispatch-outsourcing-compliance-ledger` T060 の成果物であり、現時点では
 > production code、DDL、migration、SecurityConfigを変更しない。項目をシステムへ対応付ける文書であり、
