@@ -2,7 +2,7 @@
 
 ## 現行判定
 
-`T060 FAIL / R10 Round 2: P1-01 VERIFIED_CLOSED、P1-02 OPEN / APPROVAL_REQUIRED`。R10はR1-P1-01の公式項目欠落と根拠なし2026-10 mapping行の修正を確認し、VERIFIED_CLOSEDとした。R1-P1-02の社内責任者承認event証跡は未取得のため、T060は未完了のままとする。自然人をseed/specへ固定しない方針は維持するが、実actor、承認status、承認日時、mapping version/hash、公式source版を含む承認証拠が必要である。T061/V82/production変更は停止する。
+`T060 FAIL / R10 Round 3: P1-01 VERIFIED_CLOSED、P1-02 OPEN / APPROVAL_REQUIRED`。Round 3ではP1-01の閉鎖を維持し、P1-02の承認event未取得を再確認した。c34ba6f以降にS10のfix deltaまたは承認eventはなく、S11 attendanceのcommit/dirty変更はReview対象外である。証拠なしの再Reviewは収束規則により実施しない。T060は未完了のままとし、T061/V82/production変更は停止する。
 
 ## T060 証跡
 
@@ -16,6 +16,15 @@
 |---|---|---|---|---|---|
 | dispatch-outsourcing-compliance-ledger-R1-P1-01 | **VERIFIED_CLOSED** | **FIXED_BY_IMPLEMENTER** | T060 Objective/L0全項目網羅、R2.1／field-mapping.md SRC-E section・SRC-L section・2026-10行 | SRC-E「社会保険の加入手続きが完了していない場合の理由（⑱）」とSRC-L「60歳以上か否かの別（④）」を独立mapping行へ追加。4公式PDFに確認できない2026-10通知行を削除し、一次source特定gateへ戻した | R10 Round 2がmapping 96行、全mapping行11列、SRC-E⑱=1、SRC-L④=1、根拠なし2026-10行=0、`git diff --check` exit 0を確認。新規P0/P1なし |
 | dispatch-outsourcing-compliance-ledger-R1-P1-02 | **OPEN** | **OPEN / APPROVAL_REQUIRED** | T060 Demo、tasks.md、review-ledger.md／社内責任者の実actor・承認日時・mapping version/hash・source版・status証跡 | repo内に有効な承認event記録がないため、証跡を捏造せずT060 checkboxを `[ ]` へ戻した。対象mapping blobはHead `cddbc325c0793fdb41ccb73a3f976de271b34093` の `80fe732df1553f5d9a21b6776d8288419f29d9cc`。`COMPLIANCE_RESPONSIBLE`のruntime構造とfail-closed仕様は保持 | 発注者/管理者がruntimeで承認eventを取得し、actor user ID、表示名snapshot、role、権限、承認status、承認日時、mapping version/hash、公式source版を対象blob/hashと一致させる。取得後にR10が確認するまでVERIFIED_CLOSEDにしない |
+
+## R10 Round 3 判定
+
+- 判定: `FAIL: open blockers=dispatch-outsourcing-compliance-ledger-R1-P1-02`
+- P1-01: `VERIFIED_CLOSED`維持。新規P0/P1なし。
+- P1-02: `OPEN / APPROVAL_REQUIRED`維持。対象mapping blob `80fe732df1553f5d9a21b6776d8288419f29d9cc` と一致する実actor、権限、承認status、承認日時、公式source版を含む証拠が未提出。
+- T060/F1: `[ ]`、T061/V82: 未開始。
+- c34ba6f以降のS10 fix delta・承認eventなし。S11 attendanceの追加commit/dirty変更は本specのReview対象外。
+- 次回Reviewは承認証拠提出後のみ。証拠なしの再Review依頼はしない。
 
 ## M / 本番gateと再開条件
 
