@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | `2299fbc1fff8ffa9d7c61797885786b8586d3d22`（R1 fix delta Head） |
-| merge | `unmerged`（current merged baselineは`509bdb7`、`main`はfix delta先行） |
-| latest review | `R11 Round 1 + fix delta / 2026-08-09` |
-| verdict | `FIXED_BY_IMPLEMENTER`（独立再Review待ち） |
-| issue count | `P0=0 / P1=2 / P2=3 / NOTE=0` |
-| next action | `R11へfix deltaの独立再Reviewを依頼し、5 issueをVERIFIED_CLOSEDへ判定する` |
+| head | `Packet/current merged Head=8edcaa6742dbade646df8f8dbc9bd30249109b9f`、fix内容Head=`2299fbc1fff8ffa9d7c61797885786b8586d3d22`。台帳provenanceは`git log -1 -- review-ledger.md`で解決 |
+| merge | `merged 8edcaa6`（再Review時点で`HEAD=origin/main`） |
+| latest review | `R11 Round 1 fix delta再Review / 2026-08-09` |
+| verdict | `FIXED_BY_IMPLEMENTER`（P2-01のPacket同期後、独立再Review待ち） |
+| issue count | `P0=0 / P1=0 / P2=1 / NOTE=0` |
+| next action | `Packet/current merged Head=8edcaa6とfix内容Head=2299fbcを分離した同期を確認し、P2-01を再Reviewへ提出する` |
 
 本台帳は、T067のtask実装とその証拠をappend-onlyで管理する。T067は文書のみであり、production code・DDL・migrationは変更しない。
 
@@ -21,34 +21,33 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| attendance-leave-overtime-compliance-R1-P1-01 | P1 | T068 migration契約、handbook §4/§8 | `tasks.md:40`、中央ledger P1行 | active文書でV82/V78/V74、B2未着手に見える | dispatch衝突・calculator二重実装 | V83、`4488ba8`、V81/V82/V83、R11範囲へ更新 | `rg`採番整合、L0、`git diff --check` | FIXED_BY_IMPLEMENTER | `3b03a94` | 独立再Review待ち |
-| attendance-leave-overtime-compliance-R1-P1-02 | P1 | 最新決定、`overtime-rules.md` §7、T074 | `review-ledger.md` Release Gate Register | ATT-GATE-05/06の期限がA2/F2/M着手を停止し得る | 開発/Mを不要に停止、未確認値の推測誘発 | 本番締め/release前へ変更、内部/外部両モードと判定不能findingを明記 | gate文書整合、L0 | FIXED_BY_IMPLEMENTER | `3b03a94` | 独立再Review待ち |
-| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,37` | Packetだけではcurrent merged Headを解決できない | Review範囲の誤認 | T067成果commitとPacket/current merged Headを分離 | `git rev-parse`、branch containment | FIXED_BY_IMPLEMENTER | `3b03a94` | 独立再Review待ち |
-| attendance-leave-overtime-compliance-R1-P2-02 | P2 | T067 source inventory | `source-matrix-and-agreement-inventory.md:47` | `actual_hours`をV5初期形のまま記録 | 後続精度/差異比較を誤誘導 | V5初期`DECIMAL(5,1)`とV39現行`DECIMAL(6,2)`を併記 | schema inventory静的照合 | FIXED_BY_IMPLEMENTER | `3b03a94` | 独立再Review待ち |
-| attendance-leave-overtime-compliance-R1-P2-03 | P2 | handbook §7 Test Evidence | `review-ledger.md:96` | L0 commandが再現不能 | 独立検証不能 | exact script/command、assert、対象commitを記録 | `verify-t067-l0.ps1` | FIXED_BY_IMPLEMENTER | `2299fbc` | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,41` | Packetだけではcurrent merged Headを解決できない | Review範囲の誤認 | T067成果commitとPacket/current merged Headを分離 | `git rev-parse`、branch containment | FIXED_BY_IMPLEMENTER | `git log -1 -- review-ledger.md`で解決 | 独立再Review待ち |
 
 ## 3. Closed/Deferred Issue
 
 | issue ID | final state | root cause | fix commit | verification evidence | closed round | reopen condition |
 |---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — |
+| attendance-leave-overtime-compliance-R1-P1-01 | VERIFIED_CLOSED | active文書の旧採番/B2 provenance | `3b03a94` | R11再Review: V83、V81/V82/V83、`4488ba8`、B2完了/R11範囲を確認 | R1 fix delta再Review | 新しい予約変更があれば再Review |
+| attendance-leave-overtime-compliance-R1-P1-02 | VERIFIED_CLOSED | release gate期限と実装契約の不足 | `3b03a94` | R11再Review: ATT-GATE-05/06、内部正/外部正、UNKNOWN/findingを確認 | R1 fix delta再Review | gate契約変更時 |
+| attendance-leave-overtime-compliance-R1-P2-02 | VERIFIED_CLOSED | V5初期形のみ記載 | `3b03a94` | R11再Review: V5 `DECIMAL(5,1)`/V39 `DECIMAL(6,2)`を確認 | R1 fix delta再Review | 現行migration変更時 |
+| attendance-leave-overtime-compliance-R1-P2-03 | VERIFIED_CLOSED | L0 commandの再現情報不足 | `2299fbc` | R11再Review: script実行1/0/0/0、exit 0を確認 | R1 fix delta再Review | script契約変更時 |
 
 ## 4. 最新Review Packet
 
 ```text
 - handbook version: v2.0
 - spec/tasks: attendance-leave-overtime-compliance / T067のみ
-- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7` → fix delta Head`2299fbc`（fix deltaは未merge）
+- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7` → fix内容Head`2299fbc` → Packet/current merged Head`8edcaa6`。今回のP2-01同期commitは`git log -1 -- review-ledger.md`で解決
 - changed files by task: source-matrix-and-agreement-inventory.md、tasks.md、spec-execution-ledger.md、attendance parallel audit、本台帳、`verify-t067-l0.ps1`
 - requirements/AC trace: 最重要境界、R1.3、R2.1/R2.2、R3.2/R3.4、R4.2、R5
 - migration state: 実適用最新V81、dispatch予約V82、attendance予約V83、V82/V83未作成、V59/V72永久欠番。B2 merged commit=`4488ba8`
 - test evidence: original L0 PASS。fix delta exact command: `powershell -NoProfile -ExecutionPolicy Bypass -File .kiro/specs/attendance-leave-overtime-compliance/verify-t067-l0.ps1 -BaseCommit 509bdb7 -HeadCommit 2299fbc` → 1/0/0/0 PASS
 - Demo evidence: source matrixと未確認事項のHR提示資料を作成。HR/法人資料の確認は未実施
 - skipped/unverified: 法人一覧、36協定書、就業規則、法定休日曜日、勤務区分、休暇残数の正、適用除外者
-- known issue IDs: R1-P1-01〜R1-P2-03（全件FIXED_BY_IMPLEMENTER、独立再Review待ち）、release gate ATT-GATE-01〜ATT-GATE-06
+- known issue IDs: R1-P2-01（FIXED_BY_IMPLEMENTER、独立再Review待ち）、release gate ATT-GATE-01〜ATT-GATE-06。P1-01/P1-02/P2-02/P2-03はVERIFIED_CLOSED
 - out-of-scope: Java/HTML/JS/SQL、migration、V1/H2/entity、calculator、UI/API/provider
 - rollback: T067文書変更をrevertする。production data変更なし
-- requested verdict: FIXED_BY_IMPLEMENTER / intermediate（R1 fix deltaの独立再Reviewを依頼）
+- requested verdict: FIXED_BY_IMPLEMENTER / intermediate（P2-01のPacket同期後に独立再Reviewを依頼）
 ```
 
 ## 5. Requirements Trace
@@ -157,3 +156,11 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - fixes: V83 config seed、B2=`4488ba8`/V81/V82/V83 provenance、ATT-GATE-05/06期限と内部/外部両モード契約、current merged Head固定、V39現行精度、L0 script
 - direct regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .kiro/specs/attendance-leave-overtime-compliance/verify-t067-l0.ps1 -BaseCommit 509bdb7 -HeadCommit 2299fbc` → `T067 R1 fix delta L0: PASS`、assertions=10、tests=1/failures=0/errors=0/skipped=0/exit=0
 - verdict: `FIXED_BY_IMPLEMENTER`。独立再ReviewでVERIFIED_CLOSEDにするまで自己PASSしない
+
+### Round 1 fix delta再Review — 2026-08-09 — 独立Review入力
+
+- base/head: `509bdb7` → fix内容`2299fbc` → Packet/current merged Head`8edcaa6`
+- reviewed issue IDs: R1-P1-01、R1-P1-02、R1-P2-01、R1-P2-02、R1-P2-03
+- verdict: P1-01/P1-02/P2-02/P2-03 = `VERIFIED_CLOSED`、P2-01 = `OPEN`。新規P0/P1なし
+- evidence: `509bdb7..2299fbc`、`509bdb7..8edcaa6`はいずれも1/0/0/0、`git diff --check` PASS、production/test差分0、worktree clean
+- P2-01 minimum fix: fix内容Head=`2299fbc`とPacket/current merged Head=`8edcaa6`を分離し、台帳provenanceを`git log -1 -- review-ledger.md`で解決する。今回の同期後、同一issueを再起票しない
