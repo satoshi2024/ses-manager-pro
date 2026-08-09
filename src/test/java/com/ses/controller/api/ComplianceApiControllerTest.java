@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.dto.compliance.ComplianceFinding;
 import com.ses.dto.compliance.ContractComplianceDto;
+import com.ses.service.compliance.ComplianceRuleEngine;
 import com.ses.service.compliance.LaborComplianceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,9 @@ class ComplianceApiControllerTest {
 
     @MockBean
     private LaborComplianceService laborComplianceService;
+
+    @MockBean
+    private ComplianceRuleEngine complianceRuleEngine;
 
     @Test
     @WithMockUser

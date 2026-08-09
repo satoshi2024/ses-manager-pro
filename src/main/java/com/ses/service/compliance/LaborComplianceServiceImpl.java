@@ -14,27 +14,23 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.MessageSource;
-import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 偽装請負・多重派遣リスクチェック実装（FR-10）。
- * findings は都度導出のみで永続化しない（新規テーブル不要。design.md 参照）。
+ * 派遣・準委任コンプライアンス検査サービス（既存 / FR-10系）。
+ * F2で既存4 rule（TIER_EXCEEDED / DIRECT_COMMAND / DOUBLE_DISPATCH / SETTLEMENT_MISMATCH）の
+ * 判定ロジックを ComplianceRule 群へ分解したが、check()/findCurrentRisks()の出力はgolden fixtureどおり不変。
+ * 永続化（t_compliance_finding upsert）は ComplianceRuleEngine が行う。
  */
 @Service
 @RequiredArgsConstructor
 public class LaborComplianceServiceImpl implements LaborComplianceService {
 
-    private static final String SEVERITY_WARNING = "warning";
-    private static final List<String> DIRECT_COMMAND_CONTRACT_TYPES = List.of("準委任", "請負");
-    /** 「現在」該当しうる契約のステータス。終了・解約は過去の契約なのでリスク一覧に載せない。 */
     private static final List<String> ACTIVE_CONTRACT_STATUSES = List.of(
             com.ses.common.constant.StatusConstants.CONTRACT_ACTIVE,
             com.ses.common.constant.StatusConstants.CONTRACT_PREPARING);
@@ -57,9 +53,7 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
 
     @Override
     public List<ContractComplianceDto> findCurrentRisks() {
-        // 「現在の」リスク一覧（design 2章）なので、終了・解約済みの契約は対象外。
-        // 全契約を読むと、何年も前に終了した契約の指摘が恒久的に一覧と月次締めに残り続けるうえ、
-        // 契約テーブル全件をメモリに載せることになる。
+        // 現在の「リスク一覧」はdesign §2のとおり、常時実行で算出する表示用のため、契約や勤怠の業務状態は変更しない。
         List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES));
         if (contracts.isEmpty()) {
@@ -93,55 +87,26 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
         return result;
     }
 
-    private boolean ruleEnabled(String key) {
-        return "true".equalsIgnoreCase(systemConfigService.getString(key, "true"));
-    }
-
+    /**
+     * 既存4 ruleをgolden fixtureの出力順で実行する。
+     * rule有効化・message解決は各rule（AbstractComplianceRule）へ移管済みで、出力は従来と同一。
+     */
     private List<ComplianceFinding> evaluate(Contract contract, int maxLayer) {
+        ComplianceRuleContext context = ComplianceRuleContext.builder()
+                .maxLayer(maxLayer)
+                .build();
         List<ComplianceFinding> findings = new ArrayList<>();
-        Locale locale = LocaleContextHolder.getLocale();
-        String contractType = contract.getContractType();
-
-        if (ruleEnabled("compliance.rule.tier-exceeded.enabled")) {
-            int maxTier = systemConfigService.getInt("compliance.max-tier", 3);
-            if (maxLayer > maxTier) {
-                findings.add(finding("TIER_EXCEEDED", contract.getId(), locale, maxLayer, maxTier));
-            }
+        for (ComplianceRule rule : legacyRules()) {
+            findings.addAll(rule.evaluate(contract, context));
         }
-
-        // contract_type は NULL 可（ENUM だが NOT NULL ではない）。List.of(...) は不変リストのため
-        // contains(null) が false ではなく NullPointerException を投げる。契約形態が未設定の契約が
-        // 1件でもあると、月次締めサマリ・リスク一覧・契約保存がまとめて500になる。
-        if (ruleEnabled("compliance.rule.direct-command.enabled")
-                && contractType != null && DIRECT_COMMAND_CONTRACT_TYPES.contains(contractType)
-                && Boolean.TRUE.equals(contract.getDirectCommandFlag())) {
-            findings.add(finding("DIRECT_COMMAND", contract.getId(), locale, contractType));
-        }
-
-        if (ruleEnabled("compliance.rule.double-dispatch.enabled")
-                && "派遣".equals(contractType) && maxLayer > 1) {
-            findings.add(finding("DOUBLE_DISPATCH", contract.getId(), locale, maxLayer));
-        }
-
-        if (ruleEnabled("compliance.rule.actual-mismatch.enabled")
-                && "請負".equals(contractType)
-                && (contract.getSettlementHoursMin() != null || contract.getSettlementHoursMax() != null)) {
-            findings.add(finding("SETTLEMENT_MISMATCH", contract.getId(), locale));
-        }
-
         return findings;
     }
 
-    private static final Map<String, String> MESSAGE_KEYS = new HashMap<>();
-    static {
-        MESSAGE_KEYS.put("TIER_EXCEEDED", "compliance.finding.tierExceeded");
-        MESSAGE_KEYS.put("DIRECT_COMMAND", "compliance.finding.directCommand");
-        MESSAGE_KEYS.put("DOUBLE_DISPATCH", "compliance.finding.doubleDispatch");
-        MESSAGE_KEYS.put("SETTLEMENT_MISMATCH", "compliance.finding.settlementMismatch");
-    }
-
-    private ComplianceFinding finding(String code, Long contractId, Locale locale, Object... args) {
-        String message = messageSource.getMessage(MESSAGE_KEYS.get(code), args, code, locale);
-        return new ComplianceFinding(code, SEVERITY_WARNING, message, contractId);
+    private List<ComplianceRule> legacyRules() {
+        return List.of(
+                new TierExceededRule(systemConfigService, messageSource),
+                new DirectCommandRule(systemConfigService, messageSource),
+                new DoubleDispatchRule(systemConfigService, messageSource),
+                new SettlementMismatchRule(systemConfigService, messageSource));
     }
 }

@@ -135,6 +135,23 @@ R10 Round 8はHead `b9b91f9`をread-only＋独立実行（H2/docs系43/0/0/0、M
 
 **Rollback**: V84は未releaseのためcommit revertのみでDB rollback不要。本deltaのV1/engineer-schema変更はS10側の自前commitとして記録（R10 provenance注意事項に対応）。
 
+## T062 F2 ComplianceRule分割/拡張 delta（2026-08-09）
+
+R10 Round 9のT061 F1 PASS（R5-P1-01..05・R8全件VERIFIED_CLOSED）を受け、F2を実装した。S11 trackのdirty working tree（V98・LeaveServiceImpl compile error・不正文字）によりmain worktreeではtest実行不能だったため、**isolated worktree（`s10-dispatch-f2`、base `3a0e48d`）で実装・検証**し、push後にmainへ同期した（R10 Round 9の「S10側はdirty stateと分離して作業」指示に準拠）。
+
+**変更file**:
+- `service/compliance/`: `ComplianceRule`（interface）、`ComplianceRuleContext`（読み取り専用context: maxLayer/profile/deliveries/workRecordDailies/contractChain/organizationUnit）、`AbstractComplianceRule`（severity/message/enabled共通化。message keyは既存camelCase `compliance.finding.tierExceeded`等と一致）、既存4 rule（TierExceeded/DirectCommand/DoubleDispatch/SettlementMismatch: ロジックを移管し挙動・enabled key・message・出力順をgolden fixtureどおり維持）、新rule 6件（MissingLimitationDate: 2種抵触日NULL検出＋chain算定dueDate添付、MissingResponsible: 指揮命令者/派遣先/派遣元責任者、MissingInsurance: 保険3種fingerprint別、MissingDocumentDelivery: 明示書/通知書、MissingInstructionRoute: 準委任/請負、WorkOutsidePeriod: 客先工数が契約期間外）、`LimitationDateCalculator`（design §5.2 期間代数: 連続更新通算/クーリングconfig値リセット/組織単位変更別chain/同日開始/未来開始先読み/並行契約通算。上限月数・クーリング日数はconfig key＋既定値で、GATE-T060-COOLING/T066の値をコードへ直書きしない）、`ComplianceFindingStore`（(contract_id, code, condition_fingerprint)でupsert同期。再検出でRESOLVED→OPEN、ack済みは保持、非検出でOPEN/ACK/IN_PROGRESS→RESOLVED、EXCEPTION_APPROVEDは保持）、`ComplianceRuleEngine`（全rule実行＋upsert。runActiveContracts/runForContract。契約クエリはshared test schema対応のため必要列のみselect）。
+- `LaborComplianceServiceImpl`: 既存4 ruleへ委譲する形へ分解（check/findCurrentRisksの出力はgolden fixtureどおり不変。LaborComplianceServiceImplTest 12件PASS）。
+- `controller/api/ComplianceApiController`: `POST /api/compliance/rules/run` 追加（既存compliance menu権限内。実行はread-only＋finding upsert）。
+- `dto/compliance/ComplianceFinding`: conditionFingerprint/dueDate追加（既存4引数コンストラクタは互換維持）。`RuleRunResultDto`新規。
+- messages 4 bundle: 新rule 9 message key追加（ja/en/ko/zh、MessageBundleConsistencyTest 4件PASS）。
+
+**実行test（L2〜L3定向・直接回帰、skip 0）**: 統合batch **164 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: LimitationDateCalculatorTest 8（連続更新/クーリング/組織単位変更/同日開始/未来開始/並行契約/算定不能）、ComplianceRuleEngineTest 7（新rule code別境界）、ComplianceFindingStoreTest 1（再実行重複0・ack保持・解消RESOLVED・再検出OPEN）、ComplianceRuleRunApiTest 1（Demo: run 2回でopened=0・補完でresolved=2）、LaborComplianceServiceImplTest 12（既存4 rule golden fixture維持）、MessageBundleConsistencyTest 4、ComplianceApiControllerTest 1、MonthlyClosingServiceImplTest 12、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、F1系（MAP/SNAPSHOT/NULL/HISTORY/PII/H2）9。`git diff --check` exit 0。
+
+**Demo証跡**: 欠落profileの派遣契約で抵触日2＋責任者3＋保険3＋明示書2＝10 findingがOPEN、rule再実行でopened=0（重複0）、2種抵触日を補完して再実行で該当2件がRESOLVED（欠落解消）、未補完分はOPEN維持。契約chain（連続更新通算・クーリングリセット・組織単位変更別chain・同日開始・未来開始先読み・並行契約通算）をLimitationDateCalculatorTestで実測。
+
+**境界**: DDL/migration変更なし（T061 shapeをそのまま利用）。SecurityConfig/UI/他機能未変更。T062 checkboxはR10確認まで未完了のまま。production release/apply authorizationなし。S11 dirty working treeはS11側で解消が必要（本deltaはisolated worktreeで分離済み）。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
