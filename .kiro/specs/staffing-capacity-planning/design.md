@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V92）
+## 1. DDL（予約V99）
 
 - `t_project_position(id, project_id, position_no, role_name, required_count, skills_json,
   unit_price_min/max, start/end_date, location, allocation_percent, priority, status, version)`。
@@ -84,7 +84,7 @@
 | マネージャー | 組織scope ∩ DataScope | 同左 | 自組織の不足/過配賦 | 同上 |
 | 営業 | 既存DataScope（担当案件/要員）。**組織で追加制限しない** | 同左 | 自担当の充足/不足 | 同上 |
 | HR | 要員の配置状況（単価・粗利は**mask**） | 同左 | 採用需要 | — |
-| 要員 | 自分の配置予定のみ（S14経由） | — | — | — |
+| 要員 | 自分の配置約定のみ（S14経由） | — | — | — |
 | portal user | 不可視 | — | — | — |
 | scheduler principal | 全件 | — | 宛先は担当営業/マネージャー | 需給集計 |
 
