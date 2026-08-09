@@ -1,6 +1,6 @@
 package com.ses.service.attendance;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.AttendanceMonth;
 import com.ses.entity.ApprovalRequest;
@@ -62,15 +62,15 @@ public class AttendanceReopenApprovalAdapter implements ApprovalTargetAdapter {
             throw BusinessException.of(409, "error.attendance.concurrent");
         }
         int expectedVersion = request.getTargetVersion().intValue();
-        int updated = attendanceMonthMapper.update(null, new LambdaUpdateWrapper<AttendanceMonth>()
-                .set(AttendanceMonth::getStatus, APPROVED)
-                .set(AttendanceMonth::getClosedAt, null)
-                .set(AttendanceMonth::getClosedBy, null)
-                .set(AttendanceMonth::getVersion, expectedVersion + 1)
-                .set(AttendanceMonth::getUpdatedAt, java.time.LocalDateTime.now())
-                .eq(AttendanceMonth::getId, request.getTargetId())
-                .eq(AttendanceMonth::getStatus, CLOSED)
-                .eq(AttendanceMonth::getVersion, expectedVersion));
+        int updated = attendanceMonthMapper.update(null, new UpdateWrapper<AttendanceMonth>()
+                .set("status", APPROVED)
+                .set("closed_at", null)
+                .set("closed_by", null)
+                .set("version", expectedVersion + 1)
+                .set("updated_at", java.time.LocalDateTime.now())
+                .eq("id", request.getTargetId())
+                .eq("status", CLOSED)
+                .eq("version", expectedVersion));
         if (updated != 1) {
             throw BusinessException.of(409, "error.attendance.concurrent");
         }
