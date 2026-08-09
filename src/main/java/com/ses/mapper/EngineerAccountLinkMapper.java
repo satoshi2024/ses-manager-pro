@@ -14,15 +14,21 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
     /**
      * 組織スコープに入る要員ID。
      *
-     * <p>帰属は {@code t_engineer.organization_id} を正とし、未設定の要員だけ
-     * アカウント連携ユーザーの主所属へフォールバックする。アカウント連携は要員セルフサービスを
-     * 使う要員にしか存在しないため、連携を必須にすると大半の要員が誰からも見えなくなる。
+     * <p>帰属は対象日の {@code t_engineer_accounting_history} を正とし、履歴行が無い場合だけ
+     * 現在の {@code t_engineer.organization_id}、さらに未設定時だけアカウント連携ユーザーの
+     * 対象日主所属へフォールバックする。履歴が {@code UNKNOWN} の場合は明示的に除外する。
+     * アカウント連携は要員セルフサービスを使う要員にしか存在しないため、連携を必須にすると
+     * 大半の要員が誰からも見えなくなる。
      */
     @Select("""
         <script>
         SELECT DISTINCT e.id
         FROM t_engineer e
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+        LEFT JOIN t_engineer_accounting_history eh ON eh.engineer_id = e.id
+             AND eh.deleted_flag = 0
+             AND eh.valid_from &lt;= #{asOf}
+             AND (eh.valid_to IS NULL OR eh.valid_to &gt;= #{asOf})
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{asOf}
@@ -30,7 +36,11 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
         WHERE e.deleted_flag = 0
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
-              COALESCE(e.organization_id, uo.organization_id) IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              CASE
+                WHEN eh.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
+                WHEN eh.organization_history_status = 'UNKNOWN' THEN NULL
+                ELSE COALESCE(eh.organization_id, uo.organization_id)
+              END IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">
               <if test="organizationIds != null and organizationIds.size() > 0">OR</if>

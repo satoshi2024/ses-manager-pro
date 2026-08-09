@@ -3,7 +3,10 @@ package com.ses.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.entity.OrganizationUnit;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+
+import java.time.LocalDate;
 
 /** 組織マスタMapper。 */
 @Mapper
@@ -11,4 +14,8 @@ public interface OrganizationUnitMapper extends BaseMapper<OrganizationUnit> {
 
     @Select("SELECT * FROM m_organization_unit WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     OrganizationUnit selectByIdForUpdate(Long id);
+
+    @Select("SELECT * FROM m_organization_unit WHERE id = #{id} AND deleted_flag = 0 "
+            + "AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) LIMIT 1")
+    OrganizationUnit selectAt(@Param("id") Long id, @Param("asOf") LocalDate asOf);
 }
