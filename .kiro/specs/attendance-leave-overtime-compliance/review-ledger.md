@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `FIX / REVIEW`（T070までの実装範囲はPASS。T071〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | R2-P1-02方式A fix delta＋転記修正＝committed Head `0ff7f2b`（=origin/main）。deltaは`3891c0e`→`5f362fc`（方式A実装）→`b65996f`（V91予約・文書同期）→`758649e`→`fc798be`→`0ff7f2b`（ledger同期）。dispatch V84 R5 re-sync `b9b91f9`もmerge済み |
-| merge | `5f362fc`/`b65996f`/`758649e`/`fc798be`/`0ff7f2b`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持。dispatch V84 R5（`b9b91f9`）はV1不変のまま整合commit済み |
-| latest review | `R11 Round 3フォローアップ転記確認2 2026-08-09`（`3d6864b..867ade5`、新規指摘なし・**本deltaのReview対話は収束完了**） |
-| verdict | **PASS（T070までの実装範囲）維持・収束**。R2-P1-02/R3-P2-01 VERIFIED_CLOSED。NOTE-R3-03 RESOLVED、R3-04/05 FIXED、R3-06のみdispatch帰属でOPEN。新規P0/P1/P2/NOTEなし。同一判定の転記確認は繰り返さない |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-06 dispatch）` |
-| next action | **T071開始可（条件付き維持）**：共有`FlywayMigrationSmokeTest`がdispatch V84起因でREDの間、統合担当がdispatch修正を優先し、「CI相当L4×1回」とV91 fresh全経路の再検証はV84修正後に実施。次の独立Reviewは**T071実装後**。S11完了はT074/M後 |
+| head | T070方式A delta＋T071休暇/approval統合実装＝committed Head（本delta commit、push予定）。T070のReview対話は収束完了 |
+| merge | T070までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み |
+| latest review | `R11 Round 3収束（T070まで）`。T071（A2）は実装済み・独立Review待ち |
+| verdict | T070までの実装範囲は**PASS・収束**。T071は実装・直接回帰済み（**独立Review待ち**） |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-06 dispatch、V84 fresh経路の修正待ち）` |
+| next action | **T071の独立Review**（次Review対象）。T072（freee/provider sync）はReview合格後に着手。S11完了はT074/M後。NOTE-R3-06はdispatch修正後にCI相当L4×1回 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -158,6 +158,7 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 | T069 | R3.1/R3.2/R3.4/R5 | calculator、asOf協定resolver、snapshot変換、nullable適用区分、履歴不足finding、境界fixture、定向test | calculator/resolver/DDL/dispatch `70/0/0/0`、`git diff --check` PASS | T069-D1。45h/360h/80h、月100h、法人別優先、UNKNOWNを実測 | 法人別協定・休日区分・適用除外者はrelease gate、warning通知/UIは後続 | `d395797` |
 | T070 | R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人/管理API、`AttendanceServiceImpl`、DTO、画面/JS、SecurityConfig/sidebar、4言語i18n、定向test | `AttendanceApiControllerTest` 7/0/0/0、`AttendanceWorkflowServiceTest` 1/0/0/0、UI 2/0/0/0、message 4/0/0/0、JS 1/0/0/0、navigation 2/0/0/0、合計17/0/0/0、`git diff --check` PASS | T070-D1。本人入力→提出→差戻し→再提出→承認→締め、締め後編集拒否、営業403、CSRF、390px markup | HR法人の実資料突合、実ブラウザDemo、V83適用はATT-GATE/V82後 | `cc7c15c` |
 | R2-P1-02方式A fix delta | R1.1/R1.2/R3.1/R5、design §5.1.1（R3-P2-01の1択確定含む） | V91追補、V1統合、H2 2形状、entity/mapper、calculator区間intersection、service不一致400/区間不明fail-closed、UI、i18n 4言語、境界回帰、予約表V92〜V97同期 | current HEAD指定回帰**135/0/0/0 skip 0**＋migration整合36/0/0/0、`git diff --check` PASS | 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行、不一致400を実測 | 独立VERIFIED_CLOSED、実ブラウザ、paging、L4、MySQL fresh/legacy適用 | 本delta commit |
+| T071 休暇/approval統合 | R2.1/R2.2/R2.3、design §5.3/§5.4 | `t_leave_ledger`（V98）、`LeaveService`、`LeaveApprovalAdapter`（leave.request/cancel）、残数両モード、分計算（calendar所定分）、期間重複/締め済み月拒否、営業通知分岐、menu/権限seed、本人/管理画面、i18n 4言語 | 休暇系4 class **20/0/0/0 skip 0**、全指定回帰**191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、`git diff --check` PASS | 申請→承認→calendar反映（月次leave_minutes）、代理承認、外部正モードの不足許容、営業通知分岐を定向実測 | 独立Review、実ブラウザ、L4、dispatch V84修正後のfresh全経路 | 本delta commit |
 
 ## 11. Round履歴
 
@@ -660,3 +661,13 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - overall verdict: **PASS（T070までの実装範囲）維持・収束**。P0=0 / P1=0 / P2=2 / NOTE=1（R3-06 dispatch）
 - next task/Wave: T071開始可（条件付き維持）。次spec/次WaveはS11完了（T074/M、L4）後
 - central ledger転記用短文: `R11 Round 3フォローアップ転記確認2: 867ade5はledger 2ファイルのみ・code変更なし・git diff --check PASS。§1/§2/§11・中央S11行の転記は前回判定と完全一致。NOTE-R3-03=RESOLVED、R3-04/05=FIXED、R3-06=OPEN（dispatch帰属）。新規指摘なし。attendance scope PASS維持、T071開始可（条件付き）。本deltaのReview対話は収束完了——次のReviewはT071実装後。`
+
+### T071 completion — 2026-08-09 — 主担当実装記録
+
+- base/head: current merged Head（T070 delta）上にT071を実装。V98は発注者割当（質問回答）により採用し、S12〜S17の予約をV99〜V104へ繰り上げて全派工資料を同期（前回V91と同じ手続き）
+- version decision: `t_leave_ledger`を**V98**で適用（発注者V98割当＋S12〜S17=V99〜V104繰り上げ）。V1統合baseline・H2 2形状・MySQL smoke（`FlywayAttendanceSchemaSmokeTest`にV98 test追加）を同一deltaで同期
+- implementation: `t_leave_ledger`（GRANT/CONSUME、残数=ΣGRANT−ΣCONSUME）、config `leave.balance.source`（internal=G6既定/external/未設定=判定不能finding）・`leave.balance.types`・`leave.sales-notification.types`、`LeaveMinutesCalculator`（全日=所定分・半休=所定の半分・時間休=時刻差、カレンダー未定義日は所定なし=0分）、`LeaveServiceImpl`（分計算・期間重複拒否・締め済み月拒否・残数両モード・取消=承認付き・付与・照会・scope）、`LeaveApprovalAdapter`（leave.request/leave.cancel：状態CAS・承認時残数CAS・月次leave_minutes反映・営業通知R2.3）、menu `myLeave`/`leaveManagement`＋`leave.*`権限seed（営業除外、design §5.3）、SecurityConfig（/leave管理3ロール、/my/leave要員）、本人/管理画面＋JS、i18n 4バンドル
+- direct regression: 休暇系4 class（Service 9/Adapter 5/Flow統合 2/API 4）＝**20/0/0/0 skip 0**。全指定回帰（attendance 19＋approval 3＋overtime＋integrity＋dispatch-consistency＋休暇4）＝**191/0/0/0 skip 0、BUILD SUCCESS**。MySQL smoke `FlywayAttendanceSchemaSmokeTest` 3/0/0/0（V83/V91/V98）＋`FlywayEnvironmentEvidenceTest` 1/0/0/0。`git diff --check` PASS
+- Demo: 申請（分計算・残数・重複・締め済み月）→承認（route・代理承認）→calendar反映（月次leave_minutes）→取消（残数戻し）→営業通知分岐（種別config）をH2で定向実測。外部正モードの不足許容も確認
+- issue state: 新規issueなし。既存OPENはP2×2（390px実ブラウザ、paging）とNOTE-R3-06（dispatch）のみ
+- ledger/central synchronization: `tasks.md` A2を`[x]`化、中央台帳S11行をT071完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決

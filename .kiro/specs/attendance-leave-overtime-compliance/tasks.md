@@ -81,7 +81,7 @@
   - **R2-P1-02 fix delta（方式A）**: 休憩区間は1勤務日に複数の開始・終了を保存し、勤務開始基準のoffsetで跨夜を一意に表す。`breakMinutes`は区間合計から導出し、calculatorは勤務区間と休憩区間のintersectionで法定内・時間外・休日・深夜を再計算する。重複、勤務区間外、開始≧終了、勤務時間全体超過、既存の区間不明行はfail-closedとする。V83は編集せず、追補DDLは**発注者割当のV91**（`t_employee_attendance_break`）で適用済み。V91実在に伴いS12〜S17の予約はV92〜V97へ繰り上げ済み。
   - **追加テスト**: 深夜前/中/後、跨夜、複数休憩、0分、全時間休憩、重複、勤務区間外、開始≧終了、8時間/週40時間/22時境界、月次再集計、既存`breakMinutes`のみの区間不明行、`breakMinutes`と区間合計の不一致400拒否（R3-P2-01）をdirect regressionへ含める。
 
-- [ ] A2. 休暇/approval統合
+- [x] A2. 休暇/approval統合
   - **Objective**: 有給・半休・時間休・代休・欠勤・特別休暇を申請でき、上長/HRの承認後にcalendarへ反映される。
     客先報告が必要な休暇は営業へtask/通知が作られる。
   - **実装ガイダンス**: 申請、残数/外部参照、営業通知。approval specのengineを利用する。
@@ -90,6 +90,15 @@
   - **テスト要件**: L2〜L3。半休/時間休の分計算、残数不足時の挙動（外部正/本システム正の両方）、
     期間重複の拒否、代理承認、営業への通知が休暇種別で分岐すること。
   - **Demo**: 休暇申請→承認→calendar反映。外部正モードで残数不足でも申請できることを確認。
+  - **実装内容（T071完了）**: `t_leave_ledger`（付与/消化台帳、**V98**＝発注者割当、S12〜S17はV99〜V104へ繰り上げ）、
+    config `leave.balance.source`（internal=G6既定/external/未設定=判定不能finding）・`leave.balance.types`・
+    `leave.sales-notification.types`、`LeaveService`（分計算はcalendarの所定分、期間重複拒否、締め済み月拒否、
+    残数両モード、取消=承認付き、付与/照会）、`LeaveApprovalAdapter`（leave.request/leave.cancel、状態CAS・
+    残数CAS・月次leave_minutes反映・営業通知）、menu `myLeave`/`leaveManagement`＋`leave.*`権限seed、
+    本人/管理画面と4言語i18n。営業はSecurityConfig＋menuで休暇scopeなし（通知のみ、design §5.3）。
+  - **検証（T071完了）**: 休暇系4 class **20/0/0/0 skip 0**（分計算・両モード・重複・代理承認・通知分岐・
+    取消戻し・付与・営業403）、全指定回帰 **191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、
+    `git diff --check` PASS。
 
 - [ ] B1. freee/provider sync
   - **Objective**: 承認/締め済みの雇用勤怠をfreeeへ冪等送信またはCSV出力でき、
