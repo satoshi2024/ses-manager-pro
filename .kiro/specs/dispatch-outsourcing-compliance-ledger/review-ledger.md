@@ -8,7 +8,7 @@
 
 | task | requirements | 変更file | test / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T060 | R1.1〜R1.4, R2.1〜R2.2, R3.1〜R3.4, R4.1〜R4.2, R5 | `.kiro/specs/dispatch-outsourcing-compliance-ledger/field-mapping.md`, `.kiro/specs/dispatch-outsourcing-compliance-ledger/review-ledger.md`, `.kiro/specs/dispatch-outsourcing-compliance-ledger/tasks.md`（T060 checkboxのみ）。production code/DDL/migration/SecurityConfigは変更しない | L0: 公式5 sourceのURL/版/確認日、4帳票の全項目・反復/条件付き項目、permission/retention/asOf、欠落候補、role code/操作/3状態/監査/runtime assignment/fail-closedを確認。Demo: provisional mapping、後続/M・本番gate（role assignment、資格/根拠、2026-10、保存category、cooling、外部専門家）を提示 | Base `3b03a94c0028f3df522f482f6413ff3648a81fc9`。T060実装対象Headはこの記録を含むcommit（確定後にhash記録） | 開発baselineを本番へ直接伝播しない。productionでは未指名/未確認/資格・根拠不足をfail-closed。rollbackは本3文書のcommitをrevertし、production変更は存在しないためDB rollback不要 |
+| T060 | R1.1〜R1.4, R2.1〜R2.2, R3.1〜R3.4, R4.1〜R4.2, R5 | `.kiro/specs/dispatch-outsourcing-compliance-ledger/field-mapping.md`, `.kiro/specs/dispatch-outsourcing-compliance-ledger/review-ledger.md`, `.kiro/specs/dispatch-outsourcing-compliance-ledger/tasks.md`（T060 checkboxのみ）。production code/DDL/migration/SecurityConfigは変更しない | L0: 公式5 sourceのURL/版/確認日、4帳票の全項目・反復/条件付き項目、permission/retention/asOf、欠落候補、role code/操作/3状態/監査/runtime assignment/fail-closedを確認。Demo: provisional mapping、後続/M・本番gate（role assignment、資格/根拠、2026-10、保存category、cooling、外部専門家）を提示 | Base `3b03a94c0028f3df522f482f6413ff3648a81fc9`。T060実装対象Head `8fdadb4af51d224d7659d377196b6774d46dea1f`（docs/checkbox commit） | 開発baselineを本番へ直接伝播しない。productionでは未指名/未確認/資格・根拠不足をfail-closed。rollbackは本3文書のcommitをrevertし、production変更は存在しないためDB rollback不要 |
 
 ## M / 本番gateと再開条件
 
