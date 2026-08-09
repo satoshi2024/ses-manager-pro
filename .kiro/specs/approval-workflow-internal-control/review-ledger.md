@@ -22,7 +22,7 @@
 | ID | 状態 | 根拠 | 次の必要対応 |
 |---|---|---|---|
 | `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋7 unique paths #213〜#219）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した | クローズ維持。独立Reviewで219件・AC trace・帰属を最終確認 |
-| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、V79.1 patch、S09〜S17 V80〜V88単一予約、static regression 35/0/0/0を確認した | クローズ維持 |
+| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79実在集合、V79.1 patch、S09 V80/V81、S10 V84、S11 V83、S12〜S17 V85〜V90予約、static regression 35/0/0/0を確認した | クローズ維持 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047は`[x]`。shared JDBC複数JVM ShedLock/claim、commit前rollback、loopback Webhook、CI相当L4 1471/0/0/0 zero-skipped、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerはN/A化 | クローズ維持。独立Reviewでbrowser証拠を確認 |
 | `R4-REVIEW-04` | **VERIFIED_CLOSED** | Packet・manifest・中央ledger・tasksをcode baseline Head `68fbbba`（当時値）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits/274 paths）へ同期し、指摘4件（row7前半・manifest §5.1 BP表記・README seed説明・Packet commit記述）とrow7判定欄を修正。独立Review（commit `fa003f7`）でPASS・新規blocker 0件 | クローズ維持 |
 | `R4-P1-01` | **VERIFIED_CLOSED** | V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの3 partial状態からの再開可能性、複数JVM ShedLock/claim、commit前rollback、loopback Webhookを全て確認済み | クローズ維持 |

@@ -2,7 +2,7 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（予約V88）
+## 1. DDL（予約V89）
 
 - `t_peppol_participant(owner_type/id, scheme_id, participant_id, provider, verified_at, status)`。
 - `t_digital_invoice(id, invoice_id NULL, direction, profile, specification_version, message_id,

@@ -3,6 +3,7 @@ package com.ses.migration;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -346,6 +348,31 @@ class SpecDispatchConsistencyTest {
                         entry.getKey() + " " + spec + " がV59を予約しています。V59は永久欠番です");
             }
         }
+    }
+
+    /** R4-P1-01のV83実在/V82欠番と繰上げ後の予約集合をlegacy fixtureで固定する。 */
+    @Test
+    void R4P1のV83実在とV84以降の繰上げfixtureが正式decisionと一致すること() throws Exception {
+        Properties fixture = new Properties();
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(
+                "migration/s10-r4-p1-01-v83-realized.properties")) {
+            assertTrue(input != null, "R4-P1-01 legacy fixtureがありません");
+            fixture.load(input);
+        }
+
+        assertEquals("83", fixture.getProperty("realized.latest"));
+        assertEquals("83", fixture.getProperty("realized.s11"));
+        assertEquals("82", fixture.getProperty("permanent.gap"));
+        assertEquals("84", fixture.getProperty("reserved.s10"));
+        assertEquals("85", fixture.getProperty("reserved.s12"));
+        assertEquals("86", fixture.getProperty("reserved.s13"));
+        assertEquals("87", fixture.getProperty("reserved.s14"));
+        assertEquals("88", fixture.getProperty("reserved.s15"));
+        assertEquals("89", fixture.getProperty("reserved.s16"));
+        assertEquals("90", fixture.getProperty("reserved.s17"));
+        assertTrue(Integer.parseInt(fixture.getProperty("reserved.s10"))
+                        > Integer.parseInt(fixture.getProperty("realized.latest")),
+                "S10の予約は実在latestより後でなければならない");
     }
 
     /**

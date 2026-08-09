@@ -12,7 +12,7 @@
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V82（着手時にmerge済み`db/migration`の最新を再確認する。衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V84（V83実在を確認したためV82は欠番として保持。着手時にmerge済み`db/migration`の最新を再確認し、さらに衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2-DEV-GATE確定済み。T060は公式mapping+L0+独立Reviewで`PROVISIONAL_REVIEWED`へ進める。
   特定自然人の事前指名と実actor承認eventは開始条件ではなく、`ACTIVE`化/M/本番gateとする。

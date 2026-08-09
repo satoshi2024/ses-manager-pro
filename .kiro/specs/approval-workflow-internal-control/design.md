@@ -4,7 +4,7 @@
 
 ## 1. DDL（S07正式migration V75/V76/V77/V78/V79）
 
-S07の採番正本は、既存のV75/V76/V77/V78/V79と、R1.2/R1.3の不足を補うpatch migration **V79.1**である。V75〜V79は変更せず、V79.1はV79適用後かつV80より前に適用する。S09はV80を使用し、S09 R10 remediationは既適用V80を変更せずV81へ順方向追加する。S10以降はV82〜V89を使用する。
+S07の採番正本は、既存のV75/V76/V77/V78/V79と、R1.2/R1.3の不足を補うpatch migration **V79.1**である。V75〜V79は変更せず、V79.1はV79適用後かつV80より前に適用する。S09はV80を使用し、S09 R10 remediationは既適用V80を変更せずV81へ順方向追加する。S10=V84、S11=V83、S12〜S17=V85〜V90を使用する。V82はV83実在後の欠番として補填しない。
 
 - `m_approval_route(id, tenant_id, request_type, applicant_role_condition, organization_id, min/max_amount, version_no,
   valid_from/to, active_flag)`。`applicant_role_condition IS NULL`は全role対象、値ありは申請者role一致。
@@ -26,7 +26,7 @@ payload/diffはPII最小化し、対象全entityをserializeしない。adapter�
 V75は既存の承認DDL 5テーブル、V76は既存の承認menu seed、V77は既存の
 `current_step_started_at`追加であり、いずれも変更しない。S07が追加で使用するmigrationは
 **V78の1本**と、B1で追加する**V79の1本**とする。V78は承認workflowのround/participant/version、
-V79は通知Webhook outboxだけを担当する。S09〜S17はV80＋V81修復、V82〜V89へ確定している（既存の欠番も
+V79は通知Webhook outboxだけを担当する。S09はV80＋V81修復、S10=V84、S11=V83、S12〜S17=V85〜V90へ確定している（既存の欠番も
 埋めない）。
 
 V78は次の変更を同一migrationで行う。V75の`t_approval_action`には`round_no`が存在しないため、

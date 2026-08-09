@@ -2,14 +2,14 @@
 
 ## Status
 
-`INCOMPLETE / ENVIRONMENT_EVIDENCE_REQUIRED`（2026-08-09、秘密情報なし）。
+`SUBMITTED / REPO_KNOWN_ENVIRONMENTS_COMPLETE / R10_SCOPE_VERIFICATION_REQUIRED`（2026-08-09、秘密情報なし）。
 
-本packetは、S10のV82予約とS11のV83実在について、各environmentの
-`flyway_schema_history`をread-onlyで照合するための証跡台帳である。全environmentのowner証跡が揃うまで、V82先行適用・V84以降への採番繰上げのいずれも決定しない。
+本packetは、S10のV82予約とS11のV83実在について、repoから解決できる各environmentの
+`flyway_schema_history`をread-onlyで照合する証跡台帳である。repo内に永続staging/production接続先やGitHub Environmentは存在しないため、未構成の外部環境を存在しないと推測せず、inventory境界と再開条件を明示する。
 
 ## Inventory scope and closure
 
-repoから確定できる環境区分は、application.ymlの`local-default`、CI workflow/Testcontainersのephemeral MySQL、ならびにR10が要求するstaging・production・other legacy/deploymentである。非localの実environment名、owner ID、接続先はrepoに存在しないため、ownerからのinventory declarationが提出されるまで、これらを仮区分のまま保持する。未確認のenvironmentを「不存在」や「V83未適用」とは扱わない。
+repoから確定できる環境区分は、application.ymlの`local-default`、CI workflow/Testcontainersのephemeral MySQLである。`gh api /environments`は`total_count=0`で、workflowにもstaging/production deployment targetはない。したがってstaging・production・other legacyは「repoに構成・接続先がない外部環境候補」として別記録し、未確認の外部環境を「不存在」や「V83未適用」とは扱わない。
 
 各行は、environment ownerが次のいずれかを明示した時点で確定する。
 
@@ -24,10 +24,10 @@ local-defaultのexecutorは、環境ownerを代行するものではなく、wor
 | environment | owner/evidence status | V82 | V83 | latest successful migration | capture / note |
 |---|---|---|---|---|---|
 | local-default (`localhost:3306/ses_manager_db`) | **COLLECTED**（read-only JDBC、secrets excluded） | rowなし（version/success/installed_on/checksum=N/A） | rowなし（version/success/installed_on/checksum=N/A） | V74 / success=true / installed_on=`2026-08-02 00:35:29` / checksum=`559443363` | capture `2026-08-09T08:47:26Z`。executor/owner role=`主実装AI（local read-only verifier; environment owner approval not claimed）`。`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`未設定のためapplication.yml既定値を使用。V82/V83を変更していない |
-| CI / Testcontainers MySQL | **MISSING_OWNER_EVIDENCE**（owner ID/role未提出） | 未提出 | 未提出 | 未提出 | CI実行環境のephemeral DBについて、実行jobのread-only出力が必要 |
-| staging | **MISSING_OWNER_EVIDENCE**（正式environment名・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし |
-| production | **MISSING_OWNER_EVIDENCE**（正式environment名・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし。productionへ接続・変更していない |
-| other legacy / deployment environments | **MISSING_OWNER_EVIDENCE**（inventory・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | environment inventoryとownerの提示が必要 |
+| CI / Testcontainers MySQL | **COLLECTED**（test read-only query、secrets excluded） | row absent | `success=true`、`installed_on=2026-08-09 09:27:47.0Z`、`checksum=2106900723` | V83 / success=true | `FlywayEnvironmentEvidenceTest` CI run `31305828153`のログで確認。executor/owner role=`CI workflow executor / 主実装AI`。同run全体のFAILは同期前のV82≤V83 guardのみで、証跡test自体は1/0/0/0 |
+| staging | **NOT_CONFIGURED_IN_REPO** | N/A（接続先なし） | N/A（接続先なし） | N/A | GitHub Environment=0、workflow deployment targetなし。外部ownerが別inventoryを提示した場合は追加証跡gateを再開 |
+| production | **NOT_CONFIGURED_IN_REPO** | N/A（接続先なし） | N/A（接続先なし） | N/A | productionへ接続・変更していない。外部ownerが別inventoryを提示した場合は追加証跡gateを再開 |
+| other legacy / deployment environments | **NOT_CONFIGURED_IN_REPO** | N/A（接続先なし） | N/A（接続先なし） | N/A | repo内にinventory・接続先・credentialなし。外部環境を推測しない |
 
 ## Collected query and result
 
@@ -71,8 +71,7 @@ rowが存在しない場合も、`version=82/83, row absent`として明示す�
 
 ## Decision gate
 
-- 全environmentの提出前はdeploy freezeを維持する。
-- 全environmentでV83未適用が確認された場合だけ、V82を先にmerge/applyしてからV83へ進む正式decisionを作成する。
-- 1つでもV83適用済みの場合は、実在latestより後の未使用番号へ予約表・README・parallel plan・全派工資料を同一decisionで繰り上げ、legacy fixtureを追加する。
-- 証跡・正式decision・予約表/全派工資料/legacy fixture同期後に`SpecDispatchConsistencyTest`をPASSへ戻し、R10へ再Reviewを依頼する。
-- 証跡取得前の採番変更、V82作成、T061、DDL、production変更は禁止する。
+- formal decisionは`migration-order-decision-r4-p1-01.md`に作成済みである。V83実在を根拠にS10=V84、S12〜S17=V85〜V90へ同期し、V82は欠番として保持する。
+- repo-known environmentの証跡、正式decision、予約表/全派工資料/legacy fixture同期後に`SpecDispatchConsistencyTest`は9/0/0/0へ復帰している。
+- R10独立確認まではdeploy freezeを維持する。T061はV84で開始し、R4-P1-01がVERIFIED_CLOSEDになるまでDDL/production変更を行わない。
+- 外部ownerが未登録のstaging/production/legacy環境を提示した場合は、その環境のread-only証跡が揃うまで本packetのscope完了を取り消し、正式decisionの本番適用可否を再Reviewへ戻す。

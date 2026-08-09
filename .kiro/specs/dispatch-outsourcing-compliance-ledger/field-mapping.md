@@ -36,7 +36,7 @@
 ## 2. 既存資産・候補フィールドの凡例
 
 - **既存**: 現行コードまたはV1 baselineに存在する列。候補名はJava propertyではなくDB column名で記載する。
-- **F1候補**: `design.md` のV82 `t_contract_compliance_profile` / `m_workplace` に置く予定の項目。T060ではschemaを変更しない。
+- **F1候補**: `design.md` のV84 `t_contract_compliance_profile` / `m_workplace` に置く予定の項目。T060ではschemaを変更しない。
 - **要追加候補**: 既存列とdesignのDDL候補だけでは1対1対応できず、F1以降で具体化が必要な項目。
 - `snapshot_json` は参照マスタを含む帳票生成時の不変snapshotであり、現在の `m_customer`、`t_customer_contact`、`t_engineer`、`t_contract` を後から再読しない。
 

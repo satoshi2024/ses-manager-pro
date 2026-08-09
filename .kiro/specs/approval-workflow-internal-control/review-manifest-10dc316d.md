@@ -73,7 +73,7 @@ git diff --check
 | `T046/B1` | 通知/SLA/outbox/escalation | 実装・回帰・実MySQL/loopback/複数JVM証拠を確認。`[x]` |
 | `T047/M` | 5業務画面統合・回帰 | 実装・回帰・CI相当L4・5業務desktop/390px browser Demo（10経路）を確認。`[x]` |
 | `R3-FIX` | Round 3修正・共有fixture/回帰 | S07由来またはshared consumerとして記録 |
-| `MIGRATION-CONTRACT` | S07 V75〜V79/V79.1、S09〜S17 V80〜V88の予約consumer | 後続specの予約文書。S07 production実装とは分離 |
+| `MIGRATION-CONTRACT` | S07 V75〜V79/V79.1、S09 V80/V81、S10 V84、S11 V83、S12〜S17 V85〜V90の予約consumer | 後続specの予約文書。S07 production実装とは分離 |
 | `R4-DOC` | Round 4 Packet/manifest/ledger correction | current HeadとworktreeのReview process record |
 | `SHARED` | S07以外の既存shared consumer・範囲外spec文書 | S07の受入PASSへ加算しない |
 
@@ -401,7 +401,7 @@ git diff --check
 ### 4.1 Migration / dispatch contract
 
 - 実在SQLは`V75__approval_workflow.sql`、`V76__approval_menu.sql`、`V77__approval_sla_step_start.sql`、`V78__approval_workflow_round_participant_version.sql`、`V79__notification_webhook_outbox.sql`、`V79_1__approval_route_decision_sources.sql`の6本。
-- S07はV75〜V79とV79.1、S09〜S17はV80〜V88の単一予約で固定する。V79.1はV79適用後・V80適用前のpatchであり、V75〜V79を編集しない。V80〜V88のSQLはcurrent Headに存在しない予約である。
+- S07はV75〜V79とV79.1、S09はV80/V81、S10はV84、S11は実在V83、S12〜S17はV85〜V90で固定する。V79.1はV79適用後・V80適用前のpatchであり、V75〜V79を編集しない。V82は欠番であり、V84以降のSQLはcurrent Headに存在しない予約である。
 - consumerは`README.md`、`parallel-execution-plan.md`、`spec-start-conversations.md`、`spec-review-conversations.md`、copyable start/review、各S09〜S17 design/tasks。`SpecDispatchConsistencyTest`がS07実在集合と後続単一予約を照合する。
 
 ### 4.2 Approval API/page/UI contract
@@ -450,7 +450,7 @@ git diff --check
 | ID / task | code baseline Head / Review evidence commit判定 | 根拠 |
 |---|---|---|
 | `R4-REVIEW-01` | **VERIFIED_CLOSED** | manifestをcode baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`の219 unique committed paths（#001〜#212＋今回の7 unique paths #213〜#219）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（browser evidence・Packet文書）へ整理し、R1〜R5の20 AC traceと範囲外consumer分離を再確認した |
-| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、V80〜V88予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
+| `R4-REVIEW-02` | **VERIFIED_CLOSED** | V75〜V79とV79.1 patch、S09 V80/V81、S10 V84、S11 V83、S12〜S17 V85〜V90予約、static 35/0/0/0の静的整合を確認。実MySQL gateとは分離 |
 | `R4-REVIEW-03` | **VERIFIED_CLOSED** | B1/T046・M/T047 checkboxは`[x]`。shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhook、CI相当L4 1471/0/0/0 zero-skippedに加え、5業務desktop/390px browser Demo（10経路）を実測。full application instance cron・外部providerは§5.1.1のとおりN/A |
 | `R4-REVIEW-04` | **VERIFIED_CLOSED** | code baseline Head `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（23 commits、219 paths）と初回Review evidence commit `2978461`（履歴）・現行Review evidence/result commit `646dbda`（27 commits、274 paths）へ同期し、指摘4件とrow7判定欄を修正。独立Review（commit `fa003f7`）でPASS・新規blocker 0件 |
 | `approval-workflow-internal-control-R4-P1-01` | **VERIFIED_CLOSED** | R1.2/R1.3のcode/H2/境界・異常系test **47/0/0/0**、direct regression green、V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、partial/repair/rollback、runbookの再開可能性（3 partial状態）、shared JDBCの複数JVM ShedLock/claim、commit前例外時rollback、loopback webhookを全て確認済み |

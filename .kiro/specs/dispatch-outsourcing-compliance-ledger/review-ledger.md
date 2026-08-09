@@ -2,9 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 4 packet: T060 PASS / R4-P1-01 OPEN`。R10 Round 4はDecision fix `a1f5e8e8c5b8b559520109a43c61e59f56ab8243` とPacket Head `87a901375ec94dcb7093fdd2e863ed1b8b109a56` に対してT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定した。一方、Base/PacketにV83が実在しV82が不存在であるため、`dispatch-outsourcing-compliance-ledger-R4-P1-01` をOPEN / ENVIRONMENT_EVIDENCE_REQUIREDとして記録する。本fixではmigration/productionを変更せず、T061/V82の開始を停止する。S11 attendanceのcommit/dirty変更はReview対象外であり、混入させない。
+`R10 Round 4 packet: T060 PASS / R4-P1-01 IMPLEMENTER FIX提出`。R10 Round 4はT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定済み。後続のR4-P1-01 fixでCI/TestcontainersのV83実在・V82不在をread-only確認し、正式decisionによりS10をV84へ繰り上げた。本台帳はR10独立確認待ちであり、T061/V84/production変更は停止中。S11 attendanceの別track差分は混入させない。
 
-R4-P1-01のunblockとして、予約migration番号が実在最新番号以下になる状態を検出するdirect regressionを追加した。現repoのV83実在・V82予約に対してテストは期待どおり失敗し、安全側にdeployを停止する。ローカル既定DBのread-only確認では`flyway_schema_history`の成功済み最新はV74、V82/V83の履歴行はない。ただしstaging/productionその他の環境状態をrepoから証明できないため、「全環境でV83未適用」とは断定しない。全環境の証跡と順序決定が揃うまでdeploy freezeを継続する。
+R4-P1-01のunblock fixとして、reserved <= latestを検出するguard、CI/TestcontainersのFlyway履歴read-only証跡、V83実在/V82欠番の正式decision、V84〜V90の予約資料同期、legacy fixtureを追加した。`SpecDispatchConsistencyTest`は9/0/0/0 PASSへ復帰し、R10独立確認までdeploy freezeを維持する。
 
 ## T060 証跡
 
@@ -64,3 +64,13 @@ R4-P1-01のunblockとして、予約migration番号が実在最新番号以下�
 - 外部社労士/弁護士の照合は `GATE-T060-EXTERNAL` としてT066 M / 本番解放前のgateである。
 
 T060からT061へ進む条件は、R10 Round 4で確認済みのT060判定に加え、R4-P1-01について全環境のV82/V83適用状態証跡、V82→V83または繰上げの単一decision、予約表・全派工資料・legacy fixtureの整合、`SpecDispatchConsistencyTest` direct regression PASSがR10により確認されること。R4-P1-01がOPENの間はT061/V82/production変更を開始しない。T061開始時にはmerge済み `db/migration` のlatestを再確認する。R10のRound 4 review後も、tasks.mdのcheckboxはレビュー判定と実装headの同期確認前に変更しない。
+
+## R4-P1-01 implementer fix delta（2026-08-09）
+
+- **Status**: `FIXED_BY_IMPLEMENTER / R10 INDEPENDENT REVIEW REQUESTED`。R10が確認するまで`VERIFIED_CLOSED`にはしない。T061/V84/DDL/production変更は停止継続。
+- **Environment evidence**: local-defaultはV82/V83 rowなし、latest V74、success=true、installed_on=`2026-08-02 00:35:29`、checksum=`559443363`。CI/TestcontainersはCI run `31305828153`の`FlywayEnvironmentEvidenceTest`でV82 row absent、V83 success=true、installed_on=`2026-08-09 09:27:47.0Z`、checksum=`2106900723`、versioned latest=V83をread-only assert（test 1/0/0/0）。GitHub Environment APIは`total_count=0`、repo workflowに永続staging/production deployment targetなし。外部環境を推測・接続していない。
+- **Formal decision**: `migration-order-decision-r4-p1-01.md`を作成し、V83実在を根拠にS10=V84、S11=V83、S12=V85、S13=V86、S14=V87、S15=V88、S16=V89、S17=V90、V82欠番を確定。production release authorizationは含めない。
+- **Synchronized artifacts**: customer-product-expansion README、parallel plan、central ledger、S10〜S17 design/tasks、start/review conversations、copyable conversations、`s10-r4-p1-01-v83-realized.properties`を同期。`SpecDispatchConsistencyTest`は**9/0/0/0**（skip 0、BUILD SUCCESS）へ復帰。
+- **Direct tests**: `mvn -B -Dtest=FlywayEnvironmentEvidenceTest test` **1/0/0/0 BUILD SUCCESS**（local Docker MySQL）；`mvn -B -Dtest=SpecDispatchConsistencyTest test` **9/0/0/0 BUILD SUCCESS**；`git diff --check` exit 0。repeatable migrationのversion=NULLをlatest判定から除外する回帰も含む。
+- **Changed files boundary**: migration/DDL/SecurityConfig/production code/tasks checkboxは変更なし。R4証跡・decision・docs・test fixture/direct regressionだけを変更し、S11の別track差分は混入していない。rollbackは本deltaのdocs/test commit revertのみでDB rollback不要。
+- **Review request**: R10へ本fix deltaの独立Reviewを依頼する。R10確認対象はenvironment packet、formal decision、V84〜V90の全資料同期、fixture、9件direct regression、実在SHA/Base/Headである。
