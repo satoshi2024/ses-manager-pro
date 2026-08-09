@@ -35,8 +35,8 @@
     operation_id＋expected current versionで冪等性/CASを管理し、A(v1,hA)→B(v2,hB)→A(v3,hA)を許可する。
     current pointerはFK付きで、DB trigger/権限境界によるUPDATE/DELETE拒否、retention purgeの承認済み別経路を実装する。
     clear mechanismはFieldStrategy.ALWAYSをmutable current nullable列だけに適用し、history訂正はCORRECTED/CANCELLED新eventで行う。
-  - **テスト要件**: L1〜L3。design §6.2のF1-MAP-01、F1-SNAPSHOT-01/02、F1-NULL-01/02、
-    F1-HISTORY-CORRECTION-01、F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、
+  - **テスト要件**: L1〜L3。design §6.2のF1-MAP-01、F1-SNAPSHOT-01/02、F1-NULL-01、
+    F1-HISTORY-CORRECTION-01、F1-PII-OWNERSHIP-01、F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、
     F1-MYSQL-FAILED-HISTORY-REPAIR-01、F1-MYSQL-POST-APPLY-ROLLBACK-01、FK/期間、finding uniqueを実行する。
     field permissionの実maskはT063（detail/list/count）とT064（CSV/Excel/PDF/download）へ正式移管し、
     T061はinternal entityをportal/AI DTOへ直接渡さないprojection contractとconsumer scanだけを確認する。

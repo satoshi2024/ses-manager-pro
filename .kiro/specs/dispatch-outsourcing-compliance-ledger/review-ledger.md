@@ -6,6 +6,8 @@
 
 **R10 Round 5 docs-only 再Review（Head `3891c0e`）**: NOT ACCEPTED / FAIL継続。P0=0、新規Issue=0。R5-P1-01（旧mapping/gate判断残存）、P1-02（content hashとidempotency混同・worker current未定義）、P1-04（mutable NULL clearとappend-only訂正の競合）がOPEN。R5-P1-03（fresh/legacy/partial/repair/forward-repair計画）とR5-P1-05（T061/T063/T064 ownership分離）の計画は受理。T060 PASS維持、T061 FAIL、T062〜T066停止。本deltaは上記3根本原因の文書再修正（rework 3追補）であり、V1/V84/code fixは開始しない。同じIssue IDで再提出する。
 
+**R10 Round 6 docs-only 再Review（Head `53ec7ef`）**: FAIL継続（P1はcode fix待ち）だが、R5-P1-01/02/04の**文書修正は受理**されT061 code fix着手が許可された。P0=0、P1=5（OPEN、docs受理済み）、P2=2、NOTE=1。新規P2: R6-P2-01（tasks.md test matrix不整合）、R6-P2-02（PROFILE_TYPED未使用）。NOTE: R6-NOTE-01（planned introduction table境界・recipient列名の一意化）。T060 PASS維持、T061 FAIL、T062〜T066停止。P1はcode fix＋F1 direct regression証跡が揃うまでOPEN維持、production release/apply authorizationなし。R6 P2/NOTEは本ledger追補と同一deltaで解消済み。
+
 R4-P1-01のunblock fixとして、reserved <= latestを検出するguard、CI/TestcontainersのFlyway履歴read-only証跡、V83実在/V82欠番の正式decision、V84〜V90の予約資料同期、legacy fixtureを追加した。`SpecDispatchConsistencyTest`は9/0/0/0 PASSへ復帰し、R10独立確認でR4-P1-01がVERIFIED_CLOSEDとなった。T061の旧実装はレビューでFAILとなったため、schema decision matrixとdirect regression matrixを確定してからV1/V84/H2/entityを再同期する。
 
 ## T060 証跡
@@ -69,7 +71,7 @@ R10は固定範囲 Base `856ab1faf09f07abcd7a5b34453a5037173ce553` → implement
 | dispatch-outsourcing-compliance-ledger-R5-P1-01 | **OPEN / R1.1-R1.3, R2.2, T060 mapping 1対1** | 96 stable row IDをcanonical schema manifestへ一意解決した。旧候補名、旧単一制限日、保存形状の一括構造化データ選択、GATE-T060-ROLEによるfield semantics判断はofficial rowから除去し、typed column/history/T066 semantics gateへ分離した | F1-MAP-01、2種制限日、SRC-E⑱、SRC-L④、料金、source/client苦情、worker-specific/反復historyの96行coverage。stale token scan 0 |
 | dispatch-outsourcing-compliance-ledger-R5-P1-02 | **OPEN / R1.4, R5, design §5.4/§5.5** | content hashとoperation idempotencyを分離。contract snapshotはversionのみ一意、同じoperation retryは1行、新operationでA(v1,hA)→B(v2,hB)→A(v3,hA)を許可。worker stateにcurrent pointer/version/FK/CASを具体化し、direct mutation拒否と承認済みretention purge境界を定義した | F1-SNAPSHOT-01/02。retry 1行、A/B/A 3version、CAS 1勝、2 worker独立current、orphan 0、direct UPDATE/DELETE拒否 |
 | dispatch-outsourcing-compliance-ledger-R5-P1-03 | **OPEN / platform-invariants DDL DoD、T061 migration acceptance** | MySQL smokeのfreshだけでなく、exact V83 legacy、partial schema、failed history/repair、post-apply forward repairを別fixture/test IDで固定する | F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、F1-MYSQL-FAILED-HISTORY-REPAIR-01、F1-MYSQL-POST-APPLY-ROLLBACK-01をskip 0 |
-| dispatch-outsourcing-compliance-ledger-R5-P1-04 | **OPEN / design §5.1明示NULL、tasks T061** | mutable currentのnullable列だけをFieldStrategy.ALWAYS＋full DTOで値→NULLにする。historyはclear inventoryから除外し、CORRECTED/CANCELLED、supersedes_event_id、correction_reason等を持つ新event INSERTで訂正する。旧行は不変 | F1-NULL-01/02、F1-HISTORY-CORRECTION-01。current NULL、field省略拒否、CAS rollback、旧history不変、新event、asOf最新解決 |
+| dispatch-outsourcing-compliance-ledger-R5-P1-04 | **OPEN / design §5.1明示NULL、tasks T061** | mutable currentのnullable列だけをFieldStrategy.ALWAYS＋full DTOで値→NULLにする。historyはclear inventoryから除外し、CORRECTED/CANCELLED、supersedes_event_id、correction_reason等を持つ新event INSERTで訂正する。旧行は不変 | F1-NULL-01、F1-HISTORY-CORRECTION-01。current NULL、field省略拒否、CAS rollback、旧history不変、新event、asOf最新解決 |
 | dispatch-outsourcing-compliance-ledger-R5-P1-05 | **OPEN / R4.1-R4.2、T061 PacketのPII scope claim** | T061はportal/AI直接公開0のconsumer scan、T063はdetail/list/count、T064はCSV/Excel/PDF/downloadのfield allow-list/maskを担当する。Demo ownershipを分離済み | F1-PII-OWNERSHIP-01をT061、detail/list/countをT063、CSV/Excel/PDF/downloadをT064で各々証明 |
 **R5 docs-only response status**: 上記5件は本同期では`OPEN`のまま。今回の変更は決定・test matrix・task ownershipの具体化だけで、V1/V84、production code、SecurityConfig、DDL、T061 checkbox以外の実装は変更しない。R10がfix planを受理するまでcode fixを開始せず、R10 VERIFIED_CLOSED前にT062/A1/B1/B2へ進まない。
 
@@ -77,10 +79,19 @@ R10は固定範囲 Base `856ab1faf09f07abcd7a5b34453a5037173ce553` → implement
 
 - **R5-P1-01**: 公式mapping 96行をstable IDとcanonical resolution codeへ固定し、各official rowのDB column cellを専用typed columnまたは指定historyへ置換した。旧候補名、旧単一制限日、保存形状の一括構造化データ選択、GATE-T060-ROLEによるfield semantics判断はactive mappingから除去した。料金・2種制限日の法的意味と条件付き表示だけをGATE-T066-FIELD-SEMANTICSへ残した。
 - **R5-P1-02**: snapshot_versionだけをcontract単位の一意キーとし、snapshot_hashはcontent indexに限定した。retryはoperation_idとexpected current versionで冪等化し、同じoperationは同じresultを返す。新operationのA(v1,hA)→B(v2,hB)→A(v3,hA)を保持する。worker snapshot/stateの具体的なtable、current pointer、FK、CAS、orphan rollback、direct UPDATE/DELETE拒否、承認済みretention purgeを定義した。
-- **R5-P1-04**: mutable currentのclear inventoryとappend-only history correction protocolを分離した。currentだけをFieldStrategy.ALWAYS＋full DTOで値→NULLにし、historyはevent_type、supersedes_event_id、correction_reason、actor、effective interval、asOf keyを持つ新eventで訂正/取消する。F1-NULL-01/02とF1-HISTORY-CORRECTION-01を分離した。
+- **R5-P1-04**: mutable currentのclear inventoryとappend-only history correction protocolを分離した。currentだけをFieldStrategy.ALWAYS＋full DTOで値→NULLにし、historyはevent_type、supersedes_event_id、correction_reason、actor、effective interval、asOf keyを持つ新eventで訂正/取消する。F1-NULL-01とF1-HISTORY-CORRECTION-01を分離した。
 - **R5-P1-03 / R5-P1-05**: 既提出のlegacy/partial/repair matrixとT061/T063/T064のPII ownership分離は維持する。Issue statusはR10確認前のため5件すべてOPEN。
 - **再Review指摘（R10 Round 5 P1×3 OPEN）への追補**: `t_contract.work_location`・`t_contract.job_description`・`official_typed_field`等の旧候補列を§3の全mapping行から除去し、§3.1〜3.4の列ヘッダを「DB column候補」から「DB column（F1 canonical resolution）」へ変更、§3冒頭に「§3.5 manifestと§4を正本とする」注記を追加した。派遣料金の画面位置を「契約金額」から「compliance profileの派遣料金欄（売上/粗利列とは分離）」へ訂正し、独立要否の混同を解消した。旧単一`limitation_date`の文言を§3.5/§5.1へ統一し、`GATE-T060-RETENTION`は`GATE-T066-RETENTION`へ移管（FM-L-30行・§4 RETENTION_METADATA行・§6 gate表・本ledgerのM/本番gate節を同期）。
 - 今回はspec docs、tasks、review-ledgerだけを変更し、V1/V84、production code、SecurityConfig、test source、T061 checkboxは変更しない。R10が3件のfix planを受理するまでT061 code fix、T062/A1/B1/B2、production変更を開始しない。
+
+## R10 Round 6 判定とR6 P2/NOTE同期（2026-08-09）
+
+R10 Round 6はHead `53ec7ef`（docs 4文書のみ）をread-only確認し、**R5-P1-01/02/04の文書修正を受理、T061 code fix着手を許可**した。P0=0、P1=5（OPEN、docs受理済み）、P2=2、NOTE=1。T060 PASS維持、T061 FAIL継続、T062〜T066停止継続。P1 statusはcode fix＋direct regression証跡（F1-MAP-01、F1-SNAPSHOT-01/02、F1-NULL-01、F1-HISTORY-CORRECTION-01、F1-MYSQL-FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK-01、F1-PII-OWNERSHIP-01、skip 0）が揃うまでOPEN維持、T061 checkboxは未完了のまま。production release/apply authorizationなし。
+
+- **R6-P2-01**: tasks.mdのF1テスト要件がdesign §6.2と不一致（`F1-NULL-02`参照・`F1-PII-OWNERSHIP-01`未記載）だったため、design §6.2のtest ID列へ同期した（F1-NULL-01へ訂正しF1-PII-OWNERSHIP-01を追加）。ledger内のF1-NULL-02表記も正本へ合わせた。
+- **R6-P2-02**: §3.5 resolution tableの`PROFILE_TYPED`が96 stable IDのいずれにも未使用かつ§4 canonical tableに不在だったため削除し、§3.5と§4のresolution code表を一致させた。
+- **R6-NOTE-01**: `PLANNED_INTRODUCTION_TERMS`/`PLANNED_INTRODUCTION_HISTORY`のtable境界を確定した（terms=予定労働条件sub-field列、history=紹介時期・採否・非採用理由の反復行でtermsを参照）。`recipient_scope`表記をdesign §1の`recipient_contact_id`へ統一し、§3.3/§3.5/§4の全cellを同期した。V84列名はcode fix時にF1-MAP-01で照合する。
+- 本deltaはdocs 3文書（field-mapping/tasks/review-ledger）のみ。V1/V84/code/test未変更、T061 checkbox未変更。
 
 ## M / 本番gateと再開条件
 

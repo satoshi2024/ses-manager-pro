@@ -118,7 +118,7 @@
 | 派遣労働者の雇用安定措置 | 解除前申入れ、就業機会確保、損害賠償等、理由明示 | 同上 | t_contract_compliance_snapshot.employment_stability_preference + t_employment_stability_history.request/response/action | profileの雇用安定措置 | 雇用安定措置欄 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-C／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 派遣先が雇用する場合の紛争防止措置 | 紹介可能/不可に応じた手数料または申出方法 | 条件付き（派遣元が職業紹介を行える場合） | t_direct_hire_dispute_history.measure/fee/request_method/effective_from/to | profileの紹介/紛争防止 | 紛争防止措置欄 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-C／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 期間制限を受けない業務に係る事項 | 有期プロジェクト、育休/介護休業代替、日数限定等 | 条件付き | t_contract_compliance_snapshot.limitation_exemption_type/detail/basis/from/to | profileの期間制限例外 | 備考欄 | 契約・交付時点のtyped snapshot/asOfを保存し、current masterの変更で過去帳票を変えない | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-C／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
-| 紹介予定派遣の予定労働条件 | 契約期間、更新、更新上限、業務/場所の変更範囲、試用期間、賃金、保険、喫煙措置、雇用主等 | 紹介予定派遣の場合のみ | t_planned_introduction_history.terms_*（契約期間・更新・賃金・保険・喫煙・雇用主） | profileの条件付きセクション | 別紙 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-C／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
+| 紹介予定派遣の予定労働条件 | 契約期間、更新、更新上限、業務/場所の変更範囲、試用期間、賃金、保険、喫煙措置、雇用主等 | 紹介予定派遣の場合のみ | t_planned_introduction_termsのsub-field列（契約期間・更新・業務/場所変更範囲・試用期間・賃金・保険・喫煙措置・雇用主）（PLANNED_INTRODUCTION_TERMS） | profileの条件付きセクション | 別紙 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-C／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 
 ### 3.2 就業条件明示書（SRC-E）
 
@@ -141,7 +141,7 @@
 | 福利厚生 | 制服、施設利用等の具体的便宜 | 同上 | t_contract_compliance_snapshot.benefits_detail, benefits_provided_flag | 福利厚生 | ⑯ | 契約・交付時点のtyped snapshot/asOfを保存し、current masterの変更で過去帳票を変えない | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 苦情申出先・処理方法・連携体制 | 派遣元/先の窓口と相互連携 | 同上 | t_contract_compliance_snapshot.source/client_complaint_contact_* + t_compliance_complaint_history.received_at/content/action/resolution/notified_at | 苦情窓口 | ⑨ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF`（詳細mask） | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 雇用安定措置 | 契約解除時の新たな就業機会/休業/解雇予告等 | 同上 | t_contract_compliance_snapshot.employment_stability_preference + t_employment_stability_history.request/response/action | 雇用安定措置 | ⑩ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
-| 紹介予定派遣 | 予定労働条件を条件付き明示 | 紹介予定派遣の場合のみ | t_planned_introduction_history.terms_*（契約期間・更新・賃金・保険・喫煙・雇用主） | 条件付きセクション | ⑪別紙 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
+| 紹介予定派遣 | 予定労働条件を条件付き明示 | 紹介予定派遣の場合のみ | t_planned_introduction_history（紹介時期・採否・非採用理由の反復行。予定労働条件sub-fieldはt_planned_introduction_termsを参照）（PLANNED_INTRODUCTION_HISTORY） | 条件付きセクション | ⑪別紙 | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 紛争防止措置 | 派遣先雇用時の申出/手数料等 | 条件付き | t_direct_hire_dispute_history.measure/fee/request_method/effective_from/to | 紛争防止措置 | ⑰ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 派遣料金 | 月額/日額/時間額 | 同上 | t_contract_compliance_snapshot.dispatch_fee_amount, t_contract_compliance_snapshot.dispatch_fee_basis, t_contract_compliance_snapshot.dispatch_fee_currency | compliance profileの派遣料金欄（売上/粗利列とは分離） | ⑳ | 契約・交付時点のtyped snapshot/asOfを保存し、current masterの変更で過去帳票を変えない | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状はF1で確定済み。法的意味・条件付き表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 社会保険の加入手続きが完了していない場合の理由（⑱） | 社会保険の加入手続きが未完了の場合のみ理由を記載する公式項目。完了済みを理由欄へ補完しない | 同上 | t_contract_compliance_snapshot.social_insurance_procedure_incomplete_reason（SRC-E⑱独立列） | 就業条件明示書profileの社会保険手続欄。未完了時のみ入力可能 | 就業条件明示書 備考⑱ | 契約・交付時点のtyped snapshot/asOfを保存し、current masterの変更で過去帳票を変えない | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED`,`P3_SELF`（理由詳細はmask） | SRC-E／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
@@ -167,7 +167,7 @@
 | 契約内容と明示内容の差異（責任者） | 派遣元/先責任者に差異がある場合 | 差異発生時 | t_notification_difference_history.difference_type, contract_snapshot_id, notice_snapshot_id, occurred_at | 差異入力/確認 | ⑥ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-N／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 契約内容と明示内容の差異（時間外・休日労働） | 差異がある場合のみ記載 | 差異発生時 | t_notification_difference_history.difference_type, contract_snapshot_id, notice_snapshot_id, occurred_at | 差異入力/確認 | ⑥ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-N／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 | 契約内容と明示内容の差異（その他） | 上記以外の差異 | 差異発生時 | t_notification_difference_history.difference_type, contract_snapshot_id, notice_snapshot_id, occurred_at | 差異入力/確認 | ⑥ | append-only history。訂正・取消は新event、旧event不変。asOfは有効な最新eventを解決 | `ARCHIVE_PENDING` | `P0_FULL`,`P1_MASK`,`P2_LIMITED` | SRC-N／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
-| 保険証等の写しの提示/送付 | 派遣元から派遣先への提示/送付。未知file/scan障害はfail-closed | 同上 | t_document_delivery.document_id, recipient_scope, delivered_at, confirmed_at | document delivery | 添付/交付記録 | delivery時点のtyped snapshotとrecipient/file scopeを固定。confirmed_at IS NULLは受領未確認 | `ARCHIVE_PENDING` | `P0_FULL`; `P1_MASK`,`P2_LIMITED`不可 | SRC-N／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
+| 保険証等の写しの提示/送付 | 派遣元から派遣先への提示/送付。未知file/scan障害はfail-closed | 同上 | t_document_delivery.document_id, recipient_contact_id, delivered_at, confirmed_at | document delivery | 添付/交付記録 | delivery時点のtyped snapshotとrecipient/file scopeを固定。confirmed_at IS NULLは受領未確認 | `ARCHIVE_PENDING` | `P0_FULL`; `P1_MASK`,`P2_LIMITED`不可 | SRC-N／令和8年7月版・10月改正対応／2026-08-09 | 保存形状・NULL意味はF1で確定済み。法的条件/表示はGATE-T066-FIELD-SEMANTICS、帳票経路はB1 |
 
 ### 3.4 派遣元管理台帳（SRC-L）
 
@@ -326,8 +326,8 @@
 | EMPLOYMENT_STABILITY_HISTORY | preference current＋依頼・回答・実施の`t_employment_stability_history`反復行 |
 | DIRECT_HIRE_DISPUTE_HISTORY | 雇用時の紛争防止措置と手数料/申出を`t_direct_hire_dispute_history`へ条件付き保存 |
 | LIMITATION_EXEMPTION_TYPED | 例外type/detail、根拠・期間を専用列＋snapshot。ruleが法的適用を自動確定しない |
-| PLANNED_INTRODUCTION_HISTORY | 予定労働条件のsub-fieldと紹介・採否・非採用理由を専用historyへ分離 |
-| PLANNED_INTRODUCTION_TERMS | 紹介予定派遣の契約期間・更新・業務/場所変更範囲・賃金・保険・喫煙措置・雇用主をsub-fieldで保存し、単一一括構造化データに圧縮しない |
+| PLANNED_INTRODUCTION_HISTORY | 紹介時期・採否・非採用理由をt_planned_introduction_historyの反復行へ保存し、予定労働条件sub-fieldはt_planned_introduction_termsを参照 |
+| PLANNED_INTRODUCTION_TERMS | 紹介予定派遣の契約期間・更新・業務/場所変更範囲・賃金・保険・喫煙措置・雇用主をt_planned_introduction_termsのsub-field列で保存し、単一一括構造化データに圧縮しない |
 | DISPATCH_FEE_TYPED | `dispatch_fee_amount` DECIMAL、`dispatch_fee_basis`、`dispatch_fee_currency`を売上/粗利から分離 |
 | INSURANCE_TYPED | SRC-E⑱単一理由とSRC-Lの健康/年金/雇用各status/reason/expected_dateを別列へ保存 |
 | NOTIFICATION_DIFFERENCE_HISTORY | 派遣期間・就業日・時間/休憩・責任者・時間外等の差異typeと契約側/明示側snapshotを反復行へ保存 |
@@ -337,7 +337,6 @@
 | TRAINING_HISTORY | 教育訓練を実施日時・時間・内容のappend-only historyへ保存 |
 | CAREER_HISTORY | キャリアconsultingを日時・内容のPII historyへ保存 |
 | RETENTION_METADATA | 派遣終了日と保存満了予定日をtyped metadataへ保存。legal holdで削除を停止。保存category・起算点の確認はGATE-T066-RETENTION（T066 / 本番gate） |
-| PROFILE_TYPED | 該当mappingの専用profile列＋snapshot。未確認はNULL＋finding、未定義一括構造化データは禁止 |
 ## 4. F1 schema resolution（production変更なし）
 
 4帳票96行のstable row ID（FM-C-01〜FM-L-30）を、以下の保存形状へ一意に解決する。technical shapeを未決のまま後続実装へ渡さない。法的意味・条件付き表示だけをGATE-T066へ残す。
@@ -361,12 +360,12 @@
 | EMPLOYMENT_STABILITY_HISTORY | preference current＋依頼・回答・実施のt_employment_stability_history反復行 |
 | DIRECT_HIRE_DISPUTE_HISTORY | 紛争防止措置と手数料/申出をt_direct_hire_dispute_historyへ条件付き保存 |
 | LIMITATION_EXEMPTION_TYPED | 例外type/detail、根拠・期間を専用列＋snapshot |
-| PLANNED_INTRODUCTION_HISTORY | 予定労働条件のtyped sub-fieldと紹介・採否・理由をt_planned_introduction_historyへ分離 |
-| PLANNED_INTRODUCTION_TERMS | 契約期間・更新・業務/場所変更範囲・賃金・保険・喫煙措置・雇用主をterms列へ分解保存 |
+| PLANNED_INTRODUCTION_HISTORY | 紹介時期・採否・非採用理由をt_planned_introduction_historyの反復行へ保存（予定労働条件sub-fieldはt_planned_introduction_termsを参照） |
+| PLANNED_INTRODUCTION_TERMS | 契約期間・更新・業務/場所変更範囲・賃金・保険・喫煙措置・雇用主をt_planned_introduction_termsのsub-field列へ分解保存 |
 | DISPATCH_FEE_TYPED | dispatch_fee_amount DECIMAL、dispatch_fee_basis、dispatch_fee_currencyを売上/粗利から分離 |
 | INSURANCE_TYPED | SRC-E⑱の単一理由とSRC-Lの健康/年金/雇用各status/missing_reason/expected_dateを別列で保持 |
 | NOTIFICATION_DIFFERENCE_HISTORY | 差異typeと契約側/明示側snapshotをt_notification_difference_historyへ反復保存 |
-| DOCUMENT_DELIVERY | document/template/effective period/snapshot hash/recipient scope/delivery/confirmationをt_document_deliveryへ保存 |
+| DOCUMENT_DELIVERY | document/template/effective period/snapshot hash/recipient_contact_id/delivery/confirmationをt_document_deliveryへ保存 |
 | WORKER_PII_SNAPSHOT | 氏名・性別・年齢区分・雇用主情報をworker-specific snapshotへ保存し、T063/T064のallow-listでmask |
 | LEDGER_WORK_HISTORY | 月次就業状況・タイムシートを締め時点snapshotの反復行へ保存。雇用勤怠と混同しない |
 | TRAINING_HISTORY | 教育訓練を実施日時・時間・内容のappend-only historyへ保存 |
