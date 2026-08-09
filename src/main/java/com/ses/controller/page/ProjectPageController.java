@@ -2,6 +2,7 @@ package com.ses.controller.page;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 /**
@@ -17,6 +18,15 @@ public class ProjectPageController {
     @GetMapping("/list")
     public String list() {
         return "project/list";
+    }
+
+    /**
+     * 案件詳細画面
+     */
+    @GetMapping("/detail")
+    public String detail(@RequestParam Long id, org.springframework.ui.Model model) {
+        model.addAttribute("projectId", id);
+        return "project/detail";
     }
 
     /**

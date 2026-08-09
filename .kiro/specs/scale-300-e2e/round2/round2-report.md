@@ -1,6 +1,6 @@
 # 300人規模 E2E 第2ラウンド（深掘り）
 
-- 実行日時: 2026-08-09T15:02:39.373Z
+- 実行日時: 2026-08-09T15:45:30.706Z
 - 対象URL: http://localhost:8081
 - 検出問題数: 0（重複除去後）
 - 実行チェック数: 54（うち失敗 0）
@@ -10,10 +10,10 @@
 | チェック | 結果 | 内容 |
 |---|---|---|
 | pagination:engineer | OK | total=255, pages=26, lastPageRows=5, activePage=26 |
-| pagination:customer | OK | total=39, pages=4, lastPageRows=9, activePage=4 |
+| pagination:customer | OK | total=40, pages=4, lastPageRows=10, activePage=4 |
 | pagination:project | OK | total=103, pages=11, lastPageRows=3, activePage=11 |
 | pagination:contract | OK | total=252, pages=13, lastPageRows=12, activePage=13 / 13 |
-| pagination:todo | OK | total=101, pages=6, lastPageRows=1, activePage=6 |
+| pagination:todo | OK | total=102, pages=6, lastPageRows=2, activePage=6 |
 | pagination:candidate | OK | total=45, pages=5, lastPageRows=5, activePage=5 |
 | search:engineer | OK | keyword=田中 on #searchName, found=true |
 | global-search | OK | keyword=田中, resultText=要員 (4) 田中 陸正社員 稼動中 田中 達也正社員 稼動中 田中 結衣正社員 Bench 田中 太郎正社員 稼動中  |

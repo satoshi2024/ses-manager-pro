@@ -151,6 +151,29 @@
 - 修正: 「削除」「経歴削除」「業界・役割」へ統一。
 - 状態: **FIXED**（`rg` で該当文言0件）
 
+## D-011 [P2] 案件詳細リンクが404（案件詳細ページ未実装）
+
+- 対象: `project-ingestion.js` の「案件詳細」リンクと確定フロー遷移先
+- 事象: 取込案件を確定済みにすると `/project/detail/{id}` へ遷移するが、
+  対応するページコントローラが存在せず404になる（既存コードのリンク切れ）。
+  今回のシード追加で確定済み案件が表示されるようになり顕在化した。
+- 修正:
+  - `ProjectPageController` に `/project/detail?id={id}` を追加
+  - `templates/project/detail.html` と `static/js/modules/project-detail.js` を新設
+  - `project-ingestion.js` のリンク3箇所を `/project/detail?id=` 形式へ統一
+- 状態: **FIXED**（id=5001 で全項目表示、存在しないIDは「案件が見つかりません」）
+- 補足: マネージャーは組織データスコープのためアクセス可能な案件5100で検証。
+  権限外案件（5001）はAPIが404を返し、画面は「案件が見つかりません」を表示。
+
+## レビュー指摘対応（2026-08-10）
+
+- 取込シードの変換先を実データへ整合:
+  - `t_resume_ingestion` id=3 は「高橋 博之」→ 要員1029（名前・単価・経験年数が一致）
+  - `t_project_ingestion` id=3 は案件5001「公共機関向け申請システム開発（Phase3）」と
+    案件名・単価・勤務地・期間・スキルが一致
+- `project-detail.js` のフィールド名を `Project` エンティティ（unitPriceMin /
+  unitPriceMax / remoteType / commercialFlow）へ修正し、単価とリモート表示を確認
+
 ---
 
 ## 追加検証（合格）
@@ -213,6 +236,20 @@
   - 要員 `/my/timesheet` で favicon 含め4xx/consoleエラーなし
   - HR `/resume-ingestion/review/1` / マネージャー `/project-ingestion/review/1` が200
   - `/approval/routes` は管理者200 / 営業403（意図通り）
+
+## 修正ラウンド（第5ラウンド）の実績
+
+- 実施日時: 2026-08-10（コードレビュー指摘対応）
+- 変更:
+  - `ProjectPageController` + `project/detail.html` + `project-detail.js` を追加
+  - `project-ingestion.js` の詳細リンクを `?id=` 形式へ修正（D-011）
+  - 取込シードの変換先（要員1029 / 案件5001）と parsed_json を整合
+  - `resume-ingestion.js` のインデント修正（add-skillテンプレート）
+- 検証:
+  - `/project/detail?id=5001`: 200、案件名/単価/勤務地/リモート/期間を表示
+  - マネージャーはデータスコープ内の `/project/detail?id=5100` で200を確認
+  - `/project/detail?id=9999`: 「案件が見つかりません」を表示（4xx/consoleなし）
+  - 要員1029 / 案件5001 の名前が parsed_json と一致
 
 ## UI設計メモ（障害ではない改善候補）
 

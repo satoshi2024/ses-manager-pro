@@ -58,10 +58,10 @@ const PAGE_URLS = {
 };
 
 const EXTRA_PAGES = {
-  '管理者': ['/engineer/detail?id=1001', '/engineer/detail?id=1252', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001', '/approval/routes', '/resume-ingestion/review/1', '/project-ingestion/review/1'],
-  '営業': ['/engineer/detail?id=1001', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001'],
-  'HR': ['/engineer/detail?id=1001', '/candidate/detail?id=13001', '/resume-ingestion/review/1'],
-  'マネージャー': ['/engineer/detail?id=1001', '/customer/2001', '/project-ingestion/review/1'],
+  '管理者': ['/engineer/detail?id=1001', '/engineer/detail?id=1252', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001', '/approval/routes', '/resume-ingestion/review/1', '/project-ingestion/review/1', '/project/detail?id=5001'],
+  '営業': ['/engineer/detail?id=1001', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001', '/project/detail?id=5001'],
+  'HR': ['/engineer/detail?id=1001', '/candidate/detail?id=13001', '/resume-ingestion/review/1', '/project/detail?id=5001'],
+  'マネージャー': ['/engineer/detail?id=1001', '/customer/2001', '/project-ingestion/review/1', '/project/detail?id=5100'],
   '要員': ['/my/attendance']
 };
 

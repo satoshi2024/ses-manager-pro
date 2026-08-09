@@ -1869,23 +1869,23 @@ const resumeIngestions = [
   },
   {
     id: 3,
-    originalFileName: '経歴書_高橋大輔.pdf',
+    originalFileName: 'スキルシート_高橋博之.pdf',
     storedFileName: 'resume-0003.pdf',
     fileExt: 'pdf',
     status: '確定済',
-    extractedText: '高橋大輔。Python/Djangoによる社内システム開発。',
+    extractedText: '高橋博之。Pythonを中心に13年の開発経験。金融系基幹システムの要件定義から保守運用まで対応。',
     parsedJson: JSON.stringify({
-      engineer: { fullName: '高橋 大輔', fullNameKana: 'タカハシ ダイスケ', gender: '男性', japaneseLevel: 'ネイティブ', employmentType: 'BP', experienceYears: 4, expectedUnitPrice: 720000, resumeSummary: 'Python/Djangoによる社内システム開発4年。' },
-      skills: [{ name: 'Python', proficiency: '上級', experienceYears: 4 }, { name: 'Django', proficiency: '上級', experienceYears: 3 }],
-      careers: [{ periodFrom: '2022-04-01', periodTo: '2026-03-31', projectName: '社内業務システム刷新', role: '開発エンジニア', techStack: 'Python/Django/AWS', description: '開発・運用保守を担当。' }],
+      engineer: { fullName: '高橋 博之', fullNameKana: 'タカハシ ヒロユキ', gender: '男性', japaneseLevel: 'ネイティブ', employmentType: '正社員', experienceYears: 13, expectedUnitPrice: 670000, resumeSummary: '13年の開発経験。Pythonを中心に、要件定義から保守運用まで一貫して対応。' },
+      skills: [{ name: 'Python', proficiency: '上級', experienceYears: 13 }, { name: 'Django', proficiency: '中級', experienceYears: 8 }, { name: 'SQL', proficiency: '中級', experienceYears: 10 }],
+      careers: [{ periodFrom: '2020-04-01', periodTo: '2026-03-31', projectName: '金融系基幹システム開発', role: 'リーダー', techStack: 'Python/Django/PostgreSQL', description: '要件定義から設計・実装・保守運用まで一貫して担当。' }],
       warnings: []
     }),
     aiProvider: 'mock',
     aiModel: 'mock-resume-v1',
     errorMessage: null,
-    convertedEngineerId: 1001,
-    candidateId: 13001,
-    reviewNote: '候補者から確定済み',
+    convertedEngineerId: 1029,
+    candidateId: null,
+    reviewNote: '確定済み',
     createdBy: 1
   },
   {
@@ -1982,11 +1982,11 @@ const projectIngestions = [
     sourceType: 'PASTE',
     originalFileName: null,
     storedFileName: null,
-    rawText: '流通業向け在庫管理システム。Python/Django。単価55〜70万円。',
+    rawText: '公共機関向け申請システム開発（Phase3）。SQL Server/Ruby/Go/Django。単価68〜79万円。仙台、フルリモート。二次請、2名。',
     status: '確定済',
     parsedJson: JSON.stringify({
-      project: { name: '流通業 在庫管理システム', minUnitPrice: 550000, maxUnitPrice: 700000, location: '東京', remoteAllowed: 'ハイブリッド', startDate: '2026-09-01', endDate: '2027-02-28', commercialFlow: '二次請', headCount: 1, endClientName: 'Z物流', description: '在庫管理システムの開発・導入。' },
-      skills: [{ name: 'Python' }, { name: 'Django' }],
+      project: { name: '公共機関向け申請システム開発（Phase3）', minUnitPrice: 680000, maxUnitPrice: 790000, location: '仙台', remoteAllowed: 'フルリモート', startDate: '2026-08-01', endDate: '2027-09-28', commercialFlow: '二次請', headCount: 2, endClientName: '東海システムサービス株式会社', description: 'プロジェクト管理支援および技術レビュー。' },
+      skills: [{ name: 'SQL Server' }, { name: 'Ruby' }, { name: 'Go' }, { name: 'Django' }],
       warnings: []
     }),
     aiProvider: 'mock',

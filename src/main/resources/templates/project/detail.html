@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{project.detail} + ' - ' + #{app.name}">案件詳細 - SES Manager Pro</title>
+</head>
+<body>
+
+<div layout:fragment="content">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-briefcase me-2 text-accent-green"></i><span th:text="#{project.detail}">案件詳細</span></h4>
+            <p class="text-muted small mb-0" th:text="#{project.detail.desc}">案件情報の確認</p>
+        </div>
+        <a href="/project/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
+            <i class="bi bi-arrow-left me-1"></i><span th:text="#{project.list}">案件一覧へ戻る</span>
+        </a>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-4">
+            <div id="project-detail-loading" class="text-center text-muted py-5">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div><span th:text="#{js.common.loading}">読み込み中...</span>
+            </div>
+            <div id="project-detail-body" class="d-none">
+                <div class="mb-4">
+                    <h5 class="text-white fw-bold mb-0" id="pd-name"></h5>
+                    <span class="badge bg-success mt-2" id="pd-status"></span>
+                    <span class="badge bg-secondary ms-1" id="pd-priority"></span>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">顧客ID</label><div class="text-white" id="pd-customerId"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">商流</label><div class="text-white" id="pd-flow"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">商機ID</label><div class="text-white" id="pd-opportunity"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">単価（下限）</label><div class="text-white" id="pd-unitMin"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">単価（上限）</label><div class="text-white" id="pd-unitMax"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">必要人数</label><div class="text-white" id="pd-count"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">勤務地</label><div class="text-white" id="pd-location"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">リモート</label><div class="text-white" id="pd-remote"></div></div>
+                    <div class="col-md-4"><label class="form-label text-muted small mb-1">期間</label><div class="text-white" id="pd-period"></div></div>
+                    <div class="col-12"><label class="form-label text-muted small mb-1">案件概要</label><div class="text-white" id="pd-description"></div></div>
+                    <div class="col-12"><label class="form-label text-muted small mb-1">備考</label><div class="text-white" id="pd-remarks"></div></div>
+                </div>
+            </div>
+            <div id="project-detail-error" class="text-center text-danger py-5 d-none"></div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/project-detail.js}"></script>
+</th:block>
+</body>
+</html>

@@ -191,7 +191,7 @@
                         <option value="\u4e0a\u7d1a"${sk.proficiency === '\u4e0a\u7d1a' ? ' selected' : ''}>上級</option>
                     </select>
                     <input type="number" class="form-control bg-dark border-secondary text-light skill-years" value="${sk.experienceYears || ''}" min="0" style="max-width:90px;" placeholder="\u5e74\u6570">
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                 </div>
             `);
         });
