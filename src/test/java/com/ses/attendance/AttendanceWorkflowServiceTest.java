@@ -6,6 +6,7 @@ import com.ses.entity.AttendanceMonth;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.mapper.AttendanceMonthMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.AttendanceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 
 /** T070の月次状態機械と締め済み編集拒否を確認するL2定向test。 */
 @SpringBootTest
@@ -45,6 +48,9 @@ class AttendanceWorkflowServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private ApprovalEngineService approvalEngineService;
 
     private long engineerId;
     private long organizationId;
@@ -118,6 +124,29 @@ class AttendanceWorkflowServiceTest {
 
         authenticate(USER_ID, "要員");
         assertThrows(BusinessException.class, () -> attendanceService.saveMyDay(request));
+    }
+
+    @Test
+    void 再openは理由必須で承認engineへ委譲し締め済みを直接戻さない() {
+        AttendanceDayRequest request = new AttendanceDayRequest();
+        request.setWorkDate(LocalDate.of(2026, 8, 3));
+        request.setClockIn(LocalTime.of(9, 0));
+        request.setClockOut(LocalTime.of(18, 0));
+        request.setBreakMinutes(60);
+        request.setWorkType("通常");
+        attendanceService.saveMyDay(request);
+        attendanceService.submitMyMonth("2026-08");
+        authenticate(93001L, "管理者");
+        attendanceService.approve(engineerId, "2026-08");
+        attendanceService.close(engineerId, "2026-08");
+
+        assertThrows(BusinessException.class,
+                () -> attendanceService.reopen(engineerId, "2026-08", " "));
+        assertEquals("締め済", month().getStatus());
+
+        attendanceService.reopen(engineerId, "2026-08", "訂正申請の根拠");
+        verify(approvalEngineService).request(any());
+        assertEquals("締め済", month().getStatus());
     }
 
     private AttendanceMonth month() {

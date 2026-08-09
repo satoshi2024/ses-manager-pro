@@ -406,6 +406,9 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (month == null) {
             throw BusinessException.of(404, "error.attendance.monthNotFound");
         }
+        if (month.getLegalEntityId() == null || month.getOrganizationId() == null) {
+            throw BusinessException.of(404, "error.attendance.scopeUnknown");
+        }
         return month;
     }
 
