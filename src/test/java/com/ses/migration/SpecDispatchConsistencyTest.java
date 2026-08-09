@@ -319,6 +319,14 @@ class SpecDispatchConsistencyTest {
             if (existing.contains(reserved)) {
                 conflicts.add(entry.getKey() + " " + spec + " が実在するV" + reserved + " を予約しています");
             }
+            // Flywayはout-of-order無効。parallel trackの後発migrationがmainへ先に実在した場合、
+            // 低位の予約を後からdeployすると、未適用の予約migrationを履歴順に進められず起動不能になる。
+            // 「同じ番号がない」だけではこの状態を検出できないため、reserved <= latestも拒否する。
+            if (reserved <= latest) {
+                conflicts.add(entry.getKey() + " " + spec + " の予約V" + reserved
+                        + " が実在最新V" + latest + " 以下です。Flyway out-of-order無効のため、"
+                        + "先行migrationを適用するか、全予約表を次の未使用番号へ繰り上げてください");
+            }
         }
 
         assertTrue(conflicts.isEmpty(),
