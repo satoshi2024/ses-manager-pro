@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** T070 R2-P1-03のHR法人scopeとUNKNOWN/履歴境界をSQLで検証する。 */
 @SpringBootTest
@@ -67,6 +68,23 @@ class AttendanceScopeResolverTest {
         // B法人のsnapshotは解決できても、HR Aの母集団へは混入しない。
         assertEquals(0, resolver.allowedHrEngineerIds(hr.getId(), LocalDate.of(2026, 8, 31))
                 .contains(engineerB.getId()) ? 1 : 0);
+    }
+
+    @Test
+    void 履歴ありNULLは連携ユーザー所属へfallbackせず判定不能にする() {
+        OrganizationUnit companyA = organization("ATT-HR-NULL", 81003L);
+        organizationUnitMapper.insert(companyA);
+        SysUser hr = user("att-hr-null-" + System.nanoTime(), "HR");
+        userOrganizationMapper.insert(UserOrganization.builder().userId(hr.getId())
+                .organizationId(companyA.getId()).primaryFlag(1)
+                .validFrom(LocalDate.of(2026, 1, 1)).build());
+        Engineer engineer = engineer("ATT-NULL", companyA.getId());
+        jdbcTemplate.update("INSERT INTO t_engineer_accounting_history "
+                        + "(engineer_id, organization_id, organization_history_status, valid_from, valid_to) "
+                        + "VALUES (?, NULL, 'KNOWN', '2026-01-01', NULL)", engineer.getId());
+
+        assertNull(resolver.resolveSnapshot(engineer.getId(), hr.getId(), LocalDate.of(2026, 8, 31)));
+        assertEquals(Set.of(), resolver.allowedHrEngineerIds(hr.getId(), LocalDate.of(2026, 8, 31)));
     }
 
     private OrganizationUnit organization(String code, Long legalEntityId) {

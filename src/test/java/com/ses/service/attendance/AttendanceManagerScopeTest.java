@@ -88,6 +88,32 @@ class AttendanceManagerScopeTest {
         SecurityContextHolder.clearContext();
     }
 
+    @Test
+    void 履歴ありNULLはmanagerの組織scopeへfallbackしない() {
+        OrganizationUnit own = organization("ATT-MGR-NULL");
+        organizationUnitMapper.insert(own);
+        var manager = new com.ses.entity.SysUser();
+        manager.setUsername("att-manager-null-" + System.nanoTime());
+        manager.setPassword("pass");
+        manager.setRealName("manager-null");
+        manager.setRole("マネージャー");
+        manager.setStatus(1);
+        sysUserMapper.insert(manager);
+        userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId())
+                .organizationId(own.getId()).primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
+        Engineer engineer = Engineer.builder().fullName("ATT-MGR-NULL-ENGINEER").employmentType("正社員")
+                .status("Bench").organizationId(own.getId()).build();
+        engineerMapper.insert(engineer);
+        historyMapper.insert(com.ses.entity.EngineerAccountingHistory.builder().engineerId(engineer.getId())
+                .organizationId(null).organizationHistoryStatus("KNOWN")
+                .validFrom(LocalDate.of(2026, 1, 1)).validTo(null).build());
+
+        authenticate(manager.getId());
+        assertTrue(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
+                List.of(own.getId()), List.of(), LocalDate.of(2026, 8, 31)).isEmpty());
+        SecurityContextHolder.clearContext();
+    }
+
     private OrganizationUnit organization(String code) {
         return OrganizationUnit.builder().tenantId(1L).legalEntityId(82001L).code(code)
                 .name(code).type("部門").validFrom(LocalDate.of(2026, 1, 1)).status("有効").version(0).build();

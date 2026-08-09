@@ -115,6 +115,21 @@ class AttendanceCalculatorTest {
         assertEquals(0, zeroScheduled.scheduledMinutes());
     }
 
+    @Test
+    void 別要員の個人calendarを法人fallbackへ混入させない() {
+        WorkCalendar otherEngineerCalendar = WorkCalendar.builder().legalEntityId(100L)
+                .engineerId(99L).name("別要員calendar").validFrom(LocalDate.of(2026, 1, 1))
+                .status("有効").build();
+        otherEngineerCalendar.setId(9L);
+        when(workCalendarMapper.selectList(any())).thenReturn(List.of(otherEngineerCalendar, legalCalendar));
+        day("通常", 480);
+
+        AttendanceCalculation result = calculator.calculate(LocalDate.of(2026, 8, 3), 20L,
+                100L, 10L, LocalTime.of(9, 0), LocalTime.of(10, 0), 0, 0);
+
+        assertEquals(1L, result.workCalendarId());
+    }
+
     private void day(String type, Integer scheduledMinutes) {
         when(workCalendarDayMapper.selectOne(any())).thenReturn(WorkCalendarDay.builder()
                 .calendarId(1L).calendarDate(LocalDate.of(2026, 8, 3))

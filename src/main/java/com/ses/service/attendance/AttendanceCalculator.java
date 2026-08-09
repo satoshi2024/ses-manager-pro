@@ -77,30 +77,58 @@ public class AttendanceCalculator {
         if (workDate == null || engineerId == null || legalEntityId == null) {
             throw BusinessException.of(400, "error.attendance.calendarUnknown");
         }
-        List<WorkCalendar> candidates = workCalendarMapper.selectList(new LambdaQueryWrapper<WorkCalendar>()
-                .eq(WorkCalendar::getStatus, "有効")
-                .le(WorkCalendar::getValidFrom, workDate)
-                .and(w -> w.isNull(WorkCalendar::getValidTo).or().ge(WorkCalendar::getValidTo, workDate))
-                .and(w -> w.eq(WorkCalendar::getEngineerId, engineerId)
-                        .or().eq(WorkCalendar::getOrganizationId, organizationId)
-                        .or().eq(WorkCalendar::getLegalEntityId, legalEntityId)));
-        return candidates.stream()
-                .filter(calendar -> engineerId.equals(calendar.getEngineerId())
-                        || organizationId.equals(calendar.getOrganizationId())
-                        || legalEntityId.equals(calendar.getLegalEntityId()))
-                .sorted(Comparator
-                        .comparingInt((WorkCalendar c) -> specificity(c, engineerId, organizationId, legalEntityId))
-                        .thenComparing(WorkCalendar::getValidFrom, Comparator.reverseOrder())
-                        .thenComparing(WorkCalendar::getId, Comparator.reverseOrder()))
-                .findFirst()
-                .orElseThrow(() -> BusinessException.of(400, "error.attendance.calendarUnknown"));
+        List<WorkCalendar> engineerCalendars = activeCalendars(workDate, query ->
+                query.eq(WorkCalendar::getEngineerId, engineerId)).stream()
+                .filter(calendar -> engineerId.equals(calendar.getEngineerId()))
+                .toList();
+        if (!engineerCalendars.isEmpty()) {
+            return selectLatest(engineerCalendars);
+        }
+
+        List<WorkCalendar> organizationCalendars = activeCalendars(workDate, query ->
+                query.eq(WorkCalendar::getOrganizationId, organizationId)
+                        .isNull(WorkCalendar::getEngineerId)).stream()
+                .filter(calendar -> organizationId.equals(calendar.getOrganizationId())
+                        && calendar.getEngineerId() == null)
+                .toList();
+        if (!organizationCalendars.isEmpty()) {
+            return selectLatest(organizationCalendars);
+        }
+
+        List<WorkCalendar> legalEntityCalendars = activeCalendars(workDate, query ->
+                query.eq(WorkCalendar::getLegalEntityId, legalEntityId)
+                        .isNull(WorkCalendar::getEngineerId)
+                        .isNull(WorkCalendar::getOrganizationId)).stream()
+                .filter(calendar -> legalEntityId.equals(calendar.getLegalEntityId())
+                        && calendar.getEngineerId() == null && calendar.getOrganizationId() == null)
+                .toList();
+        if (!legalEntityCalendars.isEmpty()) {
+            return selectLatest(legalEntityCalendars);
+        }
+        throw BusinessException.of(400, "error.attendance.calendarUnknown");
     }
 
-    private int specificity(WorkCalendar calendar, Long engineerId, Long organizationId, Long legalEntityId) {
-        if (engineerId.equals(calendar.getEngineerId())) return 0;
-        if (organizationId.equals(calendar.getOrganizationId())) return 1;
-        if (legalEntityId.equals(calendar.getLegalEntityId())) return 2;
-        return 3;
+    private List<WorkCalendar> activeCalendars(LocalDate workDate,
+                                               java.util.function.Consumer<LambdaQueryWrapper<WorkCalendar>> scope) {
+        LambdaQueryWrapper<WorkCalendar> query = new LambdaQueryWrapper<WorkCalendar>()
+                .eq(WorkCalendar::getStatus, "有効")
+                .le(WorkCalendar::getValidFrom, workDate)
+                .and(w -> w.isNull(WorkCalendar::getValidTo).or().ge(WorkCalendar::getValidTo, workDate));
+        scope.accept(query);
+        return workCalendarMapper.selectList(query).stream()
+                .filter(calendar -> calendar.getValidFrom() != null
+                        && !calendar.getValidFrom().isAfter(workDate)
+                        && (calendar.getValidTo() == null || !calendar.getValidTo().isBefore(workDate)))
+                .toList();
+    }
+
+    private WorkCalendar selectLatest(List<WorkCalendar> calendars) {
+        return calendars.stream()
+                .sorted(Comparator
+                        .comparing(WorkCalendar::getValidFrom, Comparator.reverseOrder())
+                        .thenComparing(WorkCalendar::getId, Comparator.nullsLast(Comparator.reverseOrder())))
+                .findFirst()
+                .orElseThrow(() -> BusinessException.of(400, "error.attendance.calendarUnknown"));
     }
 
     private int incrementalWeeklyOvertime(int priorWeekMinutes, int dailyLegalMinutes) {

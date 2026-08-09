@@ -39,7 +39,7 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
               CASE
                 WHEN eh.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
                 WHEN eh.organization_history_status = 'UNKNOWN' THEN NULL
-                ELSE COALESCE(eh.organization_id, uo.organization_id)
+                ELSE eh.organization_id
               END IN <foreach collection="organizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>
             </if>
             <if test="directUserIds != null and directUserIds.size() > 0">

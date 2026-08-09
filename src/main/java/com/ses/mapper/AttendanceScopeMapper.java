@@ -47,7 +47,7 @@ public interface AttendanceScopeMapper {
             JOIN m_organization_unit ou ON ou.id = CASE
                  WHEN eh.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
                  WHEN eh.organization_history_status = 'UNKNOWN' THEN NULL
-                 ELSE COALESCE(eh.organization_id, uo.organization_id)
+                 ELSE eh.organization_id
                END
                  AND ou.deleted_flag = 0
                  AND ou.valid_from &lt;= #{asOf}

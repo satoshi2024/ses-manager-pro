@@ -46,8 +46,15 @@ public class AttendanceScopeResolver {
         if (history != null && "UNKNOWN".equals(history.getOrganizationHistoryStatus())) {
             return null;
         }
-        Long organizationId = history == null ? engineer.getOrganizationId() : history.getOrganizationId();
-        if (organizationId == null) {
+        Long organizationId;
+        if (history != null) {
+            // 履歴行ありNULLは明示的な判定不能。現在所属・連携ユーザーへfallbackしない。
+            organizationId = history.getOrganizationId();
+            if (organizationId == null) return null;
+        } else {
+            organizationId = engineer.getOrganizationId();
+        }
+        if (history == null && organizationId == null) {
             Long linkedUserId = linkedUserId(engineerId, fallbackUserId);
             organizationId = linkedUserId == null ? null
                     : userOrganizationMapper.selectPrimaryOrganizationId(linkedUserId, asOf);
