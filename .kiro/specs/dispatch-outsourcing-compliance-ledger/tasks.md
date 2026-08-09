@@ -24,24 +24,24 @@
     付いていること、mapping lifecycleとhash固定、特定自然人の事前固定なし、実actor承認event不在が開発baselineを
     blockしないこと、`git diff --check` exit 0。
 
-- [ ] F1. workplace/profile/finding/delivery DDL（R10 Round 5 P1再作業中）
-  - **Objective**: 契約ごとに就業先・業務内容・就業時間・指揮命令者・責任者・2種の抵触日・待遇方式を、
-    field-mappingの専用column/history形状で登録できる。mutable current profileとappend-only snapshotを分離し、
-    マスタ変更・profile改定後も過去帳票の内容を再生成できる状態にする。
-  - **実装ガイダンス**: **V84**/V1/H2(`sql/schema-dispatch-compliance-h2.sql`)/MySQL smokeを同一差分で再同期する。
-    `design.md` §5.5のschema/history matrixを正本とし、SRC-E⑱、`organization_limitation_date`、派遣料金、
-    source/client別苦情、反復履歴、worker-specific snapshotをTEXT/JSONへ圧縮しない。
-    `t_compliance_finding`に`UNIQUE(contract_id, code, condition_fingerprint)`を置く（design §5.4）。
-    **2種の制限日がNULLは「制限なし」ではなく未算定**とし、明示NULL更新で旧値を残さない。
-    snapshotは`UNIQUE(contract_id,snapshot_version/hash)`、current pointer/CAS、DB trigger UPDATE/DELETE拒否、
-    clear mechanismは`FieldStrategy.ALWAYS`に固定する。
+- [ ] F1. workplace/profile/finding/delivery DDL（R10 Round 5 P1 docs再提出中）
+  - **Objective**: 契約ごとの就業先・業務内容・就業時間・指揮命令者・責任者・2種の抵触日・待遇方式を、
+    field-mappingのcanonical typed column/history形状で登録できる。mutable current profileとappend-only snapshot/historyを分離し、
+    マスタ変更・profile改定・history訂正後も過去帳票の内容を再生成できる状態にする。
+  - **実装ガイダンス**: **V84**/V1/H2(sql/schema-dispatch-compliance-h2.sql)/MySQL smokeを同一差分で再同期する。
+    design.md §5.5のschema/history matrixを正本とし、SRC-E⑱、SRC-L④、2種抵触日、派遣料金、
+    source/client別苦情、反復履歴、worker-specific snapshotを専用typed column/historyへ保持する。
+    snapshotはUNIQUE(contract_id,snapshot_version)とし、content hashを一意性やretry keyに使わない。
+    operation_id＋expected current versionで冪等性/CASを管理し、A(v1,hA)→B(v2,hB)→A(v3,hA)を許可する。
+    current pointerはFK付きで、DB trigger/権限境界によるUPDATE/DELETE拒否、retention purgeの承認済み別経路を実装する。
+    clear mechanismはFieldStrategy.ALWAYSをmutable current nullable列だけに適用し、history訂正はCORRECTED/CANCELLED新eventで行う。
   - **テスト要件**: L1〜L3。design §6.2のF1-MAP-01、F1-SNAPSHOT-01/02、F1-NULL-01/02、
-    F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、
+    F1-HISTORY-CORRECTION-01、F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、
     F1-MYSQL-FAILED-HISTORY-REPAIR-01、F1-MYSQL-POST-APPLY-ROLLBACK-01、FK/期間、finding uniqueを実行する。
-    field permissionの実maskはT063（detail/list/count）とT064（export/download/PDF）へ正式移管し、
+    field permissionの実maskはT063（detail/list/count）とT064（CSV/Excel/PDF/download）へ正式移管し、
     T061はinternal entityをportal/AI DTOへ直接渡さないprojection contractとconsumer scanだけを確認する。
-  - **Demo**: 派遣契約のprofile snapshot Aを確定し、profileをBへ改定。A/B両方を再取得し、
-    就業先master変更・値→NULL更新後もAが不変で、currentだけが安全側へ戻ることを確認する。
+  - **Demo**: profile snapshot Aを確定し、Bへ改定後に同一内容を新operationで再改定する。A(v1)・B(v2)・A(v3)を再取得し、
+    2 workerのcurrent pointerが独立していること、currentだけの値→NULLとhistory訂正（旧行不変・新event）が安全側へ戻ることを確認する。
 
 - [ ] F2. ComplianceRule分割/拡張
   - **Objective**: 既存の4つのcompliance ruleが挙動を変えずに動き続けたうえで、
