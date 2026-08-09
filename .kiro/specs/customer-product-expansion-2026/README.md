@@ -50,28 +50,32 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済み・G2開発方針決定済み |
 | 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V76, V77, V78, V79** | S07実装中・独立Review NOT REVIEWABLE |
 | 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）** | 実装完了・R09 Round8独立Review PASS（2026-08-08） |
-| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V81** | 仕様済み・G2開発方針決定済み |
-| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V82** | 仕様済み・G6決定済み |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V83** | 仕様済み |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V84** | 仕様済み・G3決定済み |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V85** | 仕様済み |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V86** | 仕様済み・G4決定済み |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V87** | 仕様済み・G5決定済み |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V88** | 仕様済み |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | 実装Head確定・R10 remediation済み・独立再Review待ち |
+| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V82** | 仕様済み・G2開発方針決定済み |
+| 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V83** | 仕様済み・G6決定済み |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V84** | 仕様済み |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V85** | 仕様済み・G3決定済み |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V86** | 仕様済み |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V87** | 仕様済み・G4決定済み |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V88** | 仕様済み・G5決定済み |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V89** | 仕様済み |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
 `enterprise-identity-security` がV63（identity/MFA/session/permission/file DDL）、V64（legacy role→
 permission group seed）、V65（break-glass二者承認とMFA試行制限）、V66（action permissionのbaseline付与と
 拒否指定）を使用した。そのため後続spec全ての予約番号を、その時点のFlyway最新番号`latest + 1`から
-振り直している（本書と各design/tasks/派工資料を同一更新で反映する）。**現在適用済みの最新はV74**であり、
+振り直している（本書と各design/tasks/派工資料を同一更新で反映する）。S09の実装でV80を適用し、既適用V80を変更しないR10修復をV81へ追加した。
+したがって、S09の実装Head時点で確認できる適用済みの最新はV81であり、
 V59とV72は永久欠番として保持する。
 
 S07の既存承認DDLはV75、承認menu seedはV76、`current_step_started_at`追加はV77であり、これらは変更不可とする。
 S07正式migrationはV75〜V79とする。内訳はV75（承認DDL）、V76（承認menu seed）、V77（SLA開始時刻）、V78（round/participant/version）、V79（B1 notification outbox）である。V79をS09以降へ再利用せず、S09〜S17の予約は
-S09=V80、S10=V81、S11=V82、S12=V83、S13=V84、S14=V85、S15=V86、S16=V87、S17=V88とする。
+S09=V80（既適用）＋V81（R10順方向修復）、S10=V82、S11=V83、S12=V84、S13=V85、S14=V86、S15=V87、S16=V88、S17=V89とする。
 過去migrationの編集やout-of-order適用は禁止する。
+
+2026-08-09時点でS09は実装Head `e0bd72b1021cd31dee7017b5e9f4dd475731259b` に固定してR10 remediation Packetを再提出中であり、独立ReviewのPASS確定前である。
+S10/S11およびWave 2の後続着手は、S09の独立再Review合格まで停止する。
 
 ## 4. 実行Wave
 

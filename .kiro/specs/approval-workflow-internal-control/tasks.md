@@ -9,7 +9,7 @@
 > **design.md §6.2の金額帯境界を実装前に確定すること。実装中に決めない。**
 >
 > **Migration**: S07の正式migrationは **V75/V76/V77/V78/V79**。R1.2/R1.3のroute decision sourceは追加のpatch migration **V79.1**が担当する。V75は承認DDL、V76は承認menu、V77はSLA開始時刻、V78はround/participant/version、V79はB1 notification outboxを担当する。V75〜V79は変更せず、V79.1はV79適用後かつV80より前に適用する。
-> S09〜S17は **V80〜V88** を予約し、過去migrationの編集・削除・out-of-order適用は行わない。適用済みDBの`flyway_schema_history`はReview Packetで別途照会結果を記録する。
+> S09はV80、S09 R10 remediationはV81を順方向追加で使用し、S10〜S17は **V82〜V89** を予約する。V80を編集・削除せず、過去migrationのout-of-order適用は行わない。適用済みDBの`flyway_schema_history`はReview Packetで別途照会結果を記録する。
 
 - [x] 0. G7と対象操作inventory
   - **状態**: 完了。成果物は[`operation-inventory.md`](operation-inventory.md)。production codeは変更していない。

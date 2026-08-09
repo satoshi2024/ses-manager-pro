@@ -6,8 +6,8 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの実在番号は **V80**。approval(V75)のmerge後に着手する。
-> 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
+> **Migration**: 本specの基礎DDLは **V80**、R10 remediationは既適用V80を変更せず順方向 **V81** を使用する。
+> approval(V75〜V79/V79.1)のmerge後に着手済み。V80/V81を再編集せず、着手時に再確認した実Headの最新をPacketへ固定する。V59/V72は永久欠番。
 
 - [x] F1. 注文/明細/検収DDL
   - **Objective**: 顧客の注文書を注文番号・顧客PO番号・期間・金額・支払条件付きで登録でき、
@@ -72,16 +72,16 @@
   - [x] R9-INVOICE-UI: 検収免除理由の非空必須判定（DB/SQL/API）、PO警告の自己判定バグ修正、UIアクセシビリティ対応 (P1-06, P2-02, P2-03)
   - [x] R9-M: 実MySQL環境での見積〜請求全通しBrowser Demo証跡（HAR/console/PNG）、DB通知dedupe/KPI自動テスト強化、L4実行 (P1-10, P2-04)
 
-- [ ] Remediation (Round 10 指摘対応)
-  - [ ] R10-SPEC: requirements.md, design.md, tasks.md, review-ledger.md, spec-execution-ledger.md の改訂およびS09 FIX戻し
-  - [ ] R10-MIG: V80を原状復元し、新規順方向マイグレーションV81__order_acceptance_remediation.sqlを新設。NON_UNIQUE/全構成列/順序/prefix/cascade三分岐制御、marker前失敗のdurability確保、実V79.1 legacy fixture追加 (R10-P0-01, R9-P1-01, R9-P1-02)
-  - [ ] R10-SCOPE: StatusConstants.ROLE_HR ("HR") を使用し、DocumentServiceImpl/DataScopeServiceImpl/AcceptanceServiceImpl/MonthlyClosingServiceImpl/DashboardServiceImplにてHRアクセスを完全遮断。検収文書のarchive list/detail/downloadを同じworkMonth-as-of SQL母集団へ統一 (R9-P0-01)
-  - [ ] R10-CONCURRENCY: WorkRecordServiceImpl.reopenMonth にて Acceptance を FOR UPDATE ロックし提出済/検収済を拒否。登録用 (tenant_id, document_type, file_hash) の DB UNIQUE 制約追加による原本hash重複アトミックClaim。明細契約化の二重clickキー競合で FOR UPDATE 再読 (R9-P1-03, R9-P1-09, R9-P2-01)
-  - [ ] R10-DOCUMENT: 注文請PDF発行のPOST/DL GET分離、ActionPermissionResolver/ApiAuditFilterのexact/method-aware判定、/api/autocomplete/legal-entities へのUI候補接続・自社代表法人動的解決、PDF再発行時のアーカイブ済bytes返却 (R9-P1-07, R9-P1-08, R10-P1-01)
-  - [ ] R10-INVOICE-UI: V81/V1/H2へ DB CHECK 制約 chk_contract_acceptance_exemption を追加、PO警告の自己除外、UIアクセシビリティ対応（aria-labelledby, aria-label, explicit id） (R9-P1-06, R9-P2-03)
-  - [ ] R10-M: 実MySQL環境での見積〜請求閉ループBrowser Demo証跡（HAR/console/PNG）、DB通知dedupe/KPI境界自動テスト追加、L4全量実行・git diff --checkパス (R9-P1-10, R9-P2-04)
+- [x] Remediation (Round 10 指摘対応)
+  - [x] R10-SPEC: requirements.md, design.md, tasks.md, review-ledger.md, spec-execution-ledger.md の改訂およびS09 FIX戻し
+  - [x] R10-MIG: V80を原状復元し、新規順方向マイグレーションV81__order_acceptance_remediation.sqlを新設。NON_UNIQUE/全構成列/順序/prefix/cascade三分岐制御、marker前失敗のdurability確保、実V79.1 legacy fixture追加 (R10-P0-01, R9-P1-01, R9-P1-02)
+  - [x] R10-SCOPE: StatusConstants.ROLE_HR ("HR") を使用し、DocumentServiceImpl/DataScopeServiceImpl/AcceptanceServiceImpl/MonthlyClosingServiceImpl/DashboardServiceImplにてHRアクセスを完全遮断。検収文書のarchive list/detail/downloadを同じworkMonth-as-of SQL母集団へ統一 (R9-P0-01)
+  - [x] R10-CONCURRENCY: WorkRecordServiceImpl.reopenMonth にて Acceptance を FOR UPDATE ロックし提出済/検収済を拒否。登録用 (tenant_id, document_type, file_hash) の DB UNIQUE 制約追加による原本hash重複アトミックClaim。明細契約化の二重clickキー競合で FOR UPDATE 再読 (R9-P1-03, R9-P1-09, R9-P2-01)
+  - [x] R10-DOCUMENT: 注文請PDF発行のPOST/DL GET分離、ActionPermissionResolver/ApiAuditFilterのexact/method-aware判定、/api/autocomplete/legal-entities へのUI候補接続・自社代表法人動的解決、PDF再発行時のアーカイブ済bytes返却 (R9-P1-07, R9-P1-08, R10-P1-01)
+  - [x] R10-INVOICE-UI: V81/V1/H2へ DB CHECK 制約 chk_contract_acceptance_exemption を追加、PO警告の自己除外、UIアクセシビリティ対応（aria-labelledby, aria-label, explicit id） (R9-P1-06, R9-P2-03)
+  - [x] R10-M: 実MySQL環境での見積〜請求閉ループBrowser Demo証跡（HAR/console/PNG）、DB通知dedupe/KPI境界自動テスト追加、L4全量実行・git diff --checkパス (R9-P1-10, R9-P2-04)
 
-- [ ] M. 全通し
+- [x] M. 全通し
   - **Objective**: 見積→注文→契約→勤怠→検収→請求がIDで追跡でき、
     既存のdocument/approval/contract/invoice機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
