@@ -130,6 +130,30 @@ class AttendanceCalculatorTest {
         assertEquals(1L, result.workCalendarId());
     }
 
+    @Test
+    void 対象組織calendarを他組織と法人既定より優先する() {
+        WorkCalendar targetOrganizationCalendar = WorkCalendar.builder().legalEntityId(100L)
+                .organizationId(10L).name("対象組織calendar").validFrom(LocalDate.of(2026, 1, 1))
+                .status("有効").build();
+        targetOrganizationCalendar.setId(11L);
+        WorkCalendar otherOrganizationCalendar = WorkCalendar.builder().legalEntityId(100L)
+                .organizationId(11L).name("他組織calendar").validFrom(LocalDate.of(2026, 2, 1))
+                .status("有効").build();
+        otherOrganizationCalendar.setId(12L);
+        WorkCalendar legalFallback = WorkCalendar.builder().legalEntityId(100L)
+                .name("法人既定calendar").validFrom(LocalDate.of(2026, 3, 1))
+                .status("有効").build();
+        legalFallback.setId(13L);
+        when(workCalendarMapper.selectList(any())).thenReturn(List.of(),
+                List.of(otherOrganizationCalendar, targetOrganizationCalendar), List.of(legalFallback));
+        day("通常", 480);
+
+        AttendanceCalculation result = calculator.calculate(LocalDate.of(2026, 8, 3), 20L,
+                100L, 10L, LocalTime.of(9, 0), LocalTime.of(10, 0), 0, 0);
+
+        assertEquals(11L, result.workCalendarId());
+    }
+
     private void day(String type, Integer scheduledMinutes) {
         when(workCalendarDayMapper.selectOne(any())).thenReturn(WorkCalendarDay.builder()
                 .calendarId(1L).calendarDate(LocalDate.of(2026, 8, 3))
