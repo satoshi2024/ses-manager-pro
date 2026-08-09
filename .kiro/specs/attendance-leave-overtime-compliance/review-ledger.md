@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `IMPLEMENTATION / REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T068実装Head=`b327b1b`（V83はlocal実装のみ、V82 merge/apply後に進める）。Packet/current merged Head=`8edcaa6`、R11 fix内容Head=`2299fbc`。台帳provenanceは`git log -1 -- review-ledger.md`で解決 |
-| merge | `8edcaa6`がcurrent merged baseline。T068の`b327b1b`/V83は未merge・未本番適用、dispatch V82を先行する |
+| head | T068実装Head=`b327b1b`（V83はlocal実装のみ、V82 merge/apply後に進める）。Packet/current merged Head=`be2fb19`（`8edcaa6`を含む）、R11 fix内容Head=`2299fbc`。台帳provenanceは`git log -1 -- review-ledger.md`で解決 |
+| merge | `be2fb19`がcurrent merged baseline（dispatch側の後続文書commitを含む）。T068の`b327b1b`/V83は未merge・未本番適用、dispatch V82を先行する |
 | latest review | `R11 Round 1 fix delta再Review / T068実装証跡 2026-08-09` |
 | verdict | `T068 COMPLETED_UNREVIEWED`。R1-P2-01は`FIXED_BY_IMPLEMENTER`（独立再Review待ち） |
 | issue count | `P0=0 / P1=0 / P2=1 / NOTE=0` |
-| next action | `R11 P2-01 fix deltaとT068 b327b1bを分離して独立Reviewへ提出。V83のmerge/applyはV82後` |
+| next action | `Packet/current merged Head=be2fb19を実Gitで再確認し、R11 P2-01 fix deltaとT068 b327b1bを分離して独立Reviewへ提出。V83のmerge/applyはV82後` |
 
 本台帳は、T067/T068のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smokeの実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -37,7 +37,7 @@
 ```text
 - handbook version: v2.0
 - spec/tasks: attendance-leave-overtime-compliance / T067・T068（T068のみ完了扱い、T069以降未着手）
-- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7` → R11 fix内容Head`2299fbc` → Packet/current merged Head`8edcaa6` → T068 local実装Head`b327b1b`。台帳provenanceは`git log -1 -- review-ledger.md`で解決
+- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7` → R11 fix内容Head`2299fbc` → Packet/current merged Head`8edcaa6` → dispatch文書更新後のPacket/current merged Head`be2fb19` → T068 local実装Head`b327b1b`。台帳provenanceは`git log -1 -- review-ledger.md`で解決
 - changed files by task: T067成果文書/台帳、T068のV1/V83、H2 replay、engineer-schema-h2、application-test.yml、7 entity/mapper、定向test、MySQL smoke、migration consistency test、tasks/design/source matrix、中央台帳
 - requirements/AC trace: 最重要境界、R1.1〜R1.4、R2.1/R2.2、R3.2/R3.4、R4.2、R5
 - migration state: 実適用最新V81、dispatch V82は未merge、attendance V83は`b327b1b`でlocal実装済み・未merge/未本番適用、V59/V72永久欠番。B2 merged commit=`4488ba8`
@@ -149,7 +149,7 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 
 ### T068 completion — 2026-08-09 — 主担当実装記録
 
-- base/head: `8edcaa6` current merged baseline → `b327b1b` local T068 implementation
+- base/head: `be2fb19` current merged baseline（`8edcaa6`を含む） → `b327b1b` local T068 implementation
 - scope: V1統合baseline、V83増分（未merge）、H2 replay 2形状、entity/mapper、MySQL smoke、migration consistency、T068のみ。T069以降は未着手
 - implementation: 分整数モデル、calendar/日次/月次/休暇/36協定/follow-up、`(source, source_external_id)` UNIQUE、scheduled NULL/0、valid_from月初CHECK、`overtime.*` 9 key、`overtime_exempt_flag=NULL` fail-closed形状
 - independently executed tests: `AttendanceSchemaTest` 5/0/0/0、`MigrationScriptIntegrityTest` 27/0/0/0、`SpecDispatchConsistencyTest` 8/0/0/0、`FlywayAttendanceSchemaSmokeTest` 1/0/0/0、`git diff --check` PASS
