@@ -161,7 +161,7 @@ L4全量 1,280/0/0/0（F0/E0/S0）、MySQL fresh/legacy/partial/repair全4経路
   R12-P2-01はPacket provenance記述のみで、実装・認可・データへの影響はない。
 - **L4 evidence**: Maven/Surefire最終report群で282 classes / 1582 tests / failures 0 / errors 0 /
   skipped 0を確認し、Docker MySQL smokeを含む。外側監視のtimeoutでwrapper最終trailerは未取得だが、child完了後の全report集計とzero-skippedを確認した。
-  Browser evidenceはS09 review-ledger §2.6および`order-acceptance-workflow/evidence/`へ固定する。
+  Browser evidenceはS09 review-ledger §2.7および`order-acceptance-workflow/evidence/`へ固定する。
 - **direct regression**: 39 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS。同一コードHeadのL4は方針どおり再実行せず、282 XMLを検算した。
 - **worktree**: clean、`.tmp-ui-scale-r3` gitlinkなし。nested repository内部はS09 main-tree変更対象外である。
 - **next action**: S10/S11を並行dispatch可能。S12はS10/S11双方のPASS後。Wave 2を解放する。
