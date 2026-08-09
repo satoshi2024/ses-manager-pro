@@ -7,15 +7,27 @@
 本packetは、S10のV82予約とS11のV83実在について、各environmentの
 `flyway_schema_history`をread-onlyで照合するための証跡台帳である。全environmentのowner証跡が揃うまで、V82先行適用・V84以降への採番繰上げのいずれも決定しない。
 
+## Inventory scope and closure
+
+repoから確定できる環境区分は、application.ymlの`local-default`、CI workflow/Testcontainersのephemeral MySQL、ならびにR10が要求するstaging・production・other legacy/deploymentである。非localの実environment名、owner ID、接続先はrepoに存在しないため、ownerからのinventory declarationが提出されるまで、これらを仮区分のまま保持する。未確認のenvironmentを「不存在」や「V83未適用」とは扱わない。
+
+各行は、environment ownerが次のいずれかを明示した時点で確定する。
+
+- `owner ID or approved role`（実在の個人名をcodeへ固定しない）
+- environmentの正式名称と種別（CI / staging / production / legacy等）
+- read-only capture時刻とV82/V83の同一schema結果
+
+local-defaultのexecutorは、環境ownerを代行するものではなく、workspaceから既定DBをread-only確認した主実装AIである。
+
 ## Environment inventory
 
 | environment | owner/evidence status | V82 | V83 | latest successful migration | capture / note |
 |---|---|---|---|---|---|
-| local-default (`localhost:3306/ses_manager_db`) | **COLLECTED**（read-only JDBC、secrets excluded） | rowなし（version/success/installed_on/checksum=N/A） | rowなし（version/success/installed_on/checksum=N/A） | V74 / success=true / installed_on=`2026-08-02 00:35:29` / checksum=`559443363` | capture `2026-08-09T08:47:26Z`。`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`未設定のためapplication.yml既定値を使用。V82/V83を変更していない |
-| CI / Testcontainers MySQL | **MISSING_OWNER_EVIDENCE** | 未提出 | 未提出 | 未提出 | CI実行環境のephemeral DBについて、実行jobのread-only出力が必要 |
-| staging | **MISSING_OWNER_EVIDENCE** | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし |
-| production | **MISSING_OWNER_EVIDENCE** | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし。productionへ接続・変更していない |
-| other legacy / deployment environments | **MISSING_OWNER_EVIDENCE** | 未提出 | 未提出 | 未提出 | environment inventoryとownerの提示が必要 |
+| local-default (`localhost:3306/ses_manager_db`) | **COLLECTED**（read-only JDBC、secrets excluded） | rowなし（version/success/installed_on/checksum=N/A） | rowなし（version/success/installed_on/checksum=N/A） | V74 / success=true / installed_on=`2026-08-02 00:35:29` / checksum=`559443363` | capture `2026-08-09T08:47:26Z`。executor/owner role=`主実装AI（local read-only verifier; environment owner approval not claimed）`。`DB_URL`/`DB_USERNAME`/`DB_PASSWORD`未設定のためapplication.yml既定値を使用。V82/V83を変更していない |
+| CI / Testcontainers MySQL | **MISSING_OWNER_EVIDENCE**（owner ID/role未提出） | 未提出 | 未提出 | 未提出 | CI実行環境のephemeral DBについて、実行jobのread-only出力が必要 |
+| staging | **MISSING_OWNER_EVIDENCE**（正式environment名・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし |
+| production | **MISSING_OWNER_EVIDENCE**（正式environment名・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | repo内に接続先・owner・credentialなし。productionへ接続・変更していない |
+| other legacy / deployment environments | **MISSING_OWNER_EVIDENCE**（inventory・owner ID/role未提出） | 未提出 | 未提出 | 未提出 | environment inventoryとownerの提示が必要 |
 
 ## Collected query and result
 

@@ -43,7 +43,8 @@ R4-P1-01のunblockとして、予約migration番号が実在最新番号以下�
 
 - P2は完了。`field-mapping.md`の状態を`PROVISIONAL_REVIEWED / T060 COMPLETE（R10 T060 PASS、R4-P1-01は環境証跡待ち）`へ最小修正した。T060 PASS、R4-P1-01 OPEN、中央ledgerのIN PROGRESS状態とは矛盾しない。
 - `environment-evidence-packet.md`を作成し、local-defaultのread-only結果と、CI/Testcontainers・staging・production・other legacyの未提出状態を秘密情報なしで記録した。全environment証跡packetは未完了である。
-- local-default結果はV82/V83 target rows=0、成功済み最新V74、`success=true`、`installed_on=2026-08-02 00:35:29`、`checksum=559443363`。repo内に非localのenvironment owner、接続先、credentialは存在しない。
+- local-default結果はV82/V83 target rows=0、成功済み最新V74、`success=true`、`installed_on=2026-08-02 00:35:29`、`checksum=559443363`。executor/owner roleは`主実装AI（local read-only verifier; environment owner approval not claimed）`と明記した。repo内に非localのenvironment owner、接続先、credentialは存在しない。
+- environment inventoryはrepoで確定可能なlocal-default、CI/Testcontainers、およびR10要求のstaging、production、other legacy/deploymentを区分として固定した。非localの正式environment名とowner ID/roleは未提出であり、未確認environmentを不存在やV83未適用とは扱わない。
 - 環境ownerへ要求するpacket形式は、environment名、capture時刻、V82/V83のversion・success・installed_on・checksum、latest successful migration、owner/実行役割である。秘密情報は提出しない。
 - 全environment証跡が揃うまで、V82先行または採番繰上げの正式decisionを推測で作成しない。予約表・全派工資料・legacy fixture同期および`SpecDispatchConsistencyTest` PASSも、そのdecision後に行う。
 
