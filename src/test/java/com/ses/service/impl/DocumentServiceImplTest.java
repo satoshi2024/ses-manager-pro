@@ -227,6 +227,33 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    void registerReceived_storagePutFailureでもtransaction中に即時cleanupする() {
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
+            ((Document) inv.getArgument(0)).setId(12L);
+            return 1;
+        });
+        when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(12L)))
+                .thenReturn(1);
+        doThrow(new RuntimeException("simulated put failure"))
+                .when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        var req = DocumentRegisterRequest.builder()
+                .documentType("ORDER_RECEIVED").sourceType("RECEIVED")
+                .businessKey("ORDER_RECEIVED:3").versionDiscriminator("1").build();
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(RuntimeException.class, () ->
+                    sut.registerReceived(req, new ByteArrayInputStream("content".getBytes())));
+            verify(documentStorage).delete(anyString());
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .getSynchronizations().isEmpty(), "put前にrollback補償が登録されているべき");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void addVersion_confirmedDocument_updatesStatusToAmended() {
         Document doc = new Document();
         doc.setId(10L);

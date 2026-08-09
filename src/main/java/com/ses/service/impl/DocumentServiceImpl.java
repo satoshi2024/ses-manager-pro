@@ -124,11 +124,13 @@ public class DocumentServiceImpl implements DocumentService {
             documentMapper.insert(doc);
             claimHashIfRequired(doc, streamResult.sha256());
 
-            // 5. Claim成功後だけStorageのquarantine領域へ保存する。
+            // 5. put前にrollback補償を登録する。putが部分書込みで失敗しても
+            // transaction中のcatchで即時削除し、rollback後にも冪等削除する。
+            registerStorageRollbackCompensation(storageKey);
+            // Claim成功後だけStorageのquarantine領域へ保存する。
             try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
                 documentStorage.put(storageKey, tempIs, true);
             }
-            registerStorageRollbackCompensation(storageKey);
 
             // 6. version・業務リンクを保存する。
             DocumentVersion version = buildVersion(request, doc.getId(), storageKey, streamResult.sizeBytes(), streamResult.sha256());
@@ -152,7 +154,7 @@ public class DocumentServiceImpl implements DocumentService {
 
         } catch (Exception e) {
             log.error("[文書台帳] DB保存失敗。storageKey={} error={}", storageKey, e.getMessage());
-            deleteStorageImmediatelyWhenNoTransaction(storageKey);
+            cleanupStorageAfterFailure(storageKey);
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
@@ -198,10 +200,10 @@ public class DocumentServiceImpl implements DocumentService {
 
         try {
             claimHashIfRequired(doc, streamResult.sha256());
+            registerStorageRollbackCompensation(storageKey);
             try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
                 documentStorage.put(storageKey, tempIs, true);
             }
-            registerStorageRollbackCompensation(storageKey);
 
             DocumentVersion version = buildVersion(request, documentId, storageKey, streamResult.sizeBytes(), streamResult.sha256());
             version.setBusinessKey(businessKey);
@@ -228,7 +230,7 @@ public class DocumentServiceImpl implements DocumentService {
 
         } catch (Exception e) {
             log.error("[文書台帳] 版追加DB失敗。storageKey={} error={}", storageKey, e.getMessage());
-            deleteStorageImmediatelyWhenNoTransaction(storageKey);
+            cleanupStorageAfterFailure(storageKey);
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
@@ -273,11 +275,9 @@ public class DocumentServiceImpl implements DocumentService {
         });
     }
 
-    private void deleteStorageImmediatelyWhenNoTransaction(String storageKey) {
-        if (TransactionSynchronizationManager.isActualTransactionActive()
-                || TransactionSynchronizationManager.isSynchronizationActive()) {
-            return;
-        }
+    private void cleanupStorageAfterFailure(String storageKey) {
+        // transaction中でも部分put/promoteの実体はDB rollbackの対象外なので、
+        // catch時に即時削除する。afterCompletionの補償削除は冪等な二重保険として残す。
         try {
             documentStorage.delete(storageKey);
         } catch (Exception cleanupError) {
@@ -1023,27 +1023,22 @@ public class DocumentServiceImpl implements DocumentService {
         Set<Long> allowedAcceptanceDocIds = new java.util.HashSet<>();
 
         // ACCEPTANCE 文書の月別複合タプルスコープ判定 (R9-P0-01)
-        // 異なる月ごとに allowedContractIdsAsOf(monthEnd) を個別に取得して合致する document_id 集合を事前構築
+        // 月の候補取得とdocument_id導出はMapper SQLで行う。acceptance全件をJavaへ
+        // ロードしてからfilterすると、list/count/downloadの認可境界をDBで保証できない。
         if (acceptanceMapper != null) {
-            List<com.ses.entity.Acceptance> acceptances = acceptanceMapper.selectList(
-                    new LambdaQueryWrapper<com.ses.entity.Acceptance>()
-                            .isNotNull(com.ses.entity.Acceptance::getDocumentId)
-                            .isNotNull(com.ses.entity.Acceptance::getWorkMonth));
-            if (acceptances != null && !acceptances.isEmpty()) {
-                // 月別にグループ化して複合タプル (contract_id, work_month) の許可を厳格判定
-                java.util.Map<String, List<com.ses.entity.Acceptance>> monthGroup = acceptances.stream()
-                        .collect(Collectors.groupingBy(com.ses.entity.Acceptance::getWorkMonth));
-                for (java.util.Map.Entry<String, List<com.ses.entity.Acceptance>> entry : monthGroup.entrySet()) {
-                    String month = entry.getKey();
-                    java.time.LocalDate monthEnd = month != null && !month.isBlank()
-                            ? java.time.YearMonth.parse(month).atEndOfMonth()
-                            : java.time.LocalDate.now();
+            List<String> documentWorkMonths = acceptanceMapper.selectDocumentWorkMonths();
+            if (documentWorkMonths != null) {
+                for (String month : documentWorkMonths) {
+                    if (month == null || month.isBlank()) {
+                        continue;
+                    }
+                    java.time.LocalDate monthEnd = java.time.YearMonth.parse(month).atEndOfMonth();
                     Set<Long> allowedContractsForMonth = dataScopeService.allowedContractIdsAsOf(monthEnd);
                     if (allowedContractsForMonth != null && !allowedContractsForMonth.isEmpty()) {
-                        for (com.ses.entity.Acceptance acc : entry.getValue()) {
-                            if (allowedContractsForMonth.contains(acc.getContractId())) {
-                                allowedAcceptanceDocIds.add(acc.getDocumentId());
-                            }
+                        List<Long> documentIds = acceptanceMapper.selectDocumentIdsByWorkMonthAndContractIds(
+                                month, new java.util.ArrayList<>(allowedContractsForMonth));
+                        if (documentIds != null) {
+                            allowedAcceptanceDocIds.addAll(documentIds);
                         }
                     }
                 }

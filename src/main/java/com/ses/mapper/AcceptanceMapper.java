@@ -18,6 +18,39 @@ import java.util.List;
 @Mapper
 public interface AcceptanceMapper extends BaseMapper<Acceptance> {
 
+    /** 文書scope判定用: 文書が紐づく検収の対象月だけをSQLで列挙する。 */
+    @Select("""
+        SELECT DISTINCT work_month
+        FROM t_acceptance
+        WHERE document_id IS NOT NULL
+          AND work_month IS NOT NULL
+          AND deleted_flag = 0
+        """)
+    List<String> selectDocumentWorkMonths();
+
+    /**
+     * 検収文書のas-of認可。Java側へ検収全件を返さず、対象月と許可契約集合を
+     * SQL境界で結合してdocument_idだけを返す。
+     */
+    @Select("""
+        <script>
+        SELECT DISTINCT document_id
+        FROM t_acceptance
+        WHERE document_id IS NOT NULL
+          AND work_month = #{workMonth}
+          AND deleted_flag = 0
+          <choose>
+            <when test="contractIds == null or contractIds.size() == 0">AND 1 = 0</when>
+            <otherwise>
+              AND contract_id IN
+              <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </otherwise>
+          </choose>
+        </script>
+        """)
+    List<Long> selectDocumentIdsByWorkMonthAndContractIds(
+            @Param("workMonth") String workMonth, @Param("contractIds") List<Long> contractIds);
+
     /**
      * グリッド一覧。確定済みwork record（検収要契約）を出発点に、未提出の行も含めて返す。
      * scopeは contractIds で絞る（空リストなら1=0で0件）。

@@ -52,6 +52,8 @@ import java.util.Set;
 public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOrder>
         implements SalesOrderService {
 
+    private static final String DEFAULT_TENANT_ID = "default";
+
     /** 状態遷移の唯一の権威（design §5.3の決定表）。フロントJSはこの複製であり、変更時は両方追随する。 */
     private static final Map<String, Set<String>> ALLOWED_STATUS_TRANSITIONS = Map.of(
             StatusConstants.ORDER_DRAFT, Set.of(StatusConstants.ORDER_RECEIVED, StatusConstants.ORDER_CANCELLED),
@@ -556,7 +558,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         }
         // 同一原本hashの二重登録は拒否（R2.4）。警告と拒否を混同しない。
         String sha256 = com.ses.service.impl.DocumentServiceImpl.computeSha256(bytes);
-        Long existing = documentMapper.findDocumentIdBySha256AndType(sha256, "ORDER_RECEIVED");
+        Long existing = documentMapper.findDocumentIdBySha256AndType(
+                DEFAULT_TENANT_ID, sha256, "ORDER_RECEIVED");
         if (existing != null) {
             throw BusinessException.of(409, "error.order.duplicateSourceDocument");
         }

@@ -25,4 +25,7 @@ Thumbs.db
 
 # アップロードファイル（ローカル保存先）
 /uploads/
+
+# 外部UI回帰用nested repositoryはrootのgitlinkとして取り込まない
+.tmp-ui-scale-r3/
 mise.toml

@@ -46,6 +46,14 @@ public class LocalDocumentStorage implements DocumentStorage {
             Files.copy(content, target, StandardCopyOption.REPLACE_EXISTING);
             log.debug("[LocalDocumentStorage] put stream: quarantine={} target={}", quarantine, target);
         } catch (IOException e) {
+            // Files.copyは途中まで書き込んだファイルを残し得るため、失敗時は
+            // quarantine/publishedの後続処理へ到達する前に対象を消す。
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException cleanupError) {
+                log.error("[LocalDocumentStorage] 部分書込みのcleanup失敗: target={} error={}",
+                        target, cleanupError.getMessage());
+            }
             throw new RuntimeException("Storage書き込み失敗: " + key, e);
         }
     }

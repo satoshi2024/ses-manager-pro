@@ -18,6 +18,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.io.InputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -73,6 +76,33 @@ class DocumentStorageTest {
             byte[] readBytes = is.readAllBytes();
             assertArrayEquals(data, readBytes);
         }
+    }
+
+    @Test
+    void localStorage_partialWriteFailure_removesQuarantineOrphan() throws Exception {
+        String key = "partial/" + System.nanoTime() + ".pdf";
+        InputStream failing = new InputStream() {
+            private boolean emitted;
+
+            @Override
+            public int read(byte[] buffer, int offset, int length) throws IOException {
+                if (!emitted) {
+                    emitted = true;
+                    buffer[offset] = 'x';
+                    return 1;
+                }
+                throw new IOException("simulated partial stream failure");
+            }
+
+            @Override
+            public int read() throws IOException {
+                throw new IOException("simulated partial stream failure");
+            }
+        };
+
+        assertThrows(RuntimeException.class, () -> localStorage.put(key, failing, true));
+        Path quarantineFile = Path.of("./target/test-storage/documents/quarantine").resolve(key);
+        assertFalse(Files.exists(quarantineFile), "部分書込みのquarantine orphanを残してはならない");
     }
 
     @Test

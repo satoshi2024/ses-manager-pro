@@ -35,10 +35,12 @@ public interface DocumentMapper extends BaseMapper<Document> {
         FROM t_document_version v
         JOIN t_document d ON d.id = v.document_id AND d.deleted_flag = 0
         WHERE v.sha256 = #{sha256}
+          AND d.tenant_id = #{tenantId}
           AND d.document_type = #{documentType}
           AND v.deleted_flag = 0
         LIMIT 1
         """)
-    Long findDocumentIdBySha256AndType(@org.apache.ibatis.annotations.Param("sha256") String sha256,
+    Long findDocumentIdBySha256AndType(@org.apache.ibatis.annotations.Param("tenantId") String tenantId,
+                                       @org.apache.ibatis.annotations.Param("sha256") String sha256,
                                        @org.apache.ibatis.annotations.Param("documentType") String documentType);
 }

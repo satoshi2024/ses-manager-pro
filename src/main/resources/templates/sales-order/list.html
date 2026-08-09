@@ -8,7 +8,7 @@
 </head>
 <body>
 <div layout:fragment="content">
-    <div class="card">
+    <div class="card mb-3">
         <div class="card-body">
             <form id="searchForm" class="row mb-3 align-items-end" onsubmit="event.preventDefault();">
                 <div class="col-md-3">
@@ -36,6 +36,11 @@
                     <button type="button" id="btnNewSalesOrder" class="btn btn-primary" th:text="#{salesOrder.btn.new}">注文作成</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
             <div class="table-responsive">
                 <table class="table table-bordered table-striped" id="salesOrderTable">
                     <thead>
@@ -53,8 +58,8 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="card-footer d-flex justify-content-between align-items-center"></div>
         </div>
+        <div class="card-footer d-flex justify-content-between align-items-center"></div>
     </div>
 
     <!-- 注文作成/編集モーダル -->
