@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `FIX / REVIEW`（T070までの実装範囲はPASS。T071〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | R2-P1-02方式A fix delta＝committed Head `b65996f`（=origin/main）。deltaは`3891c0e`→`5f362fc`（方式A実装）→`b65996f`（V91予約・文書同期） |
-| merge | `5f362fc`/`b65996f`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持 |
-| latest review | `R11 Round 3 R2-P1-02方式A fix delta 独立再Review 2026-08-09` |
-| verdict | **PASS（T070までの実装範囲）**。R2-P1-02（方式A休憩区間）とR3-P2-01（breakMinutesセル1択）はともに独立`VERIFIED_CLOSED`。新規P0/P1なし |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=2（NOTE-R3-03統合担当, NOTE-R3-06 dispatch fresh経路）` |
-| next action | **T071開始可**（R2-P1-02のVERIFIED_CLOSEDで従来の開始不可条件が解消。P2×2はhandbook §10によりblockerにしない）。NOTE-R3-03（V1へのdispatch R5テーブル混入）は統合担当へ調整し、dispatch V84 R5 merge後にCI相当L4を1回実行。S11完了はT074/M後 |
+| head | R2-P1-02方式A fix delta＋転記修正＝committed Head `0ff7f2b`（=origin/main）。deltaは`3891c0e`→`5f362fc`（方式A実装）→`b65996f`（V91予約・文書同期）→`758649e`→`fc798be`→`0ff7f2b`（ledger同期）。dispatch V84 R5 re-sync `b9b91f9`もmerge済み |
+| merge | `5f362fc`/`b65996f`/`758649e`/`fc798be`/`0ff7f2b`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持。dispatch V84 R5（`b9b91f9`）はV1不変のまま整合commit済み |
+| latest review | `R11 Round 3フォローアップ NOTE-R3-04/05修正＋dispatch R5 merge後 独立再Review 2026-08-09` |
+| verdict | **PASS（T070までの実装範囲）維持**。R2-P1-02/R3-P2-01 VERIFIED_CLOSED。NOTE-R3-04/05はFIXED（独立検証済み）。NOTE-R3-06は共有smoke破損としてdispatchレーンへ帰属（独立再現済み）。新規P0/P1なし |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=2（NOTE-R3-03統合担当, NOTE-R3-06 dispatch）` |
+| next action | **T071開始可（条件付き）**：共有`FlywayMigrationSmokeTest`がdispatch V84起因でREDの間、統合担当がdispatch修正（`log_bin_trust_function_creators`設定追加またはtrigger/function見直し）を最優先し、「CI相当L4×1回」とV91 fresh全経路の再検証はV84修正後に実施。T071の実装自体はattendance scope内で検証済みのため開始を止めない（handbook §10: NOTEは次specを止めない）。S11完了はT074/M後 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -24,8 +24,8 @@
 | attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-NOTE-R3-03 | NOTE | 統合担当調整（attendance欠陥ではない） | `5f362fc`のV1 diff（`src/main/resources/db/migration/V1__create_tables.sql`） | dispatch S10 R5 reworkのテーブル（`t_contract_compliance_snapshot`等）がattendance commitのV1へ混入した | committed treeはV1（新shape）＋V84（旧shape・IF NOT EXISTS）でgreen。dispatchが自身のV1/V84 R5を本V1と整合する形でcommitする必要がある | dispatchレーンがV84 R5をV1（committed shape）と整合させてcommitし、統合担当が両shapeの一致を確認 | fresh/legacy MySQL、`MigrationScriptIntegrityTest`、`SpecDispatchConsistencyTest`、V84 R5 merge後のCI相当L4×1回 | OPEN（統合担当へ引き継ぎ） | `5f362fc`（混入元） | dispatch V84 R5 merge時 |
-| attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
-| attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
+| attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
+| attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
 | attendance-leave-overtime-compliance-NOTE-R3-06 | NOTE | dispatch統合調整（attendance欠陥ではない） | `FlywayMigrationSmokeTest.java:37-40`（ses user container）、dispatch新V84（`b9b91f9`、trigger/function作成） | dispatch V84 R5 merge後のtreeで`FlywayMigrationSmokeTest` fresh V1→latestが**Error 1419**（binary logging有効かつses userにSUPERなしでtrigger作成失敗）。dispatch自身の`FlywayDispatchComplianceSchemaSmokeTest`はroot userのためPASS | 共有fresh経路が全repoで壊れ、CI相当L4・`mvn test`（Docker有）が失敗する | dispatchレーンが`FlywayMigrationSmokeTest`のcontainerへ`log_bin_trust_function_creators`相当の設定を追加するか、V84のtrigger/functionを回避 | fresh MySQL全経路、`FlywayMigrationSmokeTest`、V84 R5 merge後のCI相当L4 | OPEN（dispatchレーンへ引き継ぎ） | `b9b91f9`（導入元） | dispatch側の修正commit時 |
 
 ## 3. Closed/Deferred Issue
@@ -627,3 +627,15 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - post-merge verification: dispatch V84 R5 merge（`b9b91f9`）後のtreeで標準構成の指定回帰を再実行し**171/0/0/0、skip 0**（H2 context含む）を確認。MySQL smokeは`FlywayAttendanceSchemaSmokeTest 2/0/0/0`、`FlywayEnvironmentEvidenceTest 1/0/0/0`、`FlywayDispatchComplianceSchemaSmokeTest 1/0/0/0`がPASS。ただし`FlywayMigrationSmokeTest` fresh経路のみdispatch新V84のtrigger作成（Error 1419、ses userにSUPERなし・binary logging有効）で失敗し、**NOTE-R3-06としてdispatchレーンへ引き継ぎ**（attendance欠陥ではない。V91はfresh経路のV84修正後に続けて適用される）
 - verification: 文書整合のみ（`git diff --check` PASS）。code/testは変更していないためtest再実行なし
 - ledger/central synchronization: 中央`spec-execution-ledger.md`S11行の実績・next actionへNOTE-R3-04/05修正を追記。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
+
+### Round 3フォローアップ 独立再Review — 2026-08-09 — R11担当
+
+- review target: delta=`fc798be`（ledger §4/§5修正）＋`b9b91f9`（dispatch V84 R5 re-sync merge）＋`0ff7f2b`（post-merge検証記録・NOTE-R3-06登録）。worktree clean
+- independent evidence: `git diff --check` PASS。§4最新Review Packet（NOTE-R3-04）と§5 Requirements Trace（NOTE-R3-05）が現行状態へ更新済みであることを読解確認 → 両件とも**FIXED（検証済み）**
+- independent regression（current Head `0ff7f2b`、標準構成）: attendance 21 class＋approval 3＋overtime＋integrity＋dispatch-consistency＝**171/0/0/0、skip 0、BUILD SUCCESS**。`FlywayAttendanceSchemaSmokeTest` 2/0/0/0、`FlywayEnvironmentEvidenceTest` 1/0/0/0、`FlywayDispatchComplianceSchemaSmokeTest`（root）1/0/0/0。`FlywayMigrationSmokeTest`（共有fresh/legacy全経路）は**2 ERROR（Error 1419、V84 trigger、ses user SUPER不足）**を独立再現
+- result: NOTE-R3-04/05 FIXED。NOTE-R3-06はdispatch帰属が正しいことを独立再現で確認（dispatch自身smokeはrootでPASS）。R2-P1-02/R3-P2-01のVERIFIED_CLOSEDに影響なし。新規P0/P1なし
+- cross-cutting: attendance scopeはPASS維持。共有境界は**repo全体の`mvn test`（Docker有）が現HeadでRED**（FlywayMigrationSmokeTest×2、dispatch V84起因）。CI no-skip gateも連動fail見込み → 統合担当・dispatchレーンがV84修正（`log_bin_trust_function_creators`設定追加またはtrigger/function見直し）を最優先実施し、修正後にCI相当L4×1回とV91 fresh全経路を再検証する
+- unverified: T071〜T074、L4全量、実ブラウザ（390px）、paging、V84修正後のfresh全経路＋CI相当L4、ATT-GATE-01〜06
+- overall verdict: **PASS（T070までの実装範囲）維持**。P0=0 / P1=0 / P2=2 / NOTE=2（R3-03統合担当、R3-06 dispatch）
+- next task/Wave: **T071開始可（条件付き）**。共有smokeがdispatch V84起因でREDの間は統合担当がdispatch修正を優先し、CI相当L4はV84修正後に実施。T071の実装自体はattendance scope内で検証済みのため開始を止めない（handbook §10）。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 Round 3フォローアップ: NOTE-R3-04/05は§4/§5が現行状態へ更新済みを読解確認（FIXED）。NOTE-R3-06を独立再現——FlywayMigrationSmokeTestがError 1419（dispatch V84 trigger、ses user SUPER不足）で2 ERROR、dispatch自身smokeはrootで1/0/0/0 PASS、帰属はdispatchに正しい。attendanceは171/0/0/0、FlywayAttendanceSchemaSmokeTest 2/0/0/0、FlywayEnvironmentEvidenceTest 1/0/0/0でPASS維持。P0=0/P1=0/P2=2/NOTE=2。T071開始可（共有fresh経路のV84修正とCI相当L4はdispatch修正後に実施）。`
