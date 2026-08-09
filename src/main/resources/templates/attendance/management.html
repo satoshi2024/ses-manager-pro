@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{attendance.management.title}">雇用勤怠管理</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+                <div><label for="managementMonth" class="form-label" th:text="#{attendance.month}">対象月</label><input id="managementMonth" type="month" class="form-control"></div>
+                <button id="managementReload" class="btn btn-secondary" type="button" th:text="#{common.btn.search}">検索</button>
+            </div>
+            <div id="managementError" class="alert alert-danger d-none" role="alert"></div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="attendanceManagementTable">
+                    <thead><tr><th th:text="#{attendance.engineer}">要員</th><th th:text="#{attendance.status}">状態</th><th th:text="#{attendance.totalMinutes}">実働(分)</th><th th:text="#{attendance.actions}">操作</th></tr></thead>
+                    <tbody id="attendanceManagementBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="attendanceRoleFlags" class="d-none" th:data-can-approve="${canApprove}" th:data-can-close="${canClose}" th:data-can-reopen="${canReopen}"></div>
+<th:block layout:fragment="page-js"><script src="/js/modules/attendance-management.js"></script></th:block>
+</body>
+</html>

@@ -35,6 +35,9 @@
                         <span th:text="#{menu.myTimesheet}">マイ勤怠</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
+                    <a th:href="@{/my/attendance}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.myAttendance}">雇用勤怠入力</a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
                     <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
@@ -151,6 +154,9 @@
                         <i class="bi bi-clock-history me-2"></i>
                         <span th:text="#{menu.workRecord}">勤怠・請求</span>
                     </a>
+                </li>
+                <li class="nav-item" sec:authorize="hasAnyRole('管理者','HR','マネージャー')" th:if="${allowedMenus != null and allowedMenus.contains('work-record')}">
+                    <a th:href="@{/work-record/attendance}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.attendanceManagement}">雇用勤怠管理</a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('approval')}">
                     <a th:href="@{/approval/inbox}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/approval') ? 'active bg-tertiary text-white' : 'text-secondary'}">
