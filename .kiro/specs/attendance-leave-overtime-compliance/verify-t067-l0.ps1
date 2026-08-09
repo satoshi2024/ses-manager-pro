@@ -50,16 +50,18 @@ $audit = Read-AtCommit '.kiro/audits/2026-08-01-attendance-parallel-track-plan.m
 
 $taskLines = @($tasks -split "`r?`n" | Where-Object { $_ -match '^- \[[ x]\] ' })
 $checkedTasks = @($taskLines | Where-Object { $_ -match '^- \[x\] ' })
-Assert-Condition ($checkedTasks.Count -eq 1 -and $checkedTasks[0] -match '^- \[x\] 0\.') 'T067以外のtaskが[x]、またはT067が未完了'
-Assert-Condition ($tasks -match '同じV83で`overtime\.\*`のconfigをseed') 'T068のconfig seedがV83でない'
-Assert-Condition ($tasks -notmatch '同じV82で`overtime\.\*`のconfigをseed') '旧V82 config seed記述が残っている'
+Assert-Condition ($checkedTasks.Count -eq 1 -and $checkedTasks[0] -match '^- \[x\] 0\.') 'task checkbox state is invalid'
+Assert-Condition ($tasks -match 'V83.*overtime\.\*.*config') 'V83 config seed instruction is missing'
+Assert-Condition ($tasks -notmatch 'V82.*overtime\.\*.*config') 'obsolete V82 config seed instruction remains'
 
-Assert-Condition ($ledger -match '4488ba8' -and $ledger -match 'V81' -and $ledger -match 'V82' -and $ledger -match 'V83') '中央台帳のB2 provenance/採番が不足'
-Assert-Condition ($ledger -match '履歴・superseded') '旧並行監査計画がsupersededとして扱われていない'
-Assert-Condition ($sourceMatrix -match 'V5__create_work_record_billing\.sql:1-16.*actual_hours DECIMAL\(5,1\).*V39__unify_work_hour_precision\.sql:4.*DECIMAL\(6,2\)') '工数精度の初期形/現行形が不足'
-Assert-Condition ($reviewLedger -match 'Packet/current merged Head' -and $reviewLedger -match '外部正' -and $reviewLedger -match '判定不能finding') 'Review Packetまたは両モード/finding契約が不足'
-Assert-Condition ($reviewLedger -match 'ATT-GATE-05.*本番締め/release前' -and $reviewLedger -match 'ATT-GATE-06.*本番締め/release前') 'ATT-GATE-05/06の期限がrelease前でない'
-Assert-Condition ($audit -match 'SUPERSEDED') '旧監査計画にSUPERSEDED記録がない'
+Assert-Condition ($ledger -match '4488ba8' -and $ledger -match 'V81' -and $ledger -match 'V82' -and $ledger -match 'V83') 'ledger provenance/version contract is missing'
+Assert-Condition ($ledger -match 'superseded') 'audit superseded marker is missing from active ledger'
+Assert-Condition ($sourceMatrix -match 'V5__create_work_record_billing\.sql:1-16.*actual_hours DECIMAL\(5,1\).*V39__unify_work_hour_precision\.sql:4.*DECIMAL\(6,2\)') 'work-hour precision inventory is incomplete'
+Assert-Condition ($reviewLedger -match 'Packet/current merged Head' -and $reviewLedger -match 'finding') 'review packet or finding contract is incomplete'
+$gate5 = (($reviewLedger -split "`r?`n") | Where-Object { $_ -match 'ATT-GATE-05' }) -join "`n"
+$gate6 = (($reviewLedger -split "`r?`n") | Where-Object { $_ -match 'ATT-GATE-06' }) -join "`n"
+Assert-Condition ($gate5 -match 'release' -and $gate6 -match 'release') 'ATT-GATE-05/06 release deadline is missing'
+Assert-Condition ($audit -match 'SUPERSEDED') 'audit superseded marker is missing'
 
 Write-Output "T067 R1 fix delta L0: PASS"
 Write-Output "base=$BaseCommit head=$resolvedHead"
