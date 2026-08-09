@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `FIX / REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T070 R2 fix code Head=`1fb54d4`、implementation evidence Head=`9af7071`、current merged ledger Head=`8c23e44b0954d8706c7b4cd5920c147a5b783678`（`HEAD=origin/main`。Review開始時は`9af7071`/worktree clean） |
-| merge | fix delta base=`4789c19`。`1fb54d4`と証跡同期`9af7071`はいずれもcurrent `origin/main`へmerge済み。Review中に台帳同期のみの`8c23e44`が追加され、production/test/migration差分はない。V83はtreeに存在しV82は不在、全environmentの適用有無は未検証のためdeploy/apply freeze継続 |
-| latest review | `R11 Round 2 fix delta / T070独立再Review 2026-08-09` |
-| verdict | `FAIL`。R2-P1-05は`VERIFIED_CLOSED`、R1-P2-01もPacket/Git同期を確認して`VERIFIED_CLOSED`。ただしR2-P1-02〜04はfix deltaに残存欠陥がありOPEN、R2-P1-01は環境証拠待ちでOPEN。T070の実ブラウザDemoとpagingはP2 |
-| issue count | `P0=0 / P1=4 / P2=2 / NOTE=0` |
-| next action | 元の実装対話でR2-P1-02〜04の残存条件を最小修正し、明示NULL/履歴不存在、calendar scope、休憩配賦を直接回帰する。R2-P1-01は全environmentの`flyway_schema_history`確認までOPEN/deploy freeze。T071はR2-P1-02〜04が独立`VERIFIED_CLOSED`になるまで開始しない。R2-P2-01〜02だけでは次taskを止めない |
+| head | T070 R2 follow-up code=`43c5a3e`、test=`e3fe948`、implementation evidence/current merged Head=`5f84fa7ffcc1174b2734a8fc45440c4a31244d4a`（Review開始時`HEAD=origin/main`、worktree clean） |
+| merge | fix review base=`4789c19`。`43c5a3e`/`e3fe948`/`5f84fa7`はいずれもcurrent `origin/main`へmerge済み。V83は変更・適用せず、treeにV82が無く全environment適用証拠も未取得のためdeploy/apply freeze継続 |
+| latest review | `R11 Round 2 fix follow-up / T070独立再Review 2026-08-09` |
+| verdict | `FAIL`。R2-P1-04は`VERIFIED_CLOSED`。R2-P1-02はcalendar tier修正を確認したが休憩配賦が`SPEC_CLARIFICATION_REQUIRED`、R2-P1-03は明示NULL修正後も既存monthのlegal entity snapshotをHR認可へ使わないためOPEN。R2-P1-01は環境証拠待ちでOPEN。P2×2継続 |
+| issue count | `P0=0 / P1=3 / P2=2 / NOTE=0` |
+| next action | R2-P1-02は休憩区間保存または配賦規則を決定表で確定してから実装する。R2-P1-03はHR list/actionを既存monthのlegal entity snapshotと同じSQL母集団へ統一する。R2-P1-01は全environmentの`flyway_schema_history`確認までOPEN/deploy freeze。T071はP1-02/03が独立`VERIFIED_CLOSED`になるまで開始しない |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -22,9 +22,8 @@
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
 | attendance-leave-overtime-compliance-R2-P1-01 | P1 | design §1、tasks T068 migration順、handbook §4 | `design.md:5`; `tasks.md:33`; `src/main/resources/db/migration/V83__attendance_leave_overtime_compliance.sql:1` | V81 DBへcurrent mainを配備するとV82不在のままV83が適用対象になる | 後日V82追加時にout-of-order/validate失敗し得る | current mainを配備停止し、V82を先に取り込む。V83適用済み環境があれば順方向の再採番/復旧計画を固定 | V81→V82→V83 legacy/fresh、適用済み環境inventory | OPEN | — | — |
-| attendance-leave-overtime-compliance-R2-P1-02 | P1 | R1.1/R1.2/R3.1/R5、design §5.1、overtime-rules §1.2 | `AttendanceCalculator.java:46-55,75-103`; `AttendanceCalculatorTest.java:60-70,99-121` | 同一法人に「別要員の個人calendar」と法人既定calendarを置き、対象要員を計算する。また21:00〜23:00のうち21:00〜22:00を休憩として深夜時間を計算する | 別要員calendarが法人一致だけで候補となり、より新しい版なら誤選択される。休憩総分を常に退勤直前へ置く未決定規則により深夜時間も誤る | calendar tierを排他的scope条件で解決し、他要員/他組織calendarを法人fallbackへ混入させない。休憩の時刻帯を保持するか、spec決定表で配賦規則を確定して実装する | 他要員/他組織/法人既定の競合、validFrom同日、休憩が深夜前/中/後、8h/週40h/22時/跨夜 | OPEN | `4dadfb3`ほか | fix deltaで残存 |
-| attendance-leave-overtime-compliance-R2-P1-03 | P1 | T070 Objective、design §5.3 HR法人scope、R5、platform-invariants §1.1 | `AttendanceScopeResolver.java:45-54`; `AttendanceScopeMapper.java:47-51`; `AttendanceServiceImpl.java:86-90,469-474` | 履歴行を`KNOWN`かつ`organization_id=NULL`で作り、linked userのprimary organizationを法人Aに置いてA担当HRでlist/actionする | 履歴行の明示NULLはfail-closedで0件/404であるべきだが、`COALESCE(eh.organization_id, uo.organization_id)`とJava fallbackで法人Aへ復活し、PII閲覧・締めを許可する | `CASE WHEN eh.id IS NULL`の時だけcurrent/user組織へfallbackし、履歴行ありはNULLを含め履歴値を採用する。snapshot/list/actionを同じResolver規則へ統一する | HR A/B、履歴なし/KNOWN NULL/UNKNOWN、月初/月末、list/detail/count/close/reject/reopen | OPEN | `34654f2`、`356d9ee`ほか | fix deltaで残存 |
-| attendance-leave-overtime-compliance-R2-P1-04 | P1 | T070 Objective、design §5.3、platform-invariants §1.1/§2、OrganizationScope public contract | `EngineerAccountLinkMapper.java:28-43`; `AttendanceServiceImpl.java:91-94,476-480` | manager配下要員に対象月末の履歴行`KNOWN, organization_id=NULL`を置き、linked userのprimary organizationをmanager配下へ置いてlist/actionする | full-access先判定は修正済みだが、履歴明示NULLがuser組織へfallbackし、対象外要員をmanager母集団へ混入させる | shared mapperを`CASE WHEN eh.id IS NULL THEN ... ELSE eh.organization_id END`へ直し、履歴ありNULLをDB側0件にする。全consumerで同じasOf規則を維持する | full-access/有限scope、空集合、直属追加、履歴なし/ありNULL/UNKNOWN、前日/当日/翌日、list/action | OPEN | `34654f2`、`146046e`ほか | fix deltaで残存 |
+| attendance-leave-overtime-compliance-R2-P1-02 | P1 | R1.1/R1.2/R3.1/R5、design §5.1、決定表外判断禁止 | `AttendanceCalculator.java:46-55,75-134`; `AttendanceCalculatorTest.java:60-70,99-155` | 21:00〜23:00のうち21:00〜22:00を休憩として深夜時間を計算する | calendarは本人→対象組織→法人既定の排他的tierへ修正済み。残るactualは休憩総分を常に退勤直前へ置く未決定規則で深夜時間が0になること | 休憩開始/終了（複数可）を保存して区間intersectionで算定するか、breakMinutesの配賦規則を決定表へ追加してから実装する | 休憩が深夜前/中/後、跨夜、複数休憩、8h/週40h/22時、月次再集計→T069 | OPEN / SPEC_CLARIFICATION_REQUIRED | `43c5a3e`,`e3fe948` | calendar subcondition VERIFIED、休憩未決定 |
+| attendance-leave-overtime-compliance-R2-P1-03 | P1 | T070 Objective、design §5.3 HR法人scope、R5、platform-invariants §1「過去実績snapshot」/§2.2 | `AttendanceServiceImpl.java:86-90,223-260,461-474`; `AttendanceScopeResolver.java:45-65`; `AttendanceScopeMapper.java:47-51` | 月初に法人A snapshotでattendance monthを作成し、対象月末までに法人Bへ異動する。法人A/Bの各HRで同月をlist/closeする | 明示NULL/UNKNOWN fallbackは修正済み。残るactualは月末所属Bのengineer IDで認可するため、法人B HRが法人A snapshot月を閲覧・締め、法人A HRが拒否される | HRの担当legal entity集合をserver-side解決し、既存monthは`t_attendance_month.legal_entity_id` snapshotでlist/actionを同じSQL母集団へ制限する。snapshot訂正はreopenで再算定せず監査付き明示訂正に限定する | 法人A→B月中異動、異動前/当日/後、list/detail/count/close/reject/reopen、履歴なし/KNOWN NULL/UNKNOWN、管理者全件 | OPEN | `43c5a3e`でNULL subcondition修正 | fix follow-upでsnapshot consumer残存 |
 | attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN | — | — |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN | — | — |
 
@@ -38,6 +37,7 @@
 | attendance-leave-overtime-compliance-R1-P2-03 | VERIFIED_CLOSED | L0 commandの再現情報不足 | `2299fbc` | R11再Review: script実行1/0/0/0、exit 0を確認 | R1 fix delta再Review | script契約変更時 |
 | attendance-leave-overtime-compliance-R1-P2-01 | VERIFIED_CLOSED | code/evidence Headとmerged/apply状態の混同 | `9af7071` | fix base=`4789c19`、code=`1fb54d4`、HEAD=origin/main=`9af7071`をGitで確認。V83 tree内/V82不在と適用証拠未取得も分離記録 | R2 fix delta再Review | Packetと実GitのBase/Head/mergeが再度不一致になった場合 |
 | attendance-leave-overtime-compliance-R2-P1-05 | VERIFIED_CLOSED | reopenを直接状態遷移として実装しapproval境界が無かった | `b91dc99`ほか | 理由DTO/API、申請時CLOSED維持、approval adapterのstatus/version CASを読解。指定29件と共通approval engine 45件が各skip 0でPASSし、申請者除外・route fail-closed・競合・監査契約を確認 | R2 fix delta再Review | `attendance.reopen` adapter/approval engine/route契約変更時 |
+| attendance-leave-overtime-compliance-R2-P1-04 | VERIFIED_CLOSED | manager full-access/asOfと履歴ありNULL fallback | `34654f2`,`43c5a3e`,`e3fe948` | `hasFullAccess()`先判定、対象月末asOf、`CASE WHEN eh.id IS NULL THEN fallback ELSE eh.organization_id END`を読解。current Headの14 class 78/0/0/0、skip 0でKNOWN A/B・KNOWN NULL・空集合を確認。UNKNOWNは同CASEでNULL | R2 fix follow-up再Review | OrganizationScope/EngineerAccountLinkMapper/asOf consumer変更時 |
 
 ## 4. 最新Review Packet
 
@@ -429,3 +429,68 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - base/head: fix review base=`4789c19`、current code/test Head=`e3fe948`、`HEAD=origin/main`。ledger同期commit後のcurrent Headは`git log -1 -- .kiro/specs/attendance-leave-overtime-compliance/review-ledger.md`で解決する。
 - rollback: 本fixは本番未適用。`43c5a3e`、`e3fe948`を逆順revertすればcalendar/scope変更を戻せる。V83の削除・編集・再採番は行わない。
 - next Review handoff: R11担当は`43c5a3e`/`e3fe948`を対象に、履歴なし/KNOWN NULL/UNKNOWNのHR/manager list/action、person/organization/legal tier、同日validFrom/id競合を独立再実行する。休憩配賦はspec決定後に追加実装・回帰し、P1-02〜04が独立VERIFIED_CLOSEDになるまでT071を開始しない。
+
+### Round 2 fix follow-up 独立再Review — 2026-08-09 — R11担当
+
+- review target: base=`4789c192a733d2d64b13c9941ab53e3780aefbe9`、code fix=`43c5a3e`、additional regression=`e3fe948`、ledger/current merged Head=`5f84fa7ffcc1174b2734a8fc45440c4a31244d4a`
+- git evidence: Review開始時`HEAD=origin/main=5f84fa7`、worktree clean、各commitはHeadの祖先、`git diff --check 4789c19..5f84fa7` PASS。V83変更なし、V82 tree不在。Review中に他task由来の未追跡`src/test/java/com/ses/migration/FlywayEnvironmentEvidenceTest.java`を検出したが、本Review・実装commit・78件の証拠には含めない
+- independent regression: R11指定11 class＋approval共通3 classをcurrent Headで一括実行し`78/0/0/0`、skip 0、exit 0。主担当記載の77件ではなく、追加calendar testを含むcurrent正味件数は78件
+- convergence scope: R2-P1-02〜04のfix delta、変更mapper/resolverのattendance consumer、direct regressionだけを確認。T067〜T069全面再監査/L4/MySQL/Flywayは再実行していない
+- result: `R2-P1-04=VERIFIED_CLOSED`。`R2-P1-02=OPEN / SPEC_CLARIFICATION_REQUIRED`。`R2-P1-03`は明示NULL subconditionを確認したが、月次snapshotとHR認可母集団の不一致が同じissueに残るためOPEN。新規issue IDは起票しない
+
+#### attendance-leave-overtime-compliance-R2-P1-02 — OPEN / SPEC_CLARIFICATION_REQUIRED
+
+- severity: P1
+- violated requirement/acceptance: R1.1/R1.2/R3.1/R5、design §5.1、決定表外判断禁止
+- file:line: `src/main/java/com/ses/service/attendance/AttendanceCalculator.java:46-55,75-134`、`src/test/java/com/ses/service/attendance/AttendanceCalculatorTest.java:60-70,99-155`
+- reproduction (data/role/time): 要員 / 2026-08-03 21:00〜23:00 / 実休憩21:00〜22:00 / `breakMinutes=60`
+- expected / actual: expected=実休憩が深夜前なので深夜60分。ただし現行modelは休憩時刻を保持せず、期待配賦を決める決定表も無い。actual=`effectiveEnd=end-break`で退勤直前へ配賦し深夜0分
+- customer/security/operation impact: 深夜・時間外・割増および36協定入力が休憩位置により誤る
+- evidence: calendarは本人→対象組織（個人NULL）→法人既定（個人/組織NULL）の排他的queryへ修正され、別要員/他組織fixtureもPASS。休憩は依然total minutesだけで位置を復元不能
+- minimum acceptable fix: 方式A（休憩区間を保存して勤務/深夜区間とのintersection）または方式B（total minutesの配賦規則を全境界込みで決定表へ追加）を発注者が選択し、spec改訂後に実装する。Review担当は未決定規則を選ばない
+- direct regression scope: 深夜前/中/後、跨夜、複数休憩、休憩0/全時間、不正重複、8h/週40h/22時、月次再集計→T069 input
+- discovered in: original head、calendar subconditionはfix delta `43c5a3e`/`e3fe948`で解消、休憩はspec gap継続
+
+#### attendance-leave-overtime-compliance-R2-P1-03 — OPEN（snapshot consumer残存）
+
+- severity: P1
+- violated requirement/acceptance: T070 Objective「HRは法人分」、design §5.3、R5、platform-invariants §1「過去実績は月次snapshotし以後不変」/§2.2
+- file:line: `src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:86-90,223-260,461-474,364-412`、`src/main/java/com/ses/service/attendance/AttendanceScopeResolver.java:45-65`、`src/main/java/com/ses/mapper/AttendanceScopeMapper.java:47-51`
+- reproduction (data/role/time): 要員が月初の法人A所属時に`AttendanceMonth(legal_entity_id=A)`を作成し、対象月末までに法人Bへ異動する。法人A HRと法人B HRで対象月をlistし、close/reject/reopenを送る
+- expected / actual: expected=既存monthの法人snapshot Aを認可の正とし、A HRだけがlist/action可能。actual=対象月末の要員所属Bからallowed engineer IDを作り、month query/actionはIDだけを検査するためB HRがA snapshot月を操作し、A HRは拒否される
+- customer/security/operation impact: 異動を跨ぐ過去勤怠PIIが別法人HRへ誤開示され、締め・差戻し・再open申請の主体も誤る
+- evidence: `buildOverview`はHR allowed engineer IDでmonthを絞るが`legal_entity_id`はNOT NULL確認だけ。`allowedEngineerId`も同じ月末engineer ID集合のみを検査する。monthのsnapshot列は作成後保持されるが認可consumerに使われない。今回のKNOWN NULL testはresolver/mapperだけで、この異動snapshot caseを持たない
+- minimum acceptable fix: HR担当legal entity ID集合をserver-sideで解決し、既存monthの`legal_entity_id` snapshotに対してlist/detail/count/actionを同じSQL母集団で適用する。actionはmonthをlock後snapshot法人を検証し、engineer current/asOfだけで許可しない。snapshot訂正は明示権限・監査理由に限定する
+- direct regression scope: A→B月中異動、異動前/当日/翌日、A/B HR list/detail/count/close/reject/reopen、履歴なし/KNOWN NULL/UNKNOWN、管理者全件、rollback
+- discovered in: original issueのsnapshot/list/action条件、fix follow-up `43c5a3e`でNULL subcondition解消後もconsumerに残存
+
+#### task・横断・開始判定
+
+| 対象 | 判定 | 独立証拠/未検証 |
+|---|---|---|
+| T070 calendar | PARTIAL PASS | 排他的tierはPASS。休憩配賦はspec決定待ち |
+| T070 HR scope | FAIL | KNOWN NULL/UNKNOWNはfail-closedへ修正。month snapshotとlist/action母集団が不一致 |
+| T070 manager scope | PASS | `R2-P1-04 VERIFIED_CLOSED`。full-access/asOf/NULL CASEを確認 |
+| migration | FAIL / ENVIRONMENT_EVIDENCE_REQUIRED | R2-P1-01継続。V82→V83、全environment Flyway history、fresh/legacy MySQL未検証 |
+| security/scope | FAIL | HR法人越境のsnapshot caseが残る。CSRF/role/manager境界は関連test PASS |
+| performance/UI | P2 OPEN | paging/detail分離、desktop/390px実ブラウザ未実施 |
+| T071 | 開始不可 | R2-P1-02/03がVERIFIED_CLOSEDになるまでblock |
+
+- production前条件: ATT-GATE-01〜06と社労士/法人別規程突合は本ReviewのFAIL理由にしていない。V83 deploy/apply freezeを維持
+- overall verdict: `FAIL: open P1=R2-P1-01,R2-P1-02,R2-P1-03`
+- central ledger転記用短文: `R11 T070 R2 follow-upはcurrent Head 78/0/0/0 PASS。calendar排他的tierとmanager NULL/asOfを確認しR2-P1-04 VERIFIED_CLOSED。R2-P1-02は休憩配賦のSPEC_CLARIFICATION_REQUIRED、R2-P1-03はmonth legal entity snapshotをHR list/action認可へ使わないためOPEN。R2-P1-01環境証拠待ち、P2×2継続。T070 FAIL、T071/次Wave開始不可。`
+
+### Round 2 snapshot consumer fix delta — 2026-08-09 — 主担当
+
+| task | requirements | 変更file | test | Demo | commit | risk |
+|---|---|---|---|---|---|---|
+| T070 R2-P1-03 follow-up | T070 Objective「HRは法人分」、R5、design §5.3、platform-invariants §1/§2.2 | `AttendanceScopeResolver`、`AttendanceServiceImpl`、`AttendanceMonthSnapshotScopeTest`、full-access fixture | R11指定11 class＋Approval共通3 class＋snapshot test: 79/0/0/0、skip 0、exit 0。`git diff --check` PASS | 月初法人Aでmonth snapshotを作成後、要員current所属をBへ置換。B HRはlist 0件/close 404、A HRはlist表示/close成功。管理者経路は従来どおり全件 | `430296e`、`0406a4f` | R11独立VERIFIED_CLOSED前。R2-P1-02の休憩配賦spec未確定、R2-P1-01のFlyway環境証拠、P2-01/02は未完了 |
+
+- implementation delta: HR management listは対象月末のcurrent/asOf engineer IDを認可正にせず、server-side解決した担当legal entity集合を`t_attendance_month.legal_entity_id`へSQL条件として適用する。既存monthのengineer表示名・日次detailは、同じ月次snapshotで選ばれたmonth ID集合から導出する。HR closeはmonthをlockした後、同じsnapshot法人集合を検証してから状態CASへ進む。manager/adminの既定scope・admin全件は変更していない。
+- consumer boundary: `AttendanceScopeResolver.allowedHrLegalEntityIds`、`AttendanceServiceImpl.buildOverview`、`close`/`assertHrMonthSnapshotAllowed`を同じ法人snapshot規則へ統一した。明示NULL/UNKNOWNの履歴fail-closed修正は`43c5a3e`の既存deltaを維持する。
+- test evidence: current full direct commandは`AttendanceApiControllerTest, AttendanceWorkflowServiceTest, AttendanceUiContractTest, MessageBundleConsistencyTest, JsSyntaxCheckTest, RoleNavigationVisibilityTest, AttendanceCalculatorTest, AttendanceScopeResolverTest, AttendanceManagerScopeTest, AttendanceReopenApprovalAdapterTest, AttendanceServiceFullAccessTest, AttendanceMonthSnapshotScopeTest, ApprovalEngineServiceTest, ApprovalEngineConflictTest, RouteResolverServiceTest`で79/0/0/0。Review中に検出された他task由来のFlyway evidenceは本specのcommit・判定・test件数へ含めていない。
+- issue state: `R2-P1-03=FIXED_BY_IMPLEMENTER / independent re-review requested`。月次snapshot A→B list/actionをR11へ提出済みで、独立VERIFIED_CLOSEDまでは自己PASSにしない。`R2-P1-04=VERIFIED_CLOSED`、`R2-P1-02=OPEN / SPEC_CLARIFICATION_REQUIRED`、`R2-P1-01=OPEN / ENVIRONMENT_EVIDENCE_REQUIRED`、P2-01/02 OPENを維持する。
+- spec blocker: 休憩時刻・配賦規則は決定表改訂待ち。A（休憩区間保存＋intersection）またはB（`breakMinutes`のみの全境界配賦規則）の発注者決定前にcalculator/schemaを推測変更しない。
+- base/head: R11 follow-up base=`4789c19`、snapshot code=`430296e`、test=`0406a4f`、current `HEAD=origin/main=0406a4f`。ledger同期後のHeadは`git log -1 -- .kiro/specs/attendance-leave-overtime-compliance/review-ledger.md`で解決する。
+- rollback: 本番未適用。`0406a4f`、`430296e`を逆順revertすれば本deltaを戻せる。snapshotデータの訂正は行っておらず、V83 migrationの編集・削除・再採番はしていない。
+- next Review handoff: R11担当はA→B月中異動、異動前/当日/翌日、A/B HR list/detail/count/close/reject/reopen、履歴なし/KNOWN NULL/UNKNOWNを独立確認する。R2-P1-02の決定表改訂後に休憩境界testを追加し、R2-P1-02/03がVERIFIED_CLOSEDになるまでT071を開始しない。
