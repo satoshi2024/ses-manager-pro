@@ -130,4 +130,26 @@ class MonthlyClosingUnacceptedTest {
                         + " AND message LIKE '%2026-07%'", Long.class);
         assertTrue(acceptanceNotifications > 0, "検収未提出通知が発行されるはず");
     }
+
+    @Test
+    @DisplayName("検収未提出通知を2回生成してもDB行数とdedupe keyは増えない")
+    void acceptanceNotificationDatabaseDedupe() {
+        notificationGenerateService.acceptanceUnsubmitted();
+        Long firstCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type='ACCEPTANCE_UNSUBMITTED' "
+                        + "AND message LIKE '%2026-07%'", Long.class);
+        assertNotNull(firstCount);
+        assertTrue(firstCount > 0);
+
+        notificationGenerateService.acceptanceUnsubmitted();
+        Long secondCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type='ACCEPTANCE_UNSUBMITTED' "
+                        + "AND message LIKE '%2026-07%'", Long.class);
+        Long distinctKeys = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT dedupe_key) FROM t_notification "
+                        + "WHERE type='ACCEPTANCE_UNSUBMITTED' AND message LIKE '%2026-07%'", Long.class);
+
+        assertEquals(firstCount, secondCount, "同じ通知を再生成してもDB行数は増えない");
+        assertEquals(secondCount, distinctKeys, "通知行とdedupe keyは1対1である");
+    }
 }

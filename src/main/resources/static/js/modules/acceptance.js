@@ -108,7 +108,7 @@ function actionButtons(r) {
     if (r.status === '検収済') {
         html += `<button type="button" class="btn btn-sm btn-outline-primary btn-doc-upload" data-id="${r.id}">${SES.i18n.t('acceptance.btn.docUpload', '検収書登録')}</button>`;
         if (r.documentId) {
-            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/acceptances/${r.id}/document">${SES.i18n.t('acceptance.btn.docDownload', '検収書DL')}</a>`;
+            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/acceptances/${r.id}/document/download">${SES.i18n.t('acceptance.btn.docDownload', '検収書DL')}</a>`;
         }
         html += `<button type="button" class="btn btn-sm btn-outline-danger btn-cancel-approval" data-id="${r.id}">${SES.i18n.t('acceptance.btn.cancelApproval', '取消を承認申請')}</button>`;
     }

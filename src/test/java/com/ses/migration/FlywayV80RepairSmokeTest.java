@@ -60,6 +60,7 @@ class FlywayV80RepairSmokeTest {
 
         // 1) V79.1まで適用（legacy基盤）
         flywayFilesystem(dir, "79.1").migrate();
+        applyHistoricalV79_1Fixture();
 
         // 2) V80適用時点で存在する既存契約（order_line_id NULL）を投入
         long legacyContractId = insertLegacyContract("SO-V80-LEGACY-1");
@@ -149,6 +150,7 @@ class FlywayV80RepairSmokeTest {
 
         // 1) V79.1まで適用（legacy基盤、既存契約0件にするためV2のseed契約を削除）
         flywayFilesystem(dir, "79.1").migrate();
+        applyHistoricalV79_1Fixture();
         try (Connection connection = MYSQL.createConnection("");
              Statement statement = connection.createStatement()) {
             statement.execute("DELETE FROM t_contract");
@@ -206,10 +208,12 @@ class FlywayV80RepairSmokeTest {
 
         // 1) V79.1まで適用
         flywayFilesystem(dir, "79.1").migrate();
+        applyHistoricalV79_1Fixture();
 
         // 2) 誤定義: 同名だが非UNIQUEの索引 uk_contract_order_line をあらかじめ作成しておく
         try (Connection connection = MYSQL.createConnection("");
              Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE t_contract ADD COLUMN order_line_id BIGINT NULL");
             statement.execute("ALTER TABLE t_contract ADD INDEX uk_contract_order_line (order_line_id)");
             assertTrue(hasRow(statement, "SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE()"
                     + " AND table_name='t_contract' AND index_name='uk_contract_order_line' AND non_unique=1"),
@@ -237,6 +241,7 @@ class FlywayV80RepairSmokeTest {
 
         // 1) V79.1まで適用
         flywayFilesystem(dir, "79.1").migrate();
+        applyHistoricalV79_1Fixture();
 
         // 2) V80前の既存契約を投入
         long preExistingId = insertLegacyContract("SO-PRE-MARKER-1");
@@ -267,6 +272,7 @@ class FlywayV80RepairSmokeTest {
                     + "backfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
             statement.execute("INSERT IGNORE INTO t_contract_acceptance_backfill (contract_id) VALUES ("
                     + preExistingId + ")");
+            statement.execute("INSERT IGNORE INTO t_contract_acceptance_backfill (contract_id) VALUES (0)");
         }
         Flyway latest = flywayFilesystem(dir, null);
         latest.repair();
@@ -351,6 +357,20 @@ class FlywayV80RepairSmokeTest {
                     "SELECT id FROM t_contract WHERE contract_no='" + contractNo + "'")) {
                 assertTrue(resultSet.next(), contractNo + " が投入されるはず");
                 return resultSet.getLong(1);
+            }
+        }
+    }
+
+    private void applyHistoricalV79_1Fixture() throws Exception {
+        String sql = Files.readString(Paths.get(
+                "src/test/resources/sql/v79_1-order-acceptance-legacy.sql"), StandardCharsets.UTF_8);
+        try (Connection connection = MYSQL.createConnection("");
+             Statement statement = connection.createStatement()) {
+            for (String command : sql.split(";")) {
+                String trimmed = command.replaceAll("(?m)^--.*$", "").trim();
+                if (!trimmed.isEmpty()) {
+                    statement.execute(trimmed);
+                }
             }
         }
     }

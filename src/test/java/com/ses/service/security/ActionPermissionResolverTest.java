@@ -88,4 +88,18 @@ class ActionPermissionResolverTest {
         assertEquals("file.download",
                 ActionPermissionResolver.resolve("GET", "/api/work-records/10/report.pdf"));
     }
+
+    @Test
+    void 注文請発行_download_検収uploadをmethodと実URLで分離する() {
+        assertEquals("sales-order.edit", ActionPermissionResolver.resolve(
+                "POST", "/api/sales-orders/10/acknowledgement-pdf"));
+        assertEquals("file.download", ActionPermissionResolver.resolve(
+                "GET", "/api/sales-orders/10/acknowledgement-pdf/download"));
+        assertEquals("file.download", ActionPermissionResolver.resolve(
+                "GET", "/api/sales-orders/10/documents/20/download"));
+        assertEquals("file.upload", ActionPermissionResolver.resolve(
+                "POST", "/api/acceptances/30/document"));
+        assertEquals("file.download", ActionPermissionResolver.resolve(
+                "GET", "/api/acceptances/30/document/download"));
+    }
 }

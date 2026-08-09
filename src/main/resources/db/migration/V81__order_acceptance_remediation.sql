@@ -16,7 +16,8 @@ SET @uk_status = IF(
     'MISSING',
     IF(
         (SELECT COUNT(*) FROM information_schema.statistics
-          WHERE table_schema = DATABASE() AND table_name = 't_contract' AND index_name = 'uk_contract_order_line' AND non_unique = 0 AND seq_in_index = 1 AND column_name = 'order_line_id') = 1
+          WHERE table_schema = DATABASE() AND table_name = 't_contract' AND index_name = 'uk_contract_order_line'
+            AND non_unique = 0 AND seq_in_index = 1 AND column_name = 'order_line_id' AND sub_part IS NULL) = 1
         AND
         (SELECT COUNT(*) FROM information_schema.statistics
           WHERE table_schema = DATABASE() AND table_name = 't_contract' AND index_name = 'uk_contract_order_line') = 1,
@@ -30,8 +31,26 @@ SET @fk_status = IF(
       WHERE table_schema = DATABASE() AND table_name = 't_contract' AND constraint_name = 'fk_contract_order_line') = 0,
     'MISSING',
     IF(
+        (SELECT COUNT(*)
+           FROM information_schema.key_column_usage kcu
+           JOIN information_schema.referential_constraints rc
+             ON rc.constraint_schema = kcu.constraint_schema
+            AND rc.table_name = kcu.table_name
+            AND rc.constraint_name = kcu.constraint_name
+          WHERE kcu.table_schema = DATABASE()
+            AND kcu.table_name = 't_contract'
+            AND kcu.constraint_name = 'fk_contract_order_line'
+            AND kcu.ordinal_position = 1
+            AND kcu.column_name = 'order_line_id'
+            AND kcu.referenced_table_schema = DATABASE()
+            AND kcu.referenced_table_name = 't_sales_order_line'
+            AND kcu.referenced_column_name = 'id'
+            AND rc.update_rule = 'CASCADE'
+            AND rc.delete_rule = 'SET NULL') = 1
+        AND
         (SELECT COUNT(*) FROM information_schema.key_column_usage
-          WHERE table_schema = DATABASE() AND table_name = 't_contract' AND constraint_name = 'fk_contract_order_line' AND column_name = 'order_line_id' AND referenced_table_name = 't_sales_order_line' AND referenced_column_name = 'id') = 1,
+          WHERE table_schema = DATABASE() AND table_name = 't_contract'
+            AND constraint_name = 'fk_contract_order_line') = 1,
         'CORRECT',
         'WRONG'
     )
@@ -131,4 +150,3 @@ FROM t_document d
 JOIN t_document_version v ON v.document_id = d.id AND v.deleted_flag = 0
 WHERE d.deleted_flag = 0
   AND d.document_type IN ('ORDER_RECEIVED', 'ORDER_ACKNOWLEDGEMENT', 'ACCEPTANCE');
-

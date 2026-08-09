@@ -36,6 +36,8 @@ class SalesOrderPdfServiceImplTest {
     private SalesOrderPdfServiceImpl service() {
         SystemConfigService cfg = Mockito.mock(SystemConfigService.class);
         when(cfg.getString(anyString(), any())).thenAnswer(inv -> inv.getArgument(1));
+        when(cfg.getString("legal_entity.500.address", "")).thenReturn("東京都千代田区1-2-3");
+        when(cfg.getString("legal_entity.500.invoice-registration-number", "")).thenReturn("T1234567890123");
 
         CustomerMapper cm = Mockito.mock(CustomerMapper.class);
         Customer c = new Customer();
@@ -74,9 +76,19 @@ class SalesOrderPdfServiceImplTest {
         dummyDoc.setId(100L);
         when(mockDocService.registerGenerated(any(), any())).thenReturn(dummyDoc);
         when(provider.getIfAvailable()).thenReturn(mockDocService);
-        org.springframework.beans.factory.ObjectProvider<com.ses.mapper.OrganizationUnitMapper> orgUnitProvider =
+        org.springframework.beans.factory.ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeProvider =
                 Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
-        return new SalesOrderPdfServiceImpl(cfg, cm, em, pm, lm, new com.ses.common.util.PdfFontUtils(pdfProps), provider, orgUnitProvider, messageSource);
+        com.ses.service.security.OrganizationScopeService organizationScopeService =
+                Mockito.mock(com.ses.service.security.OrganizationScopeService.class);
+        com.ses.entity.OrganizationUnit legalEntity = new com.ses.entity.OrganizationUnit();
+        legalEntity.setId(501L);
+        legalEntity.setLegalEntityId(500L);
+        legalEntity.setName("株式会社発行法人");
+        when(organizationScopeService.listVisibleOrganizations(Mockito.eq(500L), any())).thenReturn(List.of(legalEntity));
+        when(organizationScopeProvider.getIfAvailable()).thenReturn(organizationScopeService);
+        return new SalesOrderPdfServiceImpl(cfg, cm, em, pm, lm,
+                new com.ses.common.util.PdfFontUtils(pdfProps), provider,
+                organizationScopeProvider, messageSource);
     }
 
     @Test
@@ -86,6 +98,7 @@ class SalesOrderPdfServiceImplTest {
         order.setOrderNo("O-202608-0001");
         order.setCustomerPoNo("PO-100");
         order.setCustomerId(1L);
+        order.setLegalEntityId(500L);
         order.setOrderDate(LocalDate.of(2026, 8, 5));
         order.setStartDate(LocalDate.of(2026, 9, 1));
         order.setEndDate(LocalDate.of(2027, 8, 31));
@@ -98,8 +111,26 @@ class SalesOrderPdfServiceImplTest {
         PdfReader reader = new PdfReader(bytes);
         try {
             assertEquals(1, reader.getNumberOfPages());
+            String text = new com.lowagie.text.pdf.parser.PdfTextExtractor(reader).getTextFromPage(1);
+            assertTrue(text.contains("株式会社発行法人"));
+            assertTrue(text.contains("東京都千代田区1-2-3"));
+            assertTrue(text.contains("T1234567890123"));
         } finally {
             reader.close();
         }
+    }
+
+    @Test
+    void generate_legalEntityが解決できない場合はglobal法人へfallbackしない() {
+        SalesOrder order = new SalesOrder();
+        order.setId(2L);
+        order.setOrderNo("O-202608-0002");
+        order.setCustomerId(1L);
+        order.setOrderDate(LocalDate.of(2026, 8, 5));
+
+        com.ses.common.exception.BusinessException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class, () -> service().generate(order));
+        assertEquals(400, ex.getCode());
+        assertEquals("error.order.legalEntityRequired", ex.getMessageKey());
     }
 }

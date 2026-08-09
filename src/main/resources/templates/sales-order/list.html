@@ -135,12 +135,12 @@
     </div>
 
     <!-- 注文詳細モーダル -->
-    <div class="modal fade" id="salesOrderDetailModal" tabindex="-1">
+    <div class="modal fade" id="salesOrderDetailModal" tabindex="-1" aria-labelledby="salesOrderDetailModalTitle" aria-hidden="true">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" th:text="#{salesOrder.detail.title}">注文詳細</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h5 class="modal-title" id="salesOrderDetailModalTitle" th:text="#{salesOrder.detail.title}">注文詳細</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
                 </div>
                 <div class="modal-body" id="salesOrderDetailBody">
                     <div class="text-muted" th:text="#{common.loading}">読み込み中...</div>

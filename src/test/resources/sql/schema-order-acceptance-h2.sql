@@ -16,6 +16,8 @@ ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS order_line_id BIGINT;
 ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS acceptance_required TINYINT NOT NULL DEFAULT 1;
 ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS acceptance_exemption_reason VARCHAR(500);
 CREATE UNIQUE INDEX uk_contract_order_line ON t_contract(order_line_id);
+ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS chk_contract_acceptance_exemption
+  CHECK (acceptance_required = 1 OR (acceptance_exemption_reason IS NOT NULL AND TRIM(acceptance_exemption_reason) != ''));
 
 DROP TABLE IF EXISTS t_contract_acceptance_backfill CASCADE;
 CREATE TABLE IF NOT EXISTS t_contract_acceptance_backfill (
@@ -103,7 +105,8 @@ CREATE TABLE IF NOT EXISTS t_document_hash_claim (
   sha256        VARCHAR(64)  NOT NULL,
   document_id   BIGINT       NOT NULL,
   created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (tenant_id, document_type, sha256)
+  PRIMARY KEY (tenant_id, document_type, sha256),
+  CONSTRAINT fk_document_hash_claim_document FOREIGN KEY (document_id) REFERENCES t_document(id) ON DELETE CASCADE
 );
 
 -- R09-P1-05: 孤児 order_line_id の拒否（t_sales_order_line 作成後にFKを追加）

@@ -79,7 +79,47 @@
 
 ---
 
-## 5. 14 Traceability Matrix
+## 5. 決定表
+
+### 5.1 時間・asOf
+
+| 対象 | current | history | snapshot | asOfで読む源 | 明示NULLの意味 |
+|---|---|---|---|---|---|
+| 注文金額/支払条件 | 見積・契約の現在値 | — | `total_amount_snapshot` / `payment_terms_snapshot` | **注文確定時点** | 未確定（下書き） |
+| 検収対象工数 | `t_work_record_daily` | — | `t_acceptance`へwork record `version`＋amount snapshot | **提出時点**。以後の工数変更で検収額を変えない | — |
+| 検収の要否 | `t_contract.acceptance_required` | 変更は監査 | — | 請求生成時点 | **NULLを許さない**（default true）。未設定を「不要」にしない |
+| work_month | `t_acceptance.work_month` | — | `UNIQUE(contract_id, work_month)` | 対象月 | — |
+| 顧客確認者 | `customer_contact_id` | contact側の期間 | 検収時の名称snapshot | 検収実行時点 | 内部代行入力（R3.5） |
+
+### 5.2 主体 × 操作 × 可見母集団
+
+| 主体 | list/detail/count | export/download | notification | scheduler/async |
+|---|---|---|---|---|
+| 管理者 | 全件 | 全件 | 全て | 未検収/期限batch |
+| マネージャー | 組織scope ∩ DataScope | 同左 | 自組織の未検収/差戻し | 同上 |
+| 営業 | 既存DataScope（担当顧客/契約）。**組織で追加制限しない** | 同左 | 自担当の注文未受領/検収未提出 | 同上 |
+| HR | 不可視 | — | — | — |
+| 要員 | 自分が対象の検収状態のみ（金額非表示） | — | — | — |
+| portal user (顧客) | **本specでは非公開**（S13で自社分の検収を開放） | — | — | — |
+| scheduler principal | 全件 | — | 宛先は担当営業、管理者、対象月時点の自組織マネージャー | 期限超過、未提出 |
+
+### 5.3 状態機械と競合
+
+| 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
+|---|---|---|---|---|
+| order 下書き | →受領確認 / →取消 | 状態CAS | — | 下書きへ |
+| 受領確認 | →注文請提出 / →取消 | 状態CAS | — | 受領確認へ |
+| 注文請提出 | →契約化 / →取消 | 状態CAS＋`version` | 二重契約化click | 注文請提出へ |
+| 契約化 | →完了 / →取消（**承認必須**） | 状態CAS | — | 取消はapproval経由 |
+| 完了 / 取消 | 終端 | — | — | 新規注文 |
+| acceptance 未提出 | →提出済 | 状態CAS | 二重提出 | 未提出へ |
+| 提出済 | →検収済 / →差戻し | 状態CAS＋`version` | 顧客と内部代行の同時操作 | 提出済へ |
+| 差戻し | →提出済（再提出） | 状態CAS | — | — |
+| 検収済 | →取消（**承認必須**、R3.4） | 状態CAS | 請求生成との競合 | 取消はapproval経由 |
+
+---
+
+## 6. Round 10 Traceability Matrix
 
 | Finding ID | Description | Implementation File | Automated Test | Demo / Evidence |
 |---|---|---|---|---|

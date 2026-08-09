@@ -21,6 +21,8 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -85,8 +87,29 @@ class SalesOrderApiControllerTest {
         when(salesOrderService.downloadDocument(eq(1L), eq(99L)))
                 .thenReturn(new java.io.ByteArrayInputStream("pdf".getBytes()));
 
-        mockMvc.perform(get("/api/sales-orders/1/documents/99"))
+        mockMvc.perform(get("/api/sales-orders/1/documents/99/download"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void acknowledgementPdf_postだけが発行し_getはarchive正本だけをdownloadする() throws Exception {
+        when(salesOrderService.generateAcknowledgementPdf(eq(1L), any())).thenReturn("generated".getBytes());
+        mockMvc.perform(post("/api/sales-orders/1/acknowledgement-pdf").with(csrf()))
+                .andExpect(status().isOk());
+        verify(salesOrderService).generateAcknowledgementPdf(eq(1L), any());
+
+        when(salesOrderService.downloadAcknowledgementPdf(1L))
+                .thenReturn(new java.io.ByteArrayInputStream("archived".getBytes()));
+        mockMvc.perform(get("/api/sales-orders/1/acknowledgement-pdf/download"))
+                .andExpect(status().isOk());
+        verify(salesOrderService).downloadAcknowledgementPdf(1L);
+    }
+
+    @Test
+    void acknowledgementPdf_get発行旧routeは存在しない() throws Exception {
+        mockMvc.perform(get("/api/sales-orders/1/acknowledgement-pdf"))
+                .andExpect(status().isMethodNotAllowed());
+        verify(salesOrderService, never()).generateAcknowledgementPdf(eq(1L), any());
     }
 
     @Test
@@ -95,5 +118,16 @@ class SalesOrderApiControllerTest {
         mockMvc.perform(get("/api/sales-orders/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    void contractDrafts_画面と同じrouteで契約化する() throws Exception {
+        when(salesOrderService.createContractDrafts(1L)).thenReturn(List.of());
+
+        mockMvc.perform(post("/api/sales-orders/1/contract-drafts").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(salesOrderService).createContractDrafts(1L);
     }
 }

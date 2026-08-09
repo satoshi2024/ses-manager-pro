@@ -555,6 +555,37 @@ class ContractServiceImplTest {
         assertEquals("準備中", draft.getStatus());
     }
 
+    @Test
+    void createDraftFromSalesOrderLine_unique競合後はcurrentReadで勝者契約を返す() {
+        com.ses.entity.SalesOrderLine line = new com.ses.entity.SalesOrderLine();
+        line.setId(700L);
+        line.setEngineerId(2L);
+        line.setProjectId(9L);
+        line.setUnitPrice(new BigDecimal("650000"));
+        line.setLineNo(1);
+        com.ses.entity.SalesOrder order = new com.ses.entity.SalesOrder();
+        order.setId(70L);
+        order.setOrderNo("O-70");
+        order.setCustomerId(4L);
+        Project project = new Project();
+        project.setCustomerId(4L);
+        Contract winner = new Contract();
+        winner.setId(900L);
+        winner.setOrderLineId(700L);
+
+        when(contractMapper.selectOne(any())).thenReturn(null, winner);
+        when(projectMapper.selectById(9L)).thenReturn(project);
+        when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
+        when(contractMapper.insert(any(Contract.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate order_line_id"));
+
+        Contract result = contractService.createDraftFromSalesOrderLine(line, order);
+
+        assertEquals(900L, result.getId());
+        verify(contractMapper, times(2)).selectOne(any());
+    }
+
     // ===== 見積からのドラフト生成（quotation-management / P4） =====
 
     private com.ses.entity.Quotation quotation(Long id, Long engineerId, Long projectId, Long customerId,

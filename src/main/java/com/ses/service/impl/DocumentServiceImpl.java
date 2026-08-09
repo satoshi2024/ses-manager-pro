@@ -66,8 +66,11 @@ public class DocumentServiceImpl implements DocumentService {
     private final ObjectProvider<FileScanner> fileScannerProvider;
     private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
+    private final com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
 
     private static final String DEFAULT_TENANT_ID = "default";
+    private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
+            "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
 
     // ----------------------------------------------------------------
     // 登録
@@ -107,36 +110,33 @@ public class DocumentServiceImpl implements DocumentService {
         String storageKey = generateStorageKey();
         StreamDigestResult streamResult = writeToTempAndDigest(content);
 
-        // 3. Storage の quarantine 領域へストリーミング保存
-        try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
-            documentStorage.put(storageKey, tempIs, true /* quarantine */);
-        } catch (Exception e) {
-            deleteTempFile(streamResult.tempPath());
-            throw new RuntimeException("Storage quarantine保存失敗", e);
-        }
-
-        // 4. P1-02: スキャン処理（fail-closed 判定）
+        // 3. スキャン処理（未知/失敗/感染はStorageへ保存する前にfail-closed）
         FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
         if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
             deleteTempFile(streamResult.tempPath());
-            log.warn("[文書台帳] スキャン失敗・感染のため登録を拒否します: storageKey={} result={}", storageKey, scanResult);
+            log.warn("[文書台帳] スキャン失敗・感染のため登録を拒否します: result={}", scanResult);
             throw BusinessException.of(400, "error.file.scanRejected");
         }
 
-        deleteTempFile(streamResult.tempPath());
-
         try {
-            // 5. DB tx: document + version 保存
+            // 4. DB tx: document作成後にHashをアトミックClaimする。
             Document doc = buildDocument(request);
             documentMapper.insert(doc);
+            claimHashIfRequired(doc, streamResult.sha256());
 
+            // 5. Claim成功後だけStorageのquarantine領域へ保存する。
+            try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
+                documentStorage.put(storageKey, tempIs, true);
+            }
+            registerStorageRollbackCompensation(storageKey);
+
+            // 6. version・業務リンクを保存する。
             DocumentVersion version = buildVersion(request, doc.getId(), storageKey, streamResult.sizeBytes(), streamResult.sha256());
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
             documentVersionMapper.insert(version);
 
-            // 6. 業務リンク登録
             if (request.getTargetType() != null && request.getTargetId() != null) {
                 link(doc.getId(), request.getTargetType(), request.getTargetId());
             }
@@ -152,7 +152,13 @@ public class DocumentServiceImpl implements DocumentService {
 
         } catch (Exception e) {
             log.error("[文書台帳] DB保存失敗。storageKey={} error={}", storageKey, e.getMessage());
-            throw e;
+            deleteStorageImmediatelyWhenNoTransaction(storageKey);
+            if (e instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new RuntimeException("文書登録に失敗しました", e);
+        } finally {
+            deleteTempFile(streamResult.tempPath());
         }
     }
 
@@ -183,23 +189,20 @@ public class DocumentServiceImpl implements DocumentService {
         String storageKey = generateStorageKey();
         StreamDigestResult streamResult = writeToTempAndDigest(content);
 
-        try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
-            documentStorage.put(storageKey, tempIs, true);
-        } catch (Exception e) {
-            deleteTempFile(streamResult.tempPath());
-            throw new RuntimeException("Storage quarantine保存失敗", e);
-        }
-
-        // P1-02: fail-closed スキャン
+        // fail-closed スキャン
         FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
         if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
             deleteTempFile(streamResult.tempPath());
             throw BusinessException.of(400, "error.file.scanRejected");
         }
 
-        deleteTempFile(streamResult.tempPath());
-
         try {
+            claimHashIfRequired(doc, streamResult.sha256());
+            try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
+                documentStorage.put(storageKey, tempIs, true);
+            }
+            registerStorageRollbackCompensation(storageKey);
+
             DocumentVersion version = buildVersion(request, documentId, storageKey, streamResult.sizeBytes(), streamResult.sha256());
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
@@ -225,7 +228,60 @@ public class DocumentServiceImpl implements DocumentService {
 
         } catch (Exception e) {
             log.error("[文書台帳] 版追加DB失敗。storageKey={} error={}", storageKey, e.getMessage());
-            throw e;
+            deleteStorageImmediatelyWhenNoTransaction(storageKey);
+            if (e instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new RuntimeException("文書版追加に失敗しました", e);
+        } finally {
+            deleteTempFile(streamResult.tempPath());
+        }
+    }
+
+    private void claimHashIfRequired(Document doc, String sha256) {
+        if (doc == null || doc.getDocumentType() == null
+                || !HASH_CLAIM_DOCUMENT_TYPES.contains(doc.getDocumentType())) {
+            return;
+        }
+        String tenantId = doc.getTenantId() != null && !doc.getTenantId().isBlank()
+                ? doc.getTenantId() : DEFAULT_TENANT_ID;
+        try {
+            documentHashClaimMapper.insertClaim(tenantId, doc.getDocumentType(), sha256, doc.getId());
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            if ("ORDER_RECEIVED".equals(doc.getDocumentType())) {
+                throw BusinessException.of(409, "error.order.duplicateSourceDocument");
+            }
+            throw BusinessException.of(409, "error.document.duplicateHash");
+        }
+    }
+
+    private void registerStorageRollbackCompensation(String storageKey) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    try {
+                        documentStorage.delete(storageKey);
+                    } catch (Exception e) {
+                        log.error("[文書台帳] rollback補償削除失敗: storageKey={}", storageKey, e);
+                    }
+                }
+            }
+        });
+    }
+
+    private void deleteStorageImmediatelyWhenNoTransaction(String storageKey) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        try {
+            documentStorage.delete(storageKey);
+        } catch (Exception cleanupError) {
+            log.error("[文書台帳] 例外時のStorage補償削除失敗: storageKey={}", storageKey, cleanupError);
         }
     }
 
@@ -964,6 +1020,8 @@ public class DocumentServiceImpl implements DocumentService {
             }
         }
 
+        Set<Long> allowedAcceptanceDocIds = new java.util.HashSet<>();
+
         // ACCEPTANCE 文書の月別複合タプルスコープ判定 (R9-P0-01)
         // 異なる月ごとに allowedContractIdsAsOf(monthEnd) を個別に取得して合致する document_id 集合を事前構築
         if (acceptanceMapper != null) {
@@ -972,7 +1030,6 @@ public class DocumentServiceImpl implements DocumentService {
                             .isNotNull(com.ses.entity.Acceptance::getDocumentId)
                             .isNotNull(com.ses.entity.Acceptance::getWorkMonth));
             if (acceptances != null && !acceptances.isEmpty()) {
-                Set<Long> allowedAcceptanceDocIds = new java.util.HashSet<>();
                 // 月別にグループ化して複合タプル (contract_id, work_month) の許可を厳格判定
                 java.util.Map<String, List<com.ses.entity.Acceptance>> monthGroup = acceptances.stream()
                         .collect(Collectors.groupingBy(com.ses.entity.Acceptance::getWorkMonth));
@@ -990,25 +1047,34 @@ public class DocumentServiceImpl implements DocumentService {
                         }
                     }
                 }
-                if (!allowedAcceptanceDocIds.isEmpty()) {
-                    linkWrapper.or(w -> w.in("document_id", allowedAcceptanceDocIds));
-                    hasCondition = true;
-                }
             }
         }
 
-        if (!hasCondition) {
+        if (!hasCondition && allowedAcceptanceDocIds.isEmpty()) {
             wrapper.eq(Document::getId, -1L);
             return;
         }
 
-        List<DocumentLink> links = documentLinkMapper.selectList(linkWrapper);
+        List<DocumentLink> links = hasCondition ? documentLinkMapper.selectList(linkWrapper) : List.of();
         Set<Long> allowedDocIds = links.stream().map(DocumentLink::getDocumentId).collect(Collectors.toSet());
 
-        if (allowedDocIds.isEmpty()) {
+        if (allowedDocIds.isEmpty() && allowedAcceptanceDocIds.isEmpty()) {
             wrapper.eq(Document::getId, -1L);
+        } else if (allowedAcceptanceDocIds.isEmpty()) {
+            wrapper.ne(Document::getDocumentType, "ACCEPTANCE")
+                    .in(Document::getId, allowedDocIds);
+        } else if (allowedDocIds.isEmpty()) {
+            wrapper.eq(Document::getDocumentType, "ACCEPTANCE")
+                    .in(Document::getId, allowedAcceptanceDocIds);
         } else {
-            wrapper.in(Document::getId, allowedDocIds);
+            // 現在DataScopeのCONTRACTリンクではACCEPTANCEを許可しない。
+            // ACCEPTANCEだけは(contract_id, work_month)のas-of複合タプルで決めた集合を使う。
+            wrapper.and(w -> w.and(current -> current
+                            .ne(Document::getDocumentType, "ACCEPTANCE")
+                            .in(Document::getId, allowedDocIds))
+                    .or(acceptance -> acceptance
+                            .eq(Document::getDocumentType, "ACCEPTANCE")
+                            .in(Document::getId, allowedAcceptanceDocIds)));
         }
     }
 

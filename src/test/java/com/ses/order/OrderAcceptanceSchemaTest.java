@@ -97,6 +97,17 @@ class OrderAcceptanceSchemaTest {
         Integer value = jdbcTemplate.queryForObject(
                 "SELECT acceptance_required FROM t_contract WHERE contract_no = 'F1-NOTNULL-3'", Integer.class);
         assertEquals(0, value);
+
+        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
+                        + " start_date, selling_price, cost_price, status, acceptance_required, acceptance_exemption_reason)"
+                        + " VALUES ('F1-CHECK-NULL', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 0, NULL)",
+                engineerId, projectId, customerId));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
+                        + " start_date, selling_price, cost_price, status, acceptance_required, acceptance_exemption_reason)"
+                        + " VALUES ('F1-CHECK-BLANK', ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 0, '   ')",
+                engineerId, projectId, customerId));
     }
 
     @Test

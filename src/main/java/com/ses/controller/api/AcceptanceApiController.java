@@ -73,7 +73,7 @@ public class AcceptanceApiController {
     }
 
     /** 検収書原本をdownloadする（検収一覧と同じscope）。 */
-    @GetMapping({"/{id}/document", "/{id}/document/download"})
+    @GetMapping("/{id}/document/download")
     public ResponseEntity<org.springframework.core.io.InputStreamResource> downloadDocument(@PathVariable Long id) {
         java.io.InputStream stream = acceptanceService.downloadDocument(id);
         return ResponseEntity.ok()

@@ -88,9 +88,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         if (uri == null) return false;
         return uri.startsWith("/api/files/")
                 || uri.endsWith("/download") || uri.contains("/download/")
-                || uri.matches("/api/sales-orders/\\d+/documents/\\d+(/.*)?")
-                || uri.matches("/api/sales-orders/\\d+/acknowledgement/pdf(/.*)?")
-                || uri.matches("/api/acceptances/\\d+/document(/.*)?");
+                || uri.matches("/api/sales-orders/\\d+/documents/\\d+/download")
+                || uri.matches("/api/sales-orders/\\d+/acknowledgement-pdf/download")
+                || uri.matches("/api/acceptances/\\d+/document/download");
     }
 
     /**

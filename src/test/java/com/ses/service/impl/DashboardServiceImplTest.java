@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -59,6 +60,9 @@ class DashboardServiceImplTest {
     @Mock
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
+    @Mock
+    private com.ses.mapper.AcceptanceMapper acceptanceMapper;
+
     // 共通口径サービスは純粋ロジックのため実体をSpyとして注入する(Dashboardのチャート/KPIが実ロジックで計算される)
     @org.mockito.Spy
     private MonthlyRevenueCalcServiceImpl monthlyRevenueCalcService = new MonthlyRevenueCalcServiceImpl();
@@ -69,6 +73,11 @@ class DashboardServiceImplTest {
 
     @InjectMocks
     private DashboardServiceImpl dashboardService;
+
+    @AfterEach
+    void clearSecurityContext() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
 
     private Contract createContract(Long id, String contractNo, Integer sellingPrice, Integer costPrice, LocalDate startDate) {
         Contract c = new Contract();
@@ -418,5 +427,59 @@ class DashboardServiceImplTest {
         assertEquals(1, result.getRetiring().size());
         assertEquals("Java", result.getRetiring().get(0).getSkill());
         assertEquals(2, result.getRetiring().get(0).getProposals());
+    }
+
+    @Test
+    void testGetSummary_未検収Kpiは0件と1件の境界を直接返す() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                dashboardService, "organizationScopeService", organizationScopeService);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                dashboardService, "acceptanceMapper", acceptanceMapper);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        Contract contract = createContract(77L, "KPI-77", 600000, 300000, LocalDate.now().minusMonths(1));
+        contract.setStatus("稼動中");
+        when(contractMapper.selectList(any())).thenReturn(List.of(contract));
+        when(acceptanceMapper.sumUnacceptedSales(org.mockito.ArgumentMatchers.nullable(List.class)))
+                .thenReturn(java.math.BigDecimal.ZERO);
+        when(acceptanceMapper.selectAcceptanceDurations(org.mockito.ArgumentMatchers.nullable(List.class)))
+                .thenReturn(List.of());
+
+        var zero = dashboardService.getSummary(null);
+        assertEquals(0L, zero.getKpi().getUnacceptedSales());
+        assertEquals(0.0, zero.getKpi().getAvgAcceptanceDays());
+
+        com.ses.dto.acceptance.AcceptanceDurationRow duration =
+                new com.ses.dto.acceptance.AcceptanceDurationRow();
+        duration.setSubmittedAt(java.time.LocalDateTime.of(2026, 8, 1, 9, 0));
+        duration.setAcceptedAt(java.time.LocalDateTime.of(2026, 8, 3, 9, 0));
+        when(acceptanceMapper.sumUnacceptedSales(org.mockito.ArgumentMatchers.nullable(List.class)))
+                .thenReturn(new java.math.BigDecimal("600000"));
+        when(acceptanceMapper.selectAcceptanceDurations(org.mockito.ArgumentMatchers.nullable(List.class)))
+                .thenReturn(List.of(duration));
+
+        var one = dashboardService.getSummary(null);
+        assertEquals(600000L, one.getKpi().getUnacceptedSales());
+        assertEquals(2.0, one.getKpi().getAvgAcceptanceDays());
+    }
+
+    @Test
+    void testGetSummary_HRは未検収金額と平均日数を常に0で返す() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                dashboardService, "organizationScopeService", organizationScopeService);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                dashboardService, "acceptanceMapper", acceptanceMapper);
+        var authentication = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                "hr", "x", List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_HR")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+
+        var result = dashboardService.getSummary(null);
+
+        assertEquals(0L, result.getKpi().getUnacceptedSales());
+        assertEquals(0.0, result.getKpi().getAvgAcceptanceDays());
+        org.mockito.Mockito.verify(acceptanceMapper, org.mockito.Mockito.never())
+                .sumUnacceptedSales(org.mockito.ArgumentMatchers.nullable(List.class));
+        org.mockito.Mockito.verify(acceptanceMapper, org.mockito.Mockito.never())
+                .selectAcceptanceDurations(org.mockito.ArgumentMatchers.nullable(List.class));
     }
 }

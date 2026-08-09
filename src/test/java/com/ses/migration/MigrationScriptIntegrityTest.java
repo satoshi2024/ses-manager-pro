@@ -276,6 +276,18 @@ class MigrationScriptIntegrityTest {
     }
 
     @Test
+    void 公開済みV80はchecksumを変更しないこと() throws Exception {
+        Resource resource = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V80__order_acceptance_workflow.sql");
+        String normalized = resource.getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(normalized.getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals("852a1a4f567c11216140d6bfa764871b74783a30d1be85489bd348cf4800f054", checksum,
+                "公開済みV80を編集せず、注文・検収の補正はV81以降へ置いてください");
+    }
+
+    @Test
     void V60のlegacy補列は対象列ごとに独立しBP外部キーより先に追加されること() throws Exception {
         String sql = v60();
         int bpColumn = sql.indexOf("ALTER TABLE t_bp_payment ADD COLUMN cost_center_id");

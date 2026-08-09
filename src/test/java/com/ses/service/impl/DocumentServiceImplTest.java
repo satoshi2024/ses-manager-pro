@@ -62,6 +62,7 @@ class DocumentServiceImplTest {
     @Mock DocumentStorage documentStorage;
     @Mock ObjectProvider<FileScanner> fileScannerProvider;
     @Mock FileScanner fileScanner;
+    @Mock com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
 
     @InjectMocks
     DocumentServiceImpl sut;
@@ -174,6 +175,55 @@ class DocumentServiceImplTest {
         ArgumentCaptor<DocumentVersion> versionCaptor = ArgumentCaptor.forClass(DocumentVersion.class);
         verify(documentVersionMapper).insert(versionCaptor.capture());
         assertEquals(1, versionCaptor.getValue().getVersionNo());
+    }
+
+    @Test
+    void registerReceived_hashClaim重複はstorage保存前に409を返す() {
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
+            ((Document) inv.getArgument(0)).setId(10L);
+            return 1;
+        });
+        when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(10L)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate"));
+        var req = DocumentRegisterRequest.builder()
+                .documentType("ORDER_RECEIVED").sourceType("RECEIVED")
+                .businessKey("ORDER_RECEIVED:1").versionDiscriminator("1").build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                sut.registerReceived(req, new ByteArrayInputStream("same".getBytes())));
+
+        assertEquals(409, ex.getCode());
+        assertEquals("error.order.duplicateSourceDocument", ex.getMessageKey());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    @Test
+    void registerReceived_transactionRollbackでstorage実体を補償削除する() {
+        when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
+            ((Document) inv.getArgument(0)).setId(11L);
+            return 1;
+        });
+        when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(11L))).thenReturn(1);
+        when(documentVersionMapper.findLatestByDocumentId(11L)).thenReturn(null);
+        when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
+        when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
+        var req = DocumentRegisterRequest.builder()
+                .documentType("ORDER_RECEIVED").sourceType("RECEIVED")
+                .businessKey("ORDER_RECEIVED:2").versionDiscriminator("1").build();
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            sut.registerReceived(req, new ByteArrayInputStream("content".getBytes()));
+            var synchronizations = org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations();
+            assertFalse(synchronizations.isEmpty());
+            synchronizations.forEach(sync -> sync.afterCompletion(
+                    org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+        verify(documentStorage).delete(anyString());
     }
 
     @Test

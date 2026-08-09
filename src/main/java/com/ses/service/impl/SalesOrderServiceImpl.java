@@ -76,6 +76,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final SalesOrderPdfService salesOrderPdfService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     // ===== 一覧・詳細・scope =====
 
@@ -494,6 +495,18 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     }
 
     private void validateRequest(SalesOrderSaveRequest request) {
+        if (request.getLegalEntityId() == null) {
+            throw BusinessException.of(400, "error.order.legalEntityRequired");
+        }
+        java.time.LocalDate legalEntityAsOf = request.getOrderDate() != null
+                ? request.getOrderDate() : java.time.LocalDate.now();
+        boolean visibleLegalEntity = organizationScopeService
+                .listVisibleOrganizations(request.getLegalEntityId(), legalEntityAsOf)
+                .stream()
+                .anyMatch(unit -> Objects.equals(request.getLegalEntityId(), unit.getLegalEntityId()));
+        if (!visibleLegalEntity) {
+            throw BusinessException.of(400, "error.order.legalEntityNotFound");
+        }
         if (request.getOrderDate() == null) {
             throw BusinessException.of("error.order.orderDateRequired");
         }
@@ -595,20 +608,37 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 StatusConstants.ORDER_COMPLETED).contains(order.getStatus())) {
             throw BusinessException.of(409, "error.order.ackNotAllowed", order.getStatus());
         }
-        byte[] pdf = salesOrderPdfService.generate(order, locale);
-        // 注文請の発行＝注文請提出（受領確認→注文請提出へ状態CAS遷移）
-        if (StatusConstants.ORDER_RECEIVED.equals(order.getStatus())) {
-            changeStatus(orderId, StatusConstants.ORDER_ACK_SUBMITTED);
+        // 初回発行後は動的再生成せず、archive正本を返す。
+        if (!StatusConstants.ORDER_RECEIVED.equals(order.getStatus())) {
+            try (java.io.InputStream archived = downloadAcknowledgementPdf(orderId)) {
+                return archived.readAllBytes();
+            } catch (java.io.IOException e) {
+                throw BusinessException.of(500, "error.order.acknowledgementArchiveFailed");
+            }
         }
+        byte[] pdf = salesOrderPdfService.generate(order, locale);
         // 文書台帳の注文請書documentIdを注文へ記録する（冪等登録済みを引く）
         com.ses.entity.DocumentVersion ackVersion = documentVersionMapper.findByIdempotencyKey(
                 "default", "GENERATED", "ORDER_ACKNOWLEDGEMENT:" + orderId, "1");
-        if (ackVersion != null) {
-            this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SalesOrder>()
-                    .eq("id", orderId)
-                    .set("acknowledgement_document_id", ackVersion.getDocumentId()));
+        if (ackVersion == null || ackVersion.getDocumentId() == null) {
+            throw BusinessException.of(500, "error.order.acknowledgementArchiveFailed");
         }
+        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SalesOrder>()
+                .eq("id", orderId)
+                .set("acknowledgement_document_id", ackVersion.getDocumentId()));
+        // archive登録・関連付け成功後だけ、注文請提出へ状態CAS遷移する。
+        changeStatus(orderId, StatusConstants.ORDER_ACK_SUBMITTED);
         return pdf;
+    }
+
+    @Override
+    public java.io.InputStream downloadAcknowledgementPdf(Long orderId) {
+        SalesOrder order = require(orderId);
+        assertAllowedOrder(orderId);
+        if (order.getAcknowledgementDocumentId() == null) {
+            throw BusinessException.of(500, "error.order.acknowledgementArchiveFailed");
+        }
+        return documentService.download(order.getAcknowledgementDocumentId(), null);
     }
 
     @Override

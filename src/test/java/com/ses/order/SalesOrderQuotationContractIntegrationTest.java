@@ -48,6 +48,7 @@ class SalesOrderQuotationContractIntegrationTest {
     private long engineerId;
     private long engineerId2;
     private long projectId;
+    private final long legalEntityId = 7001L;
 
     @BeforeEach
     void setUp() {
@@ -60,6 +61,10 @@ class SalesOrderQuotationContractIntegrationTest {
         engineerId2 = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "F2要員B" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "F2案件" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "F2案件" + suffix);
+        jdbcTemplate.update("INSERT INTO m_organization_unit "
+                        + "(legal_entity_id, code, name, type, valid_from, status, deleted_flag) "
+                        + "VALUES (?, 'F2-LEGAL', ?, '会社', ?, '有効', 0)",
+                legalEntityId, "F2テスト法人" + suffix, LocalDate.of(2020, 1, 1));
     }
 
     private Quotation newQuotation(String title, BigDecimal unitPrice, BigDecimal settlementMin, BigDecimal settlementMax) {
@@ -107,6 +112,7 @@ class SalesOrderQuotationContractIntegrationTest {
 
         // 注文単価を引き下げて条件差分を作る
         SalesOrderSaveRequest req = new SalesOrderSaveRequest();
+        req.setLegalEntityId(legalEntityId);
         req.setCustomerId(customerId);
         req.setOrderDate(LocalDate.now());
         SalesOrderSaveRequest.Line line = new SalesOrderSaveRequest.Line();
@@ -135,6 +141,7 @@ class SalesOrderQuotationContractIntegrationTest {
         // 注文を更新して2明細にする（要員A・要員B）
         SalesOrder order = orderService.createDraftFromQuotation(q.getId());
         SalesOrderSaveRequest req = new SalesOrderSaveRequest();
+        req.setLegalEntityId(legalEntityId);
         req.setCustomerId(customerId);
         req.setOrderDate(LocalDate.now());
         SalesOrderSaveRequest.Line l1 = new SalesOrderSaveRequest.Line();

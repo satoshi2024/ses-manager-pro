@@ -102,8 +102,7 @@ public class SalesOrderApiController {
     }
 
     /** 注文請書PDFを生成・文書台帳（ORDER_ACKNOWLEDGEMENT）へ登録する（R1.4）。 */
-    @GetMapping({"/{id}/acknowledgement-pdf", "/{id}/acknowledgement-pdf/download"})
-    @PostMapping({"/{id}/acknowledgement-pdf", "/{id}/acknowledgement-pdf/download"})
+    @PostMapping("/{id}/acknowledgement-pdf")
     public ResponseEntity<byte[]> acknowledgementPdf(@PathVariable Long id,
                                                      @RequestParam(required = false) String lang,
                                                      java.util.Locale locale) {
@@ -115,8 +114,18 @@ public class SalesOrderApiController {
                 .body(pdf);
     }
 
+    /** archive済み注文請書の正本をdownloadする。生成・状態変更は行わない。 */
+    @GetMapping("/{id}/acknowledgement-pdf/download")
+    public ResponseEntity<InputStreamResource> downloadAcknowledgementPdf(@PathVariable Long id) {
+        java.io.InputStream stream = salesOrderService.downloadAcknowledgementPdf(id);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"order_ack_" + id + ".pdf\"")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(new InputStreamResource(stream));
+    }
+
     /** 注文の原本/注文請書をdownloadする（注文一覧と同じscope。document側に別ACLを作らない）。 */
-    @GetMapping({"/{id}/documents/{documentId}", "/{id}/documents/{documentId}/download"})
+    @GetMapping("/{id}/documents/{documentId}/download")
     public ResponseEntity<InputStreamResource> downloadDocument(@PathVariable Long id,
                                                                 @PathVariable Long documentId) {
         java.io.InputStream stream = salesOrderService.downloadDocument(id, documentId);

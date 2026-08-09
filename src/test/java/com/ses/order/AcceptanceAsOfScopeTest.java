@@ -55,6 +55,8 @@ class AcceptanceAsOfScopeTest {
     @Autowired OrganizationService organizationService;
     @Autowired SysUserMapper sysUserMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired com.ses.service.DocumentService documentService;
+    @Autowired com.ses.mapper.DocumentMapper documentMapper;
 
     private long contractId;
     private Long orgAId;
@@ -283,6 +285,36 @@ class AcceptanceAsOfScopeTest {
         authenticate(managerB);
         var pageB = acceptanceService.pageGrid(1, 50, "2026-07", null, null, null, acceptance.getId());
         assertEquals(0, pageB.getRecords().size(), "実在する検収であっても越権マネージャーBからは0件（Scope遮断）となること");
+    }
+
+    @Test
+    @DisplayName("ACCEPTANCE archive一覧は現在契約scopeではなく対象月asOf複合タプルを使う")
+    void acceptanceArchiveListUsesWorkMonthAsOfScope() {
+        setUpHistoryTransferFixture();
+        authenticate(managerA);
+        Acceptance acceptance = acceptanceService.submit(contractId, "2026-07");
+
+        jdbcTemplate.update("INSERT INTO t_document "
+                        + "(tenant_id, document_type, document_no, direction, status, deleted_flag) "
+                        + "VALUES ('default', 'ACCEPTANCE', ?, 'INCOMING', 'CONFIRMED', 0)",
+                "ACC-ASOF-" + System.nanoTime());
+        Long documentId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_document", Long.class);
+        jdbcTemplate.update("INSERT INTO t_document_link "
+                + "(document_id, target_type, target_id, deleted_flag) VALUES (?, 'CONTRACT', ?, 0)",
+                documentId, contractId);
+        jdbcTemplate.update("UPDATE t_acceptance SET document_id=? WHERE id=?", documentId, acceptance.getId());
+
+        authenticate(managerB);
+        var denied = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.Document>();
+        ((com.ses.service.impl.DocumentServiceImpl) documentService).applyDataScopeFilter(denied);
+        assertEquals(0L, documentMapper.selectCount(denied),
+                "現在所属Bでも2026-07の検収文書は見えてはならない");
+
+        authenticate(managerA);
+        var allowed = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.Document>();
+        ((com.ses.service.impl.DocumentServiceImpl) documentService).applyDataScopeFilter(allowed);
+        assertEquals(1L, documentMapper.selectCount(allowed),
+                "2026-07時点の所属Aには検収文書が見える");
     }
 
     @Test

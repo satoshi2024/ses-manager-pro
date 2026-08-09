@@ -346,6 +346,7 @@ CREATE TABLE t_contract (
   INDEX idx_contract_customer_id (customer_id),
   INDEX idx_contract_start_date  (start_date),
   INDEX idx_contract_end_date    (end_date),
+  UNIQUE KEY uk_contract_order_line (order_line_id),
 
   CONSTRAINT fk_contract_proposal
     FOREIGN KEY (proposal_id) REFERENCES t_proposal(id)
@@ -1025,4 +1026,6 @@ ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_cost_center FOREIGN KEY (cost_
 ALTER TABLE t_engineer ADD CONSTRAINT fk_engineer_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
   ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE t_contract ADD CONSTRAINT fk_contract_cost_center FOREIGN KEY (cost_center_id) REFERENCES m_cost_center(id)
+  ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE t_contract ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id)
   ON UPDATE CASCADE ON DELETE SET NULL;

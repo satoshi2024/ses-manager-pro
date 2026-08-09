@@ -66,4 +66,42 @@ class ApiAuditFilterTest {
         assertEquals(503, response.getStatus());
         verify(chain, never()).doFilter(any(), any());
     }
+
+    @Test
+    void 注文請archiveDownloadの成功と拒否を実URLで監査する() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<AuditLogService> provider = mock(ObjectProvider.class);
+        AuditLogService auditLogService = mock(AuditLogService.class);
+        when(provider.getIfAvailable()).thenReturn(auditLogService);
+        ApiAuditFilter filter = new ApiAuditFilter(provider);
+
+        MockHttpServletRequest success = new MockHttpServletRequest(
+                "GET", "/api/sales-orders/1/acknowledgement-pdf/download");
+        filter.doFilter(success, new MockHttpServletResponse(), (req, res) -> { });
+        verify(auditLogService).record(any(), eq("GET"),
+                eq("/api/sales-orders/1/acknowledgement-pdf/download"),
+                eq(200), eq("FILE_DOWNLOAD"), eq(true));
+
+        MockHttpServletRequest rejected = new MockHttpServletRequest(
+                "GET", "/api/sales-orders/1/documents/2/download");
+        MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+        filter.doFilter(rejected, rejectedResponse,
+                (req, res) -> ((jakarta.servlet.http.HttpServletResponse) res).setStatus(403));
+        verify(auditLogService).record(any(), eq("GET"),
+                eq("/api/sales-orders/1/documents/2/download"),
+                eq(403), eq("FILE_DOWNLOAD_REJECTED"), eq(false));
+    }
+
+    @Test
+    void 検収書postUploadをfileDownload監査へ誤分類しない() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<AuditLogService> provider = mock(ObjectProvider.class);
+        AuditLogService auditLogService = mock(AuditLogService.class);
+        when(provider.getIfAvailable()).thenReturn(auditLogService);
+        ApiAuditFilter filter = new ApiAuditFilter(provider);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/acceptances/1/document");
+
+        filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+
+        verify(auditLogService).record(any(), eq("POST"), eq("/api/acceptances/1/document"),
+                eq(200), eq("ses-manager"), eq(true));
+    }
 }

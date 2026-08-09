@@ -79,6 +79,9 @@ public interface SalesOrderService extends IService<SalesOrder> {
      */
     byte[] generateAcknowledgementPdf(Long orderId, java.util.Locale locale);
 
+    /** archive済み注文請書の正本を返す。生成・状態変更は行わない。 */
+    java.io.InputStream downloadAcknowledgementPdf(Long orderId);
+
     /** documentId が当該注文の原本/注文請として紐づいていることを検証する（download scope）。 */
     void assertDocumentLinkedToOrder(Long orderId, Long documentId);
 

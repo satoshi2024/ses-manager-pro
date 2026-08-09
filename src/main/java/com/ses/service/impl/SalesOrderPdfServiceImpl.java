@@ -47,12 +47,8 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
     private final SalesOrderLineMapper lineMapper;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
-    private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.OrganizationUnitMapper> organizationUnitMapperProvider;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     private final MessageSource messageSource;
-
-    private com.ses.mapper.OrganizationUnitMapper getOrganizationUnitMapper() {
-        return organizationUnitMapperProvider.getIfAvailable();
-    }
 
     private String msg(String key, Locale locale) {
         return messageSource.getMessage(key, null, key, locale == null ? Locale.JAPANESE : locale);
@@ -130,37 +126,10 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
             document.add(new Paragraph(msg("salesOrder.pdf.ackNote", targetLocale), normalFont));
             document.add(new Paragraph(" "));
 
-            String companyName = systemConfigService.getString("company.name", "SES Manager Pro");
-            String companyAddress = systemConfigService.getString("company.address", "");
-            String registrationNo = systemConfigService.getString("company.invoice-registration-number", "");
-
-            if (order.getLegalEntityId() != null && getOrganizationUnitMapper() != null) {
-                java.time.LocalDate effectiveDate = order.getOrderDate() != null ? order.getOrderDate() : java.time.LocalDate.now();
-                com.ses.entity.OrganizationUnit legalEntity = getOrganizationUnitMapper().selectOne(
-                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.OrganizationUnit>()
-                                .eq("tenant_id", order.getTenantId() != null ? order.getTenantId() : "default")
-                                .eq("legal_entity_id", order.getLegalEntityId())
-                                .eq("deleted_flag", 0)
-                                .eq("status", "有効")
-                                .and(w -> w.isNull("valid_from").or().le("valid_from", effectiveDate))
-                                .and(w -> w.isNull("valid_to").or().ge("valid_to", effectiveDate))
-                                .orderByDesc("parent_id IS NULL")
-                                .orderByAsc("id")
-                                .last("LIMIT 1"));
-                if (legalEntity != null) {
-                    if (StringUtils.hasText(legalEntity.getName())) {
-                        companyName = legalEntity.getName();
-                    }
-                    String customAddress = systemConfigService.getString("legal_entity." + order.getLegalEntityId() + ".address", null);
-                    if (StringUtils.hasText(customAddress)) {
-                        companyAddress = customAddress;
-                    }
-                    String customReg = systemConfigService.getString("legal_entity." + order.getLegalEntityId() + ".invoice-registration-number", null);
-                    if (StringUtils.hasText(customReg)) {
-                        registrationNo = customReg;
-                    }
-                }
-            }
+            Issuer issuer = resolveIssuer(order);
+            String companyName = issuer.name();
+            String companyAddress = issuer.address();
+            String registrationNo = issuer.registrationNo();
 
             document.add(new Paragraph(companyName, normalFont));
             if (StringUtils.hasText(companyAddress)) {
@@ -179,6 +148,37 @@ public class SalesOrderPdfServiceImpl implements SalesOrderPdfService {
             throw BusinessException.of("error.order.pdfGenerateFailed");
         }
     }
+
+    /** legal_entity_idを唯一のキーとして発行法人を解決する。global設定へのfallbackは禁止する。 */
+    private Issuer resolveIssuer(SalesOrder order) {
+        if (order.getLegalEntityId() == null) {
+            throw BusinessException.of(400, "error.order.legalEntityRequired");
+        }
+        com.ses.service.security.OrganizationScopeService resolver = organizationScopeServiceProvider.getIfAvailable();
+        if (resolver == null) {
+            throw BusinessException.of(500, "error.order.legalEntityResolverUnavailable");
+        }
+        java.time.LocalDate effectiveDate = order.getOrderDate() != null
+                ? order.getOrderDate() : java.time.LocalDate.now();
+        com.ses.entity.OrganizationUnit legalEntity = resolver
+                .listVisibleOrganizations(order.getLegalEntityId(), effectiveDate)
+                .stream()
+                .sorted(java.util.Comparator
+                        .comparing((com.ses.entity.OrganizationUnit unit) -> unit.getParentId() != null)
+                        .thenComparing(com.ses.entity.OrganizationUnit::getId))
+                .findFirst()
+                .orElse(null);
+        if (legalEntity == null || !StringUtils.hasText(legalEntity.getName())) {
+            throw BusinessException.of(400, "error.order.legalEntityNotFound");
+        }
+        return new Issuer(
+                legalEntity.getName(),
+                systemConfigService.getString("legal_entity." + order.getLegalEntityId() + ".address", ""),
+                systemConfigService.getString(
+                        "legal_entity." + order.getLegalEntityId() + ".invoice-registration-number", ""));
+    }
+
+    private record Issuer(String name, String address, String registrationNo) {}
 
     private void registerToLedger(SalesOrder order, byte[] pdfBytes) {
         com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();

@@ -55,6 +55,11 @@ class SalesOrderServiceImplTest {
     @Mock private ApprovalRequestMapper approvalRequestMapper;
     @Mock private ContractService contractService;
     @Mock private DataScopeService dataScopeService;
+    @Mock private com.ses.service.DocumentService documentService;
+    @Mock private com.ses.mapper.DocumentMapper documentMapper;
+    @Mock private com.ses.mapper.DocumentVersionMapper documentVersionMapper;
+    @Mock private com.ses.service.SalesOrderPdfService salesOrderPdfService;
+    @Mock private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @InjectMocks
     private SalesOrderServiceImpl service;
@@ -127,6 +132,55 @@ class SalesOrderServiceImplTest {
 
         assertThat(order.getTotalAmountSnapshot()).isEqualByComparingTo("1100000");
         assertThat(order.getStatus()).isEqualTo(StatusConstants.ORDER_RECEIVED);
+    }
+
+    @Test
+    @DisplayName("注文請書の再発行は現在値で再生成せずarchive正本を返す")
+    void acknowledgementReissueReturnsArchivedBytes() {
+        SalesOrder order = draft(20L, StatusConstants.ORDER_ACK_SUBMITTED);
+        order.setAcknowledgementDocumentId(99L);
+        when(documentService.download(99L, null))
+                .thenReturn(new java.io.ByteArrayInputStream("archived-pdf".getBytes()));
+
+        byte[] result = service.generateAcknowledgementPdf(20L, java.util.Locale.JAPANESE);
+
+        assertThat(new String(result)).isEqualTo("archived-pdf");
+        org.mockito.Mockito.verify(salesOrderPdfService, org.mockito.Mockito.never()).generate(any(), any());
+    }
+
+    @Test
+    @DisplayName("進行済み注文にarchive正本が無い場合はfail-closed")
+    void acknowledgementReissueWithoutArchiveFailsClosed() {
+        draft(21L, StatusConstants.ORDER_CONTRACTED);
+
+        assertThatThrownBy(() -> service.generateAcknowledgementPdf(21L, java.util.Locale.JAPANESE))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.order.acknowledgementArchiveFailed");
+        org.mockito.Mockito.verify(salesOrderPdfService, org.mockito.Mockito.never()).generate(any(), any());
+    }
+
+    @Test
+    @DisplayName("注文保存は自社発行法人の未指定とscope外IDをfail-closedで拒否する")
+    void orderSaveValidatesLegalEntityBinding() {
+        com.ses.dto.order.SalesOrderSaveRequest request = new com.ses.dto.order.SalesOrderSaveRequest();
+        request.setCustomerId(10L);
+        request.setOrderDate(LocalDate.of(2026, 8, 5));
+        com.ses.dto.order.SalesOrderSaveRequest.Line requestLine =
+                new com.ses.dto.order.SalesOrderSaveRequest.Line();
+        requestLine.setEngineerId(1L);
+        requestLine.setUnitPrice(new BigDecimal("500000"));
+        request.setLines(List.of(requestLine));
+
+        assertThatThrownBy(() -> service.createFromRequest(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.order.legalEntityRequired");
+
+        request.setLegalEntityId(500L);
+        when(organizationScopeService.listVisibleOrganizations(eq(500L), eq(LocalDate.of(2026, 8, 5))))
+                .thenReturn(List.of());
+        assertThatThrownBy(() -> service.createFromRequest(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("error.order.legalEntityNotFound");
     }
 
     @Test

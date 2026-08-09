@@ -170,7 +170,18 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     success = true;
                     break;
                 } catch (DuplicateKeyException e) {
-                    // ignore and retry
+                    // 注文明細の一意制約競合は採番競合として再試行しない。
+                    // 先行txのcommit後に勝者を可視化し、呼出元で同一契約を返す。
+                    if (contract.getOrderLineId() != null) {
+                        Contract winner = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
+                                .eq(Contract::getOrderLineId, contract.getOrderLineId())
+                                .last("LIMIT 1 FOR UPDATE"));
+                        if (winner != null) {
+                            throw e;
+                        }
+                    }
+                    // 契約番号だけの競合なら、新しい番号で再試行する。
+                    contract.setId(null);
                 }
             }
             if (!success) {

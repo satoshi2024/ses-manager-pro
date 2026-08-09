@@ -116,6 +116,15 @@ public final class ActionPermissionResolver {
         if ("POST".equals(method) && uri.matches("/api/acceptances/\\d+/document")) {
             return "file.upload";
         }
+        if ("GET".equals(method) && uri.matches("/api/sales-orders/\\d+/acknowledgement-pdf/download")) {
+            return "file.download";
+        }
+        if ("GET".equals(method) && uri.matches("/api/sales-orders/\\d+/documents/\\d+/download")) {
+            return "file.download";
+        }
+        if ("GET".equals(method) && uri.matches("/api/acceptances/\\d+/document/download")) {
+            return "file.download";
+        }
         if (isDownloadPath(uri)) {
             return "file.download";
         }

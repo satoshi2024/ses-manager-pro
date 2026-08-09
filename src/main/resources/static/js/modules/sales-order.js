@@ -77,18 +77,20 @@ function onCustomerChanged() {
 function addLineRow(line) {
     line = line || {};
     const tbody = document.querySelector('#lineTable tbody');
+    const rowNo = tbody.children.length + 1;
+    const label = key => SES.escapeHtml(`${SES.i18n.t(key, key)} ${rowNo}`);
     const tr = document.createElement('tr');
     tr.innerHTML = `
         <td>
             <input type="hidden" name="lineId" value="${line.id || ''}">
-            <select class="form-select form-select-sm" name="engineerId" required></select>
+            <select class="form-select form-select-sm" name="engineerId" aria-label="${label('salesOrder.modal.line.engineer')}" required></select>
         </td>
-        <td><select class="form-select form-select-sm" name="projectId"></select></td>
-        <td><input type="number" class="form-control form-control-sm" name="unitPrice" value="${line.unitPrice || ''}" required></td>
-        <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" value="${line.settlementMin || ''}"></td>
-        <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" value="${line.settlementMax || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm" name="remarks" value="${SES.escapeHtml(line.remarks || '')}"></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger btn-remove-line">×</button></td>
+        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}"></select></td>
+        <td><input type="number" class="form-control form-control-sm" name="unitPrice" aria-label="${label('salesOrder.modal.line.unitPrice')}" value="${line.unitPrice || ''}" required></td>
+        <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" aria-label="${label('salesOrder.modal.line.settlementMin')}" value="${line.settlementMin || ''}"></td>
+        <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" aria-label="${label('salesOrder.modal.line.settlementMax')}" value="${line.settlementMax || ''}"></td>
+        <td><input type="text" class="form-control form-control-sm" name="remarks" aria-label="${label('salesOrder.modal.line.remarks')}" value="${SES.escapeHtml(line.remarks || '')}"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger btn-remove-line" aria-label="${SES.escapeHtml(SES.i18n.t('common.btn.delete', '削除'))} ${rowNo}">×</button></td>
     `;
     tbody.appendChild(tr);
     tr.querySelector('.btn-remove-line').addEventListener('click', () => tr.remove());
@@ -109,6 +111,7 @@ async function presetFromQuotation(quotationId) {
         form.startDate.value = quotation.validUntil || '';
         // 顧客選択の連動を再実行してから明細を埋める
         await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, quotation.customerId);
+        await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
         onCustomerChanged();
         addLineRow({
             engineerId: quotation.engineerId,
@@ -144,14 +147,14 @@ function openSalesOrderModal(id) {
             form.endDate.value = detail.endDate || '';
             form.paymentTerms.value = detail.paymentTermsSnapshot || '';
             loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
-            loadSelect('/api/organization-units/options', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
+            loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
             onCustomerChanged();
             detail.lines.forEach(l => addLineRow(l));
         });
     } else {
         title.textContent = SES.i18n.t('salesOrder.btn.new', '注文作成');
         loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
-        loadSelect('/api/organization-units/options', form.legalEntityId, 'id', r => r.name);
+        loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
         addLineRow();
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal')).show();
@@ -249,9 +252,9 @@ function renderSalesOrderPagination(pageData, loadFuncName) {
     let html = `<div class="text-muted small ps-2">${SES.i18n.t('common.page.info', [pageData.total, start, end])}</div>
         <nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
     if (pageData.current > 1) {
-        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" aria-label="${SES.i18n.t('common.page.prev', '前へ')}" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current - 1})"><i class="bi bi-chevron-left" aria-hidden="true"></i></a></li>`;
     } else {
-        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-muted" href="javascript:void(0)" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left"></i></a></li>`;
+        html += `<li class="page-item disabled"><a class="page-link bg-dark border-secondary text-muted" aria-label="${SES.i18n.t('common.page.prev', '前へ')}" href="javascript:void(0)" tabindex="-1" aria-disabled="true"><i class="bi bi-chevron-left" aria-hidden="true"></i></a></li>`;
     }
     for (let i = 1; i <= pageData.pages; i++) {
         if (i === pageData.current) {
@@ -263,7 +266,7 @@ function renderSalesOrderPagination(pageData, loadFuncName) {
         }
     }
     if (pageData.current < pageData.pages) {
-        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
+        html += `<li class="page-item"><a class="page-link bg-dark border-secondary text-light" aria-label="${SES.i18n.t('common.page.next', '次へ')}" href="javascript:void(0)" onclick="${loadFuncName}(${pageData.current + 1})"><i class="bi bi-chevron-right" aria-hidden="true"></i></a></li>`;
     }
     html += '</ul></nav>';
     paginationContainer.html(html);
@@ -328,10 +331,10 @@ function openSalesOrderDetail(id) {
             html += `<button type="button" class="btn btn-sm btn-danger btn-cancel-approval">${SES.i18n.t('salesOrder.btn.cancelApproval', '取消を承認申請')}</button>`;
         }
         if (d.sourceDocumentId) {
-            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/sales-orders/${d.id}/documents/${d.sourceDocumentId}">${SES.i18n.t('salesOrder.btn.sourceDoc', '原本DL')}</a>`;
+            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/sales-orders/${d.id}/documents/${d.sourceDocumentId}/download">${SES.i18n.t('salesOrder.btn.sourceDoc', '原本DL')}</a>`;
         }
         if (d.acknowledgementDocumentId) {
-            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/sales-orders/${d.id}/documents/${d.acknowledgementDocumentId}">${SES.i18n.t('salesOrder.btn.ackDoc', '注文請DL')}</a>`;
+            html += `<a class="btn btn-sm btn-outline-secondary" href="/api/sales-orders/${d.id}/documents/${d.acknowledgementDocumentId}/download">${SES.i18n.t('salesOrder.btn.ackDoc', '注文請DL')}</a>`;
         }
         html += `</div>`;
         body.innerHTML = html;
@@ -405,7 +408,7 @@ function generateAckPdf(id) {
 }
 
 function createOrderContracts(id) {
-    SES.api.post(`/api/sales-orders/${id}/contracts`, {}).then(() => {
+    SES.api.post(`/api/sales-orders/${id}/contract-drafts`, {}).then(() => {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);

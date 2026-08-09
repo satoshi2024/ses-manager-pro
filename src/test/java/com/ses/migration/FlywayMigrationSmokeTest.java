@@ -589,6 +589,18 @@ class FlywayMigrationSmokeTest {
             // R09-P1-05: 孤児order_line_idを拒否するFK（fresh/legacy同一形状）
             assertForeignKeyExists(st, "t_contract", "fk_contract_order_line",
                     "order_line_id", "t_sales_order_line", "id");
+            assertRowExists(st, "SELECT 1 FROM information_schema.statistics "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_contract' "
+                    + "AND index_name='uk_contract_order_line' AND non_unique=0 "
+                    + "AND seq_in_index=1 AND column_name='order_line_id' AND sub_part IS NULL");
+            assertRowExists(st, "SELECT 1 FROM information_schema.referential_constraints "
+                    + "WHERE constraint_schema=DATABASE() AND table_name='t_contract' "
+                    + "AND constraint_name='fk_contract_order_line' "
+                    + "AND update_rule='CASCADE' AND delete_rule='SET NULL'");
+            assertRowExists(st, "SELECT 1 FROM information_schema.table_constraints "
+                    + "WHERE table_schema=DATABASE() AND table_name='t_contract' "
+                    + "AND constraint_name='chk_contract_acceptance_exemption' AND constraint_type='CHECK'");
+            assertTableExists(st, "t_document_hash_claim");
             // R09-P2-04: legacy backfillのrepair-safe marker
             assertTableExists(st, "t_contract_acceptance_backfill");
             assertRowExists(st, "SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE()"
