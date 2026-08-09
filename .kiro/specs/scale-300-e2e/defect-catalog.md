@@ -115,9 +115,13 @@
 - 対象: マネージャー（デスクトップ・モバイル）
 - 自動ID: E2E-062, 136
 - 事象: `/project/list` で console に404リソースロードエラーが1件発生。
-- 第2ラウンド結果: マネージャーで `/project/list` を再検証したが404リソースは
-  **再現せず**（0件）。初回検出時はトランザクション性の高い状態だった可能性が高い。
-- 状態: 再現待ち（現時点ではOPENのまま追跡、UI上は影響なし）。
+- 原因（確定）: favicon 未設定のためブラウザが `/favicon.ico` を自動要求し404。
+  さらに favicon.svg 追加後は、SecurityConfig の permitAll に含まれておらず
+  要員ロールで `/favicon.svg` が403になっていた。
+- 修正: `static/favicon.svg` を追加し、base / login / error の各HTMLに
+  `<link rel="icon">` を宣言。SecurityConfig の静的リソース permitAll へ
+  `/favicon.svg` `/favicon.ico` を追加。
+- 状態: **FIXED**（要員の `/my/timesheet` でも4xx/consoleエラーなし）
 - 期待: 静的リソース/APIの参照先がすべて200であること。
 
 ## D-008 [P3] 権限データと実装の乖離（メニュー非表示だがDB付与）
@@ -128,6 +132,24 @@
 - UI上の表示はされていないが、今後メニュー表示条件を変えると404/403事故の温床になる。
 - 修正: V101 で未実装5ルートを m_menu / t_role_menu から削除。
 - 状態: **FIXED**
+
+## D-009 [P2] スキルシート/案件メール取込のレビュー画面が404（データなし）
+
+- 対象: HR `/resume-ingestion/review/1`（第3ラウンド E2E で検出）
+- 事象: 取込ジョブのテーブルにシードが無く、レビューURLが404になる。
+  一覧画面も空のため開発中に「空虚感」が出る原因になっていた。
+- 修正: シード生成器へ `t_resume_ingestion` 6件（要確認2/確定済1/却下1/失敗1/
+  取込待ち1）と `t_project_ingestion` 5件（要確認2/確定済1/失敗1/取込待ち1）を追加。
+  レビュー画面で表示される parsed_json も日本語の実データを設定。
+- 状態: **FIXED**（HRレビュー/マネージャー案件取込レビューとも200）
+
+## D-010 [P3] 取込レビュー画面のボタン文言が中国語
+
+- 対象: `resume-ingestion.js` / `project-ingestion.js` / `bp-availability-ingestion.js`
+- 事象: 「删」「経歴删除」が日本語UIに混在。`resume-ingestion.js` は「業為・役割」の
+  誤字もあった。
+- 修正: 「削除」「経歴削除」「業界・役割」へ統一。
+- 状態: **FIXED**（`rg` で該当文言0件）
 
 ---
 
@@ -173,6 +195,24 @@
   - 未実装ルートが `m_menu` / `t_role_menu` に存在しないことをSQLで確認
   - 全54 JSファイル `node --check` 成功
   - 34/34 同時ログイン成功
+
+## 修正ラウンド（第4ラウンド）の実績
+
+- 実施日時: 2026-08-10
+- 変更:
+  - `SecurityConfig` : `/favicon.svg` `/favicon.ico` を permitAll へ追加（D-007）
+  - `static/favicon.svg` 追加 + base/login/error に icon 宣言（D-007）
+  - `generate-seed.mjs` : スキルシート取込6件 / 案件メール取込5件を追加（D-009）
+  - `resume-ingestion.js` / `project-ingestion.js` / `bp-availability-ingestion.js` :
+    中国語ボタン文言を日本語へ修正（D-010）
+  - `run-e2e.mjs` : `/approval/routes` を管理者専用EXTRA_PAGESへ移動し、
+    取込レビューURLを追加
+- 検証（再構築DB）:
+  - 第1ラウンド全メニューE2E再実行: **0問題**
+  - 第2ラウンド深掘りE2E再実行: **0問題 / 54チェック全てOK**
+  - 要員 `/my/timesheet` で favicon 含め4xx/consoleエラーなし
+  - HR `/resume-ingestion/review/1` / マネージャー `/project-ingestion/review/1` が200
+  - `/approval/routes` は管理者200 / 営業403（意図通り）
 
 ## UI設計メモ（障害ではない改善候補）
 

@@ -51,17 +51,17 @@ const PAGE_URLS = {
   'bp-company': ['/bp-company/list'],
   'crm-lead': ['/crm/leads'],
   'crm-opportunity': ['/crm/opportunities'],
-  approval: ['/approval/inbox', '/approval/requests', '/approval/routes'],
+  approval: ['/approval/inbox', '/approval/requests'],
   'sales-order': ['/sales-order'],
   acceptance: ['/acceptance'],
   todo: ['/todo']
 };
 
 const EXTRA_PAGES = {
-  '管理者': ['/engineer/detail?id=1001', '/engineer/detail?id=1255', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001'],
+  '管理者': ['/engineer/detail?id=1001', '/engineer/detail?id=1252', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001', '/approval/routes', '/resume-ingestion/review/1', '/project-ingestion/review/1'],
   '営業': ['/engineer/detail?id=1001', '/customer/2001', '/bp-company/11001', '/candidate/detail?id=13001'],
   'HR': ['/engineer/detail?id=1001', '/candidate/detail?id=13001', '/resume-ingestion/review/1'],
-  'マネージャー': ['/engineer/detail?id=1001', '/customer/2001'],
+  'マネージャー': ['/engineer/detail?id=1001', '/customer/2001', '/project-ingestion/review/1'],
   '要員': ['/my/attendance']
 };
 
@@ -369,6 +369,8 @@ async function concurrentLoginCheck(browser) {
 async function main() {
   fs.mkdirSync(SPEC_DIR, { recursive: true });
   fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+  // 前回実行分の蓄積を残さない（JSONは毎回上書き、JSONLは追記のため明示的にリセットする）
+  fs.writeFileSync(path.join(SPEC_DIR, 'e2e-issues.jsonl'), '', 'utf8');
   const browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_PATH || 'C:\\Users\\satos\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe'

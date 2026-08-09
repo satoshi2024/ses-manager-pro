@@ -1823,6 +1823,214 @@ emit('t_bp_availability_ingestion', ['id', 'original_file_name', 'stored_file_na
 
 emit('t_user_permission_group', ['id', 'tenant_id', 'user_id', 'group_id', 'assigned_by', 'assigned_at'], userPermissionGroups.map((g) => [g.id, g.tenantId, g.userId, g.groupId, g.assignedBy, g.assignedAt]));
 
+// ---------- section 19: resume / project ingestion ----------
+const resumeIngestions = [
+  {
+    id: 1,
+    originalFileName: 'スキルシート_佐藤健一.pdf',
+    storedFileName: 'resume-0001.pdf',
+    fileExt: 'pdf',
+    status: '要確認',
+    extractedText: '佐藤健一。Java/Spring Bootを用いた金融系システム開発5年。要件定義から保守運用まで対応。',
+    parsedJson: JSON.stringify({
+      engineer: { fullName: '佐藤 健一', fullNameKana: 'サトウ ケンイチ', gender: '男性', japaneseLevel: 'ネイティブ', employmentType: '正社員', experienceYears: 5, expectedUnitPrice: 800000, resumeSummary: '金融系システム開発5年。Java/Spring Bootを中心に要件定義から保守運用まで対応。' },
+      skills: [{ name: 'Java', proficiency: '上級', experienceYears: 5 }, { name: 'Spring Boot', proficiency: '上級', experienceYears: 4 }, { name: 'MySQL', proficiency: '中級', experienceYears: 3 }],
+      careers: [{ periodFrom: '2022-04-01', periodTo: '2025-03-31', projectName: '証券系基幹システム刷新', role: 'リーダー', techStack: 'Java/Spring Boot/MySQL', description: '要件定義から設計・実装・結合テストまで担当。' }],
+      warnings: []
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-resume-v1',
+    errorMessage: null,
+    convertedEngineerId: null,
+    candidateId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 2,
+    originalFileName: '履歴書_鈴木美咲.docx',
+    storedFileName: 'resume-0002.docx',
+    fileExt: 'docx',
+    status: '要確認',
+    extractedText: '鈴木美咲。フロントエンド中心。React/TypeScriptでのSPA開発3年。',
+    parsedJson: JSON.stringify({
+      engineer: { fullName: '鈴木 美咲', fullNameKana: 'スズキ ミサキ', gender: '女性', japaneseLevel: 'ネイティブ', employmentType: '契約社員', experienceYears: 3, expectedUnitPrice: 700000, resumeSummary: 'React/TypeScriptでのSPA開発3年。UI/UX改善を得意とする。' },
+      skills: [{ name: 'TypeScript', proficiency: '上級', experienceYears: 3 }, { name: 'React', proficiency: '上級', experienceYears: 3 }, { name: 'Next.js', proficiency: '中級', experienceYears: 2 }],
+      careers: [{ periodFrom: '2023-04-01', periodTo: '2026-03-31', projectName: 'ECサイトリニューアル', role: 'フロントエンドエンジニア', techStack: 'TypeScript/React/Node.js', description: '画面実装・パフォーマンス改善を担当。' }],
+      warnings: ['スキル年数の記載が2年と3年で揺れています']
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-resume-v1',
+    errorMessage: null,
+    convertedEngineerId: null,
+    candidateId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 3,
+    originalFileName: '経歴書_高橋大輔.pdf',
+    storedFileName: 'resume-0003.pdf',
+    fileExt: 'pdf',
+    status: '確定済',
+    extractedText: '高橋大輔。Python/Djangoによる社内システム開発。',
+    parsedJson: JSON.stringify({
+      engineer: { fullName: '高橋 大輔', fullNameKana: 'タカハシ ダイスケ', gender: '男性', japaneseLevel: 'ネイティブ', employmentType: 'BP', experienceYears: 4, expectedUnitPrice: 720000, resumeSummary: 'Python/Djangoによる社内システム開発4年。' },
+      skills: [{ name: 'Python', proficiency: '上級', experienceYears: 4 }, { name: 'Django', proficiency: '上級', experienceYears: 3 }],
+      careers: [{ periodFrom: '2022-04-01', periodTo: '2026-03-31', projectName: '社内業務システム刷新', role: '開発エンジニア', techStack: 'Python/Django/AWS', description: '開発・運用保守を担当。' }],
+      warnings: []
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-resume-v1',
+    errorMessage: null,
+    convertedEngineerId: 1001,
+    candidateId: 13001,
+    reviewNote: '候補者から確定済み',
+    createdBy: 1
+  },
+  {
+    id: 4,
+    originalFileName: 'スキルシート_田中隼人.pdf',
+    storedFileName: 'resume-0004.pdf',
+    fileExt: 'pdf',
+    status: '却下',
+    extractedText: '記載内容が競合他社のものと重複。',
+    parsedJson: null,
+    aiProvider: 'mock',
+    aiModel: 'mock-resume-v1',
+    errorMessage: null,
+    convertedEngineerId: null,
+    candidateId: null,
+    reviewNote: '重複提出のため却下',
+    createdBy: 1
+  },
+  {
+    id: 5,
+    originalFileName: '履歴書_山本匠.xlsx',
+    storedFileName: 'resume-0005.xlsx',
+    fileExt: 'xlsx',
+    status: '失敗',
+    extractedText: null,
+    parsedJson: null,
+    aiProvider: 'mock',
+    aiModel: 'mock-resume-v1',
+    errorMessage: 'ファイル形式が不正なため解析できませんでした',
+    convertedEngineerId: null,
+    candidateId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 6,
+    originalFileName: 'スキルシート_小林真由.pdf',
+    storedFileName: 'resume-0006.pdf',
+    fileExt: 'pdf',
+    status: '取込待ち',
+    extractedText: null,
+    parsedJson: null,
+    aiProvider: null,
+    aiModel: null,
+    errorMessage: null,
+    convertedEngineerId: null,
+    candidateId: null,
+    reviewNote: null,
+    createdBy: 1
+  }
+];
+
+const projectIngestions = [
+  {
+    id: 1,
+    sourceType: 'PASTE',
+    originalFileName: null,
+    storedFileName: null,
+    rawText: '某銀行向けシステム開発。Java, Spring Boot。単価70〜85万円。2026年10月開始。一次請。',
+    status: '要確認',
+    parsedJson: JSON.stringify({
+      project: { name: '某銀行 勘定系システム改修', minUnitPrice: 700000, maxUnitPrice: 850000, location: '東京', remoteAllowed: 'ハイブリッド', startDate: '2026-10-01', endDate: '2027-03-31', commercialFlow: '一次請', headCount: 2, endClientName: 'X銀行', description: '勘定系システムの改修支援。' },
+      skills: [{ name: 'Java' }, { name: 'Spring Boot' }, { name: 'SQL' }],
+      warnings: ['単価レンジの記載が曖昧です']
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-project-v1',
+    errorMessage: null,
+    convertedProjectId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 2,
+    sourceType: 'EML',
+    originalFileName: '案件依頼_製造業.eml',
+    storedFileName: 'project-0002.eml',
+    rawText: '製造業向け基幹システム。TypeScript/React。単価60〜75万円。リモート可。',
+    status: '要確認',
+    parsedJson: JSON.stringify({
+      project: { name: '製造業 基幹システム刷新', minUnitPrice: 600000, maxUnitPrice: 750000, location: '大阪', remoteAllowed: 'フルリモート', startDate: '2026-11-01', endDate: '2027-08-31', commercialFlow: '元請', headCount: 3, endClientName: 'Y製作所', description: 'Web基幹システムの刷新プロジェクト。' },
+      skills: [{ name: 'TypeScript' }, { name: 'React' }],
+      warnings: []
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-project-v1',
+    errorMessage: null,
+    convertedProjectId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 3,
+    sourceType: 'PASTE',
+    originalFileName: null,
+    storedFileName: null,
+    rawText: '流通業向け在庫管理システム。Python/Django。単価55〜70万円。',
+    status: '確定済',
+    parsedJson: JSON.stringify({
+      project: { name: '流通業 在庫管理システム', minUnitPrice: 550000, maxUnitPrice: 700000, location: '東京', remoteAllowed: 'ハイブリッド', startDate: '2026-09-01', endDate: '2027-02-28', commercialFlow: '二次請', headCount: 1, endClientName: 'Z物流', description: '在庫管理システムの開発・導入。' },
+      skills: [{ name: 'Python' }, { name: 'Django' }],
+      warnings: []
+    }),
+    aiProvider: 'mock',
+    aiModel: 'mock-project-v1',
+    errorMessage: null,
+    convertedProjectId: 5001,
+    reviewNote: '確定済み案件',
+    createdBy: 1
+  },
+  {
+    id: 4,
+    sourceType: 'EML',
+    originalFileName: '案件依頼_通信.eml',
+    storedFileName: 'project-0004.eml',
+    rawText: '通信業向けシステム。',
+    status: '失敗',
+    parsedJson: null,
+    aiProvider: 'mock',
+    aiModel: 'mock-project-v1',
+    errorMessage: 'メール本文の抽出に失敗しました',
+    convertedProjectId: null,
+    reviewNote: null,
+    createdBy: 1
+  },
+  {
+    id: 5,
+    sourceType: 'PASTE',
+    originalFileName: null,
+    storedFileName: null,
+    rawText: '公共系システム案件（未整理）。',
+    status: '取込待ち',
+    parsedJson: null,
+    aiProvider: null,
+    aiModel: null,
+    errorMessage: null,
+    convertedProjectId: null,
+    reviewNote: null,
+    createdBy: 1
+  }
+];
+
+emit('t_resume_ingestion', ['id', 'original_file_name', 'stored_file_name', 'file_ext', 'status', 'extracted_text', 'parsed_json', 'ai_provider', 'ai_model', 'error_message', 'converted_engineer_id', 'candidate_id', 'review_note', 'created_by'], resumeIngestions.map((j) => [j.id, j.originalFileName, j.storedFileName, j.fileExt, j.status, j.extractedText, j.parsedJson, j.aiProvider, j.aiModel, j.errorMessage, j.convertedEngineerId, j.candidateId, j.reviewNote, j.createdBy]));
+emit('t_project_ingestion', ['id', 'source_type', 'original_file_name', 'stored_file_name', 'raw_text', 'status', 'parsed_json', 'ai_provider', 'ai_model', 'error_message', 'converted_project_id', 'review_note', 'created_by'], projectIngestions.map((j) => [j.id, j.sourceType, j.originalFileName, j.storedFileName, j.rawText, j.status, j.parsedJson, j.aiProvider, j.aiModel, j.errorMessage, j.convertedProjectId, j.reviewNote, j.createdBy]));
+
 // 商機→案件/見積、案件→商機、見積→商機、提案→商機の相互参照を確定させる
 const wonOpportunityIds = opportunities.filter((o) => o.stage === '受注').map((o) => o.id);
 if (wonOpportunityIds.length) {

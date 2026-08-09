@@ -131,6 +131,8 @@ public class SecurityConfig {
                     "/js/**",
                     "/lib/**",
                     "/img/**",
+                    "/favicon.svg",
+                    "/favicon.ico",
                     "/api/auth/**",
                     "/oauth2/**",
                     "/login/oauth2/**"
