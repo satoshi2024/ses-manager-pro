@@ -28,6 +28,9 @@ public interface LeaveService {
     /** 承認済休暇の取消申請（承認付き）。残数を戻す。 */
     void cancel(Long leaveId, String reason);
 
+    /** 差戻し（approval status=returned）からの再提出。engineのresubmitへ委譲する。 */
+    void resubmit(Long leaveId);
+
     /** HR/管理者が付与（GRANT）を台帳へ追加する。 */
     LeaveLedger grant(LeaveGrantRequest request);
 

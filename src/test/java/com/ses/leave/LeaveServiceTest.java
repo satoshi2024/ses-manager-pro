@@ -100,6 +100,15 @@ class LeaveServiceTest {
                 .thenReturn("有給,半休,時間休,代休,特別休暇");
         when(systemConfigService.getString(eq("leave.sales-notification.types"), any()))
                 .thenReturn("有給,特別休暇");
+        // HR(92023)/マネージャー(92024)の担当組織を法人70001の組織へ紐付ける（R4-P1-01のscope母集団）。
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (92023, 'T071-hr', 'x', 'T071 HR', 'HR', 1)");
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (92024, 'T071-mgr', 'x', 'T071 MGR', 'マネージャー', 1)");
+        for (long userId : List.of(92023L, 92024L)) {
+            jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from) "
+                    + "VALUES (?, ?, 1, '2026-01-01')", userId, organizationId);
+        }
     }
 
     @AfterEach
@@ -159,6 +168,7 @@ class LeaveServiceTest {
 
         leaveService.apply(request("有給", LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 5), null, null));
 
+        authenticate(92023L, "HR");
         List<LeaveBalanceDto> balances = leaveService.balance(engineerId);
         assertEquals("external", balances.get(0).getMode());
     }
@@ -218,6 +228,83 @@ class LeaveServiceTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> leaveService.management("2026-08"));
         assertEquals(403, e.getCode());
+    }
+
+    @Test
+    void HRは担当法人外の要員への付与を拒否し担当内は許可する() {
+        long engineerB = engineerInOtherLegalEntity();
+        authenticate(92023L, "HR");
+        when(systemConfigService.getString(eq("leave.balance.source"), any())).thenReturn("internal");
+
+        LeaveGrantRequest foreign = grantRequest(240);
+        foreign.setEngineerId(engineerB);
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> leaveService.grant(foreign));
+        assertEquals(404, denied.getCode());
+
+        leaveService.grant(grantRequest(240));
+        assertEquals(240, leaveService.balance(engineerId).get(0).getBalanceMinutes());
+    }
+
+    @Test
+    void HRとマネージャーは担当外の要員の残数閲覧を拒否される() {
+        long engineerB = engineerInOtherLegalEntity();
+        when(systemConfigService.getString(eq("leave.balance.source"), any())).thenReturn("internal");
+
+        authenticate(92023L, "HR");
+        assertEquals(404, assertThrows(BusinessException.class,
+                () -> leaveService.balance(engineerB)).getCode());
+        leaveService.balance(engineerId);
+
+        authenticate(92024L, "マネージャー");
+        assertEquals(404, assertThrows(BusinessException.class,
+                () -> leaveService.balance(engineerB)).getCode());
+        leaveService.balance(engineerId);
+    }
+
+    @Test
+    void 外部正モードでは台帳への付与を拒否する() {
+        authenticate(92023L, "HR");
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> leaveService.grant(grantRequest(240)));
+        assertEquals("error.leave.grantExternalDisabled", e.getMessageKey());
+    }
+
+    @Test
+    void 差戻し状態の申請は再提出でengineへ委譲する() {
+        stubApproval(7L);
+        leaveService.apply(request("有給", LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 3), null, null));
+        LeaveRequest applied = singleRow();
+
+        jdbcTemplate.update("INSERT INTO t_approval_request (request_type, target_type, target_id, target_version, "
+                + "applicant_id, payload_json, route_snapshot_json, status) "
+                + "VALUES ('leave.request', 'LEAVE_REQUEST', ?, 0, ?, '{}', '{}', 'returned')",
+                applied.getId(), USER_ID);
+        long approvalId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_approval_request WHERE target_id = ? AND status = 'returned'",
+                Long.class, applied.getId());
+        leaveRequestMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<LeaveRequest>()
+                .set(LeaveRequest::getApprovalRequestId, approvalId)
+                .eq(LeaveRequest::getId, applied.getId()));
+
+        leaveService.resubmit(applied.getId());
+        verify(approvalEngineService).resubmit(eq(approvalId), eq(USER_ID), any(), any(), any());
+
+        BusinessException notReturned = assertThrows(BusinessException.class,
+                () -> leaveService.resubmit(applied.getId() + 999));
+        assertEquals("error.leave.notFound", notReturned.getMessageKey());
+    }
+
+    private long engineerInOtherLegalEntity() {
+        String orgCode = "T071orgB-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
+                + "VALUES (1, 70002, ?, ?, '部門', '2026-01-01', '有効')", orgCode, orgCode);
+        long orgB = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, orgCode);
+        String engineerName = "T071engineerB-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+                engineerName, orgB);
+        return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, engineerName);
     }
 
     private void stubApproval(long id) {

@@ -5,13 +5,21 @@
     form.addEventListener('submit', applyLeave);
     document.getElementById('leaveBody').addEventListener('click', event => {
         const button = event.target.closest('[data-action="cancel"]');
-        if (!button) return;
-        const reason = window.prompt(t('leave.cancelPrompt', '取消理由を入力してください'));
-        if (reason === null) return;
-        fetch(`/api/my/leave/${encodeURIComponent(button.dataset.id)}/cancel`, {
-            method: 'POST', headers: Object.assign({'Content-Type': 'application/json'}, SES.csrf.header()),
-            body: JSON.stringify({ reason })
-        }).then(read).then(handle).catch(showError);
+        if (button) {
+            const reason = window.prompt(t('leave.cancelPrompt', '取消理由を入力してください'));
+            if (reason === null) return;
+            fetch(`/api/my/leave/${encodeURIComponent(button.dataset.id)}/cancel`, {
+                method: 'POST', headers: Object.assign({'Content-Type': 'application/json'}, SES.csrf.header()),
+                body: JSON.stringify({ reason })
+            }).then(read).then(handle).catch(showError);
+            return;
+        }
+        const resubmit = event.target.closest('[data-action="resubmit"]');
+        if (resubmit) {
+            fetch(`/api/my/leave/${encodeURIComponent(resubmit.dataset.id)}/resubmit`, {
+                method: 'POST', headers: SES.csrf.header()
+            }).then(read).then(handle).catch(showError);
+        }
     });
     load();
 
@@ -27,9 +35,14 @@
         state.textContent = `${t('leave.my.title', '休暇申請')}: ${rows.length} ${t('leave.countSuffix', '件')}`;
         document.getElementById('leaveBody').innerHTML = rows.map(row => {
             const status = approvalLabel(row);
-            const cancelable = row.status === '承認済' && row.approvalStatus !== 'rejected' && row.approvalStatus !== 'withdrawn';
-            const actions = cancelable ? `<button type="button" class="btn btn-sm btn-outline-danger" data-action="cancel" data-id="${esc(row.id)}">${esc(t('leave.cancel','取消申請'))}</button>` : '';
-            return `<tr><td>${esc(row.leaveType)}</td><td>${esc(row.startDate)}</td><td>${esc(row.endDate || '')}</td><td>${esc(row.startTime || '')}${row.startTime ? '〜' + esc(row.endTime || '') : ''}</td><td>${esc(row.requestedMinutes)}</td><td>${esc(status)}</td><td>${actions}</td></tr>`;
+            const actions = [];
+            if (row.status === '承認済' && row.approvalStatus !== 'rejected' && row.approvalStatus !== 'withdrawn') {
+                actions.push(`<button type="button" class="btn btn-sm btn-outline-danger" data-action="cancel" data-id="${esc(row.id)}">${esc(t('leave.cancel','取消申請'))}</button>`);
+            }
+            if (row.approvalStatus === 'returned' && row.status !== '承認済' && row.status !== '取消済') {
+                actions.push(`<button type="button" class="btn btn-sm btn-outline-primary" data-action="resubmit" data-id="${esc(row.id)}">${esc(t('leave.resubmit','再提出'))}</button>`);
+            }
+            return `<tr><td>${esc(row.leaveType)}</td><td>${esc(row.startDate)}</td><td>${esc(row.endDate || '')}</td><td>${esc(row.startTime || '')}${row.startTime ? '〜' + esc(row.endTime || '') : ''}</td><td>${esc(row.requestedMinutes)}</td><td>${esc(status)}</td><td>${actions.join(' ')}</td></tr>`;
         }).join('');
     }
 

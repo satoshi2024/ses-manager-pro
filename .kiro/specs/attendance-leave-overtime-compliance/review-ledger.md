@@ -12,8 +12,8 @@
 | merge | T070までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み |
 | latest review | `R11 Round 3収束（T070まで）`。T071（A2）は実装済み・独立Review待ち |
 | verdict | T070までの実装範囲は**PASS・収束**。T071は実装・直接回帰済み（**独立Review待ち**） |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-06 dispatch、V84 fresh経路の修正待ち）` |
-| next action | **T071の独立Review**（次Review対象）。T072（freee/provider sync）はReview合格後に着手。S11完了はT074/M後。NOTE-R3-06はdispatch修正後にCI相当L4×1回 |
+| issue count | `P0=0 / P1=1（R4-P1-01 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ P2=3（R2-P2-01, R2-P2-02, R4-P2-01 FIXED_BY_IMPLEMENTER）/ NOTE=3（R3-06, R4-01, R4-02 FIXED_BY_IMPLEMENTER）` |
+| next action | **R4-P1-01の独立VERIFIED_CLOSEDまでT072開始不可**（fix delta＋direct regression提出済み）。R4-P2-01（差戻し再提出）・NOTE-R4-02（外部モード付与拒否）も実装済み。NOTE-R4-01（leave routeの管理者設定）は運用設定手順として記録 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -671,3 +671,15 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - Demo: 申請（分計算・残数・重複・締め済み月）→承認（route・代理承認）→calendar反映（月次leave_minutes）→取消（残数戻し）→営業通知分岐（種別config）をH2で定向実測。外部正モードの不足許容も確認
 - issue state: 新規issueなし。既存OPENはP2×2（390px実ブラウザ、paging）とNOTE-R3-06（dispatch）のみ
 - ledger/central synchronization: `tasks.md` A2を`[x]`化、中央台帳S11行をT071完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
+
+### Round 4 R4-P1-01 fix delta — 2026-08-09 — 主担当
+
+- review target: R11 Round 4独立Review（T071）で**R4-P1-01（P1: grant/balanceの法人・組織scope欠如によるIDOR）**、**R4-P2-01（P2: 差戻し後の再提出デッドエンド）**、NOTE-R4-01（route運用設定）、NOTE-R4-02（外部正モードの付与無効化）を指摘
+- fixes:
+  - **R4-P1-01**: `grant`は管理者=全件、HR=担当法人内のみ（`allowedHrLegalEntityIds`×対象日の要員snapshotの法人一致、不一致は404）。`balance`は管理者=全件、HR=担当法人内、マネージャー=組織scope（`hasFullAccess`先判定＋asOf）、他ロール403、要員不存在/所属不明/履歴ありNULLは404。grant行の`legal_entity_id`をsnapshotから設定（従来NULLのままだった）
+  - **R4-P2-01**: `LeaveService.resubmit`＋`POST /api/my/leave/{id}/resubmit`＋本人UIの再提出ボタン（approval status=returned時のみ）。engineの`resubmit`へpayload/diffを委譲
+  - **NOTE-R4-02**: `leave.balance.source`がinternal以外ではgrantを400拒否（`error.leave.grantExternalDisabled`）。未設定（判定不能）も同様にfail-closed
+  - **NOTE-R4-01**: leave.request/leave.cancelのapproval routeはS07運用規約どおり管理者設定（route未設定はfail-closed＋config-gap通知）。運用手順として本台帳§9相当へ記録
+- direct regression: 休暇系4 class **24/0/0/0 skip 0**（新規: HR他法人付与拒否・HR/manager残数閲覧scope・外部モード付与拒否・差戻し再提出）、全指定回帰 **195/0/0/0 skip 0、BUILD SUCCESS**、`git diff --check` PASS
+- issue state: `R4-P1-01=FIXED_BY_IMPLEMENTER / independent re-review requested`（T072開始不可は維持）。`R4-P2-01=FIXED_BY_IMPLEMENTER`、`NOTE-R4-02=FIXED_BY_IMPLEMENTER`、`NOTE-R4-01=運用設定手順として記録済み`
+- next Review handoff: R11担当はHR A→A許可/A→B 404、manager配下/外、履歴なし/NULL、外部モード付与拒否、差戻し→再提出を独立再実行し、R4-P1-01をVERIFIED_CLOSEDにするまでT072を開始しない

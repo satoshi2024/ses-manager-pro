@@ -187,6 +187,30 @@ public class LeaveServiceImpl implements LeaveService {
                 "leave-cancel:" + leave.getId() + ":" + value(leave.getVersion())));
     }
 
+    /** 差戻し（approval status=returned）からの再提出。engineのresubmitへ委譲する（R4-P2-01）。 */
+    @Override
+    @Transactional
+    public void resubmit(Long leaveId) {
+        LeaveRequest leave = requireLeave(leaveId);
+        if (!leave.getEngineerId().equals(currentEngineerId())) {
+            throw BusinessException.of(403, "error.leave.roleDenied");
+        }
+        if (leave.getApprovalRequestId() == null) {
+            throw BusinessException.of(400, "error.leave.notReturned");
+        }
+        ApprovalRequest approval = approvalRequestMapper.selectById(leave.getApprovalRequestId());
+        if (approval == null || !"returned".equals(approval.getStatus())) {
+            throw BusinessException.of(400, "error.leave.notReturned");
+        }
+        approvalEngineService.resubmit(approval.getId(), SecurityUtils.currentUserId(),
+                Map.of("leaveType", leave.getLeaveType(),
+                        "startDate", leave.getStartDate().toString(),
+                        "endDate", leave.getEndDate().toString(),
+                        "requestedMinutes", leave.getRequestedMinutes(),
+                        "reason", leave.getReason() == null ? "" : leave.getReason()),
+                Map.of("beforeStatus", leave.getStatus(), "afterStatus", APPROVED), null);
+    }
+
     @Override
     @Transactional
     public LeaveLedger grant(LeaveGrantRequest request) {
@@ -208,8 +232,25 @@ public class LeaveServiceImpl implements LeaveService {
         if (engineer == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        // NOTE-R4-02: 本システム正（internal）以外では台帳が正でないため付与を拒否する。
+        String mode = systemConfigService.getString("leave.balance.source", null);
+        if (!"internal".equals(mode)) {
+            throw BusinessException.of(400, "error.leave.grantExternalDisabled");
+        }
+        // R4-P1-01: HRは担当法人内の要員のみ付与できる（管理者は全件）。
+        // 法人は付与日の要員snapshotを正とし、台帳行へも同じsnapshotを保存する。
+        AttendanceScopeSnapshot snapshot = attendanceScopeResolver.requireSnapshot(
+                request.getEngineerId(), null, request.getEntryDate());
+        if ("HR".equals(role)) {
+            Set<Long> allowed = attendanceScopeResolver.allowedHrLegalEntityIds(
+                    SecurityUtils.currentUserId(), request.getEntryDate());
+            if (allowed == null || !allowed.contains(snapshot.legalEntityId())) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+        }
         LeaveLedger row = LeaveLedger.builder()
                 .engineerId(request.getEngineerId())
+                .legalEntityId(snapshot.legalEntityId())
                 .leaveType(request.getLeaveType())
                 .ledgerType("GRANT")
                 .amountMinutes(request.getAmountMinutes())
@@ -225,6 +266,7 @@ public class LeaveServiceImpl implements LeaveService {
     @Override
     @Transactional(readOnly = true)
     public List<LeaveBalanceDto> balance(Long engineerId) {
+        assertBalanceViewable(engineerId);
         String mode = systemConfigService.getString("leave.balance.source", null);
         if (mode == null || mode.isBlank()) {
             throw BusinessException.of(400, "error.leave.balanceUnknown");
@@ -245,6 +287,45 @@ public class LeaveServiceImpl implements LeaveService {
             result.add(dto);
         }
         return result;
+    }
+
+    /**
+     * R4-P1-01: 残数照会の母集団を主体別にSQL境界で制限する。
+     * 管理者=全件、HR=担当法人内（asOf今日）、マネージャー=組織scope（hasFullAccess先判定）。
+     * 所属不明・履歴ありNULLはfail-closedで404。
+     */
+    private void assertBalanceViewable(Long engineerId) {
+        if (engineerId == null) {
+            throw BusinessException.of(400, "error.leave.engineerRequired");
+        }
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return;
+        }
+        if (engineerMapper.selectById(engineerId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        LocalDate today = LocalDate.now();
+        if ("HR".equals(role)) {
+            Set<Long> allowed = attendanceScopeResolver.allowedHrLegalEntityIds(
+                    SecurityUtils.currentUserId(), today);
+            AttendanceScopeSnapshot snapshot = attendanceScopeResolver.resolveSnapshot(
+                    engineerId, null, today);
+            if (snapshot == null || allowed == null || !allowed.contains(snapshot.legalEntityId())) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+            return;
+        }
+        if ("マネージャー".equals(role)) {
+            if (organizationScopeService.hasFullAccess()) {
+                return;
+            }
+            if (!organizationScopeService.allowedEngineerIds(today).contains(engineerId)) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+            return;
+        }
+        throw BusinessException.of(403, "error.leave.roleDenied");
     }
 
     private void validate(LeaveApplyRequest request) {

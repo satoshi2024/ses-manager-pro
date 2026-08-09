@@ -42,6 +42,12 @@ public class LeaveApiController {
         return ApiResult.success(null);
     }
 
+    @PostMapping("/api/my/leave/{id}/resubmit")
+    public ApiResult<Void> resubmit(@PathVariable Long id) {
+        leaveService.resubmit(id);
+        return ApiResult.success(null);
+    }
+
     @GetMapping("/api/leave")
     public ApiResult<List<LeaveDto>> management(@RequestParam String month) {
         return ApiResult.success(leaveService.management(month));
