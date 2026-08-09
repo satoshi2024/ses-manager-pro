@@ -1,0 +1,34 @@
+# R3_SCALE_300 シードデータ
+
+300人規模のSES企業を想定した開発・結合テスト用の一括データです。
+
+## 含まれるデータ
+
+- ユーザー300名: 管理者2 / 営業25 / HR8 / マネージャー10 / 要員255
+- 要員255名: 稼動中165 / Bench40 / 提案中30 / 退場予定20
+- 顧客35社、案件100件、提案150件、契約250件、勤怠555件（日次8,415件）
+- 請求66件、BP会社20社、候補者45名、CRM（リード/商機60件）、ToDo100件 ほか
+- 日本人名・日本企業名・実在する金額規模で生成し、担当営業・契約・請求・勤怠の
+  関連が一貫するようにしています。
+
+## 自動適用（dev起動）
+
+`application-dev.yml` が `db/migration-dev` をFlywayロケーションへ追加するため、
+`mvn spring-boot:run`（devプロファイル）で空DBへ自動投入されます。
+
+## 手動適用
+
+```powershell
+# スキーマは通常のマイグレーションで作成済みであること
+mysql -uroot -p123456 ses_manager_db -e "source sql/seed/r3-scale-300/seed.sql"
+```
+
+## 再生成
+
+```powershell
+node scripts/seed-scale-300/generate-seed.mjs
+```
+
+生成先:
+- `sql/seed/r3-scale-300/seed.sql`（手動適用用）
+- `src/main/resources/db/migration-dev/V100__seed_r3_scale_300.sql`（dev自動適用用）
