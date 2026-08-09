@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `IMPLEMENTATION / REVIEW` |
+| state | `FIX / REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T070実装Head=`cc7c15c`（V83はlocal実装のみ、V82 merge/apply後に進める）。Packet/current merged Head=`1fd0f74`（`git rev-parse HEAD origin/main`で再確認）、R11 fix内容Head=`2299fbc`。台帳provenanceは`git log -1 -- review-ledger.md`で解決 |
-| merge | `1fd0f74`がcurrent merged baseline。T070の`cc7c15c`とV83は未merge・未本番適用、dispatch V82を先行する |
-| latest review | `R11 Round 1 fix delta再Review / T068実装証跡 2026-08-09` |
-| verdict | `T070 COMPLETED_UNREVIEWED`。T067/T068/T069も実装完了・独立Review待ち。R1-P2-01は現行GitとPacketを同期済みの`FIXED_BY_IMPLEMENTER`（独立再Review待ち） |
-| issue count | `P0=0 / P1=0 / P2=1 / NOTE=0` |
-| next action | `Packet/current merged Head=1fd0f74`と`git log -1 -- review-ledger.md`を基準に、R11 P2-01、T068、T069、T070を分離して独立Reviewへ提出。次はT071。V83のmerge/applyはV82後 |
+| head | T070 code Head=`cc7c15c60bc26bf7b19fbca7759b6e65f572a725`、evidence/current merged Head=`4789c192a733d2d64b13c9941ab53e3780aefbe9`（`HEAD=origin/main`、worktree clean） |
+| merge | `cc7c15c`、証跡同期`4789c19`、T068/V83=`b327b1b`、T069=`d395797`はいずれもcurrent `origin/main`の祖先。V82はtreeに存在せず、V83の本番適用有無は未検証 |
+| latest review | `R11 Round 2 / T070独立Review 2026-08-09` |
+| verdict | `FAIL`。T070にP1×4、V82前にV83がmainへ入ったmigration順序にP1×1。R1-P2-01は現行GitとPacketが再び不一致のため`OPEN`のまま。T070の実ブラウザDemoはP2 |
+| issue count | `P0=0 / P1=5 / P2=3 / NOTE=0` |
+| next action | 元の実装対話でR2-P1-01〜05を修正し、再現test＋直接回帰（共有scope/migrationはL3）を提出する。T071はR2-P1-02〜04の共有calendar/scope契約がVERIFIED_CLOSEDになるまで開始しない。R1-P2-01とR2-P2-01〜02だけでは次taskを止めない |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -21,7 +21,14 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,41` | Packetだけではcurrent merged Headを解決できない | Review範囲の誤認 | T067成果commitとPacket/current merged Headを分離 | `git rev-parse`、branch containment | FIXED_BY_IMPLEMENTER | `git log -1 -- review-ledger.md`で解決 | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,40-50` | `HEAD=origin/main=4789c19`かつ`b327b1b`が祖先なのに、Packet/台帳がV83とT070を未mergeと記録 | Review範囲・migration配備判断の誤認 | code Head、evidence Head、merged/apply状態を実Gitと環境証拠で分離 | `git rev-parse`、`merge-base --is-ancestor`、tree内V82/V83 | OPEN | — | Round 2でFIXEDを不受理 |
+| attendance-leave-overtime-compliance-R2-P1-01 | P1 | design §1、tasks T068 migration順、handbook §4 | `design.md:5`; `tasks.md:33`; `src/main/resources/db/migration/V83__attendance_leave_overtime_compliance.sql:1` | V81 DBへcurrent mainを配備するとV82不在のままV83が適用対象になる | 後日V82追加時にout-of-order/validate失敗し得る | current mainを配備停止し、V82を先に取り込む。V83適用済み環境があれば順方向の再採番/復旧計画を固定 | V81→V82→V83 legacy/fresh、適用済み環境inventory | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P1-02 | P1 | R1.1/R1.2/R3.1/R5、design §2/§5.1、overtime-rules §1.2 | `AttendanceServiceImpl.java:276-301,304-321` | 所定480分の通常日に09:00〜23:00、休憩0分を本人保存 | 法定時間外・深夜が0になり36協定判定入力を誤る | 勤務日asOfのcalendarを解決するAttendanceCalculatorで法定内/外・所定/法定休日・深夜を分計算し、clientのworkTypeを法定区分の正にしない | 8h境界、22時境界、跨夜、所定/法定休日、calendar NULL/0、週40h | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P1-03 | P1 | T070 Objective、design §5.3 HR法人scope、R5権限外閲覧拒否 | `AttendanceServiceImpl.java:68-77,174-177,195-229,332-354,421-430` | 同一DBに法人A/Bがあり、法人A担当HRが管理一覧または法人B要員をclose | 法人Bの勤怠PIIを閲覧・締め可能 | HRの担当法人をserver側で解決し、月次/dayへlegal entity・organization snapshotを保存、list/actionをSQL境界で同じ法人集合へ制限 | HR A→B list/detail/close拒否、NULL/未知法人fail-closed、管理者全件 | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P1-04 | P1 | T070 Objective、design §5.3 manager scope、platform-invariants §1/§2 | `AttendanceServiceImpl.java:75-77,421-431`; `EngineerAccountLinkMapper.java:17-39` | scope無効時、または対象月後に要員が組織異動済みの過去月をmanagerが照会/承認 | scope無効時は0件、過去月は現在所属で誤許可/誤拒否 | `hasFullAccess()`の無制限sentinelを先に扱い、対象月末の履歴所属をCASE/共通ResolverでSQL解決する | scope on/off、空集合、直属追加、異動前/当日/後、履歴なし/ありNULL | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P1-05 | P1 | G6手動修正統制、R1.4、design §5.4 締め済み再open | `AttendanceApiController.java:69-72`; `AttendanceServiceImpl.java:180-193`; `AttendanceMonth.java:41` | 管理者が理由なしでreopen APIをPOST | 申請/承認理由を残さず締め済みsnapshotを編集可能状態へ進められる | reason必須のcommand、承認境界、version/state CAS、業務監査への保存を追加し、空理由・自己完結を拒否 | reason必須、申請者≠承認者、二重reopen、rollback、監査再読 | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN | — | — |
+| attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN | — | — |
 
 ## 3. Closed/Deferred Issue
 
@@ -63,7 +70,7 @@
 | R2.1/R2.2 | 休暇申請の期間・分・approval参照列を持ち、残数正本未確認を後続でfail-closed扱いできる | `t_leave_request`、残数ledgerは正本確定後の条件付き | schema replay、migration integrity | 休暇DDLの列・期間CHECKを確認 | 外部正/内部正の業務挙動はT071 | T068実装済み・独立Review待ち |
 | R3.2/R3.4 | 法人別協定、月初起算、適用除外者UNKNOWN、follow-upを保持する | `m_overtime_agreement`、`t_overtime_followup`、`t_engineer.overtime_exempt_flag(NULL=未確認)` | 月初CHECK、config 9 key、MySQL smoke | invalid `valid_from`拒否とconfig seedを確認 | calculator UNKNOWN/findingはT069 | T068実装済み・独立Review待ち |
 | R3.1/R3.2/R3.4/R5 | 6ルールの境界と法人/asOf協定を正しく判定し、正本・適用区分・必須履歴の不足を適合にしない | `OvertimeComplianceCalculator`、`OvertimeAgreementResolver`、`OvertimeAgreementSnapshot.from`、`OvertimeRule`のUNKNOWN finding | 公式fixture 27、resolver integration 3、DDL/dispatch直接回帰を含む70/0/0/0 | T069-D1で45h/360h/80h境界、月100hの`>=`、法人別上限優先、協定なし/適用除外不明/履歴不足を確認 | 法人別協定・法定休日・適用除外者資料はATT-GATE-02/03/06で未確認 | COMPLETED_UNREVIEWED |
-| R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人入力、月次提出、上長差戻し/承認、HR締めを同一状態CAS・scope・CSRF境界で扱う | `AttendanceServiceImpl`、本人/管理API、DTO、画面/JS、SecurityConfig/sidebar、4言語message | `AttendanceWorkflowServiceTest` 1、`AttendanceApiControllerTest` 7、UI/i18n/JS直接回帰 9、合計17/0/0/0 | T070-D1で入力→提出→差戻し→再提出→承認→締め、締め後拒否、営業403、CSRF、390px markup | HR法人の実資料突合、実ブラウザDemo、V83適用はATT-GATE/V82後 | COMPLETED_UNREVIEWED |
+| R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人入力、月次提出、上長差戻し/承認、HR締めを同一状態CAS・scope・CSRF境界で扱う | `AttendanceServiceImpl`、本人/管理API、DTO、画面/JS、SecurityConfig/sidebar、4言語message | reviewer再実行17/0/0/0。ただし法定時間区分、HR法人scope、manager asOf/full-access、reopen理由/承認競合をassertしない | 実ブラウザ未実施。逐次状態遷移・営業403・CSRF・markup静的確認のみ | R2-P1-02〜05、R2-P2-01 | **FAIL** |
 
 ## 6. 横断契約
 
@@ -119,7 +126,7 @@ T067 L0にskipはない。T068はH2/MavenとDocker/MySQL smokeを実行済み。
 | T067-D1 | HR/発注者、現行DB・spec資料 | 文書Demo | source matrix、法人別36協定一覧、法定休日、勤務区分、休暇種別、適用除外者一覧を提示 | 本システム正の境界と未確認項目が明示され、推測値がない | 資料は提示可能。HR/法人資料の受領と承認は未実施 | `source-matrix-and-agreement-inventory.md` §1〜§8 | CONDITIONAL（本番release gate） |
 | T068-D1 | 開発/Review担当 | H2 + MySQL 8.0 ephemeral | calendar日へNULL/0を登録、freee source重複、月初外協定、config全keyを検証 | NULL/0を区別、重複/月初外を拒否、9 key seed | 1週間の画面Demo、締め済み拒否、`/system-config`表示編集はT070/M | `AttendanceSchemaTest`、`FlywayAttendanceSchemaSmokeTest` | PASS（DDL Demo） |
 | T069-D1 | HR/Review担当 | Windows/H2、calculator fixture | 45h/360h/80hの境界、月100hのみ`>=`、休日労働入力の分岐、協定asOf/法人別優先、協定なし/適用区分不明/履歴不足を実行 | `VIOLATION`と`INDETERMINATE`が仕様どおりで、既定値による適合がない | warning通知・follow-up永続化・UIは後続task | `OvertimeComplianceCalculatorTest`、`OvertimeAgreementResolverTest` | PASS（calculator Demo） |
-| T070-D1 | 要員/管理者/営業のrole fixture | Windows/H2、390px markup契約 | 本人入力→提出→差戻し→再提出→承認→締め、締め後編集、営業の画面/API、CSRF、4言語message、JS構文を確認 | state CASとscope/role/CSRF境界が一致し、営業は403、締め後編集は拒否 | 実ブラウザ幅、HR法人資料突合、V83適用はM/V82後 | `AttendanceWorkflowServiceTest`、`AttendanceApiControllerTest`、`AttendanceUiContractTest` | PASS（定向Demo） |
+| T070-D1 | 要員/管理者/営業のrole fixture | Windows/H2、390px markup契約 | 本人入力→提出→差戻し→再提出→承認→締め、締め後編集、営業の画面/API、CSRF、4言語message、JS構文を確認 | state CASとscope/role/CSRF境界が一致し、営業は403、締め後編集は拒否 | 実ブラウザ幅、HR法人scope、manager asOf/full-access、法定時間区分、理由付き再open | reviewer L2 17/0/0/0。`AttendanceUiContractTest`は文字列assertのみ | **FAIL / UNVERIFIED** |
 
 ## 9. Release Gate Register
 
@@ -212,3 +219,122 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - verdict: P1-01/P1-02/P2-02/P2-03 = `VERIFIED_CLOSED`、P2-01 = `OPEN`。新規P0/P1なし
 - evidence: `509bdb7..2299fbc`、`509bdb7..8edcaa6`はいずれも1/0/0/0、`git diff --check` PASS、production/test差分0、worktree clean
 - P2-01 minimum fix: fix内容Head=`2299fbc`とPacket/current merged Head=`8edcaa6`を分離し、台帳provenanceを`git log -1 -- review-ledger.md`で解決する。今回の同期後、同一issueを再起票しない
+
+### Round 2 — 2026-08-09 — T070独立Review
+
+- review target: base=`1fd0f7492ab46388c961e2e721ccdedd416929c4` → code=`cc7c15c60bc26bf7b19fbca7759b6e65f572a725` → evidence/current merged Head=`4789c192a733d2d64b13c9941ab53e3780aefbe9`
+- git evidence: `HEAD=origin/main=4789c19`、worktree clean、`1fd0f74`/`cc7c15c`/`b327b1b`/`d395797`はいずれもHeadの祖先。treeにはV83がありV82が無い。`git diff --check 1fd0f74..4789c19` PASS
+- review中のworking tree: 判定対象を固定した後、reviewerが変更していない`src/test/java/com/ses/migration/SpecDispatchConsistencyTest.java`の未commit差分を検出。`reserved <= latest`を拒否する追加testであり、current Headの判定・test件数・fix verificationには含めない。reviewer変更は本台帳だけ
+- independently executed tests: `mvn '-Dtest=AttendanceApiControllerTest,AttendanceWorkflowServiceTest,AttendanceUiContractTest,MessageBundleConsistencyTest,JsSyntaxCheckTest,RoleNavigationVisibilityTest' test` → 17/0/0/0、BUILD SUCCESS、exit 0
+- L4 decision: T074が固定L4 checkpointであり同一HeadのL4証拠も未提出のため、本RoundではT070のL2読解/再実行に限定。P1修正がSecurityConfig/OrganizationScope/V83へ及ぶ場合はtest policy §5によりL3またはL4へ昇格する
+- reviewed issue: R1-P2-01はFIXED_BY_IMPLEMENTERを不受理。current GitとPacketのmerged状態が再度不一致なのでOPEN継続。同じ根本原因で再起票しない
+- new issues: R2-P1-01〜05、R2-P2-01〜02。P0=0/P1=5/P2=3（既存R1-P2-01を含む）
+- task verdict: T070=`FAIL`。T067〜T069の全面再監査は本Round対象外。T071〜T074は未着手
+- next task: T071はR2-P1-02〜04の共有calendar/scope契約がVERIFIED_CLOSEDになるまで開始不可。R1-P2-01/R2-P2-01〜02だけではblockしない
+- spec/Wave verdict: `FAIL: open blockers=R2-P1-01,R2-P1-02,R2-P1-03,R2-P1-04,R2-P1-05`。S12/次Waveは開始不可
+
+#### attendance-leave-overtime-compliance-R2-P1-01
+
+- severity: P1
+- violated requirement/acceptance: `design.md` §1、`tasks.md` T068の「V83のmerge/applyはV82後」、handbook §4.1
+- file:line: `design.md:5`、`tasks.md:33`、`src/main/resources/db/migration/V83__attendance_leave_overtime_compliance.sql:1`
+- reproduction: V81まで適用済みのDB / deploy principal / current `origin/main=4789c19`を配備する。Git treeにはV83がありV82が無い
+- expected / actual: expected=V82を含むHeadでV82→V83の順に適用。actual=V83が先にFlyway適用対象となり、Packetの「V83未merge」とも矛盾する
+- customer/security/operation impact: 現Headを一度適用すると後日のV82がout-of-orderになり、validate/startup failureまたは再採番・復旧作業が必要になる
+- evidence: `git ls-tree -r --name-only HEAD`でV83あり/V82なし、`git merge-base --is-ancestor b327b1b HEAD` exit 0
+- minimum acceptable fix: current mainを配備停止しV82を先にmergeする。V83適用済み環境を棚卸しし、存在する場合は過去V83を編集せずlatest+1の順方向復旧/再採番を確定する。台帳のmerged/appliedを実Git・Flyway historyに同期する
+- direct regression scope: V81 legacy→V82→V83、fresh V1→latest、Flyway history/checksum、V83適用済み環境のrepair手順
+- discovered in: original head（current merged Packet）
+
+#### attendance-leave-overtime-compliance-R2-P1-02
+
+- severity: P1
+- violated requirement/acceptance: R1.1、R1.2、R3.1、R5、design §2/§5.1、`overtime-rules.md` §1.2
+- file:line: `src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:276-301,304-321,332-354`
+- reproduction: 所定480分の通常日に要員が09:00〜23:00、休憩0分を保存する。別caseで勤務カレンダー上の通常日をclientが`法定休日`として送る
+- expected / actual: expected=calendarを勤務日asOfで解決し、通常caseは法定内480・時間外360・深夜60、休日種別はserver側の正を使用。actual=`通常`の840分全てをregularへ入れ、overtime/lateNight=0。休日区分もclient値を無条件採用する
+- customer/security/operation impact: 月45h/年360h/720h/月100h/rolling平均の入力が誤り、超過警告を見逃すか誤警告する
+- evidence: `toAttendance`は`WorkCalendarMapper`/`WorkCalendarDayMapper`を参照せず、`lateNightMinutes(0)`固定。`AttendanceCalculator`実装はrepoに存在しない。既存workflow testは9:00〜18:00だけ
+- minimum acceptable fix: calendar/所定時間/法定休日を勤務日asOfで解決する`AttendanceCalculator`を実装し、日8h・週40h、所定休日、法定休日、22:00〜5:00、跨夜、休憩を分単位で一箇所計算する。未確認休日区分はfinding/fail-closedにする
+- direct regression scope: 480分のlimit-1/limit/limit+1、週40h、所定休日/法定休日、22時境界、跨夜、休憩、calendar優先順位、scheduled NULL/0、月次再集計→T069 input
+- discovered in: original head `cc7c15c`
+
+#### attendance-leave-overtime-compliance-R2-P1-03
+
+- severity: P1
+- violated requirement/acceptance: T070 Objective「HRは法人分」、design §5.3、R5「権限外閲覧を拒否」
+- file:line: `src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:68-77,174-177,195-229,332-354,421-430`
+- reproduction: 同一DBにlegal entity A/Bと各要員を作り、A担当HRで管理一覧を開くかB要員IDへcloseを送る
+- expected / actual: expected=A法人のlist/detail/count/actionだけ。actual=HRは`buildOverview(..., null)`で全要員を取得し、任意engineerIdを無条件許可する。新規monthはlegalEntityId未設定、dayはlegalEntityId/organizationIdとも未設定
+- customer/security/operation impact: HRが担当外法人の出退勤・備考等のPIIを閲覧し、月次締めまで実行できる
+- evidence: HRと管理者が同じ分岐。`buildOverview`のunfiltered `selectList(null)`、`allowedEngineerId`のHR bypass。対象testはHR fixture/法人境界を持たない
+- minimum acceptable fix: HRの担当legal entityをserver-side identity/organization historyから解決し、month/dayへlegal entity・organization snapshotを保存する。list/actionともSQL境界で同じ法人集合を適用し、NULL/未知法人はfail-closedにする
+- direct regression scope: HR A→A許可/A→B 0件・404、close/reject/reopen各action、管理者全件、法人NULL/履歴なし、list/detail/count同一母集団
+- discovered in: original head `cc7c15c`
+
+#### attendance-leave-overtime-compliance-R2-P1-04
+
+- severity: P1
+- violated requirement/acceptance: T070 Objective、design §5.3、platform-invariants §1/§2、`OrganizationScopeService` public contract
+- file:line: `src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:75-77,421-431`、`src/main/java/com/ses/mapper/EngineerAccountLinkMapper.java:17-39`
+- reproduction: (a) `organization.scope.enabled=false`でmanagerが対象月を一覧、(b) 対象月後に組織A→Bへ異動した要員の過去月をA/B managerが一覧/承認
+- expected / actual: expected=(a) `hasFullAccess=true`は組織条件なし、(b) 対象月末の履歴所属で判定。actual=(a) `allowedEngineerIds`の空集合を0件扱い、(b) `COALESCE(e.organization_id, uo.organization_id)`が現在のengineer組織を優先する
+- customer/security/operation impact: managerの承認対象が全消失するか、異動後の現在組織へ過去勤怠が誤開示され、旧上長が承認できない
+- evidence: `OrganizationScopeService`はfull access時の空集合を「条件なし」と明記するが呼出側は確認しない。mapper javadoc/SQLはcurrent engineer organizationを正とする。既存T070 testはmanager service scope/異動fixtureを持たない
+- minimum acceptable fix: `hasFullAccess()`を先に評価し、manager時だけ許可集合をSQLへ渡す。要員所属は対象月末asOfの履歴Resolverで解決し、履歴ありNULLと不存在を`CASE WHEN h.id IS NULL`で区別する
+- direct regression scope: scope enabled/disabled、空集合0件、直属user追加、異動前/当日/翌日、未来異動、有限終了、履歴なし/ありNULL、list/action同一母集団
+- discovered in: original head `cc7c15c`（shared mapperの既存欠陥を新consumerで顕在化）
+
+#### attendance-leave-overtime-compliance-R2-P1-05
+
+- severity: P1
+- violated requirement/acceptance: G6「手動修正は理由、申請/承認、version、監査を必須」、R1.4、design §5.4
+- file:line: `src/main/java/com/ses/controller/api/AttendanceApiController.java:69-72`、`src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:180-193`、`src/main/java/com/ses/entity/AttendanceMonth.java:41`
+- reproduction: 管理者が`POST /api/work-records/attendance/{engineerId}/reopen?month=2026-08`を理由なしで送る
+- expected / actual: expected=理由必須の申請/承認とversion/state CAS、業務監査へ理由を保存。actual=単一管理者の1 callでCLOSED→APPROVED、reason入力/保存がなく`closeReason`も未使用
+- customer/security/operation impact: 締め済みsnapshotの訂正根拠と職務分離を追跡できず、不正・誤修正の説明責任を満たさない
+- evidence: controller/service interfaceにreason/approval requestが存在せず、ApiAuditFilterはuser/method/URI/statusだけを記録する。reopenの自動testも無い
+- minimum acceptable fix: reopen commandへ必須reasonとapproval referenceを追加し、申請者単独確定を拒否、承認時にreason/actor/time/versionを永続化する。汎用API監査に加えて業務監査を再読可能にする
+- direct regression scope: 空理由拒否、申請者=承認者拒否、二重reopen 409、rollback、監査再読、reopen後snapshot維持
+- discovered in: original head `cc7c15c`
+
+#### attendance-leave-overtime-compliance-R2-P2-01
+
+- severity: P2
+- violated requirement/acceptance: tasks T070 mobile 390px、shared-standards §5、handbook §7 Demo
+- file:line: `src/test/java/com/ses/web/AttendanceUiContractTest.java:11-30`、`review-ledger.md:122,186`
+- reproduction: T070-D1証跡を開き、390pxで実ブラウザ操作したartifactを確認する
+- expected / actual: expected=desktop/390pxで状態遷移、二重click、reload、戻る、拒否表示の実測。actual=HTMLの`table-responsive`等3文字列をassertしただけで、台帳自身も実ブラウザ未実施と記録する
+- customer/security/operation impact: 狭幅で操作ボタン・modal・errorが利用可能か未検証。機能結果の既知誤りは未再現のためP2
+- evidence: reviewer再実行17/0/0/0だが`AttendanceUiContractTest`本文は静的文字列assertのみ
+- minimum acceptable fix: desktop/390pxの実ブラウザDemoを実施し、主要操作・拒否表示・二重click/reload/backを証跡化する
+- direct regression scope: T070本人/manager/HR画面。Mの全UI回帰はT074で別途実施
+- discovered in: original head `cc7c15c`
+
+#### attendance-leave-overtime-compliance-R2-P2-02
+
+- severity: P2
+- violated requirement/acceptance: shared-standards §3「一覧はpaging上限1000、全件取得APIを新設しない」、handbook §6.2/性能観点
+- file:line: `src/main/java/com/ses/service/impl/AttendanceServiceImpl.java:195-229`
+- reproduction: HR/管理者 / 1万人の要員と各31日の日次勤怠 / 対象月一覧をGETする
+- expected / actual: expected=scope済み月次summaryを安全なpage sizeで取得し、日次detailは必要時に同じ母集団で取得。actual=`engineerMapper.selectList(null)`、全month、全dayを一括List化して単一DTOで返す
+- customer/security/operation impact: DB・heap・JSON応答が要員数×日数で増加し、管理画面のtimeout/メモリ圧迫を招く。実負荷証拠は未取得のためP2
+- evidence: controller/requestにpage/sizeがなく、serviceにも`PageUtils.safePage`/limitがない。性能testなし
+- minimum acceptable fix: month summaryをpagingし、day detailを遅延取得または選択要員単位へ分離する。page/count/detailへ同じHR/manager scopeをSQL境界で適用する
+- direct regression scope: 0/1/1000/1001要員、31日、page/count/detail母集団一致、上限外size正規化
+- discovered in: original head `cc7c15c`
+
+### Round 2 fix delta — 2026-08-09 — 主担当
+
+| task | requirements | 変更file | test | Demo | commit | risk |
+|---|---|---|---|---|---|---|
+| T070 R2 fix delta | R1.1/R1.2/R1.4/R3.1/R5、design §2/§5.1/§5.3/§5.4、platform-invariants §1/§2 | `AttendanceCalculator`、`AttendanceScopeResolver`、`AttendanceScopeMapper`、`EngineerAccountLinkMapper`、`AttendanceServiceImpl`、`AttendanceReopenApprovalAdapter`、reopen DTO/controller/JS、4言語message、定向test | `mvn -B -Dtest=AttendanceApiControllerTest,AttendanceWorkflowServiceTest,AttendanceUiContractTest,MessageBundleConsistencyTest,JsSyntaxCheckTest,RoleNavigationVisibilityTest,AttendanceCalculatorTest,AttendanceScopeResolverTest,AttendanceManagerScopeTest,AttendanceReopenApprovalAdapterTest,AttendanceServiceFullAccessTest test` → 29/0/0/0、skip 0、exit 0。`git diff --check` PASS | T070-D1補助証跡：calendarの通常日09:00〜23:00/休憩0をclient休日指定してもregular=480/overtime=360/lateNight=60、HR法人A/B、manager月末asOf、理由付きreopen申請を確認 | `34654f2`、`4dadfb3`、`b91dc99`、`356d9ee`、`146046e`、`0fc9a22`、`2709e2b`、`5260fd5`、`a0de2b6`、`1fb54d4` | 独立再Review前の主担当証跡。実ブラウザ、paging/detail分離、全環境Flyway history、ATT-GATE-01〜06、L4は未検証。V83はV82環境証跡と先行順序が解消するまでfreeze |
+
+- implementation summary: 日次の正は勤務日asOfの`m_work_calendar`/`m_work_calendar_day`へ移し、日8時間・週40時間・所定休日・法定休日・深夜・跨夜・休憩を`AttendanceCalculator`へ集約した。clientの`workType`は分類の正にしない。未解決calendar、履歴、法人scopeはUNKNOWN/判定不能としてfail-closed。
+- scope summary: HRは担当legal entityからserver-sideで要員集合を解決し、month/dayへlegal entity・organization snapshotを保存する。managerは`hasFullAccess()`を先に評価し、有限scopeだけ対象月末asOfの履歴集合をlist/actionへ同じ境界で渡す。履歴UNKNOWN、snapshot NULLは許可しない。
+- reopen summary: 締め済み再openは理由必須の`attendance.reopen` approval requestへ委譲し、既存approval engineの申請者除外、request/action監査、target version/state CASを利用する。申請時点では`CLOSED`を維持する。
+- issue state: `R2-P1-02`、`R2-P1-03`、`R2-P1-04`、`R2-P1-05`は`FIXED_BY_IMPLEMENTER / independent re-review requested`。独立ReviewがVERIFIED_CLOSEDとするまで自己PASSにはしない。`R2-P1-01`はV82/V83の全environment `flyway_schema_history`証跡不足のため`OPEN / ENVIRONMENT_EVIDENCE_REQUIRED`を継続し、V83のコード・migration・applyは変更していない。`R1-P2-01`は実Git HeadとPacketの同期確認を次のReviewで再確認する。
+- remaining P2: `R2-P2-01`（desktop/390px実ブラウザartifact）と`R2-P2-02`（month paging/detail分離）は未完了。T071開始条件であるP1-02〜04の独立VERIFIED_CLOSEDとは別に、T074/Mで再評価する。
+- base/head: fix deltaのreview baseは`4789c19`、実装確認Headは`1fb54d4`（`HEAD=origin/main`）。ledger自身のcommitを含むcurrent Headは`git log -1 -- .kiro/specs/attendance-leave-overtime-compliance/review-ledger.md`で解決する。V83の適用履歴はGit commitでは証明しない。
+- rollback: 本番未適用のためDB rollbackは不要。コードrollbackは上記実装commitを逆順でrevertし、approval requestの未確定申請は既存engineのcancel/expire運用で処理する。V83 migrationの編集・削除・再採番は行わない。
+- review handoff condition: R11担当が上記direct regressionを独立実行し、P1-02〜05の証跡と、別途R10からの全環境Flyway historyを確認した後にT071の開始可否を判定する。R11再Review合格前にT071〜T074を開始済みとは記録しない。
