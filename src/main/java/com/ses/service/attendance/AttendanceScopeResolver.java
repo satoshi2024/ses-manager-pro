@@ -66,11 +66,18 @@ public class AttendanceScopeResolver {
     }
 
     public Set<Long> allowedHrEngineerIds(Long userId, LocalDate asOf) {
+        Set<Long> legalEntityIds = allowedHrLegalEntityIds(userId, asOf);
+        if (legalEntityIds == null || legalEntityIds.isEmpty()) return Set.of();
+        List<Long> engineerIds = attendanceScopeMapper.selectEngineerIdsByLegalEntityIds(
+                List.copyOf(legalEntityIds), asOf);
+        return engineerIds == null ? Set.of() : Set.copyOf(engineerIds);
+    }
+
+    /** HRのlist/actionが月次snapshotへ適用するserver-side法人母集団。 */
+    public Set<Long> allowedHrLegalEntityIds(Long userId, LocalDate asOf) {
         if (userId == null || asOf == null) return Set.of();
         List<Long> legalEntityIds = attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf);
-        if (legalEntityIds == null || legalEntityIds.isEmpty()) return Set.of();
-        List<Long> engineerIds = attendanceScopeMapper.selectEngineerIdsByLegalEntityIds(legalEntityIds, asOf);
-        return engineerIds == null ? Set.of() : Set.copyOf(engineerIds);
+        return legalEntityIds == null ? Set.of() : Set.copyOf(legalEntityIds);
     }
 
     private Long linkedUserId(Long engineerId, Long fallbackUserId) {

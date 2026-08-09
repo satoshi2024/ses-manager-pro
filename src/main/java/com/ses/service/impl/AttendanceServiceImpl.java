@@ -71,7 +71,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     public AttendanceOverviewDto mine(String month) {
         YearMonth target = parseMonth(month);
         Long engineerId = currentEngineerId();
-        return buildOverview(target, List.of(engineerId));
+        return buildOverview(target, List.of(engineerId), null);
     }
 
     @Override
@@ -81,17 +81,17 @@ public class AttendanceServiceImpl implements AttendanceService {
         requireManagementRole();
         String role = SecurityUtils.currentRole();
         if ("管理者".equals(role)) {
-            return buildOverview(target, null);
+            return buildOverview(target, null, null);
         }
         if ("HR".equals(role)) {
-            Set<Long> allowed = attendanceScopeResolver.allowedHrEngineerIds(
+            Set<Long> allowedLegalEntities = attendanceScopeResolver.allowedHrLegalEntityIds(
                     SecurityUtils.currentUserId(), target.atEndOfMonth());
-            return buildOverview(target, new ArrayList<>(allowed));
+            return buildOverview(target, null, allowedLegalEntities);
         }
         // organization scope無効時の空集合は「制限なし」。有効時の空集合だけが可視0件。
         Set<Long> allowed = organizationScopeService.hasFullAccess()
                 ? null : organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
-        return buildOverview(target, allowed == null ? null : new ArrayList<>(allowed));
+        return buildOverview(target, allowed == null ? null : new ArrayList<>(allowed), null);
     }
 
     @Override
@@ -193,7 +193,10 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Transactional
     public void close(Long engineerId, String month) {
         requireHrOrAdminRole();
-        transition(lockExistingMonth(allowedEngineerId(engineerId, month), month), APPROVED, CLOSED,
+        YearMonth target = parseMonth(month);
+        AttendanceMonth current = lockExistingMonth(engineerId, target);
+        assertHrMonthSnapshotAllowed(current, target);
+        transition(current, APPROVED, CLOSED,
                 SecurityUtils.currentUserId());
     }
 
@@ -220,22 +223,25 @@ public class AttendanceServiceImpl implements AttendanceService {
                 "attendance-reopen:" + current.getId() + ":" + value(current.getVersion())));
     }
 
-    private AttendanceOverviewDto buildOverview(YearMonth target, List<Long> engineerIds) {
-        List<Engineer> engineers = engineerIds == null
-                ? engineerMapper.selectList(null)
-                : engineerIds.isEmpty() ? List.of() : engineerMapper.selectBatchIds(engineerIds);
-        engineers = engineers.stream().sorted(Comparator.comparing(Engineer::getId)).toList();
-        Set<Long> ids = engineers.stream().map(Engineer::getId).collect(Collectors.toSet());
-
+    private AttendanceOverviewDto buildOverview(YearMonth target, List<Long> engineerIds,
+                                                Set<Long> legalEntityIds) {
+        if (engineerIds != null && engineerIds.isEmpty()) {
+            return overview(target, List.of());
+        }
+        if (legalEntityIds != null && legalEntityIds.isEmpty()) {
+            return overview(target, List.of());
+        }
         LambdaQueryWrapper<AttendanceMonth> monthQuery = new LambdaQueryWrapper<AttendanceMonth>()
                 .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
                 .orderByAsc(AttendanceMonth::getEngineerId);
         if (engineerIds != null) {
-            if (ids.isEmpty()) {
-                return overview(target, List.of());
-            }
-            monthQuery.in(AttendanceMonth::getEngineerId, ids)
-                    .isNotNull(AttendanceMonth::getLegalEntityId)
+            monthQuery.in(AttendanceMonth::getEngineerId, engineerIds);
+        }
+        if (legalEntityIds != null) {
+            monthQuery.in(AttendanceMonth::getLegalEntityId, legalEntityIds);
+        }
+        if (engineerIds != null || legalEntityIds != null) {
+            monthQuery.isNotNull(AttendanceMonth::getLegalEntityId)
                     .isNotNull(AttendanceMonth::getOrganizationId);
         }
         List<AttendanceMonth> months = attendanceMonthMapper.selectList(monthQuery);
@@ -243,15 +249,16 @@ public class AttendanceServiceImpl implements AttendanceService {
             return overview(target, List.of());
         }
 
+        Set<Long> ids = months.stream().map(AttendanceMonth::getEngineerId).collect(Collectors.toSet());
+        List<Engineer> engineers = engineerMapper.selectBatchIds(ids).stream()
+                .sorted(Comparator.comparing(Engineer::getId)).toList();
         Map<Long, String> names = engineers.stream().collect(Collectors.toMap(Engineer::getId,
                 e -> e.getFullName() == null ? "" : e.getFullName()));
         LambdaQueryWrapper<EmployeeAttendance> dayQuery = new LambdaQueryWrapper<EmployeeAttendance>()
                 .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
                 .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
                 .orderByAsc(EmployeeAttendance::getWorkDate);
-        if (engineerIds != null) {
-            dayQuery.in(EmployeeAttendance::getEngineerId, ids);
-        }
+        dayQuery.in(EmployeeAttendance::getEngineerId, ids);
         Map<Long, List<EmployeeAttendance>> daysByEngineer = employeeAttendanceMapper.selectList(dayQuery)
                 .stream().collect(Collectors.groupingBy(EmployeeAttendance::getEngineerId));
 
@@ -466,19 +473,21 @@ public class AttendanceServiceImpl implements AttendanceService {
         if ("管理者".equals(SecurityUtils.currentRole())) {
             return engineerId;
         }
-        if ("HR".equals(SecurityUtils.currentRole())) {
-            if (!attendanceScopeResolver.allowedHrEngineerIds(SecurityUtils.currentUserId(),
-                    target.atEndOfMonth()).contains(engineerId)) {
-                throw BusinessException.of(404, "error.scope.notFound");
-            }
-            return engineerId;
-        }
         // managerのasOf判定は、対象月末の組織所属へ固定する。
         if (!organizationScopeService.hasFullAccess()
                 && !organizationScopeService.allowedEngineerIds(target.atEndOfMonth()).contains(engineerId)) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
         return engineerId;
+    }
+
+    private void assertHrMonthSnapshotAllowed(AttendanceMonth month, YearMonth target) {
+        if (!"HR".equals(SecurityUtils.currentRole())) return;
+        if (month.getLegalEntityId() == null
+                || !attendanceScopeResolver.allowedHrLegalEntityIds(SecurityUtils.currentUserId(),
+                target.atEndOfMonth()).contains(month.getLegalEntityId())) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
     }
 
     private void assertEditable(AttendanceMonth month) {
