@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -125,5 +126,18 @@ class AttendanceApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
         verify(attendanceService).management("2026-08");
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 再openは理由付きJSONとCSRFを要求してサービスへ委譲する() throws Exception {
+        String body = "{\"month\":\"2026-08\",\"reason\":\"訂正根拠\"}";
+
+        mockMvc.perform(post("/api/work-records/attendance/42/reopen")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(attendanceService).reopen(eq(42L), eq("2026-08"), eq("訂正根拠"));
     }
 }
