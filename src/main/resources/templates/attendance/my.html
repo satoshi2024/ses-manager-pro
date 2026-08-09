@@ -26,6 +26,7 @@
                         <th th:text="#{attendance.clockIn}">出勤</th>
                         <th th:text="#{attendance.clockOut}">退勤</th>
                         <th th:text="#{attendance.breakMinutes}">休憩(分)</th>
+                        <th th:text="#{attendance.breaks}">休憩区間</th>
                         <th th:text="#{attendance.workType}">勤務区分</th>
                         <th th:text="#{attendance.actions}">操作</th>
                     </tr></thead>
@@ -38,7 +39,11 @@
                     <div class="col-12 col-md-2"><label class="form-label" for="attendanceDate" th:text="#{attendance.date}">日付</label><input id="attendanceDate" type="date" class="form-control" required></div>
                     <div class="col-6 col-md-2"><label class="form-label" for="attendanceClockIn" th:text="#{attendance.clockIn}">出勤</label><input id="attendanceClockIn" type="time" class="form-control"></div>
                     <div class="col-6 col-md-2"><label class="form-label" for="attendanceClockOut" th:text="#{attendance.clockOut}">退勤</label><input id="attendanceClockOut" type="time" class="form-control"></div>
-                    <div class="col-6 col-md-2"><label class="form-label" for="attendanceBreak" th:text="#{attendance.breakMinutes}">休憩(分)</label><input id="attendanceBreak" type="number" min="0" value="0" class="form-control"></div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label" th:text="#{attendance.breaks}">休憩区間</label>
+                        <div id="attendanceBreaks"></div>
+                        <button type="button" id="attendanceBreakAdd" class="btn btn-sm btn-outline-secondary mt-1" th:text="#{attendance.breakAdd}">休憩区間を追加</button>
+                    </div>
                     <div class="col-6 col-md-2"><label class="form-label" for="attendanceWorkType" th:text="#{attendance.workType}">勤務区分</label><select id="attendanceWorkType" class="form-select"><option value="通常" th:text="#{attendance.workType.normal}">通常</option><option value="所定休日" th:text="#{attendance.workType.scheduledHoliday}">所定休日</option><option value="法定休日" th:text="#{attendance.workType.legalHoliday}">法定休日</option></select></div>
                     <div class="col-12 col-md-2"><button type="submit" class="btn btn-success w-100" th:text="#{attendance.save}">保存</button></div>
                 </form>

@@ -1,6 +1,7 @@
 package com.ses.attendance;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.attendance.AttendanceBreakRequest;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.entity.AttendanceMonth;
 import com.ses.entity.EngineerAccountLink;
@@ -132,7 +133,10 @@ class AttendanceWorkflowServiceTest {
         request.setWorkDate(LocalDate.of(2026, 8, 3));
         request.setClockIn(LocalTime.of(9, 0));
         request.setClockOut(LocalTime.of(18, 0));
-        request.setBreakMinutes(60);
+        AttendanceBreakRequest breakRequest = new AttendanceBreakRequest();
+        breakRequest.setStartTime(LocalTime.of(12, 0));
+        breakRequest.setEndTime(LocalTime.of(13, 0));
+        request.setBreaks(List.of(breakRequest));
         request.setWorkType("通常");
         attendanceService.saveMyDay(request);
         attendanceService.submitMyMonth("2026-08");

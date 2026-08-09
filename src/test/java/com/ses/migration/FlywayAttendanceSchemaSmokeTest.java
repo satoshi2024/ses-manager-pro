@@ -6,6 +6,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -90,6 +91,69 @@ class FlywayAttendanceSchemaSmokeTest {
                 invalidMonthRejected = true;
             }
             assertTrue(invalidMonthRejected, "協定のvalid_from月初制約が必要");
+        }
+    }
+
+    /** R2-P1-02方式Aの追補V91（t_employee_attendance_break）をfresh/legacy共通shapeで検証する。 */
+    @Test
+    void V91の休憩区間shapeと境界制約がMySQLで成立する() throws Exception {
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("83")
+                .load()
+                .migrate();
+
+        // V91追補DDLを実MySQLへ適用してshapeを検証する。V84（S10/dispatch）は同laneの
+        // FlywayDispatchComplianceSchemaSmokeTestが検証するため、本testの検証対象でない。
+        // V91のDDLは単純なCREATE TABLEのみで、Flyway適用順も番号順（V84の後）に定まる。
+        String v91 = new String(getClass().getClassLoader()
+                .getResourceAsStream("db/migration/V91__attendance_break_intervals.sql").readAllBytes(),
+                StandardCharsets.UTF_8);
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            for (String ddl : v91.split(";")) {
+                if (!ddl.trim().isEmpty()) {
+                    statement.execute(ddl);
+                }
+            }
+            assertTableExists(statement, "t_employee_attendance_break");
+            assertIndexExists(statement, "t_employee_attendance_break", "uk_employee_attendance_break");
+            assertCheckExists(statement, "t_employee_attendance_break", "chk_employee_attendance_break_offset");
+
+            statement.executeUpdate("INSERT INTO t_engineer "
+                    + "(full_name, employment_type, status) VALUES ('T091-mysql-engineer', '正社員', 'Bench')");
+            long engineerId = queryLong(statement,
+                    "SELECT id FROM t_engineer WHERE full_name='T091-mysql-engineer'");
+            statement.executeUpdate("INSERT INTO t_employee_attendance "
+                    + "(engineer_id, work_date, source) VALUES (" + engineerId + ", '2026-08-03', 'manual')");
+            long attendanceId = queryLong(statement,
+                    "SELECT id FROM t_employee_attendance WHERE engineer_id=" + engineerId
+                            + " AND work_date='2026-08-03'");
+            statement.executeUpdate("INSERT INTO t_employee_attendance_break "
+                    + "(attendance_id, sequence_no, start_offset_minutes, end_offset_minutes) "
+                    + "VALUES (" + attendanceId + ", 1, 180, 240), (" + attendanceId + ", 2, 360, 375)");
+            assertEquals(2, queryInt(statement,
+                    "SELECT COUNT(*) FROM t_employee_attendance_break WHERE attendance_id=" + attendanceId));
+
+            boolean reversedRejected = false;
+            try {
+                statement.executeUpdate("INSERT INTO t_employee_attendance_break "
+                        + "(attendance_id, sequence_no, start_offset_minutes, end_offset_minutes) "
+                        + "VALUES (" + attendanceId + ", 3, 120, 60)");
+            } catch (SQLException expected) {
+                reversedRejected = true;
+            }
+            assertTrue(reversedRejected, "開始≧終了の休憩区間を拒否するはず");
+
+            boolean duplicateRejected = false;
+            try {
+                statement.executeUpdate("INSERT INTO t_employee_attendance_break "
+                        + "(attendance_id, sequence_no, start_offset_minutes, end_offset_minutes) "
+                        + "VALUES (" + attendanceId + ", 1, 60, 90)");
+            } catch (SQLException expected) {
+                duplicateRejected = true;
+            }
+            assertTrue(duplicateRejected, "同一attendance内のsequence重複を拒否するはず");
         }
     }
 

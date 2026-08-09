@@ -11,16 +11,24 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
  * 雇用勤怠の日次計算を一箇所へ閉じ込める。休日区分はclient inputではなくcalendarを正とする。
  * 日8時間・週40時間・深夜・跨夜・休憩の口径はここから外へ出さない。
+ * 休憩は方式A（design §5.1.1）により、勤務区間から休憩区間のintersectionを除いた
+ * 実労働区間で算定する。休憩区間の検証（重複・勤務区間外・開始≧終了・全体超過）も
+ * ここでfail-closedに行う。
  */
 @Service
 @RequiredArgsConstructor
 public class AttendanceCalculator {
+
+    /** 勤務開始を0とする休憩区間（分）。 */
+    public record BreakInterval(int startOffsetMinutes, int endOffsetMinutes) {
+    }
 
     private static final int MINUTES_PER_DAY = 24 * 60;
     private static final int LEGAL_DAILY_MINUTES = 8 * 60;
@@ -31,7 +39,7 @@ public class AttendanceCalculator {
 
     public AttendanceCalculation calculate(LocalDate workDate, Long engineerId, Long legalEntityId,
                                            Long organizationId, LocalTime clockIn, LocalTime clockOut,
-                                           Integer breakMinutes, int priorWeekMinutes) {
+                                           List<BreakInterval> breaks, int priorWeekMinutes) {
         WorkCalendar calendar = resolveCalendar(workDate, engineerId, legalEntityId, organizationId);
         WorkCalendarDay day = workCalendarDayMapper.selectOne(new LambdaQueryWrapper<WorkCalendarDay>()
                 .eq(WorkCalendarDay::getCalendarId, calendar.getId())
@@ -43,16 +51,26 @@ public class AttendanceCalculator {
         if (!List.of("通常", "所定日", "所定休日", "法定休日").contains(day.getDayType())) {
             throw BusinessException.of(400, "error.attendance.calendarDayUnknown");
         }
-        int breaks = breakMinutes == null ? 0 : breakMinutes;
         int start = toMinute(clockIn);
         int end = toEndMinute(clockIn, clockOut);
         int gross = end - start;
-        if (gross < 0 || gross > MINUTES_PER_DAY || breaks < 0 || breaks > gross) {
+        if (gross < 0 || gross > MINUTES_PER_DAY) {
             throw BusinessException.of(400, "error.attendance.invalidTime");
         }
-        int effectiveEnd = end - breaks;
-        int worked = effectiveEnd - start;
-        int lateNight = nightOverlap(start, effectiveEnd);
+        List<BreakInterval> validated = validateBreaks(breaks, start, end, gross);
+
+        int worked = 0;
+        int lateNight = 0;
+        int cursor = start;
+        for (BreakInterval interval : validated) {
+            int breakStart = start + interval.startOffsetMinutes();
+            int breakEnd = start + interval.endOffsetMinutes();
+            worked += breakStart - cursor;
+            lateNight += nightOverlap(cursor, breakStart);
+            cursor = breakEnd;
+        }
+        worked += end - cursor;
+        lateNight += nightOverlap(cursor, end);
 
         int regular = 0;
         int overtime = 0;
@@ -70,6 +88,50 @@ public class AttendanceCalculator {
         }
         return new AttendanceCalculation(calendar.getId(), day.getScheduledMinutes(), day.getDayType(),
                 worked, regular, overtime, holiday, lateNight);
+    }
+
+    /**
+     * 休憩区間をfail-closedで検証し、開始offset昇順（隣接は許可、重複は拒否）で返す。
+     * 区間が無ければ空リスト。検証はこの1箇所に閉じ、配賦規則や補間は行わない。
+     */
+    private List<BreakInterval> validateBreaks(List<BreakInterval> breaks, int start, int end, int gross) {
+        if (breaks == null || breaks.isEmpty()) {
+            return List.of();
+        }
+        List<BreakInterval> sorted = new ArrayList<>(breaks);
+        int total = 0;
+        for (BreakInterval interval : sorted) {
+            if (interval == null || interval.startOffsetMinutes() < 0 || interval.endOffsetMinutes() <= 0) {
+                throw BusinessException.of(400, "error.attendance.breakInvalid");
+            }
+            if (interval.endOffsetMinutes() <= interval.startOffsetMinutes()) {
+                throw BusinessException.of(400, "error.attendance.breakInvalid");
+            }
+            if (interval.endOffsetMinutes() > gross) {
+                throw BusinessException.of(400, "error.attendance.breakOutOfRange");
+            }
+            total += interval.endOffsetMinutes() - interval.startOffsetMinutes();
+            if (total > gross) {
+                throw BusinessException.of(400, "error.attendance.breakTotalExceeds");
+            }
+        }
+        sorted.sort(Comparator.comparingInt(BreakInterval::startOffsetMinutes)
+                .thenComparingInt(BreakInterval::endOffsetMinutes));
+        for (int i = 1; i < sorted.size(); i++) {
+            BreakInterval previous = sorted.get(i - 1);
+            BreakInterval current = sorted.get(i);
+            if (current.startOffsetMinutes() < previous.endOffsetMinutes()) {
+                throw BusinessException.of(400, "error.attendance.breakOverlap");
+            }
+        }
+        // 勤務区間内の整合を絶対座標でも再確認する（offsetの加算誤りを許さない）。
+        for (BreakInterval interval : sorted) {
+            if (start + interval.startOffsetMinutes() < start
+                    || start + interval.endOffsetMinutes() > end) {
+                throw BusinessException.of(400, "error.attendance.breakOutOfRange");
+            }
+        }
+        return sorted;
     }
 
     private WorkCalendar resolveCalendar(LocalDate workDate, Long engineerId, Long legalEntityId,

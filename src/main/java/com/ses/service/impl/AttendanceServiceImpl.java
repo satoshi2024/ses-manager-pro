@@ -4,14 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.attendance.AttendanceBreakDto;
+import com.ses.dto.attendance.AttendanceBreakRequest;
 import com.ses.dto.attendance.AttendanceDayDto;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.dto.attendance.AttendanceMonthDto;
 import com.ses.dto.attendance.AttendanceOverviewDto;
 import com.ses.entity.EmployeeAttendance;
+import com.ses.entity.EmployeeAttendanceBreak;
 import com.ses.entity.AttendanceMonth;
 import com.ses.entity.Engineer;
 import com.ses.mapper.AttendanceMonthMapper;
+import com.ses.mapper.EmployeeAttendanceBreakMapper;
 import com.ses.mapper.EmployeeAttendanceMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.WorkCalendarDayMapper;
@@ -29,7 +33,6 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -58,6 +61,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceMonthMapper attendanceMonthMapper;
     private final EmployeeAttendanceMapper employeeAttendanceMapper;
+    private final EmployeeAttendanceBreakMapper employeeAttendanceBreakMapper;
     private final EngineerMapper engineerMapper;
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final OrganizationScopeService organizationScopeService;
@@ -107,7 +111,9 @@ public class AttendanceServiceImpl implements AttendanceService {
                 engineerId, userId, request.getWorkDate());
         AttendanceMonth month = lockOrCreateMonth(engineerId, target, scope);
         assertEditable(month);
-        EmployeeAttendance values = toAttendance(request, engineerId, scope);
+        List<AttendanceCalculator.BreakInterval> intervals = toBreakIntervals(request);
+        assertBreakMinutesMatch(request.getBreakMinutes(), intervals);
+        EmployeeAttendance values = toAttendance(request, engineerId, scope, intervals);
         EmployeeAttendance existing = employeeAttendanceMapper.selectOne(
                 new LambdaQueryWrapper<EmployeeAttendance>()
                         .eq(EmployeeAttendance::getEngineerId, engineerId)
@@ -117,11 +123,18 @@ public class AttendanceServiceImpl implements AttendanceService {
                         .last("LIMIT 1 FOR UPDATE"));
         if (existing == null) {
             employeeAttendanceMapper.insert(values);
+            replaceBreaks(values.getId(), intervals);
         } else {
+            // 既存のbreakMinutes > 0で区間を持たない行（区間不明）は、区間なしの再保存を拒否する。
+            if (value(existing.getBreakMinutes()) > 0 && loadBreakOffsets(existing.getId()).isEmpty()
+                    && intervals.isEmpty()) {
+                throw BusinessException.of(400, "error.attendance.breakUnknown");
+            }
             values.setId(existing.getId());
             values.setVersion(existing.getVersion());
             values.setCreatedAt(existing.getCreatedAt());
             employeeAttendanceMapper.updateById(values);
+            replaceBreaks(existing.getId(), intervals);
         }
         refreshAggregate(month);
     }
@@ -145,6 +158,8 @@ public class AttendanceServiceImpl implements AttendanceService {
                         .orderByDesc(EmployeeAttendance::getId)
                         .last("LIMIT 1 FOR UPDATE"));
         if (existing != null) {
+            employeeAttendanceBreakMapper.delete(new LambdaQueryWrapper<EmployeeAttendanceBreak>()
+                    .eq(EmployeeAttendanceBreak::getAttendanceId, existing.getId()));
             employeeAttendanceMapper.deleteById(existing.getId());
             refreshAggregate(snapshot);
         }
@@ -301,6 +316,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         dto.setClockIn(day.getClockIn());
         dto.setClockOut(day.getClockOut());
         dto.setBreakMinutes(day.getBreakMinutes());
+        dto.setBreaks(loadBreakOffsets(day.getId()).stream().map(interval -> {
+            AttendanceBreakDto breakDto = new AttendanceBreakDto();
+            breakDto.setStartTime(offsetToTime(day.getClockIn(), interval.startOffsetMinutes()));
+            breakDto.setEndTime(offsetToTime(day.getClockIn(), interval.endOffsetMinutes()));
+            return breakDto;
+        }).toList());
         dto.setWorkedMinutes(sum(day.getRegularMinutes(), day.getOvertimeMinutes(), day.getHolidayMinutes()));
         dto.setWorkType(day.getWorkType());
         dto.setWorkplaceType(day.getWorkplaceType());
@@ -311,11 +332,14 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     private EmployeeAttendance toAttendance(AttendanceDayRequest request, Long engineerId,
-                                             AttendanceScopeSnapshot scope) {
+                                             AttendanceScopeSnapshot scope,
+                                             List<AttendanceCalculator.BreakInterval> intervals) {
         int priorWeekMinutes = priorWeekMinutes(engineerId, request.getWorkDate());
         AttendanceCalculation calculation = attendanceCalculator.calculate(
                 request.getWorkDate(), engineerId, scope.legalEntityId(), scope.organizationId(),
-                request.getClockIn(), request.getClockOut(), request.getBreakMinutes(), priorWeekMinutes);
+                request.getClockIn(), request.getClockOut(), intervals, priorWeekMinutes);
+        int breakMinutes = intervals.stream().mapToInt(interval -> interval.endOffsetMinutes()
+                - interval.startOffsetMinutes()).sum();
         return EmployeeAttendance.builder()
                 .engineerId(engineerId)
                 .legalEntityId(scope.legalEntityId())
@@ -324,7 +348,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .workDate(request.getWorkDate())
                 .clockIn(request.getClockIn())
                 .clockOut(request.getClockOut())
-                .breakMinutes(request.getBreakMinutes() == null ? 0 : request.getBreakMinutes())
+                .breakMinutes(breakMinutes)
                 .regularMinutes(calculation.regularMinutes())
                 .overtimeMinutes(calculation.overtimeMinutes())
                 .holidayMinutes(calculation.holidayMinutes())
@@ -338,12 +362,99 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .build();
     }
 
+    /**
+     * 入力された休憩区間（時刻）を勤務開始基準のoffsetへ変換する（方式A）。
+     * 退勤時刻を跨ぐ区間は跨夜休憩として翌日側へ繰り上げ、日付を曖昧にしない。
+     */
+    private List<AttendanceCalculator.BreakInterval> toBreakIntervals(AttendanceDayRequest request) {
+        List<AttendanceBreakRequest> input = request.getBreaks();
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        if (request.getClockIn() == null) {
+            throw BusinessException.of(400, "error.attendance.invalidTime");
+        }
+        int clockInMinute = request.getClockIn().getHour() * 60 + request.getClockIn().getMinute();
+        List<AttendanceCalculator.BreakInterval> result = new ArrayList<>();
+        for (AttendanceBreakRequest breakRequest : input) {
+            if (breakRequest == null || breakRequest.getStartTime() == null
+                    || breakRequest.getEndTime() == null) {
+                throw BusinessException.of(400, "error.attendance.breakInvalid");
+            }
+            if (breakRequest.getStartTime().equals(breakRequest.getEndTime())) {
+                throw BusinessException.of(400, "error.attendance.breakInvalid");
+            }
+            int startOffset = Math.floorMod(
+                    breakRequest.getStartTime().getHour() * 60 + breakRequest.getStartTime().getMinute()
+                            - clockInMinute, 24 * 60);
+            int endOffset = Math.floorMod(
+                    breakRequest.getEndTime().getHour() * 60 + breakRequest.getEndTime().getMinute()
+                            - clockInMinute, 24 * 60);
+            if (endOffset <= startOffset) {
+                endOffset += 24 * 60;
+            }
+            result.add(new AttendanceCalculator.BreakInterval(startOffset, endOffset));
+        }
+        return result;
+    }
+
+    /**
+     * breakMinutesは保存済み休憩区間の合計から導出する（design §5.1.1）。
+     * 入力値が指定された場合は区間合計と一致しなければ400で拒否する（R3-P2-01確定）。
+     */
+    private void assertBreakMinutesMatch(Integer requested, List<AttendanceCalculator.BreakInterval> intervals) {
+        if (requested == null) {
+            return;
+        }
+        int sum = intervals.stream().mapToInt(interval -> interval.endOffsetMinutes()
+                - interval.startOffsetMinutes()).sum();
+        if (!requested.equals(sum)) {
+            throw BusinessException.of(400, "error.attendance.breakMinutesMismatch");
+        }
+    }
+
+    private void replaceBreaks(Long attendanceId, List<AttendanceCalculator.BreakInterval> intervals) {
+        employeeAttendanceBreakMapper.delete(new LambdaQueryWrapper<EmployeeAttendanceBreak>()
+                .eq(EmployeeAttendanceBreak::getAttendanceId, attendanceId));
+        int sequenceNo = 1;
+        for (AttendanceCalculator.BreakInterval interval : intervals) {
+            employeeAttendanceBreakMapper.insert(EmployeeAttendanceBreak.builder()
+                    .attendanceId(attendanceId)
+                    .sequenceNo(sequenceNo++)
+                    .startOffsetMinutes(interval.startOffsetMinutes())
+                    .endOffsetMinutes(interval.endOffsetMinutes())
+                    .build());
+        }
+    }
+
+    private List<AttendanceCalculator.BreakInterval> loadBreakOffsets(Long attendanceId) {
+        if (attendanceId == null) {
+            return List.of();
+        }
+        return employeeAttendanceBreakMapper.selectList(new LambdaQueryWrapper<EmployeeAttendanceBreak>()
+                        .eq(EmployeeAttendanceBreak::getAttendanceId, attendanceId)
+                        .orderByAsc(EmployeeAttendanceBreak::getSequenceNo))
+                .stream()
+                .map(breakRow -> new AttendanceCalculator.BreakInterval(
+                        value(breakRow.getStartOffsetMinutes()), value(breakRow.getEndOffsetMinutes())))
+                .toList();
+    }
+
+    private LocalTime offsetToTime(LocalTime clockIn, int offsetMinutes) {
+        if (clockIn == null) {
+            return null;
+        }
+        int minuteOfDay = (clockIn.getHour() * 60 + clockIn.getMinute() + offsetMinutes) % (24 * 60);
+        return LocalTime.of(minuteOfDay / 60, minuteOfDay % 60);
+    }
+
     private void refreshAggregate(AttendanceMonth month) {
         List<EmployeeAttendance> days = employeeAttendanceMapper.selectList(
                 new LambdaQueryWrapper<EmployeeAttendance>()
                         .eq(EmployeeAttendance::getEngineerId, month.getEngineerId())
                         .ge(EmployeeAttendance::getWorkDate, month.getWorkMonth())
                         .le(EmployeeAttendance::getWorkDate, YearMonth.from(month.getWorkMonth()).atEndOfMonth()));
+        assertNoUnknownBreakDays(days);
         int regular = days.stream().mapToInt(d -> value(d.getRegularMinutes())).sum();
         int overtime = days.stream().mapToInt(d -> value(d.getOvertimeMinutes())).sum();
         int holiday = days.stream().mapToInt(d -> value(d.getHolidayMinutes())).sum();
@@ -496,6 +607,19 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
     }
 
+    /**
+     * 休憩区間を持たないのにbreakMinutes > 0の既存行（区間不明）がある月は、
+     * 補正・承認が完了するまで月次再確定を拒否する（design §5.1.1 / R1.1）。
+     * 既存データから架空の休憩時刻を生成しない。
+     */
+    private void assertNoUnknownBreakDays(List<EmployeeAttendance> days) {
+        for (EmployeeAttendance day : days) {
+            if (value(day.getBreakMinutes()) > 0 && loadBreakOffsets(day.getId()).isEmpty()) {
+                throw BusinessException.of(400, "error.attendance.breakUnknown");
+            }
+        }
+    }
+
     private Long currentEngineerId() {
         Long userId = SecurityUtils.currentUserId();
         Long engineerId = userId == null ? null : engineerAccountLinkService.findEngineerIdByUserId(userId);
@@ -540,24 +664,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         } catch (DateTimeParseException | NullPointerException e) {
             throw BusinessException.of(400, "error.attendance.invalidDate");
         }
-    }
-
-    private int workedMinutes(LocalTime in, LocalTime out, Integer breakMinutes) {
-        if (in == null && out == null) {
-            return 0;
-        }
-        if (in == null || out == null) {
-            throw BusinessException.of(400, "error.attendance.invalidTime");
-        }
-        long minutes = Duration.between(in, out).toMinutes();
-        if (minutes < 0) {
-            minutes += 24 * 60;
-        }
-        int breaks = breakMinutes == null ? 0 : breakMinutes;
-        if (breaks < 0 || minutes > 24 * 60 || breaks > minutes) {
-            throw BusinessException.of(400, "error.attendance.invalidTime");
-        }
-        return (int) minutes - breaks;
     }
 
     private int priorWeekMinutes(Long engineerId, LocalDate workDate) {

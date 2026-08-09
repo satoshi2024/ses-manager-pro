@@ -6,6 +6,7 @@ import com.ses.entity.OvertimeAgreement;
 import com.ses.entity.WorkCalendar;
 import com.ses.entity.WorkCalendarDay;
 import com.ses.mapper.AttendanceMonthMapper;
+import com.ses.mapper.EmployeeAttendanceBreakMapper;
 import com.ses.mapper.EmployeeAttendanceMapper;
 import com.ses.mapper.OvertimeAgreementMapper;
 import com.ses.mapper.WorkCalendarDayMapper;
@@ -38,6 +39,7 @@ class AttendanceSchemaTest {
     @Autowired private WorkCalendarMapper workCalendarMapper;
     @Autowired private WorkCalendarDayMapper workCalendarDayMapper;
     @Autowired private EmployeeAttendanceMapper employeeAttendanceMapper;
+    @Autowired private EmployeeAttendanceBreakMapper employeeAttendanceBreakMapper;
     @Autowired private AttendanceMonthMapper attendanceMonthMapper;
     @Autowired private OvertimeAgreementMapper overtimeAgreementMapper;
 
@@ -45,8 +47,8 @@ class AttendanceSchemaTest {
     void T068の全テーブルとovertime設定がH2へreplayされる() {
         for (String table : List.of(
                 "m_work_calendar", "m_work_calendar_day", "t_employee_attendance",
-                "t_attendance_month", "t_leave_request", "m_overtime_agreement",
-                "t_overtime_followup")) {
+                "t_employee_attendance_break", "t_attendance_month", "t_leave_request",
+                "m_overtime_agreement", "t_overtime_followup")) {
             assertEquals(1, jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES "
                             + "WHERE TABLE_SCHEMA = SCHEMA() AND TABLE_NAME = ?",
@@ -149,6 +151,44 @@ class AttendanceSchemaTest {
                 .build();
         assertThrows(DataIntegrityViolationException.class,
                 () -> attendanceMonthMapper.insert(duplicate));
+    }
+
+    @Test
+    void 休憩区間は開始前終了後と同一attendance内のsequence重複を拒否する() {
+        long engineerId = newEngineer("T068-break-" + System.nanoTime());
+        EmployeeAttendance day = EmployeeAttendance.builder()
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .source("manual")
+                .build();
+        employeeAttendanceMapper.insert(day);
+
+        com.ses.entity.EmployeeAttendanceBreak valid = com.ses.entity.EmployeeAttendanceBreak.builder()
+                .attendanceId(day.getId())
+                .sequenceNo(1)
+                .startOffsetMinutes(180)
+                .endOffsetMinutes(240)
+                .build();
+        employeeAttendanceBreakMapper.insert(valid);
+        assertEquals(240, employeeAttendanceBreakMapper.selectById(valid.getId()).getEndOffsetMinutes());
+
+        com.ses.entity.EmployeeAttendanceBreak reversed = com.ses.entity.EmployeeAttendanceBreak.builder()
+                .attendanceId(day.getId())
+                .sequenceNo(2)
+                .startOffsetMinutes(120)
+                .endOffsetMinutes(60)
+                .build();
+        assertThrows(DataIntegrityViolationException.class,
+                () -> employeeAttendanceBreakMapper.insert(reversed));
+
+        com.ses.entity.EmployeeAttendanceBreak duplicateSequence = com.ses.entity.EmployeeAttendanceBreak.builder()
+                .attendanceId(day.getId())
+                .sequenceNo(1)
+                .startOffsetMinutes(300)
+                .endOffsetMinutes(360)
+                .build();
+        assertThrows(DataIntegrityViolationException.class,
+                () -> employeeAttendanceBreakMapper.insert(duplicateSequence));
     }
 
     private long newEngineer(String name) {

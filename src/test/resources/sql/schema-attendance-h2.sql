@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS t_overtime_followup CASCADE;
 DROP TABLE IF EXISTS m_overtime_agreement CASCADE;
 DROP TABLE IF EXISTS t_leave_request CASCADE;
 DROP TABLE IF EXISTS t_attendance_month CASCADE;
+DROP TABLE IF EXISTS t_employee_attendance_break CASCADE;
 DROP TABLE IF EXISTS t_employee_attendance CASCADE;
 DROP TABLE IF EXISTS m_work_calendar_day CASCADE;
 DROP TABLE IF EXISTS m_work_calendar CASCADE;
@@ -69,6 +70,20 @@ CREATE TABLE t_employee_attendance (
   CONSTRAINT chk_employee_attendance_minutes CHECK (
     break_minutes >= 0 AND regular_minutes >= 0 AND overtime_minutes >= 0
     AND holiday_minutes >= 0 AND late_night_minutes >= 0
+  )
+);
+
+CREATE TABLE t_employee_attendance_break (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  attendance_id BIGINT NOT NULL,
+  sequence_no INT NOT NULL,
+  start_offset_minutes INT NOT NULL,
+  end_offset_minutes INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_employee_attendance_break UNIQUE (attendance_id, sequence_no),
+  CONSTRAINT chk_employee_attendance_break_offset CHECK (
+    start_offset_minutes >= 0 AND end_offset_minutes > start_offset_minutes
   )
 );
 
