@@ -12,7 +12,7 @@
 | merge | `5f362fc`/`b65996f`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持 |
 | latest review | `R11 Round 3 R2-P1-02方式A fix delta 独立再Review 2026-08-09` |
 | verdict | **PASS（T070までの実装範囲）**。R2-P1-02（方式A休憩区間）とR3-P2-01（breakMinutesセル1択）はともに独立`VERIFIED_CLOSED`。新規P0/P1なし |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-03）` |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-03、統合担当）` |
 | next action | **T071開始可**（R2-P1-02のVERIFIED_CLOSEDで従来の開始不可条件が解消。P2×2はhandbook §10によりblockerにしない）。NOTE-R3-03（V1へのdispatch R5テーブル混入）は統合担当へ調整し、dispatch V84 R5 merge後にCI相当L4を1回実行。S11完了はT074/M後 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
@@ -24,6 +24,8 @@
 | attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-NOTE-R3-03 | NOTE | 統合担当調整（attendance欠陥ではない） | `5f362fc`のV1 diff（`src/main/resources/db/migration/V1__create_tables.sql`） | dispatch S10 R5 reworkのテーブル（`t_contract_compliance_snapshot`等）がattendance commitのV1へ混入した | committed treeはV1（新shape）＋V84（旧shape・IF NOT EXISTS）でgreen。dispatchが自身のV1/V84 R5を本V1と整合する形でcommitする必要がある | dispatchレーンがV84 R5をV1（committed shape）と整合させてcommitし、統合担当が両shapeの一致を確認 | fresh/legacy MySQL、`MigrationScriptIntegrityTest`、`SpecDispatchConsistencyTest`、V84 R5 merge後のCI相当L4×1回 | OPEN（統合担当へ引き継ぎ） | `5f362fc`（混入元） | dispatch V84 R5 merge時 |
+| attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
+| attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
 
 ## 3. Closed/Deferred Issue
 
@@ -45,18 +47,18 @@
 
 ```text
 - handbook version: v2.0
-- spec/tasks: attendance-leave-overtime-compliance / T067〜T070（T070のみ今回完了扱い、T071以降未着手）
-- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7` → R11 fix内容Head`2299fbc` → Packet/current merged Head`8edcaa6` → dispatch文書更新後のPacket/current merged Head`be2fb19` → T068 local実装Head`b327b1b` → T069 local実装Head`d395797` → Packet/current merged Head`1fd0f74` → T070 local実装Head`cc7c15c`。台帳provenanceは`git log -1 -- review-ledger.md`で解決
-- changed files by task: T067成果文書/台帳、T068のV1/V83、H2 replay、engineer-schema-h2、application-test.yml、7 entity/mapper、MySQL smoke、migration consistency test、T069のcalculator/協定asOf resolver/UNKNOWN finding/定向test、T070の本人/管理API・service・DTO・画面・JS・SecurityConfig・sidebar・4言語i18n・定向test、tasks/design/source matrix、中央台帳
-- requirements/AC trace: 最重要境界、R1.1〜R1.4、R2.1/R2.2、R3.1/R3.2/R3.4、R4.2、R5、T070のR1.1/R1.2/R1.3/R1.4/R3.3/R5
-- migration state: 実適用最新V81、dispatch V82は未merge、attendance V83は`b327b1b`でlocal実装済み・未merge/未本番適用、V59/V72永久欠番。B2 merged commit=`4488ba8`
-- test evidence: T067 R1 fix L0 `1/0/0/0` PASS。T068 `AttendanceSchemaTest 5/0/0/0`、`MigrationScriptIntegrityTest + SpecDispatchConsistencyTest 35/0/0/0`、Docker MySQL smoke `1/0/0/0` PASS。T069 calculator/resolver/DDL直接回帰 `70/0/0/0` PASS。T070 `AttendanceApiControllerTest 7/0/0/0`、`AttendanceWorkflowServiceTest 1/0/0/0`、`AttendanceUiContractTest 2/0/0/0`、`MessageBundleConsistencyTest 4/0/0/0`、`JsSyntaxCheckTest 1/0/0/0`、`RoleNavigationVisibilityTest 2/0/0/0`をPASS。MySQL smokeはV82未適用の一時containerのみ
-- Demo evidence: H2/MySQLでcalendar、NULL/0、外部source重複拒否、月初制約、overtime config 9 keyを実測。T069はfixture境界、対象月asOf、法人別上限優先、協定なし/適用除外不明/履歴不足のfindingを実測。T070は本人入力→提出→差戻し→再提出→承認→締め、締め後編集拒否、営業画面/API拒否、CSRF、390px markupを定向確認
-- skipped/unverified: V82 merge/apply順、法人一覧、36協定書、就業規則、法定休日曜日、勤務区分、休暇残数の正、適用除外者、HR法人の実資料突合、freee/休暇/差異通知、L4全量。T070はテナントDBを法人scope境界として扱い、法人別実資料の受入はATT-GATE-01〜06に残す
-- known issue IDs: R1-P2-01（FIXED_BY_IMPLEMENTER、独立再Review待ち）、release gate ATT-GATE-01〜ATT-GATE-06。P1-01/P1-02/P2-02/P2-03はVERIFIED_CLOSED
-- out-of-scope: 休暇approval、provider sync、差異通知、warning通知scheduler、M/L4、V83のV82前merge/apply
-- rollback: T070 code commit `cc7c15c`をrevertし、必要ならT069 `d395797`、T068 `b327b1b`を順にrevert（V83未適用のためproduction data変更なし）。T067文書は既存fix履歴をrevert
-- requested verdict: T070 COMPLETED_UNREVIEWED / R11 P2-01 FIXED_BY_IMPLEMENTER（current merged Head同期済み、独立Reviewを依頼）
+- spec/tasks: attendance-leave-overtime-compliance / T067〜T070完了（T071〜T074未着手）
+- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → ... → T070 local実装Head`cc7c15c` → T070 R2 fix delta`1fb54d4` → snapshot consumer fix`df7f6b1` → migration decision`b75af1a` → central gate correction`7f60738` → R11独立判定Head`3891c0e` → R2-P1-02方式A実装`5f362fc` → V91予約・文書同期`b65996f` → Round 3転記`758649e`。committed Head=`758649e`=origin/main。V91 deltaの独立再Reviewはisolated worktree `b65996f`で実施（worktree未commit差分＝dispatch V84 R5 WIPを排除）
+- changed files by task: T067成果文書/台帳、T068のV1/V83、H2 replay、engineer-schema-h2、application-test.yml、7 entity/mapper、MySQL smoke、migration consistency test、T069のcalculator/協定asOf resolver/UNKNOWN finding/定向test、T070の本人/管理API・service・DTO・画面・JS・SecurityConfig・sidebar・4言語i18n・定向test、R2-P1-02方式AのV91追補/calculator区間intersection/不一致400/区間不明fail-closed/UI/i18n/境界回帰、tasks/design/source matrix、本台帳、中央台帳、予約表V92〜V97同期（S12〜S17）
+- requirements/AC trace: 最重要境界、R1.1〜R1.4、R2.1/R2.2、R3.1/R3.2/R3.4、R4.2、R5、T070のR1.1/R1.2/R1.3/R1.4/R3.3/R5、R2-P1-02方式AのR1.1/R1.2/R3.1/R5とdesign §5.1.1
+- migration state: V83不変（checksum維持）・V82永久欠番・V91実在（S11方式A追補）・V84実在（dispatch R5 reworkは未commit WIP）・S12〜S17=V92〜V97。本番適用なし
+- test evidence: R11 Round 3独立再Review（isolated worktree `b65996f`）attendance 21 class＋approval 3 class＋overtime＋integrity＋dispatch-consistency＝**171/0/0/0、skip 0**。`FlywayAttendanceSchemaSmokeTest`（V83＋V91追補を実MySQLへ）**2/0/0/0**。`FlywayMigrationSmokeTest`（fresh V1→latest 全経路・V91含む）**2/0/0/0**。主担当実装時の指定回帰135/0/0/0＋MySQL 3/0/0/0
+- Demo evidence: 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行の400拒否、breakMinutes不一致400拒否を定向実測。実ブラウザ（390px）は未実施
+- skipped/unverified: T071〜T074、L4全量、実ブラウザ（390px）、paging（R2-P2-02）、dispatch V84 R5 merge後のtree（CI相当L4×1回推奨）、法人一覧・36協定書・就業規則・法定休日曜日・勤務区分・休暇残数の正・適用除外者・HR法人の実資料突合（ATT-GATE-01〜06）
+- known issue IDs: R2-P2-01、R2-P2-02（OPEN、T071を止めない）、NOTE-R3-03（統合担当）、NOTE-R3-04/05（本roundで修正済み）。R2-P1-01〜05、R3-P2-01、R1系はVERIFIED_CLOSED
+- out-of-scope: 休暇approval（T071）、provider sync（T072）、差異通知（T073）、warning通知scheduler、M/L4（T074）
+- rollback: 本番未適用。`758649e`/`b65996f`/`5f362fc`を逆順revertすれば本deltaを戻せる。V91は新規テーブルのみ追加、V83/V84編集なし
+- requested verdict: T070までの実装範囲 **PASS**（R11 Round 3独立再Review完了、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可）
 ```
 
 ## 5. Requirements Trace
@@ -68,12 +70,12 @@
 | R2.1 / R2.2 | 休暇種別と残数の正を後続実装で取り違えない | source matrix §4 | L0種別/正の確認状況 | 休暇種別一覧をHRへ提示 | 種別ごとの正未確認 | 中間 |
 | R3.2 / R3.4 | 適用除外者を役職名の推測で誤判定しない | source matrix §6 | L0対象者未確認を明記 | 管理監督者一覧テンプレートを提示 | HR個別確認未実施 | 中間 |
 | R5 | 確定値未入手でも判定不能を適合と誤認しない | findings F-1〜F-6、§10 | L0 | fail-closed/release gate区分を提示 | release gate未達 | 中間 |
-| R1.1/R1.2/R1.3 | 雇用勤怠を分単位で記録し、calendar/source/NULL・0/外部冪等をDDLで固定する | V1/V83、`m_work_calendar*`、`t_employee_attendance`、`t_attendance_month` | `AttendanceSchemaTest`、MySQL smoke | calendar日を投入しNULL/0とsource重複拒否を確認 | 締め済み更新拒否はT070でservice確認、V83適用はV82後 | T068実装済み・独立Review待ち |
-| R2.1/R2.2 | 休暇申請の期間・分・approval参照列を持ち、残数正本未確認を後続でfail-closed扱いできる | `t_leave_request`、残数ledgerは正本確定後の条件付き | schema replay、migration integrity | 休暇DDLの列・期間CHECKを確認 | 外部正/内部正の業務挙動はT071 | T068実装済み・独立Review待ち |
-| R3.2/R3.4 | 法人別協定、月初起算、適用除外者UNKNOWN、follow-upを保持する | `m_overtime_agreement`、`t_overtime_followup`、`t_engineer.overtime_exempt_flag(NULL=未確認)` | 月初CHECK、config 9 key、MySQL smoke | invalid `valid_from`拒否とconfig seedを確認 | calculator UNKNOWN/findingはT069 | T068実装済み・独立Review待ち |
-| R3.1/R3.2/R3.4/R5 | 6ルールの境界と法人/asOf協定を正しく判定し、正本・適用区分・必須履歴の不足を適合にしない | `OvertimeComplianceCalculator`、`OvertimeAgreementResolver`、`OvertimeAgreementSnapshot.from`、`OvertimeRule`のUNKNOWN finding | 公式fixture 27、resolver integration 3、DDL/dispatch直接回帰を含む70/0/0/0 | T069-D1で45h/360h/80h境界、月100hの`>=`、法人別上限優先、協定なし/適用除外不明/履歴不足を確認 | 法人別協定・法定休日・適用除外者資料はATT-GATE-02/03/06で未確認 | COMPLETED_UNREVIEWED |
-| R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人入力、月次提出、上長差戻し/承認、HR締めを同一状態CAS・scope・CSRF境界で扱う | `AttendanceServiceImpl`、本人/管理API、DTO、画面/JS、SecurityConfig/sidebar、4言語message | reviewer再実行17/0/0/0。ただし法定時間区分、HR法人scope、manager asOf/full-access、reopen理由/承認競合をassertしない | 実ブラウザ未実施。逐次状態遷移・営業403・CSRF・markup静的確認のみ | R2-P1-02〜05、R2-P2-01 | **FAIL** |
-| R2-P1-02方式A fix delta（R1.1/R1.2/R3.1/R5、design §5.1.1） | 休憩区間を保存し実労働区間で深夜・時間外を算定し、区間不明・不一致をfail-closedで拒否する | V91追補（`t_employee_attendance_break`）、V1統合、H2 2形状、entity/mapper、calculator区間intersection、`assertBreakMinutesMatch`、区間不明fail-closed、UI/i18n 4言語 | current HEADで指定回帰**135/0/0/0、skip 0**（attendance系19 class＋approval共通3 class＋migration整合9/27）。`git diff --check` PASS | 深夜前/中/後、跨夜、複数休憩、0分、全時間休憩、重複、区間外、開始≧終了、8h/週40h/22時、月次再集計、区間不明行、不一致400拒否を定向実測 | 独立VERIFIED_CLOSED、実ブラウザ、paging、L4 | **FIXED_BY_IMPLEMENTER** |
+| R1.1/R1.2/R1.3 | 雇用勤怠を分単位で記録し、calendar/source/NULL・0/外部冪等をDDLで固定する | V1/V83、`m_work_calendar*`、`t_employee_attendance`、`t_attendance_month` | `AttendanceSchemaTest`、MySQL smoke | calendar日を投入しNULL/0とsource重複拒否を確認 | 締め済み更新拒否はT070でservice確認、V83適用は本番gate | T068 PASS（R2-P1-01 VERIFIED_CLOSED、独立Review済み） |
+| R2.1/R2.2 | 休暇申請の期間・分・approval参照列を持ち、残数正本未確認を後続でfail-closed扱いできる | `t_leave_request`、残数ledgerは正本確定後の条件付き | schema replay、migration integrity | 休暇DDLの列・期間CHECKを確認 | 外部正/内部正の業務挙動はT071 | T068 PASS（DDL部分独立Review済み） |
+| R3.2/R3.4 | 法人別協定、月初起算、適用除外者UNKNOWN、follow-upを保持する | `m_overtime_agreement`、`t_overtime_followup`、`t_engineer.overtime_exempt_flag(NULL=未確認)` | 月初CHECK、config 9 key、MySQL smoke | invalid `valid_from`拒否とconfig seedを確認 | calculator UNKNOWN/findingはT069で確認済み、法人資料はATT-GATE-02/03/06 | T068 PASS（DDL部分独立Review済み） |
+| R3.1/R3.2/R3.4/R5 | 6ルールの境界と法人/asOf協定を正しく判定し、正本・適用区分・必須履歴の不足を適合にしない | `OvertimeComplianceCalculator`、`OvertimeAgreementResolver`、`OvertimeAgreementSnapshot.from`、`OvertimeRule`のUNKNOWN finding | 公式fixture 27、resolver integration 3、DDL/dispatch直接回帰を含む70/0/0/0。R11 Round 3独立再Reviewに含まれ171/0/0/0 | T069-D1で45h/360h/80h境界、月100hの`>=`、法人別上限優先、協定なし/適用除外不明/履歴不足を確認 | 法人別協定・法定休日・適用除外者資料はATT-GATE-02/03/06で未確認 | T069 PASS（独立Review済み） |
+| R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人入力、月次提出、上長差戻し/承認、HR締めを同一状態CAS・scope・CSRF境界で扱う | `AttendanceServiceImpl`、本人/管理API、DTO、画面/JS、SecurityConfig/sidebar、4言語message | reviewer再実行17/0/0/0＋R2 fix delta 79/0/0/0。R11 Round 3独立再Reviewに含まれ171/0/0/0 | 逐次状態遷移・営業403・CSRF・markup静的確認。実ブラウザ（390px）未実施 | R2-P2-01（390px実ブラウザ） | T070 PASS（R2-P1-02〜05、R3-P2-01 VERIFIED_CLOSED） |
+| R2-P1-02方式A fix delta（R1.1/R1.2/R3.1/R5、design §5.1.1） | 休憩区間を保存し実労働区間で深夜・時間外を算定し、区間不明・不一致をfail-closedで拒否する | V91追補（`t_employee_attendance_break`）、V1統合、H2 2形状、entity/mapper、calculator区間intersection、`assertBreakMinutesMatch`、区間不明fail-closed、UI/i18n 4言語 | 主担当指定回帰135/0/0/0＋MySQL 3/0/0/0。R11 Round 3独立再Review: **171/0/0/0 skip 0**、MySQL smoke 2/0/0/0、fresh全経路 2/0/0/0 | 深夜前/中/後、跨夜、複数休憩、0分、全時間休憩、重複、区間外、開始≧終了、8h/週40h/22時、月次再集計、区間不明行、不一致400拒否を定向実測 | 実ブラウザ、paging、L4 | **VERIFIED_CLOSED**（R11 Round 3独立再Review） |
 
 ## 6. 横断契約
 
@@ -615,3 +617,11 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - base/head: review baseはcurrent merged `3891c0e`、本deltaのcommit（V91追補＋コード＋文書＋台帳）は本commit。V83 checksum不変、V82欠番不変、V84（S10）不変
 - rollback: 本番未適用。本delta commitをrevertすればV91追補・calculator・service変更を戻せる。V91適用済みDBの復旧は不要（新規テーブルのみ追加）
 - next Review handoff: R11担当はV91 fresh/legacy MySQL適用、`t_employee_attendance_break`制約、calculator境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行、不一致400拒否、予約表V92〜V97を独立再実行する。R2-P1-02・R3-P2-01のVERIFIED_CLOSEDまでT071・次Waveを開始しない
+
+### Round 3 ledger転記修正 — 2026-08-09 — 主担当（NOTE-R3-04/05対応）
+
+- base/head: `758649e`（Round 3転記commit）上に本修正を追加。code変更なし
+- fixes: §4「最新Review Packet」を現行状態（Head `758649e`=origin/main、base/headチェーンを`3891c0e`→`5f362fc`→`b65996f`→`758649e`へ更新、V91実在・V83不変・V82欠番・S12〜S17=V92〜V97、171/0/0/0/MySQL 2/0/0/0/fresh 2/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新（NOTE-R3-04）。§5「Requirements Trace」のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列をR2-P2-01等へ移行）へ更新（NOTE-R3-05）
+- issue state: `NOTE-R3-04=FIXED`、`NOTE-R3-05=FIXED`（次Reviewで確認）。`NOTE-R3-03`は統合担当OPEN継続、P2×2はOPEN継続でT071を止めない
+- verification: 文書整合のみ（`git diff --check` PASS）。code/testは変更していないためtest再実行なし
+- ledger/central synchronization: 中央`spec-execution-ledger.md`S11行の実績・next actionへNOTE-R3-04/05修正を追記。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
