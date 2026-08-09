@@ -5,6 +5,7 @@
 - Decision ID: `S10-R4-P1-01-V83-REALIZED-RENUMBER`
 - Decision date: 2026-08-09 (JST)
 - Status: `IMPLEMENTER_DECISION_SUBMITTED / R10 INDEPENDENT VERIFICATION REQUIRED`
+- Implementer Head: `08eb09802d07c6e272473495ac22f5057cd4bbba`（Base `df7f6b1f5e27b64876133d26debd95422d29379a`）
 - Scope: repository-known local development DB and CI/Testcontainers ephemeral MySQL
 - Production release authorization: **なし**。本decisionは採番と資料の整合を決めるもので、T061のDDL適用や本番交付を許可しない。
 
