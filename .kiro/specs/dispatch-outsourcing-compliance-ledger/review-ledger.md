@@ -12,7 +12,7 @@ Review statusは`OPEN / RE-REVIEW_REQUIRED`とし、T061/V82は開始しない�
 
 | task | requirements | 変更file | test / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T060 | R1.1〜R1.4, R2.1〜R2.2, R3.1〜R3.4, R4.1〜R4.2, R5、G2-DEV-GATE | G2正本/Decision Log/README、dispatch `requirements.md`/`design.md`/`tasks.md`/`field-mapping.md`/`review-ledger.md`、S10/R10/T060派工対話 | **PASS**: mapping 96行、SRC-E ⑱=1、SRC-L ④=1、根拠なし2026-10行=0。gate L0はlifecycle 4状態/test matrix 7件/実actor承認event非block/M・本番fail-closedを確認。`SpecDispatchConsistencyTest` 8/8、`git diff --check` exit 0 | Base `1fd0f7492ab46388c961e2e721ccdedd416929c4` → Headはpush後に本ledgerへ追記 | runtime assignment/承認event/外部専門家Review未取得では`ACTIVE`化・M PASS・本番交付を禁止。rollbackはG2-DEV-GATE fix commitをrevert。production code/DDL/DB変更なし |
+| T060 | R1.1〜R1.4, R2.1〜R2.2, R3.1〜R3.4, R4.1〜R4.2, R5、G2-DEV-GATE | G2正本/Decision Log/README、dispatch `requirements.md`/`design.md`/`tasks.md`/`field-mapping.md`/`review-ledger.md`、S10/R10/T060派工対話 | **PASS**: mapping 96行、SRC-E ⑱=1、SRC-L ④=1、根拠なし2026-10行=0。gate L0はlifecycle 4状態/test matrix 7件/実actor承認event非block/M・本番fail-closedを確認。`SpecDispatchConsistencyTest` 8/8、`git diff --check` exit 0 | Base `1fd0f7492ab46388c961e2e721ccdedd416929c4` → Decision fix `a1f5e8e8c5b8b559520109a43c61e59f56ab8243`。対象mapping blob `32fdb05b00509aab8002a68ba9fa728db8fab36c` | runtime assignment/承認event/外部専門家Review未取得では`ACTIVE`化・M PASS・本番交付を禁止。rollbackはG2-DEV-GATE fix commitをrevert。production code/DDL/DB変更なし |
 
 ## R10 Issue Register
 
