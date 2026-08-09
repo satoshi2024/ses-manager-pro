@@ -63,6 +63,9 @@ public class Engineer extends BaseEntity {
      * ここがNULLのときだけ連携ユーザーの主所属で解決する。
      */
     private Long organizationId;
+
+    /** 時間外上限の適用除外フラグ。NULLはHR未確認であり、calculatorはUNKNOWNにする。 */
+    private Integer overtimeExemptFlag;
     
     private LocalDate availableDate;
     @Min(value = 0, message = "経験年数は0以上で入力してください")

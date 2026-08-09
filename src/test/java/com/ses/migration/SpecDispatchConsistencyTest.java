@@ -63,11 +63,12 @@ class SpecDispatchConsistencyTest {
     /** S07は複数migrationを実装済み。後続specの単一予約と同じ契約で扱わない。 */
     private static final Map<String, List<Integer>> REALIZED_MIGRATIONS = Map.of(
             "approval-workflow-internal-control", List.of(75, 76, 77, 78, 79),
-            "order-acceptance-workflow", List.of(80, 81));
+            "order-acceptance-workflow", List.of(80, 81),
+            "attendance-leave-overtime-compliance", List.of(83));
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
-    private static final Pattern DESIGN_REALIZED = Pattern.compile("S07正式migration V(\\d+(?:/V\\d+)*)");
-    private static final Pattern TASKS_REALIZED = Pattern.compile("S07の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
+    private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|11)正式migration V(\\d+(?:/V\\d+)*)");
+    private static final Pattern TASKS_REALIZED = Pattern.compile("S(?:07|11)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);
@@ -147,16 +148,20 @@ class SpecDispatchConsistencyTest {
             if (expectedVersions.size() == 1) {
                 int expected = expectedVersions.get(0);
 
-                int tasksHeader = firstGroup(TASKS_HEADER, tasks, spec + " の tasks.md 冒頭の予約番号");
+                int tasksHeader = REALIZED_MIGRATIONS.containsKey(spec)
+                        ? firstGroup(TASKS_REALIZED, tasks, spec + " のtasks.md正式migration")
+                        : firstGroup(TASKS_HEADER, tasks, spec + " の tasks.md 冒頭の予約番号");
                 if (tasksHeader != expected) {
-                    mismatches.add(spec + " tasks.md冒頭: V" + tasksHeader + " ≠ design.md V" + expected);
+                    mismatches.add(spec + " tasks.md migration: V" + tasksHeader + " ≠ design.md V" + expected);
                 }
 
-                int tasksGuidance = firstGroup(TASKS_GUIDANCE, tasks,
-                        spec + " の tasks.md 実装ガイダンスの V##/V1/H2");
-                if (tasksGuidance != expected) {
-                    mismatches.add(spec + " tasks.md実装ガイダンス: V" + tasksGuidance
-                            + " ≠ design.md V" + expected);
+                if (!REALIZED_MIGRATIONS.containsKey(spec)) {
+                    int tasksGuidance = firstGroup(TASKS_GUIDANCE, tasks,
+                            spec + " の tasks.md 実装ガイダンスの V##/V1/H2");
+                    if (tasksGuidance != expected) {
+                        mismatches.add(spec + " tasks.md実装ガイダンス: V" + tasksGuidance
+                                + " ≠ design.md V" + expected);
+                    }
                 }
             } else {
                 List<Integer> taskVersions = migrationSet(TASKS_REALIZED, tasks,

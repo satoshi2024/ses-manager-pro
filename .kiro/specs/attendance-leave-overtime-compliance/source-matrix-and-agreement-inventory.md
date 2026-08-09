@@ -31,7 +31,7 @@ T067着手時の `main` / `origin/main` HEAD = `5e29f39c96da85b29a0fe881326d9798
 
 ### 1.1 結論（最重要境界）
 
-> **雇用勤怠の唯一の正は本システム（F1で新設する `t_employee_attendance` / `t_attendance_month`）である。
+> **雇用勤怠の唯一の正は本システム（T068/F1で新設した `t_employee_attendance` / `t_attendance_month`）である。
 > `t_work_record_daily` / `t_work_record`（客先請求工数）は請求のための別sourceであり、
 > 雇用上の勤怠の正としては扱わない。freeeはdownstream（照合先）であり、正ではない。**
 
@@ -43,7 +43,7 @@ T067着手時の `main` / `origin/main` HEAD = `5e29f39c96da85b29a0fe881326d9798
 
 | source | 実体（現行コード上の根拠） | 正/非正 | 用途 | 雇用勤怠との関係 |
 |---|---|---|---|---|
-| 本システム（雇用勤怠、F1で新設） | `t_employee_attendance`, `t_attendance_month`（design.md §1、未実装） | **正** | 出退勤・休憩・法定内外時間・休日/深夜・勤務区分・勤務地の唯一の記録先 | — |
+| 本システム（雇用勤怠、T068/F1で新設） | `t_employee_attendance`, `t_attendance_month`（V1/V83、H2 replay、entity同期済み） | **正** | 出退勤・休憩・法定内外時間・休日/深夜・勤務区分・勤務地の唯一の記録先 | — |
 | `t_work_record`（月次実績工数） | 初期形は`V5__create_work_record_billing.sql:1-16`の`actual_hours DECIMAL(5,1)`。`V39__unify_work_hour_precision.sql:4`適用後の現行形は`DECIMAL(6,2)`。`contract_id`単位で、出退勤・休憩・深夜/休日区分を持たない | **非正（請求source）** | 契約の月次請求・支払金額算定 | 雇用勤怠と一致しない。差異は`R4`で比較表示するのみで、雇用勤怠を上書きしない |
 | `t_work_record_daily`（日次入力） | `V32__engineer_self_service.sql:23-36`。`work_record_id`（＝契約）に紐づき`engineer_id`列を持たない。`worked_hours`は自動計算値の保存であり出退勤の生ログではない | **非正（請求sourceの内訳）** | マイ勤怠画面での日次入力、月次実績工数の内訳 | 同上。**エンジニア単位ではなく契約単位のレコード**である点も雇用勤怠と構造的に異なる（1エンジニアが複数契約を掛け持つケースを想定していない設計） |
 | freee（給与・勤怠連携） | `t_freee_connection`, `t_freee_employee_link`（`V21__freee_payroll_integration.sql`）。現在は勤怠でなく給与連携のみ | **非正（downstream）** | 給与計算への連携 | tasks.md B1（freee/provider sync）で本システムの確定済み雇用勤怠をfreeeへ送信する片方向連携になる予定（design.md §3の`AttendanceProvider`基盤を利用）。freee側の値で本システムを上書きしない（design §5.4） |
@@ -222,7 +222,7 @@ F1/F2は上記が確定するまで該当法人・該当者を「判定不能」
   `overtime.*`のシステム既定値（`overtime-rules.md`§1/§2のconfig key、design.md F1ガイダンス）のみとし、
   法人別行の投入は本書5.2〜5.3のHR確認が完了してから別途行う。
 - `work_type`・法定休日曜日・休暇残数の正・適用除外者フラグは、いずれも値/運用が未確定（2, 3, 4, 6章）。
-  F1のDDL自体（カラム定義）は`design.md`§1の型（分の整数、NULL/0の区別等）に従って進めてよいが、
+  T068/F1はDDLのカラム（分の整数、NULL/0の区別、`overtime_exempt_flag`のNULL=未確認）を実装済みだが、
   ENUM値や既定値の**中身**を本書の確認未了のまま確定しないこと。
 - 本書は`overtime-rules.md`の値・境界・優先順位を一切変更しない。F1/F2の実装は同書をそのまま参照する。
 

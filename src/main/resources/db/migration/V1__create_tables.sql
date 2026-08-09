@@ -104,6 +104,7 @@ CREATE TABLE t_engineer (
   expected_unit_price DECIMAL(10,0)                          COMMENT '希望単価(円)',
   cost_center_id      BIGINT                                 COMMENT '既定原価部門ID',
   organization_id     BIGINT                                 COMMENT '所属組織ID（管理会計の帰属基準。未設定時のみアカウント連携で解決）',
+  overtime_exempt_flag TINYINT      COMMENT '時間外上限の適用除外フラグ（NULL=HR未確認、確定値のみ設定）',
   available_date     DATE                                    COMMENT '稼動可能日',
   experience_years   INT                                     COMMENT '経験年数',
   japanese_level     VARCHAR(20)                             COMMENT '日本語レベル',
@@ -118,6 +119,7 @@ CREATE TABLE t_engineer (
   INDEX idx_engineer_status          (status),
   INDEX idx_engineer_employment_type (employment_type),
   INDEX idx_engineer_available_date  (available_date),
+  INDEX idx_engineer_overtime_exempt (overtime_exempt_flag),
   INDEX idx_engineer_created_by      (created_by),
 
   CONSTRAINT fk_engineer_created_by
@@ -1017,6 +1019,217 @@ CREATE TABLE IF NOT EXISTS t_document_hash_claim (
   PRIMARY KEY (tenant_id, document_type, sha256),
   CONSTRAINT fk_document_hash_claim_document FOREIGN KEY (document_id) REFERENCES t_document(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書HashアトミックClaimテーブル';
+
+
+-- ============================================================
+-- 36. 雇用勤怠・休暇・時間外コンプライアンス（attendance-leave-overtime-compliance / S11）
+--     V83の増分migrationと同じ最終shapeを統合baselineにも保持する。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS m_work_calendar (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id BIGINT COMMENT '法人ID（法人マスタ実装前は外部参照値）',
+  organization_id BIGINT COMMENT '組織scope（NULLは法人既定）',
+  engineer_id     BIGINT COMMENT '個人scope（NULLは組織/法人既定）',
+  name            VARCHAR(200) NOT NULL COMMENT 'カレンダー名',
+  valid_from      DATE NOT NULL COMMENT '有効開始日(inclusive)',
+  valid_to        DATE COMMENT '有効終了日(inclusive)',
+  status          VARCHAR(20) NOT NULL DEFAULT '有効' COMMENT '状態',
+  version         INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag    TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  INDEX idx_work_calendar_scope (legal_entity_id, organization_id, engineer_id, valid_from, valid_to),
+  INDEX idx_work_calendar_period (valid_from, valid_to),
+  CONSTRAINT chk_work_calendar_period CHECK (valid_to IS NULL OR valid_from <= valid_to),
+  CONSTRAINT fk_work_calendar_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+  CONSTRAINT fk_work_calendar_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='勤務カレンダーバージョン';
+
+CREATE TABLE IF NOT EXISTS m_work_calendar_day (
+  id                BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  calendar_id       BIGINT NOT NULL COMMENT '勤務カレンダーID',
+  calendar_date     DATE NOT NULL COMMENT '対象日',
+  day_type          VARCHAR(30) NOT NULL COMMENT '所定日/所定休日/法定休日等',
+  scheduled_minutes INT COMMENT '所定時間（NULL=所定なし、0=所定日だが0分）',
+  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  UNIQUE KEY uk_work_calendar_day (calendar_id, calendar_date),
+  INDEX idx_work_calendar_day_date (calendar_date),
+  CONSTRAINT chk_work_calendar_day_minutes CHECK (scheduled_minutes IS NULL OR scheduled_minutes >= 0),
+  CONSTRAINT fk_work_calendar_day_calendar FOREIGN KEY (calendar_id) REFERENCES m_work_calendar(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='勤務カレンダー日別定義';
+
+CREATE TABLE IF NOT EXISTS t_employee_attendance (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id           BIGINT NOT NULL COMMENT '要員ID',
+  legal_entity_id       BIGINT COMMENT '法人ID',
+  organization_id       BIGINT COMMENT '組織ID（scope snapshot）',
+  work_calendar_id      BIGINT COMMENT '勤務カレンダー版ID',
+  work_date             DATE NOT NULL COMMENT '勤務日（跨夜も始業日の属する日）',
+  clock_in              TIME COMMENT '始業時刻',
+  clock_out             TIME COMMENT '終業時刻',
+  break_minutes         INT NOT NULL DEFAULT 0 COMMENT '休憩分',
+  regular_minutes       INT NOT NULL DEFAULT 0 COMMENT '法定内労働分',
+  overtime_minutes      INT NOT NULL DEFAULT 0 COMMENT '時間外労働分（法定休日を含まない）',
+  holiday_minutes       INT NOT NULL DEFAULT 0 COMMENT '法定休日労働分',
+  late_night_minutes    INT NOT NULL DEFAULT 0 COMMENT '深夜労働分',
+  work_type             VARCHAR(30) NOT NULL DEFAULT '通常' COMMENT '勤務区分',
+  workplace_type        VARCHAR(30) COMMENT '勤務地区分',
+  source                VARCHAR(20) NOT NULL DEFAULT 'manual' COMMENT 'manual/system/freee/import',
+  source_external_id    VARCHAR(200) COMMENT '外部sourceの冪等ID',
+  status                VARCHAR(20) NOT NULL DEFAULT '入力中' COMMENT '勤怠行状態',
+  remarks               VARCHAR(500) COMMENT '備考',
+  version               INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag          TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_employee_attendance_source (source, source_external_id),
+  INDEX idx_employee_attendance_engineer_date (engineer_id, work_date),
+  INDEX idx_employee_attendance_month (work_date, engineer_id),
+  INDEX idx_employee_attendance_scope (legal_entity_id, organization_id, work_date),
+  CONSTRAINT chk_employee_attendance_source CHECK (
+    (source IN ('manual', 'system') AND source_external_id IS NULL)
+    OR (source IN ('freee', 'import') AND source_external_id IS NOT NULL)
+  ),
+  CONSTRAINT chk_employee_attendance_minutes CHECK (
+    break_minutes >= 0 AND regular_minutes >= 0 AND overtime_minutes >= 0
+    AND holiday_minutes >= 0 AND late_night_minutes >= 0
+  ),
+  CONSTRAINT fk_employee_attendance_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_employee_attendance_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+  CONSTRAINT fk_employee_attendance_calendar FOREIGN KEY (work_calendar_id) REFERENCES m_work_calendar(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='雇用勤怠日次原簿';
+
+CREATE TABLE IF NOT EXISTS t_attendance_month (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id           BIGINT NOT NULL COMMENT '要員ID',
+  legal_entity_id       BIGINT COMMENT '法人ID',
+  organization_id       BIGINT COMMENT '組織ID（scope snapshot）',
+  work_month            DATE NOT NULL COMMENT '対象月（月初）',
+  scheduled_minutes     INT NOT NULL DEFAULT 0 COMMENT '所定分',
+  worked_minutes        INT NOT NULL DEFAULT 0 COMMENT '実働分',
+  regular_minutes       INT NOT NULL DEFAULT 0 COMMENT '法定内労働分',
+  overtime_minutes      INT NOT NULL DEFAULT 0 COMMENT '時間外労働分',
+  holiday_minutes       INT NOT NULL DEFAULT 0 COMMENT '法定休日労働分',
+  late_night_minutes    INT NOT NULL DEFAULT 0 COMMENT '深夜労働分',
+  leave_minutes         INT NOT NULL DEFAULT 0 COMMENT '休暇分',
+  status                VARCHAR(20) NOT NULL DEFAULT '入力中' COMMENT '入力中/提出済/承認済/差戻し/締め済',
+  submitted_at          DATETIME COMMENT '提出日時',
+  submitted_by          BIGINT COMMENT '提出者',
+  approved_at           DATETIME COMMENT '承認日時',
+  approved_by           BIGINT COMMENT '承認者',
+  closed_at             DATETIME COMMENT '締め日時',
+  closed_by             BIGINT COMMENT '締め担当者',
+  close_reason          VARCHAR(500) COMMENT '再open等の理由',
+  version               INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag          TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_attendance_month_engineer (engineer_id, work_month),
+  INDEX idx_attendance_month_scope (legal_entity_id, organization_id, work_month),
+  CONSTRAINT chk_attendance_month_month_start CHECK (DAYOFMONTH(work_month) = 1),
+  CONSTRAINT chk_attendance_month_minutes CHECK (
+    scheduled_minutes >= 0 AND worked_minutes >= 0 AND regular_minutes >= 0
+    AND overtime_minutes >= 0 AND holiday_minutes >= 0 AND late_night_minutes >= 0
+    AND leave_minutes >= 0
+  ),
+  CONSTRAINT fk_attendance_month_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_attendance_month_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='雇用勤怠月次snapshot';
+
+CREATE TABLE IF NOT EXISTS t_leave_request (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id           BIGINT NOT NULL COMMENT '要員ID',
+  legal_entity_id       BIGINT COMMENT '法人ID',
+  organization_id       BIGINT COMMENT '申請時組織scope',
+  leave_type            VARCHAR(30) NOT NULL COMMENT '有給/半休/時間休/代休/欠勤/特別休暇',
+  start_date            DATE NOT NULL COMMENT '休暇開始日',
+  end_date              DATE NOT NULL COMMENT '休暇終了日',
+  start_time            TIME COMMENT '時間休開始時刻',
+  end_time              TIME COMMENT '時間休終了時刻',
+  requested_minutes     INT NOT NULL COMMENT '申請分',
+  reason                VARCHAR(500) COMMENT '理由',
+  status                VARCHAR(20) NOT NULL DEFAULT '申請中' COMMENT '申請中/承認済/却下/取消',
+  approval_request_id   BIGINT COMMENT 'approval engine request ID',
+  version               INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_by            BIGINT COMMENT '申請者',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag          TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  INDEX idx_leave_request_engineer_period (engineer_id, start_date, end_date),
+  INDEX idx_leave_request_status (status),
+  INDEX idx_leave_request_approval (approval_request_id),
+  CONSTRAINT chk_leave_request_period CHECK (start_date <= end_date),
+  CONSTRAINT chk_leave_request_minutes CHECK (requested_minutes > 0),
+  CONSTRAINT fk_leave_request_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_leave_request_organization FOREIGN KEY (organization_id) REFERENCES m_organization_unit(id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
+  CONSTRAINT fk_leave_request_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='休暇申請';
+
+CREATE TABLE IF NOT EXISTS m_overtime_agreement (
+  id                                  BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id                     BIGINT NOT NULL COMMENT '法人ID',
+  valid_from                          DATE NOT NULL COMMENT '協定年度起算月（月初）',
+  valid_to                            DATE COMMENT '協定適用終了日',
+  special_clause                     TINYINT NOT NULL DEFAULT 0 COMMENT '特別条項有無',
+  normal_month_limit_minutes         INT COMMENT '法人別 月時間外上限分',
+  normal_year_limit_minutes          INT COMMENT '法人別 年時間外上限分',
+  special_year_limit_minutes         INT COMMENT '法人別 特別条項年上限分',
+  total_month_limit_minutes          INT COMMENT '法人別 月合計上限分',
+  multi_month_average_limit_minutes  INT COMMENT '法人別 複数月平均上限分',
+  exceed_month_count_limit           INT COMMENT '法人別 45時間超月数上限',
+  warning_threshold_percent           INT COMMENT '法人別 予兆閾値(%)',
+  warning_recipients                  VARCHAR(100) COMMENT '法人別通知先',
+  config_json                         TEXT COMMENT 'その他協定設定（未知値を推測して列化しない）',
+  version                             INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at                          DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at                          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag                        TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_overtime_agreement_period (legal_entity_id, valid_from),
+  INDEX idx_overtime_agreement_lookup (legal_entity_id, valid_from, valid_to),
+  CONSTRAINT chk_overtime_agreement_month_start CHECK (DAYOFMONTH(valid_from) = 1),
+  CONSTRAINT chk_overtime_agreement_period CHECK (valid_to IS NULL OR valid_from <= valid_to),
+  CONSTRAINT chk_overtime_agreement_limits CHECK (
+    (normal_month_limit_minutes IS NULL OR normal_month_limit_minutes >= 0)
+    AND (normal_year_limit_minutes IS NULL OR normal_year_limit_minutes >= 0)
+    AND (special_year_limit_minutes IS NULL OR special_year_limit_minutes >= 0)
+    AND (total_month_limit_minutes IS NULL OR total_month_limit_minutes >= 0)
+    AND (multi_month_average_limit_minutes IS NULL OR multi_month_average_limit_minutes >= 0)
+    AND (exceed_month_count_limit IS NULL OR exceed_month_count_limit >= 0)
+    AND (warning_threshold_percent IS NULL OR warning_threshold_percent BETWEEN 0 AND 100)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='法人別36協定';
+
+CREATE TABLE IF NOT EXISTS t_overtime_followup (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id           BIGINT NOT NULL COMMENT '要員ID',
+  period_month          DATE NOT NULL COMMENT '判定対象月（月初）',
+  warning_code          VARCHAR(50) NOT NULL COMMENT '警告コード',
+  status                VARCHAR(20) NOT NULL DEFAULT '未対応' COMMENT '未対応/通知済/対応中/完了',
+  notified_at           DATETIME COMMENT '通知日時',
+  health_action_status  VARCHAR(30) COMMENT '健康対応状態（診療詳細は保存しない）',
+  version               INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag          TINYINT NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_overtime_followup (engineer_id, period_month, warning_code),
+  INDEX idx_overtime_followup_period (period_month, status),
+  CONSTRAINT chk_overtime_followup_month_start CHECK (DAYOFMONTH(period_month) = 1),
+  CONSTRAINT fk_overtime_followup_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='時間外コンプライアンスfollow-up';
 
 -- ============================================================
 -- DDL完了

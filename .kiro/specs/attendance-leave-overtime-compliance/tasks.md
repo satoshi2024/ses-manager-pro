@@ -10,7 +10,7 @@
 > 社労士確認待ちではない。実装は同書の値でそのまま進める。確認結果がずれた場合は同書§4の手順で変更する
 > （多くは`/system-config`の値変更だけで済む）。**閾値をコードへ直書きしないこと。**
 >
-> **Migration**: 本specの予約番号は **V83**。order(V80/V81)のmerge後、dispatch(V82)と並行可。
+> **Migration**: 本specの正式migrationは **V83**。order(V80/V81)のmerge後、dispatch(V82)と並行実装可。merge/applyはV82後。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [x] 0. source matrixと法人別36協定の棚卸し
@@ -30,7 +30,9 @@
     法定休日の曜日が全法人分そろっているか未確認と明記されていること、
     source matrixが既存work recordとの境界を含むこと、`git diff --check` exit 0。
 
-- [ ] F1. calendar/attendance/month/leave/agreement DDL
+> S11の正式migrationは **V83**。V82未merge時点でも実装・定向testは進めるが、V83のmerge/applyはV82後に行う。
+
+- [x] F1. calendar/attendance/month/leave/agreement DDL
   - **Objective**: 社員の日別出退勤・休憩・勤務区分を分単位で登録でき、法人/組織/個人別の勤務カレンダーを持てる。
     月次状態が入力中→提出済→承認済→締め済で進み、締め済みは管理承認なしに変更できない。
   - **実装ガイダンス**: **V83**/V1/H2(`sql/schema-attendance-h2.sql`)/MySQL smoke、
