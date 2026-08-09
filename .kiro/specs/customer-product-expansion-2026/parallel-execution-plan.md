@@ -61,13 +61,13 @@ Wave 4: AI feedback
 | 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V75〜V79 | S07正式migration（承認DDL/menu/SLA/round・participant・outbox）。Contract/Invoice/BP payment共通経路を変更 |
 | 2-A | order（T054〜T059）単独 | approval完了 | V80＋V81修復 | 契約・請求状態機械の基礎。V80は変更せずV81を順方向適用 |
 | 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order独立Review合格、G2/G6確定 | V84 / V83（S11実在） | Contract担当メソッドと雇用勤怠テーブルを分離。V82は欠番 |
-| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V85 | proposal/contract/availabilityを統合参照 |
-| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V86→V87 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
-| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V88 | Freee adapter、invoice、BP paymentを変更 |
-| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V89 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
-| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V90 | 学習指標の母集団とPII境界を先に固定 |
+| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V92 | proposal/contract/availabilityを統合参照 |
+| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V93→V94 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
+| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V95 | Freee adapter、invoice、BP paymentを変更 |
+| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V96 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
+| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V97 | 学習指標の母集団とPII境界を先に固定 |
 
-> **採番の正本は `README.md` の予約表**であり、S07の正式migrationはV75〜V79、S09はV80＋V81（R10順方向修復）、S10=V84、S11=V83、S12〜S17=V85〜V90である。CI/TestcontainersでV83の実適用を確認したため、V82は欠番として保持する。永続環境は個別read-only証跡をpacketへ記録し、着手時は必ず`db/migration`の実ファイルを再確認する。
+> **採番の正本は `README.md` の予約表**であり、S07の正式migrationはV75〜V79、S09はV80＋V81（R10順方向修復）、S10=V84、S11=V83、S12〜S17=V92〜V97である。CI/TestcontainersでV83の実適用を確認したため、V82は欠番として保持する。S11方式A追補（R2-P1-02）のV91は2026-08-09に発注者割当で実在し、S12〜S17の予約はV92〜V97へ繰り上げ済みである。永続環境は個別read-only証跡をpacketへ記録し、着手時は必ず`db/migration`の実ファイルを再確認する。
 > 上表のmerge順は計画値なので、着手時は必ず `db/migration` の実ファイルを再確認する。
 > S07はV75（承認DDL）、V76（承認menu）、V77（SLA開始時刻）、V78（round/participant/version）、V79（B1 notification outbox）を使用する。
 > **V72はV59と同じ永久欠番**とする。Flywayは `out-of-order` を有効化していないため、

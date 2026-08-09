@@ -14,7 +14,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V85
+- Migration: V92
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 - 期待するtask順: F1→F2→(A1 || B1 || B2)→M

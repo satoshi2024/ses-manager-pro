@@ -53,12 +53,12 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | **PASS**・code/evidence Head `7caa5e6`・Packet/current merged HeadはPacket同期commit（main=origin/main）・R12 P2はprovenance記述のみ |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V84** | 仕様済み・G2開発方針決定済み（V83実在を受けて繰上げ） |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V83** | 仕様済み・G6決定済み |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V85** | 仕様済み |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V86** | 仕様済み・G3決定済み |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V87** | 仕様済み |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V88** | 仕様済み・G4決定済み |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V89** | 仕様済み・G5決定済み |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V90** | 仕様済み |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V92** | 仕様済み |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V93** | 仕様済み・G3決定済み |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V94** | 仕様済み |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V95** | 仕様済み・G4決定済み |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V96** | 仕様済み・G5決定済み |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V97** | 仕様済み |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
@@ -71,8 +71,10 @@ V59とV72は永久欠番として保持する。
 
 S07の既存承認DDLはV75、承認menu seedはV76、`current_step_started_at`追加はV77であり、これらは変更不可とする。
 S07正式migrationはV75〜V79とする。内訳はV75（承認DDL）、V76（承認menu seed）、V77（SLA開始時刻）、V78（round/participant/version）、V79（B1 notification outbox）である。V79をS09以降へ再利用せず、S09〜S17の予約は
-S09=V80（既適用）＋V81（R10順方向修復）、S10=V84、S11=V83、S12=V85、S13=V86、S14=V87、S15=V88、S16=V89、S17=V90とする。V82はV83実在後に予約されていたため欠番として保持し、後から補填しない。
+S09=V80（既適用）＋V81（R10順方向修復）、S10=V84、S11=V83、S12=V92、S13=V93、S14=V94、S15=V95、S16=V96、S17=V97とする。V82はV83実在後に予約されていたため欠番として保持し、後から補填しない。
 過去migrationの編集やout-of-order適用は禁止する。
+
+2026-08-09にS11の方式A追補（R2-P1-02）へ発注者割当の**V91**を実在させたため、S12〜S17の予約をV92〜V97へ繰り上げた。V91は`t_employee_attendance_break`（休憩区間）専用であり、S12〜S17が流用しない。
 
 2026-08-09時点でS09はcode/evidence Head `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`を対象とし、Packet同期commit（`git log -1 -- <path>`で解決、`main`=`origin/main`）でRound 12 independent diff reReviewのPASS記録をmerge済みである。R12-P2-01はPacket provenance記述のみである。
 S10/S11は並行dispatch可能。S12はS10/S11双方のPASS後に開始し、Wave 2は解放する。
