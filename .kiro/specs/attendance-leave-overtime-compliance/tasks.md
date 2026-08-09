@@ -13,7 +13,7 @@
 > **Migration**: 本specの予約番号は **V83**。order(V80/V81)のmerge後、dispatch(V82)と並行可。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. source matrixと法人別36協定の棚卸し
+- [x] 0. source matrixと法人別36協定の棚卸し
   - **Objective**: 雇用勤怠の正が本システムであることがsource matrixとして確定し、
     法人ごとの36協定の実内容（特別条項の有無、上限、起算日、法定休日の曜日）と適用除外者が棚卸しされる。
     F1が`m_overtime_agreement`へ登録すべき行を、推測せずに決められる状態にする。

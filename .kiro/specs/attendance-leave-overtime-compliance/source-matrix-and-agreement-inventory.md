@@ -3,7 +3,7 @@
 - 出所: `attendance-leave-overtime-compliance` task 0（T067）
 - 実行基線: `.kiro/audits/2026-08-01-attendance-parallel-track-plan.md` §4 トラックB1、§5 開始条件、§8.4 開工対話
 - 本書はproduction codeを1行も変更しない。成果物は本文書のみ。
-- 参照した確定文書: `requirements.md`（origin/main）, `design.md`（origin/main）, `overtime-rules.md`（origin/main）
+- 参照した確定文書: `requirements.md`、`design.md`、`overtime-rules.md`（いずれも実行基線 `5e29f39`）
 - **時間外の計算ルール自体（値・境界・優先順位）は `overtime-rules.md` で確定済みであり、本書では決め直さない。**
   本書が集めるのは、その確定ルールへ流し込む法人別データである。
 
@@ -11,17 +11,17 @@
 
 ## 0. 着手前検証（実行基線 §1）の結果
 
-`git fetch origin main` 後の `origin/main` HEAD = `e09060c`（実行基線作成時点の `f582f9e` から進行済み）。
+T067着手時の `main` / `origin/main` HEAD = `5e29f39c96da85b29a0fe881326d979896a595d0`。
 
 | 検証項目 | 結果 |
 |---|---|
-| (2) 17spec台帳の状態 | attendance = `NOT READY`、task `T067〜T074`（0/8）。計画書§2 row 11と一致 |
-| (3) 実適用済みmigration最新 | `V74`（CRM権限seed）。計画書の記載と一致 |
-| (4) task消化数 | approval 0/7, CRM 6/0, order 0/6, dispatch 0/7, attendance 0/8。計画書§2と矛盾なし |
-| (5) 採番予約 | attendanceは`V78`予約、直近適用は`V74`。V75〜V84の繰り上げ記載と矛盾なし |
-| §5 共通開始条件 | 全て充足（新規branchはorigin/main由来、触ってよいファイルの範囲内、migration新規作成なし） |
-| §5 B1固有条件 | production code変更なし（本書のみ追加） |
-| §6 停止条件 | 該当なし（DDL不要、触ってよいファイル外の変更不要、S07/S09は未着手のまま） |
+| (2) 17spec台帳の状態 | attendance = `IN PROGRESS`、T067完了・T068〜T074未着手。中央台帳と同期予定 |
+| (3) 実適用済みmigration最新 | `V81`（order acceptance remediation）。`V82`/`V83`は未作成 |
+| (4) 先行spec | order-acceptance-workflow = `PASS`、merge済み。T067の先行条件を充足 |
+| (5) 採番予約 | attendanceは`V83`予約。実適用最新V81で衝突なし。V59/V72は永久欠番 |
+| §5 共通開始条件 | 全て充足（production code変更なし、migration新規作成なし、G6決定済み） |
+| §5 B1固有条件 | production code変更なし（本書のみ更新） |
+| §6 停止条件 | 該当なし（DDL不要、触ってよいファイル外の変更不要。法人別資料未入手は本番release/M gate） |
 
 **矛盾は検出されなかったため、着手する。**
 
@@ -92,7 +92,8 @@ design.md §1の`m_work_calendar` / `m_work_calendar_day`、および `overtime-
 > **法定休日の曜日が全法人分そろっているか: そろっていない（未確認）。**
 > `overtime-rules.md` §1.2 のとおり、法定休日労働とそれ以外の所定休日労働はルール1/2/3への算入可否が異なるため、
 > この列が未確定のままではF1のcalculator入力（`overtimeMinutes`か`totalMinutes`か、design §5.2の3点目）を
-> 法人別に正しく組み立てられない。F1着手前にHRが就業規則から確定する必要がある。
+> 法人別に正しく組み立てられない。F1はスキーマと未確定値をfail-closedで扱う構造を先行実装できるが、
+> HR確認が完了するまで法人別カレンダーの確定値をseedせず、適合判定を本番締めへ開放しない。
 
 ---
 
@@ -151,7 +152,8 @@ A2着手前に確定させる必要がある（本書のスコープ外、F1/A2�
 **この表がF1に対して意味すること**: 現時点で`m_overtime_agreement`へ登録できる行はゼロである。
 `overtime-rules.md`§3の解決順（1. 法人別協定 → 2. `m_system_config`のシステム既定 → 3. コード定数）に従えば、
 HR確認が完了するまでは全法人が第2段（システム既定）または第3段（コード定数=Tier A値）で暫定判定され、
-**判定不能のfindingとして扱う**べきであり、「協定なし＝適合」と扱ってはならない。
+**判定不能のfindingとして扱う**べきであり、「協定なし＝適合」と扱ってはならない。これはF1/F2の
+着手を止める条件ではなく、判定結果と本番締めをfail-closedにする条件である。
 
 ### 5.3 HRへの依頼事項（本書の主目的）
 
@@ -191,9 +193,9 @@ HRが個別に確定した対象者リストをそのまま`t_engineer`側の新
 | # | finding | 影響先 | 対応 |
 |---|---|---|---|
 | F-1 | `m_legal_entity`（法人マスタ）が未実装。法人の実数・名称一覧が本システムのデータから判定不能 | 5章 全体、F1のDDL・seed | HRに法人一覧の提示を依頼（5.3） |
-| F-2 | 全法人で36協定書が未入手（協定の有無すら未確認） | F1の`m_overtime_agreement`seed | HR/各法人へ照会。入手まで判定不能としてfinding運用 |
-| F-3 | 法定休日の曜日が全法人で未確認 | F2のcalculator入力、`m_work_calendar_day.type` | 就業規則から確認（3章） |
-| F-4 | 勤務区分（work_type）の実運用がHR未確認 | F1のENUM設計（2章） | 就業規則突合 |
+| F-2 | 全法人で36協定書が未入手（協定の有無すら未確認） | F1の`m_overtime_agreement` seed、F2の判定結果 | HR/各法人へ照会。入手まで判定不能findingとして保持し、F1/F2の開発は継続 |
+| F-3 | 法定休日の曜日が全法人で未確認 | F2のcalculator入力、`m_work_calendar_day.type` | 就業規則から確認。確認前は法人別カレンダーを確定せず、本番締めを開放しない |
+| F-4 | 勤務区分（work_type）の実運用がHR未確認 | F1の勤務区分モデル | 就業規則突合。未確認値を法人の既定値にしない |
 | F-5 | 休暇残数の正（本システム/外部）が全種別・全法人で未確認 | A2の実装分岐（4章） | HR確認 |
 | F-6 | 適用除外者（管理監督者）を特定する構造化フラグが存在しない。対象者一覧も未確認 | F1のフラグ追加、F2の非判定処理（6章） | HRから個別リスト取得 |
 
@@ -214,12 +216,21 @@ F1/F2は上記が確定するまで該当法人・該当者を「判定不能」
 
 ---
 
-## 9. F1（DDL, V78）への申し送り
+## 9. F1（DDL, V83）への申し送り
 
-- 本書5.1のとおり、`m_overtime_agreement`は現時点で挿入できる法人別行を持たない。V78のseedは
+- 本書5.1のとおり、`m_overtime_agreement`は現時点で挿入できる法人別行を持たない。V83のseedは
   `overtime.*`のシステム既定値（`overtime-rules.md`§1/§2のconfig key、design.md F1ガイダンス）のみとし、
   法人別行の投入は本書5.2〜5.3のHR確認が完了してから別途行う。
 - `work_type`・法定休日曜日・休暇残数の正・適用除外者フラグは、いずれも値/運用が未確定（2, 3, 4, 6章）。
   F1のDDL自体（カラム定義）は`design.md`§1の型（分の整数、NULL/0の区別等）に従って進めてよいが、
   ENUM値や既定値の**中身**を本書の確認未了のまま確定しないこと。
 - 本書は`overtime-rules.md`の値・境界・優先順位を一切変更しない。F1/F2の実装は同書をそのまま参照する。
+
+## 10. 開発着手と本番release gateの区分
+
+- G6と`overtime-rules.md`の確定値により、T067完了後のF1/F2実装は開始できる。法人別36協定・就業規則・
+  社労士確認が未入手であることを理由に、開発を停止しない。
+- ただし、協定行がない法人はcalculatorで判定不能findingを出し、既定値で適合にしない。法人別休日・勤務区分・
+  適用除外者が未確認のまま、判定結果を本番締めの適合証明として扱わない。
+- HR/発注者の確認結果、法人別協定の登録、法定休日曜日、適用除外者の確定、社労士Reviewは、T074/Mの自己PASSではなく
+  本番release gateとして別管理する。
