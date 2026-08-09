@@ -81,10 +81,17 @@
   - [x] R10-INVOICE-UI: V81/V1/H2へ DB CHECK 制約 chk_contract_acceptance_exemption を追加、PO警告の自己除外、UIアクセシビリティ対応（aria-labelledby, aria-label, explicit id） (R9-P1-06, R9-P2-03)
   - [x] R10-M: 実MySQL環境での見積〜請求閉ループBrowser Demo証跡（HAR/console/PNG）、DB通知dedupe/KPI境界自動テスト追加、L4全量実行・git diff --checkパス (R9-P1-10, R9-P2-04)
 
+- [x] Remediation (Round 11 FAIL指摘対応)
+  - [x] R11-P1-01: `.tmp-ui-scale-r3` の未登録dirty gitlinkをroot indexから除去し、nested repositoryは削除せず`.gitignore`で再取り込みを防止
+  - [x] R11-P1-02: Document archive scopeの全検収行Javaロードを廃止し、workMonth/as-ofで許可されたcontract IDをSQL母集団へ渡してdocument IDを絞り込み
+  - [x] R9-P1-09: DocumentStorage put前のrollback compensation登録、transaction中の失敗cleanup、Local storage partial file cleanupを追加
+  - [x] R9-P1-10: 注文画面のfilter/table cardを分離し、390pxのfilter開閉・sidebar開閉・modal/reload/back/keyboard/double-click証跡を再取得
+  - [x] R11-P2-01: `ConcurrentSubmitReopenTest` の競合判定を409 `BusinessException`かつ許容message keyに限定し、その他Throwableをunexpectedとして失敗扱い
+  - [x] R11-M: 修正Head `67de0d4`で定向test 30/0/0/0・9/0/0/0・3/0/0/0、L4 282/1582/0/0/0、実MySQL smoke、Browser evidence、`git diff --check`を確認
+
 - [x] M. 全通し
   - **Objective**: 見積→注文→契約→勤怠→検収→請求がIDで追跡でき、
     既存のdocument/approval/contract/invoice機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
     document/approval回帰、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
   - **Demo**: 見積→注文→契約→勤怠→検収→請求。各段階のIDが次段階から辿れることを提示。
-

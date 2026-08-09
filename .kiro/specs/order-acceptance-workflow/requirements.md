@@ -36,4 +36,3 @@
 - 未検収契約から請求不可、検収不要契約は理由付きで可能。
 - archive検索、`file.download` 権限、GET download監査、desktop/390px、アクセシビリティ（キーボード操作・label・aria-live）を満たす。
 
-

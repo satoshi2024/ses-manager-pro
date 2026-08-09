@@ -29,7 +29,7 @@
 | 6 | 1 | `bp-company-master-procurement-compliance` | T034〜T040 | `PASS` | R06 Round 5 = **CONDITIONAL PASS（P0=0/P1=0/P2=13）**。R2〜R4の全指摘 `VERIFIED_CLOSED`。migration実績はV70/V71（V71は`information_schema`判定付きストアドプロシージャで State A/B/C 全DB環境へ冪等適用） | S06 bp-company-master-procurement-compliance 実装 | Base `ce1ccd4` → Head `4d34212`（台帳記録`ef8ddd7`まで含めて`main` / `origin/main` merge済み） | L4全量 1169/0/0/7 BUILD SUCCESS。`MigrationScriptIntegrityTest` 17/17、`SpecDispatchConsistencyTest` 8/8。本番前release gate G-1〜G-5（実MySQL fresh/legacy smoke、DELIMITER検証、desktop/390px Demo、G2外部専門家Review）を継続管理 | R06 PASS成就。S07（approval）は着手可能になった。S07は`PASS`確定済み、S09=`READY`、Wave 2=`解放`。S07正式migrationはV75〜V79（V72は永久欠番） |
 | 7 | 1 | `approval-workflow-internal-control` | T041〜T047 | **`PASS`** | R4-P1-01（route decision source V79.1）、B1/T046、M/T047を`[x]`化。APPLICANT_MANAGERを含む5 sourceの境界・異常系回帰**47/0/0/0**、request→DB `route_snapshot_json`永続化→manager変更後の承認者不変を確認。V79.1実MySQL fresh/legacy、履歴、checksum/FK/CHECK/index assertion、専用回帰でpartial/repair/rollbackと、`v79_1-fk-actions-forward-repair.sql`の**DROP後・FK追加後・CHECK追加後**各partial状態からの再開可能な再実行（`FlywayV79_1RepairSmokeTest` **2/0/0/0 / BUILD SUCCESS**）、shared JDBCの複数JVM ShedLock/claim（`OperationalBoundaryMySqlIntegrationTest` **3/0/0/0**）、commit前例外時実DB rollback、Webhook loopback（**1/0/0/0**）、H2 lock warning回帰（**3/0/0/0**）を確認。**5業務desktop/390px browser Demo（10経路）を実Chrome `150.0.7871.187`で通し**、申請者単独確定不可・申請→承認→適用・二重click/retryでも業務操作1回（申請1件・APPROVE action 1件・retry後再適用なし）を証拠（`evidence/browser-m/` スクリーンショット40枚＋JSON 11ファイル）として記録。full application instance cron・外部providerは要件外としてN/A化。CI相当L4は**1471/0/0/0、BUILD SUCCESS、skip 0、script exit 0**。S07正式migrationは**V75/V76/V77/V78/V79**、R1.2/R1.3 patchは**V79.1**、S09=V80＋V81修復、S10〜S17=V82〜V89（V72永久欠番、out-of-orderなし）。code baseline Head=`68fbbba`（23 commits/219 paths）、初回Review evidence commit=`2978461`（24 commits/272 paths、履歴）、現行Review evidence/result commit=`646dbda`（27 commits/274 paths）と分離。独立Review（`fa003f7`）で文書整合を確認しPASS確定 | S07 approval-workflow-internal-control 実装 | Review Base `5d228d2` → **code baseline Head** `68fbbba4dff8255b3a745ce61e73e686a78bef3e`（`68fbbba`時点で`main`/`origin/main`/`origin/HEAD`一致＝当時値）。Base→Headは**23 commits / 219 files / +11639/-337**。**初回Review evidence commit** `2978461be1fd36334a00a97fabe37f5613e374a4`（Base→commit **24 commits / 272 paths**、履歴）と**現行Review evidence/result commit** `646dbdafb3c6b77ec0e3b7bb581392f50be53491`（Base→commit **27 commits / 274 paths**、seed修正＋browser evidence再生成）はcode baseline Headと分離して管理する（e88351d時点の基準はBase→**26 commits / 274 paths / +16873/-342**）。最終確認時worktreeは**clean**。現在の文書同期commitは`git log -1 -- <path>`で`591b1de`以降へ解決され、68fbbbaのHEAD/origin一致（当時値）と矛盾しない。Packet文書は本流`main`の履歴としてcommitされる（専用の独立Packetブランチ/リポジトリは持たない）。文書自身のcommit（例: `d13e726`は文書同期commit）は`git log -1 -- <path>`で解決するprovenanceとして記載し、code baseline Head（`68fbbba`）や現行Review evidence/result commit（`646dbda`）として自己参照しない。旧「12ファイルdirty」記述は`68fbbba`でcommit済みとなったため削除した | **PASS**。R4-REVIEW-01/02/03/04とR4-P1-01は全てVERIFIED_CLOSED、B1/T046・M/T047は`[x]`。V79.1 partial/repair/rollbackとrunbook再開可能性、複数JVM ShedLock/claim、commit前rollback、Webhook loopback、5業務desktop/390px browser Demo（10経路）、CI相当L4 **1471/0/0/0・zero-skipped**を全て確認。full application instance cron・外部providerはrequirements/design上で正式要求されないためN/A化。独立Reviewは219-path inventoryと`evidence/browser-m/`を対象に最終確認する | PASS確定済み。S09=`REVIEW`（独立再Review待ち）、S10=`NOT READY`、Wave 2停止。S09以降の開始は各specの依存条件による |
 | 8 | 1 | `crm-contact-opportunity` | T048〜T053 | **`PASS`** | Round 8独立再ReviewでPASS確定。CRM-R5-P1-09（legacy NFKC backfill）・CRM-R5-P2-03（rollback順序）はVERIFIED CLOSED。T048〜T053全task完了、tasks.mdのM回帰も`[x]`化済み | S08 crm-contact-opportunity Round 7対応 | Base `94f95083f178b812caa43782a5e00d09a8d6f324` → Head `042bd0cfb8139466eb7199a7d625adfb181c8563`（`main` / `origin/main`） | Round 8: L4全量1,280/0/0/0（F0/E0/S0）、MySQL fresh/legacy/partial/repair全4経路成功、desktop/390px全role Demo（管理者・営業・マネージャー許可、HR・要員403）確認。P0=0/P1=0/P2=0、open release gate=0 | **PASS成就（S08）**。S07は`PASS`確定済み、S09=`READY`、Wave 2=`解放`。S07正式migrationはV75〜V79、V72は永久欠番のまま |
-| 9 | 2 | `order-acceptance-workflow` | T054〜T059 | **`REVIEW`** | R10 remediationを実装Head `e0bd72b` へ同期。V80は変更せずV81順方向修復を追加し、L4・Docker/MySQL・Browser証跡を提出。独立再Review完了までS10/S11/Wave 2は停止 | S09 order-acceptance-workflow Round 10 remediation | Base `23793ec` → code/evidence Head `e0bd72b`（実装Head） | R10 remediation Packetを再提出。L4 1578/0/0/0、Docker MySQL smoke 0 skipped、実ブラウザ実測あり。P0/P1/P2は独立再Reviewで再判定 | S09独立再ReviewでPacket・範囲外変更・rollbackを確認し、PASSまたは追加修正を確定 |
+| 9 | 2 | `order-acceptance-workflow` | T054〜T059 | **`REVIEW`** | R11 FAIL指摘をcode Head `67de0d4`へ反映し、Packet/ledger/READMEを同一code/evidence Headへ同期。V80は変更せず、S10/S11/Wave 2は独立再Review完了まで停止 | S09 order-acceptance-workflow Round 11 FAIL remediation | Base `23793ec` → code/evidence Head `67de0d4`（Packet文書同期commitは本流履歴で解決） | R9-P1-09/R9-P1-10再発、R11-P1-01/R11-P1-02/R11-P2-01を修正。L4 282/1582/0/0/0、Docker MySQL smoke、390px Browser証跡を提出。R11判定はP0=0/P1=4/P2=1、独立再Review待ち | S09独立再Reviewで現HeadのPacket・changed-files・scope/security・rollbackを確認し、PASS確定まで後続specを開放しない |
 | 10 | 2 | `dispatch-outsourcing-compliance-ledger` | T060〜T066 | `NOT READY` | order PASS、G2確定後S10。attendanceと並行可（現在S09修正中のため一時停止） |  |  |  | R10 PASS |
 | 11 | 2 | `attendance-leave-overtime-compliance` | T067〜T074 | `NOT READY` | order PASS、G6確定後S11。dispatchと並行可（現在S09修正中のため一時停止） |  |  |  | R11 PASS |
 | 12 | 2 | `staffing-capacity-planning` | T075〜T080 | `NOT READY` | dispatch/attendance PASS後S12 |  |  |  | R12 PASSでWave 2完了 |
@@ -147,23 +147,22 @@ L4全量 1,280/0/0/0（F0/E0/S0）、MySQL fresh/legacy/partial/repair全4経路
 - 番号7行（`approval-workflow-internal-control`）を`NOT READY`→`READY`へ更新した。採番はV75で確定のまま（V72は永久欠番）。
 - 追加のコード修正・再Reviewは不要。Wave 2はS07完了とその独立Review PASSまで引き続き未開始。
 
-## 2.6 S09 Round 10 remediation current Head correction（2026-08-09）
+## 2.6 S09 Round 11 FAIL remediation current Head correction（2026-08-09）
 
 上記のS09に関する過去記録は履歴として保持する。現行の正本は本節とS09の
-`order-acceptance-workflow/review-ledger.md` §1/§4であり、`1497305`を現行Headとして扱わない。
+`order-acceptance-workflow/review-ledger.md` §1/§2.6であり、`1497305`、`e0bd72b`を現行code/evidence Headとして扱わない。
 
-- **code/evidence Head**: `e0bd72b1021cd31dee7017b5e9f4dd475731259b`（`main` / `origin/main`）。
-  `1497305`以後に `4385621`、`e0bd72b` がmerge済みである。
+- **code/evidence Head**: `67de0d431bcd74e82ab17b9d1d7d67c6bd1a1287`（local `main`）。
+  `e0bd72b`以後にRound 11 FAIL対応の`67de0d4`を追加した。`origin/main`へのpush/mergeは未実施である。
 - **migration**: V80は`23793ec`からの内容を維持し、R10修復を順方向V81へ追加。S10以降の予約は
   V82, V83, V84, V85, V86, V87, V88, V89とする。V59/V72は永久欠番。
-- **current state**: `REVIEW`（実装者のR10 remediation Packet提出済み、独立再Review待ち）。
+- **current state**: `REVIEW`（R11 FAIL remediation Packet提出済み、独立再Review待ち）。
   S10/S11およびWave 2は停止継続。独立ReviewのPASSを先取りして記録しない。
-- **L4 evidence**: `verify-like-ci.ps1` 282 suites / 1578 tests / failures 0 / errors 0 / skipped 0、
-  script exit 0。Dockerを使用したMySQL smokeを含む。証跡はS09 review-ledgerと
-  `order-acceptance-workflow/evidence/round10/`に固定する。
-- **out-of-scope worktree**: `.tmp-ui-scale-r3` はindex上のgitlink
-  （`c2d9a4c0dbbfd99761982a33014aa48866fe2717`、`.gitmodules`なし）であり、S09のmain-tree差分へ
-  含めず、reset/delete/stageしない。独立subrepoのdirty file inventoryはS09 Packetへ記録する。
+- **L4 evidence**: Maven/Surefire最終report群で282 classes / 1582 tests / failures 0 / errors 0 /
+  skipped 0を確認し、Docker MySQL smokeを含む。外側監視のtimeoutでwrapper最終trailerは未取得だが、child完了後の全report集計とzero-skippedを確認した。
+  Browser evidenceはS09 review-ledger §2.6および`order-acceptance-workflow/evidence/`へ固定する。
+- **out-of-scope worktree**: `.tmp-ui-scale-r3`はroot indexから除去し、`.gitignore`へ追加した。nested repositoryは削除せずディスク上に保持する。
+  `.gitmodules`登録のないnested repo内部のdirty file inventoryはS09 main-tree変更対象外である。
 
 ## 3. 1specの状態遷移
 
