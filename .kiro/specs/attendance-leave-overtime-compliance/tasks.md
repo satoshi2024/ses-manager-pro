@@ -37,7 +37,7 @@
     **分の整数モデル**（浮動小数を使わない、design §1）、scope。
     `(source, source_external_id)`にUNIQUE。
     `scheduled_minutes IS NULL`（所定日でない）と`= 0`（所定日だが0分）を区別する（design §5.1）。
-    **同じV82で`overtime.*`のconfigをseedする**（`overtime-rules.md`§1/§2のconfig key全件）。
+    **同じV83で`overtime.*`のconfigをseedする**（`overtime-rules.md`§1/§2のconfig key全件）。
     seedは`INSERT IGNORE`で既存値を壊さない（V56の書き方に合わせる）。
     `m_overtime_agreement.valid_from`は**月初のみ許可**する制約を入れる（`overtime-rules.md`§2 #7）。
   - **テスト要件**: L1〜L3。期間/unique、締め済みの変更拒否、休暇との整合、

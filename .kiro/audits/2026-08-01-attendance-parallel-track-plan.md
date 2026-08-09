@@ -1,5 +1,10 @@
 # 2026-08-01 勤怠系並行トラック 実行計画
 
+> **SUPERSEDED（2026-08-09 / R11 Round 1）**: 本書は勤怠系先行トラックの履歴資料であり、現行の採番・状態・Review範囲の正本ではない。
+> 現行は`attendance-leave-overtime-compliance/tasks.md`、`customer-product-expansion-2026/spec-execution-ledger.md`、
+> `attendance-leave-overtime-compliance/review-ledger.md`を参照する。現行の実適用最新はV81、dispatchはV82、attendanceはV83、
+> B2 calculatorのmerge済み成果commitは`4488ba8`である。過去のV74/V78等の記載は履歴として保持するが、作業開始判断へ使用しない。
+
 - 目的: S02〜S17の進行を**遅らせずに**、勤怠系の是正と雇用勤怠の前半を並行着手する
 - 前提書: `parallel-execution-plan.md` §1（並行可の4条件）、`dependency-matrix.md` §2（共有ファイル）、
   `spec-execution-ledger.md`（状態の正本）、`.kiro/audits/2026-07-31-attendance-gap-analysis-and-plan.md`（背景）

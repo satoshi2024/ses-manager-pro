@@ -1,7 +1,7 @@
 # Source Matrix と法人別36協定 棚卸し（トラックB1 / T067）
 
 - 出所: `attendance-leave-overtime-compliance` task 0（T067）
-- 実行基線: `.kiro/audits/2026-08-01-attendance-parallel-track-plan.md` §4 トラックB1、§5 開始条件、§8.4 開工対話
+- 実行基線: `.kiro/audits/2026-08-01-attendance-parallel-track-plan.md` §4 トラックB1、§5 開始条件、§8.4 開工対話（同監査計画は現行ではsupersededの履歴資料）
 - 本書はproduction codeを1行も変更しない。成果物は本文書のみ。
 - 参照した確定文書: `requirements.md`、`design.md`、`overtime-rules.md`（いずれも実行基線 `5e29f39`）
 - **時間外の計算ルール自体（値・境界・優先順位）は `overtime-rules.md` で確定済みであり、本書では決め直さない。**
@@ -44,7 +44,7 @@ T067着手時の `main` / `origin/main` HEAD = `5e29f39c96da85b29a0fe881326d9798
 | source | 実体（現行コード上の根拠） | 正/非正 | 用途 | 雇用勤怠との関係 |
 |---|---|---|---|---|
 | 本システム（雇用勤怠、F1で新設） | `t_employee_attendance`, `t_attendance_month`（design.md §1、未実装） | **正** | 出退勤・休憩・法定内外時間・休日/深夜・勤務区分・勤務地の唯一の記録先 | — |
-| `t_work_record`（月次実績工数） | `V5__create_work_record_billing.sql:1-16`。`contract_id`単位、`actual_hours`（DECIMAL(5,1)）のみ、出退勤・休憩・深夜/休日区分を持たない | **非正（請求source）** | 契約の月次請求・支払金額算定 | 雇用勤怠と一致しない。差異は`R4`で比較表示するのみで、雇用勤怠を上書きしない |
+| `t_work_record`（月次実績工数） | 初期形は`V5__create_work_record_billing.sql:1-16`の`actual_hours DECIMAL(5,1)`。`V39__unify_work_hour_precision.sql:4`適用後の現行形は`DECIMAL(6,2)`。`contract_id`単位で、出退勤・休憩・深夜/休日区分を持たない | **非正（請求source）** | 契約の月次請求・支払金額算定 | 雇用勤怠と一致しない。差異は`R4`で比較表示するのみで、雇用勤怠を上書きしない |
 | `t_work_record_daily`（日次入力） | `V32__engineer_self_service.sql:23-36`。`work_record_id`（＝契約）に紐づき`engineer_id`列を持たない。`worked_hours`は自動計算値の保存であり出退勤の生ログではない | **非正（請求sourceの内訳）** | マイ勤怠画面での日次入力、月次実績工数の内訳 | 同上。**エンジニア単位ではなく契約単位のレコード**である点も雇用勤怠と構造的に異なる（1エンジニアが複数契約を掛け持つケースを想定していない設計） |
 | freee（給与・勤怠連携） | `t_freee_connection`, `t_freee_employee_link`（`V21__freee_payroll_integration.sql`）。現在は勤怠でなく給与連携のみ | **非正（downstream）** | 給与計算への連携 | tasks.md B1（freee/provider sync）で本システムの確定済み雇用勤怠をfreeeへ送信する片方向連携になる予定（design.md §3の`AttendanceProvider`基盤を利用）。freee側の値で本システムを上書きしない（design §5.4） |
 
@@ -112,8 +112,8 @@ design.md §1の`m_work_calendar` / `m_work_calendar_day`、および `overtime-
 
 **finding**: 休暇残数の正（本システム／外部人事システムのどちら）が全種別・全法人で未確認。
 design.md §5.1 は「本システムが正の場合のみ台帳を持つ」としており、外部が正の種別についてはR2.2のとおり
-残数不足でも申請を拒否しない仕様になる。この判定はHR確認結果次第でF1〜A2の実装に影響するため、
-A2着手前に確定させる必要がある（本書のスコープ外、F1/A2への申し送り）。
+残数不足でも申請を拒否しない仕様になる。A2は本システム正・外部正の両モードを実装し、未確認時は
+判定不能findingとして扱う。HR確認はA2の着手条件ではなく、本番締め/release前のgateである（F1/A2への申し送り）。
 
 ---
 

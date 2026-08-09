@@ -38,7 +38,7 @@
 | 15 | 3 | `accounting-payment-integration` | T094〜T101 | `NOT READY` | portal/order/BP/archive PASS、G4/G9方針後S15 |  |  |  | R15 PASS |
 | 16 | 3 | `jp-pint-digital-invoice` | T102〜T108 | `NOT READY` | accounting PASS、G5決定後S16 |  |  |  | R16 PASSでWave 3完了 |
 | 17 | 4 | `ai-feedback-learning` | T109〜T115 | `NOT READY` | CRM/proposal/staffing/outcome完了、G10方針後S17 |  |  |  | R17 PASSでroadmap完了 |
-| P1 | — | 勤怠系並行トラック（`.kiro/audits/2026-08-01-attendance-parallel-track-plan.md`） | S11 T067の先行分 + 勤怠導線是正 | **`IN PROGRESS`** | A1/A2/A3/B1完了（PR #51〜#54 merge済み）。migrationを1本も作成しておらず最新はV74のまま。B2「OvertimeComplianceCalculator + 境界fixture」は本行の登録をもって着手可 | 各トラック個別対話 | Head `c0ad9ee` | **R11の範囲に含める**（S11のF2前半を先行実装するため独立Reviewを別途行わない） | S11着手時にB1の棚卸しをF1へ、B2のcalculatorをF2へ引き継ぐ。B2は閾値解決の第2/第3段のみ実装し、第1段(`m_overtime_agreement`)はF1のDDL(V78)後に接続する |
+| P1 | — | 勤怠系並行トラック（`.kiro/audits/2026-08-01-attendance-parallel-track-plan.md`、**履歴・superseded**） | S11 T067の先行分 + 勤怠導線是正 | **`COMPLETED`**（A1/A2/A3/B1/B2） | A1/A2/A3/B1はmerge済み。B2は`4488ba8`（calculator・test・fixture計23ファイル）でmainへmerge済み。実適用最新はV81、dispatch予約V82、attendance予約V83 | S11 attendance-leave-overtime-compliance 実装 | B2 Head `4488ba8` → Packet/current merged Head `509bdb7`（main=origin/main） | **R11のReview範囲にT067とB2補助diffを含める**。B2はF1のV83 agreement接続前の第2/第3段まで完了 | T068着手前にV83の衝突を再確認し、T068でB2をV83 agreement接続へ引き継ぐ |
 
 ## 2.1 第十八次Review対応の最新実績（2026-07-29）
 

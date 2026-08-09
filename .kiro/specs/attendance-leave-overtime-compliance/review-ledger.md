@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `IN PROGRESS` |
+| state | `REVIEW` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | `93c1ac638e4672c8c4bf60421d1482e4ebc06949`（T067文書commit） |
-| merge | `unmerged` |
-| latest review | `未実施（T067完了後にR11開始）` |
-| verdict | `中間記録` |
-| issue count | `P0=0 / P1=0 / P2=0 / NOTE=0` |
-| next action | `T068着手前にmerge済みdb/migrationの最新とV83衝突を再確認する` |
+| head | `509bdb71da034b7f238dc21d0351766aac2b1b5d`（Packet/current merged Head、T067成果commitは`93c1ac6`） |
+| merge | `merged 509bdb7`（`main=origin/main`） |
+| latest review | `R11 Round 1 / 2026-08-09` |
+| verdict | `FIX`（実装者修正後、独立再Review待ち） |
+| issue count | `P0=0 / P1=2 / P2=3 / NOTE=0` |
+| next action | `R1 fix deltaのL0/direct regressionを実行し、R11へ再Reviewを依頼する` |
 
 本台帳は、T067のtask実装とその証拠をappend-onlyで管理する。T067は文書のみであり、production code・DDL・migrationは変更しない。
 
@@ -21,7 +21,11 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — | — | — | — | — |
+| attendance-leave-overtime-compliance-R1-P1-01 | P1 | T068 migration契約、handbook §4/§8 | `tasks.md:40`、中央ledger P1行 | active文書でV82/V78/V74、B2未着手に見える | dispatch衝突・calculator二重実装 | V83、`4488ba8`、V81/V82/V83、R11範囲へ更新 | `rg`採番整合、L0、`git diff --check` | FIXED_BY_IMPLEMENTER | `FIX_PENDING` | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P1-02 | P1 | 最新決定、`overtime-rules.md` §7、T074 | `review-ledger.md` Release Gate Register | ATT-GATE-05/06の期限がA2/F2/M着手を停止し得る | 開発/Mを不要に停止、未確認値の推測誘発 | 本番締め/release前へ変更、内部/外部両モードと判定不能findingを明記 | gate文書整合、L0 | FIXED_BY_IMPLEMENTER | `FIX_PENDING` | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P2-01 | P2 | handbook §9 Base/Head/merge固定 | `review-ledger.md:10-16,37` | Packetだけではcurrent merged Headを解決できない | Review範囲の誤認 | T067成果commitとPacket/current merged Headを分離 | `git rev-parse`、branch containment | FIXED_BY_IMPLEMENTER | `FIX_PENDING` | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P2-02 | P2 | T067 source inventory | `source-matrix-and-agreement-inventory.md:47` | `actual_hours`をV5初期形のまま記録 | 後続精度/差異比較を誤誘導 | V5初期`DECIMAL(5,1)`とV39現行`DECIMAL(6,2)`を併記 | schema inventory静的照合 | FIXED_BY_IMPLEMENTER | `FIX_PENDING` | 独立再Review待ち |
+| attendance-leave-overtime-compliance-R1-P2-03 | P2 | handbook §7 Test Evidence | `review-ledger.md:96` | L0 commandが再現不能 | 独立検証不能 | exact script/command、assert、対象commitを記録 | `verify-t067-l0.ps1` | FIXED_BY_IMPLEMENTER | `FIX_PENDING` | 独立再Review待ち |
 
 ## 3. Closed/Deferred Issue
 
@@ -34,17 +38,17 @@
 ```text
 - handbook version: v2.0
 - spec/tasks: attendance-leave-overtime-compliance / T067のみ
-- base/head/merge status: 5e29f39 / 93c1ac6 / 未merge（main上のT067文書commit）
-- changed files by task: source-matrix-and-agreement-inventory.md、tasks.md、spec-execution-ledger.md、本台帳
+- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → Packet/current merged Head`509bdb7`（fix deltaは本Headから開始、未merge）
+- changed files by task: source-matrix-and-agreement-inventory.md、tasks.md、spec-execution-ledger.md、attendance parallel audit、本台帳、`verify-t067-l0.ps1`
 - requirements/AC trace: 最重要境界、R1.3、R2.1/R2.2、R3.2/R3.4、R4.2、R5
-- migration state: 実適用最新V81、予約V83、V82/V83未作成、V59/V72永久欠番
-- test evidence: L0 PASS（文書整合チェック、`git diff --check` exit 0）
+- migration state: 実適用最新V81、dispatch予約V82、attendance予約V83、V82/V83未作成、V59/V72永久欠番。B2 merged commit=`4488ba8`
+- test evidence: original L0 PASS。fix deltaは`verify-t067-l0.ps1`のexact commandで再実行する
 - Demo evidence: source matrixと未確認事項のHR提示資料を作成。HR/法人資料の確認は未実施
 - skipped/unverified: 法人一覧、36協定書、就業規則、法定休日曜日、勤務区分、休暇残数の正、適用除外者
-- known issue IDs: release gate ATT-GATE-01〜ATT-GATE-06
+- known issue IDs: R1-P1-01〜R1-P2-03（全件FIXED_BY_IMPLEMENTER、独立再Review待ち）、release gate ATT-GATE-01〜ATT-GATE-06
 - out-of-scope: Java/HTML/JS/SQL、migration、V1/H2/entity、calculator、UI/API/provider
 - rollback: T067文書変更をrevertする。production data変更なし
-- requested verdict: intermediate（独立Reviewはspec全task合流後）
+- requested verdict: FIXED_BY_IMPLEMENTER / intermediate（R1 fix deltaの独立再Reviewを依頼）
 ```
 
 ## 5. Requirements Trace
@@ -105,16 +109,18 @@ skipはT067の文書L0には該当なし。Docker/MySQL/Maven/Node/browserはpro
 
 ## 9. Release Gate Register
 
-| gate ID | 未確認事項 | owner | 合格条件 | 影響 | 期限/実施時点 |
-|---|---|---|---|---|---|
-| ATT-GATE-01 | 法人の実数・名称 | 発注者/HR | 法人一覧を確定 | V83法人別行 | F1 seed前 |
-| ATT-GATE-02 | 法人別36協定書・特別条項・上限・起算月 | HR/各法人 | 協定書を確認し`m_overtime_agreement`へ登録 | calculator判定 | 本番締め前 |
-| ATT-GATE-03 | 法定休日・所定休日の曜日 | HR | 就業規則とcalendarを突合 | 休日労働算入 | 本番締め前 |
-| ATT-GATE-04 | 勤務区分の実運用 | HR | 就業規則とwork_typeを確定 | F1 model | F1実装後〜本番前 |
-| ATT-GATE-05 | 休暇残数の正 | HR | 種別・法人ごとに本システム/外部を確定 | A2申請可否 | A2着手前 |
-| ATT-GATE-06 | 管理監督者・適用除外者 | HR | 個別対象者を確定し構造化フラグへ反映 | F2非判定 | F2/M・本番前 |
+| gate ID | 未確認事項 | owner | 合格条件 | 未確認時の実装挙動 | 影響 | 期限/実施時点 |
+|---|---|---|---|---|---|---|
+| ATT-GATE-01 | 法人の実数・名称 | 発注者/HR | 法人一覧を確定 | 法人不明は判定不能finding。法人別行を推測seedしない | V83法人別行 | F1 seed/本番締め前 |
+| ATT-GATE-02 | 法人別36協定書・特別条項・上限・起算月 | HR/各法人 | 協定書を確認し`m_overtime_agreement`へ登録 | 協定行なしは判定不能finding。既定値で適合にしない | calculator判定 | 本番締め/release前 |
+| ATT-GATE-03 | 法定休日・所定休日の曜日 | HR | 就業規則とcalendarを突合 | 休日区分不明は判定不能finding。休日労働の算入を推測しない | 休日労働算入 | 本番締め/release前 |
+| ATT-GATE-04 | 勤務区分の実運用 | HR | 就業規則とwork_typeを確定 | 未確認の勤務区分を既定値へ寄せず、判定不能として扱う | F1 model | 本番締め/release前 |
+| ATT-GATE-05 | 休暇残数の正 | HR | 種別・法人ごとに本システム正/外部正を確定 | **内部正**は台帳/CASで不足を拒否し、**外部正**は参照のみで不足でも申請を拒否せず、正本未確認は判定不能findingとして記録する | A2申請可否 | **本番締め/release前** |
+| ATT-GATE-06 | 管理監督者・適用除外者 | HR | 個別対象者を確定し構造化フラグへ反映 | 対象者不明は適用除外と推測せず、判定不能finding。法定上限の適合確定をしない | F2非判定 | **本番締め/release前** |
 
-上記はT067の開発着手条件ではない。未確認時は判定不能findingを出し、本番締め・本番releaseをfail-closedにする。
+上記はT067/T068以降の開発着手条件でも、T074/Mの自己PASS条件でもない。A2は内部正/外部正の両モードを実装し、
+F2は協定行・休日区分・適用除外者・履歴が不足する場合にUNKNOWN/判定不能findingを出す。未確認時は本番締め・
+適合確定・自動通知をfail-closedにし、開発自体は継続する。
 
 ## 10. T067完了証跡（1行/Task）
 
@@ -133,3 +139,21 @@ skipはT067の文書L0には該当なし。Docker/MySQL/Maven/Node/browserはpro
 - independently executed tests: L0文書整合チェック、`git diff --check`（PASS）
 - verdict: T067完了（独立Review待ち。release gateは未達のまま管理）
 - ledger/central synchronization: tasks.md・中央台帳・本台帳はT067完了記録へ更新済み。現行台帳のprovenance同期commitは`git log -1 -- <path>`で解決する
+
+### Round 1 — 2026-08-09 — 独立Review入力
+
+- base/head: original `5e29f39` → Packet/current merged Head `509bdb7`（`main=origin/main`）
+- scope: T067文書差分、B2補助diff provenance、採番・gate・L0証拠
+- reviewed issue IDs: `attendance-leave-overtime-compliance-R1-P1-01`、`-P1-02`、`-P2-01`、`-P2-02`、`-P2-03`
+- new issue IDs: 上記5件。P0=0、P1=2、P2=3
+- independently executed tests: reviewer `git diff --check 5e29f39..509bdb7` PASS。PowerShell inline文書整合チェックはexact command不在
+- verdict: `NOT REVIEWABLE`（T068〜T074/V83/L4/Demo未提出。T067はfix必要）
+- ledger/central synchronization: P1/P2をFIXED_BY_IMPLEMENTERとして本Roundのfix deltaへ引き継ぐ
+
+### Fix Delta — 2026-08-09 — 主担当
+
+- base/head: `509bdb7` → fix commit（作業中）
+- scope: R1-P1-01〜R1-P2-03の最小修正のみ。T068本体は未開始
+- fixes: V83 config seed、B2=`4488ba8`/V81/V82/V83 provenance、ATT-GATE-05/06期限と内部/外部両モード契約、current merged Head固定、V39現行精度、L0 script
+- direct regression: `powershell -NoProfile -ExecutionPolicy Bypass -File .kiro/specs/attendance-leave-overtime-compliance/verify-t067-l0.ps1 -BaseCommit 509bdb7 -HeadCommit <fix-head>`（実行結果は下記へ追記）
+- verdict: `FIXED_BY_IMPLEMENTER`。独立再ReviewでVERIFIED_CLOSEDにするまで自己PASSしない
