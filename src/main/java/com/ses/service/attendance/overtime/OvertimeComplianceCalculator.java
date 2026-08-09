@@ -15,15 +15,16 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 時間外労働の36協定コンプライアンス判定（attendance-leave-overtime-compliance F2前半）。
+ * 時間外労働の36協定コンプライアンス判定（attendance-leave-overtime-compliance T069/F2）。
  *
  * <p>唯一の正は{@code overtime-rules.md}。判定式は1メソッド1ルールで書き、条件を複数箇所へ
  * 散らさない（overtime-rules.md §4.3）。閾値の解決順は
  * {@code m_overtime_agreement}（第1段、{@link OvertimeAgreementThresholds}）→
  * {@code m_system_config}（第2段、{@link SystemConfigService}）→
- * コード定数（第3段、{@link OvertimeLimitDefaults}）。B2では第1段はinterfaceのまま未接続で、
+ * コード定数（第3段、{@link OvertimeLimitDefaults}）。第1段のsnapshotは
  * {@link OvertimeComplianceInput#agreement()}が{@code null}の法人は判定不能findingを返す
- * （既定値で「適合」にしない、overtime-rules.md §3）。</p>
+ * （既定値で「適合」にしない、overtime-rules.md §3）。対象月の協定行は
+ * {@link OvertimeAgreementResolver}で解決してから入力へ渡す。</p>
  *
  * <p>findingは違反・判定不能の項目のみを返す（適合ルールはfindingを生成しない）。</p>
  */
@@ -37,13 +38,21 @@ public class OvertimeComplianceCalculator {
         Objects.requireNonNull(input, "input must not be null");
 
         // 適用除外者（管理監督者等）はルール1〜6の対象外（overtime-rules.md §2 #14）。
-        if (input.applicableExemption()) {
+        // NULLは未確認なので、対象外とも対象とも推測しない。
+        if (Boolean.TRUE.equals(input.applicableExemption())) {
             return List.of();
+        }
+        if (input.applicableExemption() == null) {
+            return List.of(indeterminateFinding(OvertimeRule.APPLICABILITY_UNKNOWN, input));
         }
 
         OvertimeAgreementThresholds agreement = input.agreement();
         if (agreement == null) {
             return List.of(agreementMissingFinding(input));
+        }
+
+        if (!hasRequiredHistory(input)) {
+            return List.of(indeterminateFinding(OvertimeRule.HISTORY_INSUFFICIENT, input));
         }
 
         List<OvertimeComplianceFinding> findings = new ArrayList<>();
@@ -195,6 +204,16 @@ public class OvertimeComplianceCalculator {
         return months.stream().mapToInt(OvertimeMonthMinutes::overtimeMinutes).sum();
     }
 
+    private static boolean hasRequiredHistory(OvertimeComplianceInput input) {
+        if (input.targetMonth() == null || input.currentMonth() == null
+                || input.agreementYearMonths() == null || input.agreementYearMonths().isEmpty()) {
+            return false;
+        }
+        return input.targetMonth().equals(input.currentMonth().yearMonth())
+                && input.agreementYearMonths().stream()
+                .anyMatch(month -> input.targetMonth().equals(month.yearMonth()));
+    }
+
     private static OvertimeComplianceFinding violation(OvertimeRule rule, OvertimeComplianceInput input, int actual, int limit, Integer windowMonths) {
         return new OvertimeComplianceFinding(rule, OvertimeComplianceSeverity.VIOLATION,
                 input.legalEntityId(), input.targetMonth(), actual, limit, windowMonths);
@@ -202,6 +221,11 @@ public class OvertimeComplianceCalculator {
 
     private static OvertimeComplianceFinding agreementMissingFinding(OvertimeComplianceInput input) {
         return new OvertimeComplianceFinding(OvertimeRule.AGREEMENT_MISSING, OvertimeComplianceSeverity.INDETERMINATE,
+                input.legalEntityId(), input.targetMonth(), null, null, null);
+    }
+
+    private static OvertimeComplianceFinding indeterminateFinding(OvertimeRule rule, OvertimeComplianceInput input) {
+        return new OvertimeComplianceFinding(rule, OvertimeComplianceSeverity.INDETERMINATE,
                 input.legalEntityId(), input.targetMonth(), null, null, null);
     }
 }

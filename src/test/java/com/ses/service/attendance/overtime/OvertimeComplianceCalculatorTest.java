@@ -187,6 +187,32 @@ class OvertimeComplianceCalculatorTest {
         runScenario("special-clause-false-skips-rule3456.json");
     }
 
+    @Test
+    void applicabilityUnknown_isIndeterminateAndNeverCompliant() {
+        OvertimeMonthMinutes safe = new OvertimeMonthMinutes(TARGET_MONTH, 0, 0);
+        OvertimeComplianceInput input = new OvertimeComplianceInput(
+                LEGAL_ENTITY_ID, TARGET_MONTH, null, safe, List.of(safe), List.of(safe), AGREEMENT_NO_OVERRIDE);
+
+        assertThat(calculator.evaluate(input))
+                .containsExactly(new OvertimeComplianceFinding(
+                        OvertimeRule.APPLICABILITY_UNKNOWN,
+                        OvertimeComplianceSeverity.INDETERMINATE,
+                        LEGAL_ENTITY_ID, TARGET_MONTH, null, null, null));
+    }
+
+    @Test
+    void requiredAnnualHistoryMissing_isIndeterminateAndNeverZeroFilled() {
+        OvertimeMonthMinutes safe = new OvertimeMonthMinutes(TARGET_MONTH, 0, 0);
+        OvertimeComplianceInput input = new OvertimeComplianceInput(
+                LEGAL_ENTITY_ID, TARGET_MONTH, false, safe, List.of(), List.of(), AGREEMENT_NO_OVERRIDE);
+
+        assertThat(calculator.evaluate(input))
+                .containsExactly(new OvertimeComplianceFinding(
+                        OvertimeRule.HISTORY_INSUFFICIENT,
+                        OvertimeComplianceSeverity.INDETERMINATE,
+                        LEGAL_ENTITY_ID, TARGET_MONTH, null, null, null));
+    }
+
     // ---- helpers ----
 
     private OvertimeComplianceInput baseInput(OvertimeMonthMinutes current,

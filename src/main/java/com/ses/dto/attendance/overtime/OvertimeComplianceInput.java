@@ -12,7 +12,8 @@ import java.util.List;
  *
  * @param legalEntityId       法人ID（findingの母集団特定用）
  * @param targetMonth         判定対象月
- * @param applicableExemption 適用除外者（管理監督者等）か。trueならルール1〜6を一切判定しない
+ * @param applicableExemption 適用除外者（管理監督者等）か。trueならルール1〜6を一切判定しない。
+ *                            nullはHR未確認であり、適用除外とも対象とも推測しない
  * @param currentMonth        対象月の実績（ルール1・4はこれだけを見る）
  * @param agreementYearMonths 現協定年度の開始月〜対象月まで（対象月を含む、古い順）。
  *                            ルール2・3・6が使う。協定年度境界で毎回作り直すことで
@@ -26,10 +27,15 @@ import java.util.List;
 public record OvertimeComplianceInput(
         Long legalEntityId,
         YearMonth targetMonth,
-        boolean applicableExemption,
+        Boolean applicableExemption,
         OvertimeMonthMinutes currentMonth,
         List<OvertimeMonthMinutes> agreementYearMonths,
         List<OvertimeMonthMinutes> rollingWindowMonths,
         OvertimeAgreementSnapshot agreement
 ) {
+
+    public OvertimeComplianceInput {
+        agreementYearMonths = agreementYearMonths == null ? List.of() : List.copyOf(agreementYearMonths);
+        rollingWindowMonths = rollingWindowMonths == null ? List.of() : List.copyOf(rollingWindowMonths);
+    }
 }

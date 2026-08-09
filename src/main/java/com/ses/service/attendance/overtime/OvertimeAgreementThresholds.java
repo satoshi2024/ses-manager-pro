@@ -3,8 +3,8 @@ package com.ses.service.attendance.overtime;
 /**
  * 閾値解決の第1段（法人別36協定）。overtime-rules.md §3 の優先順位1に対応する。
  *
- * <p>本interfaceはS11 F1（V78、{@code m_overtime_agreement}）が実装するまで未接続のまま残す
- * （B2の対象外）。個々のlimit系accessorが{@code null}を返した場合は、その項目だけ
+ * <p>S11 F1（V83、{@code m_overtime_agreement}）のsnapshotが実装する。
+ * 個々のlimit系accessorが{@code null}を返した場合は、その項目だけ
  * 第2段（{@code m_system_config}）へfall throughする。</p>
  */
 public interface OvertimeAgreementThresholds {
