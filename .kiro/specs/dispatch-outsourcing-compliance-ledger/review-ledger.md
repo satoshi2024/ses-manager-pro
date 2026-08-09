@@ -93,6 +93,14 @@ R10 Round 6はHead `53ec7ef`（docs 4文書のみ）をread-only確認し、**R5
 - **R6-NOTE-01**: `PLANNED_INTRODUCTION_TERMS`/`PLANNED_INTRODUCTION_HISTORY`のtable境界を確定した（terms=予定労働条件sub-field列、history=紹介時期・採否・非採用理由の反復行でtermsを参照）。`recipient_scope`表記をdesign §1の`recipient_contact_id`へ統一し、§3.3/§3.5/§4の全cellを同期した。V84列名はcode fix時にF1-MAP-01で照合する。
 - 本deltaはdocs 3文書（field-mapping/tasks/review-ledger）のみ。V1/V84/code/test未変更、T061 checkbox未変更。
 
+## R10 Round 7 判定とR7-NOTE-01対応（2026-08-09）
+
+R10 Round 7はHead `10fb5d3`（docs 3文書のみ）を再確認し、**R6-P2-01/02・R6-NOTE-01をVERIFIED_CLOSED**とした。新規P0/P1なし。新規NOTE 1件（R7-NOTE-01）: §3.1 FM-C-27行（紹介予定派遣の予定労働条件）のsnapshot・asOf規則列が「append-only history」表記のままで、`t_planned_introduction_terms`（current条件のsub-field列）と不整合。§3.5/§4を正本とする閲覧表のためF1-MAP-01を誤導しないが、code fixと同一差分での1行訂正が指示された。
+
+- **R7-NOTE-01**: FM-C-27行のsnapshot・asOf規則列を「契約・交付時点のtyped snapshot/asOfを保存し、current masterの変更で過去帳票を変えない」へ訂正した。§3.2 FM-E-22行（保険/賃金/就業場所/喫煙措置）と同じ契約に統一。
+- 本deltaはdocs 1文書（field-mapping）+ledger追記のみ。V1/V84/code/test未変更、T061 checkbox未変更。S11 attendance dirty変更はstageしない。
+- 次のdelta: **T061 code fix**（V1/V84/H2/engineer-schema/entity/mapper/MySQL smoke再同期＋F1-MAP-01/SNAPSHOT-01/02/NULL-01/HISTORY-CORRECTION-01/MYSQL-FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK-01/PII-OWNERSHIP-01、skip 0、Demo A/B/A・worker独立・NULL clear・history訂正）。P1×5はcode fix証跡が揃うまでOPEN維持。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
