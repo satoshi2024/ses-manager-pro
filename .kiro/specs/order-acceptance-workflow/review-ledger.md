@@ -9,37 +9,38 @@
 |---|---|
 | spec | order-acceptance-workflow |
 | handbook | v2.0 |
-| state | REVIEW（R11 FAIL対応完了、独立再Review待ち） |
+| state | PASS（R12 independent diff reReview完了） |
 | base | 23793ec4f9fdd37305d3ffacda84024c5ab1fe46 |
-| review-input docs Head | `67de0d431bcd74e82ab17b9d1d7d67c6bd1a1287` を対象とするRound 11 Packet（文書同期commitは本流履歴で解決） |
-| code/evidence Head | `67de0d431bcd74e82ab17b9d1d7d67c6bd1a1287` |
-| merge | `main` のfix Head。`origin/main` は前回Packet同期commit `c06fbfc` のままで、push/mergeは未実施。`.tmp-ui-scale-r3` のroot trackingは除去済み（nested repoはディスク上に保持） |
-| latest review | R11 FAIL remediation Packet / 2026-08-09（independent re-review requested） |
-| verdict | REVIEW REQUESTED: R9-P1-09/R9-P1-10再発指摘およびR11-P1-01/R11-P1-02/R11-P2-01を修正済み、最終判定は独立再Reviewで実施 |
-| issue count | R11: P0=0 / P1=4 / P2=1（既存open issueの再判定を含む） |
-| next action | `67de0d4`上のPacket、現HeadのL4/MySQL/Browser、範囲外変更、rollbackを独立再Review。PASS確定までS10/S11/Wave 2は停止 |
+| review-input docs Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47` を対象とするRound 12 Packet |
+| code/evidence/current merged Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`（`main`=`origin/main`=`origin/HEAD`） |
+| merge | `main` / `origin/main` にmerge済み。worktree clean、`.tmp-ui-scale-r3` gitlinkなし |
+| latest review | R12 independent diff reReview / 2026-08-09 |
+| verdict | PASS: P0=0 / P1=0 / P2=1。R12-P2-01はPacket provenance記述のみでPASS非block |
+| issue count | R12: P0=0 / P1=0 / P2=1。旧OPEN 5件は全件VERIFIED_CLOSED |
+| next action | S10/S11を並行dispatch可能。S12はS10/S11双方のPASS後。Wave 2を解放 |
 
 ## 2. OPEN Issue Register
 
 | issue ID | severity | 内容 | ステータス / 対応計画 |
 |---|---|---|---|
-| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | FIXED_BY_IMPLEMENTER（R10-SCOPE実装・定向/L4・Browser証跡。独立再Review待ち） |
-| order-acceptance-workflow-R10-P0-01 | P0 | 既適用V80直接変更によるFlyway checksum不一致 | FIXED_BY_IMPLEMENTER（V80復元＋V81順方向修復、実MySQL smoke。独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-01 | P1 | V81 historical legacy / wrong-shape index/FK | FIXED_BY_IMPLEMENTER（V81構造三分岐・legacy fixture、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-02 | P1 | V81 marker前失敗のdurability不備 | FIXED_BY_IMPLEMENTER（DDL前durable capture、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-03 | P1 | submit対reopen競合およびバージョンロック欠落 | FIXED_BY_IMPLEMENTER（FOR UPDATE＋CAS回帰、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-06 | P1 | 理由なし検収免除請求のDB CHECK不備 | FIXED_BY_IMPLEMENTER（V81/V1/H2 CHECK＋SQL/API、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-07 | P1 | 法人（legalEntityId）のUI候補APIバインド・PDF印字欠落 | FIXED_BY_IMPLEMENTER（候補API／法人bind／PDF、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-08 | P1 | 専用downloadの権限・監査ログ・GET状態変更バグ | FIXED_BY_IMPLEMENTER（POST/GET分離・権限・監査、独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-09 | P1 | 原本hash重複の競合（check-then-insert） | REOPENED→FIXED_BY_IMPLEMENTER（`67de0d4`でstorage失敗時の原本補償をput前登録・即時cleanupへ修正。独立再Review待ち） |
-| order-acceptance-workflow-R9-P1-10 | P1 | 全通し実MySQL Browser Demo証跡およびL4完全ログ欠落 | REOPENED→FIXED_BY_IMPLEMENTER（`67de0d4`で390px証跡を再取得、L4 1582/0/0/0・独立再Review待ち） |
-| order-acceptance-workflow-R10-P1-01 | P1 | 注文請PDF再発行時の原本非一致 | FIXED_BY_IMPLEMENTER（archived bytes返却回帰、独立再Review待ち） |
-| order-acceptance-workflow-R11-P1-01 | P1 | `.tmp-ui-scale-r3` の未登録dirty gitlinkがroot worktreeに残存 | FIXED_BY_IMPLEMENTER（`67de0d4`でroot trackingを除去し`.gitignore`へ追加。nested repoは削除せず保持、独立再Review待ち） |
-| order-acceptance-workflow-R11-P1-02 | P1 | archive scopeが検収行全件をJavaへロード | FIXED_BY_IMPLEMENTER（`67de0d4`でworkMonth/contract許可集合をSQL母集団へ移行、独立再Review待ち） |
-| order-acceptance-workflow-R11-P2-01 | P2 | `ConcurrentSubmitReopenTest` が任意Exceptionを競合として許容 | FIXED_BY_IMPLEMENTER（`67de0d4`で409 BusinessException/message keyを限定し、その他Throwableを失敗扱い。独立再Review待ち） |
-| order-acceptance-workflow-R9-P2-01 | P2 | 明細契約化の二重clickキー競合retry処理 | FIXED_BY_IMPLEMENTER（FOR UPDATE再読回帰、独立再Review待ち） |
-| order-acceptance-workflow-R9-P2-03 | P2 | UIアクセシビリティ（label for, aria-live, aria-label）欠落 | FIXED_BY_IMPLEMENTER（attributes＋DOM keyboard実測、独立再Review待ち） |
-| order-acceptance-workflow-R9-P2-04 | P2 | DB通知重複検証・KPIテストアサーション不足 | FIXED_BY_IMPLEMENTER（DB dedupe/KPI回帰、独立再Review待ち） |
+| order-acceptance-workflow-R9-P0-01 | P0 | HR/document/as-of scope漏洩 | VERIFIED_CLOSED（R10-SCOPE、定向/L4・Browser証跡） |
+| order-acceptance-workflow-R10-P0-01 | P0 | 既適用V80直接変更によるFlyway checksum不一致 | VERIFIED_CLOSED（V80復元＋V81順方向修復、実MySQL smoke） |
+| order-acceptance-workflow-R9-P1-01 | P1 | V81 historical legacy / wrong-shape index/FK | VERIFIED_CLOSED（V81構造三分岐・legacy fixture） |
+| order-acceptance-workflow-R9-P1-02 | P1 | V81 marker前失敗のdurability不備 | VERIFIED_CLOSED（DDL前durable capture） |
+| order-acceptance-workflow-R9-P1-03 | P1 | submit対reopen競合およびバージョンロック欠落 | VERIFIED_CLOSED（FOR UPDATE＋CAS回帰） |
+| order-acceptance-workflow-R9-P1-06 | P1 | 理由なし検収免除請求のDB CHECK不備 | VERIFIED_CLOSED（V81/V1/H2 CHECK＋SQL/API） |
+| order-acceptance-workflow-R9-P1-07 | P1 | 法人（legalEntityId）のUI候補APIバインド・PDF印字欠落 | VERIFIED_CLOSED（候補API／法人bind／PDF） |
+| order-acceptance-workflow-R9-P1-08 | P1 | 専用downloadの権限・監査ログ・GET状態変更バグ | VERIFIED_CLOSED（POST/GET分離・権限・監査） |
+| order-acceptance-workflow-R9-P1-09 | P1 | 原本hash重複の競合（check-then-insert） | VERIFIED_CLOSED（storage補償、独立再Review確認） |
+| order-acceptance-workflow-R9-P1-10 | P1 | 全通し実MySQL Browser Demo証跡およびL4完全ログ欠落 | VERIFIED_CLOSED（L4 1582/0/0/0・MySQL/Browser証跡） |
+| order-acceptance-workflow-R10-P1-01 | P1 | 注文請PDF再発行時の原本非一致 | VERIFIED_CLOSED（archived bytes返却回帰） |
+| order-acceptance-workflow-R11-P1-01 | P1 | `.tmp-ui-scale-r3` の未登録dirty gitlinkがroot worktreeに残存 | VERIFIED_CLOSED（root tracking除去、nested repo保持） |
+| order-acceptance-workflow-R11-P1-02 | P1 | archive scopeが検収行全件をJavaへロード | VERIFIED_CLOSED（SQL母集団へ移行） |
+| order-acceptance-workflow-R11-P2-01 | P2 | `ConcurrentSubmitReopenTest` が任意Exceptionを競合として許容 | VERIFIED_CLOSED（409/message key限定） |
+| order-acceptance-workflow-R9-P2-01 | P2 | 明細契約化の二重clickキー競合retry処理 | VERIFIED_CLOSED（FOR UPDATE再読回帰） |
+| order-acceptance-workflow-R9-P2-03 | P2 | UIアクセシビリティ（label for, aria-live, aria-label）欠落 | VERIFIED_CLOSED（attributes＋DOM keyboard実測） |
+| order-acceptance-workflow-R9-P2-04 | P2 | DB通知重複検証・KPIテストアサーション不足 | VERIFIED_CLOSED（DB dedupe/KPI回帰） |
+| order-acceptance-workflow-R12-P2-01 | P2 | PacketのHead/provenanceが実状態と不一致 | VERIFIED_CLOSED（`HEAD=origin/main=7caa5e6`、worktree clean、gitlinkなしを両ledgerへ同期） |
 
 ### Closed/Deferred Issue（R09 Round8）
 
@@ -64,9 +65,9 @@ NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreensho
 | order-acceptance-workflow-R7-P2-04 | P2 | 通知リンクが対象検収を指さずBrowser Demo証跡未記録 | H2/MySQL8 scope隔離・通常page1外定点抽出・フロント厳格一致判定はVERIFIED_CLOSED。実Chrome実行証跡群を`evidence/`へフル保存（`browser-runner.ps1`, `network-export.json`, `console-export.txt`, `notification-seed-provenance.json`, `desktop-1920x1080.png`, `mobile-390x844.png`, `postfix-browser-demo.json/md`）（FIXED_BY_IMPLEMENTER） |
 | order-acceptance-workflow-R7-P2-05 | P2 | error.acceptance.invalidWorkMonthがzh_CN/koで欠落 | `messages_zh_CN.properties`（"对象月份格式不正确（YYYY-MM）"）および `messages_ko.properties`（"대상 월의 형식이 올바르지 않습니다（YYYY-MM）"）へ訳語を追加し `MessageBundleConsistencyTest` 4/0/0/0 成功（VERIFIED_CLOSED） |
 
-## 2.5 前回Review Packet（R10 remediation / 2026-08-09）
+## 2.5 履歴Review Packet（R10 remediation / 2026-08-09）
 
-本節が現行提出Packetである。旧Round7/R09の節は履歴として保持し、現行判定には使用しない。
+旧Round7/R09および本節は履歴として保持し、現行判定には使用しない。
 
 | 項目 | 値 |
 |---|---|
@@ -99,9 +100,9 @@ NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreensho
 - Rollback: stop before S10; do not edit V80 or any already-applied migration. For code-only rollback, revert the S09 implementation/evidence commits as one review unit. For a database already at V81, use the documented forward repair/runbook path; no destructive down migration is claimed.
 - Not independently verified yet: exact historical PNG provenance, every scope/permission denial role, rejection→resubmit and rollback browser paths, external provider behavior, production backup/restore, and the final reviewer’s changed-files inventory. These remain independent Review gates.
 
-## 2.6 最新Review Packet（Round 11 FAIL remediation / 2026-08-09）
+## 2.6 履歴Review Packet（Round 11 FAIL remediation / 2026-08-09）
 
-本節が現行提出Packetである。Round 10の記録は履歴として保持し、現行判定には使用しない。
+Round 10の記録と同様に本節も履歴として保持し、現行判定には使用しない。
 
 | 項目 | 値 |
 |---|---|
@@ -143,6 +144,26 @@ NOTE（PASS非block）: ci.ymlのChrome明示設定推奨・RealBrowserScreensho
 - `.tmp-ui-scale-r3`のnested repositoryはディスク上に保持し、root treeからは除去した。`.gitmodules`登録のないgitlinkおよびnested repo内部のdirty fileはS09変更対象外である。
 - rollbackはS10/S11/Wave 2を停止したまま、code/evidence commit単位でrevert可能。V80はdown migrationせず、DBがV81適用済みの場合はV81のforward repair/runbookを使用する。
 - 未検証事項は、実S3等の外部DocumentStorage、本番backup/restore、全roleの拒否UI、rejection→resubmitおよびrollbackの全Browser経路、独立reviewerによる最終changed-files inventory。これらは独立再Review gateとして残す。
+
+## 2.7 最新Review Packet（R12 independent diff reReview / 2026-08-09）
+
+本節が現行提出Packetであり、Round 11までの節は履歴として保持する。
+
+| 項目 | 値 |
+|---|---|
+| 対象spec / task | `order-acceptance-workflow` / T054〜T059 |
+| Base | `23793ec4f9fdd37305d3ffacda84024c5ab1fe46` |
+| code/evidence/current merged Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47` |
+| merge provenance | `git rev-parse HEAD origin/main` が同一SHA、`main=origin/main=origin/HEAD`、worktree clean、gitlinkなし |
+| R12 issue | `order-acceptance-workflow-R12-P2-01` — PacketのHead/provenance記述不一致 |
+| verdict | **PASS — P0=0 / P1=0 / P2=1**。R12-P2-01は記述のみでPASS非block |
+| 旧OPEN | R9-P1-09、R9-P1-10、R11-P1-01、R11-P1-02、R11-P2-01は全件`VERIFIED_CLOSED` |
+| direct regression | 39 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS |
+| same-code L4 evidence | 282 classes / 1582 tests / failures 0 / errors 0 / skipped 0。全282 XMLを検算し、方針どおりL4再実行なし |
+| task verdict | T054 / T055 / T056 / T057 / T058 / T059 = PASS |
+| next action | S10/S11を並行dispatch可能。S12はS10/S11双方のPASS後。Wave 2解放 |
+
+未検証事項（実S3、本番backup/restore、全roleの実Browser拒否経路、全rollback Browser経路、favicon 404の機能影響なし確認）は本番前条件として継続管理し、本spec PASSのblockerとはしない。
 
 ## 3. Closed/Deferred Issue
 
