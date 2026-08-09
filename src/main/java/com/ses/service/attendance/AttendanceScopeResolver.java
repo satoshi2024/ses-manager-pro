@@ -1,0 +1,73 @@
+package com.ses.service.attendance;
+
+import com.ses.common.exception.BusinessException;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountingHistory;
+import com.ses.entity.EngineerAccountLink;
+import com.ses.entity.OrganizationUnit;
+import com.ses.mapper.AttendanceScopeMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.EngineerAccountingHistoryMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.OrganizationUnitMapper;
+import com.ses.mapper.UserOrganizationMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Set;
+
+/** 勤怠のHR法人scopeと日次/月次所属snapshotを同じ履歴規則で解決する。 */
+@Service
+@RequiredArgsConstructor
+public class AttendanceScopeResolver {
+
+    private final AttendanceScopeMapper attendanceScopeMapper;
+    private final EngineerMapper engineerMapper;
+    private final EngineerAccountingHistoryMapper accountingHistoryMapper;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
+    private final UserOrganizationMapper userOrganizationMapper;
+    private final OrganizationUnitMapper organizationUnitMapper;
+
+    public AttendanceScopeSnapshot requireSnapshot(Long engineerId, Long fallbackUserId, LocalDate asOf) {
+        AttendanceScopeSnapshot snapshot = resolveSnapshot(engineerId, fallbackUserId, asOf);
+        if (snapshot == null) {
+            throw BusinessException.of(404, "error.attendance.scopeUnknown");
+        }
+        return snapshot;
+    }
+
+    public AttendanceScopeSnapshot resolveSnapshot(Long engineerId, Long fallbackUserId, LocalDate asOf) {
+        if (engineerId == null || asOf == null) return null;
+        Engineer engineer = engineerMapper.selectById(engineerId);
+        if (engineer == null) return null;
+        EngineerAccountingHistory history = accountingHistoryMapper.selectAt(engineerId, asOf);
+        if (history != null && "UNKNOWN".equals(history.getOrganizationHistoryStatus())) {
+            return null;
+        }
+        Long organizationId = history == null ? engineer.getOrganizationId() : history.getOrganizationId();
+        if (organizationId == null) {
+            Long linkedUserId = linkedUserId(engineerId, fallbackUserId);
+            organizationId = linkedUserId == null ? null
+                    : userOrganizationMapper.selectPrimaryOrganizationId(linkedUserId, asOf);
+        }
+        if (organizationId == null) return null;
+        OrganizationUnit organization = organizationUnitMapper.selectAt(organizationId, asOf);
+        if (organization == null || organization.getLegalEntityId() == null) return null;
+        return new AttendanceScopeSnapshot(organization.getLegalEntityId(), organizationId);
+    }
+
+    public Set<Long> allowedHrEngineerIds(Long userId, LocalDate asOf) {
+        if (userId == null || asOf == null) return Set.of();
+        List<Long> legalEntityIds = attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf);
+        if (legalEntityIds == null || legalEntityIds.isEmpty()) return Set.of();
+        List<Long> engineerIds = attendanceScopeMapper.selectEngineerIdsByLegalEntityIds(legalEntityIds, asOf);
+        return engineerIds == null ? Set.of() : Set.copyOf(engineerIds);
+    }
+
+    private Long linkedUserId(Long engineerId, Long fallbackUserId) {
+        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(engineerId);
+        return link != null && link.getSysUserId() != null ? link.getSysUserId() : fallbackUserId;
+    }
+}
