@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS t_career_consulting_history CASCADE;
 DROP TABLE IF EXISTS t_training_history CASCADE;
 DROP TABLE IF EXISTS t_employment_stability_history CASCADE;
 DROP TABLE IF EXISTS t_compliance_complaint_history CASCADE;
+DROP TABLE IF EXISTS t_compliance_break_detail CASCADE;
 DROP TABLE IF EXISTS t_compliance_work_calendar CASCADE;
 DROP TABLE IF EXISTS t_compliance_snapshot_operation CASCADE;
 DROP TABLE IF EXISTS t_contract_compliance_worker_state CASCADE;
@@ -81,6 +82,8 @@ CREATE TABLE t_contract_compliance_snapshot (
   work_start_minute                 INT,
   work_end_minute                   INT,
   work_span_next_day_flag           TINYINT,
+  break_start_minute                INT,
+  break_end_minute                  INT,
   work_day_code                     VARCHAR(30),
   holiday_calendar_code             VARCHAR(30),
   agreement_reference_id            BIGINT,
@@ -170,6 +173,8 @@ CREATE TABLE t_contract_compliance_profile (
   work_start_minute                 INT,
   work_end_minute                   INT,
   work_span_next_day_flag           TINYINT,
+  break_start_minute                INT,
+  break_end_minute                  INT,
   work_day_code                     VARCHAR(30),
   holiday_calendar_code             VARCHAR(30),
   agreement_reference_id            BIGINT,
@@ -349,6 +354,33 @@ CREATE TABLE t_compliance_work_calendar (
     ON DELETE CASCADE
 );
 CREATE INDEX idx_work_calendar_contract ON t_compliance_work_calendar (contract_id, effective_from);
+
+CREATE TABLE t_compliance_break_detail (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100) NOT NULL DEFAULT 'default',
+  contract_id           BIGINT NOT NULL,
+  worker_id             BIGINT,
+  event_id              VARCHAR(64) NOT NULL,
+  event_type            VARCHAR(20) NOT NULL DEFAULT 'CREATED',
+  supersedes_event_id   VARCHAR(64),
+  correction_reason     VARCHAR(500),
+  actor_user_id         BIGINT,
+  occurred_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  effective_from        DATE,
+  effective_to          DATE,
+  break_no              INT NOT NULL,
+  start_offset_minute   INT NOT NULL,
+  end_offset_minute     INT NOT NULL,
+  version               INT NOT NULL DEFAULT 0,
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag          TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_compliance_break_detail_event UNIQUE (event_id),
+  CONSTRAINT chk_break_detail_offset CHECK (start_offset_minute >= 0 AND end_offset_minute > start_offset_minute),
+  CONSTRAINT fk_break_detail_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
+    ON DELETE CASCADE
+);
+CREATE INDEX idx_break_detail_contract ON t_compliance_break_detail (contract_id, effective_from);
 
 CREATE TABLE t_compliance_complaint_history (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,

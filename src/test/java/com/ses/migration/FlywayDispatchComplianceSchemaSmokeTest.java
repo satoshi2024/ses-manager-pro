@@ -43,7 +43,7 @@ class FlywayDispatchComplianceSchemaSmokeTest {
             for (String table : new String[]{
                     "m_workplace", "t_contract_compliance_profile", "t_contract_compliance_snapshot",
                     "t_contract_compliance_worker_snapshot", "t_contract_compliance_worker_state",
-                    "t_compliance_snapshot_operation", "t_compliance_work_calendar",
+                    "t_compliance_snapshot_operation", "t_compliance_work_calendar", "t_compliance_break_detail",
                     "t_compliance_complaint_history", "t_employment_stability_history",
                     "t_training_history", "t_career_consulting_history", "t_planned_introduction_terms",
                     "t_planned_introduction_history", "t_direct_hire_dispute_history",
@@ -72,6 +72,17 @@ class FlywayDispatchComplianceSchemaSmokeTest {
             assertColumnExists(statement, "t_contract_compliance_worker_state", "current_snapshot_version");
             assertColumnExists(statement, "t_document_delivery", "template_version");
             assertColumnExists(statement, "t_document_delivery", "snapshot_hash");
+            // R8-P0-01: WORK_TIME_TYPEDの休憩保存（profile/snapshot分整数列＋複数休憩detail）
+            for (String column : new String[]{"break_start_minute", "break_end_minute"}) {
+                assertColumnExists(statement, "t_contract_compliance_profile", column);
+                assertColumnExists(statement, "t_contract_compliance_snapshot", column);
+            }
+            assertTableExists(statement, "t_compliance_break_detail");
+            assertColumnExists(statement, "t_compliance_break_detail", "break_no");
+            assertColumnExists(statement, "t_compliance_break_detail", "start_offset_minute");
+            assertColumnExists(statement, "t_compliance_break_detail", "end_offset_minute");
+            assertTriggerExists(statement, "trg_t_compliance_break_detail_no_update");
+            assertTriggerExists(statement, "trg_t_compliance_break_detail_no_delete");
 
             assertIndexExists(statement, "t_contract_compliance_snapshot", "uk_compliance_snapshot_version");
             assertIndexExists(statement, "t_contract_compliance_snapshot", "idx_compliance_snapshot_hash");

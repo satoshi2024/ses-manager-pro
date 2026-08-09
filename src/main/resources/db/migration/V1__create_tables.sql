@@ -22,6 +22,7 @@ DROP TABLE IF EXISTS t_career_consulting_history;
 DROP TABLE IF EXISTS t_training_history;
 DROP TABLE IF EXISTS t_employment_stability_history;
 DROP TABLE IF EXISTS t_compliance_complaint_history;
+DROP TABLE IF EXISTS t_compliance_break_detail;
 DROP TABLE IF EXISTS t_compliance_work_calendar;
 DROP TABLE IF EXISTS t_compliance_snapshot_operation;
 DROP TABLE IF EXISTS t_contract_compliance_worker_state;
@@ -1342,6 +1343,8 @@ CREATE TABLE t_contract_compliance_snapshot (
   work_start_minute                 INT COMMENT '始業（分整数、0=00:00）（WORK_TIME_TYPED）',
   work_end_minute                   INT COMMENT '終業（分整数）',
   work_span_next_day_flag           TINYINT COMMENT '日跨ぎflag',
+  break_start_minute                INT COMMENT '休憩開始（分整数）（WORK_TIME_TYPED。複数休憩はt_compliance_break_detail）',
+  break_end_minute                  INT COMMENT '休憩終了（分整数）',
   work_day_code                     VARCHAR(30) COMMENT '就業日calendar code（WORK_CALENDAR_HISTORY）',
   holiday_calendar_code             VARCHAR(30) COMMENT '休日calendar code',
   agreement_reference_id            BIGINT COMMENT '36協定reference（OVERTIME_AGREEMENT_SNAPSHOT）',
@@ -1431,6 +1434,8 @@ CREATE TABLE t_contract_compliance_profile (
   work_start_minute                 INT COMMENT '始業（分整数、0=00:00）',
   work_end_minute                   INT COMMENT '終業（分整数）',
   work_span_next_day_flag           TINYINT COMMENT '日跨ぎflag',
+  break_start_minute                INT COMMENT '休憩開始（分整数）（複数休憩はt_compliance_break_detail）',
+  break_end_minute                  INT COMMENT '休憩終了（分整数）',
   work_day_code                     VARCHAR(30) COMMENT '就業日calendar code',
   holiday_calendar_code             VARCHAR(30) COMMENT '休日calendar code',
   agreement_reference_id            BIGINT COMMENT '36協定reference',
@@ -1616,6 +1621,33 @@ CREATE TABLE t_compliance_work_calendar (
   CONSTRAINT fk_work_calendar_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='就業日/休日/休暇除外のappend-only calendar history';
+
+CREATE TABLE t_compliance_break_detail (
+  id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100) NOT NULL DEFAULT 'default',
+  contract_id           BIGINT NOT NULL,
+  worker_id             BIGINT COMMENT 'worker-specific break時のみ',
+  event_id              VARCHAR(64) NOT NULL COMMENT 'event ID（CREATED/CORRECTED/CANCELLEDで新規採番）',
+  event_type            VARCHAR(20) NOT NULL DEFAULT 'CREATED',
+  supersedes_event_id   VARCHAR(64) COMMENT '訂正・取消の対象event',
+  correction_reason     VARCHAR(500) COMMENT '訂正理由（CORRECTED/CANCELLED時必須）',
+  actor_user_id         BIGINT COMMENT '実actor（runtime承認はM/本番gate）',
+  occurred_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'event発生時刻',
+  effective_from        DATE COMMENT '適用開始',
+  effective_to          DATE COMMENT '適用終了',
+  break_no              INT NOT NULL COMMENT '休憩順序（1始まり）',
+  start_offset_minute   INT NOT NULL COMMENT '勤務開始からの休憩開始offset（分）',
+  end_offset_minute     INT NOT NULL COMMENT '勤務開始からの休憩終了offset（分）',
+  version               INT NOT NULL DEFAULT 0,
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_flag          TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_compliance_break_detail_event (event_id),
+  INDEX idx_break_detail_contract (contract_id, effective_from),
+  CONSTRAINT chk_break_detail_offset CHECK (start_offset_minute >= 0 AND end_offset_minute > start_offset_minute),
+  CONSTRAINT fk_break_detail_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='就業時間の複数休憩（反復detail、append-only）';
 
 CREATE TABLE t_compliance_complaint_history (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -69,6 +69,9 @@ public class ContractComplianceSnapshot extends BaseEntity {
     private Integer workStartMinute;
     private Integer workEndMinute;
     private Integer workSpanNextDayFlag;
+    /** 休憩開始/終了（分整数）。複数休憩は t_compliance_break_detail の反復行 */
+    private Integer breakStartMinute;
+    private Integer breakEndMinute;
 
     /** WORK_CALENDAR_HISTORY */
     private String workDayCode;

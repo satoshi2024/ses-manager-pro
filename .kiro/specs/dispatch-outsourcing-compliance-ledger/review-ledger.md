@@ -121,6 +121,20 @@ R10 Round 7の「次はT061 code fix deltaを提出すること」に従い、R5
 
 **境界**: SecurityConfig/UI/controller/service/i18n/sidebarは未変更。T062以降のtaskへは進めていない。production release/apply authorizationなし。T061 checkboxはR10 VERIFIED_CLOSEDまで未完了のまま。
 
+## R10 Round 8 判定とR8 fix delta（2026-08-09）
+
+R10 Round 8はHead `b9b91f9`をread-only＋独立実行（H2/docs系43/0/0/0、MySQL 5形状5/0/0/0、skip 0）で確認した。**R5-P1-02/03/05はVERIFIED_CLOSED**（snapshot protocol・worker state・operation idempotency・immutability trigger・5形状migration・PII scan成立）。R5-P1-01/04はOPEN維持。新規: **R8-P0-01**（FM-C-12/E-12/L-18の休憩保存先欠落。F1MapManifestTestが欠落を正本化、法定必須項目）、**R8-P1-01**（FieldStrategy.ALWAYSがclearable列に未適用。F1-NULL-01はraw SQLのみ）、P2=1/NOTE=1。T060 PASS、T061 FAIL継続、T062〜T066停止、production authorizationなし。
+
+**本deltaのfix**:
+- **R8-P0-01**: WORK_TIME_TYPED契約どおり、`t_contract_compliance_profile`/`t_contract_compliance_snapshot`へ`break_start_minute`/`break_end_minute`（分整数）を追加し、複数休憩はappend-onlyの`t_compliance_break_detail`（break_no/start_offset_minute/end_offset_minute、event correction protocol、immutability trigger×2）へ反復detailとして保存。V1/V84/H2/engineer-schema/entity（ContractComplianceProfile/ContractComplianceSnapshot/ComplianceBreakDetail＋mapper）を同一差分で同期し、F1MapManifestTestのWORK_TIME_TYPED manifestへ反映、MySQL fresh smokeへ列/table/trigger assertを追加。
+- **R8-P1-01**: `ContractComplianceProfile`の全clearable nullable業務列へ`@TableField(updateStrategy = FieldStrategy.ALWAYS)`を付与（design §5.5 explicit NULL・field-mapping §4.3の既定解）。新規`F1NullClearMapperTest`（@SpringBootTest/H2/test profile）でfull DTOの`updateById`による値→NULL保存と、楽観ロックCAS失敗（expected version不一致）の0行更新をMyBatis-Plus経路で検証。
+- **R8-P2-01**: design §6.2 F1-NULL-01行へ「省略PATCH rejectはT063 API導入時にvalidationで担保、T061はraw SQL＋mapper full DTO testで値→NULLとCAS 0行を担保」を明記。
+- **R8-NOTE-01**: F1-HISTORY-CORRECTION-01のasOf解決assertをeffective interval（effective_from/to）＋「asOf日に有効な後続eventにsupersedeされていない」NOT EXISTS条件へ強化（8/10→evt-1、8/20→evt-2、8/31→evt-2、10/1→0件を検証）。
+
+**実行test（L1〜L3定向・直接回帰、skip 0）**: H2/F1系（DispatchComplianceSchemaH2Test、F1MapManifestTest、F1SnapshotWriteProtocolTest、F1NullAndHistoryCorrectionTest、F1NullClearMapperTest、F1PiiOwnershipScanTest）8/0/0/0、MySQL 5形状（FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK）5/0/0/0、SpecDispatchConsistencyTest 9/0/0/0、MigrationScriptIntegrityTest 27/0/0/0。`git diff --check` exit 0。
+
+**Rollback**: V84は未releaseのためcommit revertのみでDB rollback不要。本deltaのV1/engineer-schema変更はS10側の自前commitとして記録（R10 provenance注意事項に対応）。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。

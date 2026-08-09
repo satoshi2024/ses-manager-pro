@@ -184,7 +184,7 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 | F1-MAP-01 | L1 | FM-C-01〜FM-L-30の96 stable row IDをcanonical schema manifestへ照合 | 全96 IDが専用typed columnまたは指定historyへ1件ずつ解決。technical shape未解決0件 |
 | F1-SNAPSHOT-01 | L2 | 同じoperation retry、A(v1,hA)→B(v2,hB)→A(v3,hA)、direct SQL UPDATE/DELETE、失敗rollback | 同じoperationは1行、A/B/Aは3version、同じcontent hashを許容、pointerはv3、旧snapshot不変、orphan 0、直接変更拒否 |
 | F1-SNAPSHOT-02 | L2 | worker A/Bを独立に同時改定し、expected current versionを競合させる | workerごとにcurrent pointer/version/CASが独立し、各競合は1勝、FK/rollback後orphan 0 |
-| F1-NULL-01 | L2 | field-mapping §4.3のcurrent clearable field familyを値→明示NULL、field省略PATCH、CAS失敗 | current列だけNULL化、旧値残存なし、省略PATCHはreject、CAS失敗は全rollback |
+| F1-NULL-01 | L2 | field-mapping §4.3のcurrent clearable field familyを値→明示NULL、field省略PATCH、CAS失敗 | current列だけNULL化、旧値残存なし、CAS失敗は全rollback。T061ではraw SQL＋MyBatis-Plus full DTOのmapper test（F1NullClearMapperTest）で値→NULLとCAS 0行を担保し、省略PATCH rejectはT063のAPI導入時にvalidationとして担保する |
 | F1-HISTORY-CORRECTION-01 | L2 | complaint/direct-hire/notification differenceの原event→CORRECTED/CANCELLED event | 旧eventは不変、新eventにsupersedes/correction reason/actorを保存、asOfは最新有効eventを解決 |
 | F1-MYSQL-FRESH-01 | L1 | 空DBをV1→V84 | V1 baselineとV84が同じtable/FK/index/entity契約を形成し、skip 0 |
 | F1-MYSQL-LEGACY-01 | L2 | exact provenance付きV83公開形状＋既存契約fixtureへV84適用 | V83 fixture、既存契約、success/checksumを固定し、推測backfill 0、未確認はfail-closed |

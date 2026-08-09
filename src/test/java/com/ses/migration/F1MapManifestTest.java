@@ -48,7 +48,8 @@ class F1MapManifestTest {
         RESOLUTION_COLUMNS.put("SAFETY_TYPED", new String[]{
                 "t_contract_compliance_snapshot", "safety_responsibility_detail", "safety_rule_reference"});
         RESOLUTION_COLUMNS.put("WORK_TIME_TYPED", new String[]{
-                "t_contract_compliance_snapshot", "work_start_minute", "work_end_minute", "work_span_next_day_flag"});
+                "t_contract_compliance_snapshot", "work_start_minute", "work_end_minute", "work_span_next_day_flag",
+                "break_start_minute", "break_end_minute"});
         RESOLUTION_COLUMNS.put("WORK_CALENDAR_HISTORY", new String[]{
                 "t_compliance_work_calendar", "work_day_code", "holiday_calendar_code", "excluded_date"});
         RESOLUTION_COLUMNS.put("OVERTIME_AGREEMENT_SNAPSHOT", new String[]{
@@ -141,6 +142,12 @@ class F1MapManifestTest {
                     for (int i = 1; i < entry.getValue().length; i++) {
                         assertColumnExists(statement, table, entry.getValue()[i], entry.getKey());
                     }
+                }
+                // WORK_TIME_TYPEDの複数休憩は反復detail（t_compliance_break_detail）へ分解する（R8-P0-01）
+                assertTableExists(statement, "t_compliance_break_detail", "WORK_TIME_TYPED");
+                for (String column : new String[]{"break_no", "start_offset_minute", "end_offset_minute",
+                        "event_id", "event_type", "supersedes_event_id", "correction_reason"}) {
+                    assertColumnExists(statement, "t_compliance_break_detail", column, "WORK_TIME_TYPED");
                 }
             }
         }
