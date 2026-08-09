@@ -50,7 +50,7 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 6 | `bp-company-master-procurement-compliance` | BP自由入力排除・取適法/フリーランス法対応 | XL | V70, V71 | 仕様済み・G2開発方針決定済み |
 | 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V76, V77, V78, V79** | S07実装中・独立Review NOT REVIEWABLE |
 | 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
-| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | **PASS**・current merged Head `7caa5e6`（main=origin/main）・R12 P2はprovenance記述のみ |
+| 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | **PASS**・code/evidence Head `7caa5e6`・Packet/current merged HeadはPacket同期commit（main=origin/main）・R12 P2はprovenance記述のみ |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V82** | 仕様済み・G2開発方針決定済み |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V83** | 仕様済み・G6決定済み |
 | 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V84** | 仕様済み |
@@ -74,7 +74,7 @@ S07正式migrationはV75〜V79とする。内訳はV75（承認DDL）、V76（�
 S09=V80（既適用）＋V81（R10順方向修復）、S10=V82、S11=V83、S12=V84、S13=V85、S14=V86、S15=V87、S16=V88、S17=V89とする。
 過去migrationの編集やout-of-order適用は禁止する。
 
-2026-08-09時点でS09はcode/evidence/current merged Head `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`（`main`=`origin/main`）に固定し、Round 12 independent diff reReviewでPASS確定した。R12-P2-01はPacket provenance記述のみである。
+2026-08-09時点でS09はcode/evidence Head `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`を対象とし、Packet同期commit（`git log -1 -- <path>`で解決、`main`=`origin/main`）でRound 12 independent diff reReviewのPASS記録をmerge済みである。R12-P2-01はPacket provenance記述のみである。
 S10/S11は並行dispatch可能。S12はS10/S11双方のPASS後に開始し、Wave 2は解放する。
 
 ## 4. 実行Wave

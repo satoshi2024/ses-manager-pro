@@ -11,9 +11,10 @@
 | handbook | v2.0 |
 | state | PASS（R12 independent diff reReview完了） |
 | base | 23793ec4f9fdd37305d3ffacda84024c5ab1fe46 |
-| review-input docs Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47` を対象とするRound 12 Packet |
-| code/evidence/current merged Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`（`main`=`origin/main`=`origin/HEAD`） |
-| merge | `main` / `origin/main` にmerge済み。worktree clean、`.tmp-ui-scale-r3` gitlinkなし |
+| review-input docs Head | Packet同期commit（`git log -1 -- <path>`で解決） |
+| code/evidence Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`（実装・証跡Head） |
+| Packet/current merged Head | Packet同期後の`HEAD`（`git rev-parse HEAD origin/main`が同一SHA、`main`=`origin/main`=`origin/HEAD`） |
+| merge | Packet同期commitまでmerge済み。worktree clean、`.tmp-ui-scale-r3` gitlinkなし |
 | latest review | R12 independent diff reReview / 2026-08-09 |
 | verdict | PASS: P0=0 / P1=0 / P2=1。R12-P2-01はPacket provenance記述のみでPASS非block |
 | issue count | R12: P0=0 / P1=0 / P2=1。旧OPEN 5件は全件VERIFIED_CLOSED |
@@ -153,8 +154,9 @@ Round 10の記録と同様に本節も履歴として保持し、現行判定に
 |---|---|
 | 対象spec / task | `order-acceptance-workflow` / T054〜T059 |
 | Base | `23793ec4f9fdd37305d3ffacda84024c5ab1fe46` |
-| code/evidence/current merged Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47` |
-| merge provenance | `git rev-parse HEAD origin/main` が同一SHA、`main=origin/main=origin/HEAD`、worktree clean、gitlinkなし |
+| code/evidence Head | `7caa5e6a25b21a21a7d7d02961ace7245b33fb47` |
+| Packet/current merged Head | Packet同期commit（`git log -1 -- <path>`で解決） |
+| merge provenance | Packet同期後の`git rev-parse HEAD origin/main`が同一SHA、`main=origin/main=origin/HEAD`、worktree clean、gitlinkなし |
 | R12 issue | `order-acceptance-workflow-R12-P2-01` — PacketのHead/provenance記述不一致 |
 | verdict | **PASS — P0=0 / P1=0 / P2=1**。R12-P2-01は記述のみでPASS非block |
 | 旧OPEN | R9-P1-09、R9-P1-10、R11-P1-01、R11-P1-02、R11-P2-01は全件`VERIFIED_CLOSED` |
