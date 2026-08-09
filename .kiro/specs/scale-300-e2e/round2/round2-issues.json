@@ -1,0 +1,254 @@
+{
+  "base": "http://localhost:8081",
+  "runAt": "2026-08-09T14:05:56.068Z",
+  "round": 2,
+  "issueCount": 26,
+  "checkCount": 54,
+  "failedCheckCount": 1,
+  "issues": [
+    {
+      "id": "R2-001",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "contract-gantt",
+      "url": "/contract/gantt",
+      "type": "PAGE_ERROR",
+      "message": "TypeError: Cannot read properties of undefined (reading '11')\n    at Object.format (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:1613)\n    at f.get_date_info (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:21059)\n    at http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:20945\n    at Array.map (<anonymous>)\n    at f.get_dates_to_draw (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:20919)\n    at f.make_dates (http://localhost:8081/lib/frappe-ga",
+      "stack": "TypeError: Cannot read properties of undefined (reading '11')\n    at Object.format (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:1613)\n    at f.get_date_info (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:21059)\n    at http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:20945\n    at Array.map (<anonymous>)\n    at f.get_dates_to_draw (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:20919)\n    at f.make_dates (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:20554)\n    at f.render (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:18246)\n    at f.change_view_mode (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:16523)\n    at new f (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:14391)\n    at Object.success (http://localhost:8081/js/modules/contract-gantt.js:75:26)"
+    },
+    {
+      "id": "R2-002",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "proposal-kanban",
+      "url": "/proposal/kanban",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: renderKanbanCard is not defined\n    at http://localhost:8081/js/modules/proposal-kanban.js:174:21\n    at Array.forEach (<anonymous>)\n    at Object.success (http://localhost:8081/js/modules/proposal-kanban.js:173:25)\n    at c (http://localhost:8081/lib/jquery/jquery.min.js:2:25304)\n    at Object.fireWith [as resolveWith] (http://localhost:8081/lib/jquery/jquery.min.js:2:26053)\n    at l (http://localhost:8081/lib/jquery/jquery.min.js:2:77782)\n    at XMLHttpRequest.<anonymous> (http",
+      "stack": "ReferenceError: renderKanbanCard is not defined\n    at http://localhost:8081/js/modules/proposal-kanban.js:174:21\n    at Array.forEach (<anonymous>)\n    at Object.success (http://localhost:8081/js/modules/proposal-kanban.js:173:25)\n    at c (http://localhost:8081/lib/jquery/jquery.min.js:2:25304)\n    at Object.fireWith [as resolveWith] (http://localhost:8081/lib/jquery/jquery.min.js:2:26053)\n    at l (http://localhost:8081/lib/jquery/jquery.min.js:2:77782)\n    at XMLHttpRequest.<anonymous> (http://localhost:8081/lib/jquery/jquery.min.js:2:80265)"
+    },
+    {
+      "id": "R2-003",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "engineer-detail",
+      "url": "/engineer/detail?id=1001",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-004",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "engineer-detail-legacy",
+      "url": "/engineer/detail?id=1",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-005",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "detail-1001",
+      "url": "/engineer/detail?id=1001",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-006",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "detail-1252",
+      "url": "/engineer/detail?id=1252",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-007",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "detail-1",
+      "url": "/engineer/detail?id=1",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-008",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "detail-2",
+      "url": "/engineer/detail?id=2",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-009",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "detail-3",
+      "url": "/engineer/detail?id=3",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3",
+      "stack": "ReferenceError: loadAccountLink is not defined\n    at http://localhost:8081/js/modules/engineer-account-link.js:6:51\n    at http://localhost:8081/js/modules/engineer-account-link.js:83:3"
+    },
+    {
+      "id": "R2-010",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "engineer-detail",
+      "url": "/engineer/detail?id=1",
+      "type": "ACCOUNT_LINK",
+      "message": "legacy engineer id=1 account link not shown ()"
+    },
+    {
+      "id": "R2-011",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-skill-tag",
+      "url": "/skill-tag",
+      "type": "HTTP_404",
+      "message": "HTTP 404"
+    },
+    {
+      "id": "R2-012",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-skill-tag",
+      "url": "/skill-tag",
+      "type": "CONSOLE_ERROR",
+      "message": "Failed to load resource: the server responded with a status of 404 ()"
+    },
+    {
+      "id": "R2-013",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-skill-tag",
+      "url": "/skill-tag",
+      "type": "RESPONSE_4XX",
+      "message": "404 http://localhost:8081/skill-tag"
+    },
+    {
+      "id": "R2-014",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-search",
+      "url": "/search",
+      "type": "HTTP_404",
+      "message": "HTTP 404"
+    },
+    {
+      "id": "R2-015",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-search",
+      "url": "/search",
+      "type": "CONSOLE_ERROR",
+      "message": "Failed to load resource: the server responded with a status of 404 ()"
+    },
+    {
+      "id": "R2-016",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-search",
+      "url": "/search",
+      "type": "RESPONSE_4XX",
+      "message": "404 http://localhost:8081/search"
+    },
+    {
+      "id": "R2-017",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-tasks",
+      "url": "/tasks",
+      "type": "HTTP_404",
+      "message": "HTTP 404"
+    },
+    {
+      "id": "R2-018",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-tasks",
+      "url": "/tasks",
+      "type": "CONSOLE_ERROR",
+      "message": "Failed to load resource: the server responded with a status of 404 ()"
+    },
+    {
+      "id": "R2-019",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-tasks",
+      "url": "/tasks",
+      "type": "RESPONSE_4XX",
+      "message": "404 http://localhost:8081/tasks"
+    },
+    {
+      "id": "R2-020",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-saved-views",
+      "url": "/saved-views",
+      "type": "HTTP_404",
+      "message": "HTTP 404"
+    },
+    {
+      "id": "R2-021",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-saved-views",
+      "url": "/saved-views",
+      "type": "CONSOLE_ERROR",
+      "message": "Failed to load resource: the server responded with a status of 404 ()"
+    },
+    {
+      "id": "R2-022",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-saved-views",
+      "url": "/saved-views",
+      "type": "RESPONSE_4XX",
+      "message": "404 http://localhost:8081/saved-views"
+    },
+    {
+      "id": "R2-023",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-batch-operations",
+      "url": "/batch-operations",
+      "type": "HTTP_404",
+      "message": "HTTP 404"
+    },
+    {
+      "id": "R2-024",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-batch-operations",
+      "url": "/batch-operations",
+      "type": "CONSOLE_ERROR",
+      "message": "Failed to load resource: the server responded with a status of 404 ()"
+    },
+    {
+      "id": "R2-025",
+      "role": "管理者",
+      "viewport": "desktop",
+      "page": "route-batch-operations",
+      "url": "/batch-operations",
+      "type": "RESPONSE_4XX",
+      "message": "404 http://localhost:8081/batch-operations"
+    },
+    {
+      "id": "R2-026",
+      "role": "管理者",
+      "viewport": "mobile",
+      "page": "proposal",
+      "url": "/proposal/kanban",
+      "type": "PAGE_ERROR",
+      "message": "ReferenceError: renderKanbanCard is not defined\n    at http://localhost:8081/js/modules/proposal-kanban.js:174:21\n    at Array.forEach (<anonymous>)\n    at Object.success (http://localhost:8081/js/modules/proposal-kanban.js:173:25)\n    at c (http://localhost:8081/lib/jquery/jquery.min.js:2:25304)\n    at Object.fireWith [as resolveWith] (http://localhost:8081/lib/jquery/jquery.min.js:2:26053)\n    at l (http://localhost:8081/lib/jquery/jquery.min.js:2:77782)\n    at XMLHttpRequest.<anonymous> (http",
+      "stack": "ReferenceError: renderKanbanCard is not defined\n    at http://localhost:8081/js/modules/proposal-kanban.js:174:21\n    at Array.forEach (<anonymous>)\n    at Object.success (http://localhost:8081/js/modules/proposal-kanban.js:173:25)\n    at c (http://localhost:8081/lib/jquery/jquery.min.js:2:25304)\n    at Object.fireWith [as resolveWith] (http://localhost:8081/lib/jquery/jquery.min.js:2:26053)\n    at l (http://localhost:8081/lib/jquery/jquery.min.js:2:77782)\n    at XMLHttpRequest.<anonymous> (http://localhost:8081/lib/jquery/jquery.min.js:2:80265)"
+    }
+  ]
+}

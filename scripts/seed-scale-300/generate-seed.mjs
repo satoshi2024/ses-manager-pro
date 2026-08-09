@@ -79,7 +79,7 @@ const rolePlan = [
   ['営業', 25],
   ['HR', 8],
   ['マネージャー', 10],
-  ['要員', 255]
+  ['要員', 252]
 ];
 for (const [role, cnt] of rolePlan) {
   const prefix = role === '管理者' ? 'admin' : role === '営業' ? 'sales' : role === 'HR' ? 'hr' : role === 'マネージャー' ? 'mgr' : 'member';
@@ -100,6 +100,27 @@ for (const [role, cnt] of rolePlan) {
     });
   }
 }
+// V2初期マスタの要員3名（田中/山田/伊藤）を300人の中に含める
+const legacyMembers = [
+  { fullName: '田中 太郎', kana: 'タナカ タロウ', gender: '男性' },
+  { fullName: '山田 花子', kana: 'ヤマダ ハナコ', gender: '女性' },
+  { fullName: '伊藤 健太', kana: 'イトウ ケンタ', gender: '男性' }
+];
+legacyMembers.forEach((m, i) => {
+  const id = nextUserId++;
+  const username = `s300.member${pad(253 + i, 3)}`;
+  users.push({
+    id,
+    username,
+    password: 'Scale300!',
+    realName: m.fullName,
+    kana: m.kana,
+    role: '要員',
+    gender: m.gender,
+    email: `${username}@ses.local`,
+    status: 1
+  });
+});
 const salesUsers = users.filter((u) => u.role === '営業');
 const hrUsers = users.filter((u) => u.role === 'HR');
 const managerUsers = users.filter((u) => u.role === 'マネージャー');
@@ -200,6 +221,76 @@ let nextAcctHistId = 28001;
 
 const techOrgs = [3005, 3006, 3007];
 const techCostCenters = [4001, 4002, 4003];
+const legacyEngineerDefs = [
+  {
+    id: 1,
+    fullName: '田中 太郎',
+    kana: 'タナカ タロウ',
+    initialName: 'T.T',
+    gender: '男性',
+    employment: '正社員',
+    status: '稼動中',
+    unitPrice: 800000,
+    exp: 5,
+    orgId: techOrgs[1],
+    costCenterId: techCostCenters[1],
+    resumeSummary: 'Javaバックエンド開発を中心に、Spring Bootを用いたAPI設計・実装経験が豊富です。直近ではクラウド（AWS）を活用した基盤構築にも携わっています。'
+  },
+  {
+    id: 2,
+    fullName: '山田 花子',
+    kana: 'ヤマダ ハナコ',
+    initialName: 'Y.H',
+    gender: '女性',
+    employment: '契約社員',
+    status: '提案中',
+    unitPrice: 700000,
+    exp: 3,
+    orgId: techOrgs[2],
+    costCenterId: techCostCenters[2],
+    resumeSummary: 'フロントエンド開発を得意とし、ReactやVue.jsを用いたSPAの開発経験があります。UI/UXを意識した実装を心がけています。'
+  },
+  {
+    id: 3,
+    fullName: '伊藤 健太',
+    kana: 'イトウ ケンタ',
+    initialName: 'I.K',
+    gender: '男性',
+    employment: 'BP',
+    status: 'Bench',
+    unitPrice: 600000,
+    exp: 2,
+    orgId: techOrgs[0],
+    costCenterId: techCostCenters[0],
+    resumeSummary: 'Pythonを用いたデータ分析スクリプトの作成や、Djangoでの簡単なWebアプリケーション構築経験があります。現在は新しい技術の習得に意欲的です。'
+  }
+];
+for (const def of legacyEngineerDefs) {
+  engineers.push({
+    id: def.id,
+    fullName: def.fullName,
+    kana: def.kana,
+    initialName: def.initialName,
+    gender: def.gender,
+    birthDate: D(1988, 4, 1),
+    nationality: '日本',
+    station: STATIONS[0][0],
+    prefecture: STATIONS[0][1],
+    railway: STATIONS[0][2],
+    employment: def.employment,
+    status: def.status,
+    unitPrice: def.unitPrice,
+    costCenterId: def.costCenterId,
+    organizationId: def.orgId,
+    overtimeExempt: null,
+    availableDate: def.status === 'Bench' || def.status === '提案中' ? D(2026, 8, 1) : null,
+    exp: def.exp,
+    japaneseLevel: 'ネイティブ',
+    resumeSummary: def.resumeSummary,
+    remarks: def.status === 'Bench' ? '長期Benchのため営業フォロー重点。' : null,
+    createdBy: 1
+  });
+}
 const skillIdByName = {
   Java: 1, Python: 2, JavaScript: 3, TypeScript: 4, 'C#': 5, PHP: 6, Go: 7, Kotlin: 8, Swift: 9,
   Ruby: 10, 'C++': 11, Scala: 12, SQL: 13, 'Spring Boot': 14, React: 15, 'Vue.js': 16, Angular: 17,
@@ -214,40 +305,44 @@ const dbSkills = [26, 27, 28, 29, 30, 31];
 const cloudSkills = [33, 34, 35, 36, 37];
 
 memberUsers.forEach((user, idx) => {
-  const engineerId = 1001 + idx;
-  const status = idx < 165 ? '稼動中' : idx < 205 ? 'Bench' : idx < 235 ? '提案中' : '退場予定';
-  const employment = idx % 17 === 0 ? 'BP' : idx % 8 === 0 ? '契約社員' : '正社員';
-  const exp = int(1, 25);
-  const org = techOrgs[idx % 3];
-  const cc = techCostCenters[idx % 3];
-  const unitPrice = Math.min(950000, roundTo(380000 + exp * 17000 + rnd() * 120000, 10000));
+  const legacy = idx >= 252;
+  const legacyDef = legacy ? legacyEngineerDefs[idx - 252] : null;
+  const engineerId = legacy ? legacyDef.id : 1001 + idx;
+  const status = legacy ? legacyDef.status : idx < 165 ? '稼動中' : idx < 205 ? 'Bench' : idx < 235 ? '提案中' : '退場予定';
+  const employment = legacy ? legacyDef.employment : idx % 17 === 0 ? 'BP' : idx % 8 === 0 ? '契約社員' : '正社員';
+  const exp = legacy ? legacyDef.exp : int(1, 25);
+  const org = legacy ? legacyDef.orgId : techOrgs[idx % 3];
+  const cc = legacy ? legacyDef.costCenterId : techCostCenters[idx % 3];
+  const unitPrice = legacy ? legacyDef.unitPrice : Math.min(950000, roundTo(380000 + exp * 17000 + rnd() * 120000, 10000));
   const station = pick(STATIONS);
   const mainLang = pick(languageSkills);
   const mainLangName = Object.keys(skillIdByName).find((k) => skillIdByName[k] === mainLang);
-  engineers.push({
-    id: engineerId,
-    fullName: user.realName,
-    kana: user.kana,
-    initialName: `${user.realName.replace(' ', ' ').split(' ').map((s) => s.charAt(0)).join('.')}.`,
-    gender: user.gender,
-    birthDate: D(int(1966, 2003), int(1, 12), int(1, 28)),
-    nationality: '日本',
-    station: station[0],
-    prefecture: station[1],
-    railway: station[2],
-    employment,
-    status,
-    unitPrice,
-    costCenterId: cc,
-    organizationId: org,
-    overtimeExempt: employment === '正社員' && rnd() < 0.15 ? 1 : null,
-    availableDate: status === 'Bench' || status === '提案中' ? D(2026, int(8, 10), int(1, 28)) : null,
-    exp,
-    japaneseLevel: 'ネイティブ',
-    resumeSummary: `${exp}年の開発経験。${mainLangName}を中心に、要件定義から保守運用まで一貫して対応。`,
-    remarks: status === 'Bench' ? '長期Benchのため営業フォロー重点。' : null,
-    createdBy: 1
-  });
+  if (!legacy) {
+    engineers.push({
+      id: engineerId,
+      fullName: user.realName,
+      kana: user.kana,
+      initialName: `${user.realName.replace(' ', ' ').split(' ').map((s) => s.charAt(0)).join('.')}.`,
+      gender: user.gender,
+      birthDate: D(int(1966, 2003), int(1, 12), int(1, 28)),
+      nationality: '日本',
+      station: station[0],
+      prefecture: station[1],
+      railway: station[2],
+      employment,
+      status,
+      unitPrice,
+      costCenterId: cc,
+      organizationId: org,
+      overtimeExempt: employment === '正社員' && rnd() < 0.15 ? 1 : null,
+      availableDate: status === 'Bench' || status === '提案中' ? D(2026, int(8, 10), int(1, 28)) : null,
+      exp,
+      japaneseLevel: 'ネイティブ',
+      resumeSummary: `${exp}年の開発経験。${mainLangName}を中心に、要件定義から保守運用まで一貫して対応。`,
+      remarks: status === 'Bench' ? '長期Benchのため営業フォロー重点。' : null,
+      createdBy: 1
+    });
+  }
   // skills: 4-7 tags
   const skillCount = int(4, 7);
   const chosen = new Set([mainLang]);
@@ -691,7 +786,7 @@ for (const eng of engineers.filter((e) => e.status === '稼動中' || e.status =
 let benchIdx = 0;
 for (const eng of engineers.filter((e) => e.status === 'Bench' || e.status === '提案中')) {
   if (benchIdx >= 45) break;
-  const status = rnd() < 0.15 ? '解約' : '終了';
+  const status = benchIdx % 7 === 0 ? '解約' : '終了';
   makeContract(eng, status, D(2024, int(1, 6), 1), D(2026, int(1, 5), 28), null, null, false);
   benchIdx++;
 }
@@ -711,6 +806,26 @@ for (let i = 0; i < 20; i++) {
     renewedFromContractId: base.id,
     autoRenew: 1
   });
+}
+
+// 成約済み提案を対応する稼働中/準備中契約へ紐付け（契約→提案の参照整合）
+const contractedProposals = proposals.filter((p) => p.status === '成約');
+for (const p of contractedProposals) {
+  const candidates = contracts.filter(
+    (c) => c.engineerId === p.engineerId && !c.proposalId && (c.status === '稼動中' || c.status === '準備中')
+  );
+  const match = candidates.find((c) => c.projectId === p.projectId) || candidates[0];
+  if (match) {
+    match.proposalId = p.id;
+  } else {
+    // 成約提案に対応する契約が無い場合は準備中契約を補完する
+    const eng = engineers.find((e) => e.id === p.engineerId);
+    const proj = projects.find((pr) => pr.id === p.projectId);
+    makeContract(eng, '準備中', D(2026, 9, 1), D(2027, 8, 28), p, null, false);
+    const created = contracts[contracts.length - 1];
+    created.projectId = proj.id;
+    created.customerId = proj.customerId;
+  }
 }
 
 // ---------- section 12: work records ----------
@@ -1637,7 +1752,8 @@ emit('m_customer', ['id', 'company_name', 'company_name_kana', 'contact_person',
 emit('t_customer_contact', ['id', 'customer_id', 'name', 'name_kana', 'department', 'position', 'roles_json', 'email', 'phone', 'primary_flag', 'valid_from', 'valid_to', 'status', 'version', 'deleted_flag'], customerContacts.map((c) => [c.id, c.customerId, c.name, c.kana, c.department, c.position, c.rolesJson, c.email, c.phone, c.primaryFlag, c.validFrom, null, c.status, c.version, 0]));
 emit('m_workplace', ['id', 'tenant_id', 'customer_id', 'organization_id', 'name', 'address', 'organization_unit', 'phone', 'valid_from', 'valid_to', 'status', 'version', 'deleted_flag'], workplaces.map((w) => [w.id, w.tenantId, w.customerId, w.organizationId, w.name, w.address, w.organizationUnit, w.phone, w.validFrom, null, w.status, w.version, 0]));
 
-emit('t_engineer', ['id', 'full_name', 'full_name_kana', 'initial_name', 'gender', 'birth_date', 'nationality', 'nearest_station', 'prefecture', 'railway_company', 'employment_type', 'status', 'expected_unit_price', 'cost_center_id', 'organization_id', 'overtime_exempt_flag', 'available_date', 'experience_years', 'japanese_level', 'resume_summary', 'remarks', 'created_by'], engineers.map((e) => [e.id, e.fullName, e.kana, e.initialName, e.gender, e.birthDate, e.nationality, e.station, e.prefecture, e.railway, e.employment, e.status, e.unitPrice, e.costCenterId, e.organizationId, e.overtimeExempt, e.availableDate, e.exp, e.japaneseLevel, e.resumeSummary, e.remarks, e.createdBy]));
+// V2初期マスタの要員3名（id 1-3）は既存のため、追加分のみINSERTする
+emit('t_engineer', ['id', 'full_name', 'full_name_kana', 'initial_name', 'gender', 'birth_date', 'nationality', 'nearest_station', 'prefecture', 'railway_company', 'employment_type', 'status', 'expected_unit_price', 'cost_center_id', 'organization_id', 'overtime_exempt_flag', 'available_date', 'experience_years', 'japanese_level', 'resume_summary', 'remarks', 'created_by'], engineers.filter((e) => e.id >= 1001).map((e) => [e.id, e.fullName, e.kana, e.initialName, e.gender, e.birthDate, e.nationality, e.station, e.prefecture, e.railway, e.employment, e.status, e.unitPrice, e.costCenterId, e.organizationId, e.overtimeExempt, e.availableDate, e.exp, e.japaneseLevel, e.resumeSummary, e.remarks, e.createdBy]));
 emit('t_engineer_skill', ['id', 'engineer_id', 'skill_id', 'proficiency', 'experience_years'], engineerSkills.map((s) => [s.id, s.engineerId, s.skillId, s.proficiency, s.experienceYears]));
 emit('t_engineer_career', ['id', 'engineer_id', 'period_from', 'period_to', 'project_name', 'client_industry', 'role', 'description', 'tech_stack', 'team_size'], engineerCareers.map((c) => [c.id, c.engineerId, c.periodFrom, c.periodTo, c.projectName, c.clientIndustry, c.role, c.description, c.techStack, c.teamSize]));
 emit('t_engineer_sales', ['id', 'engineer_id', 'sales_user_id', 'primary_flag', 'assigned_at', 'released_at', 'remarks', 'deleted_flag'], engineerSales.map((s) => [s.id, s.engineerId, s.salesUserId, s.primaryFlag, s.assignedAt, s.releasedAt, s.remarks, s.deletedFlag]));

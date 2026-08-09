@@ -35,3 +35,4 @@ tmp/
 node_modules/
 .kiro/specs/scale-300-e2e/evidence/desktop/
 .kiro/specs/scale-300-e2e/evidence/mobile/
+.kiro/specs/scale-300-e2e/round2/evidence/full/
