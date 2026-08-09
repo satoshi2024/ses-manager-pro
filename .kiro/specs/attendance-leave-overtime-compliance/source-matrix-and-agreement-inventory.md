@@ -15,7 +15,7 @@ T067着手時の `main` / `origin/main` HEAD = `5e29f39c96da85b29a0fe881326d9798
 
 | 検証項目 | 結果 |
 |---|---|
-| (2) 17spec台帳の状態 | attendance = `IN PROGRESS`、T067完了・T068〜T074未着手。中央台帳と同期予定 |
+| (2) 17spec台帳の状態 | attendance = `IN PROGRESS`、T067完了・T068〜T074未着手。中央台帳と同期済み（T067 commit `93c1ac6`） |
 | (3) 実適用済みmigration最新 | `V81`（order acceptance remediation）。`V82`/`V83`は未作成 |
 | (4) 先行spec | order-acceptance-workflow = `PASS`、merge済み。T067の先行条件を充足 |
 | (5) 採番予約 | attendanceは`V83`予約。実適用最新V81で衝突なし。V59/V72は永久欠番 |

@@ -8,12 +8,12 @@
 | handbook | `v2.0` |
 | state | `IN PROGRESS` |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | `T067完了作業（commit前）` |
+| head | `93c1ac638e4672c8c4bf60421d1482e4ebc06949`（T067文書commit） |
 | merge | `unmerged` |
 | latest review | `未実施（T067完了後にR11開始）` |
 | verdict | `中間記録` |
 | issue count | `P0=0 / P1=0 / P2=0 / NOTE=0` |
-| next action | `T067のcommitを固定し、T068着手前にV83衝突を再確認する` |
+| next action | `T068着手前にmerge済みdb/migrationの最新とV83衝突を再確認する` |
 
 本台帳は、T067のtask実装とその証拠をappend-onlyで管理する。T067は文書のみであり、production code・DDL・migrationは変更しない。
 
@@ -34,7 +34,7 @@
 ```text
 - handbook version: v2.0
 - spec/tasks: attendance-leave-overtime-compliance / T067のみ
-- base/head/merge status: 5e29f39 / T067完了作業（commit前） / 未merge
+- base/head/merge status: 5e29f39 / 93c1ac6 / 未merge（main上のT067文書commit）
 - changed files by task: source-matrix-and-agreement-inventory.md、tasks.md、spec-execution-ledger.md、本台帳
 - requirements/AC trace: 最重要境界、R1.3、R2.1/R2.2、R3.2/R3.4、R4.2、R5
 - migration state: 実適用最新V81、予約V83、V82/V83未作成、V59/V72永久欠番
@@ -93,7 +93,7 @@
 
 | level | command | environment | tests | failures | errors | skipped | exit | commit | executor |
 |---|---|---|---:|---:|---:|---:|---:|---|---|
-| L0 | PowerShell inline文書整合チェック、`git diff --check` | Windows PowerShell / worktree | 1 | 0 | 0 | 0 | 0 | commit前 | 主担当 |
+| L0 | PowerShell inline文書整合チェック、`git diff --check` | Windows PowerShell / worktree | 1 | 0 | 0 | 0 | 0 | `93c1ac6` | 主担当 |
 
 skipはT067の文書L0には該当なし。Docker/MySQL/Maven/Node/browserはproduction code・DDL・UIを変更しないため本taskでは実行対象外で、T074/Mまたは該当taskへ繰り越す。
 
@@ -120,16 +120,16 @@ skipはT067の文書L0には該当なし。Docker/MySQL/Maven/Node/browserはpro
 
 | task | requirements | 変更file | test | Demo | commit | risk |
 |---|---|---|---|---|---|---|
-| T067 | 最重要境界、R1.2/R1.3、R2.1/R2.2、R3.2/R3.4、R4.2、R5 | `source-matrix-and-agreement-inventory.md`、本台帳、`tasks.md`、中央台帳 | L0 PASS、1/0/0/0、`git diff --check` exit 0 | T067-D1、資料提示可能。HR確認はrelease gate | commit前（次のdocs commitで固定） | 法人/協定/就業規則/適用除外者未確認。既定値で適合にせず判定不能として管理 |
+| T067 | 最重要境界、R1.2/R1.3、R2.1/R2.2、R3.2/R3.4、R4.2、R5 | `source-matrix-and-agreement-inventory.md`、本台帳、`tasks.md`、中央台帳 | L0 PASS、1/0/0/0、`git diff --check` exit 0 | T067-D1、資料提示可能。HR確認はrelease gate | `93c1ac6`（現台帳同期は後続の文書provenance commit） | 法人/協定/就業規則/適用除外者未確認。既定値で適合にせず判定不能として管理 |
 
 ## 11. Round履歴
 
 ### Round 0 — 2026-08-09 — 主担当中間記録
 
-- base/head: `5e29f39` / T067完了作業（commit前）
+- base/head: `5e29f39` / `93c1ac6`
 - scope: T067のみ、文書整合と開始条件
 - reviewed issue IDs: なし
 - new issue IDs: なし。release gateはATT-GATE-01〜06として別管理
 - independently executed tests: L0文書整合チェック、`git diff --check`（PASS）
 - verdict: T067完了（独立Review待ち。release gateは未達のまま管理）
-- ledger/central synchronization: tasks.md・中央台帳・本台帳はT067完了記録へ更新済み。commit hashは次のdocs commitで固定する
+- ledger/central synchronization: tasks.md・中央台帳・本台帳はT067完了記録へ更新済み。現行台帳のprovenance同期commitは`git log -1 -- <path>`で解決する
