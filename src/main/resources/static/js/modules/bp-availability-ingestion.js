@@ -201,7 +201,7 @@
             container.append(`
                 <div class="d-flex gap-2 mb-2 skill-row">
                     <input type="text" class="form-control bg-dark border-secondary text-light skill-name" value="${SES.escapeHtml(typeof sk === 'object' ? sk.name : sk)}" placeholder="スキル名">
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                 </div>
             `);
         });
@@ -238,7 +238,7 @@
                 $('#rv-skills-container').append(`
                     <div class="d-flex gap-2 mb-2 skill-row">
                         <input type="text" class="form-control bg-dark border-secondary text-light skill-name" placeholder="スキル名">
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                     </div>
                 `);
             });

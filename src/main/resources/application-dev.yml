@@ -1,0 +1,7 @@
+# dev プロファイル専用設定。
+# R3_SCALE_300 シード（db/migration-dev/V100__seed_r3_scale_300.sql）を
+# 通常起動（spring.profiles.active=dev）でも自動適用する。
+# 他のプロファイル（test/prod）には影響しない。
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/migration-dev

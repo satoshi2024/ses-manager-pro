@@ -171,7 +171,7 @@ function loadKanbanColumnPage(status, page, append = false) {
 
                 const records = pageData.records || [];
                 records.forEach(item => {
-                    renderKanbanCard(item, colBody);
+                    colBody.append(createKanbanCard(item));
                 });
 
                 if (records.length === 0 && !append) {

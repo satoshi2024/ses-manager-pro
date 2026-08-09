@@ -1,0 +1,12 @@
+{
+  "name": "ses-scale-300-e2e",
+  "private": true,
+  "type": "module",
+  "description": "300人規模シードに対するブラウザE2E（desktop/mobile）",
+  "scripts": {
+    "test": "node run-e2e.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

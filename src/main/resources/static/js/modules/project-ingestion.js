@@ -45,7 +45,7 @@
                     <td class="text-end pe-4">
                         ${row.status === '要確認' ? `<a href="/project-ingestion/review/${row.id}" class="btn btn-sm btn-primary">レビュー</a>` : ''}
                         ${row.status === '失敗' ? `<button class="btn btn-sm btn-outline-warning" onclick="reparseJob(${row.id})">再解析</button>` : ''}
-                        ${row.status === '確定済' && row.convertedProjectId ? `<a href="/project/detail/${row.convertedProjectId}" class="btn btn-sm btn-outline-success">案件詳細</a>` : ''}
+                        ${row.status === '確定済' && row.convertedProjectId ? `<a href="/project/detail?id=${row.convertedProjectId}" class="btn btn-sm btn-outline-success">案件詳細</a>` : ''}
                     </td>
                 </tr>
             `);
@@ -207,7 +207,7 @@
             container.append(`
                 <div class="d-flex gap-2 mb-2 skill-row">
                     <input type="text" class="form-control bg-dark border-secondary text-light skill-name" value="${SES.escapeHtml(sk.name || '')}" placeholder="スキル名">
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                 </div>
             `);
         });
@@ -267,17 +267,17 @@
                         if (result.isConfirmed) {
                             location.href = '/proposal/kanban'; // 提案作成への導線（既存のカンバン等）
                         } else {
-                            location.href = '/project/detail/' + projectId;
+                            location.href = '/project/detail?id=' + projectId;
                         }
                     });
                 } else {
                     Toast.success('確定しました。案件詳細へ移動します。');
-                    setTimeout(() => location.href = '/project/detail/' + projectId, 2000);
+                    setTimeout(() => location.href = '/project/detail?id=' + projectId, 2000);
                 }
             },
             error: function() {
                 Toast.success('確定しました。案件詳細へ移動します。');
-                setTimeout(() => location.href = '/project/detail/' + projectId, 2000);
+                setTimeout(() => location.href = '/project/detail?id=' + projectId, 2000);
             }
         });
     }
@@ -293,7 +293,7 @@
                 $('#rv-skills-container').append(`
                     <div class="d-flex gap-2 mb-2 skill-row">
                         <input type="text" class="form-control bg-dark border-secondary text-light skill-name" placeholder="スキル名">
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                     </div>
                 `);
             });

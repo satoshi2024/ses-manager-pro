@@ -191,7 +191,7 @@
                         <option value="\u4e0a\u7d1a"${sk.proficiency === '\u4e0a\u7d1a' ? ' selected' : ''}>上級</option>
                     </select>
                     <input type="number" class="form-control bg-dark border-secondary text-light skill-years" value="${sk.experienceYears || ''}" min="0" style="max-width:90px;" placeholder="\u5e74\u6570">
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                 </div>
             `);
         });
@@ -209,10 +209,10 @@
                             <div class="col-6"><label class="small text-muted">終了</label><input type="date" class="form-control form-control-sm bg-dark border-secondary text-light career-to" value="${c.periodTo || ''}"></div>
                         </div>
                         <div class="mb-2"><label class="small text-muted">プロジェクト名</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-project" value="${SES.escapeHtml(c.projectName || '')}"></div>
-                        <div class="mb-2"><label class="small text-muted">業為・役割</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-role" value="${SES.escapeHtml(c.role || '')}"></div>
+                        <div class="mb-2"><label class="small text-muted">業界・役割</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-role" value="${SES.escapeHtml(c.role || '')}"></div>
                         <div class="mb-2"><label class="small text-muted">技術スタック</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-tech" value="${SES.escapeHtml(c.techStack || '')}"></div>
                         <div class="mb-2"><label class="small text-muted">業務内容</label><textarea class="form-control form-control-sm bg-dark border-secondary text-light career-desc" rows="2">${SES.escapeHtml(c.description || '')}</textarea></div>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.career-row').remove()">経歴删除</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.career-row').remove()">経歴削除</button>
                     </div>
                 </div>
             `);
@@ -279,7 +279,7 @@
                             <option value="\u4e0a\u7d1a">上級</option>
                         </select>
                         <input type="number" class="form-control bg-dark border-secondary text-light skill-years" min="0" style="max-width:90px;" placeholder="\u5e74\u6570">
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">删</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.skill-row').remove()">削除</button>
                     </div>
                 `);
             });
@@ -293,10 +293,10 @@
                                 <div class="col-6"><label class="small text-muted">終了</label><input type="date" class="form-control form-control-sm bg-dark border-secondary text-light career-to"></div>
                             </div>
                             <div class="mb-2"><label class="small text-muted">プロジェクト名</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-project"></div>
-                            <div class="mb-2"><label class="small text-muted">業為・役割</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-role"></div>
+                            <div class="mb-2"><label class="small text-muted">業界・役割</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-role"></div>
                             <div class="mb-2"><label class="small text-muted">技術スタック</label><input type="text" class="form-control form-control-sm bg-dark border-secondary text-light career-tech"></div>
                             <div class="mb-2"><label class="small text-muted">業務内容</label><textarea class="form-control form-control-sm bg-dark border-secondary text-light career-desc" rows="2"></textarea></div>
-                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.career-row').remove()">経歴删除</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="$(this).closest('.career-row').remove()">経歴削除</button>
                         </div>
                     </div>
                 `);

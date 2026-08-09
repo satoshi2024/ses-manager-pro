@@ -29,3 +29,10 @@ Thumbs.db
 # 外部UI回帰用nested repositoryはrootのgitlinkとして取り込まない
 .tmp-ui-scale-r3/
 mise.toml
+
+# ===== ローカル実行・E2E成果物 =====
+tmp/
+node_modules/
+.kiro/specs/scale-300-e2e/evidence/desktop/
+.kiro/specs/scale-300-e2e/evidence/mobile/
+.kiro/specs/scale-300-e2e/round2/evidence/full/

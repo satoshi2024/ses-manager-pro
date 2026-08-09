@@ -1,0 +1,9 @@
+{
+  "base": "http://localhost:8081",
+  "runAt": "2026-08-09T15:45:30.706Z",
+  "round": 2,
+  "issueCount": 0,
+  "checkCount": 54,
+  "failedCheckCount": 0,
+  "issues": []
+}
