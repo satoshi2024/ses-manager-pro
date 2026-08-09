@@ -2,11 +2,14 @@
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
 
-## 1. DDL（S11正式migration V83。S10の予約V84確定後にmerge/apply）
+## 1. DDL（S11正式migration V83。V83は凍結し、方式Aの追補DDLは別途承認された未使用versionで適用する）
 
 - `m_work_calendar(id, legal_entity_id, name, valid_from/to)`、`m_work_calendar_day(calendar_id,date,type,scheduled_minutes)`。
 - `t_employee_attendance(id, engineer_id, work_date, clock_in/out, break_minutes, work_type,
   workplace_type, source, source_external_id, status, version)`。
+- `t_employee_attendance_break(id, attendance_id, sequence_no, start_offset_minutes, end_offset_minutes,
+  created_at, updated_at)`。区間は勤務開始を0とする整数分offsetで保存し、跨夜でも日付を曖昧にしない。
+  `break_minutes`は区間合計から導出し、休憩区間がない既存行で`break_minutes > 0`の場合は区間不明として扱う。
 - `t_attendance_month(engineer_id, work_month, totals..., overtime_minutes, status, submitted/approved/closed metadata)`。
 - `t_leave_request(engineer_id, leave_type, start/end/date/time, requested_minutes, reason, status,
   approval_request_id)`。
@@ -15,6 +18,8 @@
 - `t_overtime_followup(engineer_id, period, warning_code, status, notified_at, health_action_status)`。
 
 時間は分の整数で保存し、表示時に時間へ変換。浮動小数を使わない。
+
+方式AのDDL追補は、V83を編集せず、S10=V84・S12〜S17=V85〜V90の予約を侵食しない、発注者承認済みの未使用migration versionが割り当てられてから作成する。version未確定のまま予約外migrationを作成しない。
 
 ## 2. Calculator
 
@@ -53,6 +58,16 @@
 - `scheduled_minutes IS NULL`（所定日でない）と`= 0`（所定日だが0分）を区別する。§1.1に該当。
 - **締め済み雇用勤怠は上書き不可**（R1.4）。freee/importのsyncが締め済み月を更新しようとしたら
   拒否してfindingにする。sourceの優先順位で黙って上書きしない。
+
+### 5.1.1 休憩区間（方式A：発注者決定）
+
+| 対象 | 決定 | fail-closed条件 | 既存データ |
+|---|---|---|---|
+| 保存単位 | `t_employee_attendance_break`へ1勤務日の複数区間を`start_offset_minutes`/`end_offset_minutes`で保存。offsetの基準は当該勤務の開始時刻 | `start < end`、両端が`0..勤務区間分`、合計が勤務区間分以下 | 既存行は架空の区間を生成しない |
+| 跨夜 | 勤務開始を0とするため、翌日区間も正のoffsetで一意に表す | 勤務区間外または負のoffsetは拒否 | `break_minutes > 0`かつ区間なしは「区間不明」 |
+| 複数区間 | `sequence_no`順に保持し、隣接は許可、重複は拒否 | `next.start < previous.end`、開始≧終了、重複、全体超過を拒否 | 区間不明のまま月次再確定・締め直しを拒否 |
+| `breakMinutes` | 区間の長さの合計から導出して保存・表示 | 入力値との不一致を受け付けない。入力値は無視または不一致として拒否 | `break_minutes=0`かつ区間なしは既知の休憩0分 |
+| 集計 | 勤務区間と休憩区間のintersectionを除いた実労働区間を`AttendanceCalculator`へ渡し、法定内・時間外・休日・深夜を算定 | calculatorへ架空の退勤直前休憩を補間しない | 補正・承認完了までは再確定不可 |
 
 ### 5.2 時間外計算の境界定義
 
@@ -123,4 +138,7 @@
 
 DST影響なしのJST日界、跨夜、休憩、休日、45/360/720/80/100境界、source of truth、sync retry、
 leave残、closing、work record差異非連動。
+
+方式Aの休憩回帰は、深夜前・深夜中・深夜後、跨夜、複数休憩、0分、全時間休憩、重複、勤務区間外、開始≧終了、
+8時間・週40時間・22時境界、月次再集計、既存`breakMinutes`のみの区間不明行を含む。
 
