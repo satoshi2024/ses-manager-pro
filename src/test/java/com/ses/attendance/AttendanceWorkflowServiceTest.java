@@ -47,12 +47,24 @@ class AttendanceWorkflowServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     private long engineerId;
+    private long organizationId;
+    private long calendarId;
 
     @BeforeEach
     void setUp() {
         String name = "T070-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", name);
+        String code = "T070-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
+                + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
+        organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+                name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
+        jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
+                + "VALUES (70001, ?, ?, ?, '2026-01-01', '有効')", organizationId, engineerId, name);
+        calendarId = jdbcTemplate.queryForObject("SELECT id FROM m_work_calendar WHERE engineer_id = ?", Long.class, engineerId);
+        jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
+                + "VALUES (?, '2026-08-03', '通常', 480)", calendarId);
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
@@ -70,14 +82,17 @@ class AttendanceWorkflowServiceTest {
         AttendanceDayRequest request = new AttendanceDayRequest();
         request.setWorkDate(LocalDate.of(2026, 8, 3));
         request.setClockIn(LocalTime.of(9, 0));
-        request.setClockOut(LocalTime.of(18, 0));
-        request.setBreakMinutes(60);
-        request.setWorkType("通常");
+        request.setClockOut(LocalTime.of(23, 0));
+        request.setBreakMinutes(0);
+        request.setWorkType("法定休日");
 
         attendanceService.saveMyDay(request);
         AttendanceMonth month = month();
         assertEquals("入力中", month.getStatus());
-        assertEquals(480, month.getWorkedMinutes());
+        assertEquals(840, month.getWorkedMinutes());
+        assertEquals(480, month.getRegularMinutes());
+        assertEquals(360, month.getOvertimeMinutes());
+        assertEquals(60, month.getLateNightMinutes());
 
         attendanceService.submitMyMonth("2026-08");
         assertEquals("提出済", month().getStatus());
