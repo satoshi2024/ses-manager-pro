@@ -21,7 +21,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -61,7 +60,6 @@ class AttendanceServiceFullAccessTest {
     void fullAccessでは空のallowedEngineerIdsを可視0件へ変換しない() {
         authenticateManager();
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
-        when(engineerMapper.selectList(isNull())).thenReturn(List.of());
 
         var overview = attendanceService.management("2026-08");
 
