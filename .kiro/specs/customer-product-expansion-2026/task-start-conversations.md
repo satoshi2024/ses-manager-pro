@@ -3078,9 +3078,12 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 - [ ] 0. G2公式様式field mapping
   - **Objective**: 0. G2公式様式field mapping を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **成果物**: 帳票ごとの法定項目→DB/画面/生成位置、保存期間、権限。
-  - **Demo**: 厚生労働省公式URL/版/確認日付きmappingの社内責任者承認。外部社労士/法務承認はM/本番gate。
+  - **Demo**: 厚生労働省公式URL/版/確認日/effective period付きmappingをL0と独立Reviewで
+    `PROVISIONAL_REVIEWED`にする。runtime社内責任者assignment、実actor承認event、外部専門家Reviewは
+    `ACTIVE`化、M PASS、本番交付のgate。
   - **実装ガイダンス**: requirements.md、design.md、全体shared-standards.mdの境界と既存資産再利用規約に従い、未決事項を黙って補完しない。
-  - **テスト要件**: 成果物を該当requirements ID、権限、境界値、失敗時挙動、後方互換の観点でレビューし、判断根拠を記録する。
+  - **テスト要件**: 全fieldの公式source/版/effective period、mapping lifecycle/hash、特定自然人の事前固定なし、
+    実actor承認event不在が開発baselineをblockしないこと、M/本番ではfail-closedになることをL0で確認する。
 
 【着手判定】
 1. design/tasksに記載された先行taskが完了し、そのdiffが現在のbranchへ取り込まれているか確認する。
