@@ -24,7 +24,7 @@
     付いていること、mapping lifecycleとhash固定、特定自然人の事前固定なし、実actor承認event不在が開発baselineを
     blockしないこと、`git diff --check` exit 0。
 
-- [ ] F1. workplace/profile/finding/delivery DDL（R8 fix提出済み・R10確認待ち）
+- [x] F1. workplace/profile/finding/delivery DDL（R10 Round 9でT061 F1 PASS・VERIFIED_CLOSED）
   - **Objective**: 契約ごとの就業先・業務内容・就業時間・指揮命令者・責任者・2種の抵触日・待遇方式を、
     field-mappingのcanonical typed column/history形状で登録できる。mutable current profileとappend-only snapshot/historyを分離し、
     マスタ変更・profile改定・history訂正後も過去帳票の内容を再生成できる状態にする。
