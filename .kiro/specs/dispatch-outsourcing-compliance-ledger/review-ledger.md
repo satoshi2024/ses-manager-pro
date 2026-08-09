@@ -48,6 +48,13 @@ R4-P1-01のunblockとして、予約migration番号が実在最新番号以下�
 - 環境ownerへ要求するpacket形式は、environment名、capture時刻、V82/V83のversion・success・installed_on・checksum、latest successful migration、owner/実行役割である。秘密情報は提出しない。
 - 全environment証跡が揃うまで、V82先行または採番繰上げの正式decisionを推測で作成しない。予約表・全派工資料・legacy fixture同期および`SpecDispatchConsistencyTest` PASSも、そのdecision後に行う。
 
+## R10 progress acknowledgement
+
+- R10の進捗判定を受領し、`dispatch-outsourcing-compliance-ledger-R4-P1-01` は **OPEN / ENVIRONMENT_EVIDENCE_REQUIRED** のまま維持する。
+- 非local environmentの証跡は未完了であり、deploy freeze、T061/V82/DDL/production変更停止、正式migration decision未作成を継続する。
+- local-defaultのexecutor/owner role追記とinventory scopeの明文化は完了したが、CI/Testcontainers・staging・production・other legacyのowner証跡は未提出である。
+- 全environmentの同一schema証跡、正式decision、予約表/全派工資料/legacy fixture同期、`SpecDispatchConsistencyTest` PASSが揃うまで、正式独立Reviewは開始しない。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
