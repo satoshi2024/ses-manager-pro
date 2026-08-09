@@ -12,7 +12,7 @@
 | merge | `5f362fc`/`b65996f`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持 |
 | latest review | `R11 Round 3 R2-P1-02方式A fix delta 独立再Review 2026-08-09` |
 | verdict | **PASS（T070までの実装範囲）**。R2-P1-02（方式A休憩区間）とR3-P2-01（breakMinutesセル1択）はともに独立`VERIFIED_CLOSED`。新規P0/P1なし |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-03、統合担当）` |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=2（NOTE-R3-03統合担当, NOTE-R3-06 dispatch fresh経路）` |
 | next action | **T071開始可**（R2-P1-02のVERIFIED_CLOSEDで従来の開始不可条件が解消。P2×2はhandbook §10によりblockerにしない）。NOTE-R3-03（V1へのdispatch R5テーブル混入）は統合担当へ調整し、dispatch V84 R5 merge後にCI相当L4を1回実行。S11完了はT074/M後 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
@@ -26,6 +26,7 @@
 | attendance-leave-overtime-compliance-NOTE-R3-03 | NOTE | 統合担当調整（attendance欠陥ではない） | `5f362fc`のV1 diff（`src/main/resources/db/migration/V1__create_tables.sql`） | dispatch S10 R5 reworkのテーブル（`t_contract_compliance_snapshot`等）がattendance commitのV1へ混入した | committed treeはV1（新shape）＋V84（旧shape・IF NOT EXISTS）でgreen。dispatchが自身のV1/V84 R5を本V1と整合する形でcommitする必要がある | dispatchレーンがV84 R5をV1（committed shape）と整合させてcommitし、統合担当が両shapeの一致を確認 | fresh/legacy MySQL、`MigrationScriptIntegrityTest`、`SpecDispatchConsistencyTest`、V84 R5 merge後のCI相当L4×1回 | OPEN（統合担当へ引き継ぎ） | `5f362fc`（混入元） | dispatch V84 R5 merge時 |
 | attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
 | attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | FIXED（本round） | 本round commit | 本roundのreviewer確認 |
+| attendance-leave-overtime-compliance-NOTE-R3-06 | NOTE | dispatch統合調整（attendance欠陥ではない） | `FlywayMigrationSmokeTest.java:37-40`（ses user container）、dispatch新V84（`b9b91f9`、trigger/function作成） | dispatch V84 R5 merge後のtreeで`FlywayMigrationSmokeTest` fresh V1→latestが**Error 1419**（binary logging有効かつses userにSUPERなしでtrigger作成失敗）。dispatch自身の`FlywayDispatchComplianceSchemaSmokeTest`はroot userのためPASS | 共有fresh経路が全repoで壊れ、CI相当L4・`mvn test`（Docker有）が失敗する | dispatchレーンが`FlywayMigrationSmokeTest`のcontainerへ`log_bin_trust_function_creators`相当の設定を追加するか、V84のtrigger/functionを回避 | fresh MySQL全経路、`FlywayMigrationSmokeTest`、V84 R5 merge後のCI相当L4 | OPEN（dispatchレーンへ引き継ぎ） | `b9b91f9`（導入元） | dispatch側の修正commit時 |
 
 ## 3. Closed/Deferred Issue
 
@@ -623,5 +624,6 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - base/head: `758649e`（Round 3転記commit）上に本修正を追加。code変更なし
 - fixes: §4「最新Review Packet」を現行状態（Head `758649e`=origin/main、base/headチェーンを`3891c0e`→`5f362fc`→`b65996f`→`758649e`へ更新、V91実在・V83不変・V82欠番・S12〜S17=V92〜V97、171/0/0/0/MySQL 2/0/0/0/fresh 2/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新（NOTE-R3-04）。§5「Requirements Trace」のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列をR2-P2-01等へ移行）へ更新（NOTE-R3-05）
 - issue state: `NOTE-R3-04=FIXED`、`NOTE-R3-05=FIXED`（次Reviewで確認）。`NOTE-R3-03`は統合担当OPEN継続、P2×2はOPEN継続でT071を止めない
+- post-merge verification: dispatch V84 R5 merge（`b9b91f9`）後のtreeで標準構成の指定回帰を再実行し**171/0/0/0、skip 0**（H2 context含む）を確認。MySQL smokeは`FlywayAttendanceSchemaSmokeTest 2/0/0/0`、`FlywayEnvironmentEvidenceTest 1/0/0/0`、`FlywayDispatchComplianceSchemaSmokeTest 1/0/0/0`がPASS。ただし`FlywayMigrationSmokeTest` fresh経路のみdispatch新V84のtrigger作成（Error 1419、ses userにSUPERなし・binary logging有効）で失敗し、**NOTE-R3-06としてdispatchレーンへ引き継ぎ**（attendance欠陥ではない。V91はfresh経路のV84修正後に続けて適用される）
 - verification: 文書整合のみ（`git diff --check` PASS）。code/testは変更していないためtest再実行なし
 - ledger/central synchronization: 中央`spec-execution-ledger.md`S11行の実績・next actionへNOTE-R3-04/05修正を追記。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
