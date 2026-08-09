@@ -33,10 +33,13 @@
     source/client別苦情、反復履歴、worker-specific snapshotをTEXT/JSONへ圧縮しない。
     `t_compliance_finding`に`UNIQUE(contract_id, code, condition_fingerprint)`を置く（design §5.4）。
     **2種の制限日がNULLは「制限なし」ではなく未算定**とし、明示NULL更新で旧値を残さない。
-  - **テスト要件**: L1〜L3。design §6.2のF1-MAP-01、snapshot A→B append-only/CAS、値→NULL、
-    MySQL fresh/V83 legacy/partial/repair/no-backfill、FK/期間、finding uniqueを実行する。
+    snapshotは`UNIQUE(contract_id,snapshot_version/hash)`、current pointer/CAS、DB trigger UPDATE/DELETE拒否、
+    clear mechanismは`FieldStrategy.ALWAYS`に固定する。
+  - **テスト要件**: L1〜L3。design §6.2のF1-MAP-01、F1-SNAPSHOT-01/02、F1-NULL-01/02、
+    F1-MYSQL-FRESH-01、F1-MYSQL-LEGACY-01、F1-MYSQL-PARTIAL-SCHEMA-01、
+    F1-MYSQL-FAILED-HISTORY-REPAIR-01、F1-MYSQL-POST-APPLY-ROLLBACK-01、FK/期間、finding uniqueを実行する。
     field permissionの実maskはT063（detail/list/count）とT064（export/download/PDF）へ正式移管し、
-    T061はinternal entityの直接portal/AI公開がないことだけを確認する。
+    T061はinternal entityをportal/AI DTOへ直接渡さないprojection contractとconsumer scanだけを確認する。
   - **Demo**: 派遣契約のprofile snapshot Aを確定し、profileをBへ改定。A/B両方を再取得し、
     就業先master変更・値→NULL更新後もAが不変で、currentだけが安全側へ戻ることを確認する。
 
@@ -61,7 +64,7 @@
   - **テスト要件**: L1〜L3。T061から正式移管したR4.1のdetail/list/count field projection、validation、
     **field mask（画面）**、mobile 390px、
     契約形態切替時の項目切替。
-  - **Demo**: 派遣/準委任で異なる入力項目。営業ログインで待遇欄がmaskされることを画面とCSVの両方で確認。
+  - **Demo**: 派遣/準委任で異なる入力項目。営業・マネージャーログインで待遇欄がmaskされることを画面のdetail/list/countで確認（CSV/Excel/PDF/downloadはB1のDemo）。
 
 - [ ] B1. 法定帳票/交付/archive
   - **Objective**: 同一snapshotから派遣元管理台帳等を再生成でき、版差分が説明できる。
@@ -73,7 +76,7 @@
   - **テスト要件**: L2〜L3。T061から正式移管したR4.2のexport/download/PDF field allow-listとmask、
     golden file照合、template version切替、hash、document ACL、
     同一snapshotの再生成で版が増えないこと。
-  - **Demo**: 派遣元台帳等を生成し交付記録。同じsnapshotで再生成して版が増えないことを確認。
+  - **Demo**: 派遣元台帳等を生成し交付記録。同じsnapshotで再生成して版が増えないことを確認し、CSV/Excel/PDF/downloadの全経路でT064のfield allow-list/maskが維持されることを確認。
 
 - [ ] B2. deadline/リスク運用
   - **Objective**: 抵触日と文書期限の90/60/30日前に通知が届き、対応担当・ack・解消・例外承認が記録できる。

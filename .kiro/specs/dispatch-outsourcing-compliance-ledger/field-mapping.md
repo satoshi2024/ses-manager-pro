@@ -203,6 +203,140 @@
 | 紹介予定派遣に関する事項 | 該当時の紹介時期/内容、採否、非採用理由 | 条件付き・反復 | 要追加候補 `planned_introduction_history` | introduction tab | ⑬反復行 | worker-specific snapshot + outcome history | `R3Y` | `P0_FULL`,`P1_MASK`（mask）, `P2_LIMITED`不可 | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | — |
 | 派遣終了日・保存満了予定日 | 管理台帳の3年保存起算日 | 同上 | 既存 `t_contract.end_date`; 要追加候補 `retention_due_date` | ledger metadata | metadata | `end_date`確定後 `+3年`。legal holdで停止 | `R3Y` | `P0_FULL`,`P1_MASK` | SRC-L／令和8年7月版・10月改正対応／2026-08-09 | retention dueのtimezone/hold連携 |
 
+### 3.5 stable mapping row ID manifest（F1-MAP-01正本）
+
+公式mapping表の行順をstable IDへ固定する。IDはsourceごとに独立し、行の文言を修正しても再利用しない。新規公式項目は新IDを追加し、既存IDのresolution codeを空欄に戻さない。以下96行がF1-MAP-01の入力であり、各IDは既存column、typed F1 column、history columnのいずれかへ1件だけ解決する。
+
+| stable row ID | source | 公式項目名（mapping行） | resolution code |
+|---|---|---|---|
+| FM-C-01 | SRC-C | 当事者、契約番号、契約締結日 | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-C-02 | SRC-C | 派遣先事業所の名称・所在地・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-C-03 | SRC-C | 就業場所の名称・所在地・部署・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-C-04 | SRC-C | 組織単位（名称・組織の長の職名） | WORKPLACE_ORG_SNAPSHOT |
+| FM-C-05 | SRC-C | 業務内容・政令業務該当 | WORK_DESCRIPTION_TYPED |
+| FM-C-06 | SRC-C | 業務に伴う責任の程度・権限の有無・内容 | RESPONSIBILITY_TYPED |
+| FM-C-07 | SRC-C | 派遣期間（開始・終了） | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-C-08 | SRC-C | 就業日・休日・休暇除外 | WORK_CALENDAR_HISTORY |
+| FM-C-09 | SRC-C | 指揮命令者（部署・役職・氏名） | RESPONSIBILITY_TYPED |
+| FM-C-10 | SRC-C | 派遣先責任者（部署・役職・氏名・電話） | RESPONSIBILITY_TYPED |
+| FM-C-11 | SRC-C | 派遣元責任者（部署・役職・氏名・電話） | RESPONSIBILITY_TYPED |
+| FM-C-12 | SRC-C | 就業時間・休憩 | WORK_TIME_TYPED |
+| FM-C-13 | SRC-C | 時間外・休日労働 | OVERTIME_AGREEMENT_SNAPSHOT |
+| FM-C-14 | SRC-C | 事業所単位の派遣可能期間の抵触日 | LIMITATION_DUAL_TYPED |
+| FM-C-15 | SRC-C | 組織単位（個人単位）の派遣可能期間の抵触日 | LIMITATION_DUAL_TYPED |
+| FM-C-16 | SRC-C | 苦情申出先（派遣元） | COMPLAINT_HISTORY |
+| FM-C-17 | SRC-C | 苦情申出先（派遣先） | COMPLAINT_HISTORY |
+| FM-C-18 | SRC-C | 苦情処理方法・連携体制 | COMPLAINT_HISTORY |
+| FM-C-19 | SRC-C | 安全・衛生 | SAFETY_TYPED |
+| FM-C-20 | SRC-C | 福利厚生 | BENEFITS_TYPED |
+| FM-C-21 | SRC-C | 派遣人員 | HEADCOUNT_TYPED |
+| FM-C-22 | SRC-C | 協定対象派遣労働者に限定するか | AGREEMENT_FLAG_TYPED |
+| FM-C-23 | SRC-C | 無期雇用/60歳以上の者に限定するか | WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT |
+| FM-C-24 | SRC-C | 派遣労働者の雇用安定措置 | EMPLOYMENT_STABILITY_HISTORY |
+| FM-C-25 | SRC-C | 派遣先が雇用する場合の紛争防止措置 | DIRECT_HIRE_DISPUTE_HISTORY |
+| FM-C-26 | SRC-C | 期間制限を受けない業務に係る事項 | LIMITATION_EXEMPTION_TYPED |
+| FM-C-27 | SRC-C | 紹介予定派遣の予定労働条件 | PLANNED_INTRODUCTION_TERMS |
+| FM-E-01 | SRC-E | 宛先の派遣労働者氏名・派遣元名・住所・使用者職氏名 | WORKER_PII_SNAPSHOT |
+| FM-E-02 | SRC-E | 派遣先事業所の名称・所在地・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-E-03 | SRC-E | 就業場所の名称・所在地・部署・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-E-04 | SRC-E | 組織単位 | WORKPLACE_ORG_SNAPSHOT |
+| FM-E-05 | SRC-E | 業務内容・責任の程度 | RESPONSIBILITY_TYPED |
+| FM-E-06 | SRC-E | 派遣期間 | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-E-07 | SRC-E | 事業所単位の抵触日 | LIMITATION_DUAL_TYPED |
+| FM-E-08 | SRC-E | 個人単位の抵触日 | LIMITATION_DUAL_TYPED |
+| FM-E-09 | SRC-E | 就業日・休日 | WORK_CALENDAR_HISTORY |
+| FM-E-10 | SRC-E | 指揮命令者 | RESPONSIBILITY_TYPED |
+| FM-E-11 | SRC-E | 派遣先責任者・派遣元責任者 | RESPONSIBILITY_TYPED |
+| FM-E-12 | SRC-E | 就業時間・休憩 | WORK_TIME_TYPED |
+| FM-E-13 | SRC-E | 時間外・休日労働 | OVERTIME_AGREEMENT_SNAPSHOT |
+| FM-E-14 | SRC-E | 安全衛生 | SAFETY_TYPED |
+| FM-E-15 | SRC-E | 福利厚生 | BENEFITS_TYPED |
+| FM-E-16 | SRC-E | 苦情申出先・処理方法・連携体制 | COMPLAINT_HISTORY |
+| FM-E-17 | SRC-E | 雇用安定措置 | EMPLOYMENT_STABILITY_HISTORY |
+| FM-E-18 | SRC-E | 紹介予定派遣 | PLANNED_INTRODUCTION_HISTORY |
+| FM-E-19 | SRC-E | 紛争防止措置 | DIRECT_HIRE_DISPUTE_HISTORY |
+| FM-E-20 | SRC-E | 派遣料金 | DISPATCH_FEE_TYPED |
+| FM-E-21 | SRC-E | 社会保険の加入手続きが完了していない場合の理由（⑱） | INSURANCE_TYPED |
+| FM-E-22 | SRC-E | 保険/賃金/就業場所/喫煙措置（予定労働条件） | PLANNED_INTRODUCTION_TERMS |
+| FM-N-01 | SRC-N | 通知日・宛先・派遣元所在地・事業所名・代表者 | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-N-02 | SRC-N | 契約締結日・契約No | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-N-03 | SRC-N | 派遣労働者の氏名 | WORKER_PII_SNAPSHOT |
+| FM-N-04 | SRC-N | 性別 | WORKER_PII_SNAPSHOT |
+| FM-N-05 | SRC-N | 年齢区分（45歳以上/18歳未満/その他） | WORKER_PII_SNAPSHOT |
+| FM-N-06 | SRC-N | 60歳以上/60歳未満 | WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT |
+| FM-N-07 | SRC-N | 健康保険の資格取得届提出有無 | INSURANCE_TYPED |
+| FM-N-08 | SRC-N | 厚生年金保険の資格取得届提出有無 | INSURANCE_TYPED |
+| FM-N-09 | SRC-N | 雇用保険の資格取得届提出有無 | INSURANCE_TYPED |
+| FM-N-10 | SRC-N | 協定対象派遣労働者か否か | AGREEMENT_FLAG_TYPED |
+| FM-N-11 | SRC-N | 派遣労働者の雇用期間 | WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT |
+| FM-N-12 | SRC-N | 契約内容と明示内容の差異（派遣期間・就業日） | NOTIFICATION_DIFFERENCE_HISTORY |
+| FM-N-13 | SRC-N | 契約内容と明示内容の差異（就業時間・休憩） | NOTIFICATION_DIFFERENCE_HISTORY |
+| FM-N-14 | SRC-N | 契約内容と明示内容の差異（責任者） | NOTIFICATION_DIFFERENCE_HISTORY |
+| FM-N-15 | SRC-N | 契約内容と明示内容の差異（時間外・休日労働） | NOTIFICATION_DIFFERENCE_HISTORY |
+| FM-N-16 | SRC-N | 契約内容と明示内容の差異（その他） | NOTIFICATION_DIFFERENCE_HISTORY |
+| FM-N-17 | SRC-N | 保険証等の写しの提示/送付 | DOCUMENT_DELIVERY |
+| FM-L-01 | SRC-L | 派遣労働者氏名 | WORKER_PII_SNAPSHOT |
+| FM-L-02 | SRC-L | 無期/有期雇用・雇用期間 | WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT |
+| FM-L-03 | SRC-L | 協定対象派遣労働者か否か | AGREEMENT_FLAG_TYPED |
+| FM-L-04 | SRC-L | 派遣期間 | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-L-05 | SRC-L | 60歳以上か否かの別（④） | WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT |
+| FM-L-06 | SRC-L | 健康保険の提出有無・未加入理由・取得予定日 | INSURANCE_TYPED |
+| FM-L-07 | SRC-L | 厚生年金保険の提出有無・未加入理由・取得予定日 | INSURANCE_TYPED |
+| FM-L-08 | SRC-L | 雇用保険の提出有無・未加入理由・取得予定日 | INSURANCE_TYPED |
+| FM-L-09 | SRC-L | 派遣先名称 | CONTRACT_PARTY_PERIOD_SNAPSHOT |
+| FM-L-10 | SRC-L | 派遣先事業所名称・所在地・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-L-11 | SRC-L | 就業場所名称・所在地・電話 | WORKPLACE_ORG_SNAPSHOT |
+| FM-L-12 | SRC-L | 組織単位 | WORKPLACE_ORG_SNAPSHOT |
+| FM-L-13 | SRC-L | 業務内容・政令業務該当 | WORK_DESCRIPTION_TYPED |
+| FM-L-14 | SRC-L | 業務に伴う責任の程度 | RESPONSIBILITY_TYPED |
+| FM-L-15 | SRC-L | 就業日 | WORK_CALENDAR_HISTORY |
+| FM-L-16 | SRC-L | 派遣先責任者 | RESPONSIBILITY_TYPED |
+| FM-L-17 | SRC-L | 派遣元責任者 | RESPONSIBILITY_TYPED |
+| FM-L-18 | SRC-L | 就業時間・休憩 | WORK_TIME_TYPED |
+| FM-L-19 | SRC-L | 時間外・休日労働 | OVERTIME_AGREEMENT_SNAPSHOT |
+| FM-L-20 | SRC-L | 月次就業状況・タイムシート | LEDGER_WORK_HISTORY |
+| FM-L-21 | SRC-L | 苦情処理状況（申出日） | COMPLAINT_HISTORY |
+| FM-L-22 | SRC-L | 苦情内容 | COMPLAINT_HISTORY |
+| FM-L-23 | SRC-L | 苦情処理状況・結果通知 | COMPLAINT_HISTORY |
+| FM-L-24 | SRC-L | 教育訓練の内容 | TRAINING_HISTORY |
+| FM-L-25 | SRC-L | キャリア・コンサルティング | CAREER_HISTORY |
+| FM-L-26 | SRC-L | 希望する雇用安定措置 | EMPLOYMENT_STABILITY_HISTORY |
+| FM-L-27 | SRC-L | 雇用安定措置の内容 | EMPLOYMENT_STABILITY_HISTORY |
+| FM-L-28 | SRC-L | 期間制限を受けない業務 | LIMITATION_EXEMPTION_TYPED |
+| FM-L-29 | SRC-L | 紹介予定派遣に関する事項 | PLANNED_INTRODUCTION_HISTORY |
+| FM-L-30 | SRC-L | 派遣終了日・保存満了予定日 | RETENTION_METADATA |
+
+| resolution code | F1で確定する保存先・履歴形状 |
+|---|---|
+| CONTRACT_PARTY_PERIOD_SNAPSHOT | `t_contract`の契約基本値＋`t_contract_compliance_snapshot`の当事者・期間typed snapshot。法人/代表者はcurrent masterを再読しない |
+| WORKPLACE_ORG_SNAPSHOT | `m_workplace`参照＋snapshotの名称・所在地・部署・組織・電話typed列。自由記述JSONのみは禁止 |
+| WORK_DESCRIPTION_TYPED | `work_description`、政令業務該当flag/referenceの専用列＋snapshot |
+| RESPONSIBILITY_TYPED | `responsibility_level`、`responsibility_detail`と責任者contact snapshot |
+| SAFETY_TYPED | 安全・衛生の責任分担、適用規程、referenceを専用列＋snapshot。法的適用可否はT066で確認 |
+| WORK_TIME_TYPED | 始業・終業・休憩開始/終了を分整数で保存し、日跨ぎ・複数休憩を反復detailへ分解 |
+| WORK_CALENDAR_HISTORY | 曜日・休日・休暇除外をcalendar codeとexcluded dateのtyped/history行で保存 |
+| OVERTIME_AGREEMENT_SNAPSHOT | 時間外・休日上限、36協定reference、適用期間をtyped snapshot。未確認はNULL＋finding |
+| LIMITATION_DUAL_TYPED | `workplace_limitation_date`と`organization_limitation_date`を別DATE列＋snapshot。旧`limitation_date`へ混在させない |
+| COMPLAINT_HISTORY | source/client窓口typed snapshotと`t_compliance_complaint_history`の受付・内容・処理・通知append-only行 |
+| BENEFITS_TYPED | `benefits_detail`、`benefits_provided_flag`を待遇方式から分離してworker snapshotへ複写 |
+| HEADCOUNT_TYPED | `dispatch_headcount`とworker snapshot件数を整合検証 |
+| AGREEMENT_FLAG_TYPED | `agreement_target_flag`を`treatment_scheme`から独立保持 |
+| WORKER_EMPLOYMENT_RESTRICTION_SNAPSHOT | `employment_term_type/from/to`、`indefinite_worker_flag`、`age_over_60_flag`、`worker_restriction_type`をworker snapshotへ保存 |
+| EMPLOYMENT_STABILITY_HISTORY | preference current＋依頼・回答・実施の`t_employment_stability_history`反復行 |
+| DIRECT_HIRE_DISPUTE_HISTORY | 雇用時の紛争防止措置と手数料/申出を`t_direct_hire_dispute_history`へ条件付き保存 |
+| LIMITATION_EXEMPTION_TYPED | 例外type/detail、根拠・期間を専用列＋snapshot。ruleが法的適用を自動確定しない |
+| PLANNED_INTRODUCTION_HISTORY | 予定労働条件のsub-fieldと紹介・採否・非採用理由を専用historyへ分離 |
+| PLANNED_INTRODUCTION_TERMS | 紹介予定派遣の契約期間・更新・業務/場所変更範囲・賃金・保険・喫煙措置・雇用主をsub-fieldで保存し、単一JSONに圧縮しない |
+| DISPATCH_FEE_TYPED | `dispatch_fee_amount` DECIMAL、`dispatch_fee_basis`、`dispatch_fee_currency`を売上/粗利から分離 |
+| INSURANCE_TYPED | SRC-E⑱単一理由とSRC-Lの健康/年金/雇用各status/reason/expected_dateを別列へ保存 |
+| NOTIFICATION_DIFFERENCE_HISTORY | 派遣期間・就業日・時間/休憩・責任者・時間外等の差異typeと契約側/明示側snapshotを反復行へ保存 |
+| DOCUMENT_DELIVERY | document/template/effective period/snapshot hash/recipient scope/delivery/confirmationを`t_document_delivery`へ保存 |
+| WORKER_PII_SNAPSHOT | 氏名・性別・年齢区分・雇用主職氏名をworker-specific snapshotへ保存し、T063/T064のallow-listでmask |
+| LEDGER_WORK_HISTORY | 月次就業状況・タイムシートを締め時点snapshotの反復行へ保存。雇用勤怠と混同しない |
+| TRAINING_HISTORY | 教育訓練を実施日時・時間・内容のappend-only historyへ保存 |
+| CAREER_HISTORY | キャリアconsultingを日時・内容のPII historyへ保存 |
+| RETENTION_METADATA | 派遣終了日と保存満了予定日をtyped metadataへ保存。legal holdで削除を停止 |
+| PROFILE_TYPED | 該当mappingの専用profile列＋snapshot。未確認はNULL＋finding、未定義JSONは禁止 |
 ## 4. F1 DDL候補との突合（production変更なし）
 
 `design.md` の候補は、就業先、契約形態詳細、業務内容、就業時間/休憩/休日/時間外、指揮命令者、派遣先/元責任者、苦情窓口、待遇方式、抵触日、教育訓練、安全衛生、保険、指示経路、再委託可否、検収方法、snapshot、versionを示している。公式4帳票との突合で、次をF1の欠落候補として明示する。
@@ -232,12 +366,12 @@ R10 Round 5で確認された「要追加候補」「JSON圧縮」「単一列�
 
 | mapping group | F1で確定する保存先 | 履歴・snapshot規則 | 未決gate／後続task |
 |---|---|---|---|
-| 事業所・組織・就業場所 | `m_workplace`のmaster参照＋`t_contract_compliance_snapshot`の`workplace_*`/`organization_*` typed snapshot列 | 契約・workerごとにsnapshot versionを追加し、master更新で過去行を変更しない | 複数就業場所の法的表示条件はGATE-T060-ROLE、帳票出力はB1 |
+| 事業所・組織・就業場所 | `m_workplace`のmaster参照＋`t_contract_compliance_snapshot`の`workplace_*`/`organization_*` typed snapshot列 | 契約・workerごとにsnapshot versionを追加し、master更新で過去行を変更しない | 複数就業場所の法的表示条件はGATE-T066-FIELD-SEMANTICS、帳票出力はB1 |
 | 責任の程度・権限 | `responsibility_level`、`responsibility_detail` | profile確定時にsnapshotへ複写。自由記述JSONへ圧縮しない | 選択肢の法務確認はT066、列形状はF1 |
-| 2種の派遣可能期間制限日 | `workplace_limitation_date`、`organization_limitation_date`を別のnullable DATE列。旧単一`limitation_date`へ意味を寄せない | asOf Resolverの算定結果をsnapshotへ保存。NULLは未算定 | 算定規則はT062/T065、表示条件はGATE-T060-COOLING |
+| 2種の派遣可能期間制限日 | `workplace_limitation_date`、`organization_limitation_date`を別のnullable DATE列。旧単一`limitation_date`へ意味を寄せない | asOf Resolverの算定結果をsnapshotへ保存。NULLは未算定 | 算定規則はT062/T065、法的表示条件はGATE-T066-FIELD-SEMANTICS、期間値はGATE-T060-COOLING |
 | SRC-E ⑱ 社会保険手続未完了理由 | `social_insurance_procedure_incomplete_reason`を独立TEXT列 | 就業条件snapshotへ保存。SRC-Lの3保険別reasonとは別値として保持 | 法的文言の確認はGATE-T060-ROLE。3保険別status/reason/expected_dateも独立保持 |
 | 3保険の加入状態・理由・取得予定日 | health/pension/employment各々の`status`、`missing_reason`、`expected_date` | worker-specific snapshotへ保存し、理由NULLと未確認を混同しない | F1 schema fix、保険判定はT062 |
-| 派遣料金 | `dispatch_fee_amount`（DECIMAL）、`dispatch_fee_basis`、`dispatch_fee_currency` | 契約・worker/帳票version単位でsnapshot。`t_contract`の売上・粗利列を流用しない | 料金の法的意味・表示可否はGATE-T060-ROLE/T066 |
+| 派遣料金 | `dispatch_fee_amount`（DECIMAL）、`dispatch_fee_basis`、`dispatch_fee_currency` | 契約・worker/帳票version単位でsnapshot。`t_contract`の売上・粗利列を流用しない | 料金の法的意味・表示可否はGATE-T066-FIELD-SEMANTICS/T066 |
 | 福利厚生 | `benefits_detail`と、待遇方式とは別の`benefits_provided_flag` | worker-specific snapshot | 待遇差の法的評価はGATE-T060-2026-10/T066 |
 | 派遣人員・協定対象・無期・60歳以上 | `dispatch_headcount`、`agreement_target_flag`、`indefinite_worker_flag`、`age_over_60_flag`、`worker_restriction_type` | worker snapshotとの人数整合を検証し、SRC-L④を独立出力 | 適用条件の確認はT066、整合回帰はF1/T062 |
 | 派遣元／派遣先の苦情申出先 | source/clientを別のtyped contact snapshot列として保持 | profileの窓口と、実際の申出を`t_compliance_complaint_history`へ分離してappend-only | 表示maskはT063/T064、処理方法の法務確認はT066 |
@@ -245,17 +379,40 @@ R10 Round 5で確認された「要追加候補」「JSON圧縮」「単一列�
 | 雇用安定措置 | preferenceをprofileへ、依頼・回答・実施を`t_employment_stability_history`へ | worker-specific append-only履歴 | 法定条件はT066、運用通知はT065 |
 | 教育・キャリア・月次就業状況 | `t_training_history`、`t_career_consulting_history`、`t_ledger_work_snapshot` | 実施・締め時点ごとのappend-only行 | 勤怠source連携はS11/G6、帳票出力はB1 |
 | 紹介予定派遣 | `t_planned_introduction_history`（紹介時期・条件・採否・理由） | 該当契約・workerだけ行を持つ条件付き履歴 | 法務確認はT066、帳票条件分岐はB1 |
-| profile snapshot | mutable current profileと`t_contract_compliance_snapshot`を分離。snapshotは`contract_id + snapshot_version + snapshot_hash`で一意 | 確定後の過去snapshotはUPDATE/DELETE不可。改定は新versionをINSERTし、CASでcurrentを切替 | F1 schema/entity/mapper/test fix |
+| profile snapshot | mutable current profileに`current_snapshot_id`/`current_snapshot_version`を持たせ、`t_contract_compliance_snapshot`は`UNIQUE(contract_id,snapshot_version)`＋`UNIQUE(contract_id,snapshot_hash)` | 1 transactionでversion予約→INSERT→pointer CAS。DB triggerが過去snapshotのUPDATE/DELETEを拒否し、競合rollbackでorphanを残さない | F1 schema/entity/mapper/test fix |
 | 交付・受領 | `t_document_delivery`へdocument/template/effective period/snapshot hash/recipient scopeを必須対応 | 交付ごとに反復行。`confirmed_at IS NULL`は受領未確認 | B1 archive/交付実装 |
-| 明示NULL | clearable fieldは`FieldStrategy.ALWAYS`または専用clear SQLとfull DTO契約を使う | 値→NULLを保存し、findingを再評価。更新skipで旧値を残さない | F1 entity/mapper integration test |
+| 明示NULL | clear mechanismは`FieldStrategy.ALWAYS`に固定し、全clearable fieldを送るfull DTO/update contractを使う | 値→NULLを保存し、findingを再評価。更新skipで旧値を残さない | F1 entity/mapper integration test |
+| 就業時間・休憩 | `work_start_minute`、`work_end_minute`、`break_start_minute`、`break_end_minute`と複数休憩history | 分整数、日跨ぎflag、休憩行をsnapshot。現在の勤務表を再解釈しない | 日跨ぎ/複数休憩の形状はF1、法務表示はB1 |
+| 就業日・休日・休暇除外 | `work_day_code`、`holiday_calendar_code`、`excluded_date`のtyped/history行 | 個別除外日をappend-only snapshot。calendar更新で過去帳票を変更しない | calendar sourceはGATE-T060-COOLING、実装はF1 |
+| 36協定参照・時間外上限 | `agreement_reference_id`、`overtime_daily/monthly/yearly_limit`、適用期間 | 協定の参照versionをsnapshot。未確認はNULL＋finding | 法人別協定の適法性はT066、source連携はS11/G6 |
+| worker雇用期間 | `employment_term_type`、`employment_from`、`employment_to` | worker-specific snapshot。派遣期間と混在しない | source確認はT066、形状はF1 |
+| 契約内容と明示内容の差異 | `t_notification_difference_history`（difference_type、contract_snapshot、notice_snapshot、occurred_at） | 差異発生時だけ反復行を追加 | 差異の法的評価はT066、帳票表示はB1 |
+| 直接雇用時の紛争防止措置 | `t_direct_hire_dispute_history`（measure、fee、request_method、effective period） | 紹介可能契約だけ条件付きappend-only | 職業紹介可否・手数料sourceはT066 |
+| retention due | `retention_due_date`、`legal_hold_flag`、起算日 | 派遣終了日確定後に保存満了予定日をsnapshot。legal holdで削除停止 | retention category/起算点はGATE-T060-RETENTION、列形状はF1 |
 
 この表の `F1 schema fix` 行は、次のcode fixでV1/V84/H2/entity/mapper/testを同一差分で同期する。`T063/T064/T066` と明記した行は、F1が値を失わない形状までを確定し、field permission・法的表示・外部照合を各taskの受入へ移管する。したがって、現行V84を合格済みDDLとして扱わず、R5 P1修正完了までT061 checkboxは未完了とする。
+
+### 4.2 explicit NULL inventory（F1-NULL-01正本）
+
+clear可能なnullable fieldは以下に限定し、すべて`FieldStrategy.ALWAYS`のfull DTO/update contractで送る。記載のないnullable列は内部生成・監査用であり、画面PATCHからclearしない。`current_snapshot_id`/`current_snapshot_version`、snapshot version/hash、監査actor、delivery idempotency keyはsystem-onlyで、NULL clear対象外とする。
+
+| field family | clearable field | NULLの意味・再評価 |
+|---|---|---|
+| contract/workplace | `contract_type_detail`, `workplace_id`, `work_description`, `work_location`, `workplace_name_snapshot`, `workplace_address_snapshot`, `workplace_department_snapshot`, `workplace_phone_snapshot`, `organization_unit`, `organization_head_title_snapshot` | 未入力/未確認。派遣で必須なら`MISSING_PROFILE_*`、準委任で不要なら適用外statusを別保存 |
+| schedule | `work_start_minute`, `work_end_minute`, `break_start_minute`, `break_end_minute`, `work_day_code`, `holiday_calendar_code`, `excluded_date`, `overtime_daily_limit`, `overtime_monthly_limit`, `overtime_yearly_limit`, `agreement_reference_id` | 算定不能/未確認。現在masterから補完せずfindingへ戻す |
+| responsibility/contact | `command_person_contact_id`, `client_responsible_contact_id`, `dispatch_responsible_user_id`, source/client complaint contact snapshot、`responsibility_level`, `responsibility_detail`, `complaint_handling_method`, `complaint_coordination` | contact/責任者未設定。派遣ではfinding、準委任の指揮命令者は適用外ルールへ委ねる |
+| limitation/fee/benefit | `workplace_limitation_date`, `organization_limitation_date`, `dispatch_fee_amount`, `dispatch_fee_basis`, `dispatch_fee_currency`, `benefits_detail`, `benefits_provided_flag`, `dispatch_headcount` | 2種制限日は未算定、料金/福利厚生/人員は未確認。安全側findingを出し、NULLを「なし」としない |
+| worker/restriction | `employment_term_type`, `employment_from`, `employment_to`, `agreement_target_flag`, `indefinite_worker_flag`, `age_over_60_flag`, `worker_restriction_type`, worker name/gender/age snapshot | worker identity/雇用期間/適用区分未確認。worker-specific snapshotを作成できない場合は帳票交付fail-closed |
+| insurance | `health_insurance_status/missing_reason/expected_date`, `pension_insurance_status/missing_reason/expected_date`, `employment_insurance_status/missing_reason/expected_date`, `social_insurance_procedure_incomplete_reason` | 未加入理由と未確認を分離。SRC-E⑱単一理由を3保険reasonへ補完しない |
+| conditional/history | employment stability preference、limitation exemption type/detail、planned introduction terms、notification difference、direct-hire dispute | 条件不成立は行なし、成立後NULLは未確認。history rowの訂正は新行で行い既存行を更新しない |
+
+F1-NULL-01は各行の値→NULL、version CAS失敗、transaction rollback、再検出findingを上記全familyで検証する。`FieldStrategy.ALWAYS`の導入はclearable fieldをfull DTOで常に送る全update pathがあることを同じcode fixで確認する。
 
 ## 5. 決定表の適用
 
 ### 5.1 時間・asOf
 
-`customer-product-expansion-2026/platform-invariants.md` と `design.md` §5.1/§5.2をそのまま適用する。帳票は交付日時点のsnapshotを読む。履歴行がない場合と、履歴行が存在して明示NULLの場合を `COALESCE` で混同しない。`limitation_date` の未設定は「抵触日なし」ではなく `MISSING_LIMITATION_DATE` の候補である。期間の重なり、同日開始、未来開始、更新chain、組織単位変更、クーリングはT062/T065で具体化する。
+`customer-product-expansion-2026/platform-invariants.md` と `design.md` §5.1/§5.2をそのまま適用する。帳票は交付日時点のsnapshotを読む。履歴行がない場合と、履歴行が存在して明示NULLの場合を `COALESCE` で混同しない。`workplace_limitation_date` と `organization_limitation_date` の未設定は「抵触日なし」ではなく、それぞれ `MISSING_WORKPLACE_LIMITATION_DATE` / `MISSING_ORGANIZATION_LIMITATION_DATE` の候補である。旧単一`limitation_date`は使用しない。期間の重なり、同日開始、未来開始、更新chain、組織単位変更、クーリングはT062/T065で具体化する。
 
 ### 5.2 主体 × 操作 × 可視母集団
 
@@ -269,6 +426,7 @@ R10 Round 5で確認された「要追加候補」「JSON圧縮」「単一列�
 
 | gate ID | 未決事項 | owner / 承認対象 | 影響 | 状態 |
 |---|---|---|---|---|
+| GATE-T066-FIELD-SEMANTICS | 派遣料金の意味・表示可否、2種抵触日の法的表示条件、複数就業場所・直接雇用紛争防止・紹介予定派遣の条件解釈 | T066法務受入責任者が技術mappingを確認し、外部社労士/弁護士Reviewを本番gateで記録する。`COMPLIANCE_RESPONSIBLE` runtime assignmentは承認actorを提供するが、法的field semanticsのownerではない | F1の保存形状は維持したまま、T062/T064/B1の算定・表示・交付をfail-closed | **OPEN（T066 / 本番gate）** |
 | GATE-T060-ROLE | `COMPLIANCE_RESPONSIBLE` のrole code、承認可能操作、`未確認/要確認/確認済`、監査項目、runtime指名・交代、未指名時fail-closed | 管理者がruntimeでassignmentを作成・終了する。自然人の氏名/user IDをT060の成果物へ事前固定しない | `ACTIVE`化、M PASS、本番確認済化 | **T060定義済み／M・本番assignment gate** |
 | GATE-T060-2026-10 | 2026-10-01施行分の待遇差説明を求める権利の正確な文言、対象、適用境界、旧版非遡及 | `COMPLIANCE_RESPONSIBLE` roleのruntime approval。外部社労士/弁護士照合はT066/本番gate | B1 template version、2026-10交付 | **OPEN（後続・本番gate）** |
 | GATE-T060-RETENTION | 個別契約書・就業条件明示書・派遣先通知書のarchive category/保存起算点。台帳R3Y以外を推測しない | 管理者/法務がrole assignment経由で保持category、tax category、legal holdを確認 | B1 retention/deletion | **OPEN（T061/B1具体化gate）** |

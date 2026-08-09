@@ -72,6 +72,16 @@ R10は固定範囲 Base `856ab1faf09f07abcd7a5b34453a5037173ce553` → implement
 
 **R5 docs-only response status**: 上記5件は本同期では`OPEN`のまま。今回の変更は決定・test matrix・task ownershipの具体化だけで、V1/V84、production code、SecurityConfig、DDL、T061 checkbox以外の実装は変更しない。R10がfix planを受理するまでcode fixを開始せず、R10 VERIFIED_CLOSED前にT062/A1/B1/B2へ進まない。
 
+### R5 docs-only rework 2（再提出内容、P1はOPEN維持）
+
+- **R5-P1-01**: `field-mapping.md`のSRC-C 27行、SRC-E 22行、SRC-N 17行、SRC-L 30行を `FM-C-01`〜`FM-L-30` のstable IDへ固定するmanifestを追加した。全96 IDにresolution codeを1件ずつ割り当て、work time/break（分整数・日跨ぎ・複数休憩）、work days/excluded dates、36協定reference、worker雇用期間、notification difference、直接雇用紛争防止、retention dueを専用typed/historyへ解決した。料金・2種抵触日表示等の法的意味は`GATE-T066-FIELD-SEMANTICS`へ移し、`GATE-T060-ROLE`のruntime承認roleと混同しない。
+- **R5-P1-02**: snapshotを`UNIQUE(contract_id,snapshot_version)`＋`UNIQUE(contract_id,snapshot_hash)`へ確定し、workerはcontract/workerを複合scopeとする。profileは`current_snapshot_id`/`current_snapshot_version`を持ち、`FOR UPDATE`→version予約→INSERT→pointer CASを1 transactionで行う。UNIQUE/CAS/FK失敗は全rollbackし、DB triggerでsnapshotの直接UPDATE/DELETEを拒否する。同一hash再実行は既存行を返し、orphan 0をF1-SNAPSHOT-01/02で検証する。
+- **R5-P1-03**: `F1-MYSQL-LEGACY-01`（exact V83 fixture）、`F1-MYSQL-PARTIAL-SCHEMA-01`（column/index/FKのpresent/absent/old definition）、`F1-MYSQL-FAILED-HISTORY-REPAIR-01`（failed history/checksum/repair）、`F1-MYSQL-POST-APPLY-ROLLBACK-01`（適用前revertと適用後forward repairを分離）へtest IDを分割した。既存契約no-backfill、checksum、installed_on、repair前fail-closedを明記した。
+- **R5-P1-04**: clear mechanismは`FieldStrategy.ALWAYS`へ一つに固定した。`field-mapping.md` §4.2でprofile/workplace/schedule/contact/limitation/fee/benefit/worker/insurance/conditional-historyの全clearable familyとNULL意味を列挙し、全field full DTO、CAS失敗、rollback、MISSING再評価をF1-NULL-01/02へ束ねた。snapshot pointer/hash等system-only列はclear対象外とした。
+- **R5-P1-05**: T061はconsumer scanによるportal/AI直接公開0のみ、T063は画面/detail/list/count、T064はCSV/Excel/PDF/downloadのfield allow-list/maskを担当する。A1 Demoを画面/detail/list/count、B1 DemoをCSV/Excel/PDF/downloadへ同期し、旧「A1画面とCSV」の混在を解消する。`design.md` §5.5のprojection contractもこの境界に合わせた。
+
+今回もコード・DDL・migration・test sourceは変更しておらず、5 P1は`OPEN`のまま。上記docs受理後にのみ、単一code fixでV1/V84/H2/entity/mapper/testを同期する。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
