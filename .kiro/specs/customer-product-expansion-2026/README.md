@@ -87,8 +87,9 @@ S10/S11は並行dispatch可能。S12はS10/S11双方のPASS後に開始し、Wav
 - 独立DB方式ではtenant/legal entityの将来互換方針を保持するが、V59は作成せず永久欠番とする。全表tenant_id化、TenantContext、tenant interceptor、tenant単位backup/restoreは延期する。共有DBを再開する場合も、当時のFlyway最新番号`latest + 1`を新しいmigration番号に使用する。
 - 共有DBマルチテナントは、SaaS販売方式が正式決定され、契約・法務・セキュリティ・移行・運用要件が承認された時に再開する。
 - G1〜G6は2026-07-26に発注者の明示委任に基づいて決定済み。詳細は`gate-decisions-g1-g6.md`を正とする。
-- G2は公式資料と社内コンプライアンス責任者で開発を開始し、外部専門家Reviewを法定帳票の本番交付および
-  該当M taskのrelease gateとする。システムは法的結論を自動判定しない。
+- G2は公式資料、L0、独立Reviewで`PROVISIONAL_REVIEWED`の開発baselineを確定し、runtimeの社内責任者assignment、
+  実actor承認event、外部専門家Reviewを`ACTIVE`化、法定帳票の本番交付および該当M taskのrelease gateとする。
+  特定の自然人を開発時に固定せず、システムは法的結論を自動判定しない。
 
 ### Wave 0 — 横断基盤（相互並行禁止）
 

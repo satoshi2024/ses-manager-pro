@@ -9,16 +9,19 @@
 > **Migration**: 本specの予約番号は **V82**。order(V80/V81)のmerge後、attendance(V83)と並行可。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. G2公式様式field mapping
+- [x] 0. G2公式様式field mapping
   - **Objective**: 派遣元管理台帳・就業条件明示書・派遣先通知書・個別契約書の各法定項目が、
     DB列・画面・生成位置へ1対1で対応付けられる。以降の帳票生成が「どの項目をどこから取るか」を推測せずに済む。
   - **成果物**: 帳票ごとの法定項目→DB/画面/生成位置、保存期間、権限。
-  - **Demo**: 厚生労働省公式URL/版/確認日付きmappingの社内責任者承認。外部社労士/法務承認はM/本番gate。
+  - **Demo**: 厚生労働省公式URL/版/確認日/effective period付きmappingを独立Reviewし、mapping hashを固定して
+    `PROVISIONAL_REVIEWED`にする。runtime社内責任者assignment、実actor承認event、外部社労士/法務Reviewは
+    `ACTIVE`化、M PASS、本番交付のgate。
   - **実装ガイダンス**: production codeを変更しない。`field-mapping.md`として保存する（design §3）。
     **システムは法的適否を自動確定しない**（前提節）。mappingは項目の対応であって適法性の判断ではない。
     クーリング期間の日数など判断値は`m_system_config`へ置く前提で、コードへ直書きしないことを明記する。
-  - **テスト要件**: L0。全帳票の法定項目が漏れなく対応付いていること、
-    各項目に公式URL/版/確認日が付いていること、`git diff --check` exit 0。
+  - **テスト要件**: L0。全帳票の法定項目が漏れなく対応付いていること、各項目に公式URL/版/確認日/effective periodが
+    付いていること、mapping lifecycleとhash固定、特定自然人の事前固定なし、実actor承認event不在が開発baselineを
+    blockしないこと、`git diff --check` exit 0。
 
 - [ ] F1. workplace/profile/finding/delivery DDL
   - **Objective**: 契約ごとに就業先・業務内容・就業時間・指揮命令者・責任者・抵触日・待遇方式を登録でき、
@@ -80,4 +83,5 @@
     既存4 ruleの回帰、法務fixture golden file、Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
   - **Demo**: 法務fixture3契約の台帳とfindingを照合。既存4 ruleの出力が変わっていないことを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
-    外部社労士/弁護士Reviewは本taskのPASS条件ではなく、**本番releaseのgate**として別管理する。
+    runtime社内責任者assignment、対象mapping version/hashへの実actor承認event、外部社労士/弁護士Reviewを
+    **本taskのPASSかつ本番releaseのgate**として確認する。いずれか未取得なら`ACTIVE`化・本番交付・M PASSを禁止する。

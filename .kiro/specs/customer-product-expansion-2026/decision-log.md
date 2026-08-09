@@ -7,7 +7,7 @@
 |---|---|---|---|---|---|
 | G0 | yes | 顧客ごと単独DBか、共有DB SaaSマルチテナントか | 当面は顧客ごと単独DB。共有DB販売が確定した時だけ全表tenant_id化 | 全spec | 決定済（2026-07-26） |
 | G1 | yes | 第1IdPとMFA方式 | Entra ID OIDC、全内部user MFA、管理者FIDO2、local TOTP break-glass 2アカウント | identity/portal | 決定済（2026-07-26） |
-| G2 | yes | 派遣・準委任・フリーランス・取適法の法務監修者 | 公式資料+社内コンプライアンス責任者で開発し、専門家承認をM/本番gate化 | BP/compliance/archive | 決定済（2026-07-26） |
+| G2 | yes | 派遣・準委任・フリーランス・取適法の法務監修者 | 公式資料+L0+独立Reviewでprovisional開発を進め、runtime社内承認+専門家ReviewをM/本番gate化 | BP/compliance/archive | 決定済（2026-07-26、2026-08-09開発gate改訂） |
 | G3 | yes | 外部ポータルの公開ドメイン、利用規約、本人確認 | 別subdomain/chain、招待制、別identity、全portal user TOTP MFA | portal | 決定済（2026-07-26） |
 | G4 | yes | freeeの契約プランと利用可能API、仕訳方針 | freeeを会計の正、公式OAuth/API+CSV fallback、legal entity別connection | accounting | 決定済（2026-07-26） |
 | G5 | yes | Peppol Certified Service Provider | ファーストアカウンティングPeppol AP API、provider adapter、PDF/email併存 | JP PINT | 決定済（2026-07-26） |
@@ -40,6 +40,22 @@
 - 原則: 外部契約・専門家署名が未取得でも、公式contract fixture、mock、WireMock、provisional field mappingで
   基盤実装を進められる。実環境を確認したと虚偽記録してはならない。
 - 影響するspec: identity、archive、BP、dispatch、portal、accounting、JP PINT、attendance、engineer portal。
+
+## G2 開発gate改訂記録
+
+- ID: G2-DEV-GATE
+- 決定: `コンプライアンス責任者`はruntime roleとし、特定の自然人を開発時に固定しない。公式資料、版、確認日、
+  effective periodを持つmappingがL0と独立Reviewを通過した時点を`PROVISIONAL_REVIEWED`とし、task 0完了および
+  後続開発を許可する。runtime assignment、実actorの承認event、外部専門家Reviewは`ACTIVE`化、M PASS、
+  法定帳票の本番交付に必要なrelease gateとする。
+- 決定日: 2026-08-09
+- 決定者: 発注者
+- 根拠/理由: 開発中の個人指名を要求すると、未実装のruntime assignmentと承認eventがtask 0の前提になる循環gateを
+  生じる。role、権限、監査、未指名時fail-closedを先に実装し、実在actorは運用開始時に有効期間付きで指名する。
+  交代時は旧assignmentを終了して新assignmentを追加し、過去の承認・帳票snapshotを上書きしない。
+- 影響するspecへ反映するファイル: `gate-decisions-g1-g6.md`、`README.md`、
+  `dispatch-outsourcing-compliance-ledger/requirements.md`、`design.md`、`tasks.md`、`field-mapping.md`、
+  `review-ledger.md`、S10/R10派工対話、T060 task対話。
 
 ## 決定テンプレート
 

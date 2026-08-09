@@ -24,7 +24,12 @@
 ## 3. 帳票
 
 - `ComplianceDocumentGenerator`と帳票種別別template version。
-- 公式様式の項目対応表を`field-mapping.md`としてG2確認付きで保存。
+- 公式様式の項目対応表を`field-mapping.md`としてURL/版/確認日/effective period付きで保存する。
+- mapping lifecycleは`DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`。L0と独立Reviewで
+  `PROVISIONAL_REVIEWED`となり開発baselineにできる。runtimeの`COMPLIANCE_RESPONSIBLE` assignment、
+  対象version/hashへの実actor承認event、外部専門家Reviewが揃うまで`ACTIVE`化と本番交付を禁止する。
+- `COMPLIANCE_RESPONSIBLE`は管理者が有効期間付きで指名・交代する。特定の自然人をcode/spec/seedへ固定せず、
+  承認eventにactor ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
 - PDF/Excelどちらを採用するか帳票別に決め、生成物はarchive登録。
 
 ## 4. UI
@@ -95,6 +100,9 @@
 
 | 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
 |---|---|---|---|---|
+| mapping DRAFT | →PROVISIONAL_REVIEWED | 公式source/版/effective period＋L0＋独立Review、mapping hash固定 | mapping編集 | DRAFTの新versionを作成 |
+| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋外部専門家Review | 承認とmapping改定 | 承認対象hash不一致なら遷移拒否 |
+| mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS | 法令・様式更新 | 旧versionと過去帳票snapshotを保持 |
 | profile 未入力 | →入力済 | 状態CAS | — | — |
 | 入力済 | →確定（帳票生成可） | `version` CAS | 同時編集 | 入力済へ |
 | 確定 | →改定（新version） | `version` CAS | — | **過去snapshotは不変** |
@@ -117,4 +125,21 @@
 
 rule境界、finding upsert/解消、帳票field mapping、deadline scheduler、profile snapshot、PII permission、
 既存4rule回帰、法務fixture golden file。
+
+T060 L0は、全mapping行の公式URL/版/確認日/effective period、mapping hash、`DRAFT -> PROVISIONAL_REVIEWED`条件、
+特定自然人の事前固定がないことを検証する。実actor承認eventがないことは開発baselineの失敗条件にしない。
+Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが欠ける場合に`ACTIVE`化と本番交付が拒否され、
+対象hash不一致の承認eventが無効であることを検証する。
+
+### 6.1 G2 gate test matrix
+
+| test ID | level / task | setup | operation | expected |
+|---|---|---|---|---|
+| G2-GATE-L0-01 | L0 / T060 | 公式source/版/確認日/effective periodと全fieldを持つDRAFT。runtime assignmentなし | L0と独立Review | `PROVISIONAL_REVIEWED`。T061〜T065の開発開始可 |
+| G2-GATE-L0-02 | L0 / T060 | G2正本、spec、mapping、seed候補 | 特定の氏名/user ID固定をscan | 固定0件。role codeとruntime指名規則のみ |
+| G2-GATE-L2-01 | L2 / T061-T064 | PROVISIONAL_REVIEWED、active assignmentなし | ACTIVE化または本番交付 | fail-closed。状態不変、監査event |
+| G2-GATE-L2-02 | L2 / T061-T064 | active assignmentあり、承認eventのmapping hashが不一致 | ACTIVE化 | 拒否。対象version/hash一致を要求 |
+| G2-GATE-L2-03 | L2 / T061-T064 | 旧責任者の承認後に管理者が交代 | assignment終了/追加 | 旧承認actor snapshotと過去帳票は不変 |
+| G2-GATE-M-01 | L4 / T066 | assignment/承認eventあり、外部専門家Reviewなし | M PASSまたは本番交付 | 拒否。PROVISIONAL_REVIEWEDを維持 |
+| G2-GATE-M-02 | L4 / T066 | active assignment、対象hash承認event、外部専門家Reviewが有効 | ACTIVE化と本番交付 | 成功。version/hashと全証跡を監査保存 |
 

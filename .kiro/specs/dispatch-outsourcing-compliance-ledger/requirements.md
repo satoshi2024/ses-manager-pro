@@ -2,8 +2,10 @@
 
 ## 前提
 
-- G2は厚生労働省の公式様式を開発baselineとし、社内責任者がprovisional mappingを承認する。外部社労士/弁護士
-  ReviewはM/本番gateとする。派遣元/先管理台帳は派遣終了日起算3年をbaselineとし、legal holdは延長する。
+- G2は厚生労働省の公式様式を開発baselineとする。公式URL/版/確認日/effective periodを持つprovisional mappingが
+  L0と独立Reviewを通過すれば`PROVISIONAL_REVIEWED`として後続開発を開始できる。特定の社内責任者を開発時に
+  固定しない。runtimeの社内責任者assignment、対象version/hashへの実actor承認event、外部社労士/弁護士Reviewは
+  `ACTIVE`化、M PASS、本番交付のgateとする。派遣元/先管理台帳は派遣終了日起算3年をbaselineとし、legal holdは延長する。
 - システムはリスクと不足を提示するが、契約形態の法的適否を自動確定しない。
 
 ## R1. 就業先/責任者/契約条件
@@ -33,6 +35,8 @@
 
 ## R5. 受入
 
+- mappingは`DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`を持ち、開発baselineと本番有効版を混同しない。
+- runtime責任者未指名、承認event未取得、外部専門家Review未取得では`ACTIVE`化および本番帳票交付をfail-closedにする。
 - 派遣1件の必要帳票を同一snapshotから再生成し、版差分を説明できる。
 - 抵触日30日前、期間外工数、責任者欠落を検知。
 - 準委任のdirect command flagだけでなく指示経路/承認者不足を表示。

@@ -1,12 +1,12 @@
-# G2 公式様式 field mapping（T060 draft）
+# G2 公式様式 field mapping（T060 provisional baseline）
 
-> **状態: R1 FIXED BY IMPLEMENTER / T060 NOT COMPLETE（承認証跡待ち）**
+> **状態: PROVISIONAL_REVIEWED / T060 COMPLETE（G2-DEV-GATE改訂、R10再Review待ち）**
 >
 > 本書は `dispatch-outsourcing-compliance-ledger` T060 の成果物であり、現時点では
 > production code、DDL、migration、SecurityConfigを変更しない。項目をシステムへ対応付ける文書であり、
 > 個別契約の法的適否を自動判定するものではない。`コンプライアンス責任者` は個人を固定しない
-> application roleであり、runtimeで管理者が指名・交代する。role assignment、資格/根拠確認、外部専門家Reviewは
-> M/本番gateで管理し、T060のprovisional mapping起草・L0検証をブロックしない。
+> application roleであり、runtimeで管理者が指名・交代する。role assignment、実actor承認event、資格/根拠確認、
+> 外部専門家ReviewはACTIVE化/M/本番gateで管理し、T060完了と後続開発をブロックしない。
 
 ## 1. source of truth と version / effective period
 
@@ -72,6 +72,18 @@
 | 未指名/失効時 | productionのmapping確認済化、法定帳票本番交付、期限運用の確定処理を拒否する。開発・テストは `UNCONFIRMED` のまま継続できる。 |
 
 法定の派遣元責任者・派遣先責任者は、事業所/契約ごとのruntime master/assignmentであり、`valid_from`/`valid_to`を持つ別概念とする。交代時は旧行を終了し、新行の部署・役職・氏名・連絡先を帳票作成時にsnapshotする。過去帳票を上書きしない。
+
+### 2.4 mapping lifecycle
+
+| 状態 | 到達条件 | 許可 | 禁止 |
+|---|---|---|---|
+| `DRAFT` | 公式field mappingを起草中 | 文書編集、L0 | 後続実装baseline、本番交付 |
+| `PROVISIONAL_REVIEWED` | 公式URL/版/確認日/effective period、全項目mapping、L0、独立Review、対象blob/hash固定 | T061〜T065の開発baseline | `CONFIRMED`化、M PASS、本番交付 |
+| `ACTIVE` | runtimeのactive assignment、対象version/hashへの実actor承認event、外部専門家Reviewがすべて有効 | M PASS、本番交付 | 対象hash不一致の承認利用 |
+| `SUPERSEDED` | 後継versionがACTIVE | 過去帳票再現、監査参照 | 新規契約/交付への適用 |
+
+`PROVISIONAL_REVIEWED`は法的適否の承認ではなく、開発に必要なfield対応が独立Review済みであることを示す。
+実actor承認eventを捏造して開発gateを通過させず、実運用時に対象version/hashへ結び付けて取得する。
 
 ## 3. 帳票別 field mapping
 
@@ -226,13 +238,13 @@
 
 ### 5.3 状態機械と競合
 
-`design.md` §5.4をそのまま適用する。profile確定は `version` CAS、findingは `(contract_id, code, condition_fingerprint)` のDB UNIQUE + upsert、帳票再生成は `(contract_id, document_type, template_version, snapshot_hash)` の業務一意キーとする。mapping自体の承認状態は `COMPLIANCE_RESPONSIBLE` roleのruntime assignmentと監査eventで管理し、開発baselineをT061以降へ渡す場合も、本番の確認済化・法定帳票交付は必要なassignment/資格/根拠が揃わなければfail-closedとする。
+`design.md` §5.4をそのまま適用する。profile確定は `version` CAS、findingは `(contract_id, code, condition_fingerprint)` のDB UNIQUE + upsert、帳票再生成は `(contract_id, document_type, template_version, snapshot_hash)` の業務一意キーとする。mappingはL0と独立Reviewで`PROVISIONAL_REVIEWED`としてT061以降へ渡せるが、`ACTIVE`化、本番の確認済化・法定帳票交付は必要なassignment、対象hashへの承認event、外部専門家Reviewが揃わなければfail-closedとする。
 
 ## 6. 未決gate（role assignment / 後続実装・本番gate）
 
 | gate ID | 未決事項 | owner / 承認対象 | 影響 | 状態 |
 |---|---|---|---|---|
-| GATE-T060-ROLE | `COMPLIANCE_RESPONSIBLE` のrole code、承認可能操作、`未確認/要確認/確認済`、監査項目、runtime指名・交代、未指名時fail-closed | 管理者がruntimeでassignmentを作成・終了する。自然人の氏名/user IDをT060の成果物へ事前固定しない | T061以降の認可・承認event・本番確認済化 | **T060定義済み／M・本番assignment gate** |
+| GATE-T060-ROLE | `COMPLIANCE_RESPONSIBLE` のrole code、承認可能操作、`未確認/要確認/確認済`、監査項目、runtime指名・交代、未指名時fail-closed | 管理者がruntimeでassignmentを作成・終了する。自然人の氏名/user IDをT060の成果物へ事前固定しない | `ACTIVE`化、M PASS、本番確認済化 | **T060定義済み／M・本番assignment gate** |
 | GATE-T060-2026-10 | 2026-10-01施行分の待遇差説明を求める権利の正確な文言、対象、適用境界、旧版非遡及 | `COMPLIANCE_RESPONSIBLE` roleのruntime approval。外部社労士/弁護士照合はT066/本番gate | B1 template version、2026-10交付 | **OPEN（後続・本番gate）** |
 | GATE-T060-RETENTION | 個別契約書・就業条件明示書・派遣先通知書のarchive category/保存起算点。台帳R3Y以外を推測しない | 管理者/法務がrole assignment経由で保持category、tax category、legal holdを確認 | B1 retention/deletion | **OPEN（T061/B1具体化gate）** |
 | GATE-T060-COOLING | クーリング期間の日数、組織単位変更を同一実体とみなす確認基準 | `COMPLIANCE_RESPONSIBLE` roleが `m_system_config` 値と運用基準を承認 | T062/T065の抵触日算定 | **OPEN（T062/T065具体化gate）** |
@@ -254,5 +266,5 @@
 - [x] `COMPLIANCE_RESPONSIBLE` role code、承認可能操作、3状態、監査項目、runtime assignment/交代、未指名時fail-closedを定義した。
 - [x] 法定の派遣元責任者・派遣先責任者を内部mapping承認roleと分離し、runtime有効期間と帳票生成時snapshotを定義した。
 - [x] 特定の自然人名またはuser IDを事前固定せず、承認event時のactor ID・表示名snapshot・role・日時・mapping version/hash・根拠資料を保存する規則を定義した。
-- [ ] 社内コンプライアンス責任者による承認event（active assignment、承認権限、実actor、承認日時、mapping version/hash、公式source版）のrepo証跡。証跡未取得のためT060は未完了。
-- [x] `git diff --check` はT060の3文書に対してexit 0。R10 direct regressionはform mapping 96行、SRC-E ⑱=1行、SRC-L ④=1行、根拠なし2026-10 mapping行=0行を確認した。
+- [x] 実actor承認eventはT060の開発完了条件ではなく、`ACTIVE`化、M PASS、本番交付のgateとして分離した。未取得を虚偽に補完しない。
+- [x] G2正本、spec、決定表、L0 matrix、派工対話を含む本fix deltaのL0 PASS、`SpecDispatchConsistencyTest` 8/8、`git diff --check` exit 0。form mapping 96行、SRC-E ⑱=1行、SRC-L ④=1行、根拠なし2026-10 mapping行=0行を維持した。
