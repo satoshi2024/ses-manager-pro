@@ -226,6 +226,31 @@
 | 交付version | document type/version/effective period/snapshot hash | 2026-10-01版を旧版へ遡及する | B1のidempotency契約へ引継ぎ |
 | 交付/受領 | `t_document_delivery`に交付日だけでなくversion・snapshot・recipient scopeが必要 | 同一snapshot再生成/受領未確認を区別できない | F1/B1の追加候補 |
 
+## 4.1 F1 schema resolution contract（Round 5 fix plan）
+
+R10 Round 5で確認された「要追加候補」「JSON圧縮」「単一列への混在」は、F1の実装判断として残さない。以下をF1再実装の正本とし、各mapping行を **typed column / append-only history / 明示的後続task・gate** のいずれかへ1対1で束ねる。法的な適用可否が未確認の項目も、保存形状を未定義のままにせず、NULLと未確認理由を分離してfail-closedにする。
+
+| mapping group | F1で確定する保存先 | 履歴・snapshot規則 | 未決gate／後続task |
+|---|---|---|---|
+| 事業所・組織・就業場所 | `m_workplace`のmaster参照＋`t_contract_compliance_snapshot`の`workplace_*`/`organization_*` typed snapshot列 | 契約・workerごとにsnapshot versionを追加し、master更新で過去行を変更しない | 複数就業場所の法的表示条件はGATE-T060-ROLE、帳票出力はB1 |
+| 責任の程度・権限 | `responsibility_level`、`responsibility_detail` | profile確定時にsnapshotへ複写。自由記述JSONへ圧縮しない | 選択肢の法務確認はT066、列形状はF1 |
+| 2種の派遣可能期間制限日 | `workplace_limitation_date`、`organization_limitation_date`を別のnullable DATE列。旧単一`limitation_date`へ意味を寄せない | asOf Resolverの算定結果をsnapshotへ保存。NULLは未算定 | 算定規則はT062/T065、表示条件はGATE-T060-COOLING |
+| SRC-E ⑱ 社会保険手続未完了理由 | `social_insurance_procedure_incomplete_reason`を独立TEXT列 | 就業条件snapshotへ保存。SRC-Lの3保険別reasonとは別値として保持 | 法的文言の確認はGATE-T060-ROLE。3保険別status/reason/expected_dateも独立保持 |
+| 3保険の加入状態・理由・取得予定日 | health/pension/employment各々の`status`、`missing_reason`、`expected_date` | worker-specific snapshotへ保存し、理由NULLと未確認を混同しない | F1 schema fix、保険判定はT062 |
+| 派遣料金 | `dispatch_fee_amount`（DECIMAL）、`dispatch_fee_basis`、`dispatch_fee_currency` | 契約・worker/帳票version単位でsnapshot。`t_contract`の売上・粗利列を流用しない | 料金の法的意味・表示可否はGATE-T060-ROLE/T066 |
+| 福利厚生 | `benefits_detail`と、待遇方式とは別の`benefits_provided_flag` | worker-specific snapshot | 待遇差の法的評価はGATE-T060-2026-10/T066 |
+| 派遣人員・協定対象・無期・60歳以上 | `dispatch_headcount`、`agreement_target_flag`、`indefinite_worker_flag`、`age_over_60_flag`、`worker_restriction_type` | worker snapshotとの人数整合を検証し、SRC-L④を独立出力 | 適用条件の確認はT066、整合回帰はF1/T062 |
+| 派遣元／派遣先の苦情申出先 | source/clientを別のtyped contact snapshot列として保持 | profileの窓口と、実際の申出を`t_compliance_complaint_history`へ分離してappend-only | 表示maskはT063/T064、処理方法の法務確認はT066 |
+| 苦情処理経過・結果通知 | `t_compliance_complaint_history`（received/content/action/resolved/notified） | 受付・処理・通知を反復行で保存。findingの単一resolution_noteへ潰さない | F1 schema fix、法定表示はB1 |
+| 雇用安定措置 | preferenceをprofileへ、依頼・回答・実施を`t_employment_stability_history`へ | worker-specific append-only履歴 | 法定条件はT066、運用通知はT065 |
+| 教育・キャリア・月次就業状況 | `t_training_history`、`t_career_consulting_history`、`t_ledger_work_snapshot` | 実施・締め時点ごとのappend-only行 | 勤怠source連携はS11/G6、帳票出力はB1 |
+| 紹介予定派遣 | `t_planned_introduction_history`（紹介時期・条件・採否・理由） | 該当契約・workerだけ行を持つ条件付き履歴 | 法務確認はT066、帳票条件分岐はB1 |
+| profile snapshot | mutable current profileと`t_contract_compliance_snapshot`を分離。snapshotは`contract_id + snapshot_version + snapshot_hash`で一意 | 確定後の過去snapshotはUPDATE/DELETE不可。改定は新versionをINSERTし、CASでcurrentを切替 | F1 schema/entity/mapper/test fix |
+| 交付・受領 | `t_document_delivery`へdocument/template/effective period/snapshot hash/recipient scopeを必須対応 | 交付ごとに反復行。`confirmed_at IS NULL`は受領未確認 | B1 archive/交付実装 |
+| 明示NULL | clearable fieldは`FieldStrategy.ALWAYS`または専用clear SQLとfull DTO契約を使う | 値→NULLを保存し、findingを再評価。更新skipで旧値を残さない | F1 entity/mapper integration test |
+
+この表の `F1 schema fix` 行は、次のcode fixでV1/V84/H2/entity/mapper/testを同一差分で同期する。`T063/T064/T066` と明記した行は、F1が値を失わない形状までを確定し、field permission・法的表示・外部照合を各taskの受入へ移管する。したがって、現行V84を合格済みDDLとして扱わず、R5 P1修正完了までT061 checkboxは未完了とする。
+
 ## 5. 決定表の適用
 
 ### 5.1 時間・asOf

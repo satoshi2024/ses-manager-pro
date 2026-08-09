@@ -8,13 +8,21 @@
 
 - `m_workplace(id, customer_id, name, address, organization_unit, phone)`。
 - `t_contract_compliance_profile(contract_id, contract_type_detail, workplace_id, work_description,
-  work_time/break/holidays/overtime, command_person_contact_id, client/responsible_person,
-  dispatch_responsible_user_id, complaint_contact, treatment_scheme, limitation_date,
-  training/safety/insurance fields, instruction_route, subcontract_allowed, acceptance_method,
-  snapshot_json, version)`。
+  work_time/break/holidays/overtime, command_person_contact_id, client/dispatch responsible person,
+  responsibility_level/detail, workplace_limitation_date, organization_limitation_date,
+  social_insurance_procedure_incomplete_reason, health/pension/employment status/reason/expected_date,
+  dispatch_fee_amount/basis/currency, benefits_detail, dispatch_headcount,
+  agreement_target_flag, indefinite_worker_flag, age_over_60_flag, worker_restriction_type,
+  source/client complaint contacts, treatment_scheme, training/safety/insurance fields,
+  instruction_route, subcontract_allowed, acceptance_method, version)`。
+- `t_contract_compliance_snapshot(contract_id, snapshot_version, snapshot_hash, typed fields, snapshot_json)` と
+  `t_contract_compliance_worker_snapshot(contract_id, worker_id, snapshot_version, snapshot_hash, typed fields)`。
 - `t_compliance_finding(id, contract_id, code, severity, status, detected_at, due_date,
-  acknowledged_by/at, resolution_note, evidence_document_id)`。
-- `t_document_delivery(document_id, recipient_contact_id, delivery_method, delivered_at, confirmed_at)`。
+  acknowledged_by/at, resolution_note, evidence_document_id)`。苦情・教育・雇用安定・紹介予定・月次実績は専用history tableで反復保存する。
+- `t_document_delivery(document_id, recipient_contact_id, template_version, effective period, snapshot_hash,
+  delivery_method, delivered_at, confirmed_at)`。
+
+> **R5補正**: 上記は実装前の短縮表であり、現行V84実装の合格を意味しない。公式mappingとの1対1対応、履歴table、明示NULL、legacy/partial/repair経路は§5.5/§6.2を正本とする。未決の法的意味をTEXT/JSONへ圧縮してDDLを確定してはならない。
 
 ## 2. Rule engine
 
@@ -50,10 +58,10 @@
 
 | 対象 | current | history | snapshot | asOfで読む源 | 明示NULLの意味 |
 |---|---|---|---|---|---|
-| 就業条件 | `t_contract_compliance_profile`現在値 | `version`＋監査 | `snapshot_json`（帳票生成時に固定） | **帳票の交付日時点のsnapshot** | 未入力＝`MISSING_*` finding対象 |
+| 就業条件 | `t_contract_compliance_profile`現在値 | `t_contract_compliance_snapshot` append-only | snapshot rowのtyped列＋`snapshot_json` | **帳票の交付日時点のsnapshot** | 未入力＝`MISSING_*` finding対象 |
 | 就業先 | `m_workplace`現在値 | — | profile snapshotへ名称/住所を含める | 契約時点のsnapshot | 未設定＝finding |
 | 指揮命令者 | `command_person_contact_id` | contact側の期間 | snapshotへ氏名を含める | 契約時点 | **未設定＝派遣ではfinding、準委任では正常** |
-| 抵触日 | `limitation_date` | — | — | 現在値 | **未算定**。「抵触日なし」ではない。算定不能をfindingにする |
+| 抵触日 | `workplace_limitation_date`＋`organization_limitation_date` | snapshot rowへ算定結果を保存 | 2種のdateを別々にasOf解決 | 現在値または交付snapshot | **未算定**。「抵触日なし」ではない。算定不能をfindingにする |
 | 保険/教育訓練 | profile各field | — | snapshot | 契約時点 | **未確認**（「不要」ではない） |
 | finding | `t_compliance_finding.status` | `detected_at`＋解消履歴 | — | 現在値 | — |
 | 帳票交付 | `t_document_delivery` | 交付ごとに行追加 | — | 交付日 | `confirmed_at IS NULL`＝**受領未確認**（未交付ではない） |
@@ -107,7 +115,7 @@
 | mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS | 法令・様式更新 | 旧versionと過去帳票snapshotを保持 |
 | profile 未入力 | →入力済 | 状態CAS | — | — |
 | 入力済 | →確定（帳票生成可） | `version` CAS | 同時編集 | 入力済へ |
-| 確定 | →改定（新version） | `version` CAS | — | **過去snapshotは不変** |
+| 確定 | →改定（新version） | current profileは`version` CAS、snapshotは`contract_id + snapshot_version + snapshot_hash` UNIQUE | 同時編集 | **過去snapshotはUPDATE/DELETE不可。改定は新snapshot INSERT** |
 | finding OPEN | →acknowledged / →解消 / →例外承認 | 状態CAS | rule再実行との競合 | OPENへ戻る（再検出） |
 | acknowledged | →対応中→解消 / →例外承認 | 状態CAS | — | — |
 | 解消 | 再検出でOPENへ戻りうる | fingerprint一致で同一findingを再利用 | — | — |
@@ -122,6 +130,20 @@
 - 帳票生成はarchive specへ登録する。生成の冪等キーは
   `(contract_id, document_type, template_version, snapshot_hash)`。
   同じsnapshotからの再生成で2件目を作らない。
+
+### 5.5 F1 schema / history matrix（R5で確定する技術契約）
+
+| 領域 | current row | append-only history / snapshot | NULL・競合規則 | 担当task |
+|---|---|---|---|---|
+| 公式mappingのtyped field | `t_contract_compliance_profile`の専用列（組織制限日、SRC-E⑱、料金、責任、福利厚生、人数、協定/無期/60歳） | worker/contract snapshotへ同じ列名で複写 | 公式項目を別名称・JSONだけで置換しない。未確認はNULL＋finding | T061 |
+| worker-specific | current profileはcontract単位、worker識別は別参照 | `t_contract_compliance_worker_snapshot`をworker/version/hash単位でappend-only | 複数workerのPII・出力を同一snapshotへ混在させない | T061 |
+| 苦情・雇用安定・教育・career・紹介予定 | currentは条件/窓口のみ | 各history tableを反復行として保存 | findingのresolution_noteやJSONへ圧縮しない | T061/T062/B1 |
+| profile snapshot | mutable current profile | `t_contract_compliance_snapshot`、`snapshot_version`増分 | 確定後UPDATE/DELETE拒否、改定は新version、current切替はCAS | T061/B1 |
+| explicit NULL | full update DTOまたは専用clear mapper | snapshotは旧版不変、currentだけ明示NULL可 | `not_null` skipで旧date/status/reasonを残さない | T061/T062 |
+| permission boundary | internal entity/table（portal/AIへ直接公開しない） | snapshotと履歴を同一scopeで参照 | T061はprojection契約を持つ。実maskはT063 detail/list/count、T064 export/download/PDFで検証 | T063/T064 |
+| migration path | fresh V1→V84 | V83実形状からV84、partial/repair、既存契約no-backfill | V84は既存表を前提にせず、FK順序と再開性をassert | T061 |
+
+このmatrixで法的な文言・適用条件を新たに決めていない。法務判断はGATE-T060-ROLE/2026-10/COOLING/EXTERNALへ残し、保存形状とfail-closed境界だけを確定する。
 
 ## 6. テスト
 
@@ -144,4 +166,16 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 | G2-GATE-L2-03 | L2 / T061-T064 | 旧責任者の承認後に管理者が交代 | assignment終了/追加 | 旧承認actor snapshotと過去帳票は不変 |
 | G2-GATE-M-01 | L4 / T066 | assignment/承認eventあり、外部専門家Reviewなし | M PASSまたは本番交付 | 拒否。PROVISIONAL_REVIEWEDを維持 |
 | G2-GATE-M-02 | L4 / T066 | active assignment、対象hash承認event、外部専門家Reviewが有効 | ACTIVE化と本番交付 | 成功。version/hashと全証跡を監査保存 |
+
+### 6.2 T061 F1 direct regression matrix（R5 fix scope）
+
+| test ID | level | fixture / operation | expected |
+|---|---|---|---|
+| F1-MAP-01 | L1 | field-mapping全行をschema matrixへ機械照合 | 公式項目ごとに専用columnまたは指定historyが1件。未決行はowner/task/gate付きで、未定義の「要追加候補」0件 |
+| F1-SNAPSHOT-01 | L2 | snapshot Aを確定→current profileをBへ改定→Aを再取得 | A/B両方が取得可能。AのJSON・typed field・hashは不変、Bは新version、同時改定はCASで片方だけ成功 |
+| F1-NULL-01 | L2 | date/status/reason/workplaceを値→明示NULLへ更新 | DBがNULLとなり、旧値が残らず`MISSING_*`再評価対象になる |
+| F1-MYSQL-FRESH-01 | L1 | 空DBをV1→V84 | V1 baselineとV84が同じtable/FK/index/entity契約を形成し、skip 0 |
+| F1-MYSQL-LEGACY-01 | L2 | V83公開形状＋既存契約fixtureへV84適用 | 4表・typed field・FKが作成され、既存契約を推測backfillせず未確認をfail-closedで保持 |
+| F1-MYSQL-PARTIAL-01 | L2 | 4表の一部だけ存在するpartial fixtureでV84/retry/repair | 既存行を壊さず再開可能。duplicate/FK順序エラーを検出し、成功後のschemaがfreshと一致 |
+| F1-PII-OWNERSHIP-01 | L1 | T061 entityを直接portal/AI DTOへ渡すconsumer scan | 直接公開0件。detail/list/countのfield maskはT063、export/download/PDFはT064の別matrixへ移管され、T061 PASSの証拠に混在しない |
 
