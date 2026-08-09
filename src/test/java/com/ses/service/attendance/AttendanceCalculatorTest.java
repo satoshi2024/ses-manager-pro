@@ -36,9 +36,10 @@ class AttendanceCalculatorTest {
 
     @BeforeEach
     void setUp() {
-        legalCalendar = WorkCalendar.builder().id(1L).legalEntityId(100L)
+        legalCalendar = WorkCalendar.builder().legalEntityId(100L)
                 .organizationId(10L).name("法人calendar").validFrom(LocalDate.of(2026, 1, 1))
                 .status("有効").build();
+        legalCalendar.setId(1L);
         when(workCalendarMapper.selectList(any())).thenReturn(List.of(legalCalendar));
     }
 
@@ -97,9 +98,10 @@ class AttendanceCalculatorTest {
 
     @Test
     void 個人calendarを法人calendarより優先しscheduledのNULLと0を保持する() {
-        WorkCalendar engineerCalendar = WorkCalendar.builder().id(3L).legalEntityId(100L)
+        WorkCalendar engineerCalendar = WorkCalendar.builder().legalEntityId(100L)
                 .engineerId(20L).name("個人calendar").validFrom(LocalDate.of(2026, 1, 1))
                 .status("有効").build();
+        engineerCalendar.setId(3L);
         when(workCalendarMapper.selectList(any())).thenReturn(List.of(legalCalendar, engineerCalendar));
         day("通常", null);
         AttendanceCalculation nullScheduled = calculator.calculate(LocalDate.of(2026, 8, 3), 20L,

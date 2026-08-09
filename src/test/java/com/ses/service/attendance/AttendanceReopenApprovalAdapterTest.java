@@ -50,7 +50,9 @@ class AttendanceReopenApprovalAdapterTest {
     }
 
     private AttendanceMonth month(Long id, int version) {
-        return AttendanceMonth.builder().id(id).engineerId(20L).organizationId(30L)
+        AttendanceMonth month = AttendanceMonth.builder().engineerId(20L).organizationId(30L)
                 .workMonth(java.time.LocalDate.of(2026, 8, 1)).status("締め済").version(version).build();
+        month.setId(id);
+        return month;
     }
 }
