@@ -10,10 +10,10 @@
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
 | head | R2-P1-02方式A fix delta＋転記修正＝committed Head `0ff7f2b`（=origin/main）。deltaは`3891c0e`→`5f362fc`（方式A実装）→`b65996f`（V91予約・文書同期）→`758649e`→`fc798be`→`0ff7f2b`（ledger同期）。dispatch V84 R5 re-sync `b9b91f9`もmerge済み |
 | merge | `5f362fc`/`b65996f`/`758649e`/`fc798be`/`0ff7f2b`はmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・S11方式A追補V91実在（S12〜S17はV92〜V97へ繰り上げ）を維持。dispatch V84 R5（`b9b91f9`）はV1不変のまま整合commit済み |
-| latest review | `R11 Round 3フォローアップ転記確認 2026-08-09`（`0ff7f2b..3d6864b`、新規指摘なし） |
-| verdict | **PASS（T070までの実装範囲）維持**。R2-P1-02/R3-P2-01 VERIFIED_CLOSED。NOTE-R3-03は解消（dispatch `b9b91f9`がV1不変のままV84 R5を整合commit）、NOTE-R3-04/05 FIXED（検証済み）、NOTE-R3-06のみdispatch帰属でOPEN。新規P0/P1/NOTEなし |
+| latest review | `R11 Round 3フォローアップ転記確認2 2026-08-09`（`3d6864b..867ade5`、新規指摘なし・**本deltaのReview対話は収束完了**） |
+| verdict | **PASS（T070までの実装範囲）維持・収束**。R2-P1-02/R3-P2-01 VERIFIED_CLOSED。NOTE-R3-03 RESOLVED、R3-04/05 FIXED、R3-06のみdispatch帰属でOPEN。新規P0/P1/P2/NOTEなし。同一判定の転記確認は繰り返さない |
 | issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=1（NOTE-R3-06 dispatch）` |
-| next action | **T071開始可（条件付き維持）**：共有`FlywayMigrationSmokeTest`がdispatch V84起因でREDの間、統合担当がdispatch修正を優先し、「CI相当L4×1回」とV91 fresh全経路の再検証はV84修正後に実施。T071の実装自体はattendance scope内で検証済みのため開始を止めない（handbook §10）。S11完了はT074/M後 |
+| next action | **T071開始可（条件付き維持）**：共有`FlywayMigrationSmokeTest`がdispatch V84起因でREDの間、統合担当がdispatch修正を優先し、「CI相当L4×1回」とV91 fresh全経路の再検証はV84修正後に実施。次の独立Reviewは**T071実装後**。S11完了はT074/M後 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -650,3 +650,13 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - overall verdict: **PASS（T070までの実装範囲）維持**。P0=0 / P1=0 / P2=2 / NOTE=1（R3-06 dispatch）
 - next task/Wave: **T071開始可（条件付き維持）**。共有smoke REDの間は統合担当がdispatch V84修正を優先し、CI相当L4とV91 fresh全経路の再検証はV84修正後に実施。次spec/次WaveはS11完了（T074/M、L4）後
 - central ledger転記用短文: `R11 Round 3フォローアップ転記確認: 3d6864bはledger 2ファイルのみ・code変更なし・git diff --check PASS。§1/§2/§11・中央S11行の転記は前回判定と完全一致。NOTE-R3-04/05=FIXED（検証済み）、NOTE-R3-06=OPEN（dispatch帰属）。NOTE-R3-03はdispatch b9b91f9がV1不変のままV84 R5を整合commitしたため解消。新規P0/P1/NOTEなし。attendance scope PASS維持、T071開始可（条件付き）、S11完了はT074/M後。`
+
+### Round 3フォローアップ転記確認2 — 2026-08-09 — R11担当（収束完了）
+
+- review target: delta=`3d6864b..867ade5`（docs: Round 3フォローアップ転記確認）。code変更なし（ledger 2ファイルのみ、`git diff --check` PASS）。worktree clean
+- result: 転記は前回判定と完全一致（§1現行判定、§2 RegisterのNOTE-R3-03=RESOLVED、§11末尾、中央ledger S11行）。**新規P0/P1/P2/NOTEなし**
+- convergence: 本delta（T070方式A・ledger収束）に関するReview対話は**収束完了**。同一判定の転記確認はこれ以上繰り返さない。次の独立ReviewはT071（休暇/approval統合）実装後、およびdispatch V84修正確認（NOTE-R3-06）
+- unverified: T071〜T074、L4全量、実ブラウザ（390px）、paging、V84修正後のfresh全経路＋CI相当L4、ATT-GATE-01〜06
+- overall verdict: **PASS（T070までの実装範囲）維持・収束**。P0=0 / P1=0 / P2=2 / NOTE=1（R3-06 dispatch）
+- next task/Wave: T071開始可（条件付き維持）。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 Round 3フォローアップ転記確認2: 867ade5はledger 2ファイルのみ・code変更なし・git diff --check PASS。§1/§2/§11・中央S11行の転記は前回判定と完全一致。NOTE-R3-03=RESOLVED、R3-04/05=FIXED、R3-06=OPEN（dispatch帰属）。新規指摘なし。attendance scope PASS維持、T071開始可（条件付き）。本deltaのReview対話は収束完了——次のReviewはT071実装後。`
