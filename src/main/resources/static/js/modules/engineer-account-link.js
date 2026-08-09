@@ -3,8 +3,6 @@
     const engineerId = new URLSearchParams(window.location.search).get('id');
     if (!engineerId) return;
 
-    document.addEventListener('DOMContentLoaded', loadAccountLink);
-
     window.loadAccountLink = function () {
         const current = document.getElementById('account-link-current');
         if (!current) return;
@@ -25,6 +23,8 @@
                 }
             });
     };
+
+    document.addEventListener('DOMContentLoaded', loadAccountLink);
 
     function loadCandidates() {
         fetch(`/api/engineers/${engineerId}/account-link/candidates`)

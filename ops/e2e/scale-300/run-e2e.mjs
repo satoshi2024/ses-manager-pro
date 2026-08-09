@@ -40,7 +40,6 @@ const PAGE_URLS = {
   quotation: ['/quotation'],
   'monthly-closing': ['/monthly-closing'],
   'my-timesheet': ['/my/timesheet'],
-  'skill-tag': ['/skill-tag'],
   'resume-ingestion': ['/resume-ingestion'],
   'project-ingestion': ['/project-ingestion'],
   'bp-availability': ['/bp-availability/list'],
@@ -49,10 +48,6 @@ const PAGE_URLS = {
   compliance: ['/compliance'],
   'management-accounting': ['/management-accounting'],
   'document-archive': ['/document/list'],
-  search: ['/search'],
-  tasks: ['/tasks'],
-  'saved-views': ['/saved-views'],
-  'batch-operations': ['/batch-operations'],
   'bp-company': ['/bp-company/list'],
   'crm-lead': ['/crm/leads'],
   'crm-opportunity': ['/crm/opportunities'],
@@ -78,7 +73,7 @@ const FORBIDDEN = {
   '要員': ['/dashboard', '/engineer/list', '/customer/list', '/api/engineers', '/user/list']
 };
 
-const MOBILE_KEY_MENUS = ['dashboard', 'engineer', 'customer', 'project', 'proposal', 'contract', 'work-record', 'invoice', 'candidate', 'tasks', 'quotation', 'bp-company', 'crm-lead', 'crm-opportunity', 'sales-performance', 'monthly-closing', 'user', 'analytics', 'approval', 'todo'];
+const MOBILE_KEY_MENUS = ['dashboard', 'engineer', 'customer', 'project', 'proposal', 'contract', 'work-record', 'invoice', 'candidate', 'quotation', 'bp-company', 'crm-lead', 'crm-opportunity', 'sales-performance', 'monthly-closing', 'user', 'analytics', 'approval', 'todo'];
 
 const issues = [];
 let issueSeq = 1;

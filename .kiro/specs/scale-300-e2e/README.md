@@ -66,3 +66,14 @@ node round2-deep.mjs
 V2初期要員3名のログイン、34アカウント同時ログインを検証している。
 全量スクリーンショットは `.kiro/specs/scale-300-e2e/round2/evidence/full/`
 （gitignore対象）、代表例は `round2/evidence/selected/` に保存される。
+
+## 修正状況（2026-08-09）
+
+- D-002 カンバン描画 / D-003 ガント日本語ロケール / D-004 アカウント連携の
+  JS障害を修正済み。
+- V101 で未実装ページのメニュー行（search / tasks / skill-tag /
+  saved-views / batch-operations）を `m_menu` / `t_role_menu` から撤去。
+  APIは action permission（V66_1 / V74）で継続利用可能。
+- `/tasks` は `/todo` への互換リダイレクトを追加。
+- 修正後の第2ラウンドE2E再実行: **0問題 / 54チェック全てOK**。
+  最新結果は `round2/round2-report.md` を参照。

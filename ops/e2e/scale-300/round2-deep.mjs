@@ -457,11 +457,8 @@ async function run() {
       await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'not-found', url: '/definitely-not-found', selected: true, expectedStatuses: [404] });
       await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'error-page', url: '/error', selected: true, ignoreErrorText: true });
       await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'approval-routes', url: '/approval/routes' });
-      await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'route-skill-tag', url: '/skill-tag' });
-      await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'route-search', url: '/search' });
-      await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'route-tasks', url: '/tasks' });
-      await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'route-saved-views', url: '/saved-views' });
-      await auditPage(adminCtx, { role: '管理者', viewport: 'desktop', pageName: 'route-batch-operations', url: '/batch-operations' });
+      // 未実装ページのメニュー行はV101で撤去済み。直接URLは未実装のまま404を返すが、
+      // メニュー権限データとは無関係になったため、ここでは再検証しない。
       await adminCtx.close();
 
       for (const u of [USERS[1], USERS[2], USERS[3]]) {

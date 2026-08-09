@@ -1,9 +1,9 @@
 # 300人規模 E2E 第2ラウンド（深掘り）
 
-- 実行日時: 2026-08-09T14:05:56.068Z
+- 実行日時: 2026-08-09T14:21:24.535Z
 - 対象URL: http://localhost:8081
-- 検出問題数: 26（重複除去後）
-- 実行チェック数: 54（うち失敗 1）
+- 検出問題数: 0（重複除去後）
+- 実行チェック数: 54（うち失敗 0）
 
 ## チェック一覧
 
@@ -17,7 +17,7 @@
 | pagination:candidate | OK | total=45, pages=5, lastPageRows=5, activePage=5 |
 | search:engineer | OK | keyword=田中 on #searchName, found=true |
 | global-search | OK | keyword=田中, resultText=要員 (4) 田中 陸正社員 稼動中 田中 達也正社員 稼動中 田中 結衣正社員 Bench 田中 太郎正社員 稼動中  |
-| engineer-detail:account-link | NG | id=1 linkText= |
+| engineer-detail:account-link | OK | id=1 linkText=#397 |
 | modal:engineer-modal | OK | engineerModal opened, visible fields=11 |
 | modal:customer-modal | OK | customerModal opened, visible fields=5 |
 | modal:contract-modal | OK | contractModal opened, visible fields=16 |
@@ -68,51 +68,3 @@
 
 | ID | ロール | ビューポート | ページ | 種別 | 内容 |
 |---|---|---|---|---|---|
-| R2-001 | 管理者 | desktop | contract-gantt | PAGE_ERROR | TypeError: Cannot read properties of undefined (reading '11')
-    at Object.format (http://localhost:8081/lib/frappe-gantt/frappe-gantt.min.js:1:1613)
-    at f.get_date_info (http: |
-| R2-002 | 管理者 | desktop | proposal-kanban | PAGE_ERROR | ReferenceError: renderKanbanCard is not defined
-    at http://localhost:8081/js/modules/proposal-kanban.js:174:21
-    at Array.forEach (<anonymous>)
-    at Object.success (http://l |
-| R2-003 | 管理者 | desktop | engineer-detail | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-004 | 管理者 | desktop | engineer-detail-legacy | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-005 | 管理者 | desktop | detail-1001 | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-006 | 管理者 | desktop | detail-1252 | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-007 | 管理者 | desktop | detail-1 | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-008 | 管理者 | desktop | detail-2 | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-009 | 管理者 | desktop | detail-3 | PAGE_ERROR | ReferenceError: loadAccountLink is not defined
-    at http://localhost:8081/js/modules/engineer-account-link.js:6:51
-    at http://localhost:8081/js/modules/engineer-account-link.j |
-| R2-010 | 管理者 | desktop | engineer-detail | ACCOUNT_LINK | legacy engineer id=1 account link not shown () |
-| R2-011 | 管理者 | desktop | route-skill-tag | HTTP_404 | HTTP 404 |
-| R2-012 | 管理者 | desktop | route-skill-tag | CONSOLE_ERROR | Failed to load resource: the server responded with a status of 404 () |
-| R2-013 | 管理者 | desktop | route-skill-tag | RESPONSE_4XX | 404 http://localhost:8081/skill-tag |
-| R2-014 | 管理者 | desktop | route-search | HTTP_404 | HTTP 404 |
-| R2-015 | 管理者 | desktop | route-search | CONSOLE_ERROR | Failed to load resource: the server responded with a status of 404 () |
-| R2-016 | 管理者 | desktop | route-search | RESPONSE_4XX | 404 http://localhost:8081/search |
-| R2-017 | 管理者 | desktop | route-tasks | HTTP_404 | HTTP 404 |
-| R2-018 | 管理者 | desktop | route-tasks | CONSOLE_ERROR | Failed to load resource: the server responded with a status of 404 () |
-| R2-019 | 管理者 | desktop | route-tasks | RESPONSE_4XX | 404 http://localhost:8081/tasks |
-| R2-020 | 管理者 | desktop | route-saved-views | HTTP_404 | HTTP 404 |
-| R2-021 | 管理者 | desktop | route-saved-views | CONSOLE_ERROR | Failed to load resource: the server responded with a status of 404 () |
-| R2-022 | 管理者 | desktop | route-saved-views | RESPONSE_4XX | 404 http://localhost:8081/saved-views |
-| R2-023 | 管理者 | desktop | route-batch-operations | HTTP_404 | HTTP 404 |
-| R2-024 | 管理者 | desktop | route-batch-operations | CONSOLE_ERROR | Failed to load resource: the server responded with a status of 404 () |
-| R2-025 | 管理者 | desktop | route-batch-operations | RESPONSE_4XX | 404 http://localhost:8081/batch-operations |
-| R2-026 | 管理者 | mobile | proposal | PAGE_ERROR | ReferenceError: renderKanbanCard is not defined
-    at http://localhost:8081/js/modules/proposal-kanban.js:174:21
-    at Array.forEach (<anonymous>)
-    at Object.success (http://l |

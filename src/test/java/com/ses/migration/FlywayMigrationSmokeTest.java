@@ -396,11 +396,20 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "m_saved_view", "page_key");
             assertColumnExists(st, "m_saved_view", "owner_user_id");
 
-            // V69: 生産性向上機能 メニュー・権限マスタ
-            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='search'");
-            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='tasks'");
-            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='saved-views'");
-            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='batch-operations'");
+            // V69/V101: 生産性向上機能はAPIのみ実装（UI未実装）のため、V101で
+            // メニュー・権限マスタから撤去する。m_menu に残さないこと。
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM m_menu"
+                            + " WHERE menu_key IN ('search','tasks','skill-tag','saved-views','batch-operations')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
+                        "未実装ページのメニュー行はV101で削除されていること");
+            }
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id"
+                            + " WHERE m.menu_key IN ('search','tasks','skill-tag','saved-views','batch-operations')")) {
+                org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
+                        "未実装ページのロール付与はV101で削除されていること");
+            }
 
             // V73: CRM複数担当者・商機管理 (crm-contact-opportunity)
             assertTableExists(st, "t_customer_contact");

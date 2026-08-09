@@ -2,7 +2,7 @@
 
 自動検出（第1ラウンド `e2e-issues.json` 156件 / 第2ラウンド
 `round2/round2-issues.json` 26件）を実体ごとに集約した最終カタログ。
-状態: **OPEN**（検証・記録のみで修正は行わない）／**確認済み（仕様通り）**。
+状態: **FIXED**（修正済み・回帰検証済み）／**確認済み（仕様通り）**。
 
 ## 凡例
 
@@ -52,6 +52,8 @@
 - 原因（確定）: `src/main/resources/static/js/modules/proposal-kanban.js:174` が
   `renderKanbanCard(item, colBody)` を呼ぶが、同ファイルの実装は
   `createKanbanCard(item)`（約249行目）に改名済みで、`renderKanbanCard` が存在しない。
+- 修正: 呼び出しを `colBody.append(createKanbanCard(item))` に変更。
+- 状態: **FIXED**（第3ラウンド E2E でカンバン描画エラー0件）
 - 期待: カンバンカードが描画され、ステータス変更操作が可能であること。
 
 ## D-003 [P1] 契約一覧で `Cannot read properties of undefined (reading '11')`
@@ -65,6 +67,9 @@
   `lib/frappe-gantt/frappe-gantt.min.js` に `ja` ロケールが無いため、
   `format()` が `r[s][+i[1]]`（`r['ja']` は undefined）を評価して例外になる。
   スタック: `Object.format → get_date_info → make_dates → render → new Gantt`
+- 修正: vendored `frappe-gantt.min.js` の月名マップへ `ja`（1月〜12月）を追加し、
+  `language: 'ja'` を維持したまま描画できるようにした。
+- 状態: **FIXED**（第3ラウンド E2E でガントページエラー0件）
 - 期待: サポート済み言語（`en`）を使う、または日本語ロケールを同梱する。
 - 補足: `/contract/list` 自体は第2ラウンドで252件・13ページのページングが正常。
 
@@ -79,6 +84,8 @@
   スクリプト読み込み時に ReferenceError になる。
 - 影響: アカウント連携カードが常に空（例: id=1 はDB上
   `s300.member253` と連携済みだが、UIには `—` のまま）。
+- 修正: `addEventListener` を `window.loadAccountLink` の定義後に移動。
+- 状態: **FIXED**（id=1 で `#397` 表示を確認）
 - 期待: アカウント連携表示が定義済み関数で描画されること。
 
 ## D-005 [P2] メニュー権限データに未実装ルートが存在（404）
@@ -87,6 +94,10 @@
 - 自動ID: E2E-008〜017, 029〜038, 049〜058, 072〜081, 098〜107 ほか
 - 事象: `m_menu` / `t_role_menu` に存在するが、対応するページコントローラが無く
   直接URLが404になる。サイドバーには表示されていない（ユーザー影響は小さい）。
+- 修正: V101 で `search` / `tasks` / `skill-tag` / `saved-views` /
+  `batch-operations` の m_menu 行と t_role_menu 付与を撤去。
+  API は t_permission_group_action（V66_1 / V74）で継続利用可能。
+- 状態: **FIXED**（ページUIは spec どおり次フェーズで再登録）
 - 期待: 実装予定ルートはメニューデータから外す、またはページを実装する。
 
 ## D-006 [P2] 要員ロールの権限データに参照不可ルートが存在（403）
@@ -95,6 +106,8 @@
 - 自動ID: E2E-083〜090, 149〜156
 - 事象: `t_role_menu` で要員に付与されているが、SecurityConfig が拒否して403。
   サイドバーには表示されないためUI上の事故はないが、権限データが不整合。
+- 修正: V101 で全ロール（要員含む）の付与を削除。
+- 状態: **FIXED**
 - 期待: 要員には付与しない。
 
 ## D-007 [P2] マネージャーの案件一覧でリソース404
@@ -113,6 +126,8 @@
   `t_role_menu` に残っており、`GlobalControllerAdvice` の許可集合と
   SecurityConfig / ページコントローラ実装が一致していない。
 - UI上の表示はされていないが、今後メニュー表示条件を変えると404/403事故の温床になる。
+- 修正: V101 で未実装5ルートを m_menu / t_role_menu から削除。
+- 状態: **FIXED**
 
 ---
 
@@ -139,6 +154,25 @@
   第2ラウンドでも再現し、原因ファイル・行まで特定済み。
 - D-005 / D-006（未実装ルートの404 / 要員403）は第2ラウンドでも再現。
 - 契約一覧・ガントは別機能であり、一覧側は正常、ガント側のみ障害（D-003修正）。
+
+## 修正ラウンド（第3ラウンド）の実績
+
+- 実施日時: 2026-08-09
+- 変更:
+  - `proposal-kanban.js` : カード描画関数呼び出しを修正（D-002）
+  - `frappe-gantt.min.js` : 日本語月名ロケールを追加（D-003）
+  - `engineer-account-link.js` : イベント登録順を修正（D-004）
+  - `V101__remove_unimplemented_menu_routes.sql` : 未実装5ルートの
+    m_menu / t_role_menu を撤去（D-005 / D-006 / D-008）
+  - `TodoPageController` : `/tasks` を `/todo` へリダイレクト（互換入口）
+- 検証（空DBからマイグレーション適用後の `ses_manager_ui_test_300`）:
+  - 第2ラウンド深掘りE2E再実行: **0問題 / 54チェック全てOK**
+  - 要員詳細 id=1 のアカウント連携カードが `#397` を表示
+  - 営業ロールで `/api/search` `/api/tasks/page` `/api/skill-tags`
+    `/api/saved-views` が200（メニュー撤去後もAPIは action permission で利用可）
+  - 未実装ルートが `m_menu` / `t_role_menu` に存在しないことをSQLで確認
+  - 全54 JSファイル `node --check` 成功
+  - 34/34 同時ログイン成功
 
 ## UI設計メモ（障害ではない改善候補）
 
