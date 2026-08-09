@@ -8,12 +8,19 @@ import com.ses.dto.attendance.AttendanceDayDto;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.dto.attendance.AttendanceMonthDto;
 import com.ses.dto.attendance.AttendanceOverviewDto;
-import com.ses.entity.AttendanceMonth;
 import com.ses.entity.EmployeeAttendance;
+import com.ses.entity.AttendanceMonth;
 import com.ses.entity.Engineer;
 import com.ses.mapper.AttendanceMonthMapper;
 import com.ses.mapper.EmployeeAttendanceMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.WorkCalendarDayMapper;
+import com.ses.service.approval.ApprovalEngineService;
+import com.ses.service.approval.ApprovalRequestCommand;
+import com.ses.service.attendance.AttendanceCalculation;
+import com.ses.service.attendance.AttendanceCalculator;
+import com.ses.service.attendance.AttendanceScopeResolver;
+import com.ses.service.attendance.AttendanceScopeSnapshot;
 import com.ses.service.AttendanceService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.security.OrganizationScopeService;
@@ -54,6 +61,10 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final EngineerMapper engineerMapper;
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final OrganizationScopeService organizationScopeService;
+    private final AttendanceCalculator attendanceCalculator;
+    private final AttendanceScopeResolver attendanceScopeResolver;
+    private final ApprovalEngineService approvalEngineService;
+    private final WorkCalendarDayMapper workCalendarDayMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -69,12 +80,18 @@ public class AttendanceServiceImpl implements AttendanceService {
         YearMonth target = parseMonth(month);
         requireManagementRole();
         String role = SecurityUtils.currentRole();
-        if ("管理者".equals(role) || "HR".equals(role)) {
+        if ("管理者".equals(role)) {
             return buildOverview(target, null);
         }
-        // managerの空集合は「制限なし」ではなく、可視対象0件の意味。
-        Set<Long> allowed = organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
-        return buildOverview(target, new ArrayList<>(allowed));
+        if ("HR".equals(role)) {
+            Set<Long> allowed = attendanceScopeResolver.allowedHrEngineerIds(
+                    SecurityUtils.currentUserId(), target.atEndOfMonth());
+            return buildOverview(target, new ArrayList<>(allowed));
+        }
+        // organization scope無効時の空集合は「制限なし」。有効時の空集合だけが可視0件。
+        Set<Long> allowed = organizationScopeService.hasFullAccess()
+                ? null : organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
+        return buildOverview(target, allowed == null ? null : new ArrayList<>(allowed));
     }
 
     @Override
@@ -85,9 +102,12 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
         Long engineerId = currentEngineerId();
         YearMonth target = YearMonth.from(request.getWorkDate());
-        AttendanceMonth month = lockOrCreateMonth(engineerId, target);
+        Long userId = SecurityUtils.currentUserId();
+        AttendanceScopeSnapshot scope = attendanceScopeResolver.requireSnapshot(
+                engineerId, userId, request.getWorkDate());
+        AttendanceMonth month = lockOrCreateMonth(engineerId, target, scope);
         assertEditable(month);
-        EmployeeAttendance values = toAttendance(request, engineerId);
+        EmployeeAttendance values = toAttendance(request, engineerId, scope);
         EmployeeAttendance existing = employeeAttendanceMapper.selectOne(
                 new LambdaQueryWrapper<EmployeeAttendance>()
                         .eq(EmployeeAttendance::getEngineerId, engineerId)
@@ -179,7 +199,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional
-    public void reopen(Long engineerId, String month) {
+    public void reopen(Long engineerId, String month, String reason) {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.attendance.roleDenied");
         }
@@ -187,9 +207,17 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (!CLOSED.equals(current.getStatus())) {
             throw BusinessException.of(400, "error.attendance.invalidTransition", current.getStatus(), APPROVED);
         }
-        casUpdate(current, APPROVED, update -> update
-                .set(AttendanceMonth::getClosedAt, null)
-                .set(AttendanceMonth::getClosedBy, null));
+        if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
+            throw BusinessException.of(400, "error.attendance.reopenReasonRequired");
+        }
+        approvalEngineService.request(new ApprovalRequestCommand(
+                com.ses.service.attendance.AttendanceReopenApprovalAdapter.REQUEST_TYPE,
+                "ATTENDANCE_MONTH", current.getId(), (long) value(current.getVersion()),
+                SecurityUtils.currentUserId(), current.getOrganizationId(), null,
+                Map.of("reason", reason.trim(), "engineerId", current.getEngineerId(),
+                        "workMonth", current.getWorkMonth().toString()),
+                Map.of("beforeStatus", CLOSED, "afterStatus", APPROVED, "reason", reason.trim()),
+                "attendance-reopen:" + current.getId() + ":" + value(current.getVersion())));
     }
 
     private AttendanceOverviewDto buildOverview(YearMonth target, List<Long> engineerIds) {
@@ -206,7 +234,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             if (ids.isEmpty()) {
                 return overview(target, List.of());
             }
-            monthQuery.in(AttendanceMonth::getEngineerId, ids);
+            monthQuery.in(AttendanceMonth::getEngineerId, ids)
+                    .isNotNull(AttendanceMonth::getLegalEntityId)
+                    .isNotNull(AttendanceMonth::getOrganizationId);
         }
         List<AttendanceMonth> months = attendanceMonthMapper.selectList(monthQuery);
         if (months.isEmpty()) {
@@ -273,26 +303,26 @@ public class AttendanceServiceImpl implements AttendanceService {
         return dto;
     }
 
-    private EmployeeAttendance toAttendance(AttendanceDayRequest request, Long engineerId) {
-        int worked = workedMinutes(request.getClockIn(), request.getClockOut(), request.getBreakMinutes());
-        String workType = request.getWorkType();
-        if (workType == null || !Set.of("通常", "所定休日", "法定休日").contains(workType)) {
-            throw BusinessException.of(400, "error.attendance.unknownWorkType");
-        }
-        int regular = "通常".equals(workType) ? worked : 0;
-        int overtime = "所定休日".equals(workType) ? worked : 0;
-        int holiday = "法定休日".equals(workType) ? worked : 0;
+    private EmployeeAttendance toAttendance(AttendanceDayRequest request, Long engineerId,
+                                             AttendanceScopeSnapshot scope) {
+        int priorWeekMinutes = priorWeekMinutes(engineerId, request.getWorkDate());
+        AttendanceCalculation calculation = attendanceCalculator.calculate(
+                request.getWorkDate(), engineerId, scope.legalEntityId(), scope.organizationId(),
+                request.getClockIn(), request.getClockOut(), request.getBreakMinutes(), priorWeekMinutes);
         return EmployeeAttendance.builder()
                 .engineerId(engineerId)
+                .legalEntityId(scope.legalEntityId())
+                .organizationId(scope.organizationId())
+                .workCalendarId(calculation.workCalendarId())
                 .workDate(request.getWorkDate())
                 .clockIn(request.getClockIn())
                 .clockOut(request.getClockOut())
                 .breakMinutes(request.getBreakMinutes() == null ? 0 : request.getBreakMinutes())
-                .regularMinutes(regular)
-                .overtimeMinutes(overtime)
-                .holidayMinutes(holiday)
-                .lateNightMinutes(0)
-                .workType(workType)
+                .regularMinutes(calculation.regularMinutes())
+                .overtimeMinutes(calculation.overtimeMinutes())
+                .holidayMinutes(calculation.holidayMinutes())
+                .lateNightMinutes(calculation.lateNightMinutes())
+                .workType(calculation.workType())
                 .workplaceType(request.getWorkplaceType())
                 .source("manual")
                 .status(INPUT)
@@ -311,9 +341,11 @@ public class AttendanceServiceImpl implements AttendanceService {
         int overtime = days.stream().mapToInt(d -> value(d.getOvertimeMinutes())).sum();
         int holiday = days.stream().mapToInt(d -> value(d.getHolidayMinutes())).sum();
         int lateNight = days.stream().mapToInt(d -> value(d.getLateNightMinutes())).sum();
+        int scheduled = days.stream().mapToInt(this::scheduledMinutes).sum();
         int worked = regular + overtime + holiday;
         int version = value(month.getVersion());
         int updated = attendanceMonthMapper.update(null, new LambdaUpdateWrapper<AttendanceMonth>()
+                .set(AttendanceMonth::getScheduledMinutes, scheduled)
                 .set(AttendanceMonth::getWorkedMinutes, worked)
                 .set(AttendanceMonth::getRegularMinutes, regular)
                 .set(AttendanceMonth::getOvertimeMinutes, overtime)
@@ -329,9 +361,13 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
     }
 
-    private AttendanceMonth lockOrCreateMonth(Long engineerId, YearMonth target) {
+    private AttendanceMonth lockOrCreateMonth(Long engineerId, YearMonth target,
+                                              AttendanceScopeSnapshot scope) {
         AttendanceMonth existing = findMonthForUpdate(engineerId, target);
         if (existing != null) {
+            if (existing.getLegalEntityId() == null || existing.getOrganizationId() == null) {
+                throw BusinessException.of(404, "error.attendance.scopeUnknown");
+            }
             return existing;
         }
         Engineer engineer = engineerMapper.selectById(engineerId);
@@ -340,7 +376,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
         AttendanceMonth created = AttendanceMonth.builder()
                 .engineerId(engineerId)
-                .organizationId(engineer.getOrganizationId())
+                .legalEntityId(scope.legalEntityId())
+                .organizationId(scope.organizationId())
                 .workMonth(target.atDay(1))
                 .scheduledMinutes(0)
                 .workedMinutes(0)
@@ -423,11 +460,19 @@ public class AttendanceServiceImpl implements AttendanceService {
         if (engineerId == null) {
             throw BusinessException.of(400, "error.attendance.engineerRequired");
         }
-        if ("管理者".equals(SecurityUtils.currentRole()) || "HR".equals(SecurityUtils.currentRole())) {
+        if ("管理者".equals(SecurityUtils.currentRole())) {
+            return engineerId;
+        }
+        if ("HR".equals(SecurityUtils.currentRole())) {
+            if (!attendanceScopeResolver.allowedHrEngineerIds(SecurityUtils.currentUserId(),
+                    target.atEndOfMonth()).contains(engineerId)) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
             return engineerId;
         }
         // managerのasOf判定は、対象月末の組織所属へ固定する。
-        if (!organizationScopeService.allowedEngineerIds(target.atEndOfMonth()).contains(engineerId)) {
+        if (!organizationScopeService.hasFullAccess()
+                && !organizationScopeService.allowedEngineerIds(target.atEndOfMonth()).contains(engineerId)) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
         return engineerId;
@@ -501,6 +546,30 @@ public class AttendanceServiceImpl implements AttendanceService {
             throw BusinessException.of(400, "error.attendance.invalidTime");
         }
         return (int) minutes - breaks;
+    }
+
+    private int priorWeekMinutes(Long engineerId, LocalDate workDate) {
+        LocalDate weekStart = workDate.minusDays(workDate.getDayOfWeek().getValue() - 1L);
+        LocalDate previousDay = workDate.minusDays(1);
+        if (previousDay.isBefore(weekStart)) return 0;
+        return employeeAttendanceMapper.selectList(new LambdaQueryWrapper<EmployeeAttendance>()
+                        .eq(EmployeeAttendance::getEngineerId, engineerId)
+                        .ge(EmployeeAttendance::getWorkDate, weekStart)
+                        .le(EmployeeAttendance::getWorkDate, previousDay))
+                .stream()
+                .mapToInt(day -> value(day.getRegularMinutes()) + value(day.getOvertimeMinutes()))
+                .sum();
+    }
+
+    private int scheduledMinutes(EmployeeAttendance day) {
+        if (day.getWorkCalendarId() == null || day.getWorkDate() == null) return 0;
+        com.ses.entity.WorkCalendarDay calendarDay = workCalendarDayMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.WorkCalendarDay>()
+                        .eq(com.ses.entity.WorkCalendarDay::getCalendarId, day.getWorkCalendarId())
+                        .eq(com.ses.entity.WorkCalendarDay::getCalendarDate, day.getWorkDate())
+                        .last("LIMIT 1"));
+        return calendarDay == null || calendarDay.getScheduledMinutes() == null
+                ? 0 : calendarDay.getScheduledMinutes();
     }
 
     private int sum(Integer... values) {

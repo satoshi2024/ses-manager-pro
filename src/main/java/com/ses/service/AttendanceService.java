@@ -22,5 +22,5 @@ public interface AttendanceService {
 
     void close(Long engineerId, String month);
 
-    void reopen(Long engineerId, String month);
+    void reopen(Long engineerId, String month, String reason);
 }

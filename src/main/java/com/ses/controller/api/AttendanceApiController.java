@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.dto.attendance.AttendanceOverviewDto;
+import com.ses.dto.attendance.AttendanceReopenRequest;
 import com.ses.service.AttendanceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -67,8 +68,10 @@ public class AttendanceApiController {
     }
 
     @PostMapping("/api/work-records/attendance/{engineerId}/reopen")
-    public ApiResult<Void> reopen(@PathVariable Long engineerId, @RequestParam String month) {
-        attendanceService.reopen(engineerId, month);
+    public ApiResult<Void> reopen(@PathVariable Long engineerId,
+                                  @RequestBody AttendanceReopenRequest request) {
+        attendanceService.reopen(engineerId, request == null ? null : request.getMonth(),
+                request == null ? null : request.getReason());
         return ApiResult.success(null);
     }
 }
