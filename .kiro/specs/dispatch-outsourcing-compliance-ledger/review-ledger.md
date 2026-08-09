@@ -101,6 +101,26 @@ R10 Round 7はHead `10fb5d3`（docs 3文書のみ）を再確認し、**R6-P2-01
 - 本deltaはdocs 1文書（field-mapping）+ledger追記のみ。V1/V84/code/test未変更、T061 checkbox未変更。S11 attendance dirty変更はstageしない。
 - 次のdelta: **T061 code fix**（V1/V84/H2/engineer-schema/entity/mapper/MySQL smoke再同期＋F1-MAP-01/SNAPSHOT-01/02/NULL-01/HISTORY-CORRECTION-01/MYSQL-FRESH/LEGACY/PARTIAL-SCHEMA/FAILED-HISTORY-REPAIR/POST-APPLY-ROLLBACK-01/PII-OWNERSHIP-01、skip 0、Demo A/B/A・worker独立・NULL clear・history訂正）。P1×5はcode fix証跡が揃うまでOPEN維持。
 
+## T061 F1 code fix delta（2026-08-09）
+
+R10 Round 7の「次はT061 code fix deltaを提出すること」に従い、R5契約（field-mapping §3.5/§4、design §5.5/§5.6、tasks.md T061）をV1/V84/H2/entity/mapper/MySQL smokeへ同一差分で再同期した。
+
+**変更file**:
+- `db/migration/V1__create_tables.sql`: dispatch sectionをR5 shapeへ置換（旧`limitation_date`/`worker_limitation_date`/`snapshot_json`等を除去し、typed列・2種制限日・current pointerを追加）。drop listへ新table 13件を追加。
+- `db/migration/V84__dispatch_outsourcing_compliance_ledger.sql`: 全面再同期。snapshot UNIQUE(contract_id,snapshot_version)・hash非一意索引、worker snapshot/state（FK/CAS）、operation table（operation_id一意）、10 history table（event correction protocol）、finding/delivery拡張、conditional ALTER/FK（partial path）、append-only拒否trigger 24件（DROP IF EXISTS＋CREATEの冪等パターン）。
+- entity 18件＋mapper 18件: ContractComplianceProfile/DocumentDelivery更新、ContractComplianceSnapshot/WorkerSnapshot/WorkerState/ComplianceSnapshotOperation/ComplianceWorkCalendar/ComplianceComplaintHistory/EmploymentStabilityHistory/TrainingHistory/CareerConsultingHistory/PlannedIntroductionTerms/PlannedIntroductionHistory/DirectHireDisputeHistory/NotificationDifferenceHistory/LedgerWorkSnapshot新規。
+- `sql/schema-dispatch-compliance-h2.sql`: R5 shapeへ再生成（drop list付き、H2 dialect、document/contact/sys_user/engineer FKとtriggerはmapper境界で担保）。
+- `sql/engineer-schema-h2.sql`: dispatch sectionをR5 shapeへ同期（S11 attendance変更は保持）。
+- test: DispatchComplianceSchemaH2Test再書、F1SnapshotWriteProtocolTest/F1NullAndHistoryCorrectionTest/F1MapManifestTest/F1PiiOwnershipScanTest新規、FlywayDispatchComplianceSchemaSmokeTest再書、FlywayV84LegacySchemaSmokeTest/FlywayV84PartialSchemaSmokeTest/FlywayV84FailedHistoryRepairSmokeTest/FlywayV84PostApplyRollbackSmokeTest新規。
+
+**実行test（L1〜L3定向・直接回帰、skip 0）**: `mvn -B -Dtest=<上記17クラス> test` → **127 tests / failures 0 / errors 0 / skipped 0 / BUILD SUCCESS**。内訳: F1-MAP-01 1、F1-SNAPSHOT-01/02 2、F1-NULL-01＋HISTORY-CORRECTION-01 2、PII-OWNERSHIP-01 1、MYSQL-FRESH 1、MYSQL-LEGACY 1、MYSQL-PARTIAL-SCHEMA 1、MYSQL-FAILED-HISTORY-REPAIR 1、MYSQL-POST-APPLY-ROLLBACK 1、SpecDispatchConsistencyTest 9、MigrationScriptIntegrityTest 27、ContractServiceImplTest 48、ComplianceApiControllerTest 1、MobileResponsiveLayoutTest 25、JsSyntaxCheckTest 1、MessageBundleConsistencyTest 4。`git diff --check` exit 0。
+
+**Demo証跡（SQL/H2・MySQL実測）**: profile snapshot A(v1,hA)→B(v2,hB)→A(v3,hA)を3 version保持、current pointerはv3、v1不変。同じoperation_idのretryはUNIQUE拒否で1行。2 workerのcurrent pointerは独立しCAS競合1勝、失敗txはsnapshot/pointerを全rollbackしorphan 0。current列の値→NULLが保存され旧値残存なし、snapshotは不変。history訂正はCORRECTED/CANCELLED新event（supersedes_event_id/correction_reason付き）で旧行不変、asOfは最新有効event。snapshot/history tableはDB triggerで直接UPDATE/DELETE拒否（MySQL実測）。
+
+**Rollback**: 本deltaはV84 rewriteを含むが、V84は未release（production/staging未適用、R10確認済み）のため、commit revertのみでDB rollback不要。S11 attendance dirty変更（V91等）はstageしていない。
+
+**境界**: SecurityConfig/UI/controller/service/i18n/sidebarは未変更。T062以降のtaskへは進めていない。production release/apply authorizationなし。T061 checkboxはR10 VERIFIED_CLOSEDまで未完了のまま。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。

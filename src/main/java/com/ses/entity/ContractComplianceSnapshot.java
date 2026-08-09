@@ -1,30 +1,48 @@
 package com.ses.entity;
 
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
-import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.ses.common.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
- * 契約ごとの派遣・準委任コンプライアンス項目（mutable current row）。
- * 帳票再生成用の不変値は t_contract_compliance_snapshot へversion付きで保存する。
- * 明示NULL（値→NULL）はclear可能なnullable列のみ、full DTO＋FieldStrategy.ALWAYSで行う。
+ * 契約compliance profileのappend-only snapshot。
+ * UNIQUE(contract_id, snapshot_version)のみが一意制約。snapshot_hashは内容hashの非一意索引であり、
+ * retryの冪等性キーにしない（operation tableが担当）。A(v1,hA)→B(v2,hB)→A(v3,hA)を3 version保持する。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("t_contract_compliance_profile")
-public class ContractComplianceProfile extends BaseEntity {
+@TableName("t_contract_compliance_snapshot")
+public class ContractComplianceSnapshot extends BaseEntity {
 
     private String tenantId;
     private Long contractId;
-    private String contractTypeDetail;
-    private Long workplaceId;
+    private Integer snapshotVersion;
+    private String snapshotHash;
+    private String operationId;
+    private LocalDateTime snapshotAt;
+
+    /** CONTRACT_PARTY_PERIOD_SNAPSHOT */
+    private String contractNo;
+    private LocalDate contractDate;
+    private String partyName;
+    private String partyAddress;
+    private String partyRepresentative;
+    private LocalDate dispatchFrom;
+    private LocalDate dispatchTo;
+
+    /** WORKPLACE_ORG_SNAPSHOT */
+    private String workplaceName;
+    private String workplaceAddress;
+    private String workplaceDepartment;
+    private String workplacePhone;
+    private String organizationUnit;
+    private String organizationHeadTitle;
 
     /** WORK_DESCRIPTION_TYPED */
     private String workDescription;
@@ -34,34 +52,25 @@ public class ContractComplianceProfile extends BaseEntity {
     /** RESPONSIBILITY_TYPED */
     private String responsibilityLevel;
     private String responsibilityDetail;
-
-    /** 指揮命令者（RESPONSIBILITY_TYPED） */
-    private Long commandPersonContactId;
     private String commandPersonDepartment;
     private String commandPersonTitle;
     private String commandPersonName;
     private String commandPersonPhone;
-
-    /** 派遣先責任者（RESPONSIBILITY_TYPED） */
-    private Long clientResponsibleContactId;
     private String clientResponsibleDepartment;
     private String clientResponsibleTitle;
     private String clientResponsibleName;
     private String clientResponsiblePhone;
-
-    /** 派遣元責任者（RESPONSIBILITY_TYPED） */
-    private Long dispatchResponsibleUserId;
     private String dispatchResponsibleDepartment;
     private String dispatchResponsibleTitle;
     private String dispatchResponsibleName;
     private String dispatchResponsiblePhone;
 
-    /** WORK_TIME_TYPED（分整数。0=00:00） */
+    /** WORK_TIME_TYPED */
     private Integer workStartMinute;
     private Integer workEndMinute;
     private Integer workSpanNextDayFlag;
 
-    /** WORK_CALENDAR_HISTORY（current部分。除外日は t_compliance_work_calendar） */
+    /** WORK_CALENDAR_HISTORY */
     private String workDayCode;
     private String holidayCalendarCode;
 
@@ -73,7 +82,7 @@ public class ContractComplianceProfile extends BaseEntity {
     private LocalDate overtimePeriodFrom;
     private LocalDate overtimePeriodTo;
 
-    /** LIMITATION_DUAL_TYPED（NULL=未算定。「抵触日なし」ではない） */
+    /** LIMITATION_DUAL_TYPED（NULL=未算定） */
     private LocalDate workplaceLimitationDate;
     private LocalDate organizationLimitationDate;
 
@@ -92,7 +101,7 @@ public class ContractComplianceProfile extends BaseEntity {
     private Integer agreementTargetFlag;
     private String treatmentScheme;
 
-    /** COMPLAINT_HISTORY（current窓口。実際の申出は t_compliance_complaint_history） */
+    /** COMPLAINT_HISTORY（current窓口snapshot） */
     private String sourceComplaintContactDepartment;
     private String sourceComplaintContactTitle;
     private String sourceComplaintContactName;
@@ -102,7 +111,7 @@ public class ContractComplianceProfile extends BaseEntity {
     private String clientComplaintContactName;
     private String clientComplaintContactPhone;
 
-    /** EMPLOYMENT_STABILITY_HISTORY（current希望） */
+    /** EMPLOYMENT_STABILITY_HISTORY */
     private String employmentStabilityPreference;
 
     /** LIMITATION_EXEMPTION_TYPED */
@@ -112,12 +121,12 @@ public class ContractComplianceProfile extends BaseEntity {
     private LocalDate limitationExemptionFrom;
     private LocalDate limitationExemptionTo;
 
-    /** DISPATCH_FEE_TYPED（売上/粗利列とは分離） */
+    /** DISPATCH_FEE_TYPED */
     private BigDecimal dispatchFeeAmount;
     private String dispatchFeeBasis;
     private String dispatchFeeCurrency;
 
-    /** INSURANCE_TYPED（SRC-E⑱単一理由＋3保険別status/reason/expected_date） */
+    /** INSURANCE_TYPED */
     private String socialInsuranceProcedureIncompleteReason;
     private String healthInsuranceStatus;
     private String healthInsuranceMissingReason;
@@ -134,18 +143,9 @@ public class ContractComplianceProfile extends BaseEntity {
     private Integer subcontractAllowed;
     private String acceptanceMethod;
 
-    private LocalDate dispatchPeriodStart;
-    private LocalDate dispatchPeriodEnd;
-
     /** RETENTION_METADATA */
     private LocalDate retentionDueDate;
     private Integer legalHoldFlag;
-
-    /** current snapshot pointer（FK/CAS） */
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
-    private Long currentSnapshotId;
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
-    private Integer currentSnapshotVersion;
 
     @Version
     private Integer version;
