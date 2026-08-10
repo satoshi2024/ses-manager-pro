@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071/T072 **PASS・完結**、T073独立Review **PASS**（R6-P2-01 FIXED_BY_IMPLEMENTER・独立再Review待ち、R6-NOTE-01/02対応済み）、T074未着手） |
+| state | `REVIEW`（T071/T072/T073 **PASS・完結**（R6-P2-01 VERIFIED_CLOSED、R6-NOTE-01 CLOSED）、T074（M）着手可） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T073 R6 fix delta `62e3d31`＝current merged HEAD（main=origin/main、push済み） |
+| head | T073 R6 fix delta転記 `ef4ce72`＝current merged HEAD（main=origin/main、push済み） |
 | merge | T073までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 Round 6 T073独立Review`（`5c34db26`/`11398d9`）。T073 R6 fix delta（`62e3d31`）は独立再Review待ち |
-| verdict | **T073 PASS**（P0=0/P1=0/P2=3/NOTE=5）。R6-P2-01（SQL境界）は`62e3d31`で修正済み（FIXED_BY_IMPLEMENTER）。R6-NOTE-01（閾値境界）はdesign.md追記済み、R6-NOTE-02（scheduler通知宛先）は運用方針としてledger記録 |
-| issue count | `P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R6-P2-01 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ NOTE=5（R3-06, R4-03, R4-04, R6-NOTE-01, R6-NOTE-02）` |
-| next action | **T074（M. 回帰/法務受入）着手可**（R11 Round 6）。R6-P2-01の独立VERIFIED_CLOSED後が安全。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| latest review | `R11 R6-P2-01 fix delta再Review`（`62e3d31`/`ef4ce72`）。**R6-P2-01 VERIFIED_CLOSED、R6-NOTE-01 CLOSED、T073完結** |
+| verdict | **T073完結**（P0=0/P1=0/P2=2/NOTE=4）。R6-P2-01（SQL境界）VERIFIED_CLOSED、R6-NOTE-01（閾値境界）CLOSED |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=4（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番, R6-NOTE-02 scheduler通知宛先）` |
+| next action | **T074（M. 回帰/法務受入・L4全量）着手可**。L4（mvn test・fresh/legacy MySQL・browser Demo・法務fixture）を実施し、attendance起因FAILゼロを確認。cross-lane NOTE×3は統合担当解消後CI相当L4×1回。S11完了後にS12（staffing）解放。R2-P2-01/02は本taskで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -836,6 +836,16 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - overall verdict: **PASS（T073）**。P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R6-P2-01）/ NOTE=5（cross-lane 3＋R6 2）
 - next task/Wave: **T074（M 回帰/法務受入）開始可**。R6-P2-01（SQL境界）はT074/MのL4前にfix推奨（P2のため開始を止めない）。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、T074のL4全量（mvn test、fresh/legacy MySQL、desktop/390px browser、法務fixture golden file）を実行。次spec/次WaveはS11完了後
 - central ledger転記用短文: `R11 Round 6 T073独立Review: 新規13/0/0/0＋回帰232件（唯一FAILはcross-lane NOTE-R4-03）skip 0。R4.2非連動（理由保存前後でbilling_amount/actual_hours不変をSQL実測）、閾値境界480=超過/479=以内、scope（HR法人・manager組織・confirm 404）、通知冪等（dedupe key・確認済み除外）、CSRFを実assert。新規P2: R6-P2-01——list()がSQL取得後にJava filterでscope適用（platform-invariants §2.2違反、機能的漏れなし）。NOTE×2（閾値境界の設計未記載、scheduler通知の宛先運用）。P0=0/P1=0/P2=3/NOTE=5。T074（M）開始可。`
+
+### R6-P2-01 fix delta再Review — 2026-08-10 — R11担当
+
+- review target: delta=`62e3d319`（SQL境界scope適用＋閾値境界の設計記録）＋`ef4ce724`（転記）
+- independent evidence: 独立実行（31 class）**234 tests / 1 failure（既知NOTE-R4-03のみ）/ 0 errors / 0 skipped**、BUILD SUCCESS。`AttendanceDiscrepancyServiceTest` **10/0/0/0**（+2: HR・managerのSQL境界除外）
+- result: `R6-P2-01=VERIFIED_CLOSED` — list()が`query.in(AttendanceMonth::getEngineerId, scopedEngineerIds)`（空集合は`List.of(-1L)` sentinel）でSQL境界適用（platform-invariants §2.2準拠）。test: HRのlistは他法人month行がSELECT自体から除外（1件のみ）、managerは他組織要員がSQL境界で除外を実assert。`R6-NOTE-01=CLOSED（設計記録済み）` — design.mdに「480ちょうど=超過（確認・通知対象）」＋fixture 479/480/481を追記。`R6-NOTE-02=記録継続`（運用方針として台帳に明記、§2.4整合）
+- cross-cutting: scope/security **PASS**（list/confirm/pendingWarningsすべて主体別境界が一致、SQL境界含む）、閾値/非連動 **PASS**（境界の向きが設計に固定、billing不変は既検証）、回帰全green、skip 0
+- overall verdict: **PASS（T073完結）**。P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=4（cross-lane 3＋R6-NOTE-02）
+- next task/Wave: **T074（M 回帰/法務受入）開始可**。T074でL4全量（mvn test、fresh/legacy MySQL、desktop/390px browser Demo、法務fixture golden file）を実施し、cross-lane 3件（R3-06/R4-03/R4-04）は統合担当解消後にCI相当L4×1回。S11完了後、次spec（S12 staffing）解放。ATT-GATE-01〜06は本番release gateとして継続管理
+- central ledger転記用短文: `R11 R6-P2-01 fix delta再Review: 62e3d319を独立検証——list()がquery.in＋空集合-1 sentinelでSQL境界適用、HR/managerのscope外month行がSELECTから除外されることを実assert。design.mdへ閾値境界（480ちょうど=超過、479/480/481 fixture）を記録。234件中FAILはcross-lane NOTE-R4-03のみ、skip 0。R6-P2-01 VERIFIED_CLOSED、R6-NOTE-01 CLOSED、新規指摘なし。P0=0/P1=0/P2=2/NOTE=4。T074（M）開始可、S11完了後にS12解放。`
 
 ### Round 6 R6-P2-01 fix delta — 2026-08-10 — 主担当
 
