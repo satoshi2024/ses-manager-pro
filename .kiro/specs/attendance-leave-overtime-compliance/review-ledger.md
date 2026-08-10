@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071までの実装範囲はPASS・収束。T072実装済み・独立Review待ち。T073〜T074未着手） |
+| state | `REVIEW`（T071までPASS・収束、T072独立Review **PASS**（R5-P2-01/02 FIXED_BY_IMPLEMENTER・独立再Review待ち）、T073〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T072実装 `840539da`＝current merged HEAD（main=origin/main、push済み）。T071のReview対話は収束完了 |
+| head | T072 R5 fix delta `c750fcb3`＝current merged HEAD（main=origin/main、push済み） |
 | merge | T072までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 Round 4 fix delta再Review確認`（T071まで）。T072（`840539da`）は実装済み・独立Review待ち |
-| verdict | T071 fix deltaは**PASS維持**（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、NOTE-R4-01記録済み、leave 24/0/0/0、attendance/approval/overtime/integrity全green、skip 0、`git diff --check` PASS）。T072は実装・定向回帰済み（独立Review待ち） |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **T072独立Review→T073（B2. 客先工数差異/通知）着手**。cross-lane NOTE×3（R3-06、R4-03、R4-04）は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| latest review | `R11 Round 5 T072独立Review`（`840539da`/`82b8612c`）。T072 R5 fix delta（`c750fcb3`）は独立再Review待ち |
+| verdict | T072は**PASS**（P0=0/P1=0/P2=4/NOTE=3）。R5-P2-01（timezone dead-config）・R5-P2-02（照合実体）は`c750fcb3`で修正済み（FIXED_BY_IMPLEMENTER）。R2-P2-01/02はT074/M |
+| issue count | `P0=0 / P1=0 / P2=4（R2-P2-01, R2-P2-02, R5-P2-01 FIXED_BY_IMPLEMENTER, R5-P2-02 FIXED_BY_IMPLEMENTER）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
+| next action | **T073（B2. 客先工数差異/通知）着手可**（R5-P2-02はT073差異表示と線引き済み）。R5-P2-01/02の独立VERIFIED_CLOSEDまでT073開始を保留し、独立再Review待ち。cross-lane NOTE×3は統合担当OPEN |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -28,6 +28,8 @@
 | attendance-leave-overtime-compliance-NOTE-R3-06 | NOTE | dispatch統合調整（attendance欠陥ではない） | `FlywayMigrationSmokeTest.java:37-40`（ses user container）、dispatch新V84（`b9b91f9`、trigger/function作成） | dispatch V84 R5 merge後のtreeで`FlywayMigrationSmokeTest` fresh V1→latestが**Error 1419**（binary logging有効かつses userにSUPERなしでtrigger作成失敗）。dispatch自身の`FlywayDispatchComplianceSchemaSmokeTest`はroot userのためPASS | 共有fresh経路が全repoで壊れ、CI相当L4・`mvn test`（Docker有）が失敗する | dispatchレーンが`FlywayMigrationSmokeTest`のcontainerへ`log_bin_trust_function_creators`相当の設定を追加するか、V84のtrigger/functionを回避 | fresh MySQL全経路、`FlywayMigrationSmokeTest`、V84 R5 merge後のCI相当L4 | OPEN（dispatchレーンへ引き継ぎ） | `b9b91f9`（導入元） | dispatch側の修正commit時 |
 | attendance-leave-overtime-compliance-NOTE-R4-03 | NOTE | scale-300統合調整（attendance起因ではない。repo L4/CIを破壊中） | `project.detail.desc`キー | scale-300（`0e29c555`）の`detail.html`が参照する`project.detail.desc`キーが4バンドル欠落 | `MessageBundleConsistencyTest`がFAILし、repo L4/CIがRED | `messages*.properties`へ`project.detail.desc`を追加（scale-300/統合担当） | `MessageBundleConsistencyTest`、CI相当L4 | OPEN（統合担当へ引き継ぎ） | `0e29c555`（導入元） | 統合担当の修正commit時 |
 | attendance-leave-overtime-compliance-NOTE-R4-04 | NOTE | scale-300採番調整（attendance起因ではない。repo L4/CIを破壊中） | `SpecDispatchConsistencyTest`、予約表 | scale-300が`V101__remove_unimplemented_menu_routes.sql`を実在化し、S13=V100/S14=V101予約と衝突（attendanceのf26da9f0繰上げ後に他laneが採番） | `SpecDispatchConsistencyTest`がFAIL（`reserved <= latest`拒否）し、repo L4/CIがRED | 予約表を再繰上げ（S13/S14以降を最新実在V101以上へ）し、S11〜S17の全派工資料・`SpecDispatchConsistencyTest`を同期 | `SpecDispatchConsistencyTest`、CI相当L4 | OPEN（統合担当へ引き継ぎ） | scale-300採番commit | 統合担当の修正commit時 |
+| attendance-leave-overtime-compliance-R5-P2-01 | P2 | tasks.md B1「timezoneはtenant設定（design §3）」 | `AttendanceSyncServiceImpl.java:61,73`（`CONFIG_TIMEZONE`）、`ZoneId` import未使用 | `attendance.sync.timezone`は設定登録のみで**読み取りコードが存在しない**（dead constant）。cursorの`updated_at`は文字列辞書順比較でtimezone semanticsなし | 外部providerがtimezone付きISOを返すとcursor前進・比較がずれる可能性。現行はmock既定・freeeはG4 provisionalのため即時影響なし | timezone設定をcursor正規化（zone付きparse）へ実装するか、javadoc/完了記録の虚偽主張を削除しG4 gateへ明示延期 | timezone正規化のboundary（zoneなし/zone付き/不正値）、cursor再実行 | **FIXED_BY_IMPLEMENTER**（`c750fcb3`: `tenantZone()`+`normalizeUpdatedAt()`でzoneなしをtenant timezone解釈・zone付きはInstant正規化して比較・保存。mapper直読みで同一tx整合） | `c750fcb3` | 独立再Review（R11） |
+| attendance-leave-overtime-compliance-R5-P2-02 | P2 | tasks.md B1「外部データはread-onlyの照合に使われる」 | `AttendanceSyncServiceImpl.java:169-176`（pull） | pullはfetch→pulledCount加算→締め済み/承認済み上書き拒否のみで、**非締め月レコードは取得後破棄**（比較・差異の保存/表示なし） | 「照合」の実体が無く外部データを活かせない（安全側の拒否は実装済み） | 照合対象の保存または差異DTO化（T073の範囲と明確に線引きして実装） | 照合の一致/差異/該当なし集計、差異サンプル上限、read-only不変、T073差異表示との線引き | **FIXED_BY_IMPLEMENTER**（`c750fcb3`: 外部レコードと本システム日次（manual/system）を比較し`matchedCount`/`diffCount`/`unmatchedCount`＋差異サンプル（最大20件）を`AttendanceSyncResultDto`へ追加。DB登録はしない。status API・管理画面UIで表示。T073（客先工数差異）とは別物として線引き） | `c750fcb3` | 独立再Review（R11） |
 
 ## 3. Closed/Deferred Issue
 
@@ -730,3 +732,25 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - rollback: 本番未適用。`840539da`をrevertすれば本deltaを戻せる。DDL変更なし・migration不変（V83/V91/V98 checksum維持）
 - next Review handoff: R11担当は401 refresh 1回/429 backoff/timeout/4xx、重複送信で外部1件、部分失敗、締め済み月への外部更新拒否+finding、秘密の非ログ出力、営業/要員403・マネージャーrun 403・CSRFを独立再実行する。T073（B2）は独立Review後に着手可
 - ledger/central synchronization: `tasks.md` B1を`[x]`化、中央台帳S11行をT072完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
+
+### Round 5 T072独立Review — 2026-08-10 — R11担当
+
+- review target: delta=`840539da`（実装）→`82b8612c`（完了記録）。転記commit `42b80b30`（R4判定）は前回verdictどおり
+- independent evidence: 独立実行（29 class）**214 tests / 1 failure（既知NOTE-R4-03のみ）/ 0 errors / 0 skipped**。T072新規5 class = **28/0/0/0**（SyncService 8、SyncApi 7、FreeeProvider 3、MockProvider 3、FreeeIntegrationApi 7）。attendance/leave/approval/overtime/integrity全green
+- result: **PASS（T072）**。P0=0/P1=0/P2=4/NOTE=3。検証PASSの要点: G6境界（承認/締め済みのみpush・read-only pull・締め済み/承認済み月への外部更新拒否→`EXT_OVERWRITE_REJECTED` finding（UNIQUE冪等）＋HR/管理者dedupe通知）、冪等push（payload SHA-256→Idempotency-Key、同一payload再送で外部1件、部分失敗は月別エラー分離）、共通基盤（401 refresh 1回・429 exponential backoff+jitter・timeout/5xx→503・4xx retryなし→400・Idempotency-Key/X-Correlation-ID・秘密非ログ（log capture test））、scope（管理者=全件/HR=法人SQL境界/マネージャー=組織scope、run=管理者/HR・status/CSV=マネージャー閲覧可、営業/要員403、CSRF）、CSV fallback（UTF-8 BOM・RFC4180・承認/締め済みのみ・scope適用）、config（provider enum・timezone・cursor・last-result、SYSTEM_MANAGED、同一tx mapper直読）
+- new issues: `R5-P2-01`（P2: `attendance.sync.timezone`がdead constant。javadoc/完了記録の虚偽主張）、`R5-P2-02`（P2: pullがfetch後破棄で照合実体なし。T073の範囲と線引きして実装することが望ましい）
+- cross-lane: NOTE-R4-03（`project.detail.desc`）は本Reviewで再現確認済み（scale-300起因・統合担当）。NOTE-R4-04（V101予約衝突）解消されず。NOTE-R3-06（dispatch V84 fresh経路）確認待ち
+- overall verdict: **PASS（T072）**。P0=0 / P1=0 / P2=4（R2-P2-01, R2-P2-02, R5-P2-01, R5-P2-02）/ NOTE=3
+- next task/Wave: **T073（B2 客先工数差異/通知）開始可**（R5-P2-02はT073の差異表示設計と線引きして実装することが望ましい）。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、CI相当L4×1回。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 Round 5 T072独立Review: 新規5 class 28/0/0/0＋attendance回帰214件（唯一のFAILはcross-lane NOTE-R4-03）skip 0。G6境界（承認/締め済みのみpush・read-only pull・締め済み外部更新拒否→EXT_OVERWRITE_REJECTED finding＋dedupe通知）、冪等push（同一payload外部1件）、401 refresh 1回/429 backoff/timeout 503/4xx retryなし/秘密非ログ、scope（管理者/HR法人/manager組織）・CSRF・CSV BOMを実assert。新規P2×2: R5-P2-01（attendance.sync.timezoneが未使用のdead code、javadoc/完了記録の虚偽主張）、R5-P2-02（pullがfetch後破棄で照合実体なし）。P0=0/P1=0/P2=4/NOTE=3。T073開始可、cross-lane 3件は統合担当。`
+
+### Round 5 T072 R5-P2-01/02 fix delta — 2026-08-10 — 主担当
+
+- base/head: `82b8612c` → fix `c750fcb3`（rebase後、HEAD=origin/main、push済み）
+- fixes:
+  - **R5-P2-01**: `tenantZone()`（`attendance.sync.timezone`をmapper直読みで解決、既定Asia/Tokyo、不正値はwarn＋fallback）＋`normalizeUpdatedAt()`（zone付きISOはOffsetDateTime→Instant正規化、zoneなしはtenant timezoneで解釈→Instant、不正値は原文維持）を実装し、cursorの比較・保存を正規化値へ統一。`CONFIG_TIMEZONE`のdead constant解消。javadoc/完了記録の主張が実装と一致
+  - **R5-P2-02**: pullで外部レコードと本システム日次（source=manual/system）を照合し、`matchedCount`/`diffCount`/`unmatchedCount`と差異サンプル（最大20件、`sourceExternalId`/`engineerId`/`workDate`/外部値/内部値）を`AttendanceSyncResultDto`へ追加。DB登録はしない（read-only）。syncAllも照合結果を引き継ぎ。status API・管理画面UI（一致/差異/該当なし＋差異一覧）で表示。T073（客先工数差異）とは別物（freee照合 vs 客先工数差異）として線引きをledgerへ明記
+- direct regression: 新規5 class＋照合/timezone追加分 **31/0/0/0 skip 0**（SyncService 10、SyncApi 7、FreeeProvider 3、MockProvider 3、FreeeIntegrationApi 7、JS 1）＋指定回帰 **136/0/0/0 skip 0**（attendance 19 class＋leave系＋migration integrity 27）、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（cross-lane・統合担当）
+- issue state: `R5-P2-01=FIXED_BY_IMPLEMENTER / independent re-review requested`、`R5-P2-02=FIXED_BY_IMPLEMENTER / independent re-review requested`。T073開始可（R11判定）を維持
+- rollback: 本番未適用。`c750fcb3`をrevertすれば本deltaを戻せる。DDL変更なし
+- next Review handoff: R11担当はtimezone正規化（zoneなし/zone付き/不正値）と照合の一致/差異/該当なし集計・差異サンプル上限・read-only不変を独立再実行し、R5-P2-01/02をVERIFIED_CLOSEDにする。T073（B2）は独立再Review後に着手可
