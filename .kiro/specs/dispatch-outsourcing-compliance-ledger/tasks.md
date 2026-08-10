@@ -43,7 +43,7 @@
   - **Demo**: profile snapshot Aを確定し、Bへ改定後に同一内容を新operationで再改定する。A(v1)・B(v2)・A(v3)を再取得し、
     2 workerのcurrent pointerが独立していること、currentだけの値→NULLとhistory訂正（旧行不変・新event）が安全側へ戻ることを確認する。
 
-- [ ] F2. ComplianceRule分割/拡張（T062実装提出済み・R10 Round 10でFAIL→P1×2 fixを再提出済み・再Review待ち）
+- [x] F2. ComplianceRule分割/拡張（R10 Round 11でT062 F2 PASS・R10-P1-01/02 VERIFIED_CLOSED）
   - **Objective**: 既存の4つのcompliance ruleが挙動を変えずに動き続けたうえで、
     抵触日・責任者欠落・明示書未交付・保険未確認・期間外稼動・指示経路の各findingが検出される。
     rule再実行でfindingが重複せず、ack済みfindingがOPENへ戻らない。
