@@ -129,6 +129,12 @@ V91は`t_employee_attendance_break`専用であり、S12〜S17はV92〜V97へ繰
 - **sourceの優先順位**: 本システム(manual/system) > freee/import。
   外部が締め済み・承認済みを上書きしようとしたら**拒否してfindingへ**（R1.3）。
   黙って上書きも、黙って無視もしない。
+- **pullのcursor運用（R5-P2-03で確定）**: cursorは**legal entity別**に保持する
+  （`attendance.sync.freee.cursor.le.<legalEntityId>`、管理者は全法人を対象）。
+  HR/マネージャーのpullは自scopeの法人だけを処理し、**他法人のcursorを進めない**。
+  これにより、法人A担当HRが先にpullしても法人B配下の外部レコードがcursorに
+  飲み込まれず、法人Bの後続pullで締め済み拒否・照合が漏れなく実行される。
+  cursor前進は「処理したレコード（scope内）のmax updated_at」に限定する。
 - **客先工数との非連動**（R4.2）: 差異表示はread-only DTO。
   `WorkRecordServiceImpl`の金額計算・請求ロジックへ一切接続しない。
   差異を確認・理由保存しても請求金額は変わらないことをtestで固定する。

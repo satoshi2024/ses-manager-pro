@@ -70,6 +70,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
     static final String CONFIG_PROVIDER = "attendance.sync.provider";
     static final String CONFIG_TIMEZONE = "attendance.sync.timezone";
     static final String CONFIG_CURSOR = "attendance.sync.freee.cursor";
+    static final String CONFIG_CURSOR_LE_PREFIX = "attendance.sync.freee.cursor.le.";
     static final String CONFIG_LAST_RESULT = "attendance.sync.last-result";
 
     private final List<AttendanceProvider> providers;
@@ -81,6 +82,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
     private final SysUserMapper sysUserMapper;
     private final AttendanceScopeResolver attendanceScopeResolver;
     private final OrganizationScopeService organizationScopeService;
+    private final com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
     private final SystemConfigService systemConfigService;
     private final com.ses.mapper.SystemConfigMapper systemConfigMapper;
     private final NotificationService notificationService;
@@ -119,22 +121,30 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         AttendanceProvider provider = resolveProvider();
         AttendanceSyncResultDto result = newResult(provider.source(), "pull", target);
         // R5-P1-01: caller scopeを解決する（管理者=全件(null)、HR=担当法人の要員、マネージャー=組織scope）。
-        // pullは外部レコード単位の処理であり、reject/reconcileの母集団をpush/CSVと同じscope境界へ揃える。
+        // R5-P2-03: cursorはlegal entity別（attendance.sync.freee.cursor.le.<id>）に保持し、
+        // fetchは対象法人のcursorの最小値で行い、cursor前進は処理したレコードの法人ごとに行う。
+        // これにより、法人A担当HRが先にpullしても法人Bのcursorは進まず、法人Bの後続pullで
+        // 締め済み拒否・照合が漏れなく実行される（黙って無視しない）。
         Set<Long> scopedEngineerIds = pullScopeEngineerIds(target);
-        String cursor = readCursor(provider.source());
+        Set<Long> scopeLegalEntityIds = pullScopeLegalEntityIds(target);
         try {
-            List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(cursor);
+            // 対象法人のcursorを読み、最小値をfetch起点にする（管理者=全法人、HR=担当法人、マネージャー=組織scope要員の法人）
+            Map<Long, String> cursorByLegalEntity = new HashMap<>();
+            String fetchCursor = null;
+            for (Long legalEntityId : scopeLegalEntityIds) {
+                String c = readCursor(legalEntityId);
+                cursorByLegalEntity.put(legalEntityId, c);
+                if (c != null && (fetchCursor == null || c.compareTo(fetchCursor) < 0)) {
+                    fetchCursor = c;
+                }
+            }
+            List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(fetchCursor);
             result.setPulledCount(records.size());
             // R5-P2-01: cursorはtenant timezone（attendance.sync.timezone）で正規化して比較・保存する
             ZoneId zone = tenantZone();
-            String maxUpdatedAt = cursor;
             Map<Long, Map<LocalDate, EmployeeAttendance>> internalByEngineer = new HashMap<>();
+            Map<Long, String> nextCursorByLegalEntity = new HashMap<>(cursorByLegalEntity);
             for (ExternalAttendanceRecord record : records) {
-                String normalizedUpdated = normalizeUpdatedAt(record.getUpdatedAt(), zone);
-                if (normalizedUpdated != null
-                        && (maxUpdatedAt == null || normalizedUpdated.compareTo(maxUpdatedAt) > 0)) {
-                    maxUpdatedAt = normalizedUpdated;
-                }
                 if (record.getWorkDate() == null || !YearMonth.from(record.getWorkDate()).equals(target)) {
                     continue;
                 }
@@ -147,26 +157,114 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                         || (scopedEngineerIds != null && !scopedEngineerIds.contains(record.getEngineerId()))) {
                     continue;
                 }
+                // R5-P2-03: レコードの所属法人を解決し、caller scope外の法人ならskip（cursorも進めない）
+                Long legalEntityId = legalEntityIdOf(record, target);
+                if (legalEntityId == null || !scopeLegalEntityIds.contains(legalEntityId)) {
+                    continue;
+                }
+                String normalizedUpdated = normalizeUpdatedAt(record.getUpdatedAt(), zone);
+                // その法人のcursor以前のレコードは既に処理済み（前回分）
+                String legalEntityCursor = nextCursorByLegalEntity.get(legalEntityId);
+                if (normalizedUpdated != null && legalEntityCursor != null
+                        && normalizedUpdated.compareTo(legalEntityCursor) <= 0) {
+                    continue;
+                }
                 try {
                     if (isClosedOrApproved(record)) {
                         rejectExternalUpdate(record, target);
                         result.setRejectedCount(value(result.getRejectedCount()) + 1);
-                        continue;
+                    } else {
+                        // R5-P2-02: 外部レコードを本システムの日次と照合（read-only。DB登録はしない）
+                        reconcile(record, target, internalByEngineer, result);
                     }
-                    // R5-P2-02: 外部レコードを本システムの日次と照合（read-only。DB登録はしない）
-                    reconcile(record, target, internalByEngineer, result);
+                    // R5-P2-03: 処理したレコードの法人だけcursorを前進させる
+                    if (normalizedUpdated != null
+                            && (nextCursorByLegalEntity.get(legalEntityId) == null
+                            || normalizedUpdated.compareTo(nextCursorByLegalEntity.get(legalEntityId)) > 0)) {
+                        nextCursorByLegalEntity.put(legalEntityId, normalizedUpdated);
+                    }
                 } catch (Exception e) {
                     result.getErrors().add("externalId=" + record.getSourceExternalId() + ": " + safeMessage(e));
                 }
             }
-            result.setCursor(maxUpdatedAt != null ? maxUpdatedAt : cursor);
-            saveCursor(provider.source(), result.getCursor());
+            // 法人別cursorを保存（R5-P2-03: 進んだ法人だけ書き込み、他法人は不変）
+            for (Map.Entry<Long, String> entry : nextCursorByLegalEntity.entrySet()) {
+                String before = cursorByLegalEntity.get(entry.getKey());
+                String after = entry.getValue();
+                if (!java.util.Objects.equals(before, after)) {
+                    saveCursor(entry.getKey(), after);
+                }
+            }
+            result.setCursor(nextCursorByLegalEntity.values().stream()
+                    .filter(java.util.Objects::nonNull)
+                    .max(String::compareTo).orElse(null));
         } catch (Exception e) {
             result.getErrors().add("pull: " + safeMessage(e));
             result.setSuccess(false);
         }
         finish(result);
         return result;
+    }
+
+    /**
+     * R5-P2-03: pullのcaller scope法人集合（design §5.3）。
+     * 管理者=全法人、HR=担当法人、マネージャー=組織scope要員の属する法人。
+     */
+    private Set<Long> pullScopeLegalEntityIds(YearMonth target) {
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return attendanceScopeResolver.allLegalEntityIds();
+        }
+        if ("HR".equals(role)) {
+            Set<Long> ids = attendanceScopeResolver.allowedHrLegalEntityIds(
+                    SecurityUtils.currentUserId(), target.atEndOfMonth());
+            return ids == null ? Set.of() : ids;
+        }
+        if ("マネージャー".equals(role)) {
+            Set<Long> engineerIds = organizationScopeService.hasFullAccess()
+                    ? null : organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
+            if (engineerIds == null) {
+                return attendanceScopeResolver.allLegalEntityIds();
+            }
+            if (engineerIds.isEmpty()) {
+                return Set.of();
+            }
+            List<AttendanceMonth> months = attendanceMonthMapper.selectList(
+                    new LambdaQueryWrapper<AttendanceMonth>()
+                            .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
+                            .in(AttendanceMonth::getEngineerId, engineerIds)
+                            .isNotNull(AttendanceMonth::getLegalEntityId));
+            Set<Long> legalEntityIds = new HashSet<>();
+            for (AttendanceMonth m : months) {
+                legalEntityIds.add(m.getLegalEntityId());
+            }
+            return legalEntityIds;
+        }
+        throw BusinessException.of(403, "error.attendance.roleDenied");
+    }
+
+    /** レコードの所属法人を解決する（対象月のmonth行→要員の現在所属組織→不明）。 */
+    private Long legalEntityIdOf(ExternalAttendanceRecord record, YearMonth target) {
+        AttendanceMonth month = attendanceMonthMapper.selectOne(new LambdaQueryWrapper<AttendanceMonth>()
+                .eq(AttendanceMonth::getEngineerId, record.getEngineerId())
+                .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
+                .last("LIMIT 1"));
+        if (month != null && month.getLegalEntityId() != null) {
+            return month.getLegalEntityId();
+        }
+        Engineer engineer = engineerMapper.selectById(record.getEngineerId());
+        if (engineer != null && engineer.getOrganizationId() != null) {
+            Long legalEntityId = organizationLegalEntityId(engineer.getOrganizationId());
+            if (legalEntityId != null) {
+                return legalEntityId;
+            }
+        }
+        return null;
+    }
+
+    private Long organizationLegalEntityId(Long organizationId) {
+        com.ses.entity.OrganizationUnit org = organizationUnitMapper.selectById(organizationId);
+        return org == null ? null : org.getLegalEntityId();
     }
 
     /**
@@ -557,17 +655,32 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         throw BusinessException.of(400, "error.attendance.sync.providerUnknown");
     }
 
-    private String readCursor(String providerSource) {
+    private String readCursor(Long legalEntityId) {
         // SystemConfigServiceのキャッシュはafterCommit更新のため、同一tx内のreadはmapper直読みにする
-        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(CONFIG_CURSOR);
+        String key = cursorKey(legalEntityId);
+        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(key);
         return config == null ? null : config.getConfigValue();
     }
 
-    private void saveCursor(String providerSource, String cursor) {
+    private void saveCursor(Long legalEntityId, String cursor) {
         if (cursor == null) {
             return;
         }
-        systemConfigService.put(CONFIG_CURSOR, cursor, "外部勤怠同期のupdated_at cursor");
+        // 法人別cursorキーは動的（SCHEMAS未登録）のためSystemConfigService.putは使えない。
+        // cursorはmapper直読（readCursor）のため、キャッシュ整合は問題にならない。
+        String key = cursorKey(legalEntityId);
+        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(key);
+        if (config == null) {
+            systemConfigMapper.insert(new com.ses.entity.SystemConfig(key, cursor, "外部勤怠同期のupdated_at cursor（法人別）"));
+        } else {
+            config.setConfigValue(cursor);
+            systemConfigMapper.updateById(config);
+        }
+    }
+
+    /** R5-P2-03: cursor keyは法人別（管理者用は従来のグローバルkey）。 */
+    private String cursorKey(Long legalEntityId) {
+        return legalEntityId == null ? CONFIG_CURSOR : CONFIG_CURSOR_LE_PREFIX + legalEntityId;
     }
 
     private void saveLastResult(AttendanceSyncResultDto result) {

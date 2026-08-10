@@ -31,6 +31,13 @@ public class SystemConfigApiController {
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result");
 
+    /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
+    private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";
+
+    private boolean isSystemManagedKey(String key) {
+        return SYSTEM_MANAGED_KEYS.contains(key) || key.startsWith(SYSTEM_MANAGED_PREFIX);
+    }
+
     private final SystemConfigService systemConfigService;
 
     /** scope設定変更時のDashboardキャッシュ世代更新。テストスライスでは未配置でも動作させる。 */
@@ -41,7 +48,7 @@ public class SystemConfigApiController {
     @GetMapping
     public ApiResult<List<SystemConfig>> list() {
         List<SystemConfig> configs = systemConfigService.all();
-        configs.removeIf(c -> SYSTEM_MANAGED_KEYS.contains(c.getConfigKey()));
+        configs.removeIf(c -> isSystemManagedKey(c.getConfigKey()));
         
         for (SystemConfig c : configs) {
             if (MASKED_KEYS.contains(c.getConfigKey()) && StringUtils.hasText(c.getConfigValue())) {
@@ -62,7 +69,7 @@ public class SystemConfigApiController {
         String finalScopeValue = previousScopeValue;
         if (configs != null) {
             for (SystemConfig c : configs) {
-                if (SYSTEM_MANAGED_KEYS.contains(c.getConfigKey())) {
+                if (isSystemManagedKey(c.getConfigKey())) {
                     throw BusinessException.of(400, "error.config.systemKey");
                 }
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {

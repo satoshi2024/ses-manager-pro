@@ -228,6 +228,51 @@ class AttendanceSyncServiceTest {
         assertEquals(2, result.getRejectedCount(), "管理者は全法人の締め済み更新を拒否");
     }
 
+    @Test
+    void HRAが先にpullしても法人Bのcursorは進まず_後続の法人B処理が漏れない() {
+        // R5-P2-03: 法人A担当HR-Aが先にpullしても、法人Bのcursorは進まない。
+        // 法人BのHR-B（または管理者）が後続pullすると、法人B配下の締め済み拒否が実行される。
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (93101, 'hr-t072a', 'x', 'HR-A', 'HR', 1)");
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (93102, 'hr-t072b', 'x', 'HR-B', 'HR', 1)");
+        jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from, deleted_flag) "
+                + "VALUES (93101, ?, 1, '2026-01-01', 0)", organizationId);
+        long otherEngineerId = insertEngineerOtherLegalEntity();
+        long otherOrgId = otherOrgIdOf(otherEngineerId);
+        jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from, deleted_flag) "
+                + "VALUES (93102, ?, 1, '2026-01-01', 0)", otherOrgId);
+
+        // 法人A: 自社要員の締め済み月。法人B: 他社要員の締め済み月
+        insertMonth("締め済", "2026-08");
+        insertClosedMonthOtherLegalEntity(otherEngineerId, otherOrgId, "2026-08");
+
+        // 法人B配下の外部レコード（締め済み月への更新）
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-b-only-1")
+                .engineerId(otherEngineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T03:00:00Z")
+                .build());
+
+        // HR-Aが先にpull → 法人Bのレコードはscope外skip、法人Bのcursorは進まない
+        authenticate(93101L, "HR");
+        AttendanceSyncResultDto first = attendanceSyncService.syncPull("2026-08");
+        assertTrue(first.isSuccess());
+        assertEquals(0, first.getRejectedCount(), "HR-Aは法人Bの締め済み更新を拒否しない");
+        List<String> cursorB = jdbcTemplate.queryForList(
+                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor.le.72002'",
+                String.class);
+        assertTrue(cursorB.isEmpty(), "法人Bのcursorは進んでいない（行が存在しない）");
+
+        // HR-Bが後続pull → 法人B配下の締め済み拒否が実行される
+        authenticate(93102L, "HR");
+        AttendanceSyncResultDto second = attendanceSyncService.syncPull("2026-08");
+        assertTrue(second.isSuccess());
+        assertEquals(1, second.getRejectedCount(), "HR-Bは自法人の締め済み更新を拒否できる");
+        assertEquals(1, second.getPulledCount(), "法人Bのcursorが進んでいないので再取得できる");
+    }
+
     private long otherOrgIdOf(long otherEngineerId) {
         return jdbcTemplate.queryForObject(
                 "SELECT organization_id FROM t_engineer WHERE id = ?", Long.class, otherEngineerId);
@@ -386,7 +431,7 @@ class AttendanceSyncServiceTest {
 
         attendanceSyncService.syncPull("2026-08");
         String cursor = jdbcTemplate.queryForObject(
-                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor'",
+                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor.le.72001'",
                 String.class);
         assertEquals("2026-08-11T10:00:00Z", cursor, "zoneなしupdated_atはtenant timezone（UTC）で解釈される");
     }
@@ -404,7 +449,7 @@ class AttendanceSyncServiceTest {
 
         attendanceSyncService.syncPull("2026-08");
         String cursor = jdbcTemplate.queryForObject(
-                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor'",
+                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor.le.72001'",
                 String.class);
         assertNotNull(cursor);
         assertEquals("2026-08-10T01:00:00Z", cursor);

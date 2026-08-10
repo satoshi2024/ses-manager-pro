@@ -80,6 +80,12 @@ public class AttendanceScopeResolver {
         return legalEntityIds == null ? Set.of() : Set.copyOf(legalEntityIds);
     }
 
+    /** 全法人ID（管理者のpullが全法人のcursorを対象にするため、R5-P2-03）。 */
+    public Set<Long> allLegalEntityIds() {
+        List<Long> legalEntityIds = attendanceScopeMapper.selectAllLegalEntityIds();
+        return legalEntityIds == null ? Set.of() : Set.copyOf(legalEntityIds);
+    }
+
     private Long linkedUserId(Long engineerId, Long fallbackUserId) {
         EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(engineerId);
         return link != null && link.getSysUserId() != null ? link.getSysUserId() : fallbackUserId;

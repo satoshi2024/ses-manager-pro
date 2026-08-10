@@ -59,4 +59,14 @@ public interface AttendanceScopeMapper {
             """)
     List<Long> selectEngineerIdsByLegalEntityIds(@Param("legalEntityIds") List<Long> legalEntityIds,
                                                  @Param("asOf") LocalDate asOf);
+
+    /** 全法人IDの列挙（管理者のpullで全法人のcursorを対象にするため）。 */
+    @Select("""
+            SELECT DISTINCT legal_entity_id
+            FROM m_organization_unit
+            WHERE legal_entity_id IS NOT NULL
+              AND deleted_flag = 0
+            ORDER BY legal_entity_id
+            """)
+    List<Long> selectAllLegalEntityIds();
 }
