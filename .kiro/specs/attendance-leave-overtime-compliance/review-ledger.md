@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071/T072 **PASS・完結**（R5-P1-01/02/03 VERIFIED_CLOSED/FIXED）、T073〜T074未着手） |
+| state | `REVIEW`（T071/T072 **PASS・完結**、**T073実装済み・独立Review待ち**、T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T072完了 `9be5e5c`＝current merged HEAD（main=origin/main、push済み） |
-| merge | T072までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 R5-P2-03 fix delta再Review`（`3fce6d78`/`9be5e5c`）。**R5-P2-03 VERIFIED_CLOSED、T072完結** |
-| verdict | **T072完結**（P0=0/P1=0/P2=2/NOTE=3）。R5-P1-01/02/03すべてVERIFIED_CLOSED/FIXED。法人別cursor運用方針がdesign.mdに確定 |
+| head | T073実装 `5c34db26`＝current merged HEAD（main=origin/main、push済み） |
+| merge | T073までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
+| latest review | `R11 R5-P2-03 fix delta再Review`（T072完結）。T073（`5c34db26`）は実装済み・独立Review待ち |
+| verdict | T072完結（P0=0/P1=0/P2=2/NOTE=3）。T073は実装・定向回帰済み（独立Review待ち） |
 | issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **T073（B2. 客先工数差異/通知）着手可**。pull運用方針（法人別cursor）確定済み。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| next action | **T073独立Review→T074（M. 回帰/法務受入）着手**。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -169,7 +169,8 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 | R2-P1-02方式A fix delta | R1.1/R1.2/R3.1/R5、design §5.1.1（R3-P2-01の1択確定含む） | V91追補、V1統合、H2 2形状、entity/mapper、calculator区間intersection、service不一致400/区間不明fail-closed、UI、i18n 4言語、境界回帰、予約表V92〜V97同期 | current HEAD指定回帰**135/0/0/0 skip 0**＋migration整合36/0/0/0、`git diff --check` PASS | 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行、不一致400を実測 | 独立VERIFIED_CLOSED、実ブラウザ、paging、L4、MySQL fresh/legacy適用 | 本delta commit |
 | T071 休暇/approval統合 | R2.1/R2.2/R2.3、design §5.3/§5.4 | `t_leave_ledger`（V98）、`LeaveService`、`LeaveApprovalAdapter`（leave.request/cancel）、残数両モード、分計算（calendar所定分）、期間重複/締め済み月拒否、営業通知分岐、menu/権限seed、本人/管理画面、i18n 4言語 | 休暇系4 class **20/0/0/0 skip 0**、全指定回帰**191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、`git diff --check` PASS | 申請→承認→calendar反映（月次leave_minutes）、代理承認、外部正モードの不足許容、営業通知分岐を定向実測 | 独立Review、実ブラウザ、L4、dispatch V84修正後のfresh全経路 | 本delta commit |
 | T071 R4 fix delta（R4-P1-01/R4-P2-01/NOTE-R4-02） | R2.2（残数scope）、R5（権限外閲覧拒否）、design §5.3/§5.4 | grant/balanceの主体別scope（HR=法人・manager=組織・管理者全件・404 fail-closed）、`resubmit`（returned限定・engine委譲）、外部モード付与400拒否、UI/i18n 4言語 | 休暇系4 class **24/0/0/0 skip 0**（新規: HR他法人付与404・HR/manager残数scope・外部モード付与拒否・差戻し再提出）、全指定回帰**195/0/0/0 skip 0、BUILD SUCCESS**、`git diff --check` PASS | R4-P1-01/R4-P2-01を独立VERIFIED_CLOSED、NOTE-R4-02をFIXED（R11 Round 4 fix delta再Review、独立22 class全green、skip 0） | 実ブラウザ、L4、paging、cross-lane NOTE×3 | `85ca62ba` |
-| T072 B1 freee/provider sync | R1.3、R5、G6、G4、design §3/§5.4、platform-invariants §7 | `AttendanceProvider`＋`MockAttendanceProvider`＋`FreeeAttendanceProvider`（`FreeeIntegrationService.apiGet/apiPost`共通基盤: 401 refresh 1回/429 backoff/timeout 503/4xx retryなし/冪等キー・相関ID/秘密非ログ）、`AttendanceSyncService`（冪等push・cursor差分pull・締め済み/承認済み月拒否→`t_overtime_followup` warning_code='EXT_OVERWRITE_REJECTED' UPSERT＋HR/管理者通知・cursor/結果はm_system_config JSON・timezone tenant設定）、run/status/export-csv API、管理画面同期カード＋JS、i18n 4言語、SystemConfig SCHEMAS/SYSTEM_MANAGED_KEYS | 新規5 class **29/0/0/0 skip 0**（provider matrix 7・sync 8・API 7・provider 3・mock 3＋JS 1）、指定回帰 **165/0/0/0 skip 0**（attendance 19 class＋leave系＋migration integrity）、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN） | sandbox（mock provider）sync→再実行で外部1件（重複送信skip）、締め済み月への外部更新を流して拒否+finding（t_overtime_followup行）を`AttendanceSyncServiceTest`で実測。CSV出力（BOM付きUTF-8）も実測 | 独立Review、実ブラウザ、L4、ATT-GATE-01〜06 | `840539da` |
+| T072 B1 freee/provider sync | R1.3、R5、G6、G4、design §3/§5.4、platform-invariants §7 | `AttendanceProvider`＋`MockAttendanceProvider`＋`FreeeAttendanceProvider`（`FreeeIntegrationService.apiGet/apiPost`共通基盤: 401 refresh 1回/429 backoff/timeout 503/4xx retryなし/冪等キー・相関ID/秘密非ログ）、`AttendanceSyncService`（冪等push・法人別cursor差分pull・締め済み/承認済み月拒否→`t_overtime_followup` warning_code='EXT_OVERWRITE_REJECTED' UPSERT＋HR/管理者通知・read-only照合・timezone tenant設定）、run/status/export-csv API、管理画面同期カード＋JS、i18n 4言語、SystemConfig SCHEMAS/SYSTEM_MANAGED_KEYS | 新規5 class **29/0/0/0 skip 0**、指定回帰 **165/0/0/0 skip 0**、`git diff --check` PASS。R5-P1-01（scope）・R5-P2-01/02/03（timezone/照合/法人別cursor）で独立VERIFIED_CLOSED/FIXED | sandbox（mock provider）sync→再実行で外部1件（重複送信skip）、締め済み月への外部更新を流して拒否+finding（t_overtime_followup行）を実測。CSV出力（BOM付きUTF-8）も実測 | 独立Review、実ブラウザ、L4、ATT-GATE-01〜06 | `840539da` ほか |
+| T073 B2 客先工数差異/通知 | R4.1、R4.2、design §5.4 | `AttendanceDiscrepancyService`（read-only比較DTO: 雇用勤怠`worked_minutes` vs 契約工数`actual_hours×60`、閾値`attendance.discrepancy.threshold-minutes`既定480分、理由確認は`m_system_config` JSON、scope設計§5.3、`pendingWarnings` scheduler principal相当）、API list/confirm、管理画面差異カード＋JS、`NotificationGenerateService.attendanceDiscrepancyWarning()`（管理者/HRへdedupe key冪等通知）、i18n 4言語 | 新規2 class **13/0/0/0 skip 0**（Service 8・API 5）、指定回帰 **232/0/0/0 skip 0**、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（cross-lane・統合担当） | 8h差異（1200分）を確認して理由保存、保存前後のbilling_amount・actual_hoursがSQLで同一であることを`AttendanceDiscrepancyServiceTest`で実測（R4.2） | 独立Review、実ブラウザ、L4、ATT-GATE-01〜06 | `5c34db26` |
 
 ## 11. Round履歴
 
@@ -806,3 +807,19 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - overall verdict: **PASS（T072完結）**。P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（cross-lane）
 - next task/Wave: **T073（B2 客先工数差異/通知）開始可（維持）**。R5-P2-03の閉鎖でpull運用方針（法人別cursor）が確定済み。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、CI相当L4×1回。次spec/次WaveはS11完了（T074/M、L4）後
 - central ledger転記用短文: `R11 R5-P2-03 fix delta再Review: 3fce6d78を独立検証——法人別cursor（cursor.le.<id>、旧key fallback）＋scope法人集合＋レコード別LE解決＋処理法人のみcursor前進を読解し、HR-A先pull→法人B cursor不変→HR-B後続pullでB拒否実行を実assert。設計決定（design.md）も記録済み。219件中FAILはcross-lane NOTE-R4-03のみ、skip 0。R5-P2-03 VERIFIED_CLOSED、新規指摘なし。P0=0/P1=0/P2=2/NOTE=3。T073開始可。`
+
+### T073 completion — 2026-08-10 — 主担当実装記録
+
+- base/head: T072完了 `9be5e5c` → T073実装 `5c34db26`（rebase後、HEAD=origin/main、push済み）。**DDLなし**（予約外migration禁止。理由保存は`m_system_config` JSON）
+- implementation:
+  - `AttendanceDiscrepancyService`/`Impl`: read-only比較DTO（雇用勤怠`t_attendance_month.worked_minutes` vs 契約工数`t_work_record.actual_hours×60`をengineer別に月次比較、稼働中/終了契約のみ、`contract_minutes`合算）。閾値`attendance.discrepancy.threshold-minutes`（既定480分、不正値は480へfallback）。`overThreshold = |diff| >= threshold`（R4.1境界）。理由確認は`m_system_config` JSON（`attendance.discrepancy.confirmed`、closing.confirmed-months前例。SYSTEM_MANAGED）。scopeはdesign §5.3（管理者=全件/HR=法人（`allowedHrLegalEntityIds`×snapshot法人）/マネージャー=組織scope（hasFullAccess先判定）、営業・要員は既存SecurityConfigの403）。`pendingWarnings`はscheduler principal相当（全件・scope非依存）で閾値超過かつ未確認のみ
+  - API: `GET /api/work-records/attendance/discrepancy?month=`（一覧）、`POST .../discrepancy/confirm`（理由保存。空理由400・500文字超400）
+  - 通知: `NotificationGenerateService.attendanceDiscrepancyWarning()`（日次バッチ`generateAll()`へ追加。管理者/HRへdedupe key `ATT_DISCREPANCY:{engineerId}:{month}` で冪等）
+  - UI: management.htmlに差異カード（要員/勤怠/契約/差異/状態/理由/操作）＋JS（確認ボタン→理由prompt→POST）。i18n 4バンドル
+- 逸脱と根拠（ledger記録）: 理由保存の永続化先は`m_system_config` JSON（`attendance.discrepancy.confirmed`）。理由: (1) 新規テーブルは予約外migration禁止（NOTE-R4-04でV99以降衝突）、(2) work record系テーブル（t_work_record.remarks等）への書込みは「WorkRecordServiceImplの金額計算・請求ロジックへの接続」（R4.2）と見なされるため避ける、(3) closing.confirmed-monthsのJSON運用前例に従う
+- direct regression: 新規2 class **13/0/0/0 skip 0**（Service 8: 差異計算・閾値境界（480ちょうど超過/479範囲内）・理由保存で請求金額不変（billing_amount・actual_hoursをSQLで実測）・空理由400・営業403・HR担当法人/他法人404・pendingWarnings；API 5: 営業403/要員403/管理者一覧/マネージャー確認/CSRF）＋指定回帰 **232/0/0/0 skip 0**（attendance全系＋sync系＋leave系＋approval共通＋migration integrity＋provider matrix＋SystemConfigApi）、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（cross-lane・統合担当）
+- Demo: 8h差異（1200分）を確認して理由保存、保存前後の`billing_amount`・`actual_hours`がSQLで同一であることを`AttendanceDiscrepancyServiceTest`で実測（R4.2「請求金額を自動変更しない」）
+- issue state: 新規issueなし（T073起因のP0/P1/P2なし）。既存OPENはP2×2（390px実ブラウザ、paging）とNOTE×3（cross-lane、統合担当）
+- rollback: 本番未適用。`5c34db26`をrevertすれば本deltaを戻せる。DDL変更なし（m_system_configの動的キーのみ）
+- next Review handoff: R11担当はread-only不変（理由保存前後のbilling_amount/actual_hours同一）、閾値境界（480-1/480/480+1分）、scope（HR法人/マネージャー組織/営業403）、通知の冪等（dedupe key）、pendingWarnings（scheduler相当）を独立再実行する。T074（M）は独立Review後に着手可
+- ledger/central synchronization: `tasks.md` B2を`[x]`化、中央台帳S11行をT073完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
