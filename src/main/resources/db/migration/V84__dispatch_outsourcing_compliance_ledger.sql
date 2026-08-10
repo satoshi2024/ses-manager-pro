@@ -259,12 +259,12 @@ CREATE TABLE IF NOT EXISTS t_contract_compliance_worker_snapshot (
   id                            BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'worker snapshot ID',
   tenant_id                     VARCHAR(100) NOT NULL DEFAULT 'default' COMMENT 'テナント境界',
   contract_id                   BIGINT NOT NULL COMMENT '契約ID',
-  worker_id                     BIGINT NOT NULL COMMENT '派遣労動者（t_engineer ID）',
+  worker_id                     BIGINT NOT NULL COMMENT '派遣労働者（t_engineer ID）',
   snapshot_version              INT NOT NULL COMMENT 'worker単位のsnapshot version（1始まり）',
   snapshot_hash                 VARCHAR(64) NOT NULL COMMENT '内容hash（非一意）',
   operation_id                  VARCHAR(64) COMMENT '生成operation ID',
   snapshot_at                   DATETIME COMMENT 'snapshot確定日時',
-  worker_name                   VARCHAR(100) COMMENT '派遣労動者氏名（WORKER_PII_SNAPSHOT）',
+  worker_name                   VARCHAR(100) COMMENT '派遣労働者氏名（WORKER_PII_SNAPSHOT）',
   employer_name                 VARCHAR(200) COMMENT '派遣元名',
   employer_address              VARCHAR(500) COMMENT '派遣元住所',
   employer_title                VARCHAR(100) COMMENT '使用者職氏名',
@@ -303,7 +303,7 @@ CREATE TABLE IF NOT EXISTS t_contract_compliance_worker_state (
   id                          BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'worker current state ID',
   tenant_id                   VARCHAR(100) NOT NULL DEFAULT 'default' COMMENT 'テナント境界',
   contract_id                 BIGINT NOT NULL COMMENT '契約ID',
-  worker_id                   BIGINT NOT NULL COMMENT '派遣労動者（t_engineer ID）',
+  worker_id                   BIGINT NOT NULL COMMENT '派遣労働者（t_engineer ID）',
   current_snapshot_id         BIGINT COMMENT 'current worker snapshot pointer（FK）',
   current_snapshot_version    INT COMMENT 'current snapshot version（CAS対象）',
   version                     INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版（CAS）',
@@ -542,7 +542,7 @@ CREATE TABLE IF NOT EXISTS t_planned_introduction_terms (
   INDEX idx_planned_terms_contract (contract_id, effective_from),
   CONSTRAINT fk_planned_terms_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON UPDATE CASCADE ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='紹介予定派遣の予定労動条件（current-condition sub-field）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='紹介予定派遣の予定労働条件（current-condition sub-field）';
 
 CREATE TABLE IF NOT EXISTS t_planned_introduction_history (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,

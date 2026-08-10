@@ -39,20 +39,18 @@ public class MissingResponsibleRule extends AbstractComplianceRule {
     @Override
     protected List<ComplianceFinding> evaluateEnabled(Contract contract, ComplianceRuleContext context) {
         ContractComplianceProfile profile = context.profile();
-        if (profile == null) {
-            return List.of();
-        }
+        // profile未作成は「全field未入力」として検出する（design §5.1: 未入力＝MISSING_* finding対象）。
         List<ComplianceFinding> findings = new ArrayList<>();
-        if (profile.getCommandPersonContactId() == null
-                && !StringUtils.hasText(profile.getCommandPersonName())) {
+        if (profile == null || (profile.getCommandPersonContactId() == null
+                && !StringUtils.hasText(profile.getCommandPersonName()))) {
             findings.add(finding(context, CODE_COMMAND_PERSON, contract.getId(), "command-person", null));
         }
-        if (profile.getClientResponsibleContactId() == null
-                && !StringUtils.hasText(profile.getClientResponsibleName())) {
+        if (profile == null || (profile.getClientResponsibleContactId() == null
+                && !StringUtils.hasText(profile.getClientResponsibleName()))) {
             findings.add(finding(context, CODE_CLIENT_RESPONSIBLE, contract.getId(), "client-responsible", null));
         }
-        if (profile.getDispatchResponsibleUserId() == null
-                && !StringUtils.hasText(profile.getDispatchResponsibleName())) {
+        if (profile == null || (profile.getDispatchResponsibleUserId() == null
+                && !StringUtils.hasText(profile.getDispatchResponsibleName()))) {
             findings.add(finding(context, CODE_DISPATCH_RESPONSIBLE, contract.getId(), "dispatch-responsible", null));
         }
         return findings;

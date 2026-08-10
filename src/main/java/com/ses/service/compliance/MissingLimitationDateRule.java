@@ -42,20 +42,19 @@ public class MissingLimitationDateRule extends AbstractComplianceRule {
     @Override
     protected List<ComplianceFinding> evaluateEnabled(Contract contract, ComplianceRuleContext context) {
         ContractComplianceProfile profile = context.profile();
-        if (profile == null) {
-            return List.of();
-        }
+        Long workplaceId = profile != null ? profile.getWorkplaceId() : null;
         LimitationDateCalculator.LimitationDates computed = limitationDateCalculator.compute(
-                contract.getStartDate(), profile.getWorkplaceId(), context.organizationUnit(),
+                contract.getStartDate(), workplaceId, context.organizationUnit(),
                 context.contractChain());
         List<ComplianceFinding> findings = new ArrayList<>();
-        if (profile.getWorkplaceLimitationDate() == null) {
-            String fingerprint = "workplace:" + (profile.getWorkplaceId() != null
-                    ? profile.getWorkplaceId() : contract.getCustomerId());
+        // profile未作成は「全field未入力」として検出する（design §5.1: 未入力＝MISSING_* finding対象）。
+        if (profile == null || profile.getWorkplaceLimitationDate() == null) {
+            String fingerprint = "workplace:" + (workplaceId != null
+                    ? workplaceId : contract.getCustomerId());
             findings.add(finding(context, CODE_WORKPLACE, contract.getId(), fingerprint,
                     computed != null ? computed.workplaceDate() : null));
         }
-        if (profile.getOrganizationLimitationDate() == null) {
+        if (profile == null || profile.getOrganizationLimitationDate() == null) {
             String fingerprint = "org:" + (context.organizationUnit() != null
                     ? context.organizationUnit() : "unknown");
             findings.add(finding(context, CODE_ORGANIZATION, contract.getId(), fingerprint,

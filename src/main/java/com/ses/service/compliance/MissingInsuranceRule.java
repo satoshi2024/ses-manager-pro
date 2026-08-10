@@ -36,17 +36,15 @@ public class MissingInsuranceRule extends AbstractComplianceRule {
     @Override
     protected List<ComplianceFinding> evaluateEnabled(Contract contract, ComplianceRuleContext context) {
         ContractComplianceProfile profile = context.profile();
-        if (profile == null) {
-            return List.of();
-        }
+        // profile未作成は「全field未入力」として検出する（design §5.1: 未入力＝MISSING_* finding対象）。
         List<ComplianceFinding> findings = new ArrayList<>();
-        if (profile.getHealthInsuranceStatus() == null) {
+        if (profile == null || profile.getHealthInsuranceStatus() == null) {
             findings.add(finding(context, CODE, contract.getId(), "HEALTH", null, "健康保険"));
         }
-        if (profile.getPensionInsuranceStatus() == null) {
+        if (profile == null || profile.getPensionInsuranceStatus() == null) {
             findings.add(finding(context, CODE, contract.getId(), "PENSION", null, "厚生年金"));
         }
-        if (profile.getEmploymentInsuranceStatus() == null) {
+        if (profile == null || profile.getEmploymentInsuranceStatus() == null) {
             findings.add(finding(context, CODE, contract.getId(), "EMPLOYMENT", null, "雇用保険"));
         }
         return findings;

@@ -213,12 +213,23 @@ class ComplianceRuleEngineTest {
     }
 
     @Test
-    void profileが未作成ならprofile依存ruleはskipされ既存4ruleは動く() {
+    void profileが未作成なら全field未入力としてMISSING系ruleが全件検知し既存4ruleも動く() {
         lenient().when(profileMapper.selectOne(any())).thenReturn(null);
         Contract contract = contract("派遣", LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"));
         List<ComplianceFinding> findings = engine.evaluate(contract);
         assertThat(findings).extracting(ComplianceFinding::getCode)
-                .doesNotContain("MISSING_WORKPLACE_LIMITATION_DATE", "MISSING_COMMAND_PERSON",
+                .contains("MISSING_WORKPLACE_LIMITATION_DATE", "MISSING_ORGANIZATION_LIMITATION_DATE",
+                        "MISSING_COMMAND_PERSON", "MISSING_CLIENT_RESPONSIBLE", "MISSING_DISPATCH_RESPONSIBLE",
                         "MISSING_INSURANCE_CONFIRMATION", "MISSING_DOCUMENT_DELIVERY");
+        assertThat(findings).filteredOn(f -> "MISSING_INSURANCE_CONFIRMATION".equals(f.getCode())).hasSize(3);
+        assertThat(findings).filteredOn(f -> "MISSING_DOCUMENT_DELIVERY".equals(f.getCode())).hasSize(2);
+    }
+
+    @Test
+    void 準委任でprofile未作成なら指示経路MISSINGが出る() {
+        lenient().when(profileMapper.selectOne(any())).thenReturn(null);
+        Contract contract = contract("準委任", LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"));
+        assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
+                .contains("MISSING_INSTRUCTION_ROUTE");
     }
 }

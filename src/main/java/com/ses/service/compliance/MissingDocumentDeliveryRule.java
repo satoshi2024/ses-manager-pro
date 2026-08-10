@@ -40,9 +40,7 @@ public class MissingDocumentDeliveryRule extends AbstractComplianceRule {
 
     @Override
     protected List<ComplianceFinding> evaluateEnabled(Contract contract, ComplianceRuleContext context) {
-        if (context.profile() == null) {
-            return List.of();
-        }
+        // 交付記録の有無だけで判定するためprofileに依存しない（profile未作成でも検出する）。
         List<ComplianceFinding> findings = new ArrayList<>();
         for (String documentType : List.of(DOC_TYPE_EMPLOYMENT_CONDITIONS, DOC_TYPE_DISPATCH_NOTICE)) {
             boolean delivered = context.deliveries().stream()

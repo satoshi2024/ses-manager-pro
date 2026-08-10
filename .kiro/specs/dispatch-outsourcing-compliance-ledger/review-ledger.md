@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 5 packet: T060 PASS / R4-P1-01 VERIFIED_CLOSED / T061 F1 FAIL（R5 P1×5、docs fix plan提出済み）`。R10 Round 4はT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定し、R4-P1-01もVERIFIED_CLOSEDとした。Round 5はT061のDDL/entity/H2/MySQL/direct regressionをread-only独立確認し、mapping 1対1不足、snapshot履歴欠落、legacy/partial未検証、明示NULL更新漏れ、PII ownership未分離の5 P1をOPENとした。T061 checkboxは未完了へ戻し、field-mapping §4、design §5.5/§6.2、tasks test matrixを先に改訂する。production release/apply authorizationは付与しない。S11 attendanceの別track差分は混入させない。
+`R10 Round 10: T060 PASS / T061 F1 PASS / T062 F2 FAIL（R10-P1-01: PASS済みV84誤字4行・復元済み、R10-P1-02: null-profile fail-open・修正済み）→ fix delta再提出済み・再Review待ち`。T062のcore実装・既存4 rule golden 12/12はclean独立実行で確認済み。T063〜T065はF2 PASS後に再開、T066 Mは未着手。production release/apply authorizationなし。
+
+**R10 Round 5 packet: T060 PASS / R4-P1-01 VERIFIED_CLOSED / T061 F1 FAIL（R5 P1×5、docs fix plan提出済み）**。R10 Round 4はT060をPASS（R1-P1-01 VERIFIED_CLOSED、R1-P1-02 VERIFIED_CLOSED_BY_DECISION_CHANGE）と判定し、R4-P1-01もVERIFIED_CLOSEDとした。Round 5はT061のDDL/entity/H2/MySQL/direct regressionをread-only独立確認し、mapping 1対1不足、snapshot履歴欠落、legacy/partial未検証、明示NULL更新漏れ、PII ownership未分離の5 P1をOPENとした。T061 checkboxは未完了へ戻し、field-mapping §4、design §5.5/§6.2、tasks test matrixを先に改訂する。production release/apply authorizationは付与しない。S11 attendanceの別track差分は混入させない。
 
 **R10 Round 5 docs-only 再Review（Head `3891c0e`）**: NOT ACCEPTED / FAIL継続。P0=0、新規Issue=0。R5-P1-01（旧mapping/gate判断残存）、P1-02（content hashとidempotency混同・worker current未定義）、P1-04（mutable NULL clearとappend-only訂正の競合）がOPEN。R5-P1-03（fresh/legacy/partial/repair/forward-repair計画）とR5-P1-05（T061/T063/T064 ownership分離）の計画は受理。T060 PASS維持、T061 FAIL、T062〜T066停止。本deltaは上記3根本原因の文書再修正（rework 3追補）であり、V1/V84/code fixは開始しない。同じIssue IDで再提出する。
 
@@ -151,6 +153,25 @@ R10 Round 9のT061 F1 PASS（R5-P1-01..05・R8全件VERIFIED_CLOSED）を受け�
 **Demo証跡**: 欠落profileの派遣契約で抵触日2＋責任者3＋保険3＋明示書2＝10 findingがOPEN、rule再実行でopened=0（重複0）、2種抵触日を補完して再実行で該当2件がRESOLVED（欠落解消）、未補完分はOPEN維持。契約chain（連続更新通算・クーリングリセット・組織単位変更別chain・同日開始・未来開始先読み・並行契約通算）をLimitationDateCalculatorTestで実測。
 
 **境界**: DDL/migration変更なし（T061 shapeをそのまま利用）。SecurityConfig/UI/他機能未変更。T062 checkboxはR10確認まで未完了のまま。production release/apply authorizationなし。S11 dirty working treeはS11側で解消が必要（本deltaはisolated worktreeで分離済み）。
+
+## R10 Round 10 fix delta（2026-08-10）
+
+R10 Round 10はT062 F2（`de08f2e4`）を独立実行で検証し、**FAIL**判定・新規P1×2を提示した。本deltaはその2 blockerの最小修正である。
+
+| issue ID | violated | 根本原因と最小fix | 証跡 |
+|---|---|---|---|
+| R10-P1-01 | platform-invariants §4.1（適用済みmigration編集禁止）、F1-MYSQL-POST-APPLY-ROLLBACK-01、T061 PASS凍結、commit message虚偽 | `de08f2e4`でT061 PASS済みV84の4コメント行（`労働`→`労動`、L262/L267/L306/L545）が混入しchecksumが変動。**T061 PASS時点`34c68f7`のバイト列へ完全復元** | `git diff 34c68f78 -- V84`空（バイト一致）、`労動` count=0、`git diff --check` exit 0 |
+| R10-P1-02 | design §5.1（未入力＝`MISSING_*` finding対象）、R5、R3.1 | 5 rule全てが`profile == null → List.of()`でskipし、最もリスクの高い「一切未設定」状態が検知不能（fail-open）。**null profileを「全field未入力」として評価**し、fingerprint fallback（workplace=contract.customerId、org=unknown）は既存実装を維持。`MissingDocumentDeliveryRule`はprofile非依存のためnull check自体を除去 | ComplianceRuleEngineTest: null-profileでMISSING 7 code全件＋保険3・明示書2の件数、準委任null-profileで指示経路を正本化（旧skip正本化testは置換）。L2〜L3定向・直接回帰 **80/0/0/0 skip 0**（下記） |
+
+**変更file**: `src/main/resources/db/migration/V84__dispatch_outsourcing_compliance_ledger.sql`（34c68f7へ復元・4行）、`service/compliance/{MissingLimitationDateRule,MissingResponsibleRule,MissingInsuranceRule,MissingDocumentDeliveryRule,MissingInstructionRouteRule}.java`（null-profile fail-closed）、`ComplianceRuleEngineTest.java`（skip正本化testをfail-closed正本化へ置換＋準委任test追加）、`tasks.md`（F2 status追記）。
+
+**実行test（L2〜L3定向・直接回帰、skip 0）**: F2系（ComplianceRuleEngineTest 8・ComplianceFindingStoreTest 1・ComplianceRuleRunApiTest 1・LimitationDateCalculatorTest 8・LaborComplianceServiceImplTest 12 golden維持）30/0/0/0、F1系（DispatchComplianceSchemaH2Test・F1MapManifestTest・F1SnapshotWriteProtocolTest・F1NullAndHistoryCorrectionTest・F1NullClearMapperTest・F1PiiOwnershipScanTest）8/0/0/0、MigrationScriptIntegrityTest 27/0/0/0、ComplianceApiControllerTest 1、JsSyntaxCheckTest 1、SpecDispatchConsistencyTestはS10側8/8 PASS（残り1 failureはR10-P2-01のS12〜S14予約V99-V101 vs 実在V101で他track起因）、MessageBundleConsistencyTestは`project.detail.desc`（scale-300 `0e29c555`）のみ他track起因。`git diff --check` exit 0。
+
+**P2（他track・本deltaのfix対象外）**: R10-P2-01 — 現mainでSpecDispatchConsistencyTest（S12/S13/S14予約が実在V101以下）とMessageBundleConsistencyTest（`project.detail.desc`未定義）が他track起因で失敗。dispatchのV84予約・本deltaの変更とは無関係。予約表再同期（S12〜S17を実在latest+1へ）とscale-300側のkey追加は統合/他track担当。
+
+**Rollback**: V84はT061 PASS時のバイト列へ戻しただけ（未release）で、commit revertでDB rollback不要。ruleのnull-profile挙動はこのdeltaのcommit revertで旧挙動へ戻る。
+
+**境界**: DDL/migrationはV84復元のみ（新規schema変更なし）。SecurityConfig/UI/controller/i18n/sidebar/他機能未変更。T062 checkboxはR10再Review PASSまで未完了のまま。production release/apply authorizationなし。再開条件: R10がR10-P1-01/02のCLOSEを確認 → T062 checkbox `[x]` → T063/A1（→T064/B1 ‖ T065/B2並行）→ T066 M。
 
 ## M / 本番gateと再開条件
 

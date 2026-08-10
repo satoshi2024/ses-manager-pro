@@ -37,10 +37,8 @@ public class MissingInstructionRouteRule extends AbstractComplianceRule {
     @Override
     protected List<ComplianceFinding> evaluateEnabled(Contract contract, ComplianceRuleContext context) {
         ContractComplianceProfile profile = context.profile();
-        if (profile == null) {
-            return List.of();
-        }
-        if (!StringUtils.hasText(profile.getInstructionRoute())) {
+        // profile未作成は「全field未入力」として検出する（design §5.1: 未入力＝MISSING_* finding対象）。
+        if (profile == null || !StringUtils.hasText(profile.getInstructionRoute())) {
             return List.of(finding(context, CODE, contract.getId(), "instruction-route", null));
         }
         return List.of();
