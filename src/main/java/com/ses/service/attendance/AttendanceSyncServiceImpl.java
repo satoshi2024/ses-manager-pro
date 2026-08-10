@@ -118,6 +118,9 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         YearMonth target = parseMonth(month);
         AttendanceProvider provider = resolveProvider();
         AttendanceSyncResultDto result = newResult(provider.source(), "pull", target);
+        // R5-P1-01: caller scopeを解決する（管理者=全件(null)、HR=担当法人の要員、マネージャー=組織scope）。
+        // pullは外部レコード単位の処理であり、reject/reconcileの母集団をpush/CSVと同じscope境界へ揃える。
+        Set<Long> scopedEngineerIds = pullScopeEngineerIds(target);
         String cursor = readCursor(provider.source());
         try {
             List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(cursor);
@@ -133,6 +136,15 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                     maxUpdatedAt = normalizedUpdated;
                 }
                 if (record.getWorkDate() == null || !YearMonth.from(record.getWorkDate()).equals(target)) {
+                    continue;
+                }
+                if (record.getEngineerId() == null) {
+                    resolveEngineer(record);
+                }
+                // R5-P1-01: 要員に解決できない外部レコード、およびcaller scope外のレコードは
+                // 処理も照合も行わない（他法人要員のPII・finding書込を防ぐ）。
+                if (record.getEngineerId() == null
+                        || (scopedEngineerIds != null && !scopedEngineerIds.contains(record.getEngineerId()))) {
                     continue;
                 }
                 try {
@@ -155,6 +167,29 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         }
         finish(result);
         return result;
+    }
+
+    /**
+     * R5-P1-01: pullのcaller scope要員集合（design §5.3）。
+     * 管理者=null（全件）、HR=担当法人の要員（対象月末asOf）、マネージャー=組織scope
+     * （hasFullAccess先判定＋対象月末asOf）。営業・要員は403。
+     */
+    private Set<Long> pullScopeEngineerIds(YearMonth target) {
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return null;
+        }
+        if ("HR".equals(role)) {
+            return attendanceScopeResolver.allowedHrEngineerIds(
+                    SecurityUtils.currentUserId(), target.atEndOfMonth());
+        }
+        if ("マネージャー".equals(role)) {
+            if (organizationScopeService.hasFullAccess()) {
+                return null;
+            }
+            return organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
+        }
+        throw BusinessException.of(403, "error.attendance.roleDenied");
     }
 
     /**

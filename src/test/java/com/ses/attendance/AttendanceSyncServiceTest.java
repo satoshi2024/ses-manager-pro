@@ -114,6 +114,125 @@ class AttendanceSyncServiceTest {
         return monthRow;
     }
 
+    /** 法人B（72002）配下の要員を追加し、そのengineerIdを返す（R5-P1-01）。 */
+    private long insertEngineerOtherLegalEntity() {
+        String name = "T072B-" + System.nanoTime();
+        String code = "T072B-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
+                + "VALUES (1, 72002, ?, ?, '部門', '2026-01-01', '有効')", code, name);
+        long otherOrgId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+                name, otherOrgId);
+        return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
+    }
+
+    /** 指定engineerの締め済み月を法人Bで作る（R5-P1-01）。 */
+    private AttendanceMonth insertClosedMonthOtherLegalEntity(long otherEngineerId, long otherOrgId, String month) {
+        AttendanceMonth monthRow = new AttendanceMonth();
+        monthRow.setEngineerId(otherEngineerId);
+        monthRow.setLegalEntityId(72002L);
+        monthRow.setOrganizationId(otherOrgId);
+        monthRow.setWorkMonth(LocalDate.parse(month + "-01"));
+        monthRow.setScheduledMinutes(14400);
+        monthRow.setWorkedMinutes(9600);
+        monthRow.setRegularMinutes(8640);
+        monthRow.setOvertimeMinutes(960);
+        monthRow.setHolidayMinutes(0);
+        monthRow.setLateNightMinutes(120);
+        monthRow.setLeaveMinutes(0);
+        monthRow.setStatus("締め済");
+        monthRow.setVersion(0);
+        attendanceMonthMapper.insert(monthRow);
+        return monthRow;
+    }
+
+    @Test
+    void HRのpullは担当法人の要員だけを処理し_他法人要員はskipする() {
+        // R5-P1-01: HR-Aは法人A（72001）担当。法人B（72002）の要員の外部レコードは
+        // reject/reconcileとも処理せず、finding書込もPII返却もしない。
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (93101, 'hr-t072a', 'x', 'HR-A', 'HR', 1)");
+        // HR-Aを法人A（72001）へ紐付ける
+        jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from, deleted_flag) "
+                + "VALUES (93101, ?, 1, '2026-01-01', 0)", organizationId);
+        long otherEngineerId = insertEngineerOtherLegalEntity();
+        authenticate(93101L, "HR");
+
+        // 法人Aの自社要員: 締め済み月 → 拒否対象
+        insertMonth("締め済", "2026-08");
+        // 法人Bの他社要員: 締め済み月 → scope外なのでskip
+        insertClosedMonthOtherLegalEntity(otherEngineerId, otherOrgIdOf(otherEngineerId), "2026-08");
+
+        // 外部レコード: A要員1件（締め済み更新）＋B要員1件（締め済み更新）
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-hr-a-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T01:00:00Z")
+                .build());
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-hr-b-1")
+                .engineerId(otherEngineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T02:00:00Z")
+                .build());
+
+        AttendanceSyncResultDto result = attendanceSyncService.syncPull("2026-08");
+        assertTrue(result.isSuccess());
+        assertEquals(2, result.getPulledCount(), "取得件数はproviderの返却どおり");
+        assertEquals(1, result.getRejectedCount(), "A要員（担当法人）の締め済み更新だけ拒否");
+
+        // A要員（自社）のfindingは書かれる
+        OvertimeFollowup findingA = overtimeFollowupMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OvertimeFollowup>()
+                        .eq(OvertimeFollowup::getEngineerId, engineerId)
+                        .eq(OvertimeFollowup::getPeriodMonth, LocalDate.of(2026, 8, 1))
+                        .eq(OvertimeFollowup::getWarningCode, "EXT_OVERWRITE_REJECTED"));
+        assertNotNull(findingA, "担当法人のfindingは書かれる");
+        // B要員（他法人）のfindingは書かれない
+        OvertimeFollowup findingB = overtimeFollowupMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OvertimeFollowup>()
+                        .eq(OvertimeFollowup::getEngineerId, otherEngineerId)
+                        .eq(OvertimeFollowup::getPeriodMonth, LocalDate.of(2026, 8, 1))
+                        .eq(OvertimeFollowup::getWarningCode, "EXT_OVERWRITE_REJECTED"));
+        assertEquals(null, findingB, "他法人要員のfindingは書かれない（scope外skip）");
+        // 照合PII（差異サンプル）にも他法人要員は出ない
+        if (result.getDifferences() != null) {
+            assertFalse(result.getDifferences().stream()
+                            .anyMatch(d -> otherEngineerId == d.getEngineerId()),
+                    "他法人要員のPIIは結果DTOに返らない");
+        }
+    }
+
+    @Test
+    void 管理者のpullは全要員を処理する() {
+        authenticate(93001L, "管理者");
+        insertMonth("締め済", "2026-08");
+        long otherEngineerId = insertEngineerOtherLegalEntity();
+        insertClosedMonthOtherLegalEntity(otherEngineerId, otherOrgIdOf(otherEngineerId), "2026-08");
+
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-admin-a-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T01:00:00Z")
+                .build());
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-admin-b-1")
+                .engineerId(otherEngineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T02:00:00Z")
+                .build());
+
+        AttendanceSyncResultDto result = attendanceSyncService.syncPull("2026-08");
+        assertEquals(2, result.getRejectedCount(), "管理者は全法人の締め済み更新を拒否");
+    }
+
+    private long otherOrgIdOf(long otherEngineerId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT organization_id FROM t_engineer WHERE id = ?", Long.class, otherEngineerId);
+    }
+
     @Test
     void pushは承認締め済み月だけを冪等送信し_重複送信で外部1件() {
         authenticate(93001L, "管理者");
