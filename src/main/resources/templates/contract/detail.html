@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{contract.detail} + ' - ' + #{app.name}">契約詳細</title>
+</head>
+<body>
+
+<div layout:fragment="content" id="contract-detail-container" aria-busy="true">
+    <div id="contract-detail-loading" class="text-center text-muted py-5" role="status">
+        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+        <span th:text="#{common.loading}">読み込み中...</span>
+    </div>
+    <div id="contract-detail-error" class="alert alert-warning d-none" role="alert">
+        <i class="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
+        <span id="contract-detail-error-message" th:text="#{error.scope.notFound}">閲覧権限がないか、対象が存在しません</span>
+        <a href="/contract/list" class="alert-link ms-2" th:text="#{common.back}">戻る</a>
+    </div>
+
+    <div id="contract-detail-content" class="d-none">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <h4 class="text-white fw-bold mb-1">
+                    <i class="bi bi-file-earmark-text me-2 text-accent-blue"></i>
+                    <span id="cd-contractNo"></span>
+                    <span class="fs-6 text-muted ms-2" id="cd-contractType"></span>
+                </h4>
+                <p class="text-muted small mb-0" id="cd-subtitle"></p>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="/contract/list" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
+                    <i class="bi bi-arrow-left me-1"></i><th:block th:text="#{common.back}">戻る</th:block>
+                </a>
+                <button class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" id="cd-save-btn" onclick="ContractCompliance.save()" disabled>
+                    <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.save}">保存</th:block>
+                </button>
+            </div>
+        </div>
+
+        <div id="cd-mask-note" class="alert alert-info d-none" role="alert">
+            <i class="bi bi-shield-lock me-2"></i><span th:text="#{cpp.maskNote}">待遇・保険・苦情詳細等の情報はマネージャーには表示されません（保存しても変更されません）</span>
+        </div>
+
+        <div class="row g-4">
+            <!-- コンプライアンス profile -->
+            <div class="col-lg-7">
+                <div class="card bg-card border-dark shadow-sm">
+                    <div class="card-header border-dark bg-transparent d-flex justify-content-between align-items-center py-3">
+                        <h6 class="mb-0 text-white fw-bold"><i class="bi bi-clipboard2-check me-2 text-accent-green"></i><th:block th:text="#{cpp.title}">コンプライアンス項目</th:block></h6>
+                        <span id="cd-profile-version" class="badge bg-secondary"></span>
+                    </div>
+                    <div class="card-body p-4" id="cpp-form">
+                        <div id="cpp-no-profile" class="text-muted small d-none" th:text="#{cpp.noProfile}">未作成</div>
+
+                        <!-- 就業先・業務内容 -->
+                        <h6 class="text-accent-blue fw-bold mt-2 mb-3"><i class="bi bi-geo-alt me-1"></i><th:block th:text="#{cpp.section.basic}">就業先・業務内容</th:block></h6>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.contractTypeDetail}">契約形態詳細</label>
+                                <input type="text" id="cpp-contractTypeDetail" data-key="contractTypeDetail" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.workplace}">就業事業所</label>
+                                <select id="cpp-workplaceId" data-key="workplaceId" class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark">
+                                    <option value="">—</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label text-muted small" th:text="#{cpp.workDescription}">業務内容</label>
+                                <textarea id="cpp-workDescription" data-key="workDescription" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="2000"></textarea>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check mt-3">
+                                    <input type="checkbox" id="cpp-statutoryJobFlag" data-key="statutoryJobFlag" class="form-check-input">
+                                    <label class="form-check-label text-muted small" for="cpp-statutoryJobFlag" th:text="#{cpp.statutoryJobFlag}">政令業務該当</label>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label text-muted small" th:text="#{cpp.statutoryJobReference}">政令業務根拠</label>
+                                <input type="text" id="cpp-statutoryJobReference" data-key="statutoryJobReference" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.responsibilityLevel}">責任分界</label>
+                                <input type="text" id="cpp-responsibilityLevel" data-key="responsibilityLevel" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="200">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.responsibilityDetail}">責任分界詳細</label>
+                                <input type="text" id="cpp-responsibilityDetail" data-key="responsibilityDetail" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                            </div>
+                        </div>
+
+                        <!-- 就業時間・休憩 -->
+                        <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-clock me-1"></i><th:block th:text="#{cpp.section.worktime}">就業時間・休憩</th:block></h6>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.workStartMinute}">始業（分）</label>
+                                <input type="number" id="cpp-workStartMinute" data-key="workStartMinute" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0" max="1439" placeholder="480">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.workEndMinute}">終業（分）</label>
+                                <input type="number" id="cpp-workEndMinute" data-key="workEndMinute" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0" max="1439" placeholder="1080">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.breakStartMinute}">休憩開始（分）</label>
+                                <input type="number" id="cpp-breakStartMinute" data-key="breakStartMinute" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0" max="1439">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.breakEndMinute}">休憩終了（分）</label>
+                                <input type="number" id="cpp-breakEndMinute" data-key="breakEndMinute" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0" max="1439">
+                            </div>
+                            <div class="col-md-3">
+                                <div class="form-check mt-3">
+                                    <input type="checkbox" id="cpp-workSpanNextDayFlag" data-key="workSpanNextDayFlag" class="form-check-input">
+                                    <label class="form-check-label text-muted small" for="cpp-workSpanNextDayFlag" th:text="#{cpp.workSpanNextDayFlag}">深夜・翌日跨ぎ</label>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.workDayCode}">就業曜日</label>
+                                <input type="text" id="cpp-workDayCode" data-key="workDayCode" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.holidayCalendarCode}">休日カレンダー</label>
+                                <input type="text" id="cpp-holidayCalendarCode" data-key="holidayCalendarCode" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                            </div>
+                        </div>
+
+                        <!-- 時間外・36協定 -->
+                        <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-hourglass-split me-1"></i><th:block th:text="#{cpp.section.overtime}">時間外・36協定</th:block></h6>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{cpp.agreementReferenceId}">36協定ID</label>
+                                <input type="number" id="cpp-agreementReferenceId" data-key="agreementReferenceId" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label text-muted small" th:text="#{cpp.overtimeDailyLimit}">日限度(h)</label>
+                                <input type="number" id="cpp-overtimeDailyLimit" data-key="overtimeDailyLimit" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label text-muted small" th:text="#{cpp.overtimeMonthlyLimit}">月限度(h)</label>
+                                <input type="number" id="cpp-overtimeMonthlyLimit" data-key="overtimeMonthlyLimit" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label text-muted small" th:text="#{cpp.overtimeYearlyLimit}">年限度(h)</label>
+                                <input type="number" id="cpp-overtimeYearlyLimit" data-key="overtimeYearlyLimit" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{cpp.overtimePeriodFrom}">適用期間（開始）</label>
+                                <input type="date" id="cpp-overtimePeriodFrom" data-key="overtimePeriodFrom" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{cpp.overtimePeriodTo}">適用期間（終了）</label>
+                                <input type="date" id="cpp-overtimePeriodTo" data-key="overtimePeriodTo" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+
+                        <!-- 責任者 -->
+                        <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-people me-1"></i><th:block th:text="#{cpp.section.responsible}">責任者</th:block></h6>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.commandPersonName}">指揮命令者氏名</label>
+                                <input type="text" id="cpp-commandPersonName" data-key="commandPersonName" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.commandPersonDepartment}">部署</label>
+                                <input type="text" id="cpp-commandPersonDepartment" data-key="commandPersonDepartment" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.commandPersonTitle}">役職</label>
+                                <input type="text" id="cpp-commandPersonTitle" data-key="commandPersonTitle" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.commandPersonPhone}">電話</label>
+                                <input type="text" id="cpp-commandPersonPhone" data-key="commandPersonPhone" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.commandPersonContactId}">担当者ID（顧客担当者）</label>
+                                <input type="number" id="cpp-commandPersonContactId" data-key="commandPersonContactId" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.dispatchResponsibleUserId}">派遣元責任者（社内ユーザーID）</label>
+                                <input type="number" id="cpp-dispatchResponsibleUserId" data-key="dispatchResponsibleUserId" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.dispatchResponsibleName}">派遣元責任者氏名</label>
+                                <input type="text" id="cpp-dispatchResponsibleName" data-key="dispatchResponsibleName" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.dispatchResponsibleDepartment}">部署</label>
+                                <input type="text" id="cpp-dispatchResponsibleDepartment" data-key="dispatchResponsibleDepartment" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.dispatchResponsibleTitle}">役職</label>
+                                <input type="text" id="cpp-dispatchResponsibleTitle" data-key="dispatchResponsibleTitle" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.dispatchResponsiblePhone}">電話</label>
+                                <input type="text" id="cpp-dispatchResponsiblePhone" data-key="dispatchResponsiblePhone" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.clientResponsibleName}">派遣先責任者氏名</label>
+                                <input type="text" id="cpp-clientResponsibleName" data-key="clientResponsibleName" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.clientResponsibleDepartment}">部署</label>
+                                <input type="text" id="cpp-clientResponsibleDepartment" data-key="clientResponsibleDepartment" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.clientResponsibleTitle}">役職</label>
+                                <input type="text" id="cpp-clientResponsibleTitle" data-key="clientResponsibleTitle" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label text-muted small" th:text="#{cpp.clientResponsiblePhone}">電話</label>
+                                <input type="text" id="cpp-clientResponsiblePhone" data-key="clientResponsiblePhone" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{cpp.clientResponsibleContactId}">担当者ID（顧客担当者）</label>
+                                <input type="number" id="cpp-clientResponsibleContactId" data-key="clientResponsibleContactId" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                            </div>
+                        </div>
+
+                        <!-- 派遣固有: 抵触日・安全衛生・保険・待遇・苦情・派遣人員・派遣期間 -->
+                        <div data-section="dispatch">
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-calendar-event me-1"></i><th:block th:text="#{cpp.section.limitation}">抵触日・例外</th:block></h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small" th:text="#{cpp.workplaceLimitationDate}">事業所単位抵触日</label>
+                                    <input type="date" id="cpp-workplaceLimitationDate" data-key="workplaceLimitationDate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small" th:text="#{cpp.organizationLimitationDate}">組織単位抵触日</label>
+                                    <input type="date" id="cpp-organizationLimitationDate" data-key="organizationLimitationDate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4 cpp-sensitive">
+                                    <label class="form-label text-muted small" th:text="#{cpp.limitationExemptionType}">例外種別</label>
+                                    <input type="text" id="cpp-limitationExemptionType" data-key="limitationExemptionType" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                                <div class="col-md-4 cpp-sensitive">
+                                    <label class="form-label text-muted small" th:text="#{cpp.limitationExemptionFrom}">例外期間（開始）</label>
+                                    <input type="date" id="cpp-limitationExemptionFrom" data-key="limitationExemptionFrom" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4 cpp-sensitive">
+                                    <label class="form-label text-muted small" th:text="#{cpp.limitationExemptionTo}">例外期間（終了）</label>
+                                    <input type="date" id="cpp-limitationExemptionTo" data-key="limitationExemptionTo" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-12 cpp-sensitive">
+                                    <label class="form-label text-muted small" th:text="#{cpp.limitationExemptionDetail}">例外内容</label>
+                                    <input type="text" id="cpp-limitationExemptionDetail" data-key="limitationExemptionDetail" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                                <div class="col-12 cpp-sensitive">
+                                    <label class="form-label text-muted small" th:text="#{cpp.limitationExemptionBasis}">例外根拠</label>
+                                    <input type="text" id="cpp-limitationExemptionBasis" data-key="limitationExemptionBasis" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                            </div>
+
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-shield-check me-1"></i><th:block th:text="#{cpp.section.safety}">安全衛生・教育訓練</th:block></h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.safetyResponsibilityDetail}">安全衛生責任分担</label>
+                                    <textarea id="cpp-safetyResponsibilityDetail" data-key="safetyResponsibilityDetail" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="1000"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.safetyRuleReference}">適用規程</label>
+                                    <input type="text" id="cpp-safetyRuleReference" data-key="safetyRuleReference" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                            </div>
+
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-umbrella me-1"></i><th:block th:text="#{cpp.section.insurance}">社会保険（未確認はNULL）</th:block></h6>
+                            <div class="row g-3 mb-3 cpp-sensitive">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.healthInsuranceStatus}">健康保険状態</label>
+                                    <input type="text" id="cpp-healthInsuranceStatus" data-key="healthInsuranceStatus" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.healthInsuranceMissingReason}">未加入理由</label>
+                                    <input type="text" id="cpp-healthInsuranceMissingReason" data-key="healthInsuranceMissingReason" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.healthInsuranceExpectedDate}">取得予定日</label>
+                                    <input type="date" id="cpp-healthInsuranceExpectedDate" data-key="healthInsuranceExpectedDate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.pensionInsuranceStatus}">厚生年金状態</label>
+                                    <input type="text" id="cpp-pensionInsuranceStatus" data-key="pensionInsuranceStatus" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.pensionInsuranceMissingReason}">未加入理由</label>
+                                    <input type="text" id="cpp-pensionInsuranceMissingReason" data-key="pensionInsuranceMissingReason" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.pensionInsuranceExpectedDate}">取得予定日</label>
+                                    <input type="date" id="cpp-pensionInsuranceExpectedDate" data-key="pensionInsuranceExpectedDate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.employmentInsuranceStatus}">雇用保険状態</label>
+                                    <input type="text" id="cpp-employmentInsuranceStatus" data-key="employmentInsuranceStatus" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.employmentInsuranceMissingReason}">未加入理由</label>
+                                    <input type="text" id="cpp-employmentInsuranceMissingReason" data-key="employmentInsuranceMissingReason" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="500">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.employmentInsuranceExpectedDate}">取得予定日</label>
+                                    <input type="date" id="cpp-employmentInsuranceExpectedDate" data-key="employmentInsuranceExpectedDate" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.socialInsuranceProcedureIncompleteReason}">社会保険手続未完了理由</label>
+                                    <textarea id="cpp-socialInsuranceProcedureIncompleteReason" data-key="socialInsuranceProcedureIncompleteReason" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="1000"></textarea>
+                                </div>
+                            </div>
+
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-cash-coin me-1"></i><th:block th:text="#{cpp.section.treatment}">待遇（派遣料金・福利厚生・方式）</th:block></h6>
+                            <div class="row g-3 mb-3 cpp-sensitive">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchFeeAmount}">派遣料金（円）</label>
+                                    <input type="number" id="cpp-dispatchFeeAmount" data-key="dispatchFeeAmount" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0" step="0.01">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchFeeBasis}">料金基準</label>
+                                    <input type="text" id="cpp-dispatchFeeBasis" data-key="dispatchFeeBasis" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchFeeCurrency}">通貨</label>
+                                    <input type="text" id="cpp-dispatchFeeCurrency" data-key="dispatchFeeCurrency" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="10">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.benefitsDetail}">福利厚生</label>
+                                    <textarea id="cpp-benefitsDetail" data-key="benefitsDetail" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="1000"></textarea>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mt-3">
+                                        <input type="checkbox" id="cpp-benefitsProvidedFlag" data-key="benefitsProvidedFlag" class="form-check-input">
+                                        <label class="form-check-label text-muted small" for="cpp-benefitsProvidedFlag" th:text="#{cpp.benefitsProvidedFlag}">福利厚生あり</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small" th:text="#{cpp.treatmentScheme}">待遇方式</label>
+                                    <input type="text" id="cpp-treatmentScheme" data-key="treatmentScheme" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mt-3">
+                                        <input type="checkbox" id="cpp-agreementTargetFlag" data-key="agreementTargetFlag" class="form-check-input">
+                                        <label class="form-check-label text-muted small" for="cpp-agreementTargetFlag" th:text="#{cpp.agreementTargetFlag}">協定対象派遣労働者に限定</label>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.employmentStabilityPreference}">希望する雇用安定措置</label>
+                                    <textarea id="cpp-employmentStabilityPreference" data-key="employmentStabilityPreference" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="1000"></textarea>
+                                </div>
+                            </div>
+
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-telephone me-1"></i><th:block th:text="#{cpp.section.complaint}">苦情窓口</th:block></h6>
+                            <div class="row g-3 mb-3 cpp-sensitive">
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.sourceComplaintContactName}">派遣元窓口氏名</label>
+                                    <input type="text" id="cpp-sourceComplaintContactName" data-key="sourceComplaintContactName" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.sourceComplaintContactDepartment}">部署</label>
+                                    <input type="text" id="cpp-sourceComplaintContactDepartment" data-key="sourceComplaintContactDepartment" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.sourceComplaintContactTitle}">役職</label>
+                                    <input type="text" id="cpp-sourceComplaintContactTitle" data-key="sourceComplaintContactTitle" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.sourceComplaintContactPhone}">電話</label>
+                                    <input type="text" id="cpp-sourceComplaintContactPhone" data-key="sourceComplaintContactPhone" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.clientComplaintContactName}">派遣先窓口氏名</label>
+                                    <input type="text" id="cpp-clientComplaintContactName" data-key="clientComplaintContactName" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.clientComplaintContactDepartment}">部署</label>
+                                    <input type="text" id="cpp-clientComplaintContactDepartment" data-key="clientComplaintContactDepartment" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.clientComplaintContactTitle}">役職</label>
+                                    <input type="text" id="cpp-clientComplaintContactTitle" data-key="clientComplaintContactTitle" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="100">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label text-muted small" th:text="#{cpp.clientComplaintContactPhone}">電話</label>
+                                    <input type="text" id="cpp-clientComplaintContactPhone" data-key="clientComplaintContactPhone" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="50">
+                                </div>
+                            </div>
+
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-people-fill me-1"></i><th:block th:text="#{cpp.section.dispatchOther}">派遣人員・派遣期間</th:block></h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchHeadcount}">派遣人員（人）</label>
+                                    <input type="number" id="cpp-dispatchHeadcount" data-key="dispatchHeadcount" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" min="0">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchPeriodStart}">派遣期間（開始）</label>
+                                    <input type="date" id="cpp-dispatchPeriodStart" data-key="dispatchPeriodStart" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{cpp.dispatchPeriodEnd}">派遣期間（終了）</label>
+                                    <input type="date" id="cpp-dispatchPeriodEnd" data-key="dispatchPeriodEnd" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 準委任/請負固有 -->
+                        <div data-section="quasi">
+                            <h6 class="text-accent-blue fw-bold mt-4 mb-3"><i class="bi bi-diagram-3 me-1"></i><th:block th:text="#{cpp.section.quasi}">準委任・請負（指示経路等）</th:block></h6>
+                            <div class="row g-3 mb-3">
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" th:text="#{cpp.instructionRoute}">作業指示経路・勤怠承認者</label>
+                                    <textarea id="cpp-instructionRoute" data-key="instructionRoute" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" rows="2" maxlength="1000"></textarea>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check mt-3">
+                                        <input type="checkbox" id="cpp-subcontractAllowed" data-key="subcontractAllowed" class="form-check-input">
+                                        <label class="form-check-label text-muted small" for="cpp-subcontractAllowed" th:text="#{cpp.subcontractAllowed}">再委託を許可する</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label text-muted small" th:text="#{cpp.acceptanceMethod}">検収方法</label>
+                                    <input type="text" id="cpp-acceptanceMethod" data-key="acceptanceMethod" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark" maxlength="200">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- findings -->
+            <div class="col-lg-5">
+                <div class="card bg-card border-dark shadow-sm">
+                    <div class="card-header border-dark bg-transparent py-3">
+                        <h6 class="mb-0 text-white fw-bold"><i class="bi bi-exclamation-triangle me-2 text-warning"></i><th:block th:text="#{cpp.findings}">コンプライアンス指摘</th:block></h6>
+                    </div>
+                    <div class="card-body p-0" id="cpp-findings-card">
+                        <div class="p-3 text-muted small" id="cpp-findings-empty" th:text="#{cpp.findings.none}">指摘はありません</div>
+                        <div class="table-responsive d-none" id="cpp-findings-table-wrap">
+                            <table class="table table-sm table-dark table-hover mb-0 align-middle">
+                                <thead class="table-secondary border-dark">
+                                    <tr>
+                                        <th class="px-3 py-2 text-muted small" th:text="#{cpp.finding.status}">状態</th>
+                                        <th class="py-2 text-muted small" th:text="#{cpp.finding.code}">コード</th>
+                                        <th class="px-3 py-2 text-muted small" th:text="#{cpp.finding.due}">期限</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cpp-findings-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/contract-compliance.js}"></script>
+</th:block>
+
+</body>
+</html>

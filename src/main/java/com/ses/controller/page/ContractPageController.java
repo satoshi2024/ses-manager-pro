@@ -40,4 +40,15 @@ public class ContractPageController {
     public String renewalCalendar() {
         return "contract/renewal-calendar";
     }
+
+    /**
+     * 契約詳細画面表示（T063 A1: compliance profile/findings）。
+     * データはJSが /api/contracts/{id}/compliance-profile から取得する。
+     *
+     * @return 画面パス
+     */
+    @GetMapping("/detail/{id}")
+    public String detail() {
+        return "contract/detail";
+    }
 }

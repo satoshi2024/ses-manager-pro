@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 11: T060 PASS / T061 F1 PASS / T062 F2 PASS（P0=0/P1=0）。R10-P1-01（V84誤字・34c68f7バイト復元）・R10-P1-02（null-profile fail-open修正）をVERIFIED_CLOSED。T063〜T065解放可、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 11: T060 PASS / T061 F1 PASS / T062 F2 PASS（P0=0/P1=0）。R10-P1-01（V84誤字・34c68f7バイト復元）・R10-P1-02（null-profile fail-open修正）をVERIFIED_CLOSED。T063 A1実装提出済み（R10 Round 12確認待ち）、T064〜T065解放可、T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 10: T060 PASS / T061 F1 PASS / T062 F2 FAIL（R10-P1-01: PASS済みV84誤字4行・復元済み、R10-P1-02: null-profile fail-open・修正済み）→ fix delta再提出済み・再Review待ち**。T062のcore実装・既存4 rule golden 12/12はclean独立実行で確認済み。T063〜T065はF2 PASS後に再開、T066 Mは未着手。production release/apply authorizationなし。
 
 **R10 Round 10: T060 PASS / T061 F1 PASS / T062 F2 FAIL（R10-P1-01: PASS済みV84誤字4行・復元済み、R10-P1-02: null-profile fail-open・修正済み）→ fix delta再提出済み・再Review待ち**。T062のcore実装・既存4 rule golden 12/12はclean独立実行で確認済み。T063〜T065はF2 PASS後に再開、T066 Mは未着手。production release/apply authorizationなし。
 
@@ -190,6 +192,32 @@ R10はHead `85ca62ba` → `39f0384c`（10ファイル/+62/-39）をread-only＋�
 **残課題（本spec外・統合担当）**: 予約表V99-V101衝突の再同期、`project.detail.desc` key追加。解消後に現mainの全量CI再実行を推奨。
 
 **境界**: 本deltaはV84復元・rule修正・test正本化・ledger同期のみ。SecurityConfig/UI/controller/i18n/sidebar/他機能未変更。production release/apply authorizationなし。T062 checkboxを`[x]`化し、T063（A1）から着手可。
+
+## T063 A1 契約compliance profile/UI delta（2026-08-10、R10 Round 12確認待ち）
+
+R10 Round 11のT062 F2 PASSを受け、T063 A1を実装した。S11 trackが同一worktreeをdirtyにしているため、**isolated worktree（`ses-manager-pro-s10-t063`、base `42b80b30`=origin/main）で実装・検証**し、push後にmainへ同期する。
+
+**変更file**:
+- `controller/api/ContractComplianceProfileApiController.java`（新規）: `GET/PUT /api/contracts/{id}/compliance-profile`。契約メニュー（4管理ロール）の権限配下。CSRFは既存ajaxSetup経由。
+- `service/ContractComplianceProfileService.java`＋`service/impl/ContractComplianceProfileServiceImpl.java`（新規）:
+  - role別field mask（design §5.3）: 管理者/HR=P0_FULL、マネージャー=P1_MASK（待遇・保険・苦情詳細・雇用安定措置・抵触日例外・retention metadataをmask）、営業=P2_LIMITED（業務遂行に必要な限定fieldのみ、書き込み不可）。
+  - maskはexport/PDF（T064）と同一allow-listを共有する前提で、SENSITIVE_FIELDS/P2_ALLOWED_FIELDSを定数化。
+  - 保存はfull DTO必須（key欠落は400、R8-P2-01の省略PATCH reject）。楽観ロック（version CAS、不一致409）。format validation（分0〜1439、日付順序、flag 0/1、workplace/contact/user存在、workplaceの契約顧客一致）。
+  - masked role（マネージャー）: sensitive fieldの変更は403 reject（省略=現値維持、異なる値=reject）。BeanUtilsコピー後にsensitive現値をrestoreし、画面maskによる誤消去を防ぐ。
+  - findingsは`MonthlyClosingServiceImpl.canViewCompliance()`と同じ方式（管理者=常に可、他roleはcompliance menu権限をMenuCacheServiceで再チェック、fail-closed）でcompliance menu権限がある場合のみ返す（design §5.3）。
+  - DataScope: `dataScopeService.assertAllowedContract`（既存契約APIと同じ境界）。
+- `dto/compliance/ContractComplianceProfileSaveDto.java`・`ContractComplianceProfileDetailDto.java`（新規）。
+- `controller/page/ContractPageController.java`: `GET /contract/detail/{id}` 追加（view名のみ）。
+- `templates/contract/detail.html`（新規）: 契約詳細画面（JS駆動）。契約形態別section切替（派遣固有: 抵触日・保険・待遇・苦情・派遣人員・派遣期間・安全衛生 / 準委任・請負固有: 指示経路・再委託・検収）、sensitive fieldは`cpp-sensitive`クラスでmasked role時に編集不可＋「—」表示、findingsカード（compliance権限時のみサーバが返す）、mobile対応（common layout・col-md分割・mobile-date-range相当）。
+- `static/js/modules/contract-compliance.js`（新規）: 取得・section切替・mask適用・full DTO構築（masked roleはsensitive keyを省略）・保存・findings描画。
+- `static/js/modules/contract.js`: 契約一覧の操作列へ詳細リンク（`/contract/detail/{id}`）追加。
+- messages 4 bundle: T063キー約150件追加（ja/en/ko/zh、MessageBundleConsistencyTest PASS）。
+
+**実行test（L1〜L3定向・直接回帰、skip 0）**: ContractComplianceProfileApiTest 15（role別mask matrix: 管理者/HR full・マネージャーP1_MASK・営業P2_LIMITED・findings権限・full DTO欠落400・営業PUT 403・マネージャーsensitive変更403・sensitive省略=現値維持・version 409・期間逆転400・workplace不存在400・契約404）、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26（`/contract/detail/1`追加）、F2系30（Engine 8・golden 12・Store 1・RunApi 1・Calculator 8）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計108件中失敗2件は既知のR10-P2-01他track起因（S12〜S14予約V99-V101 vs 実在V101、`project.detail.desc`）。`git diff --check` exit 0。
+
+**Demo証跡（L1〜L3実測）**: 派遣/準委任のsection切替はdetail.htmlの`data-section="dispatch"/"quasi"`とJSの`applyContractType`で実装し、page testでマークアップ確認。maskはAPIレスポンスをrole別に実測（管理者=dispatch_fee_amount 10000表示、マネージャー=doesNotExist、営業=限定fieldのみ）。ブラウザでの営業/マネージャーログイン画面DemoはR10 ReviewのDemo確認項目として提示（本環境はbrowser Demo不可のため）。CSV/Excel/PDF/downloadのmaskはT064（B1）のDemo範囲。
+
+**境界**: DDL/migration変更なし（V84 shapeをそのまま利用）。SecurityConfig/他機能未変更。T063 checkboxはR10確認まで`[x]`維持（実装提出済み）。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 

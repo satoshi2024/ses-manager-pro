@@ -293,6 +293,7 @@ function renderContracts(list) {
                     ${getStatusBadge(c.status)}
                 </td>
                 <td class="px-4 py-3 text-end text-nowrap">
+                    <a class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('contract.action.detail')}" href="/contract/detail/${c.id}"><i class="bi bi-eye"></i></a>
                     <button type="button" class="btn btn-outline-secondary btn-sm me-1" title="${SES.i18n.t('contract.action.edit')}" onclick="openEditContract(${c.id})"><i class="bi bi-pencil"></i></button>
                     ${statusBtn}
                     <button type="button" class="btn btn-outline-danger btn-sm text-danger border-danger" onclick="deleteContract(${c.id})"><i class="bi bi-trash"></i></button>

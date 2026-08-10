@@ -56,7 +56,7 @@
     契約chain（連続更新/クーリング/組織単位変更/並行契約）の抵触日算定。
   - **Demo**: 欠落profileを補完してfinding解消。rule を2回実行してfinding件数が増えないことを確認。
 
-- [ ] A1. 契約compliance profile/UI
+- [x] A1. 契約compliance profile/UI（T063実装済み・R10 Review待ち）
   - **Objective**: 契約詳細で派遣と準委任で異なる入力項目が出て、必須項目の不足がその場で分かる。
     待遇情報や個人情報は権限のないユーザーにはmaskされる。
   - **実装ガイダンス**: 契約形態別field、help、権限、差分。
