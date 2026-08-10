@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 12: T060/T061/T062 PASS維持。T063 A1 FAIL（R12-P1-01: SaveDto残留retention/legalHoldによるUI保存400、P2-01: contact顧客一致未検証）→ fix再提出済み・再Review待ち。T064〜T065停止、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 13: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS（P0=0/P1=0/P2=0）。R12-P1-01（SaveDto 2列削除・UI保存400解消）・R12-P2-01（contact顧客一致）をVERIFIED_CLOSED。T064〜T065解放可、T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 12: T060/T061/T062 PASS維持。T063 A1 FAIL（R12-P1-01: SaveDto残留retention/legalHoldによるUI保存400、P2-01: contact顧客一致未検証）→ fix再提出済み・再Review待ち。T064〜T065停止、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 11: T060 PASS / T061 F1 PASS / T062 F2 PASS（P0=0/P1=0）。R10-P1-01（V84誤字・34c68f7バイト復元）・R10-P1-02（null-profile fail-open修正）をVERIFIED_CLOSED。T063 A1実装提出済み（R10 Round 12確認待ち）、T064〜T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
@@ -239,6 +241,24 @@ R10 Round 12はT063 A1（`6d5e21f5`）を独立実行（121件中失敗2件は�
 **Rollback**: DDL/migration/SecurityConfig変更なし。commit revertでDB rollback不要。
 
 **境界**: T063 checkboxはR10再Review PASSまで未完了へ戻し、再開条件: R10がR12-P1-01/P2-01のCLOSEを確認 → T064（B1）→ T065（B2）→ T066 M。production release/apply authorizationなし。
+
+## R10 Round 13 判定（2026-08-10）: T063 A1 PASS
+
+R10はHead `6d5e21f5` → `a6695026`（9ファイル/+112/-12）をread-only＋独立実行（123件中失敗2件は既知のR10-P2-01他track起因で本delta前から同一、dispatch関連全PASS）で確認した。
+
+| issue ID | 前回 | 今回 | 検証 |
+|---|---|---|---|
+| R12-P1-01 | OPEN | **VERIFIED_CLOSED** | SaveDtoからretentionDueDate/legalHoldFlag削除→editableFields自動除外・missingチェック対象外・copy対象外。**17件目testがテンプレート実data-key抽出payloadでPUT→200を回帰保証**（`doesNotContain`もassert）。マネージャーのretention盲書き換えも遮断。GETの管理者/HR表示はentity経由で維持 |
+| R12-P2-01 | P2 | **VERIFIED_CLOSED** | requireContactOfCustomer（存在＋customer_id一致、両方非null時）。他顧客contact指定PUT→400をtestで検証。i18n `contactCustomerMismatch`×4 |
+| R10-P2-01 | P2 | 継続（dispatch非関与） | `project.detail.desc`・予約V99-V101衝突。統合担当追跡 |
+
+**task別判定**: T060/T061/T062 PASS維持 / **T063 A1 PASS**（P0=0/P1=0/P2=0。role mask・full DTO・CAS・validation・UI保存動線まで検証済み）/ T064〜T065解放可 / T066 M未着手（G2 gate）。
+
+**独立証跡**: API 17/0/0/0、ページ2、Mobile 26、F2系30、F1系9、Integrity 27 — 全PASS skip 0。保存動線はUI実送payload（data-key 76件＋version）でPUT 200を自動回帰化。
+
+**NOTE継続（非block）**: 営業write 403のdesign明文化推奨、guardのBigDecimal表記差、engine N+1（T066性能検証）。
+
+**境界**: DDL/migration/SecurityConfig変更なし。production release/apply authorizationなし。T063 checkboxを`[x]`化し、T064（B1）から着手可。
 
 ## M / 本番gateと再開条件
 
