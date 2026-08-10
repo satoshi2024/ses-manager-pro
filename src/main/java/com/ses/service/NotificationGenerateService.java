@@ -64,6 +64,7 @@ public class NotificationGenerateService {
     private final com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
     private final com.ses.mapper.EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
     private final SystemConfigService systemConfigService;
+    private final com.ses.service.attendance.AttendanceDiscrepancyService attendanceDiscrepancyService;
 
     public void generateAll() {
         contractEnding();
@@ -80,6 +81,38 @@ public class NotificationGenerateService {
         acceptanceUnsubmitted();
         acceptanceOverdue();
         acceptanceRejected();
+        attendanceDiscrepancyWarning();
+    }
+
+    /**
+     * T073/B2: 客先工数差異が閾値超過かつ未確認の要員を管理者/HRへ通知する。
+     *
+     * <p>scheduler principal（全件）として日次バッチから呼ぶ。dedupe key =
+     * {@code ATT_DISCREPANCY:{engineerId}:{workMonth}} で冪等（確認されるまで再通知しない）。</p>
+     */
+    public void attendanceDiscrepancyWarning() {
+        try {
+            YearMonth target = YearMonth.now().minusMonths(1);
+            var pending = attendanceDiscrepancyService.pendingWarnings(target.toString());
+            if (pending == null || pending.getItems() == null || pending.getItems().isEmpty()) {
+                return;
+            }
+            List<SysUser> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                    .in(SysUser::getRole, "管理者", "HR")
+                    .eq(SysUser::getStatus, 1));
+            for (var item : pending.getItems()) {
+                String dedupeKey = "ATT_DISCREPANCY:" + item.getEngineerId() + ":" + target;
+                String message = "[\"notification.msg.ATT_DISCREPANCY\", \"" + item.getEngineerName() + "\", \""
+                        + target + "\", \"" + item.getDiffMinutes() + "\"]";
+                for (SysUser user : recipients) {
+                    notificationService.publishToUser(user.getId(), "ATT_DISCREPANCY",
+                            "客先工数差異の確認依頼", message, "/work-record/attendance",
+                            dedupeKey, "work-record");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("客先工数差異の通知生成に失敗しました: {}", e.getMessage());
+        }
     }
 
     /**

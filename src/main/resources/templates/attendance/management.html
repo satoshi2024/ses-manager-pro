@@ -44,6 +44,31 @@
             <div id="attendanceSyncResult" class="mt-3 small" aria-live="polite"></div>
         </div>
     </div>
+    <!-- T073: 客先工数差異（read-only比較・理由確認。請求金額は変わらない） -->
+    <div class="card mt-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <h2 class="h6 mb-0" th:text="#{attendance.discrepancy.title}">客先工数差異</h2>
+                <span class="badge text-bg-secondary" th:text="#{attendance.discrepancy.readOnly}">read-only</span>
+            </div>
+            <div id="attendanceDiscrepancyError" class="alert alert-danger d-none" role="alert"></div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="attendanceDiscrepancyTable">
+                    <thead><tr>
+                        <th th:text="#{attendance.engineer}">要員</th>
+                        <th class="text-end" th:text="#{attendance.discrepancy.attendanceMinutes}">雇用勤怠(分)</th>
+                        <th class="text-end" th:text="#{attendance.discrepancy.contractMinutes}">契約工数(分)</th>
+                        <th class="text-end" th:text="#{attendance.discrepancy.diffMinutes}">差異(分)</th>
+                        <th th:text="#{attendance.discrepancy.status}">状態</th>
+                        <th th:text="#{attendance.discrepancy.reason}">確認理由</th>
+                        <th th:text="#{attendance.actions}">操作</th>
+                    </tr></thead>
+                    <tbody id="attendanceDiscrepancyBody"></tbody>
+                </table>
+            </div>
+            <div id="attendanceDiscrepancyHint" class="small text-muted" th:text="#{attendance.discrepancy.hint}"></div>
+        </div>
+    </div>
 </div>
 <div id="attendanceRoleFlags" class="d-none" th:data-can-approve="${canApprove}" th:data-can-close="${canClose}" th:data-can-reopen="${canReopen}" th:data-can-sync="${canSync}"></div>
 <th:block layout:fragment="page-js"><script src="/js/modules/attendance-management.js"></script></th:block>

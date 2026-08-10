@@ -7,6 +7,7 @@
     document.getElementById('managementReload').addEventListener('click', load);
     load();
     initSyncCard();
+    initDiscrepancyCard();
 
     function load() {
         fetch(`/api/work-records/attendance?month=${encodeURIComponent(month.value)}`).then(r => r.json()).then(data => {
@@ -115,6 +116,69 @@
                 html += `<div class="mt-1 text-danger">${result.errors.map(esc).join('<br>')}</div>`;
             }
             el.innerHTML = html;
+        }
+    }
+
+    // ===== T073: 客先工数差異（read-only比較・理由確認） =====
+    function initDiscrepancyCard() {
+        const body = document.getElementById('attendanceDiscrepancyBody');
+        if (!body) return;
+        loadDiscrepancy();
+        month.addEventListener('change', loadDiscrepancy);
+
+        function loadDiscrepancy() {
+            const monthValue = encodeURIComponent(month.value);
+            fetch(`/api/work-records/attendance/discrepancy?month=${monthValue}`).then(r => r.json()).then(data => {
+                if (data.code !== 200) return showDiscrepancyError(data.message);
+                const target = document.getElementById('attendanceDiscrepancyError');
+                target.classList.add('d-none');
+                const items = (data.data && data.data.items) || [];
+                body.innerHTML = items.length === 0
+                    ? `<tr><td colspan="7" class="text-muted">${esc(SES.i18n.t('attendance.discrepancy.empty', '差異データがありません'))}</td></tr>`
+                    : items.map(row => {
+                        const confirmed = row.confirmed;
+                        const over = row.overThreshold;
+                        const statusBadge = confirmed
+                            ? `<span class="badge text-bg-success">${esc(SES.i18n.t('attendance.discrepancy.confirmed', '確認済み'))}</span>`
+                            : (over
+                                ? `<span class="badge text-bg-danger">${esc(SES.i18n.t('attendance.discrepancy.overThreshold', '要確認'))}</span>`
+                                : `<span class="badge text-bg-secondary">${esc(SES.i18n.t('attendance.discrepancy.within', '範囲内'))}</span>`);
+                        const confirmBtn = (!confirmed && over)
+                            ? `<button type="button" class="btn btn-sm btn-outline-primary" data-discrepancy-confirm="${esc(row.engineerId)}">${esc(SES.i18n.t('attendance.discrepancy.confirm', '確認'))}</button>`
+                            : '';
+                        return `<tr>
+                            <td>${esc(row.engineerName || row.engineerId)}</td>
+                            <td class="text-end">${esc(row.attendanceMinutes || 0)}</td>
+                            <td class="text-end">${esc(row.contractMinutes || 0)}</td>
+                            <td class="text-end">${esc(row.diffMinutes || 0)}</td>
+                            <td>${statusBadge}</td>
+                            <td>${esc(row.reason || '')}${row.confirmedAt ? `<div class="small text-muted">${esc(row.confirmedBy || '')} ${esc(row.confirmedAt || '')}</div>` : ''}</td>
+                            <td>${confirmBtn}</td>
+                        </tr>`;
+                    }).join('');
+                document.querySelectorAll('[data-discrepancy-confirm]').forEach(button =>
+                    button.addEventListener('click', () => confirmDiscrepancy(button.dataset.discrepancyConfirm)));
+            }).catch(showDiscrepancyError);
+        }
+
+        function confirmDiscrepancy(engineerId) {
+            const reason = window.prompt(SES.i18n.t('attendance.discrepancy.reasonPrompt', '確認理由を入力してください'));
+            if (!reason || !reason.trim()) return;
+            const headers = Object.assign({'Content-Type': 'application/json'}, SES.csrf.header());
+            fetch('/api/work-records/attendance/discrepancy/confirm', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ engineerId: String(engineerId), month: month.value, reason: reason.trim() })
+            }).then(r => r.json()).then(data => {
+                if (data.code !== 200) return showDiscrepancyError(data.message);
+                loadDiscrepancy();
+            }).catch(showDiscrepancyError);
+        }
+
+        function showDiscrepancyError(error) {
+            const el = document.getElementById('attendanceDiscrepancyError');
+            el.textContent = error || SES.i18n.t('attendance.discrepancy.error', '差異の取得に失敗しました');
+            el.classList.remove('d-none');
         }
     }
 })();

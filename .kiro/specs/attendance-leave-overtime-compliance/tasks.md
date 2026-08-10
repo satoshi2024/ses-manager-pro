@@ -125,7 +125,7 @@
     provider 3・mock 3＋JS 1）、指定回帰 **165/0/0/0 skip 0**、`git diff --check` PASS。
     唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN）。
 
-- [ ] B2. 客先工数差異/通知
+- [x] B2. 客先工数差異/通知
   - **Objective**: 雇用勤怠合計と契約工数の差が月次で表示され、閾値超過を理由付きで確認できる。
     差異を確認しても請求金額は変わらない。
   - **実装ガイダンス**: 月次比較、理由確認、warning/escalation。
@@ -133,6 +133,17 @@
   - **テスト要件**: L2〜L3。**差異確認の前後で請求金額が不変であること**、
     scope、通知の冪等、閾値の境界。
   - **Demo**: 8h差異を確認して理由保存。理由保存の前後で請求金額が同じことをSQLで提示。
+  - **実装内容（T073完了）**: `AttendanceDiscrepancyService`（read-only比較DTO: 雇用勤怠`worked_minutes`と
+    契約工数`actual_hours×60`を月次比較、閾値`attendance.discrepancy.threshold-minutes`（既定480分）超過判定、
+    理由確認は**m_system_config JSON**（`attendance.discrepancy.confirmed`、closing.confirmed-months前例。
+    新規テーブルは予約外migration禁止・work record系テーブルへの書込みは「請求ロジック接続」と見なすため、
+    逸脱と根拠をledgerへ記録）、scopeはdesign §5.3（管理者=全件/HR=法人/マネージャー=組織、営業403は既存SecurityConfig）、
+    `pendingWarnings`（scheduler principal=全件・閾値超過かつ未確認のみ））。API list/confirm
+    （`/api/work-records/attendance/discrepancy/**`）。管理画面に差異カード＋JS。日次バッチ
+    `NotificationGenerateService.attendanceDiscrepancyWarning()`（管理者/HRへdedupe key冪等通知）。
+  - **検証（T073完了）**: 新規2 class **13/0/0/0 skip 0**（Service 8・API 5）、指定回帰 **232/0/0/0 skip 0**、
+    `git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN）。
+    Demo: 8h差異（1200分）を確認して理由保存、保存前後のbilling_amount・actual_hoursがSQLで同一を実測。
 
 - [ ] M. 回帰/法務受入
   - **Objective**: 6か月rollingのfixtureが期待どおりで、月次が一気通貫で動く。

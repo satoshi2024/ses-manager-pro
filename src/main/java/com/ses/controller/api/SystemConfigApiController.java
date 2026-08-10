@@ -29,7 +29,8 @@ public class SystemConfigApiController {
 
     /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
-            "attendance.sync.freee.cursor", "attendance.sync.last-result");
+            "attendance.sync.freee.cursor", "attendance.sync.last-result",
+            "attendance.discrepancy.confirmed");
 
     /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
     private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";
