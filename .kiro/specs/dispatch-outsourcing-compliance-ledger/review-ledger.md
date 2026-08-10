@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 18: T060〜T065 PASS確定（T065 B2 PASS・新規R18-P1-01 fix済み）。残りT066 M（帳票全項目化＋L4全量＋G2 gate）未達、production authorizationなし`。
+`R10 Round 18: T060〜T065 PASS確定。T066 M: 実装・L4全量（1824件・失敗0・skip 38=Docker gateのみ）完了。G2 gate（COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視）未取得のためM PASS条件未達・production authorizationなし`。
+
+**R10 Round 16: T060〜T064 PASS確定。T065 B2実装提出済み（R10 Round 17確認待ち）。T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 16: T060〜T064 PASS確定。T065 B2実装提出済み（R10 Round 17確認待ち）。T066 M/本番gate未達、production authorizationなし**。
 
@@ -367,6 +369,29 @@ R10は`ca87e331`（T065 B2）を全328クラス1817テストの独立実行（T0
 **task別判定**: T060〜T065 PASS確定 / **T066 M**（帳票全項目化＝履歴/worker snapshot由来項目、L4全量、G2 gate: COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視）未達。
 
 **境界**: V85追加以外のDDL変更なし。SecurityConfig/他機能未変更。T065 checkboxを`[x]`化。production release/apply authorizationなし。
+
+## T066 M 法務受入/回帰 delta（2026-08-10、R10 Round 19確認待ち）
+
+R10 Round 18のT065 B2 PASSとR18-P1-01 fixを受け、Mを実施した。**isolated worktree（`ses-manager-pro-s10-t063`）で実装・検証**し、push後にmainへ同期する。
+
+**変更file**:
+- `service/compliance/ComplianceDocumentGenerator.java`: **worker snapshot由来項目の帳票全項目化**（R15-P1-03のT066移管分）。派遣元管理台帳のworker sectionへ性別・年齢区分・雇用期間種別/期間・無期雇用flag・60歳以上flag・労働者制限種別を追加（worker snapshotが存在する場合のみ出力・全てsensitive）。`build()`にworker引数を追加。
+- `service/impl/ComplianceDocumentServiceImpl.java`: generate/downloadで契約の要員の最新worker snapshotをロードしてgeneratorへ渡す（`ContractComplianceWorkerSnapshotMapper`）。
+- `test/migration/ComplianceLegalFixtureTest.java`（新規・L4）: 法務fixture3契約のgolden照合。派遣=欠落profile→MISSING系10件（抵触日2+責任者3+保険3+明示書2）かつ既存4 rule非発火、準委任/請負=指示経路MISSING、BP階層4→TIER_EXCEEDED（既存4 ruleの実DB経路での出力確認）。
+- `test/service/compliance/ComplianceDocumentGeneratorTest.java`: worker snapshot由来行のgolden（FULL出力・MASKで「—」）。
+- messages 4 bundle: doc.worker* 8 key追加。
+- design.md §3.1: T066 Mでの最終化を明記（worker snapshot由来項目は出力、**履歴table由来項目（苦情処理状況・キャリア・教育訓練・紹介予定・紛争防止・差異通知）は書き込み経路が本specの実装範囲に存在しないためGATE-T066-HISTORYとして受入対象外に記録**）。
+
+**L4全量（`mvn -B test`）**: **1824 tests / failures 0 / errors 0 / skipped 38（全てDocker gate: Flyway*SmokeTest×5・FlywayRepairRunbookTest・FlywayV73PartialRepairSmokeTest・ConcurrentUpdateTest。CIではDockerで実行されskip 0契約維持）/ BUILD SUCCESS**。Round 18時点の他track起因2件（`project.detail.desc`・予約V99-V101衝突）はPR #68（fix/ci-v84-v85-msg-reservations）で統合担当が解消済み（MessageBundleConsistencyTest 4/4・SpecDispatchConsistencyTest 9/9 PASS）。`git diff --check` exit 0。
+
+**G2 gate（M PASS・本番releaseの前提・本deltaでは未取得）**:
+- `COMPLIANCE_RESPONSIBLE`のruntime assignment（管理者による指名・有効期間付き）— 未実施
+- 対象mapping version/hashへの実actor承認event — 未実施
+- 外部社労士/弁護士のReview（GATE-T060-EXTERNAL）— 未実施
+- 帳票PDFの実ブラウザ目視（font/レイアウト）— 未実施
+- 履歴table由来の帳票項目（GATE-T066-HISTORY）— 書き込み経路不在のため受入対象外として記録
+
+**境界**: 本deltaはgenerator拡充・service・test・docsのみ。V85追加以外のDDL変更なし。SecurityConfig/他機能未変更。M checkboxはG2 gate取得まで未完了維持。production release/apply authorizationなし。再開条件: 上記G2 gateの証跡取得 → R10がM PASS判定 → 本番release gate。
 
 ## M / 本番gateと再開条件
 

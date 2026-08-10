@@ -55,6 +55,13 @@
   紛争防止・差異通知・性別/年齢/雇用期間・無期/60歳区分など）は、それらの行を作成する実装が
   存在しないためT064では出力せず、**T066（M）で履歴連携と共に全項目化**する。
   template versionは`m_system_config`の`compliance.template.<TYPE>.version`（既定1）。
+  - **T066 Mでの最終化（R18）**: worker snapshot由来項目（性別・年齢区分・雇用期間種別/期間・
+    無期雇用flag・60歳以上flag・労働者制限種別）は、`t_contract_compliance_worker_snapshot`が
+    存在する場合に派遣元管理台帳へ出力する（`ComplianceDocumentGenerator`のworker引数。
+    worker snapshot未作成時は出力しない）。**履歴table由来項目（苦情処理状況・キャリアconsulting・
+    教育訓練・紹介予定・紛争防止・差異通知）は、当該履歴を作成する書き込み経路が本specの実装範囲に
+    存在しないため、受入対象外としてGATE-T066-HISTORYに記録する**（既存の反復履歴tableはT061で
+    整備済み。書き込み経路は別spec/将来実装）。
 - **当事者（派遣元=自社）** は`company.name`/`company.address`/`company.representative`
   （m_system_config）をsnapshot化して出力する。自社マスタが未実装のためconfigを正とする。
 

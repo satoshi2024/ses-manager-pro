@@ -16,6 +16,7 @@ import com.ses.entity.DocumentVersion;
 import com.ses.mapper.ComplianceFindingMapper;
 import com.ses.mapper.ContractComplianceProfileMapper;
 import com.ses.mapper.ContractComplianceSnapshotMapper;
+import com.ses.mapper.ContractComplianceWorkerSnapshotMapper;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.DocumentAccessLogMapper;
 import com.ses.mapper.DocumentDeliveryMapper;
@@ -61,6 +62,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final ContractService contractService;
     private final ContractComplianceProfileMapper profileMapper;
     private final ContractComplianceSnapshotMapper snapshotMapper;
+    private final ContractComplianceWorkerSnapshotMapper workerSnapshotMapper;
     private final ComplianceSnapshotWriter snapshotWriter;
     private final ComplianceDocumentGenerator documentGenerator;
     private final DocumentService documentService;
@@ -121,9 +123,10 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         String engineerName = contract.getEngineerId() == null ? null
                 : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
+        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract);
         // archive正本は常にFULLで生成する（R4.2）。download時にviewer roleで再maskする。
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, request.getDocumentType(), "FULL", engineerName);
+                contract, snapshot, request.getDocumentType(), "FULL", engineerName, workerSnapshot);
         byte[] pdf = documentGenerator.toPdf(content, messageSource);
 
         com.ses.dto.document.DocumentRegisterRequest registerRequest =
@@ -226,8 +229,22 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
         String viewerMask = maskLevel();
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName);
+                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName, workerSnapshot(contract));
         return documentGenerator.toPdf(content, messageSource);
+    }
+
+    /** 契約の要員の最新worker snapshot（無ければnull）。 */
+    private com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot(Contract contract) {
+        if (contract.getEngineerId() == null) {
+            return null;
+        }
+        List<com.ses.entity.ContractComplianceWorkerSnapshot> list = workerSnapshotMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ContractComplianceWorkerSnapshot>()
+                        .eq(com.ses.entity.ContractComplianceWorkerSnapshot::getContractId, contract.getId())
+                        .eq(com.ses.entity.ContractComplianceWorkerSnapshot::getWorkerId, contract.getEngineerId())
+                        .orderByDesc(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotVersion)
+                        .last("LIMIT 1"));
+        return list.isEmpty() ? null : list.get(0);
     }
 
     // ===== 共通 =====

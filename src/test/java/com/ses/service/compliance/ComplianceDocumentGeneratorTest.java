@@ -78,7 +78,7 @@ class ComplianceDocumentGeneratorTest {
     @Test
     void 就業条件明示書はFULLで全行sensitive値を含みMASKでは待遇保険苦情がマスクされる() {
         ComplianceDocumentGenerator.Content full = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "FULL", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "FULL", "山田太郎", null);
         assertThat(full.titleKey()).isEqualTo("doc.title.EMPLOYMENT_CONDITIONS_STATEMENT");
         assertThat(rows(full, "doc.section.wage"))
                 .extracting(row -> row.value())
@@ -102,7 +102,7 @@ class ComplianceDocumentGeneratorTest {
                 .contains("2029-01-01", "2027-01-01");
 
         ComplianceDocumentGenerator.Content masked = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "MASK", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "MASK", "山田太郎", null);
         assertThat(rows(masked, "doc.section.wage"))
                 .extracting(row -> row.value())
                 .containsOnly("—");
@@ -136,13 +136,13 @@ class ComplianceDocumentGeneratorTest {
     @Test
     void 派遣元管理台帳はworker氏名がsensitiveとしてマスクされる() {
         ComplianceDocumentGenerator.Content full = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "FULL", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "FULL", "山田太郎", null);
         assertThat(rows(full, "doc.section.worker"))
                 .extracting(row -> row.value())
                 .contains("山田太郎");
 
         ComplianceDocumentGenerator.Content masked = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "MASK", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "MASK", "山田太郎", null);
         assertThat(rows(masked, "doc.section.worker"))
                 .filteredOn(row -> row.labelKey().equals("doc.workerName"))
                 .extracting(row -> row.value())
@@ -155,16 +155,43 @@ class ComplianceDocumentGeneratorTest {
     }
 
     @Test
+    void 派遣元管理台帳はworkerSnapshot由来項目を出力する() {
+        com.ses.entity.ContractComplianceWorkerSnapshot worker = new com.ses.entity.ContractComplianceWorkerSnapshot();
+        worker.setGender("男性");
+        worker.setAgeBand("60歳以上");
+        worker.setEmploymentTermType("有期");
+        worker.setEmploymentFrom(LocalDate.of(2025, 4, 1));
+        worker.setEmploymentTo(LocalDate.of(2026, 3, 31));
+        worker.setIndefiniteWorkerFlag(0);
+        worker.setAgeOver60Flag(1);
+        worker.setWorkerRestrictionType("無");
+
+        ComplianceDocumentGenerator.Content content = generator.build(contract(), snapshot(),
+                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "FULL", "山田太郎", worker);
+        assertThat(rows(content, "doc.section.worker"))
+                .extracting(row -> row.value())
+                .contains("男性", "60歳以上", "有期", "2025-04-01", "2026-03-31", "×", "○", "無");
+
+        // worker snapshot由来項目はsensitive（MASKでマスク）
+        ComplianceDocumentGenerator.Content masked = generator.build(contract(), snapshot(),
+                ComplianceDocumentGenerator.TYPE_DISPATCH_LEDGER, "MASK", "山田太郎", worker);
+        assertThat(rows(masked, "doc.section.worker"))
+                .filteredOn(row -> row.labelKey().equals("doc.workerGender"))
+                .extracting(row -> row.value())
+                .containsExactly("—");
+    }
+
+    @Test
     void 派遣先通知書と個別契約書も構成される() {
         ComplianceDocumentGenerator.Content notice = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_DISPATCH_NOTICE, "FULL", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_DISPATCH_NOTICE, "FULL", "山田太郎", null);
         assertThat(notice.titleKey()).isEqualTo("doc.title.DISPATCH_NOTICE");
         assertThat(rows(notice, "doc.section.responsible"))
                 .extracting(row -> row.value())
                 .contains("田中指揮", "鈴木責任", "佐藤自社");
 
         ComplianceDocumentGenerator.Content individual = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_INDIVIDUAL_CONTRACT, "FULL", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_INDIVIDUAL_CONTRACT, "FULL", "山田太郎", null);
         assertThat(individual.titleKey()).isEqualTo("doc.title.INDIVIDUAL_CONTRACT");
         assertThat(rows(individual, "doc.section.quasi"))
                 .extracting(row -> row.value())
@@ -174,13 +201,13 @@ class ComplianceDocumentGeneratorTest {
     @Test
     void 未知の帳票種別はIllegalArgumentException() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> generator.build(contract(), snapshot(), "UNKNOWN_TYPE", "FULL", "山田太郎"));
+                () -> generator.build(contract(), snapshot(), "UNKNOWN_TYPE", "FULL", "山田太郎", null));
     }
 
     @Test
     void toPdfは日本語PDFバイト列を返す() {
         ComplianceDocumentGenerator.Content content = generator.build(contract(), snapshot(),
-                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "FULL", "山田太郎");
+                ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "FULL", "山田太郎", null);
         byte[] pdf = generator.toPdf(content, null);
         assertThat(pdf).isNotEmpty();
         assertThat(new String(pdf, java.nio.charset.StandardCharsets.ISO_8859_1))

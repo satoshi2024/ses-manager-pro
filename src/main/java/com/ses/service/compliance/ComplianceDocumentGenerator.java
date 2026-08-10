@@ -57,10 +57,12 @@ public class ComplianceDocumentGenerator {
     /**
      * snapshotから帳票内容を構築する。
      *
-     * @param engineerName 派遣労働者氏名（ledger用。worker snapshot未作成時は契約要員名）
+     * @param engineerName   派遣労働者氏名（ledger用。worker snapshot未作成時は契約要員名）
+     * @param workerSnapshot worker snapshot（任意。存在すればworker固有項目を出力する）
      */
     public Content build(Contract contract, ContractComplianceSnapshot snapshot, String documentType,
-                         String maskLevel, String engineerName) {
+                         String maskLevel, String engineerName,
+                         com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot) {
         if (!DOCUMENT_TYPES.contains(documentType)) {
             throw new IllegalArgumentException("unknown document type: " + documentType);
         }
@@ -68,7 +70,7 @@ public class ComplianceDocumentGenerator {
         List<Section> sections = switch (documentType) {
             case TYPE_EMPLOYMENT_CONDITIONS -> employmentConditions(snapshot, masked);
             case TYPE_DISPATCH_NOTICE -> dispatchNotice(snapshot, masked);
-            case TYPE_DISPATCH_LEDGER -> dispatchLedger(contract, snapshot, masked, engineerName);
+            case TYPE_DISPATCH_LEDGER -> dispatchLedger(contract, snapshot, masked, engineerName, workerSnapshot);
             case TYPE_INDIVIDUAL_CONTRACT -> individualContract(snapshot, masked);
             default -> List.of();
         };
@@ -235,12 +237,25 @@ public class ComplianceDocumentGenerator {
     }
 
     private List<Section> dispatchLedger(Contract contract, ContractComplianceSnapshot s, boolean masked,
-                                         String engineerName) {
+                                         String engineerName,
+                                         com.ses.entity.ContractComplianceWorkerSnapshot worker) {
         List<Section> sections = new ArrayList<>();
-        sections.add(section("doc.section.worker", List.of(
-                row("doc.workerName", engineerName, true),
-                row("doc.contractNo", s.getContractNo(), false),
-                row("doc.period", period(s.getDispatchFrom(), s.getDispatchTo()), false))));
+        List<Row> workerRows = new ArrayList<>();
+        workerRows.add(row("doc.workerName", engineerName, true));
+        workerRows.add(row("doc.contractNo", s.getContractNo(), false));
+        workerRows.add(row("doc.period", period(s.getDispatchFrom(), s.getDispatchTo()), false));
+        if (worker != null) {
+            // worker snapshot由来項目（T066 Mで帳票全項目化。worker snapshot未作成時は出力しない）
+            workerRows.add(row("doc.workerGender", worker.getGender(), true));
+            workerRows.add(row("doc.workerAgeBand", worker.getAgeBand(), true));
+            workerRows.add(row("doc.workerEmploymentTerm", worker.getEmploymentTermType(), true));
+            workerRows.add(row("doc.workerEmploymentFrom", date(worker.getEmploymentFrom()), true));
+            workerRows.add(row("doc.workerEmploymentTo", date(worker.getEmploymentTo()), true));
+            workerRows.add(row("doc.workerIndefinite", flag(worker.getIndefiniteWorkerFlag()), true));
+            workerRows.add(row("doc.workerOver60", flag(worker.getAgeOver60Flag()), true));
+            workerRows.add(row("doc.workerRestriction", worker.getWorkerRestrictionType(), true));
+        }
+        sections.add(section("doc.section.worker", workerRows));
         sections.add(section("doc.section.work", List.of(
                 row("cpp.workDescription", s.getWorkDescription(), false),
                 row("cpp.workDayCode", s.getWorkDayCode(), false),

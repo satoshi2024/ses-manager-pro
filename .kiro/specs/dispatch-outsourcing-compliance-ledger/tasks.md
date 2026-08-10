@@ -87,7 +87,7 @@
     冪等（同一期限・同一段階で1回）、例外承認の期限切れでOPENへ戻ること。
   - **Demo**: 抵触日alert→対応→解消。90日ちょうどと89日で通知段階が変わることを確認。
 
-- [ ] M. 法務受入/回帰
+- [ ] M. 法務受入/回帰（T066実装・L4全量実行済み・G2 gate未達のためPASS条件未達）
   - **Objective**: 法務fixtureの3契約について台帳とfindingが期待どおりで、
     既存のcompliance機能・契約機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
