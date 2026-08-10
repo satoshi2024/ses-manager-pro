@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 16: T060〜T064 PASS確定。T065 B2実装提出済み（R10 Round 17確認待ち）。T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 18: T060〜T065 PASS確定（T065 B2 PASS・新規R18-P1-01 fix済み）。残りT066 M（帳票全項目化＋L4全量＋G2 gate）未達、production authorizationなし`。
+
+**R10 Round 16: T060〜T064 PASS確定。T065 B2実装提出済み（R10 Round 17確認待ち）。T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし**。
 
@@ -351,6 +353,20 @@ R10 Round 16のT064 B1 PASSを受け、B2を実装した。**isolated worktree�
 **Demo証跡（L2〜L3実測）**: 抵触日alert→ack→対応中→解消、例外承認（expiresAt付き）→失効でOPENへ戻る。90日ちょうどで90日前段階、89日で追加なし（60日前段階は60日ちょうどに発火）を実測。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
 
 **境界**: V85はS10正式migration（V84）の後続列追加のみ。SecurityConfig/他機能未変更。T065 checkboxはR10確認まで未完了。production release/apply authorizationなし。
+
+## R10 Round 18 判定（2026-08-10）: T065 B2 PASS＋R18-P1-01 fix
+
+R10は`ca87e331`（T065 B2）を全328クラス1817テストの独立実行（T065系10/0/0/0、回帰996/0/0/0 skip 0、`git diff --check` exit 0）で確認し、**T065 B2 PASS**とした。design §3.2/§5.3/§5.4充足（due_date基準90/60/30段階初回のみ・dedupeKey冪等・担当営業+HR個人宛・例外失効OPEN復帰・@Version CAS・営業403・V85条件付きADD COLUMN・UI/messages×4）。
+
+フルスイート4 failureは全てRound 16 base（ca47e7f1）で再現確認済みの他track/環境起因（`project.detail.desc`・予約V99-V101衝突・VerifyLikeCi=本機低速flake）で、ca87e331非起因。skip 38は全てDocker gate（本機Docker無し。CIでは実行されskip 0契約維持）。
+
+| issue ID | violated | 根本原因と最小fix | 証跡 |
+|---|---|---|---|
+| R18-P1-01 | AllMappersSchemaSweepTest（CI失敗） | `ContractComplianceWorkerSnapshot.ageOver60Flag`のマッピング列がschema（MySQL V84・H2×2）の`age_over_60_flag`と不一致（MyBatis-Plus既定変換は`age_over60_flag`）。b9b91f9b（T061）由来・未記録だったため今回検出。**`@TableField("age_over_60_flag")`を付与**（列名統一よりentity修正が最小） | AllMappersSchemaSweepTest **119/0/0/0 PASS**（worker snapshot mapper含む全mapperのschema整合） |
+
+**task別判定**: T060〜T065 PASS確定 / **T066 M**（帳票全項目化＝履歴/worker snapshot由来項目、L4全量、G2 gate: COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視）未達。
+
+**境界**: V85追加以外のDDL変更なし。SecurityConfig/他機能未変更。T065 checkboxを`[x]`化。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 
