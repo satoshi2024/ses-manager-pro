@@ -66,7 +66,7 @@
     契約形態切替時の項目切替。
   - **Demo**: 派遣/準委任で異なる入力項目。営業・マネージャーログインで待遇欄がmaskされることを画面のdetail/list/countで確認（CSV/Excel/PDF/downloadはB1のDemo）。
 
-- [ ] B1. 法定帳票/交付/archive（T064実装提出済み・R10確認待ち）
+- [x] B1. 法定帳票/交付/archive（R10 Round 16でT064 B1 PASS・R15-P1-01〜04 VERIFIED_CLOSED）
   - **Objective**: 同一snapshotから派遣元管理台帳等を再生成でき、版差分が説明できる。
     生成物がarchiveへ保存され、交付日・交付方法・受領確認が追跡できる。
   - **実装ガイダンス**: generator/template version/delivery/受領。

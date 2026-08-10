@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 16: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS / T064 B1 PASS（P0=0/P1=0/P2=0）。R15-P1-01〜04（download再mask・party snapshot化・mapping scope・営業動線）をVERIFIED_CLOSED。T065解放可、T066 M（帳票全項目化＋G2 gate）未達、production authorizationなし`。
+
+**R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 14: T060〜T063 PASS確定。T064 B1実装提出済み（R10 Round 15確認待ち）。T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
@@ -308,6 +310,24 @@ R10 Round 15はT064 B1（`84101461`）を独立実行（135件中失敗2件は�
 **Rollback**: DDL/migration/SecurityConfig変更なし。commit revertでDB rollback不要。
 
 **境界**: T064 checkboxはR10再Review PASSまで未完了維持。再開条件: R10がR15-P1-01〜04のCLOSEを確認 → T065（B2）→ T066 M。production release/apply authorizationなし。
+
+## R10 Round 16 判定（2026-08-10）: T064 B1 PASS
+
+R10はHead `84101461` → `ca47e7f1`（12ファイル/+272/-38）をread-only＋独立実行（136件中失敗2件は既知のR10-P2-01他track起因で本delta前から同一、dispatch関連全PASS）で確認した。
+
+| issue ID | 前回 | 今回 | 検証 |
+|---|---|---|---|
+| R15-P1-01 | OPEN | **VERIFIED_CLOSED** | generateは常にFULLで正本化、downloadはsnapshotからviewer roleで再レンダリング（管理者/HR=FULL・マネージャー=MASK・営業=LIMITED）。cross-role testでFULL/MASK/LIMITEDのPDF byte差を実測（API 8件目）。scan CLEAN gate・access log維持。design §3.1に再レンダリング版≠正本の旨明記 |
+| R15-P1-02 | OPEN | **VERIFIED_CLOSED** | SnapshotWriterがcompany系config（SCHEMAS登録済み）をparty_*へsnapshot化（FM-C-01）。generatorの当事者行をdoc.party.name/address/representativeへ整合、派遣期間はdoc.periodで別出力 |
+| R15-P1-03 | OPEN | **VERIFIED_CLOSED（scope決定として受理）** | typed列由来項目を各帳票へ追加。履歴table・worker snapshot由来項目はT066（M）で履歴連携と共に全項目化（design §3.1明記）。T066の受入で網羅を再検証 |
+| R15-P1-04 | OPEN | **VERIFIED_CLOSED** | 営業は一覧＋masked（LIMITED）download可、generate/confirmはwriteとして403（design §3.1明記）。API testで実測 |
+| R10-P2-01 | P2 | 継続（統合担当追跡） | 同一2 failureのみ |
+
+**task別判定**: T060〜T063 PASS維持 / **T064 B1 PASS**（P0=0/P1=0/P2=0。冪等・版管理・正本FULL・viewer再mask・scan gate・受領確認・営業動線まで検証済み）/ T065解放可 / T066 M未着手（**T064から移管された履歴/worker由来の帳票全項目化**を含む）。
+
+**NOTE（非block・T066で検証）**: ① download再レンダリングのengineer名は現在マスタ由来（正本PDFはsnapshot固定でR1.4担保）② operation_idがserver派生（§4.1と構造差異・観測挙動はF1-SNAPSHOT-01合致）③ profileHashのBigDecimal表記感度 ④ 帳票PDFの実ブラウザ目視はM/本番gate。
+
+**境界**: DDL/migration/SecurityConfig変更なし。production release/apply authorizationなし。T064 checkboxを`[x]`化し、T065（B2）から着手可。
 
 ## M / 本番gateと再開条件
 
