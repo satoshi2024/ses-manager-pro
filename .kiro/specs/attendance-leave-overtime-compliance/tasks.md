@@ -100,7 +100,7 @@
     取消戻し・付与・営業403）、全指定回帰 **191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、
     `git diff --check` PASS。
 
-- [ ] B1. freee/provider sync
+- [x] B1. freee/provider sync
   - **Objective**: 承認/締め済みの雇用勤怠をfreeeへ冪等送信またはCSV出力でき、
     外部データはread-onlyの照合に使われる。締め済み月が外部から上書きされない。
   - **実装ガイダンス**: 本システムを正とし、外部dataはread-only照合（G6決定）。
@@ -110,6 +110,20 @@
   - **テスト要件**: L2〜L3。401 refresh 1回/429 backoff/timeout、重複送信で外部1件、
     部分失敗、**締め済み月への外部更新が拒否されfindingになること**、秘密の非ログ出力。
   - **Demo**: sandbox syncと再実行。締め済み月に外部更新を流して拒否されることを確認。
+  - **実装内容（T072完了）**: `AttendanceProvider` interface（design §3）＋`MockAttendanceProvider`
+    （`attendance.sync.provider=mock`既定、冪等キーで外部1件）＋`FreeeAttendanceProvider`
+    （`FreeeIntegrationService`のapiGet/apiPost共通基盤へ委譲。401 refresh 1回・429 backoff・
+    timeout 503・4xx retryなし・冪等キー/相関IDヘッダー・秘密非ログを実装）。
+    `AttendanceSyncService`（承認/締め済み月の冪等push・外部updated_at cursor差分pull・
+    締め済み/承認済み月への外部更新は**拒否してfinding**＝`t_overtime_followup`へ
+    warning_code='EXT_OVERWRITE_REJECTED'でUPSERT＋HR/管理者通知（dedupe key）・
+    cursor/直近結果は`m_system_config` JSON（SYSTEM_MANAGED）・timezoneは
+    `attendance.sync.timezone` tenant設定）。API run/status/export-csv（runは管理者/HR、
+    status/CSVは管理者/HR/マネージャー、scopeはdesign §5.3）。管理画面に同期カード＋JS、
+    4言語i18n。
+  - **検証（T072完了）**: 新規5 class **29/0/0/0 skip 0**（provider matrix 7・sync 8・API 7・
+    provider 3・mock 3＋JS 1）、指定回帰 **165/0/0/0 skip 0**、`git diff --check` PASS。
+    唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN）。
 
 - [ ] B2. 客先工数差異/通知
   - **Objective**: 雇用勤怠合計と契約工数の差が月次で表示され、閾値超過を理由付きで確認できる。

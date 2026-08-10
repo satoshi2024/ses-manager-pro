@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071までの実装範囲はPASS・収束。T072〜T074未着手） |
+| state | `REVIEW`（T071までの実装範囲はPASS・収束。T072実装済み・独立Review待ち。T073〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T071 fix delta `85ca62ba`＝current merged HEAD（main=origin/main、push済み）。T071のReview対話は収束完了 |
-| merge | T071までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 Round 4 fix delta再Review確認`（`85ca62ba..HEAD`、dispatch T062のみでattendance変更ゼロ） |
-| verdict | T071 fix deltaは**PASS維持**（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、NOTE-R4-01記録済み、leave 24/0/0/0、attendance/approval/overtime/integrity全green、skip 0、`git diff --check` PASS） |
+| head | T072実装 `840539da`＝current merged HEAD（main=origin/main、push済み）。T071のReview対話は収束完了 |
+| merge | T072までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
+| latest review | `R11 Round 4 fix delta再Review確認`（T071まで）。T072（`840539da`）は実装済み・独立Review待ち |
+| verdict | T071 fix deltaは**PASS維持**（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、NOTE-R4-01記録済み、leave 24/0/0/0、attendance/approval/overtime/integrity全green、skip 0、`git diff --check` PASS）。T072は実装・定向回帰済み（独立Review待ち） |
 | issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **T072（freee/provider sync）開始可**。cross-lane NOTE×3（R3-06、R4-03、R4-04）は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| next action | **T072独立Review→T073（B2. 客先工数差異/通知）着手**。cross-lane NOTE×3（R3-06、R4-03、R4-04）は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -165,6 +165,7 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 | R2-P1-02方式A fix delta | R1.1/R1.2/R3.1/R5、design §5.1.1（R3-P2-01の1択確定含む） | V91追補、V1統合、H2 2形状、entity/mapper、calculator区間intersection、service不一致400/区間不明fail-closed、UI、i18n 4言語、境界回帰、予約表V92〜V97同期 | current HEAD指定回帰**135/0/0/0 skip 0**＋migration整合36/0/0/0、`git diff --check` PASS | 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行、不一致400を実測 | 独立VERIFIED_CLOSED、実ブラウザ、paging、L4、MySQL fresh/legacy適用 | 本delta commit |
 | T071 休暇/approval統合 | R2.1/R2.2/R2.3、design §5.3/§5.4 | `t_leave_ledger`（V98）、`LeaveService`、`LeaveApprovalAdapter`（leave.request/cancel）、残数両モード、分計算（calendar所定分）、期間重複/締め済み月拒否、営業通知分岐、menu/権限seed、本人/管理画面、i18n 4言語 | 休暇系4 class **20/0/0/0 skip 0**、全指定回帰**191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、`git diff --check` PASS | 申請→承認→calendar反映（月次leave_minutes）、代理承認、外部正モードの不足許容、営業通知分岐を定向実測 | 独立Review、実ブラウザ、L4、dispatch V84修正後のfresh全経路 | 本delta commit |
 | T071 R4 fix delta（R4-P1-01/R4-P2-01/NOTE-R4-02） | R2.2（残数scope）、R5（権限外閲覧拒否）、design §5.3/§5.4 | grant/balanceの主体別scope（HR=法人・manager=組織・管理者全件・404 fail-closed）、`resubmit`（returned限定・engine委譲）、外部モード付与400拒否、UI/i18n 4言語 | 休暇系4 class **24/0/0/0 skip 0**（新規: HR他法人付与404・HR/manager残数scope・外部モード付与拒否・差戻し再提出）、全指定回帰**195/0/0/0 skip 0、BUILD SUCCESS**、`git diff --check` PASS | R4-P1-01/R4-P2-01を独立VERIFIED_CLOSED、NOTE-R4-02をFIXED（R11 Round 4 fix delta再Review、独立22 class全green、skip 0） | 実ブラウザ、L4、paging、cross-lane NOTE×3 | `85ca62ba` |
+| T072 B1 freee/provider sync | R1.3、R5、G6、G4、design §3/§5.4、platform-invariants §7 | `AttendanceProvider`＋`MockAttendanceProvider`＋`FreeeAttendanceProvider`（`FreeeIntegrationService.apiGet/apiPost`共通基盤: 401 refresh 1回/429 backoff/timeout 503/4xx retryなし/冪等キー・相関ID/秘密非ログ）、`AttendanceSyncService`（冪等push・cursor差分pull・締め済み/承認済み月拒否→`t_overtime_followup` warning_code='EXT_OVERWRITE_REJECTED' UPSERT＋HR/管理者通知・cursor/結果はm_system_config JSON・timezone tenant設定）、run/status/export-csv API、管理画面同期カード＋JS、i18n 4言語、SystemConfig SCHEMAS/SYSTEM_MANAGED_KEYS | 新規5 class **29/0/0/0 skip 0**（provider matrix 7・sync 8・API 7・provider 3・mock 3＋JS 1）、指定回帰 **165/0/0/0 skip 0**（attendance 19 class＋leave系＋migration integrity）、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN） | sandbox（mock provider）sync→再実行で外部1件（重複送信skip）、締め済み月への外部更新を流して拒否+finding（t_overtime_followup行）を`AttendanceSyncServiceTest`で実測。CSV出力（BOM付きUTF-8）も実測 | 独立Review、実ブラウザ、L4、ATT-GATE-01〜06 | `840539da` |
 
 ## 11. Round履歴
 
@@ -712,3 +713,20 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - overall verdict: **PASS（T071 fix delta）維持・収束**。P0=0 / P1=0 / P2=2 / NOTE=3
 - next task/Wave: **T072開始可（維持）**。統合担当はNOTE-R3-06/R4-03/R4-04の3件を解消後、CI相当L4×1回を実行。次spec/次WaveはS11完了（T074/M、L4）後
 - central ledger転記用短文: `R11 Round 4 fix delta再Review確認: 85ca62ba..HEADはattendance変更ゼロ（dispatch T062のみ、diff --check PASS）。前回判定（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、leave 24/0/0/0、T072開始可）を維持、新規指摘なし。台帳§1を現行判定へ転記commit済み。cross-lane NOTE×3（R3-06 dispatch、R4-03/04 scale-300）は統合担当OPEN。`
+
+### T072 completion — 2026-08-10 — 主担当実装記録
+
+- base/head: T071 fix delta `85ca62ba` → T072実装 `840539da`（rebase後。dispatch T063 `6d5e21f5`を取り込んだ後にpush済み、HEAD=origin/main）。**DDLなし**（予約外migration禁止・NOTE-R4-04でV99以降衝突中のため、cursor/結果は`m_system_config` JSON、外部レコードは既存`t_employee_attendance`のsource='freee'形状を設計上参照）
+- implementation:
+  - `AttendanceProvider` interface（design §3: push=承認/締め済みの冪等送信、pull=外部updated_at cursor差分取得）
+  - `MockAttendanceProvider`（`attendance.sync.provider=mock`既定。payload hash冪等キーで重複送信→外部1件）
+  - `FreeeAttendanceProvider`（`attendance.sync.provider=freee`。`FreeeIntegrationService.apiGet/apiPost`へ委譲 — OAuth/refresh共通基盤に401 refresh 1回・429 exponential backoff・timeout/5xx→503・4xx retryなし・Idempotency-Key/X-Correlation-IDヘッダー・秘密非ログを実装。実freee API形状は本番release gate（G4））
+  - `AttendanceSyncService`（承認/締め済み月のみpush。pullは締め済み/承認済み月への外部更新を**拒否してfinding**＝`t_overtime_followup`へwarning_code='EXT_OVERWRITE_REJECTED'でUPSERT（UNIQUEで冪等）＋管理者/HRへ通知（dedupe key）。cursor・直近結果はm_system_config JSON（SYSTEM_MANAGED）。timezoneは`attendance.sync.timezone`（既定Asia/Tokyo、直書きしない）。CSV出力はCsvUtils（UTF-8 BOM、RFC4180、scope適用））
+  - API: `POST /api/work-records/attendance/sync/run`（管理者/HRのみ）、`GET .../sync/status`（管理者/HR/マネージャー）、`GET .../sync/export-csv`（管理者/HR/マネージャー、scope適用）。管理画面（management.html）に同期カード＋JS、i18n 4バンドル
+- 逸脱と根拠（ledger記録）: 締め済み/承認済み月への外部更新拒否の「finding」は、既存`t_overtime_followup`（時間外follow-upテーブル）へwarning_code='EXT_OVERWRITE_REJECTED'で記録する。理由: 本spec内でfindingの永続化先は同テーブルが唯一（design §5.1「判定結果をt_overtime_followupへ」）であり、新規テーブルは予約外migration禁止で作れない。warning_codeで種別を区別し、UNIQUE(engineer_id, period_month, warning_code)で冪等にする。テーブル名の意味論はhealth_action_status列をNULLのまま使わないことで保全する
+- direct regression: 新規5 class **29/0/0/0 skip 0**（`FreeeIntegrationServiceApiTest` 7、`AttendanceSyncServiceTest` 8、`AttendanceSyncApiControllerTest` 7、`FreeeAttendanceProviderTest` 3、`MockAttendanceProviderTest` 3、`JsSyntaxCheckTest` 1）＋指定回帰 **165/0/0/0 skip 0**（attendance 19 class＋leave 4 class＋migration integrity 27）、`git diff --check` PASS。**唯一の既知FAIL: `MessageBundleConsistencyTest`の`project.detail.desc`（NOTE-R4-03、scale-300起因・統合担当OPEN。T072起因ではない）**
+- Demo: sandbox（mock provider）でsync→再実行。同一payloadの再送は`duplicateSkippedCount=1`（外部1件）。締め済み月へ外部更新を流すと`rejectedCount=1`かつ`t_overtime_followup`へEXT_OVERWRITE_REJECTED行が永続化され、通知dedupe keyが発行されることを`AttendanceSyncServiceTest`で実測。CSV出力はBOM付きUTF-8・ヘッダー・承認/締め済みのみを実測
+- issue state: 新規issueなし（T072起因のP0/P1/P2なし）。既存OPENはP2×2（390px実ブラウザ、paging）とNOTE×3（R3-06 dispatch、R4-03/04 scale-300、統合担当）
+- rollback: 本番未適用。`840539da`をrevertすれば本deltaを戻せる。DDL変更なし・migration不変（V83/V91/V98 checksum維持）
+- next Review handoff: R11担当は401 refresh 1回/429 backoff/timeout/4xx、重複送信で外部1件、部分失敗、締め済み月への外部更新拒否+finding、秘密の非ログ出力、営業/要員403・マネージャーrun 403・CSRFを独立再実行する。T073（B2）は独立Review後に着手可
+- ledger/central synchronization: `tasks.md` B1を`[x]`化、中央台帳S11行をT072完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
