@@ -68,15 +68,16 @@ public class AttendanceDiscrepancyServiceImpl implements AttendanceDiscrepancySe
         YearMonth target = parseMonth(month);
         int threshold = systemConfigServiceThreshold();
         Set<Long> scopedEngineerIds = scopedEngineerIds(target);
-        List<AttendanceMonth> months = attendanceMonthMapper.selectList(
-                new LambdaQueryWrapper<AttendanceMonth>()
-                        .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
-                        .orderByAsc(AttendanceMonth::getEngineerId));
+        LambdaQueryWrapper<AttendanceMonth> query = new LambdaQueryWrapper<AttendanceMonth>()
+                .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
+                .orderByAsc(AttendanceMonth::getEngineerId);
+        // R6-P2-01: scopeはSQL境界で適用する（platform-invariants §2.2。取得後のJava filter禁止）。
+        // 空集合は「該当0件」としてDB側で0件にする（id=-1 sentinel）。
         if (scopedEngineerIds != null) {
-            months = months.stream()
-                    .filter(m -> scopedEngineerIds.contains(m.getEngineerId()))
-                    .toList();
+            query.in(AttendanceMonth::getEngineerId, scopedEngineerIds.isEmpty()
+                    ? List.of(-1L) : new ArrayList<>(scopedEngineerIds));
         }
+        List<AttendanceMonth> months = attendanceMonthMapper.selectList(query);
         if (months.isEmpty()) {
             return AttendanceDiscrepancyDto.empty(month, threshold);
         }

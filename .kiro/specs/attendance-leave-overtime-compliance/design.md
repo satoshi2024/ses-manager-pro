@@ -138,6 +138,11 @@ V91は`t_employee_attendance_break`専用であり、S12〜S17はV92〜V97へ繰
 - **客先工数との非連動**（R4.2）: 差異表示はread-only DTO。
   `WorkRecordServiceImpl`の金額計算・請求ロジックへ一切接続しない。
   差異を確認・理由保存しても請求金額は変わらないことをtestで固定する。
+  理由保存は`m_system_config` JSON（`attendance.discrepancy.confirmed`）のみへ書込み、
+  work record系テーブルは変更しない。
+- **差異の閾値境界（R6-NOTE-01で確定）**: `overThreshold := |雇用勤怠 − 契約工数| >= threshold`
+  （`attendance.discrepancy.threshold-minutes`、既定480分）。**ちょうどは超過**（確認・通知が必要）。
+  fixture: 479分=以内 / 480分=超過 / 481分=超過。
 - 休暇残数が外部正の場合、残数不足でも**申請を拒否しない**（参照表示のみ、R2.2）。
   本システム正の場合のみ残数CASで不足を拒否する。
 

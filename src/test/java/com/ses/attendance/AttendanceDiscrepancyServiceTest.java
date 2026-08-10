@@ -261,4 +261,66 @@ class AttendanceDiscrepancyServiceTest {
         AttendanceDiscrepancyDto pending2 = discrepancyService.pendingWarnings("2026-08");
         assertEquals(0, pending2.getItems().size(), "確認済みはwarning対象外");
     }
+
+    private long insertOtherLegalEntityMonth() {
+        // 他法人（73002）の要員・monthを追加し、そのengineerIdを返す
+        String name = "T073C-" + System.nanoTime();
+        String code = "T073C-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
+                + "VALUES (1, 73002, ?, ?, '部門', '2026-01-01', '有効')", code, name);
+        long otherOrgId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+                name, otherOrgId);
+        long otherEngineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
+        AttendanceMonth other = new AttendanceMonth();
+        other.setEngineerId(otherEngineerId);
+        other.setLegalEntityId(73002L);
+        other.setOrganizationId(otherOrgId);
+        other.setWorkMonth(LocalDate.of(2026, 8, 1));
+        other.setScheduledMinutes(14400);
+        other.setWorkedMinutes(24000);
+        other.setRegularMinutes(24000);
+        other.setOvertimeMinutes(0);
+        other.setHolidayMinutes(0);
+        other.setLateNightMinutes(0);
+        other.setLeaveMinutes(0);
+        other.setStatus("締め済");
+        other.setVersion(0);
+        attendanceMonthMapper.insert(other);
+        return otherEngineerId;
+    }
+
+    @Test
+    void HRのlistはscope外の法人をSQL境界で除外する() {
+        // R6-P2-01: scopeはSQL境界で適用され、他法人のmonth行はSELECT自体から除外される
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (93101, 'hr-t073b', 'x', 'HR', 'HR', 1)");
+        jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from, deleted_flag) "
+                + "VALUES (93101, ?, 1, '2026-01-01', 0)", organizationId);
+        authenticate(93101L, "HR");
+        insertMonth(24000, "2026-08", "締め済");
+        insertContract(380);
+        insertOtherLegalEntityMonth();
+
+        AttendanceDiscrepancyDto dto = discrepancyService.list("2026-08");
+        assertEquals(1, dto.getItems().size(), "他法人のmonth行はSELECTから除外される（SQL境界）");
+        assertEquals(engineerId, dto.getItems().get(0).getEngineerId());
+    }
+
+    @Test
+    void マネージャーのlistは組織scope内だけを返す() {
+        // manager: 自組織（organizationId）の要員のみ。他組織の要員はSQL境界で除外
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (93301, 'mgr-t073', 'x', 'MGR', 'マネージャー', 1)");
+        jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from, deleted_flag) "
+                + "VALUES (93301, ?, 1, '2026-01-01', 0)", organizationId);
+        authenticate(93301L, "マネージャー");
+        insertMonth(24000, "2026-08", "締め済");
+        insertContract(380);
+        insertOtherLegalEntityMonth();
+
+        AttendanceDiscrepancyDto dto = discrepancyService.list("2026-08");
+        assertEquals(1, dto.getItems().size(), "他組織の要員はSQL境界で除外される");
+        assertEquals(engineerId, dto.getItems().get(0).getEngineerId());
+    }
 }
