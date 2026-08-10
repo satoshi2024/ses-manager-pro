@@ -934,7 +934,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V99
+- Migration: V105
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 - 期待するtask順: F1→F2→(A1 || B1 || B2)→M
@@ -1022,7 +1022,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V100
+- Migration: V106
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M
@@ -1113,7 +1113,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V101
+- Migration: V107
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 - 期待するtask順: F1→(A1 || A2 || B1 || B2)→M

@@ -50,7 +50,7 @@ class FlywayV80RepairSmokeTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_v80_repair")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     @Test

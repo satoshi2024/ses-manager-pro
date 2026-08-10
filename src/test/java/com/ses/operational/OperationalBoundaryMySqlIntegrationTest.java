@@ -92,7 +92,7 @@ class OperationalBoundaryMySqlIntegrationTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_operational_boundary")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     @DynamicPropertySource
