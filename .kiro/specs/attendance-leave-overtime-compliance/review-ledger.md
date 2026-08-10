@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071までPASS・収束、T072独立Review **PASS**（R5-P2-01/02 FIXED）、**R5-P1-01 FIXED_BY_IMPLEMENTER・独立再Review待ち**、T073〜T074未着手） |
+| state | `REVIEW`（T071までPASS・収束、T072独立Review **PASS**（R5-P1-01 VERIFIED_CLOSED、R5-P2-01/02 FIXED、R5-P2-03 OPEN）、T073〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T072 R5-P1-01 fix delta `1582d96`＝current merged HEAD（main=origin/main、push済み） |
+| head | T072 R5-P1-01 fix delta `a955aa3`＝current merged HEAD（main=origin/main、push済み） |
 | merge | T072までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 Round 5 fix delta再Review`（`c750fcb3`/`ba5625f3`）。R5-P1-01 fix delta（`1582d96`）は独立再Review待ち |
-| verdict | T072は**PASS**（R5-P2-01/02 FIXED）。R5-P1-01（syncPull caller scope漏れ・P1）は`1582d96`で修正済み（FIXED_BY_IMPLEMENTER） |
-| issue count | `P0=0 / P1=1（R5-P1-01 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ P2=4（R2-P2-01, R2-P2-02, R5-P2-01, R5-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **R5-P1-01の独立VERIFIED_CLOSEDまでT073開始不可**（fix delta＋direct regression提出済み）。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02・R5-P2-01/02はT074/Mで再評価 |
+| latest review | `R11 R5-P1-01 fix delta再Review`（`1582d96`/`a955aa3`）。**R5-P1-01 VERIFIED_CLOSED**、新規R5-P2-03（cursor×scope外）OPEN |
+| verdict | T072は**PASS**（P0=0/P1=0/P2=3/NOTE=3）。R5-P1-01 VERIFIED_CLOSED。R5-P2-03（cursorがscope外レコードでも前進し多法人で後続HRの拒否・照合が黙ってスキップされ得る）はT073着手時にpull運用方針と合わせてfix推奨（P2のためT073開始を止めない） |
+| issue count | `P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R5-P2-03）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
+| next action | **T073（B2. 客先工数差異/通知）着手可**。R5-P2-03はT073着手時にpullのグローバル/スコープ運用方針と合わせてfixし、design/tasksへ明記。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02・R5-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -30,7 +30,8 @@
 | attendance-leave-overtime-compliance-NOTE-R4-04 | NOTE | scale-300採番調整（attendance起因ではない。repo L4/CIを破壊中） | `SpecDispatchConsistencyTest`、予約表 | scale-300が`V101__remove_unimplemented_menu_routes.sql`を実在化し、S13=V100/S14=V101予約と衝突（attendanceのf26da9f0繰上げ後に他laneが採番） | `SpecDispatchConsistencyTest`がFAIL（`reserved <= latest`拒否）し、repo L4/CIがRED | 予約表を再繰上げ（S13/S14以降を最新実在V101以上へ）し、S11〜S17の全派工資料・`SpecDispatchConsistencyTest`を同期 | `SpecDispatchConsistencyTest`、CI相当L4 | OPEN（統合担当へ引き継ぎ） | scale-300採番commit | 統合担当の修正commit時 |
 | attendance-leave-overtime-compliance-R5-P2-01 | P2 | tasks.md B1「timezoneはtenant設定（design §3）」 | `AttendanceSyncServiceImpl.java:61,73`（`CONFIG_TIMEZONE`）、`ZoneId` import未使用 | `attendance.sync.timezone`は設定登録のみで**読み取りコードが存在しない**（dead constant）。cursorの`updated_at`は文字列辞書順比較でtimezone semanticsなし | 外部providerがtimezone付きISOを返すとcursor前進・比較がずれる可能性。現行はmock既定・freeeはG4 provisionalのため即時影響なし | timezone設定をcursor正規化（zone付きparse）へ実装するか、javadoc/完了記録の虚偽主張を削除しG4 gateへ明示延期 | timezone正規化のboundary（zoneなし/zone付き/不正値）、cursor再実行 | **FIXED_BY_IMPLEMENTER**（`c750fcb3`: `tenantZone()`+`normalizeUpdatedAt()`でzoneなしをtenant timezone解釈・zone付きはInstant正規化して比較・保存。mapper直読みで同一tx整合） | `c750fcb3` | 独立再Review（R11） |
 | attendance-leave-overtime-compliance-R5-P2-02 | P2 | tasks.md B1「外部データはread-onlyの照合に使われる」 | `AttendanceSyncServiceImpl.java:169-176`（pull） | pullはfetch→pulledCount加算→締め済み/承認済み上書き拒否のみで、**非締め月レコードは取得後破棄**（比較・差異の保存/表示なし） | 「照合」の実体が無く外部データを活かせない（安全側の拒否は実装済み） | 照合対象の保存または差異DTO化（T073の範囲と明確に線引きして実装） | 照合の一致/差異/該当なし集計、差異サンプル上限、read-only不変、T073差異表示との線引き | **FIXED（検証済み）**（`c750fcb3`: 外部レコードと本システム日次（manual/system）を比較し`matchedCount`/`diffCount`/`unmatchedCount`＋差異サンプル（最大20件）を`AttendanceSyncResultDto`へ追加。DB登録はしない。status API・管理画面UIで表示。T073（客先工数差異）とは別物として線引き。R5 fix delta再Reviewで実assert確認） | `c750fcb3` | R11 Round 5 fix delta再Review |
-| attendance-leave-overtime-compliance-R5-P1-01 | P1 | T070 Objective・design §5.3・R5、platform-invariants §2 | `AttendanceSyncServiceImpl.java:117-155`（syncPull） | HR-Aが法人Bの要員の外部レコードをpull。`rejectExternalUpdate`（:140）が任意法人の締め済み/承認済み月へfinding書込＋通知し、`reconcile`（:145）が他法人要員の日次勤怠PII（出退勤・各分・engineerId・workDate）を結果DTOへ返却 | 他法人要員のPII漏洩と誤finding書込（R4-P1-01と同じ根本原因クラスがpull経路に残存） | syncPullへcaller scope境界（管理者=全件/HR=担当法人/マネージャー=組織scope）を適用し、reject/reconcileを同一境界に統一。scope外・要員未解決レコードはskip | HR A→A処理/A→B skip、finding書込なし・PII非返却、管理者全件、マネージャー組織scope | **FIXED_BY_IMPLEMENTER**（`1582d96`: `pullScopeEngineerIds()`を追加し、管理者=null（全件）、HR=`allowedHrEngineerIds`（対象月末asOf）、マネージャー=`hasFullAccess`先判定＋`allowedEngineerIds`（対象月末asOf）、営業・要員は403。syncPullで要員未解決・scope外レコードはreject/reconcileともskip。HR A→A拒否/A→B skip・finding書込なし・PII非返却、管理者全件をfixture実assert） | `1582d96` | 独立再Review（R11） |
+| attendance-leave-overtime-compliance-R5-P1-01 | P1 | T070 Objective・design §5.3・R5、platform-invariants §2 | `AttendanceSyncServiceImpl.java:117-155`（syncPull） | HR-Aが法人Bの要員の外部レコードをpull。`rejectExternalUpdate`（:140）が任意法人の締め済み/承認済み月へfinding書込＋通知し、`reconcile`（:145）が他法人要員の日次勤怠PII（出退勤・各分・engineerId・workDate）を結果DTOへ返却 | 他法人要員のPII漏洩と誤finding書込（R4-P1-01と同じ根本原因クラスがpull経路に残存） | syncPullへcaller scope境界（管理者=全件/HR=担当法人/マネージャー=組織scope）を適用し、reject/reconcileを同一境界に統一。scope外・要員未解決レコードはskip | HR A→A処理/A→B skip、finding書込なし・PII非返却、管理者全件、マネージャー組織scope | **VERIFIED_CLOSED**（`1582d96`を独立検証: `pullScopeEngineerIds`（管理者=全件、HR=`allowedHrEngineerIds`月末asOf、マネージャー=組織scope・hasFullAccess先判定、その他403）＋scope外・要員未解決はreject/reconcile前にskip（:123,141-149）。test: HR-Aが自法人締め済み更新のみ拒否（rejectedCount=1）、他法人要員のfinding不書込（findingB=null）、管理者は全要員処理を実assert。read-only・PII/finding漏れは解消） | `1582d96` | R11 R5-P1-01 fix delta再Review |
+| attendance-leave-overtime-compliance-R5-P2-03 | P2 | tasks.md B1「締め済み月が外部から上書きされない」「黙って無視もしない」、design §5.4 | `AttendanceSyncServiceImpl.java:133-137,146-149,162-163`（syncPull） | **cursorがscope外レコードでも前進する**。`maxUpdatedAt`（:133-137）はscope skip（:146-149）より前に全レコードで更新され、単一グローバルcursor（`attendance.sync.freee.cursor`）へ保存（:162-163）。多法人DBでHR-Aが先にpullすると、HR-B配下要員のレコード分もcursorが進み、**HR-Bの後続pullでは該当レコードを取得できず、HR-B配下の締め済み月外部更新の拒否・照合が黙ってスキップされる** | 「黙って無視」になる（締め済み拒否の完全性がpull順に依存） | ①cursorをscope内レコードだけで前進、②legal entity別cursor keyへ分割、③pullをグローバル/system principalで実行し結果表示のみscope——のいずれかを決定表・設計で確定して実装 | HR-A→HR-Bの順序でpull、法人別cursor、締め済み拒否の他法人到達性 | OPEN（T073着手時にpullのグローバル/スコープ運用方針と合わせてfix推奨。P2のためT073開始を止めない） | — | T073着手時 |
 
 ## 3. Closed/Deferred Issue
 
@@ -775,3 +776,14 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - issue state: `R5-P1-01=FIXED_BY_IMPLEMENTER / independent re-review requested`（T073開始不可は維持）。`R5-P2-01=FIXED（検証済み）`、`R5-P2-02=FIXED（検証済み）`
 - rollback: 本番未適用。`1582d96`をrevertすれば本deltaを戻せる。DDL変更なし
 - next Review handoff: R11担当はHR A→A処理/A→B skip（finding書込なし・PII非返却）、管理者全件、マネージャー組織scope、要員未解決skip、営業/要員403を独立再実行し、R5-P1-01をVERIFIED_CLOSEDにする。T073（B2）は独立再Review後に着手可
+
+### R5-P1-01 fix delta再Review — 2026-08-10 — R11担当
+
+- review target: delta=`1582d96`（syncPull caller scope）＋`a955aa3`（転記）
+- independent evidence: 独立実行（29 class）**218 tests / 1 failure（既知NOTE-R4-03のみ）/ 0 errors / 0 skipped**、BUILD SUCCESS。`AttendanceSyncServiceTest` **12/0/0/0**（+2: HR scope・管理者全件）
+- result: `R5-P1-01=VERIFIED_CLOSED` — `pullScopeEngineerIds`（管理者=全件、HR=`allowedHrEngineerIds`月末asOf、マネージャー=組織scope・hasFullAccess先判定、その他403）を適用し、要員未解決・scope外レコードはreject/reconcile前にskip（`AttendanceSyncServiceImpl.java:123,141-149`）。test: HR-Aが自法人締め済み更新のみ拒否（rejectedCount=1）、他法人要員のfinding不書込（findingB=null）、管理者は全要員処理を実assert。read-only・PII/finding漏れは解消
+- new issue: **`R5-P2-03`（P2）** — cursorがscope外レコードでも前進する。`maxUpdatedAt`（:133-137）はscope skip（:146-149）より前に全レコードで更新され、単一グローバルcursor（`attendance.sync.freee.cursor`）へ保存（:162-163）。多法人DBでHR-Aが先にpullすると、HR-B配下要員のレコード分もcursorが進み、**HR-Bの後続pullでは該当レコードを取得できず、HR-B配下の締め済み月外部更新の拒否・照合が黙ってスキップされる**（「黙って無視」になる）。最小修正: ①cursorをscope内レコードだけで前進、②legal entity別cursor keyへ分割、③pullをグローバル/system principalで実行し結果表示のみscope——のいずれかを決定表・設計で確定して実装
+- cross-cutting: scope/security **PASS**（R5-P1-01解消。push/CSV/pull/statusすべて主体別境界が一致）。cursor/拒否の完全性 **P2**（多法人でpull順に依存する拒否漏れ）。回帰は全sync/attendance/leave/approval green、skip 0
+- overall verdict: **PASS（T072 fix delta）**。P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R5-P2-03）/ NOTE=3（cross-lane）
+- next task/Wave: **T073（B2 客先工数差異/通知）開始可**。R5-P2-03（cursorとscope外レコードの扱い）はT073着手時に、pullのグローバル/スコープ運用方針と合わせてfixを推奨（P2のため開始を止めない）。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、CI相当L4×1回。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 R5-P1-01 fix delta再Review: 1582d96を独立検証——pullScopeEngineerIds（管理者全件/HR法人/manager組織・asOf）＋scope外skipでreject/reconcile母集団を統一し、HR-A→A拒否/B finding不書込・管理者全件を実assert。R5-P1-01 VERIFIED_CLOSED。新規P2: R5-P2-03——cursorがscope外レコードでも前進し、多法人で後続HRの締め済み拒否・照合が黙ってスキップされ得る（:133-137 vs :146-149の順序）。218件中FAILはcross-lane NOTE-R4-03のみ。P0=0/P1=0/P2=3/NOTE=3。T073開始可。`
