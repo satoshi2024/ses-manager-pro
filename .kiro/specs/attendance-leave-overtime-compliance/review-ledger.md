@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `FIX / REVIEW`（T070までの実装範囲はPASS。T071〜T074未着手） |
+| state | `REVIEW`（T071までの実装範囲はPASS・収束。T072〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T070方式A delta＋T071休暇/approval統合実装＝committed Head（本delta commit、push予定）。T070のReview対話は収束完了 |
-| merge | T070までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み |
-| latest review | `R11 Round 3収束（T070まで）`。T071（A2）は実装済み・独立Review待ち |
-| verdict | T070までの実装範囲は**PASS・収束**。T071は実装・直接回帰済み（**独立Review待ち**） |
-| issue count | `P0=0 / P1=1（R4-P1-01 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ P2=3（R2-P2-01, R2-P2-02, R4-P2-01 FIXED_BY_IMPLEMENTER）/ NOTE=3（R3-06, R4-01, R4-02 FIXED_BY_IMPLEMENTER）` |
-| next action | **R4-P1-01の独立VERIFIED_CLOSEDまでT072開始不可**（fix delta＋direct regression提出済み）。R4-P2-01（差戻し再提出）・NOTE-R4-02（外部モード付与拒否）も実装済み。NOTE-R4-01（leave routeの管理者設定）は運用設定手順として記録 |
+| head | T071 fix delta `85ca62ba`＝current merged HEAD（main=origin/main、push済み）。T071のReview対話は収束完了 |
+| merge | T071までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
+| latest review | `R11 Round 4 fix delta再Review確認`（`85ca62ba..HEAD`、dispatch T062のみでattendance変更ゼロ） |
+| verdict | T071 fix deltaは**PASS維持**（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、NOTE-R4-01記録済み、leave 24/0/0/0、attendance/approval/overtime/integrity全green、skip 0、`git diff --check` PASS） |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
+| next action | **T072（freee/provider sync）開始可**。cross-lane NOTE×3（R3-06、R4-03、R4-04）は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -26,6 +26,8 @@
 | attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
 | attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
 | attendance-leave-overtime-compliance-NOTE-R3-06 | NOTE | dispatch統合調整（attendance欠陥ではない） | `FlywayMigrationSmokeTest.java:37-40`（ses user container）、dispatch新V84（`b9b91f9`、trigger/function作成） | dispatch V84 R5 merge後のtreeで`FlywayMigrationSmokeTest` fresh V1→latestが**Error 1419**（binary logging有効かつses userにSUPERなしでtrigger作成失敗）。dispatch自身の`FlywayDispatchComplianceSchemaSmokeTest`はroot userのためPASS | 共有fresh経路が全repoで壊れ、CI相当L4・`mvn test`（Docker有）が失敗する | dispatchレーンが`FlywayMigrationSmokeTest`のcontainerへ`log_bin_trust_function_creators`相当の設定を追加するか、V84のtrigger/functionを回避 | fresh MySQL全経路、`FlywayMigrationSmokeTest`、V84 R5 merge後のCI相当L4 | OPEN（dispatchレーンへ引き継ぎ） | `b9b91f9`（導入元） | dispatch側の修正commit時 |
+| attendance-leave-overtime-compliance-NOTE-R4-03 | NOTE | scale-300統合調整（attendance起因ではない。repo L4/CIを破壊中） | `project.detail.desc`キー | scale-300（`0e29c555`）の`detail.html`が参照する`project.detail.desc`キーが4バンドル欠落 | `MessageBundleConsistencyTest`がFAILし、repo L4/CIがRED | `messages*.properties`へ`project.detail.desc`を追加（scale-300/統合担当） | `MessageBundleConsistencyTest`、CI相当L4 | OPEN（統合担当へ引き継ぎ） | `0e29c555`（導入元） | 統合担当の修正commit時 |
+| attendance-leave-overtime-compliance-NOTE-R4-04 | NOTE | scale-300採番調整（attendance起因ではない。repo L4/CIを破壊中） | `SpecDispatchConsistencyTest`、予約表 | scale-300が`V101__remove_unimplemented_menu_routes.sql`を実在化し、S13=V100/S14=V101予約と衝突（attendanceのf26da9f0繰上げ後に他laneが採番） | `SpecDispatchConsistencyTest`がFAIL（`reserved <= latest`拒否）し、repo L4/CIがRED | 予約表を再繰上げ（S13/S14以降を最新実在V101以上へ）し、S11〜S17の全派工資料・`SpecDispatchConsistencyTest`を同期 | `SpecDispatchConsistencyTest`、CI相当L4 | OPEN（統合担当へ引き継ぎ） | scale-300採番commit | 統合担当の修正commit時 |
 
 ## 3. Closed/Deferred Issue
 
@@ -43,23 +45,26 @@
 | attendance-leave-overtime-compliance-NOTE-R3-03 | RESOLVED | V1（`5f362fc`）へdispatch R5テーブルが混入したが、attendance欠陥ではない | `b9b91f9`（dispatch整合commit） | dispatch `b9b91f9`はV1を変更せず（V1は`5f362fc`経由で既にR5 shape）、V84 R5を本V1と整合する形でcommitし、R11が解消を確認（commit message「content landed via parallel S11 commit 5f362fc; verified identical at HEAD」） | R11 Round 3フォローアップ転記確認 | V84/V1のshapeを再度分岐させる変更時 |
 | attendance-leave-overtime-compliance-R2-P1-02 | VERIFIED_CLOSED | 休憩総分を退勤直前へ配賦し深夜・時間外が休憩位置で誤る（方式A未実装） | `5f362fc`（V91追補）＋`b65996f` | Round 3独立再Review: V91 DDL（UNIQUE(attendance_id,sequence_no)、CHECK offset、FK CASCADE）＋V1統合＋H2 2形状＋MySQL smoke。`AttendanceCalculator.validateBreaks`（重複/区間外/開始≧終了/全体超過を1箇所でfail-closed、補間なし）＋intersection算定を読解。再現case（21:00〜23:00、休憩21:00〜22:00）はworked=60/lateNight=60をservice・calculator両testで実assert。区間不明行は再保存・月次再集計とも400拒否。isolated worktree `b65996f`で171/0/0/0 skip 0、MySQL smoke 2/0/0/0、fresh全経路2/0/0/0 | R11 Round 3 独立再Review | calculator/休憩区間model/`t_employee_attendance_break`/V91のいずれかを変更した場合 |
 | attendance-leave-overtime-compliance-R3-P2-01 | VERIFIED_CLOSED | breakMinutes行が「無視または不一致として拒否」の2択を1セルに併記していた | `5f362fc` | Round 3独立再Review: design §5.1.1を「不一致は400拒否」へ1択確定し、`assertBreakMinutesMatch`＋`error.attendance.breakMinutesMismatch`で実装・test済み。区間なし`breakMinutes>0`も同一400で拒否を確認 | R11 Round 3 独立再Review | breakMinutes契約または決定表の該当行を変更した場合 |
+| attendance-leave-overtime-compliance-R4-P1-01 | VERIFIED_CLOSED | grant/balanceが法人・組織scopeなしで任意engineerを許可するIDOR | `85ca62ba` | R11 Round 4 fix delta再Review（独立検証）: `grant`はHR=`allowedHrLegalEntityIds`×対象日snapshot法人の一致のみ（不一致404）、管理者全件、`legal_entity_id`をsnapshotから設定。`balance`は管理者全件/HR=担当法人（asOf今日）/マネージャー=組織scope（`hasFullAccess`先判定＋asOf）、要員不存在・所属不明・履歴ありNULLは404 fail-closed。HR他法人付与404＋担当内許可、HR/manager他法人残数閲覧404＋担当内許可を実assert。leave 4 class 24/0/0/0 skip 0 | R11 Round 4 fix delta再Review（独立） | grant/balanceのscope契約またはAttendanceScopeResolver/asOf consumer変更時 |
+| attendance-leave-overtime-compliance-R4-P2-01 | VERIFIED_CLOSED | 差戻し後に再提出できないデッドエンド | `85ca62ba` | R11 Round 4 fix delta再Review（独立検証）: `resubmit`（本人のみ・approval status=returned時のみ）＋`POST /api/my/leave/{id}/resubmit`＋UI再提出ボタン＋4言語key。engineへpayload/diff委譲をtestでverify | R11 Round 4 fix delta再Review（独立） | resubmit契約またはapproval engineのroute再解決/CAS変更時 |
+| attendance-leave-overtime-compliance-NOTE-R4-02 | FIXED | 外部正モード（`leave.balance.source`≠internal）でもgrantが可能だった | `85ca62ba` | R11 Round 4 fix delta再Review: `leave.balance.source`≠internalではgrantを400拒否（`error.leave.grantExternalDisabled`）。未設定（判定不能）もfail-closed。外部モード付与拒否を実assert | R11 Round 4 fix delta再Review（独立） | leave.balance.source契約変更時 |
 
 ## 4. 最新Review Packet
 
 ```text
 - handbook version: v2.0
-- spec/tasks: attendance-leave-overtime-compliance / T067〜T070完了（T071〜T074未着手）
-- base/head/merge status: original `5e29f39` → T067成果`93c1ac6` → ... → T070 local実装Head`cc7c15c` → T070 R2 fix delta`1fb54d4` → snapshot consumer fix`df7f6b1` → migration decision`b75af1a` → central gate correction`7f60738` → R11独立判定Head`3891c0e` → R2-P1-02方式A実装`5f362fc` → V91予約・文書同期`b65996f` → Round 3転記`758649e`。committed Head=`758649e`=origin/main。V91 deltaの独立再Reviewはisolated worktree `b65996f`で実施（worktree未commit差分＝dispatch V84 R5 WIPを排除）
-- changed files by task: T067成果文書/台帳、T068のV1/V83、H2 replay、engineer-schema-h2、application-test.yml、7 entity/mapper、MySQL smoke、migration consistency test、T069のcalculator/協定asOf resolver/UNKNOWN finding/定向test、T070の本人/管理API・service・DTO・画面・JS・SecurityConfig・sidebar・4言語i18n・定向test、R2-P1-02方式AのV91追補/calculator区間intersection/不一致400/区間不明fail-closed/UI/i18n/境界回帰、tasks/design/source matrix、本台帳、中央台帳、予約表V92〜V97同期（S12〜S17）
-- requirements/AC trace: 最重要境界、R1.1〜R1.4、R2.1/R2.2、R3.1/R3.2/R3.4、R4.2、R5、T070のR1.1/R1.2/R1.3/R1.4/R3.3/R5、R2-P1-02方式AのR1.1/R1.2/R3.1/R5とdesign §5.1.1
-- migration state: V83不変（checksum維持）・V82永久欠番・V91実在（S11方式A追補）・V84実在（dispatch R5 reworkは未commit WIP）・S12〜S17=V92〜V97。本番適用なし
-- test evidence: R11 Round 3独立再Review（isolated worktree `b65996f`）attendance 21 class＋approval 3 class＋overtime＋integrity＋dispatch-consistency＝**171/0/0/0、skip 0**。`FlywayAttendanceSchemaSmokeTest`（V83＋V91追補を実MySQLへ）**2/0/0/0**。`FlywayMigrationSmokeTest`（fresh V1→latest 全経路・V91含む）**2/0/0/0**。主担当実装時の指定回帰135/0/0/0＋MySQL 3/0/0/0
-- Demo evidence: 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行の400拒否、breakMinutes不一致400拒否を定向実測。実ブラウザ（390px）は未実施
-- skipped/unverified: T071〜T074、L4全量、実ブラウザ（390px）、paging（R2-P2-02）、dispatch V84 R5 merge後のtree（CI相当L4×1回推奨）、法人一覧・36協定書・就業規則・法定休日曜日・勤務区分・休暇残数の正・適用除外者・HR法人の実資料突合（ATT-GATE-01〜06）
-- known issue IDs: R2-P2-01、R2-P2-02（OPEN、T071を止めない）、NOTE-R3-03（統合担当）、NOTE-R3-04/05（本roundで修正済み）。R2-P1-01〜05、R3-P2-01、R1系はVERIFIED_CLOSED
-- out-of-scope: 休暇approval（T071）、provider sync（T072）、差異通知（T073）、warning通知scheduler、M/L4（T074）
-- rollback: 本番未適用。`758649e`/`b65996f`/`5f362fc`を逆順revertすれば本deltaを戻せる。V91は新規テーブルのみ追加、V83/V84編集なし
-- requested verdict: T070までの実装範囲 **PASS**（R11 Round 3独立再Review完了、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可）
+- spec/tasks: attendance-leave-overtime-compliance / T067〜T071完了（T072〜T074未着手）
+- base/head/merge status: original `5e29f39` → ... → T071休暇実装`7981e5c` → T071完了記録`6d99658a` → R4 fix delta`85ca62ba`（＝current merged HEAD=origin/main、push済み）。R4 fix delta再Review確認（`85ca62ba..HEAD`）はattendance変更ゼロ・新規指摘なしで**PASS維持**
+- changed files by task: T067成果文書/台帳、T068のV1/V83、H2 replay、engineer-schema-h2、application-test.yml、7 entity/mapper、MySQL smoke、migration consistency test、T069のcalculator/協定asOf resolver/UNKNOWN finding/定向test、T070の本人/管理API・service・DTO・画面・JS・SecurityConfig・sidebar・4言語i18n・定向test、R2-P1-02方式AのV91追補/calculator区間intersection/不一致400/区間不明fail-closed/UI/i18n/境界回帰、T071のV98（t_leave_ledger）/LeaveService/LeaveApprovalAdapter/休暇画面/権限seed/i18n、R4 fix deltaのgrant/balance scope・resubmit・外部モード付与拒否、tasks/design/source matrix、本台帳、中央台帳、予約表V99〜V104同期（S12〜S17）
+- requirements/AC trace: 最重要境界、R1.1〜R1.4、R2.1〜R2.3、R3.1/R3.2/R3.4、R4.2、R5、T070のR1.1/R1.2/R1.3/R1.4/R3.3/R5、R2-P1-02方式AのR1.1/R1.2/R3.1/R5とdesign §5.1.1、T071のR2.1/R2.2/R2.3とdesign §5.3/§5.4
+- migration state: V83不変（checksum維持）・V82永久欠番・V91実在（S11方式A追補）・V98実在（S11休暇残数台帳、発注者割当）・V84実在（dispatch）・V101実在（scale-300、S14予約と衝突中）。S12〜S17=V99〜V104予約（NOTE-R4-04で統合担当が再繰上げ予定）。本番適用なし
+- test evidence: R11 Round 4 fix delta独立検証: leave 4 class = **24/0/0/0**（LeaveServiceTest 13＋Adapter 5＋Flow 2＋API 4）、attendance/approval/overtime/integrity含む22 class全PASS、skip 0。主担当実装時の全指定回帰195/0/0/0 skip 0、MySQL smoke 4/0/0/0（V83/V91/V98）
+- Demo evidence: R4 fix delta境界（HR他法人付与404・担当内許可、HR/manager他法人残数404・担当内許可、外部モード付与拒否、差戻し→再提出）を定向実測。実ブラウザ（390px）は未実施
+- skipped/unverified: T072〜T074、L4全量、実ブラウザ（390px）、paging（R2-P2-02）、dispatch V84修正後のfresh全経路（NOTE-R3-06）、scale-300起因のMessageBundleConsistencyTest（NOTE-R4-03）とSpecDispatchConsistencyTest（NOTE-R4-04）、法人一覧・36協定書・就業規則・法定休日曜日・勤務区分・休暇残数の正・適用除外者・HR法人の実資料突合（ATT-GATE-01〜06）
+- known issue IDs: R2-P2-01、R2-P2-02（OPEN、T072を止めない）、NOTE-R3-06（dispatch、統合担当）、NOTE-R4-03（`project.detail.desc`欠落、scale-300、統合担当）、NOTE-R4-04（V101予約衝突、scale-300採番、統合担当）。R4-P1-01/R4-P2-01はVERIFIED_CLOSED、NOTE-R4-02はFIXED、NOTE-R4-01は記録済み
+- out-of-scope: provider sync（T072）、差異通知（T073）、warning通知scheduler、M/L4（T074）
+- rollback: 本番未適用。`85ca62ba`以前の各実装commitを逆順revertすれば本deltaを戻せる。V83/V91/V98は新規テーブル・列のみ追加、既存migration編集なし
+- requested verdict: T071までの実装範囲 **PASS**（R11 Round 4 fix delta再Review確認、R4-P1-01/R4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、T072開始可）
 ```
 
 ## 5. Requirements Trace
@@ -159,6 +164,7 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 | T070 | R1.1/R1.2/R1.3/R1.4/R3.3/R5 | 本人/管理API、`AttendanceServiceImpl`、DTO、画面/JS、SecurityConfig/sidebar、4言語i18n、定向test | `AttendanceApiControllerTest` 7/0/0/0、`AttendanceWorkflowServiceTest` 1/0/0/0、UI 2/0/0/0、message 4/0/0/0、JS 1/0/0/0、navigation 2/0/0/0、合計17/0/0/0、`git diff --check` PASS | T070-D1。本人入力→提出→差戻し→再提出→承認→締め、締め後編集拒否、営業403、CSRF、390px markup | HR法人の実資料突合、実ブラウザDemo、V83適用はATT-GATE/V82後 | `cc7c15c` |
 | R2-P1-02方式A fix delta | R1.1/R1.2/R3.1/R5、design §5.1.1（R3-P2-01の1択確定含む） | V91追補、V1統合、H2 2形状、entity/mapper、calculator区間intersection、service不一致400/区間不明fail-closed、UI、i18n 4言語、境界回帰、予約表V92〜V97同期 | current HEAD指定回帰**135/0/0/0 skip 0**＋migration整合36/0/0/0、`git diff --check` PASS | 方式A境界（深夜前/中/後、跨夜、複数休憩、0分、全時間、重複、区間外、開始≧終了、8h/週40h/22時）、区間不明行、不一致400を実測 | 独立VERIFIED_CLOSED、実ブラウザ、paging、L4、MySQL fresh/legacy適用 | 本delta commit |
 | T071 休暇/approval統合 | R2.1/R2.2/R2.3、design §5.3/§5.4 | `t_leave_ledger`（V98）、`LeaveService`、`LeaveApprovalAdapter`（leave.request/cancel）、残数両モード、分計算（calendar所定分）、期間重複/締め済み月拒否、営業通知分岐、menu/権限seed、本人/管理画面、i18n 4言語 | 休暇系4 class **20/0/0/0 skip 0**、全指定回帰**191/0/0/0 skip 0**、MySQL smoke 4/0/0/0（V83/V91/V98）、`git diff --check` PASS | 申請→承認→calendar反映（月次leave_minutes）、代理承認、外部正モードの不足許容、営業通知分岐を定向実測 | 独立Review、実ブラウザ、L4、dispatch V84修正後のfresh全経路 | 本delta commit |
+| T071 R4 fix delta（R4-P1-01/R4-P2-01/NOTE-R4-02） | R2.2（残数scope）、R5（権限外閲覧拒否）、design §5.3/§5.4 | grant/balanceの主体別scope（HR=法人・manager=組織・管理者全件・404 fail-closed）、`resubmit`（returned限定・engine委譲）、外部モード付与400拒否、UI/i18n 4言語 | 休暇系4 class **24/0/0/0 skip 0**（新規: HR他法人付与404・HR/manager残数scope・外部モード付与拒否・差戻し再提出）、全指定回帰**195/0/0/0 skip 0、BUILD SUCCESS**、`git diff --check` PASS | R4-P1-01/R4-P2-01を独立VERIFIED_CLOSED、NOTE-R4-02をFIXED（R11 Round 4 fix delta再Review、独立22 class全green、skip 0） | 実ブラウザ、L4、paging、cross-lane NOTE×3 | `85ca62ba` |
 
 ## 11. Round履歴
 
@@ -683,3 +689,26 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - direct regression: 休暇系4 class **24/0/0/0 skip 0**（新規: HR他法人付与拒否・HR/manager残数閲覧scope・外部モード付与拒否・差戻し再提出）、全指定回帰 **195/0/0/0 skip 0、BUILD SUCCESS**、`git diff --check` PASS
 - issue state: `R4-P1-01=FIXED_BY_IMPLEMENTER / independent re-review requested`（T072開始不可は維持）。`R4-P2-01=FIXED_BY_IMPLEMENTER`、`NOTE-R4-02=FIXED_BY_IMPLEMENTER`、`NOTE-R4-01=運用設定手順として記録済み`
 - next Review handoff: R11担当はHR A→A許可/A→B 404、manager配下/外、履歴なし/NULL、外部モード付与拒否、差戻し→再提出を独立再実行し、R4-P1-01をVERIFIED_CLOSEDにするまでT072を開始しない
+
+### Round 4 fix delta 独立再Review — 2026-08-09 — R11担当
+
+- review target: fix delta=`85ca62ba`（R4-P1-01/R4-P2-01/NOTE-R4-02対応＋NOTE-R4-01記録）。worktree clean（当時）
+- independent evidence: `git diff --check` PASS。独立実行（22 class）**全PASS**、leave 4 class = **24/0/0/0**（LeaveServiceTest 13＋Adapter 5＋Flow 2＋API 4）、attendance/approval/overtime/integrity全green、skip 0
+- result: `R4-P1-01=VERIFIED_CLOSED`（grant: HR=`allowedHrLegalEntityIds`×対象日snapshot法人一致のみ・不一致404、管理者全件、`legal_entity_id`をsnapshotから設定。balance: 管理者全件/HR=担当法人（asOf今日）/マネージャー=組織scope（`hasFullAccess`先判定＋asOf）、要員不存在・所属不明・履歴ありNULLは404 fail-closed。test: HR他法人付与404＋担当内許可、HR/manager他法人残数閲覧404＋担当内許可を実assert）、`R4-P2-01=VERIFIED_CLOSED`（`resubmit`本人のみ・approval status=returned時のみ＋`POST /api/my/leave/{id}/resubmit`＋UI再提出ボタン＋4言語key、engineへpayload/diff委譲をtestでverify）、`NOTE-R4-02=FIXED`（`leave.balance.source`≠internalはgrantを400拒否、未設定含むfail-closed）、`NOTE-R4-01=記録済み`（leave.request/leave.cancel routeはS07規約どおり運用設定・fail-closed＋config-gap通知）
+- new notes（cross-lane、attendance起因ではない）: `NOTE-R4-03` — `MessageBundleConsistencyTest` FAIL（scale-300 `0e29c555`の`detail.html`が参照する`project.detail.desc`キー欠落、repo L4/CI破壊）。`NOTE-R4-04` — `SpecDispatchConsistencyTest` FAIL（scale-300が`V101__remove_unimplemented_menu_routes.sql`を実在化し、S13=V100/S14=V101予約と衝突、予約表の再繰上げが必要）。両件とも統合担当へ引き継ぎ
+- cross-cutting: scope/security PASS（grant/balanceも主体別scopeをserver-side解決）、状態機械/競合 PASS（resubmitはengineのroute再解決・CAS契約へ委譲）、migration/採番はattendance側PASS（V101衝突はNOTE-R4-04として統合担当）、i18n 4バンドル同キー
+- unverified: T072〜T074、L4全量、実ブラウザ（390px）、paging（R2-P2-02）、NOTE-R3-06/4-03/4-04解消後のCI相当L4、ATT-GATE-01〜06
+- overall verdict: **PASS（T071 fix delta）**。P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06, R4-03, R4-04）
+- next task/Wave: **T072（freee/provider sync）開始可**（R4-P1-01のP1解消で開始不可条件が消滅）。統合担当はNOTE-R4-03/4-04/NOTE-R3-06の3件を解消後、CI相当L4×1回を実行。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 Round 4 fix delta再Review: 85ca62baを独立検証——grant/balanceは主体別scope（HR=法人・manager=組織・hasFullAccess先判定・404 fail-closed）をserver-side解決で適用しR4-P1-01 VERIFIED_CLOSED。resubmit（returned限定・engine委譲・UI/i18n）でR4-P2-01 VERIFIED_CLOSED、NOTE-R4-02 FIXED、NOTE-R4-01記録済み。leave 24/0/0/0、attendance/approval 22 class全green、skip 0。新規NOTE×2（cross-lane）: MessageBundleConsistencyTestのproject.detail.desc欠落（scale-300）とSpecDispatchConsistencyTestのV101予約衝突（scale-300採番）は統合担当へ。P0=0/P1=0/P2=2/NOTE=3。T072開始可。`
+
+### Round 4 fix delta 再Review確認 — 2026-08-09 — R11担当（収束完了）
+
+- review target: `85ca62ba..HEAD`（attendance code変更ゼロ。HEAD新規commitはdispatch T062系`39f0384c`/`07a4ff41`のみ、attendance scope外）。`git diff --stat 85ca62ba..HEAD`でattendance/leave関連パス・V91/V98 migration・leave UI・spec文書すべて空、`git diff --check` PASS
+- result: 前回判定（Round 4 fix delta再Review）をそのまま維持。**新規P0/P1/P2/NOTEなし**。R4-P1-01/R4-P2-01=VERIFIED_CLOSED、NOTE-R4-02=FIXED、NOTE-R4-01=記録済み、R2-P2-01/02=OPEN（T074/M）、NOTE-R3-06（dispatch）・NOTE-R4-03/4-04（scale-300、統合担当）OPEN
+- cross-cutting: attendance scope **PASS維持**（P0=0/P1=0/P2=2/NOTE=3、うちcross-lane 3件）。dispatch T062のcommitはattendance共有file（V91/V98、SecurityConfig、sidebar、4言語bundle）へ非干渉を差分で確認
+- NOTE: Round 4 fix delta再Reviewの判定が本台帳§1へ未転記のままだった（R4-P1-01 FIXED_BY_IMPLEMENTER・T072開始不可の旧状態）。本roundで§1/§2/§3/§4/§10/§11・中央ledgerへ転記しcommitする（従来roundと同じ同期手順）
+- unverified: T072〜T074、L4全量、実ブラウザ（390px）、paging、cross-lane NOTE×3解消後のCI相当L4、ATT-GATE-01〜06
+- overall verdict: **PASS（T071 fix delta）維持・収束**。P0=0 / P1=0 / P2=2 / NOTE=3
+- next task/Wave: **T072開始可（維持）**。統合担当はNOTE-R3-06/R4-03/R4-04の3件を解消後、CI相当L4×1回を実行。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 Round 4 fix delta再Review確認: 85ca62ba..HEADはattendance変更ゼロ（dispatch T062のみ、diff --check PASS）。前回判定（R4-P1-01/R4-P2-01 VERIFIED_CLOSED、leave 24/0/0/0、T072開始可）を維持、新規指摘なし。台帳§1を現行判定へ転記commit済み。cross-lane NOTE×3（R3-06 dispatch、R4-03/04 scale-300）は統合担当OPEN。`
