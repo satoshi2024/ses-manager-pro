@@ -86,6 +86,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("retention.risk.followup-interval-days", ConfigSchema.integer(0, null));
         SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
         SCHEMAS.put("procurement.payment-max-days", ConfigSchema.integer(1, null));
+        // S11 T072: 外部勤怠同期（provider選択・tenant timezone・cursor・直近結果）
+        SCHEMAS.put("attendance.sync.provider", ConfigSchema.enumOf("mock", "freee"));
+        SCHEMAS.put("attendance.sync.timezone", ConfigSchema.string());
+        SCHEMAS.put("attendance.sync.freee.cursor", ConfigSchema.string()); // JSON/ISO cursor。操作状態
+        SCHEMAS.put("attendance.sync.last-result", ConfigSchema.string()); // JSON。操作状態
     }
 
     private void ensureLoaded() {

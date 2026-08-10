@@ -22,6 +22,8 @@ public class AttendancePageController {
         model.addAttribute("canApprove", "管理者".equals(role) || "マネージャー".equals(role));
         model.addAttribute("canClose", "管理者".equals(role) || "HR".equals(role));
         model.addAttribute("canReopen", "管理者".equals(role));
+        // T072: 外部同期の実行は管理者/HRのみ（マネージャーはstatus/CSV閲覧のみ、design §5.3）
+        model.addAttribute("canSync", "管理者".equals(role) || "HR".equals(role));
         return "attendance/management";
     }
 }

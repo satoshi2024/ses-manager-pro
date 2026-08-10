@@ -1,0 +1,473 @@
+package com.ses.service.attendance;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
+import com.ses.common.util.CsvUtils;
+import com.ses.common.util.SecurityUtils;
+import com.ses.dto.attendance.sync.AttendanceMonthlyPayload;
+import com.ses.dto.attendance.sync.AttendanceSyncResultDto;
+import com.ses.dto.attendance.sync.ExternalAttendanceRecord;
+import com.ses.entity.AttendanceMonth;
+import com.ses.entity.EmployeeAttendance;
+import com.ses.entity.Engineer;
+import com.ses.entity.FreeeEmployeeLink;
+import com.ses.entity.OvertimeFollowup;
+import com.ses.entity.SysUser;
+import com.ses.mapper.AttendanceMonthMapper;
+import com.ses.mapper.EmployeeAttendanceMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.FreeeEmployeeLinkMapper;
+import com.ses.mapper.OvertimeFollowupMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.service.NotificationService;
+import com.ses.service.SystemConfigService;
+import com.ses.service.security.OrganizationScopeService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * 雇用勤怠の外部provider同期（S11 B1）。
+ *
+ * <p>G6決定により本システムを正とし、外部データはread-only照合に使う。DBへの書込みは
+ * 承認/締め済みデータの外部送信（push）を除いて行わない。締め済み・承認済み月への
+ * 外部更新は拒否し、t_overtime_followupへwarning_code='EXT_OVERWRITE_REJECTED'で
+ * findingを記録してHR/管理者へ通知する（黙って上書きも、黙って無視もしない）。</p>
+ *
+ * <p>cursorと直近の実行結果はm_system_configのJSONキー（SYSTEM_MANAGED）へ保存する。
+ * timezoneは{@code attendance.sync.timezone}（既定Asia/Tokyo）をtenant設定として読む。</p>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AttendanceSyncServiceImpl implements AttendanceSyncService {
+
+    static final String APPROVED = "承認済";
+    static final String CLOSED = "締め済";
+    /** 外部上書き拒否のfinding warning_code（t_overtime_followup）。 */
+    static final String WARNING_CODE_EXT_OVERWRITE_REJECTED = "EXT_OVERWRITE_REJECTED";
+    static final String CONFIG_PROVIDER = "attendance.sync.provider";
+    static final String CONFIG_TIMEZONE = "attendance.sync.timezone";
+    static final String CONFIG_CURSOR = "attendance.sync.freee.cursor";
+    static final String CONFIG_LAST_RESULT = "attendance.sync.last-result";
+
+    private final List<AttendanceProvider> providers;
+    private final AttendanceMonthMapper attendanceMonthMapper;
+    private final EmployeeAttendanceMapper employeeAttendanceMapper;
+    private final EngineerMapper engineerMapper;
+    private final FreeeEmployeeLinkMapper freeeEmployeeLinkMapper;
+    private final OvertimeFollowupMapper overtimeFollowupMapper;
+    private final SysUserMapper sysUserMapper;
+    private final AttendanceScopeResolver attendanceScopeResolver;
+    private final OrganizationScopeService organizationScopeService;
+    private final SystemConfigService systemConfigService;
+    private final com.ses.mapper.SystemConfigMapper systemConfigMapper;
+    private final NotificationService notificationService;
+    private final ObjectMapper objectMapper;
+
+    @Override
+    public AttendanceSyncResultDto syncPush(String month) {
+        YearMonth target = parseMonth(month);
+        AttendanceProvider provider = resolveProvider();
+        AttendanceSyncResultDto result = newResult(provider.source(), "push", target);
+        List<AttendanceMonth> months = monthsForScope(target);
+        for (AttendanceMonth monthRow : months) {
+            if (!APPROVED.equals(monthRow.getStatus()) && !CLOSED.equals(monthRow.getStatus())) {
+                continue;
+            }
+            try {
+                AttendanceMonthlyPayload payload = buildPayload(monthRow, target);
+                String idempotencyKey = payloadHash(payload);
+                boolean accepted = provider.pushMonthly(payload, idempotencyKey, result.getCorrelationId());
+                if (accepted) {
+                    result.setPushedCount(value(result.getPushedCount()) + 1);
+                } else {
+                    result.setDuplicateSkippedCount(value(result.getDuplicateSkippedCount()) + 1);
+                }
+            } catch (Exception e) {
+                result.getErrors().add("engineer=" + monthRow.getEngineerId() + ": " + safeMessage(e));
+            }
+        }
+        finish(result);
+        return result;
+    }
+
+    @Override
+    public AttendanceSyncResultDto syncPull(String month) {
+        YearMonth target = parseMonth(month);
+        AttendanceProvider provider = resolveProvider();
+        AttendanceSyncResultDto result = newResult(provider.source(), "pull", target);
+        String cursor = readCursor(provider.source());
+        try {
+            List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(cursor);
+            result.setPulledCount(records.size());
+            String maxUpdatedAt = cursor;
+            for (ExternalAttendanceRecord record : records) {
+                if (record.getUpdatedAt() != null
+                        && (maxUpdatedAt == null || record.getUpdatedAt().compareTo(maxUpdatedAt) > 0)) {
+                    maxUpdatedAt = record.getUpdatedAt();
+                }
+                if (record.getWorkDate() == null || !YearMonth.from(record.getWorkDate()).equals(target)) {
+                    continue;
+                }
+                try {
+                    if (isClosedOrApproved(record)) {
+                        rejectExternalUpdate(record, target);
+                        result.setRejectedCount(value(result.getRejectedCount()) + 1);
+                    }
+                    // 照合に使うだけでDBへは登録しない（本システムを正。source='freee'行は承認付き取込経路）
+                } catch (Exception e) {
+                    result.getErrors().add("externalId=" + record.getSourceExternalId() + ": " + safeMessage(e));
+                }
+            }
+            result.setCursor(maxUpdatedAt);
+            if (records.isEmpty()) {
+                result.setCursor(cursor);
+            }
+            saveCursor(provider.source(), result.getCursor());
+        } catch (Exception e) {
+            result.getErrors().add("pull: " + safeMessage(e));
+            result.setSuccess(false);
+        }
+        finish(result);
+        return result;
+    }
+
+    @Override
+    public AttendanceSyncResultDto syncAll(String month) {
+        AttendanceSyncResultDto push = syncPush(month);
+        AttendanceSyncResultDto pull = syncPull(month);
+        AttendanceSyncResultDto combined = newResult(push.getProvider(), "all", parseMonth(month));
+        combined.setPushedCount(push.getPushedCount());
+        combined.setDuplicateSkippedCount(push.getDuplicateSkippedCount());
+        combined.setPulledCount(pull.getPulledCount());
+        combined.setRegisteredCount(pull.getRegisteredCount());
+        combined.setRejectedCount(pull.getRejectedCount());
+        combined.setCursor(pull.getCursor());
+        combined.getErrors().addAll(push.getErrors());
+        combined.getErrors().addAll(pull.getErrors());
+        combined.setSuccess(push.isSuccess() && pull.isSuccess());
+        combined.setFinishedAt(LocalDateTime.now());
+        saveLastResult(combined);
+        return combined;
+    }
+
+    @Override
+    public AttendanceSyncResultDto lastResult() {
+        // SystemConfigServiceのキャッシュはafterCommit更新のため、同一tx内のreadはmapper直読みにする
+        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(CONFIG_LAST_RESULT);
+        if (config == null || config.getConfigValue() == null) {
+            return AttendanceSyncResultDto.empty();
+        }
+        try {
+            return objectMapper.readValue(config.getConfigValue(), AttendanceSyncResultDto.class);
+        } catch (Exception e) {
+            log.warn("attendance sync last result is unreadable, returning empty");
+            return AttendanceSyncResultDto.empty();
+        }
+    }
+
+    @Override
+    public boolean providerAvailable() {
+        return resolveProvider().available();
+    }
+
+    @Override
+    public String providerSource() {
+        return resolveProvider().source();
+    }
+
+    @Override
+    public void exportCsv(String month, OutputStream out) {
+        YearMonth target = parseMonth(month);
+        List<AttendanceMonth> months = monthsForScope(target);
+        Map<Long, Engineer> engineers = new HashMap<>();
+        Set<Long> ids = new HashSet<>();
+        for (AttendanceMonth monthRow : months) {
+            if (!APPROVED.equals(monthRow.getStatus()) && !CLOSED.equals(monthRow.getStatus())) {
+                continue;
+            }
+            ids.add(monthRow.getEngineerId());
+        }
+        if (!ids.isEmpty()) {
+            engineerMapper.selectBatchIds(ids).forEach(e -> engineers.put(e.getId(), e));
+        }
+        List<EmployeeAttendance> days = ids.isEmpty() ? List.of()
+                : employeeAttendanceMapper.selectList(new LambdaQueryWrapper<EmployeeAttendance>()
+                        .in(EmployeeAttendance::getEngineerId, ids)
+                        .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
+                        .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
+                        .orderByAsc(EmployeeAttendance::getEngineerId)
+                        .orderByAsc(EmployeeAttendance::getWorkDate));
+        try {
+            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
+            writer.write(CsvUtils.UTF8_BOM);
+            CsvUtils.appendLine(writer, "要員ID", "要員名", "日付", "出勤", "退勤", "休憩(分)",
+                    "法定内(分)", "時間外(分)", "休日(分)", "深夜(分)", "勤務区分");
+            for (EmployeeAttendance day : days) {
+                Engineer engineer = engineers.get(day.getEngineerId());
+                CsvUtils.appendLine(writer,
+                        String.valueOf(day.getEngineerId()),
+                        engineer == null ? "" : engineer.getFullName(),
+                        day.getWorkDate() == null ? "" : day.getWorkDate().toString(),
+                        day.getClockIn() == null ? "" : day.getClockIn().toString(),
+                        day.getClockOut() == null ? "" : day.getClockOut().toString(),
+                        String.valueOf(value(day.getBreakMinutes())),
+                        String.valueOf(value(day.getRegularMinutes())),
+                        String.valueOf(value(day.getOvertimeMinutes())),
+                        String.valueOf(value(day.getHolidayMinutes())),
+                        String.valueOf(value(day.getLateNightMinutes())),
+                        day.getWorkType() == null ? "" : day.getWorkType());
+            }
+            writer.flush();
+        } catch (IOException e) {
+            throw BusinessException.of(500, "error.attendance.sync.csvFailed");
+        }
+    }
+
+    private boolean isClosedOrApproved(ExternalAttendanceRecord record) {
+        if (record.getEngineerId() == null) {
+            resolveEngineer(record);
+        }
+        if (record.getEngineerId() == null || record.getWorkDate() == null) {
+            return false;
+        }
+        AttendanceMonth monthRow = attendanceMonthMapper.selectOne(new LambdaQueryWrapper<AttendanceMonth>()
+                .eq(AttendanceMonth::getEngineerId, record.getEngineerId())
+                .eq(AttendanceMonth::getWorkMonth, YearMonth.from(record.getWorkDate()).atDay(1))
+                .last("LIMIT 1"));
+        return monthRow != null && (APPROVED.equals(monthRow.getStatus()) || CLOSED.equals(monthRow.getStatus()));
+    }
+
+    private void resolveEngineer(ExternalAttendanceRecord record) {
+        if (record.getExternalEngineerId() == null) {
+            return;
+        }
+        FreeeEmployeeLink link = freeeEmployeeLinkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
+                .eq(FreeeEmployeeLink::getFreeeEmployeeId, record.getExternalEngineerId())
+                .last("LIMIT 1"));
+        if (link != null) {
+            record.setEngineerId(link.getEngineerId());
+        }
+    }
+
+    /**
+     * 締め済み・承認済み月への外部更新を拒否し、finding（t_overtime_followup）をUPSERTして
+     * HR/管理者へ通知する。「黙って上書きも、黙って無視もしない」（design §5.4 / R1.3）。
+     */
+    private void rejectExternalUpdate(ExternalAttendanceRecord record, YearMonth target) {
+        Long engineerId = record.getEngineerId();
+        OvertimeFollowup existing = overtimeFollowupMapper.selectOne(new LambdaQueryWrapper<OvertimeFollowup>()
+                .eq(OvertimeFollowup::getEngineerId, engineerId)
+                .eq(OvertimeFollowup::getPeriodMonth, target.atDay(1))
+                .eq(OvertimeFollowup::getWarningCode, WARNING_CODE_EXT_OVERWRITE_REJECTED)
+                .last("LIMIT 1"));
+        if (existing == null) {
+            try {
+                overtimeFollowupMapper.insert(OvertimeFollowup.builder()
+                        .engineerId(engineerId)
+                        .periodMonth(target.atDay(1))
+                        .warningCode(WARNING_CODE_EXT_OVERWRITE_REJECTED)
+                        .status("未対応")
+                        .notifiedAt(LocalDateTime.now())
+                        .build());
+            } catch (DuplicateKeyException duplicate) {
+                // UNIQUE(engineer_id, period_month, warning_code)競合は冪等として無視
+            }
+        }
+        notifyRejection(engineerId, target);
+    }
+
+    private void notifyRejection(Long engineerId, YearMonth target) {
+        String dedupeKey = "ATT_SYNC_REJECTED:" + engineerId + ":" + target;
+        List<SysUser> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .in(SysUser::getRole, "管理者", "HR")
+                .eq(SysUser::getStatus, 1));
+        String message = "[\"notification.msg.ATT_SYNC_REJECTED\", \"" + engineerId + "\", \""
+                + target + "\"]";
+        for (SysUser user : recipients) {
+            notificationService.publishToUser(user.getId(), "ATT_SYNC_REJECTED",
+                    "外部勤怠更新の拒否", message, "/work-record/attendance",
+                    dedupeKey, "work-record");
+        }
+    }
+
+    private AttendanceMonthlyPayload buildPayload(AttendanceMonth monthRow, YearMonth target) {
+        Engineer engineer = engineerMapper.selectById(monthRow.getEngineerId());
+        List<EmployeeAttendance> days = employeeAttendanceMapper.selectList(
+                new LambdaQueryWrapper<EmployeeAttendance>()
+                        .eq(EmployeeAttendance::getEngineerId, monthRow.getEngineerId())
+                        .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
+                        .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
+                        .orderByAsc(EmployeeAttendance::getWorkDate));
+        List<AttendanceMonthlyPayload.Day> payloadDays = new ArrayList<>();
+        for (EmployeeAttendance day : days) {
+            payloadDays.add(AttendanceMonthlyPayload.Day.builder()
+                    .workDate(day.getWorkDate() == null ? null : day.getWorkDate().toString())
+                    .clockIn(day.getClockIn() == null ? null : day.getClockIn().toString())
+                    .clockOut(day.getClockOut() == null ? null : day.getClockOut().toString())
+                    .breakMinutes(value(day.getBreakMinutes()))
+                    .regularMinutes(value(day.getRegularMinutes()))
+                    .overtimeMinutes(value(day.getOvertimeMinutes()))
+                    .holidayMinutes(value(day.getHolidayMinutes()))
+                    .lateNightMinutes(value(day.getLateNightMinutes()))
+                    .workType(day.getWorkType())
+                    .build());
+        }
+        return AttendanceMonthlyPayload.builder()
+                .engineerId(monthRow.getEngineerId())
+                .engineerName(engineer == null ? null : engineer.getFullName())
+                .workMonth(target.toString())
+                .status(monthRow.getStatus())
+                .scheduledMinutes(value(monthRow.getScheduledMinutes()))
+                .workedMinutes(value(monthRow.getWorkedMinutes()))
+                .regularMinutes(value(monthRow.getRegularMinutes()))
+                .overtimeMinutes(value(monthRow.getOvertimeMinutes()))
+                .holidayMinutes(value(monthRow.getHolidayMinutes()))
+                .lateNightMinutes(value(monthRow.getLateNightMinutes()))
+                .leaveMinutes(value(monthRow.getLeaveMinutes()))
+                .days(payloadDays)
+                .build();
+    }
+
+    /**
+     * 対象月の月次勤怠をscope（design §5.3: 管理者=全件、HR=法人scope、マネージャー=組織scope）で返す。
+     */
+    private List<AttendanceMonth> monthsForScope(YearMonth target) {
+        String role = SecurityUtils.currentRole();
+        LambdaQueryWrapper<AttendanceMonth> query = new LambdaQueryWrapper<AttendanceMonth>()
+                .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
+                .orderByAsc(AttendanceMonth::getEngineerId);
+        if ("管理者".equals(role)) {
+            // 全件
+        } else if ("HR".equals(role)) {
+            Set<Long> legalEntityIds = attendanceScopeResolver.allowedHrLegalEntityIds(
+                    SecurityUtils.currentUserId(), target.atEndOfMonth());
+            if (legalEntityIds.isEmpty()) {
+                return List.of();
+            }
+            query.in(AttendanceMonth::getLegalEntityId, legalEntityIds);
+        } else if ("マネージャー".equals(role)) {
+            if (organizationScopeService.hasFullAccess()) {
+                // 組織条件なし
+            } else {
+                Set<Long> engineerIds = organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
+                if (engineerIds.isEmpty()) {
+                    return List.of();
+                }
+                query.in(AttendanceMonth::getEngineerId, engineerIds);
+            }
+        } else {
+            throw BusinessException.of(403, "error.attendance.roleDenied");
+        }
+        return attendanceMonthMapper.selectList(query);
+    }
+
+    private AttendanceProvider resolveProvider() {
+        String configured = systemConfigService.getString(CONFIG_PROVIDER, "mock");
+        for (AttendanceProvider provider : providers) {
+            if (configured.equalsIgnoreCase(provider.source())) {
+                return provider;
+            }
+        }
+        throw BusinessException.of(400, "error.attendance.sync.providerUnknown");
+    }
+
+    private String readCursor(String providerSource) {
+        // SystemConfigServiceのキャッシュはafterCommit更新のため、同一tx内のreadはmapper直読みにする
+        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(CONFIG_CURSOR);
+        return config == null ? null : config.getConfigValue();
+    }
+
+    private void saveCursor(String providerSource, String cursor) {
+        if (cursor == null) {
+            return;
+        }
+        systemConfigService.put(CONFIG_CURSOR, cursor, "外部勤怠同期のupdated_at cursor");
+    }
+
+    private void saveLastResult(AttendanceSyncResultDto result) {
+        try {
+            systemConfigService.put(CONFIG_LAST_RESULT, objectMapper.writeValueAsString(result),
+                    "直近の外部勤怠同期実行結果");
+        } catch (Exception e) {
+            log.warn("attendance sync result save failed: {}", e.getMessage());
+        }
+    }
+
+    private AttendanceSyncResultDto newResult(String provider, String direction, YearMonth target) {
+        AttendanceSyncResultDto result = AttendanceSyncResultDto.empty();
+        result.setProvider(provider);
+        result.setDirection(direction);
+        result.setWorkMonth(target.toString());
+        result.setCorrelationId(UUID.randomUUID().toString());
+        result.setStartedAt(LocalDateTime.now());
+        return result;
+    }
+
+    private void finish(AttendanceSyncResultDto result) {
+        result.setFinishedAt(LocalDateTime.now());
+        result.setSuccess(result.getErrors().isEmpty());
+        saveLastResult(result);
+    }
+
+    private String payloadHash(AttendanceMonthlyPayload payload) {
+        try {
+            byte[] bytes = objectMapper.writeValueAsBytes(payload);
+            return "att-sync-" + hex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (Exception e) {
+            throw BusinessException.of(500, "error.attendance.sync.hashFailed");
+        }
+    }
+
+    private String hex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private String safeMessage(Exception e) {
+        String message = e.getMessage();
+        if (message == null || message.isBlank()) {
+            return e.getClass().getSimpleName();
+        }
+        return message;
+    }
+
+    private YearMonth parseMonth(String month) {
+        try {
+            return YearMonth.parse(month);
+        } catch (DateTimeParseException | NullPointerException e) {
+            throw BusinessException.of(400, "error.attendance.invalidMonth");
+        }
+    }
+
+    private int value(Integer v) {
+        return v == null ? 0 : v;
+    }
+}

@@ -28,7 +28,8 @@ public class SystemConfigApiController {
     private static final String MASK_PLACEHOLDER = "********";
 
     /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
-    private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months");
+    private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
+            "attendance.sync.freee.cursor", "attendance.sync.last-result");
 
     private final SystemConfigService systemConfigService;
 

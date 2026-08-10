@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.FreeeConnectionMapper;
 import com.ses.mapper.FreeeEmployeeLinkMapper;
 import com.ses.service.FreeeIntegrationService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -36,6 +37,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapper, FreeeConnection> implements FreeeIntegrationService {
     
@@ -316,6 +318,109 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         } catch (Exception ex) {
             throw BusinessException.of(503, "error.payroll.providerUnavailable");
         }
+    }
+
+    /**
+     * S11 T072共通基盤: 認証付きGET。401はrefresh 1回＋再試行、429はbackoff、
+     * timeout/5xxは503へ変換する。tokenはログへ出力しない。
+     */
+    @Override
+    public JsonNode apiGet(String path) {
+        return executeWithRetry(path, HttpMethod.GET, null, null, null);
+    }
+
+    /**
+     * S11 T072共通基盤: 認証付きPOST。冪等キーと相関IDをヘッダーへ付与し、
+     * 401はrefresh 1回＋再試行、429はbackoff、timeout/5xxは503へ変換する。
+     */
+    @Override
+    public JsonNode apiPost(String path, Object body, String idempotencyKey, String correlationId) {
+        return executeWithRetry(path, HttpMethod.POST, body, idempotencyKey, correlationId);
+    }
+
+    private JsonNode executeWithRetry(String path, HttpMethod method, Object body,
+                                      String idempotencyKey, String correlationId) {
+        if (path == null || path.isBlank()) {
+            throw BusinessException.of(400, "error.payroll.invalidPath");
+        }
+        FreeeConnection c = connectionMapper.selectOne(new LambdaQueryWrapper<FreeeConnection>()
+                .orderByDesc(FreeeConnection::getId).last("LIMIT 1"));
+        if (c == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        if (c.getTokenExpiresAt() != null && c.getTokenExpiresAt().isBefore(LocalDateTime.now().plusMinutes(1))) {
+            applicationContext.getBean(FreeeIntegrationService.class).refresh();
+            c = connectionMapper.selectOne(new LambdaQueryWrapper<FreeeConnection>()
+                    .orderByDesc(FreeeConnection::getId).last("LIMIT 1"));
+        }
+        HttpHeaders h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
+        // 401はrefresh 1回に限定する（platform-invariants §7: 無限refreshしない）。
+        boolean refreshed = false;
+        int attempt = 0;
+        while (true) {
+            try {
+                HttpEntity<?> entity = body == null ? new HttpEntity<>(h) : new HttpEntity<>(body, h);
+                if (HttpMethod.GET.equals(method)) {
+                    return restTemplate.exchange(apiBase + path, method, entity, JsonNode.class).getBody();
+                }
+                return restTemplate.exchange(apiBase + path, method, entity, JsonNode.class).getBody();
+            } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized ex) {
+                if (refreshed) {
+                    throw BusinessException.of(401, "error.payroll.tokenError");
+                }
+                applicationContext.getBean(FreeeIntegrationService.class).refresh();
+                c = connectionMapper.selectOne(new LambdaQueryWrapper<FreeeConnection>()
+                        .orderByDesc(FreeeConnection::getId).last("LIMIT 1"));
+                h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
+                refreshed = true;
+            } catch (org.springframework.web.client.HttpClientErrorException.TooManyRequests ex) {
+                attempt++;
+                int maxAttempts = 3;
+                if (attempt >= maxAttempts) {
+                    throw BusinessException.of(429, "error.payroll.rateLimited");
+                }
+                sleepBackoff(attempt, ex);
+            } catch (org.springframework.web.client.ResourceAccessException ex) {
+                // timeout（saasRestTemplate 5s/15s）はretryしないで503
+                throw BusinessException.of(503, "error.payroll.providerUnavailable");
+            } catch (org.springframework.web.client.HttpClientErrorException ex) {
+                // 4xx validationはretryしない（人手修正待ち）
+                throw BusinessException.of(400, "error.payroll.providerRejected");
+            } catch (Exception ex) {
+                throw BusinessException.of(503, "error.payroll.providerUnavailable");
+            }
+        }
+    }
+
+    /** 429時のexponential backoff + jitter。秘密情報はログへ出さない。 */
+    private void sleepBackoff(int attempt, org.springframework.web.client.HttpClientErrorException ex) {
+        long base = 500L * (1L << (attempt - 1));
+        long jitter = new SecureRandom().nextLong(0, base);
+        log.warn("freee API rate limited (429), retrying in {}ms: status={}", base + jitter,
+                ex.getStatusCode().value());
+        try {
+            Thread.sleep(base + jitter);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw BusinessException.of(503, "error.payroll.providerUnavailable");
+        }
+    }
+
+    private HttpHeaders headers(HttpMethod method, String accessToken,
+                                 String idempotencyKey, String correlationId) {
+        HttpHeaders h = new HttpHeaders();
+        h.setBearerAuth(accessToken);
+        h.setAccept(List.of(MediaType.APPLICATION_JSON));
+        if (HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method) || HttpMethod.PATCH.equals(method)) {
+            h.setContentType(MediaType.APPLICATION_JSON);
+        }
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            h.set("Idempotency-Key", idempotencyKey);
+        }
+        if (correlationId != null && !correlationId.isBlank()) {
+            h.set("X-Correlation-ID", correlationId);
+        }
+        return h;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
