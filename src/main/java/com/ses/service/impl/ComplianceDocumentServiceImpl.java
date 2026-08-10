@@ -15,6 +15,7 @@ import com.ses.entity.DocumentDelivery;
 import com.ses.entity.DocumentVersion;
 import com.ses.mapper.ComplianceFindingMapper;
 import com.ses.mapper.ContractComplianceProfileMapper;
+import com.ses.mapper.ContractComplianceSnapshotMapper;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.DocumentAccessLogMapper;
 import com.ses.mapper.DocumentDeliveryMapper;
@@ -29,7 +30,6 @@ import com.ses.service.compliance.ComplianceAccessControl;
 import com.ses.service.compliance.ComplianceDocumentGenerator;
 import com.ses.service.compliance.ComplianceSnapshotWriter;
 import com.ses.service.security.DataScopeService;
-import com.ses.service.storage.DocumentStorage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -60,13 +60,13 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
 
     private final ContractService contractService;
     private final ContractComplianceProfileMapper profileMapper;
+    private final ContractComplianceSnapshotMapper snapshotMapper;
     private final ComplianceSnapshotWriter snapshotWriter;
     private final ComplianceDocumentGenerator documentGenerator;
     private final DocumentService documentService;
     private final DocumentDeliveryMapper deliveryMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final DocumentAccessLogMapper documentAccessLogMapper;
-    private final DocumentStorage documentStorage;
     private final CustomerContactMapper customerContactMapper;
     private final EngineerMapper engineerMapper;
     private final com.ses.mapper.CustomerMapper customerMapper;
@@ -79,7 +79,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     @Override
     public List<ComplianceDocumentDeliveryDto> list(Long contractId) {
         Contract contract = requireVisibleContract(contractId);
-        requireComplianceAccess();
+        requireAnyContractRole();
         return deliveryMapper.selectList(new LambdaQueryWrapper<DocumentDelivery>()
                         .eq(DocumentDelivery::getContractId, contractId)
                         .orderByDesc(DocumentDelivery::getId))
@@ -121,9 +121,9 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         String engineerName = contract.getEngineerId() == null ? null
                 : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
-        String maskLevel = maskLevel();
+        // archive正本は常にFULLで生成する（R4.2）。download時にviewer roleで再maskする。
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, request.getDocumentType(), maskLevel, engineerName);
+                contract, snapshot, request.getDocumentType(), "FULL", engineerName);
         byte[] pdf = documentGenerator.toPdf(content, messageSource);
 
         com.ses.dto.document.DocumentRegisterRequest registerRequest =
@@ -199,8 +199,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     @Override
     public byte[] download(Long contractId, Long deliveryId) {
         Contract contract = requireVisibleContract(contractId);
-        requireComplianceAccess();
-        requireWritable();
+        requireAnyContractRole();
         DocumentDelivery delivery = deliveryMapper.selectById(deliveryId);
         if (delivery == null || !contractId.equals(delivery.getContractId())) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -211,11 +210,24 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
         recordAccessLog(delivery.getDocumentId(), version.getId());
-        try (java.io.InputStream in = documentStorage.open(version.getStorageKey())) {
-            return in.readAllBytes();
-        } catch (java.io.IOException e) {
-            throw new IllegalStateException("帳票PDFの読み出しに失敗しました", e);
+        // R4.2: downloadはviewer roleで再maskする（archive正本はFULLのまま保持）。
+        // マネージャー=MASK、営業=LIMITED、管理者/HR=FULL。
+        ContractComplianceSnapshot snapshot = snapshotMapper.selectOne(
+                new LambdaQueryWrapper<ContractComplianceSnapshot>()
+                        .eq(ContractComplianceSnapshot::getContractId, contractId)
+                        .eq(ContractComplianceSnapshot::getSnapshotHash, delivery.getSnapshotHash())
+                        .orderByDesc(ContractComplianceSnapshot::getSnapshotVersion)
+                        .last("LIMIT 1"));
+        if (snapshot == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
         }
+        String engineerName = contract.getEngineerId() == null ? null
+                : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
+                : engineerMapper.selectById(contract.getEngineerId()).getFullName());
+        String viewerMask = maskLevel();
+        com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
+                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName);
+        return documentGenerator.toPdf(content, messageSource);
     }
 
     // ===== 共通 =====
@@ -243,15 +255,27 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         }
     }
 
-    /** 営業は生成・確認・ダウンロード不可（fail-closed）。 */
+    /** 契約メニュー配下の全ロール（4管理ロール＋営業）を許容する（一覧・download）。 */
+    private void requireAnyContractRole() {
+        String role = SecurityUtils.currentRole();
+        if (!java.util.Set.of("管理者", "HR", "マネージャー", "営業").contains(role)) {
+            throw BusinessException.of(403, "error.accessDenied");
+        }
+    }
+
+    /** 営業は生成・確認不可（writeはfail-closed）。 */
     private void requireWritable() {
         if ("営業".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "contract.compliance.writeDenied");
         }
     }
 
+    /** download時にviewer roleで適用するmask（営業=LIMITED、マネージャー=MASK、管理者/HR=FULL）。 */
     private String maskLevel() {
         String role = SecurityUtils.currentRole();
+        if ("営業".equals(role)) {
+            return "LIMITED";
+        }
         if ("マネージャー".equals(role)) {
             return "MASK";
         }

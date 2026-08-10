@@ -11,6 +11,7 @@ import com.ses.mapper.ComplianceSnapshotOperationMapper;
 import com.ses.mapper.ContractComplianceProfileMapper;
 import com.ses.mapper.ContractComplianceSnapshotMapper;
 import com.ses.mapper.WorkplaceMapper;
+import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -45,6 +46,7 @@ public class ComplianceSnapshotWriter {
     private final ContractComplianceSnapshotMapper snapshotMapper;
     private final ComplianceSnapshotOperationMapper operationMapper;
     private final WorkplaceMapper workplaceMapper;
+    private final SystemConfigService systemConfigService;
 
     /**
      * 契約のcompliance snapshotを保証する。
@@ -144,6 +146,10 @@ public class ComplianceSnapshotWriter {
         snapshot.setContractDate(contract.getContractDate());
         snapshot.setDispatchFrom(profile.getDispatchPeriodStart());
         snapshot.setDispatchTo(profile.getDispatchPeriodEnd());
+        // 当事者（派遣元=自社）はcompany系m_system_configからsnapshot化する（field-mapping FM-C-01）。
+        snapshot.setPartyName(systemConfigService.getString("company.name", null));
+        snapshot.setPartyAddress(systemConfigService.getString("company.address", null));
+        snapshot.setPartyRepresentative(systemConfigService.getString("company.representative", null));
         if (profile.getWorkplaceId() != null) {
             Workplace workplace = workplaceMapper.selectById(profile.getWorkplaceId());
             if (workplace != null) {

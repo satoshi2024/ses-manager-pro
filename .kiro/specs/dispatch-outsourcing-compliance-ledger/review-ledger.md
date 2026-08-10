@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 14: T060〜T063 PASS確定。T064 B1実装提出済み（R10 Round 15確認待ち）。T065解放可、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 14: T060〜T063 PASS確定。T064 B1実装提出済み（R10 Round 15確認待ち）。T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 13: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS（P0=0/P1=0/P2=0）。R12-P1-01（SaveDto 2列削除・UI保存400解消）・R12-P2-01（contact顧客一致）をVERIFIED_CLOSED。T064〜T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
@@ -287,6 +289,25 @@ R10 Round 14のT064着手許可を受け、B1を実装した。S11 trackが同�
 **Demo証跡（L2〜L3実測）**: 派遣元管理台帳等を生成→交付記録作成。同一snapshot（同一内容）の再生成でdelivery件数・snapshot件数とも増えない（冪等）。profile変更→snapshot v2→新hash→新交付記録（版差分が説明できる）。template version切替（m_system_config）で版が進む。PDFはscanStatus CLEANのみダウンロード可。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
 
 **境界**: DDL/migration変更なし（V84 shape・既存document archiveを利用。retention categoryはGATE-T066-RETENTION）。SecurityConfig/他機能未変更（canViewComplianceのHR常可化のみdesign §5.3準拠の共通化）。T064 checkboxはR10確認まで未完了。production release/apply authorizationなし。
+
+## R10 Round 15 fix delta（2026-08-10）: R15-P1-01〜04
+
+R10 Round 15はT064 B1（`84101461`）を独立実行（135件中失敗2件は既知のR10-P2-01他track起因、B1系12/12含め全PASS）で確認し、**FAIL**判定・新規P1×4を提示した。本deltaはその修正である。
+
+| issue ID | violated | 根本原因と最小fix | 証跡 |
+|---|---|---|---|
+| R15-P1-01 | R4.2・design §5.3 | 生成時role固定mask＋role非依存冪等キーで、マネージャーがFULL PDFを取得可／mask済PDFが正本化。**generateは常にFULLでarchive正本化し、download時にviewer roleで再mask（snapshotから再レンダリング）**。scanStatus CLEANの正本登録をdownloadの前提gateに維持 | 新test: 管理者generate→管理者download（FULL）とマネージャーdownload（MASK）のバイト列が異なる・営業download（LIMITED）もFULLと異なる。全て%PDF。8/8 PASS |
+| R15-P1-02 | R2.1・FM-C-01 | party_*未投入＋label/value不一致。**SnapshotWriterが`company.name/address/representative`（m_system_config、SCHEMASへ`company.representative`追加）をsnapshot化**。generatorは`doc.party.name/address/representative`ラベルへ整合（派遣元=party_*、派遣先=workplace_*） | API test: 生成後に`t_contract_compliance_snapshot.party_name/party_address`がconfig値で投入されることを実測。GeneratorTestで4帳票の当事者行をgolden assert |
+| R15-P1-03 | R2.1・T060 mapping・B1 golden | 4帳票のmapping項目の相当数が未出力。**generatorを拡充**: 福利厚生・雇用安定措置・協定対象flag・派遣人員・抵触日2種・抵触日例外・休日カレンダー・責任者（通知書/台帳）・時間外（台帳）・保存満了（台帳）等をsnapshot typed列から出力。**履歴table・worker snapshot由来項目（苦情処理状況・キャリア・教育訓練・紹介予定・紛争防止・差異通知・性別/年齢・無期/60歳）は、それらの行を作成する実装が存在しないためT066（M）で全項目化する旨をdesign.md §3.1へ明記**（範囲固定） | GeneratorTest 5/5（新section含むgolden） |
+| R15-P1-04 | design §5.3・R4.1 | 営業の帳票API全403が「同左」と未文書化逸脱。**営業に一覧＋masked（LIMITED）downloadを許可**（generate/confirmはwriteとして403維持）。逸脱はdesign.md §3.1へ明記 | 新test: 営業が一覧200・masked download 200・generate 403 |
+
+**変更file**: `ComplianceDocumentServiceImpl.java`（download再mask・営業許可・snapshot検索）、`ComplianceDocumentGenerator.java`（4帳票のsection拡充・party行）、`ComplianceSnapshotWriter.java`（party config投入）、`SystemConfigServiceImpl.java`（`company.representative`＋template version 4 keyをSCHEMASへ）、messages 4 bundle（doc.party.*/doc.section.benefits・retention等）、design.md §3.1（逸脱・範囲）、test 2件拡充（API 7→8、Generator 5）。
+
+**実行test（L2〜L3定向・直接回帰、skip 0）**: **計125件全PASS（失敗0・skip 0）**: T064系13（API 8・Generator 5）、T063系45、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。`git diff --check` exit 0。MessageBundleConsistencyTestは既知の他track失敗（`project.detail.desc`）のみ。
+
+**Rollback**: DDL/migration/SecurityConfig変更なし。commit revertでDB rollback不要。
+
+**境界**: T064 checkboxはR10再Review PASSまで未完了維持。再開条件: R10がR15-P1-01〜04のCLOSEを確認 → T065（B2）→ T066 M。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 

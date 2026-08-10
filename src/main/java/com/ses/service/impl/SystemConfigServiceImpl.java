@@ -50,6 +50,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     private static final java.util.Map<String, ConfigSchema> SCHEMAS = new java.util.HashMap<>();
     static {
         SCHEMAS.put("company.name", ConfigSchema.string());
+        SCHEMAS.put("company.representative", ConfigSchema.string());
         SCHEMAS.put("company.email", ConfigSchema.string());
         SCHEMAS.put("company.address", ConfigSchema.string());
         SCHEMAS.put("company.invoice-registration-number", ConfigSchema.string());

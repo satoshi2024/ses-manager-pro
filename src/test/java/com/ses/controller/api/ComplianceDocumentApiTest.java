@@ -60,6 +60,9 @@ class ComplianceDocumentApiTest {
     @Test
     void 生成するとsnapshotとdocumentとdeliveryが作成され同じ内容の再生成は増えない() throws Exception {
         long contractId = insertContractWithProfile();
+        systemConfigService.put("company.name", "SES株式会社", "test");
+        systemConfigService.put("company.address", "東京都千代田区", "test");
+        systemConfigService.put("company.representative", "代表取締役 山田", "test");
 
         // 1回目: 生成
         long firstId = generate(contractId, "EMPLOYMENT_CONDITIONS_STATEMENT", "EMAIL");
@@ -73,6 +76,13 @@ class ComplianceDocumentApiTest {
         String snapshotHash = jdbcTemplate.queryForObject(
                 "SELECT snapshot_hash FROM t_document_delivery WHERE id=" + firstId, String.class);
         assertThat(snapshotHash).isNotBlank();
+        // 当事者（派遣元=自社）がcompany系configからsnapshot化される（R15-P1-02）
+        String partyName = jdbcTemplate.queryForObject(
+                "SELECT party_name FROM t_contract_compliance_snapshot WHERE contract_id=" + contractId, String.class);
+        assertThat(partyName).isEqualTo("SES株式会社");
+        String partyAddress = jdbcTemplate.queryForObject(
+                "SELECT party_address FROM t_contract_compliance_snapshot WHERE contract_id=" + contractId, String.class);
+        assertThat(partyAddress).isEqualTo("東京都千代田区");
 
         // 2回目（同じ内容の再生成）: 同じdeliveryを返し2件目を作らない（Demo: 版が増えない）
         long secondId = generate(contractId, "EMPLOYMENT_CONDITIONS_STATEMENT", "EMAIL");
@@ -80,6 +90,58 @@ class ComplianceDocumentApiTest {
         assertEquals(1, queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId));
         assertEquals(1, queryInt("SELECT COUNT(*) FROM t_contract_compliance_snapshot WHERE contract_id=" + contractId),
                 "再生成ではsnapshotも増えない");
+    }
+
+    @Test
+    void downloadはviewerRoleで再maskされマネージャーはFULLPDFを取得できない() throws Exception {
+        long contractId = insertContractWithProfile();
+        long deliveryId = generate(contractId, "EMPLOYMENT_CONDITIONS_STATEMENT", "EMAIL");
+
+        // 管理者（FULL）のdownload
+        byte[] adminPdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        // マネージャー（MASK）のdownload: FULLと異なるバイト列（再maskされたPDF）
+        byte[] managerPdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("2").roles("マネージャー")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(new String(adminPdf, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith("%PDF");
+        assertThat(new String(managerPdf, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith("%PDF");
+        assertThat(managerPdf).isNotEqualTo(adminPdf);
+
+        // 営業（LIMITED）のdownloadも可能（masked）
+        byte[] salesPdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("3").roles("営業")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(salesPdf).isNotEqualTo(adminPdf);
+    }
+
+    @Test
+    @WithMockUser(username = "1", roles = "営業")
+    void 営業は一覧とmaskedDownloadができ生成は403() throws Exception {
+        long contractId = insertContractWithProfile();
+        long deliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL",
+                org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                        .user("1").roles("管理者"));
+
+        // 一覧は可能
+        mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.length()").value(1));
+        // masked downloadは可能
+        byte[] pdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(new String(pdf, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith("%PDF");
+        // 生成は403
+        mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/generate")
+                        .with(csrf()).contentType("application/json")
+                        .content("{\"documentType\":\"DISPATCH_NOTICE\",\"deliveryMethod\":\"EMAIL\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -164,28 +226,26 @@ class ComplianceDocumentApiTest {
                 .andExpect(status().isBadRequest());
     }
 
-    @Test
-    @WithMockUser(username = "1", roles = "営業")
-    void 営業は一覧生成ダウンロードすべて403() throws Exception {
-        long contractId = insertContractWithProfile();
-        mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/generate")
-                        .with(csrf()).contentType("application/json")
-                        .content("{\"documentType\":\"DISPATCH_NOTICE\",\"deliveryMethod\":\"EMAIL\"}"))
-                .andExpect(status().isForbidden());
-    }
-
     // ===== データ準備 =====
 
     private long generate(long contractId, String documentType, String deliveryMethod) throws Exception {
+        return generate(contractId, documentType, deliveryMethod, null);
+    }
+
+    private long generate(long contractId, String documentType, String deliveryMethod,
+                          org.springframework.test.web.servlet.request.RequestPostProcessor user) throws Exception {
         java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("documentType", documentType);
         body.put("deliveryMethod", deliveryMethod);
         body.put("recipientContactId", null);
         String json = objectMapper.writeValueAsString(body);
-        String response = mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/generate")
-                        .with(csrf()).contentType("application/json").content(json))
+        org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder builder =
+                post("/api/contracts/" + contractId + "/compliance-documents/generate")
+                        .with(csrf()).contentType("application/json").content(json);
+        if (user != null) {
+            builder.with(user);
+        }
+        String response = mockMvc.perform(builder)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn().getResponse().getContentAsString();

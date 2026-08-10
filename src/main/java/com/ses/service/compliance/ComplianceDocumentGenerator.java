@@ -128,20 +128,25 @@ public class ComplianceDocumentGenerator {
     private List<Section> employmentConditions(ContractComplianceSnapshot s, boolean masked) {
         List<Section> sections = new ArrayList<>();
         sections.add(section("doc.section.workplace", List.of(
-                row("cpp.workplace", s.getWorkplaceName(), false),
-                row("doc.party.dispatchFrom", s.getPartyName(), false),
+                row("doc.party.name", s.getPartyName(), false),
+                row("doc.party.address", s.getPartyAddress(), false),
+                row("doc.party.representative", s.getPartyRepresentative(), false),
+                row("doc.party.dispatchTo", s.getWorkplaceName(), false),
                 row("doc.address", s.getWorkplaceAddress(), false),
                 row("doc.department", s.getWorkplaceDepartment(), false),
                 row("doc.workplacePhone", s.getWorkplacePhone(), false))));
         sections.add(section("doc.section.work", List.of(
                 row("cpp.workDescription", s.getWorkDescription(), false),
-                row("doc.period", period(s.getDispatchFrom(), s.getDispatchTo()), false))));
+                row("doc.period", period(s.getDispatchFrom(), s.getDispatchTo()), false),
+                row("cpp.statutoryJobFlag", flag(s.getStatutoryJobFlag()), false),
+                row("cpp.statutoryJobReference", s.getStatutoryJobReference(), false))));
         sections.add(section("doc.section.worktime", List.of(
                 row("cpp.workStartMinute", minutes(s.getWorkStartMinute()), false),
                 row("cpp.workEndMinute", minutes(s.getWorkEndMinute()), false),
                 row("cpp.breakStartMinute", minutes(s.getBreakStartMinute()), false),
                 row("cpp.breakEndMinute", minutes(s.getBreakEndMinute()), false),
                 row("cpp.workDayCode", s.getWorkDayCode(), false),
+                row("cpp.holidayCalendarCode", s.getHolidayCalendarCode(), false),
                 row("cpp.overtimeDailyLimit", s.getOvertimeDailyLimit() == null ? null : s.getOvertimeDailyLimit() + "h", false),
                 row("cpp.overtimeMonthlyLimit", s.getOvertimeMonthlyLimit() == null ? null : s.getOvertimeMonthlyLimit() + "h", false),
                 row("cpp.overtimeYearlyLimit", s.getOvertimeYearlyLimit() == null ? null : s.getOvertimeYearlyLimit() + "h", false))));
@@ -154,6 +159,20 @@ public class ComplianceDocumentGenerator {
                 row("cpp.healthInsuranceStatus", s.getHealthInsuranceStatus(), true),
                 row("cpp.pensionInsuranceStatus", s.getPensionInsuranceStatus(), true),
                 row("cpp.employmentInsuranceStatus", s.getEmploymentInsuranceStatus(), true))));
+        sections.add(section("doc.section.benefits", List.of(
+                row("cpp.benefitsDetail", s.getBenefitsDetail(), true),
+                row("cpp.benefitsProvidedFlag", flag(s.getBenefitsProvidedFlag()), true),
+                row("cpp.agreementTargetFlag", flag(s.getAgreementTargetFlag()), false),
+                row("cpp.treatmentScheme", s.getTreatmentScheme(), true),
+                row("cpp.employmentStabilityPreference", s.getEmploymentStabilityPreference(), true))));
+        sections.add(section("doc.section.limitation", List.of(
+                row("cpp.workplaceLimitationDate", date(s.getWorkplaceLimitationDate()), false),
+                row("cpp.organizationLimitationDate", date(s.getOrganizationLimitationDate()), false),
+                row("cpp.limitationExemptionType", s.getLimitationExemptionType(), true),
+                row("cpp.limitationExemptionDetail", s.getLimitationExemptionDetail(), true),
+                row("cpp.limitationExemptionBasis", s.getLimitationExemptionBasis(), true),
+                row("cpp.limitationExemptionFrom", date(s.getLimitationExemptionFrom()), true),
+                row("cpp.limitationExemptionTo", date(s.getLimitationExemptionTo()), true))));
         sections.add(section("doc.section.safety", List.of(
                 row("cpp.safetyResponsibilityDetail", s.getSafetyResponsibilityDetail(), false),
                 row("cpp.safetyRuleReference", s.getSafetyRuleReference(), false))));
@@ -172,7 +191,9 @@ public class ComplianceDocumentGenerator {
     private List<Section> dispatchNotice(ContractComplianceSnapshot s, boolean masked) {
         List<Section> sections = new ArrayList<>();
         sections.add(section("doc.section.workplace", List.of(
-                row("doc.party.dispatchFrom", s.getPartyName(), false),
+                row("doc.party.name", s.getPartyName(), false),
+                row("doc.party.address", s.getPartyAddress(), false),
+                row("doc.party.representative", s.getPartyRepresentative(), false),
                 row("doc.party.dispatchTo", s.getWorkplaceName(), false),
                 row("doc.address", s.getWorkplaceAddress(), false),
                 row("doc.department", s.getWorkplaceDepartment(), false))));
@@ -198,6 +219,10 @@ public class ComplianceDocumentGenerator {
         sections.add(section("doc.section.wage", List.of(
                 row("cpp.dispatchFeeAmount", fee(s.getDispatchFeeAmount()), true),
                 row("cpp.dispatchFeeBasis", s.getDispatchFeeBasis(), true))));
+        sections.add(section("doc.section.benefits", List.of(
+                row("cpp.benefitsDetail", s.getBenefitsDetail(), true),
+                row("cpp.agreementTargetFlag", flag(s.getAgreementTargetFlag()), false),
+                row("cpp.treatmentScheme", s.getTreatmentScheme(), true))));
         sections.add(section("doc.section.safety", List.of(
                 row("cpp.safetyResponsibilityDetail", s.getSafetyResponsibilityDetail(), false),
                 row("cpp.safetyRuleReference", s.getSafetyRuleReference(), false))));
@@ -218,8 +243,13 @@ public class ComplianceDocumentGenerator {
                 row("doc.period", period(s.getDispatchFrom(), s.getDispatchTo()), false))));
         sections.add(section("doc.section.work", List.of(
                 row("cpp.workDescription", s.getWorkDescription(), false),
+                row("cpp.workDayCode", s.getWorkDayCode(), false),
                 row("cpp.workStartMinute", minutes(s.getWorkStartMinute()), false),
-                row("cpp.workEndMinute", minutes(s.getWorkEndMinute()), false))));
+                row("cpp.workEndMinute", minutes(s.getWorkEndMinute()), false),
+                row("cpp.overtimeMonthlyLimit", s.getOvertimeMonthlyLimit() == null ? null : s.getOvertimeMonthlyLimit() + "h", false))));
+        sections.add(section("doc.section.responsible", List.of(
+                row("cpp.clientResponsibleName", s.getClientResponsibleName(), false),
+                row("cpp.dispatchResponsibleName", s.getDispatchResponsibleName(), false))));
         sections.add(section("doc.section.insurance", List.of(
                 row("cpp.healthInsuranceStatus", s.getHealthInsuranceStatus(), true),
                 row("cpp.pensionInsuranceStatus", s.getPensionInsuranceStatus(), true),
@@ -230,18 +260,24 @@ public class ComplianceDocumentGenerator {
         sections.add(section("doc.section.complaint", List.of(
                 row("cpp.sourceComplaintContactName", s.getSourceComplaintContactName(), true),
                 row("cpp.clientComplaintContactName", s.getClientComplaintContactName(), true))));
-        sections.add(section("doc.section.stability", List.of(
-                row("cpp.employmentStabilityPreference", s.getEmploymentStabilityPreference(), true))));
+        sections.add(section("doc.section.benefits", List.of(
+                row("cpp.employmentStabilityPreference", s.getEmploymentStabilityPreference(), true),
+                row("cpp.benefitsDetail", s.getBenefitsDetail(), true))));
         sections.add(section("doc.section.limitation", List.of(
                 row("cpp.workplaceLimitationDate", date(s.getWorkplaceLimitationDate()), false),
-                row("cpp.organizationLimitationDate", date(s.getOrganizationLimitationDate()), false))));
+                row("cpp.organizationLimitationDate", date(s.getOrganizationLimitationDate()), false),
+                row("cpp.limitationExemptionType", s.getLimitationExemptionType(), true))));
+        sections.add(section("doc.section.retention", List.of(
+                row("cpp.retentionDueDate", date(s.getRetentionDueDate()), false))));
         return mask(sections, masked);
     }
 
     private List<Section> individualContract(ContractComplianceSnapshot s, boolean masked) {
         List<Section> sections = new ArrayList<>();
         sections.add(section("doc.section.workplace", List.of(
-                row("doc.party.dispatchFrom", s.getPartyName(), false),
+                row("doc.party.name", s.getPartyName(), false),
+                row("doc.party.address", s.getPartyAddress(), false),
+                row("doc.party.representative", s.getPartyRepresentative(), false),
                 row("doc.party.dispatchTo", s.getWorkplaceName(), false),
                 row("doc.address", s.getWorkplaceAddress(), false))));
         sections.add(section("doc.section.work", List.of(
@@ -262,10 +298,25 @@ public class ComplianceDocumentGenerator {
                 row("cpp.dispatchResponsibleName", s.getDispatchResponsibleName(), false))));
         sections.add(section("doc.section.wage", List.of(
                 row("cpp.dispatchFeeAmount", fee(s.getDispatchFeeAmount()), true),
-                row("cpp.dispatchFeeBasis", s.getDispatchFeeBasis(), true))));
+                row("cpp.dispatchFeeBasis", s.getDispatchFeeBasis(), true),
+                row("cpp.dispatchFeeCurrency", s.getDispatchFeeCurrency(), true))));
+        sections.add(section("doc.section.benefits", List.of(
+                row("cpp.benefitsDetail", s.getBenefitsDetail(), true),
+                row("cpp.dispatchHeadcount", s.getDispatchHeadcount() == null ? null : String.valueOf(s.getDispatchHeadcount()), false),
+                row("cpp.agreementTargetFlag", flag(s.getAgreementTargetFlag()), false),
+                row("cpp.treatmentScheme", s.getTreatmentScheme(), true),
+                row("cpp.employmentStabilityPreference", s.getEmploymentStabilityPreference(), true))));
         sections.add(section("doc.section.complaint", List.of(
                 row("cpp.sourceComplaintContactName", s.getSourceComplaintContactName(), true),
                 row("cpp.clientComplaintContactName", s.getClientComplaintContactName(), true))));
+        sections.add(section("doc.section.limitation", List.of(
+                row("cpp.workplaceLimitationDate", date(s.getWorkplaceLimitationDate()), false),
+                row("cpp.organizationLimitationDate", date(s.getOrganizationLimitationDate()), false),
+                row("cpp.limitationExemptionType", s.getLimitationExemptionType(), true),
+                row("cpp.limitationExemptionDetail", s.getLimitationExemptionDetail(), true),
+                row("cpp.limitationExemptionBasis", s.getLimitationExemptionBasis(), true),
+                row("cpp.limitationExemptionFrom", date(s.getLimitationExemptionFrom()), true),
+                row("cpp.limitationExemptionTo", date(s.getLimitationExemptionTo()), true))));
         sections.add(section("doc.section.quasi", List.of(
                 row("cpp.instructionRoute", s.getInstructionRoute(), false),
                 row("cpp.subcontractAllowed", flag(s.getSubcontractAllowed()), false),

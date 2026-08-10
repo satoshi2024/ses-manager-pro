@@ -42,6 +42,22 @@
   承認eventにactor ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
 - PDF/Excelどちらを採用するか帳票別に決め、生成物はarchive登録。
 
+### 3.1 T064実装時の逸脱・範囲（R15指摘対応・決定済み）
+
+- **archive正本は常にFULLで生成し、downloadはviewer roleで再maskする**（R4.2）。
+  冪等キー`(contract_id, document_type, template_version, snapshot_hash)`はrole非依存で全roleが共有する。
+  マネージャーはMASK済みPDF、営業はLIMITED済みPDFのみ取得できる。配信物は再レンダリングであり、
+  archive正本（FULL）とはバイト列が異なる。scanStatus CLEANの正本登録がdownloadの前提gate。
+- **営業の帳票API**（R4.1/R4.2の「同左」を適用）: 一覧とmasked（LIMITED）downloadは可。
+  生成・受領確認はwriteであり、営業は403（fail-closed。決定表にwrite列が無い中の安全側判断）。
+- **帳票の出力項目scope**: generatorはsnapshot typed列に存在する項目を出力する（MAPPING-2026-07）。
+  履歴table・worker snapshot由来の項目（苦情処理状況・キャリアconsulting・教育訓練・紹介予定・
+  紛争防止・差異通知・性別/年齢/雇用期間・無期/60歳区分など）は、それらの行を作成する実装が
+  存在しないためT064では出力せず、**T066（M）で履歴連携と共に全項目化**する。
+  template versionは`m_system_config`の`compliance.template.<TYPE>.version`（既定1）。
+- **当事者（派遣元=自社）** は`company.name`/`company.address`/`company.representative`
+  （m_system_config）をsnapshot化して出力する。自社マスタが未実装のためconfigを正とする。
+
 ## 4. UI
 
 - contract detailにcompliance profile/findings/documents。

@@ -37,6 +37,8 @@ class ComplianceDocumentGeneratorTest {
         s.setSnapshotHash("h1");
         s.setContractNo("C-100");
         s.setPartyName("SES株式会社");
+        s.setPartyAddress("東京都千代田区1-1-1");
+        s.setPartyRepresentative("代表取締役 山田");
         s.setWorkplaceName("顧客株式会社");
         s.setWorkplaceAddress("東京都千代田区1-1-1");
         s.setWorkplaceDepartment("開発部");
@@ -62,6 +64,8 @@ class ComplianceDocumentGeneratorTest {
         s.setSourceComplaintContactName("苦情窓口A");
         s.setClientComplaintContactName("苦情窓口B");
         s.setEmploymentStabilityPreference("継続就業支援を希望");
+        s.setBenefitsDetail("借上社宅あり");
+        s.setAgreementTargetFlag(0);
         s.setWorkplaceLimitationDate(LocalDate.of(2029, 1, 1));
         s.setOrganizationLimitationDate(LocalDate.of(2027, 1, 1));
         s.setSafetyResponsibilityDetail("安全衛生責任は派遣元");
@@ -85,6 +89,17 @@ class ComplianceDocumentGeneratorTest {
         assertThat(rows(full, "doc.section.worktime"))
                 .extracting(row -> row.value())
                 .contains("09:00", "18:00", "12:00", "13:00");
+        // 当事者（派遣元）はsnapshotのparty_*から出力される（R15-P1-02）
+        assertThat(rows(full, "doc.section.workplace"))
+                .extracting(row -> row.value())
+                .contains("SES株式会社", "東京都千代田区1-1-1", "代表取締役 山田", "顧客株式会社");
+        // mapping項目（福利厚生・雇用安定・抵触日・例外）が出力される（R15-P1-03）
+        assertThat(rows(full, "doc.section.benefits"))
+                .extracting(row -> row.value())
+                .contains("借上社宅あり", "継続就業支援を希望");
+        assertThat(rows(full, "doc.section.limitation"))
+                .extracting(row -> row.value())
+                .contains("2029-01-01", "2027-01-01");
 
         ComplianceDocumentGenerator.Content masked = generator.build(contract(), snapshot(),
                 ComplianceDocumentGenerator.TYPE_EMPLOYMENT_CONDITIONS, "MASK", "山田太郎");
@@ -97,13 +112,25 @@ class ComplianceDocumentGeneratorTest {
         assertThat(rows(masked, "doc.section.complaint"))
                 .extracting(row -> row.value())
                 .containsOnly("—");
-        // 非sensitive（業務内容・就業時間・責任者）はMASKでも見える
+        // benefits: sensitive行（福利厚生・雇用安定・待遇方式）はmask、非sensitive（協定対象flag）は見える
+        assertThat(rows(masked, "doc.section.benefits"))
+                .filteredOn(row -> row.sensitive())
+                .extracting(row -> row.value())
+                .containsOnly("—");
+        assertThat(rows(masked, "doc.section.benefits"))
+                .filteredOn(row -> row.labelKey().equals("cpp.agreementTargetFlag"))
+                .extracting(row -> row.value())
+                .containsExactly("×");
+        // 非sensitive（業務内容・就業時間・責任者・当事者）はMASKでも見える
         assertThat(rows(masked, "doc.section.work"))
                 .extracting(row -> row.value())
                 .contains("システム開発");
         assertThat(rows(masked, "doc.section.responsible"))
                 .extracting(row -> row.value())
                 .contains("田中指揮");
+        assertThat(rows(masked, "doc.section.workplace"))
+                .extracting(row -> row.value())
+                .contains("SES株式会社", "顧客株式会社");
     }
 
     @Test
