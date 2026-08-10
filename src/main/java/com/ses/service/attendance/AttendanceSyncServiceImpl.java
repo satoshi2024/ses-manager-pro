@@ -27,7 +27,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -41,7 +40,6 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -124,11 +122,15 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         try {
             List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(cursor);
             result.setPulledCount(records.size());
+            // R5-P2-01: cursorはtenant timezone（attendance.sync.timezone）で正規化して比較・保存する
+            ZoneId zone = tenantZone();
             String maxUpdatedAt = cursor;
+            Map<Long, Map<LocalDate, EmployeeAttendance>> internalByEngineer = new HashMap<>();
             for (ExternalAttendanceRecord record : records) {
-                if (record.getUpdatedAt() != null
-                        && (maxUpdatedAt == null || record.getUpdatedAt().compareTo(maxUpdatedAt) > 0)) {
-                    maxUpdatedAt = record.getUpdatedAt();
+                String normalizedUpdated = normalizeUpdatedAt(record.getUpdatedAt(), zone);
+                if (normalizedUpdated != null
+                        && (maxUpdatedAt == null || normalizedUpdated.compareTo(maxUpdatedAt) > 0)) {
+                    maxUpdatedAt = normalizedUpdated;
                 }
                 if (record.getWorkDate() == null || !YearMonth.from(record.getWorkDate()).equals(target)) {
                     continue;
@@ -137,16 +139,15 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                     if (isClosedOrApproved(record)) {
                         rejectExternalUpdate(record, target);
                         result.setRejectedCount(value(result.getRejectedCount()) + 1);
+                        continue;
                     }
-                    // 照合に使うだけでDBへは登録しない（本システムを正。source='freee'行は承認付き取込経路）
+                    // R5-P2-02: 外部レコードを本システムの日次と照合（read-only。DB登録はしない）
+                    reconcile(record, target, internalByEngineer, result);
                 } catch (Exception e) {
                     result.getErrors().add("externalId=" + record.getSourceExternalId() + ": " + safeMessage(e));
                 }
             }
-            result.setCursor(maxUpdatedAt);
-            if (records.isEmpty()) {
-                result.setCursor(cursor);
-            }
+            result.setCursor(maxUpdatedAt != null ? maxUpdatedAt : cursor);
             saveCursor(provider.source(), result.getCursor());
         } catch (Exception e) {
             result.getErrors().add("pull: " + safeMessage(e));
@@ -154,6 +155,127 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         }
         finish(result);
         return result;
+    }
+
+    /**
+     * R5-P2-02: 外部レコードと本システムの該当日次（source=manual/system）を比較し、
+     * 一致/差異/対応なしを結果へ集計する。DBへは登録しない（read-only照合）。
+     */
+    private void reconcile(ExternalAttendanceRecord record, YearMonth target,
+                           Map<Long, Map<LocalDate, EmployeeAttendance>> internalByEngineer,
+                           AttendanceSyncResultDto result) {
+        if (record.getEngineerId() == null) {
+            resolveEngineer(record);
+        }
+        if (record.getEngineerId() == null || record.getWorkDate() == null) {
+            result.setUnmatchedCount(value(result.getUnmatchedCount()) + 1);
+            return;
+        }
+        Map<LocalDate, EmployeeAttendance> days = internalByEngineer.computeIfAbsent(
+                record.getEngineerId(), id -> loadInternalDays(id, target));
+        EmployeeAttendance internal = days.get(record.getWorkDate());
+        String externalValue = externalValue(record);
+        if (internal == null) {
+            result.setUnmatchedCount(value(result.getUnmatchedCount()) + 1);
+            addDifference(result, record, externalValue, "（該当日次なし）");
+            return;
+        }
+        String internalValue = internalValue(internal);
+        if (externalValue.equals(internalValue)) {
+            result.setMatchedCount(value(result.getMatchedCount()) + 1);
+        } else {
+            result.setDiffCount(value(result.getDiffCount()) + 1);
+            addDifference(result, record, externalValue, internalValue);
+        }
+    }
+
+    private Map<LocalDate, EmployeeAttendance> loadInternalDays(Long engineerId, YearMonth target) {
+        Map<LocalDate, EmployeeAttendance> result = new HashMap<>();
+        List<EmployeeAttendance> days = employeeAttendanceMapper.selectList(
+                new LambdaQueryWrapper<EmployeeAttendance>()
+                        .eq(EmployeeAttendance::getEngineerId, engineerId)
+                        .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
+                        .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
+                        .in(EmployeeAttendance::getSource, "manual", "system"));
+        for (EmployeeAttendance day : days) {
+            result.put(day.getWorkDate(), day);
+        }
+        return result;
+    }
+
+    /** 外部レコードと本システム日次の比較文字列（R5-P2-02）。nullは0として扱う。 */
+    private String externalValue(ExternalAttendanceRecord record) {
+        return "in=" + time(record.getClockIn()) + " out=" + time(record.getClockOut())
+                + " break=" + value(record.getBreakMinutes())
+                + " reg=" + value(record.getRegularMinutes())
+                + " ot=" + value(record.getOvertimeMinutes())
+                + " hol=" + value(record.getHolidayMinutes())
+                + " ln=" + value(record.getLateNightMinutes());
+    }
+
+    private String internalValue(EmployeeAttendance day) {
+        return "in=" + time(day.getClockIn()) + " out=" + time(day.getClockOut())
+                + " break=" + value(day.getBreakMinutes())
+                + " reg=" + value(day.getRegularMinutes())
+                + " ot=" + value(day.getOvertimeMinutes())
+                + " hol=" + value(day.getHolidayMinutes())
+                + " ln=" + value(day.getLateNightMinutes());
+    }
+
+    private String time(java.time.LocalTime t) {
+        return t == null ? "" : t.toString();
+    }
+
+    private void addDifference(AttendanceSyncResultDto result, ExternalAttendanceRecord record,
+                               String externalValue, String internalValue) {
+        if (result.getDifferences() == null) {
+            result.setDifferences(new ArrayList<>());
+        }
+        if (result.getDifferences().size() >= 20) {
+            return;
+        }
+        result.getDifferences().add(AttendanceSyncResultDto.ReconciliationItem.builder()
+                .sourceExternalId(record.getSourceExternalId())
+                .engineerId(record.getEngineerId())
+                .workDate(record.getWorkDate() == null ? null : record.getWorkDate().toString())
+                .externalValue(externalValue)
+                .internalValue(internalValue)
+                .build());
+    }
+
+    /**
+     * R5-P2-01: tenant timezone（attendance.sync.timezone、既定Asia/Tokyo）を返す。
+     * design §3「timezoneはAsia/Tokyo固定ではなくtenant設定」の実体。
+     * SystemConfigServiceのキャッシュはafterCommit更新のため、同一tx内のreadはmapper直読みにする。
+     */
+    private ZoneId tenantZone() {
+        com.ses.entity.SystemConfig config = systemConfigMapper.selectById(CONFIG_TIMEZONE);
+        String configured = config == null || config.getConfigValue() == null
+                ? "Asia/Tokyo" : config.getConfigValue();
+        try {
+            return ZoneId.of(configured);
+        } catch (Exception e) {
+            log.warn("attendance.sync.timezoneの値が不正なためAsia/Tokyoを使います: {}", configured);
+            return ZoneId.of("Asia/Tokyo");
+        }
+    }
+
+    /**
+     * R5-P2-01: 外部updated_at（ISO-8601）をtenant timezoneで正規化したISO文字列へ変換する。
+     * zone無し文字列はtenant timezoneで解釈し、zone付きはそのまま正規化する。
+     */
+    private String normalizeUpdatedAt(String updatedAt, ZoneId zone) {
+        if (updatedAt == null || updatedAt.isBlank()) {
+            return null;
+        }
+        try {
+            if (updatedAt.endsWith("Z") || updatedAt.indexOf('+') > 10 && updatedAt.contains(":")) {
+                return java.time.OffsetDateTime.parse(updatedAt).toInstant().toString();
+            }
+            return java.time.LocalDateTime.parse(updatedAt).atZone(zone).toInstant().toString();
+        } catch (DateTimeParseException e) {
+            return updatedAt;
+        }
     }
 
     @Override
@@ -166,6 +288,10 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         combined.setPulledCount(pull.getPulledCount());
         combined.setRegisteredCount(pull.getRegisteredCount());
         combined.setRejectedCount(pull.getRejectedCount());
+        combined.setMatchedCount(pull.getMatchedCount());
+        combined.setDiffCount(pull.getDiffCount());
+        combined.setUnmatchedCount(pull.getUnmatchedCount());
+        combined.setDifferences(pull.getDifferences());
         combined.setCursor(pull.getCursor());
         combined.getErrors().addAll(push.getErrors());
         combined.getErrors().addAll(pull.getErrors());

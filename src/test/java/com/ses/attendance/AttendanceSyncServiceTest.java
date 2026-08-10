@@ -147,7 +147,7 @@ class AttendanceSyncServiceTest {
                 .holidayMinutes(0)
                 .lateNightMinutes(60)
                 .workType("通常")
-                .updatedAt("2026-08-11T10:00:00+09:00")
+                .updatedAt("2026-08-11T01:00:00Z")
                 .build());
 
         AttendanceSyncResultDto result = attendanceSyncService.syncPull("2026-08");
@@ -184,7 +184,7 @@ class AttendanceSyncServiceTest {
                 .clockOut(LocalTime.of(18, 0))
                 .breakMinutes(60)
                 .regularMinutes(480)
-                .updatedAt("2026-08-11T10:00:00+09:00")
+                .updatedAt("2026-08-11T01:00:00Z")
                 .build());
 
         AttendanceSyncResultDto result = attendanceSyncService.syncPull("2026-08");
@@ -193,7 +193,83 @@ class AttendanceSyncServiceTest {
         assertEquals(0, result.getRejectedCount(), "入力中月は拒否しない");
         assertEquals(0, employeeAttendanceMapper.selectCount(null), "照合に使うだけでDB登録しない");
         assertNotNull(result.getCursor());
-        assertEquals("2026-08-11T10:00:00+09:00", result.getCursor());
+        assertEquals("2026-08-11T01:00:00Z", result.getCursor());
+        // R5-P2-02: 照合の実体（本システムに該当日次なし→unmatched）
+        assertEquals(1, result.getUnmatchedCount());
+    }
+
+    @Test
+    void pullは外部レコードを本システム日次と照合して一致と差異を集計する() {
+        authenticate(93001L, "管理者");
+        insertMonth("入力中", "2026-08");
+        // 本システム日次: 08-03 09:00-18:00 break60 reg480
+        jdbcTemplate.update("INSERT INTO t_employee_attendance (engineer_id, legal_entity_id, organization_id, work_date, "
+                + "clock_in, clock_out, break_minutes, regular_minutes, overtime_minutes, holiday_minutes, late_night_minutes, "
+                + "work_type, source, status) "
+                + "VALUES (?, 72001, ?, '2026-08-03', '09:00', '18:00', 60, 480, 0, 0, 0, '通常', 'manual', '入力中')",
+                engineerId, organizationId);
+
+        // 外部レコード1: 本システムと一致
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-match-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .clockIn(LocalTime.of(9, 0))
+                .clockOut(LocalTime.of(18, 0))
+                .breakMinutes(60)
+                .regularMinutes(480)
+                .updatedAt("2026-08-11T01:00:00Z")
+                .build());
+        // 外部レコード2: 差異あり（残業60分多い）
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-diff-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .clockIn(LocalTime.of(9, 0))
+                .clockOut(LocalTime.of(19, 0))
+                .breakMinutes(60)
+                .regularMinutes(480)
+                .overtimeMinutes(60)
+                .updatedAt("2026-08-11T02:00:00Z")
+                .build());
+        // 外部レコード3: 本システムに該当日次なし
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-unmatch-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 4))
+                .updatedAt("2026-08-11T03:00:00Z")
+                .build());
+
+        AttendanceSyncResultDto result = attendanceSyncService.syncPull("2026-08");
+        assertTrue(result.isSuccess());
+        assertEquals(3, result.getPulledCount());
+        assertEquals(1, result.getMatchedCount(), "一致1件");
+        assertEquals(1, result.getDiffCount(), "差異1件");
+        assertEquals(1, result.getUnmatchedCount(), "該当なし1件");
+        assertEquals(2, result.getDifferences().size(), "差異サンプルは2件（diff＋unmatch）");
+        assertEquals("ext-diff-1", result.getDifferences().get(0).getSourceExternalId());
+        // 照合はread-only: 本システム日次（manual）は1件のまま、外部レコードは登録されない
+        assertEquals(1, employeeAttendanceMapper.selectCount(null),
+                "本システム日次1件のみ（外部レコードはDB登録されない）");
+    }
+
+    @Test
+    void pullはtimezone設定でzoneなしupdated_atを正規化する() {
+        systemConfigService.put("attendance.sync.timezone", "UTC", "test");
+        authenticate(93001L, "管理者");
+        insertMonth("入力中", "2026-08");
+        mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
+                .sourceExternalId("ext-tz-1")
+                .engineerId(engineerId)
+                .workDate(LocalDate.of(2026, 8, 3))
+                .updatedAt("2026-08-11T10:00:00")
+                .build());
+
+        attendanceSyncService.syncPull("2026-08");
+        String cursor = jdbcTemplate.queryForObject(
+                "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor'",
+                String.class);
+        assertEquals("2026-08-11T10:00:00Z", cursor, "zoneなしupdated_atはtenant timezone（UTC）で解釈される");
     }
 
     @Test
@@ -204,7 +280,7 @@ class AttendanceSyncServiceTest {
                 .sourceExternalId("ext-c1")
                 .engineerId(engineerId)
                 .workDate(LocalDate.of(2026, 8, 3))
-                .updatedAt("2026-08-10T10:00:00+09:00")
+                .updatedAt("2026-08-10T01:00:00Z")
                 .build());
 
         attendanceSyncService.syncPull("2026-08");
@@ -212,17 +288,17 @@ class AttendanceSyncServiceTest {
                 "SELECT config_value FROM m_system_config WHERE config_key = 'attendance.sync.freee.cursor'",
                 String.class);
         assertNotNull(cursor);
-        assertEquals("2026-08-10T10:00:00+09:00", cursor);
+        assertEquals("2026-08-10T01:00:00Z", cursor);
 
         mockAttendanceProvider.seedExternalRecord(ExternalAttendanceRecord.builder()
                 .sourceExternalId("ext-c2")
                 .engineerId(engineerId)
                 .workDate(LocalDate.of(2026, 8, 4))
-                .updatedAt("2026-08-12T10:00:00+09:00")
+                .updatedAt("2026-08-12T01:00:00Z")
                 .build());
         AttendanceSyncResultDto second = attendanceSyncService.syncPull("2026-08");
         assertEquals(1, second.getPulledCount(), "cursor以降の差分だけ取得");
-        assertEquals("2026-08-12T10:00:00+09:00", second.getCursor());
+        assertEquals("2026-08-12T01:00:00Z", second.getCursor());
     }
 
     @Test

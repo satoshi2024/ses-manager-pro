@@ -38,6 +38,28 @@ public class AttendanceSyncResultDto {
     /** 実行が成功したか（エラーがあっても部分成功はtrue） */
     private boolean success;
 
+    // ===== R5-P2-02: read-only照合の実体（外部レコードと本システム日次の比較結果） =====
+    /** 外部レコードが本システム日次と一致した件数 */
+    private Integer matchedCount;
+    /** 外部レコードと本システム日次に差異がある件数 */
+    private Integer diffCount;
+    /** 本システムに対応する日次が無い外部レコードの件数 */
+    private Integer unmatchedCount;
+    /** 差異レコードの要約（直近最大20件。照合の実体としてerror UI/statusで表示） */
+    private List<ReconciliationItem> differences;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReconciliationItem {
+        private String sourceExternalId;
+        private Long engineerId;
+        private String workDate;
+        private String externalValue;
+        private String internalValue;
+    }
+
     public static AttendanceSyncResultDto empty() {
         return AttendanceSyncResultDto.builder()
                 .pushedCount(0)
@@ -45,7 +67,11 @@ public class AttendanceSyncResultDto {
                 .pulledCount(0)
                 .registeredCount(0)
                 .rejectedCount(0)
+                .matchedCount(0)
+                .diffCount(0)
+                .unmatchedCount(0)
                 .errors(new ArrayList<>())
+                .differences(new ArrayList<>())
                 .success(true)
                 .build();
     }

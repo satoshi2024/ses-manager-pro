@@ -99,11 +99,22 @@
             const el = document.getElementById('attendanceSyncResult');
             if (!result) { el.innerHTML = ''; return; }
             const t = SES.i18n.t;
-            el.innerHTML = `<span class="badge ${result.success ? 'text-bg-success' : 'text-bg-danger'}">${result.success ? t('attendance.sync.success', '成功') : t('attendance.sync.partial', '部分失敗')}</span> `
+            let html = `<span class="badge ${result.success ? 'text-bg-success' : 'text-bg-danger'}">${result.success ? t('attendance.sync.success', '成功') : t('attendance.sync.partial', '部分失敗')}</span> `
                 + `${t('attendance.sync.pushed', '送信')}: ${esc(result.pushedCount || 0)} / ${t('attendance.sync.duplicate', '重複skip')}: ${esc(result.duplicateSkippedCount || 0)}`
-                + ` / ${t('attendance.sync.pulled', '取得')}: ${esc(result.pulledCount || 0)} / ${t('attendance.sync.rejected', '拒否')}: ${esc(result.rejectedCount || 0)}`
-                + (result.errors && result.errors.length
-                    ? `<div class="mt-1 text-danger">${result.errors.map(esc).join('<br>')}</div>` : '');
+                + ` / ${t('attendance.sync.pulled', '取得')}: ${esc(result.pulledCount || 0)} / ${t('attendance.sync.rejected', '拒否')}: ${esc(result.rejectedCount || 0)}`;
+            if (result.direction !== 'push') {
+                html += `<div class="mt-1">${t('attendance.sync.matched', '一致')}: ${esc(result.matchedCount || 0)}`
+                    + ` / ${t('attendance.sync.diff', '差異')}: ${esc(result.diffCount || 0)}`
+                    + ` / ${t('attendance.sync.unmatched', '該当なし')}: ${esc(result.unmatchedCount || 0)}</div>`;
+                if (result.differences && result.differences.length) {
+                    html += `<ul class="mt-1 mb-0 ps-3 text-danger">${result.differences.map(d =>
+                        `<li>${esc(d.workDate || '')} ${esc(d.externalValue || '')} ≠ ${esc(d.internalValue || '')}</li>`).join('')}</ul>`;
+                }
+            }
+            if (result.errors && result.errors.length) {
+                html += `<div class="mt-1 text-danger">${result.errors.map(esc).join('<br>')}</div>`;
+            }
+            el.innerHTML = html;
         }
     }
 })();
