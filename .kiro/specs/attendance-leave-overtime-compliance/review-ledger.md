@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071までPASS・収束、T072独立Review **PASS**（R5-P1-01 VERIFIED_CLOSED、R5-P2-01/02 FIXED）、**R5-P2-03 FIXED_BY_IMPLEMENTER・独立再Review待ち**、T073〜T074未着手） |
+| state | `REVIEW`（T071/T072 **PASS・完結**（R5-P1-01/02/03 VERIFIED_CLOSED/FIXED）、T073〜T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T072 R5-P2-03 fix delta `3fce6d78`＝current merged HEAD（main=origin/main、push済み） |
+| head | T072完了 `9be5e5c`＝current merged HEAD（main=origin/main、push済み） |
 | merge | T072までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 R5-P1-01 fix delta再Review`（R5-P2-03 OPEN発見）。R5-P2-03 fix delta（`3fce6d78`）は独立再Review待ち |
-| verdict | T072は**PASS**（R5-P1-01 VERIFIED_CLOSED、R5-P2-01/02 FIXED）。R5-P2-03（cursor×scope外）は`3fce6d78`で法人別cursor化により修正済み（FIXED_BY_IMPLEMENTER） |
-| issue count | `P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R5-P2-03 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **T073（B2. 客先工数差異/通知）着手可**（R11 R5-P1-01再Review）。R5-P2-03の独立VERIFIED_CLOSED後が安全。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| latest review | `R11 R5-P2-03 fix delta再Review`（`3fce6d78`/`9be5e5c`）。**R5-P2-03 VERIFIED_CLOSED、T072完結** |
+| verdict | **T072完結**（P0=0/P1=0/P2=2/NOTE=3）。R5-P1-01/02/03すべてVERIFIED_CLOSED/FIXED。法人別cursor運用方針がdesign.mdに確定 |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
+| next action | **T073（B2. 客先工数差異/通知）着手可**。pull運用方針（法人別cursor）確定済み。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -31,7 +31,7 @@
 | attendance-leave-overtime-compliance-R5-P2-01 | P2 | tasks.md B1「timezoneはtenant設定（design §3）」 | `AttendanceSyncServiceImpl.java:61,73`（`CONFIG_TIMEZONE`）、`ZoneId` import未使用 | `attendance.sync.timezone`は設定登録のみで**読み取りコードが存在しない**（dead constant）。cursorの`updated_at`は文字列辞書順比較でtimezone semanticsなし | 外部providerがtimezone付きISOを返すとcursor前進・比較がずれる可能性。現行はmock既定・freeeはG4 provisionalのため即時影響なし | timezone設定をcursor正規化（zone付きparse）へ実装するか、javadoc/完了記録の虚偽主張を削除しG4 gateへ明示延期 | timezone正規化のboundary（zoneなし/zone付き/不正値）、cursor再実行 | **FIXED_BY_IMPLEMENTER**（`c750fcb3`: `tenantZone()`+`normalizeUpdatedAt()`でzoneなしをtenant timezone解釈・zone付きはInstant正規化して比較・保存。mapper直読みで同一tx整合） | `c750fcb3` | 独立再Review（R11） |
 | attendance-leave-overtime-compliance-R5-P2-02 | P2 | tasks.md B1「外部データはread-onlyの照合に使われる」 | `AttendanceSyncServiceImpl.java:169-176`（pull） | pullはfetch→pulledCount加算→締め済み/承認済み上書き拒否のみで、**非締め月レコードは取得後破棄**（比較・差異の保存/表示なし） | 「照合」の実体が無く外部データを活かせない（安全側の拒否は実装済み） | 照合対象の保存または差異DTO化（T073の範囲と明確に線引きして実装） | 照合の一致/差異/該当なし集計、差異サンプル上限、read-only不変、T073差異表示との線引き | **FIXED（検証済み）**（`c750fcb3`: 外部レコードと本システム日次（manual/system）を比較し`matchedCount`/`diffCount`/`unmatchedCount`＋差異サンプル（最大20件）を`AttendanceSyncResultDto`へ追加。DB登録はしない。status API・管理画面UIで表示。T073（客先工数差異）とは別物として線引き。R5 fix delta再Reviewで実assert確認） | `c750fcb3` | R11 Round 5 fix delta再Review |
 | attendance-leave-overtime-compliance-R5-P1-01 | P1 | T070 Objective・design §5.3・R5、platform-invariants §2 | `AttendanceSyncServiceImpl.java:117-155`（syncPull） | HR-Aが法人Bの要員の外部レコードをpull。`rejectExternalUpdate`（:140）が任意法人の締め済み/承認済み月へfinding書込＋通知し、`reconcile`（:145）が他法人要員の日次勤怠PII（出退勤・各分・engineerId・workDate）を結果DTOへ返却 | 他法人要員のPII漏洩と誤finding書込（R4-P1-01と同じ根本原因クラスがpull経路に残存） | syncPullへcaller scope境界（管理者=全件/HR=担当法人/マネージャー=組織scope）を適用し、reject/reconcileを同一境界に統一。scope外・要員未解決レコードはskip | HR A→A処理/A→B skip、finding書込なし・PII非返却、管理者全件、マネージャー組織scope | **VERIFIED_CLOSED**（`1582d96`を独立検証: `pullScopeEngineerIds`（管理者=全件、HR=`allowedHrEngineerIds`月末asOf、マネージャー=組織scope・hasFullAccess先判定、その他403）＋scope外・要員未解決はreject/reconcile前にskip（:123,141-149）。test: HR-Aが自法人締め済み更新のみ拒否（rejectedCount=1）、他法人要員のfinding不書込（findingB=null）、管理者は全要員処理を実assert。read-only・PII/finding漏れは解消） | `1582d96` | R11 R5-P1-01 fix delta再Review |
-| attendance-leave-overtime-compliance-R5-P2-03 | P2 | tasks.md B1「締め済み月が外部から上書きされない」「黙って無視もしない」、design §5.4 | `AttendanceSyncServiceImpl.java:133-137,146-149,162-163`（syncPull） | **cursorがscope外レコードでも前進する**。`maxUpdatedAt`（:133-137）はscope skip（:146-149）より前に全レコードで更新され、単一グローバルcursor（`attendance.sync.freee.cursor`）へ保存（:162-163）。多法人DBでHR-Aが先にpullすると、HR-B配下要員のレコード分もcursorが進み、**HR-Bの後続pullでは該当レコードを取得できず、HR-B配下の締め済み月外部更新の拒否・照合が黙ってスキップされる** | 「黙って無視」になる（締め済み拒否の完全性がpull順に依存） | ①cursorをscope内レコードだけで前進、②legal entity別cursor keyへ分割、③pullをグローバル/system principalで実行し結果表示のみscope——のいずれかを決定表・設計で確定して実装 | HR-A→HR-Bの順序でpull、法人別cursor、締め済み拒否の他法人到達性 | **FIXED_BY_IMPLEMENTER**（`3fce6d78`: **②法人別cursor**を採用。cursor keyを`attendance.sync.freee.cursor.le.<legalEntityId>`へ分割し、fetchは対象法人cursorの最小値、cursor前進は処理したレコードの法人ごと。管理者=全法人/HR=担当法人/マネージャー=組織scope要員の法人。design.md §5.4へ運用方針を明記。fixture: HR-Aが先にpull→法人B cursor不変（行なし）、HR-B後続pull→法人B配下の締め済み拒否1件・pulledCount=1を実assert） | `3fce6d78` | 独立再Review（R11） |
+| attendance-leave-overtime-compliance-R5-P2-03 | P2 | tasks.md B1「締め済み月が外部から上書きされない」「黙って無視もしない」、design §5.4 | `AttendanceSyncServiceImpl.java:133-137,146-149,162-163`（syncPull） | **cursorがscope外レコードでも前進する**。`maxUpdatedAt`（:133-137）はscope skip（:146-149）より前に全レコードで更新され、単一グローバルcursor（`attendance.sync.freee.cursor`）へ保存（:162-163）。多法人DBでHR-Aが先にpullすると、HR-B配下要員のレコード分もcursorが進み、**HR-Bの後続pullでは該当レコードを取得できず、HR-B配下の締め済み月外部更新の拒否・照合が黙ってスキップされる** | 「黙って無視」になる（締め済み拒否の完全性がpull順に依存） | ①cursorをscope内レコードだけで前進、②legal entity別cursor keyへ分割、③pullをグローバル/system principalで実行し結果表示のみscope——のいずれかを決定表・設計で確定して実装 | HR-A→HR-Bの順序でpull、法人別cursor、締め済み拒否の他法人到達性 | **VERIFIED_CLOSED**（`3fce6d78`を独立検証: 法人別cursorキー（`attendance.sync.freee.cursor.le.<id>`、旧グローバルkeyはfallback保持）。`pullScopeLegalEntityIds`（管理者=全法人/HR=担当法人/マネージャー=組織scope要員の法人、hasFullAccess先判定）→ fetchは対象法人cursorの最小値、レコードは`legalEntityIdOf`（月次snapshot→要員組織の法人）で解決しscope外法人はskip・cursor不変、処理済み（法人cursor以前）はskip、処理したレコードの法人だけcursor前進・保存は変化した法人のみ。動的cursor keyはSYSTEM_MANAGED prefix管理。test: HR-A先pull→法人B cursor不変（行不存在）→HR-B後続pullでBレコード再取得（pulledCount=1）・締め済み拒否実行（rejectedCount=1）を実assert） | `3fce6d78` | R11 R5-P2-03 fix delta再Review |
 
 ## 3. Closed/Deferred Issue
 
@@ -796,3 +796,13 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - issue state: `R5-P2-03=FIXED_BY_IMPLEMENTER / independent re-review requested`。`R5-P1-01=VERIFIED_CLOSED`、`R5-P2-01/02=FIXED（検証済み）`維持
 - rollback: 本番未適用。`3fce6d78`をrevertすれば本deltaを戻せる。DDL変更なし（m_system_configの動的キーのみ）
 - next Review handoff: R11担当はHR-A→HR-B順序のpull（法人B cursor不変→後続拒否到達）、管理者全法人、マネージャー組織scope要員の法人、法人別cursorのSYSTEM_MANAGED非表示を独立再実行し、R5-P2-03をVERIFIED_CLOSEDにする。T073（B2）は独立再Review後に着手可
+
+### R5-P2-03 fix delta再Review — 2026-08-10 — R11担当
+
+- review target: delta=`3fce6d78`（法人別cursor実装）＋`9be5e5c2`（転記）。design.mdにも決定を記録
+- independent evidence: 独立実行（29 class）**219 tests / 1 failure（既知NOTE-R4-03のみ）/ 0 errors / 0 skipped**、BUILD SUCCESS。`AttendanceSyncServiceTest` **13/0/0/0**
+- result: `R5-P2-03=VERIFIED_CLOSED` — 法人別cursorキー（`attendance.sync.freee.cursor.le.<id>`、旧グローバルkeyはfallback保持）を実装。`pullScopeLegalEntityIds`（管理者=全法人/HR=担当法人/マネージャー=組織scope要員の法人、hasFullAccess先判定）→ fetchは対象法人cursorの最小値、レコードは`legalEntityIdOf`（月次snapshot→要員組織の法人）で解決しscope外法人はskip・cursor不変、処理済み（法人cursor以前）はskip、処理したレコードの法人だけcursor前進・保存は変化した法人のみ。動的cursor keyはSYSTEM_MANAGED prefix管理。test: HR-A先pull→法人B cursor不変（行不存在）→HR-B後続pullでBレコード再取得（pulledCount=1）・締め済み拒否実行（rejectedCount=1）を実assert
+- cross-cutting: 締め済み拒否の完全性 **PASS**（pull順・法人間で漏れなく到達。黙って無視しない契約が法人別cursorで成立）、scope/security **PASS**（R5-P1-01境界を維持、engineer scope＋LE scopeの二重確認）、config/cache **PASS**（動的keyはmapper直読/直書でcache非依存、SYSTEM_MANAGED prefixで管理者編集不可）、回帰全green、skip 0
+- overall verdict: **PASS（T072完結）**。P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（cross-lane）
+- next task/Wave: **T073（B2 客先工数差異/通知）開始可（維持）**。R5-P2-03の閉鎖でpull運用方針（法人別cursor）が確定済み。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、CI相当L4×1回。次spec/次WaveはS11完了（T074/M、L4）後
+- central ledger転記用短文: `R11 R5-P2-03 fix delta再Review: 3fce6d78を独立検証——法人別cursor（cursor.le.<id>、旧key fallback）＋scope法人集合＋レコード別LE解決＋処理法人のみcursor前進を読解し、HR-A先pull→法人B cursor不変→HR-B後続pullでB拒否実行を実assert。設計決定（design.md）も記録済み。219件中FAILはcross-lane NOTE-R4-03のみ、skip 0。R5-P2-03 VERIFIED_CLOSED、新規指摘なし。P0=0/P1=0/P2=2/NOTE=3。T073開始可。`
