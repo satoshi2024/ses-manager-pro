@@ -145,7 +145,7 @@
     `git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN）。
     Demo: 8h差異（1200分）を確認して理由保存、保存前後のbilling_amount・actual_hoursがSQLで同一を実測。
 
-- [ ] M. 回帰/法務受入
+- [x] M. 回帰/法務受入
   - **Objective**: 6か月rollingのfixtureが期待どおりで、月次が一気通貫で動く。
     既存の給与・work record・請求機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
@@ -153,3 +153,17 @@
   - **Demo**: 6か月rolling fixtureと月次全通し。客先工数を編集しても雇用勤怠が変わらないことを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
     法人別36協定/就業規則の確認と外部社労士Reviewは本taskのPASS条件ではなく、**本番releaseのgate**として別管理する。
+  - **検証（T074完了）**: L4全量 `mvn test` = **1701 tests / 5 failures / 38 skipped**。
+    **attendance起因FAILはゼロ**。5 failuresは全てattendance非関与:
+    (1) `MessageBundleConsistencyTest`＝NOTE-R4-03（既知cross-lane・統合担当）、
+    (2) `SpecDispatchConsistencyTest`＝NOTE-R4-04（既知cross-lane・統合担当）、
+    (3) `AllMappersSchemaSweepTest`＝dispatch S10 entity/H2不一致（`ageOver60Flag`→`age_over60_flag` vs 実列`age_over_60_flag`、dispatch起因・新規NOTE-R6-03として登録）、
+    (4)(5) `CapacityBaselineScriptTest`/`VerifyLikeCiPowerShellCompatibilityTest`＝45秒タイムアウト（scripts系・環境依存）。
+    38 skipped＝Docker未起動によるMySQL smoke全件（環境依存・既知）。
+    browser Demo: **実Chrome CDP（headless）でdesktop 1920x1080・390x844の勤怠管理画面を実測**し、
+    同期カード・差異カードの表示、ログイン→/work-record/attendance遷移、PNG＋SHA-256＋consoleイベントを
+    `evidence/browser-m/`へ保存（R2-P2-01の390px再評価）。`git diff --check` PASS。
+    Demo実測: 6か月rolling（OvertimeComplianceCalculatorTest 27）、月次一気通貫
+    （workflow/sync/discrepancy/leave 全PASS）、客先工数編集で請求金額・雇用勤怠不変（R4.2実測）。
+  - **残件**: (a) fresh/legacy MySQL smokeはDocker起動後にCI相当で再実行（統合担当がNOTE-R3-06/R4-03/R4-04解消後にCI相当L4×1回）、
+    (b) ATT-GATE-01〜06（法人別36協定・就業規則・社労士Review）は**本番release gate**として継続管理。

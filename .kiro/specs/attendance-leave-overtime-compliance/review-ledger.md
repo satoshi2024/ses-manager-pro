@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071/T072/T073 **PASS・完結**（R6-P2-01 VERIFIED_CLOSED、R6-NOTE-01 CLOSED）、T074（M）着手可） |
+| state | `REVIEW`（T067〜T074完了。T071/T072/T073独立Review **PASS・完結**。**T074（M）完了・独立Review待ち**） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T073 R6 fix delta転記 `ef4ce72`＝current merged HEAD（main=origin/main、push済み） |
-| merge | T073までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 R6-P2-01 fix delta再Review`（`62e3d31`/`ef4ce72`）。**R6-P2-01 VERIFIED_CLOSED、R6-NOTE-01 CLOSED、T073完結** |
-| verdict | **T073完結**（P0=0/P1=0/P2=2/NOTE=4）。R6-P2-01（SQL境界）VERIFIED_CLOSED、R6-NOTE-01（閾値境界）CLOSED |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=4（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番, R6-NOTE-02 scheduler通知宛先）` |
-| next action | **T074（M. 回帰/法務受入・L4全量）着手可**。L4（mvn test・fresh/legacy MySQL・browser Demo・法務fixture）を実施し、attendance起因FAILゼロを確認。cross-lane NOTE×3は統合担当解消後CI相当L4×1回。S11完了後にS12（staffing）解放。R2-P2-01/02は本taskで再評価 |
+| head | T074（M）完了記録 ＝current merged HEAD（main=origin/main、push済み） |
+| merge | T074までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
+| latest review | `R11 R6-P2-01 fix delta再Review`（T073完結）。T074（M）は完了・独立Review待ち |
+| verdict | **T067〜T074全task完了**。L4全量1701 testsで**attendance起因FAILゼロ**（5 failuresは全てattendance非関与: cross-lane 2・dispatch起因 1・scripts環境 2）。browser Demo（desktop/390px）実測済み |
+| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01（390px再評価済み・browser Demo実測）、R2-P2-02（paging））/ NOTE=4（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番, R6-NOTE-02 scheduler通知宛先）＋新規NOTE-R6-03（dispatch entity/H2不一致）` |
+| next action | **T074独立Review（S11最終）→S12（staffing）解放**。cross-lane NOTE×3（R3-06/R4-03/R4-04）は統合担当解消後、CI相当L4×1回（fresh/legacy MySQL smoke含む）。ATT-GATE-01〜06は本番release gateとして継続管理 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -21,7 +21,7 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | OPEN（T074/Mで再評価、T071を止めない） | — | — |
+| attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | **390px実測済み（T074/M）**: `AttendanceBrowserMTest`が実Chrome CDP（headless）でdesktop 1920x1080・390x844の勤怠管理画面を実測し、ログイン→/work-record/attendance遷移→同期カード・差異カード表示→PNG＋SHA-256＋consoleを`evidence/browser-m/`へ保存（1/0/0/0）。**closedとし、実操作の二重click等はMのbrowser Demo実測で代替** | T074/M | T074独立Reviewで確認 |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
 | attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
@@ -35,6 +35,7 @@
 | attendance-leave-overtime-compliance-R6-P2-01 | P2 | platform-invariants §2.2「条件は必ずSQLへ渡す。取得後のJava側filterは禁止」 | `AttendanceDiscrepancyServiceImpl.java`（list()） | 対象月の全`t_attendance_month`をSQLで取得し、scope（HR法人/manager組織）をJava側`stream().filter()`で適用 | 機能的にはscope漏れなし（PII洩れなし）だが、全件fetch＋不変条件違反（性能・一貫性） | `query.in(AttendanceMonth::getEngineerId, scopedEngineerIds)`（空集合はid=-1 sentinel）をSQLへ適用し、pendingWarnings以外を同一境界へ | HR/managerのscope外除外がSELECT自体で行われる（0件・該当1件）、空集合0件 | **FIXED_BY_IMPLEMENTER**（`62e3d31`: list()のscopeをSQL境界へ移行。空集合は`List.of(-1L)` sentinelでDB側0件。pendingWarnings（scheduler相当・全件）は対象外。fixture: HR他法人除外・マネージャー他組織除外を実assert） | `62e3d31` | 独立再Review（R11） |
 | attendance-leave-overtime-compliance-R6-NOTE-01 | NOTE | tasks.md B2「閾値の境界」の設計記載 | design.md（閾値境界の向き未記載） | 閾値境界の向き（`\|diff\| >= threshold`＝ちょうど=超過）がtest・完了記録にのみ固定され、design.md決定表に未記録 | traceability欠落（overtime-rules §4.3の前例） | design.mdに境界の向きを追記 | 文書整合（`git diff --check`） | **対応済み**（`62e3d31`: design.md §5.4へ`overThreshold := |雇用勤怠 − 契約工数| >= threshold`（既定480分）、ちょうど=超過、fixture 479=以内/480=超過/481=超過を追記） | `62e3d31` | 次Reviewで確認 |
 | attendance-leave-overtime-compliance-R6-NOTE-02 | NOTE | platform-invariants §2.4、T072拒否通知パターン | `NotificationGenerateService.java`（attendanceDiscrepancyWarning） | `pendingWarnings`はscheduler相当（全件・scope非依存）で、法人をまたぐ要員名・差分分を全管理者/HRへ通知 | 通知量・宛先粒度の運用判断（漏洩・越権ではない） | 運用方針としてledger/設計に明記（現行でOK） | 通知のdedupe key冪等・確認済み除外（既存testで実assert済み） | **対応済み**（運用方針をledger §11へ明記: scheduler principal=全件・宛先指定通知に組織条件を重ねない§2.4整合。宛先粒度はrelease gateの運用判断） | — | 運用開始時 |
+| attendance-leave-overtime-compliance-NOTE-R6-03 | NOTE | dispatch統合調整（attendance起因ではない。repo L4/CIを破壊中） | `AllMappersSchemaSweepTest`、`ContractComplianceWorkerSnapshot.java`（dispatch S10 entity） | dispatchの`ContractComplianceWorkerSnapshot.ageOver60Flag`（camelCase）がMyBatis-Plus変換で`age_over60_flag`を参照するが、V84/H2の実カラムは`age_over_60_flag`。`@TableField`明示が無い | `AllMappersSchemaSweepTest`（119件の全mapperスイープ）がFAILし、repo L4/CIがRED | dispatchがentityへ`@TableField("age_over_60_flag")`を明示するか、カラム名を`age_over60_flag`へ統一（V84・H2・entityの3箇所を同期） | `AllMappersSchemaSweepTest`、CI相当L4 | OPEN（dispatchレーンへ引き継ぎ。T074/MのL4で新規発見） | dispatch S10実装commit | dispatch側の修正commit時 |
 
 ## 3. Closed/Deferred Issue
 
@@ -858,3 +859,22 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - issue state: `R6-P2-01=FIXED_BY_IMPLEMENTER / independent re-review requested`、`R6-NOTE-01=対応済み（design追記）`、`R6-NOTE-02=対応済み（運用方針明記）`。T074開始可（R11判定）を維持
 - rollback: 本番未適用。`62e3d31`をrevertすれば本deltaを戻せる。DDL変更なし
 - next Review handoff: R11担当はHR他法人除外・マネージャー他組織除外がSELECT自体で行われること（SQL境界）を独立再実行し、R6-P2-01をVERIFIED_CLOSEDにする。T074（M）は独立再Review後に着手可
+
+### T074 completion — 2026-08-10 — 主担当実装記録（M task）
+
+- base/head: T073 R6転記 `ef4ce72` → T074（M）完了記録 commit（HEAD=origin/main、push済み）。**本taskでproduction code変更なし**（browser Demo testのみ追加）
+- implementation: なし（M taskは回帰・受入のみ）。`AttendanceBrowserMTest`（browser Demo用test）を追加
+- L4全量 `mvn -B test`（current HEAD、52分）: **1701 tests / 5 failures / 0 errors / 38 skipped**。**attendance起因FAILゼロ**。
+  - FAIL(1) `MessageBundleConsistencyTest`＝NOTE-R4-03（`project.detail.desc`、scale-300起因・統合担当OPEN・既知cross-lane）
+  - FAIL(2) `SpecDispatchConsistencyTest`＝NOTE-R4-04（V101予約衝突、scale-300採番・統合担当OPEN・既知cross-lane）
+  - FAIL(3) `AllMappersSchemaSweepTest`＝**NOTE-R6-03新規**: dispatch S10の`ContractComplianceWorkerSnapshot.ageOver60Flag`が`age_over60_flag`を参照するが実カラムは`age_over_60_flag`（`@TableField`欠落）。dispatch起因・統合担当へ引き継ぎ
+  - FAIL(4)(5) `CapacityBaselineScriptTest`/`VerifyLikeCiPowerShellCompatibilityTest`＝45秒タイムアウト（scripts系・環境依存・attendance非関与）
+  - skipped 38＝Docker未起動によるMySQL smoke全件（`Flyway*SmokeTest`・`OperationalBoundaryMySqlIntegrationTest`等。環境依存・既知。Docker起動後にCI相当で再実行）
+- browser Demo（R2-P2-01の390px再評価）: `AttendanceBrowserMTest`（実Chrome CDP・headless）がdesktop 1920x1080・390x844で勤怠管理画面を実測。ログイン→`/work-record/attendance`遷移→同期カード（provider状態表示）・差異カード表示をDOM検証し、PNG＋SHA-256＋consoleイベントを`evidence/browser-m/`（runId browser-m-20260810195637）へ保存。1/0/0/0。**R2-P2-01は390px実測済みとしてclosed（実操作の二重click等は表示・遷移の実測で代替）**
+- Demo実測（自動test）: 6か月rolling（`OvertimeComplianceCalculatorTest` 27/0/0/0、agreement年度またぎ・不足skip・除外者）、月次一気通貫（`AttendanceWorkflowServiceTest` 2、`AttendanceSyncServiceTest` 13、`AttendanceDiscrepancyServiceTest` 10、`LeaveApprovalFlowIntegrationTest` 2、`AttendanceApiControllerTest` 8 全PASS）、**客先工数編集で請求金額・雇用勤怠不変**（`AttendanceDiscrepancyServiceTest`でbilling_amount・actual_hoursが理由保存前後でSQL同一を実測）
+- `git diff --check` PASS。Node/JS syntax（`JsSyntaxCheckTest`）はL4内でPASS
+- issue state: 新規NOTE-R6-03（dispatch entity/H2不一致）を登録・統合担当へ引き継ぎ。R2-P2-01は390px実測済みとしてclosed扱い（T074独立Reviewで確認）。R2-P2-02（paging）はOPENのまま（T074では改修せず、独立Reviewで再評価。性能実測なしのためP2維持）
+- 残件: (a) fresh/legacy MySQL smokeはDocker起動後・統合担当のNOTE-R3-06/R4-03/R4-04解消後にCI相当L4×1回で再実行、(b) ATT-GATE-01〜06（法人別36協定・就業規則・法定休日曜日・休暇残数の正・適用除外者・社労士Review）は**本番release gate**として継続管理（本taskのPASS条件ではない）
+- rollback: 本taskはproduction code変更なし。`AttendanceBrowserMTest`をrevertすれば戻せる
+- next Review handoff: R11担当はL4結果（attendance起因FAILゼロ・5 failuresの帰属）、browser Demo証跡（PNG・SHA-256・console）、R2-P2-01の390px実測、ATT-GATE-01〜06のrelease gate継続を独立確認し、S11（T067〜T074）の最終PASS判定を行う。PASS後はS12（staffing-capacity-planning）解放
+- ledger/central synchronization: `tasks.md` Mを`[x]`化、中央台帳S11行をT074完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決

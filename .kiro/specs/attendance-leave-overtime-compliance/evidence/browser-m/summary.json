@@ -1,0 +1,12 @@
+{
+  "runId" : "browser-m-20260810195637",
+  "baseUrl" : "http://localhost:60144",
+  "desktop-png" : "desktop-attendance-management.png",
+  "desktop-png-sha256" : "387059a4ad419f1e42662f68be6874f22eee331d275ae6806d27f07c966903d2",
+  "desktop-finalUrl" : "http://localhost:60144/work-record/attendance",
+  "desktop-consoleCount" : 3,
+  "mobile390-png" : "mobile390-attendance-management.png",
+  "mobile390-png-sha256" : "c389cecf94f8cd659eb757f65fe071ae15d6b11a3eacaa79df7a1ea857a997b5",
+  "mobile390-finalUrl" : "http://localhost:60144/work-record/attendance",
+  "mobile390-consoleCount" : 6
+}
