@@ -81,6 +81,15 @@ const ContractCompliance = (function () {
         if (detail.canEdit) {
             $('#cd-save-btn').prop('disabled', false);
         }
+
+        // 法定帳票・交付（T064 B1。営業=LIMITEDはcompliance権限なしとして非表示）
+        if (detail.maskLevel !== 'LIMITED') {
+            $('#cd-documents-card').removeClass('d-none');
+            if (detail.canEdit) {
+                $('#cd-doc-generate-btn').prop('disabled', false);
+            }
+            loadDocuments();
+        }
     }
 
     function fillWorkplaceOptions(workplaces) {
@@ -183,7 +192,107 @@ const ContractCompliance = (function () {
         });
     }
 
-    return { init: init, save: save };
+    // ===== 法定帳票・交付（T064 B1） =====
+
+    function loadDocuments() {
+        $.ajax({
+            url: '/api/contracts/' + contractId + '/compliance-documents',
+            method: 'GET',
+            success: function (res) {
+                if (res.code !== 200) {
+                    return;
+                }
+                renderDocuments(res.data || []);
+            },
+            error: function () {
+                // 一覧取得失敗はカードを空のままにする（画面は継続）
+            }
+        });
+    }
+
+    function renderDocuments(deliveries) {
+        if (!deliveries || deliveries.length === 0) {
+            $('#cd-doc-empty').removeClass('d-none');
+            $('#cd-doc-table-wrap').addClass('d-none');
+            return;
+        }
+        $('#cd-doc-empty').addClass('d-none');
+        $('#cd-doc-table-wrap').removeClass('d-none');
+        const body = $('#cd-doc-body');
+        body.empty();
+        deliveries.forEach(function (d) {
+            const typeLabel = SES.i18n.t('doc.title.' + d.documentType, d.documentType);
+            const statusBadge = d.deliveryStatus === 'DELIVERED'
+                ? '<span class="badge bg-success">' + SES.escapeHtml(d.deliveryStatus) + '</span>'
+                : '<span class="badge bg-secondary">' + SES.escapeHtml(d.deliveryStatus || '') + '</span>';
+            const confirmed = d.confirmedAt
+                ? '<span class="text-success small"><i class="bi bi-check-circle"></i> ' + SES.escapeHtml(String(d.confirmedAt).substring(0, 16)) + '</span>'
+                : '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2" onclick="ContractCompliance.confirmDelivery(' + d.id + ')">'
+                    + SES.i18n.t('cpp.document.confirm', '受領確認') + '</button>';
+            body.append(
+                '<tr>' +
+                '<td class="px-3 py-2 small">' + SES.escapeHtml(typeLabel) + '</td>' +
+                '<td class="py-2 small text-muted">v' + SES.escapeHtml(String(d.templateVersion)) + '</td>' +
+                '<td class="py-2">' + statusBadge + '</td>' +
+                '<td class="py-2 small text-muted">' + SES.escapeHtml(d.deliveredAt ? String(d.deliveredAt).substring(0, 16) : '—') + '</td>' +
+                '<td class="py-2 small">' + confirmed + '</td>' +
+                '<td class="px-3 py-2 text-end text-nowrap">' +
+                '<button type="button" class="btn btn-outline-info btn-sm" title="' + SES.i18n.t('cpp.document.download', 'ダウンロード') + '" onclick="ContractCompliance.downloadDelivery(' + d.id + ')"><i class="bi bi-download"></i></button>' +
+                '</td>' +
+                '</tr>');
+        });
+    }
+
+    function generateDocument() {
+        const documentType = $('#cd-doc-type').val();
+        const deliveryMethod = $('#cd-doc-method').val();
+        $('#cd-doc-generate-btn').prop('disabled', true);
+        $.ajax({
+            url: '/api/contracts/' + contractId + '/compliance-documents/generate',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ documentType: documentType, deliveryMethod: deliveryMethod, recipientContactId: null }),
+            success: function (res) {
+                if (res.code === 200) {
+                    Toast.success(SES.i18n.t('cpp.documents.generated', '帳票を生成し交付記録を作成しました'));
+                    loadDocuments();
+                } else {
+                    Toast.error(res.message || SES.i18n.t('js.common.error_network', '通信エラー'));
+                }
+                $('#cd-doc-generate-btn').prop('disabled', false);
+            },
+            error: function (err) {
+                Toast.error((err.responseJSON && err.responseJSON.message)
+                    || SES.i18n.t('js.common.error_network', '通信エラー'));
+                $('#cd-doc-generate-btn').prop('disabled', false);
+            }
+        });
+    }
+
+    function confirmDelivery(deliveryId) {
+        $.ajax({
+            url: '/api/contracts/' + contractId + '/compliance-documents/' + deliveryId + '/confirm',
+            method: 'POST',
+            success: function (res) {
+                if (res.code === 200) {
+                    Toast.success(SES.i18n.t('cpp.documents.confirmed', '受領確認を記録しました'));
+                    loadDocuments();
+                } else {
+                    Toast.error(res.message || SES.i18n.t('js.common.error_network', '通信エラー'));
+                }
+            },
+            error: function (err) {
+                Toast.error((err.responseJSON && err.responseJSON.message)
+                    || SES.i18n.t('js.common.error_network', '通信エラー'));
+            }
+        });
+    }
+
+    function downloadDelivery(deliveryId) {
+        window.open('/api/contracts/' + contractId + '/compliance-documents/' + deliveryId + '/download', '_blank');
+    }
+
+    return { init: init, save: save, generateDocument: generateDocument, confirmDelivery: confirmDelivery, downloadDelivery: downloadDelivery };
 })();
 
 $(function () {

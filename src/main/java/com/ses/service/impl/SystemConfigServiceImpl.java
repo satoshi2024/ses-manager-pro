@@ -91,6 +91,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("attendance.sync.timezone", ConfigSchema.string());
         SCHEMAS.put("attendance.sync.freee.cursor", ConfigSchema.string()); // JSON/ISO cursor。操作状態
         SCHEMAS.put("attendance.sync.last-result", ConfigSchema.string()); // JSON。操作状態
+        // S10 T064: 法定帳票のtemplate version（帳票種別別。既定1。帳票様式の更新時に管理者が変更する）
+        SCHEMAS.put("compliance.template.EMPLOYMENT_CONDITIONS_STATEMENT.version", ConfigSchema.integer(1, null));
+        SCHEMAS.put("compliance.template.DISPATCH_NOTICE.version", ConfigSchema.integer(1, null));
+        SCHEMAS.put("compliance.template.DISPATCH_LEDGER.version", ConfigSchema.integer(1, null));
+        SCHEMAS.put("compliance.template.INDIVIDUAL_CONTRACT.version", ConfigSchema.integer(1, null));
     }
 
     private void ensureLoaded() {

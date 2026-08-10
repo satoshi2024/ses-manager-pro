@@ -57,44 +57,10 @@ import java.util.Set;
 public class ContractComplianceProfileServiceImpl implements ContractComplianceProfileService {
 
     /** マネージャー（P1_MASK）でmaskするsensitive field（待遇・保険・苦情詳細・雇用安定措置・抵触日例外）。 */
-    static final List<String> SENSITIVE_FIELDS = List.of(
-            "dispatchFeeAmount", "dispatchFeeBasis", "dispatchFeeCurrency",
-            "benefitsDetail", "benefitsProvidedFlag",
-            "treatmentScheme",
-            "socialInsuranceProcedureIncompleteReason",
-            "healthInsuranceStatus", "healthInsuranceMissingReason", "healthInsuranceExpectedDate",
-            "pensionInsuranceStatus", "pensionInsuranceMissingReason", "pensionInsuranceExpectedDate",
-            "employmentInsuranceStatus", "employmentInsuranceMissingReason", "employmentInsuranceExpectedDate",
-            "sourceComplaintContactDepartment", "sourceComplaintContactTitle",
-            "sourceComplaintContactName", "sourceComplaintContactPhone",
-            "clientComplaintContactDepartment", "clientComplaintContactTitle",
-            "clientComplaintContactName", "clientComplaintContactPhone",
-            "employmentStabilityPreference",
-            "limitationExemptionType", "limitationExemptionDetail", "limitationExemptionBasis",
-            "limitationExemptionFrom", "limitationExemptionTo");
+    static final List<String> SENSITIVE_FIELDS = com.ses.service.compliance.ComplianceFieldMask.SENSITIVE_FIELDS;
 
     /** 営業（P2_LIMITED）が見られる限定field（契約遂行に必要な業務項目）。 */
-    static final List<String> P2_ALLOWED_FIELDS = List.of(
-            "contractTypeDetail", "workplaceId",
-            "workDescription", "statutoryJobFlag", "statutoryJobReference",
-            "responsibilityLevel", "responsibilityDetail",
-            "commandPersonContactId", "commandPersonDepartment", "commandPersonTitle",
-            "commandPersonName", "commandPersonPhone",
-            "clientResponsibleContactId", "clientResponsibleDepartment", "clientResponsibleTitle",
-            "clientResponsibleName", "clientResponsiblePhone",
-            "dispatchResponsibleUserId", "dispatchResponsibleDepartment", "dispatchResponsibleTitle",
-            "dispatchResponsibleName", "dispatchResponsiblePhone",
-            "workStartMinute", "workEndMinute", "workSpanNextDayFlag",
-            "breakStartMinute", "breakEndMinute",
-            "workDayCode", "holidayCalendarCode",
-            "agreementReferenceId",
-            "overtimeDailyLimit", "overtimeMonthlyLimit", "overtimeYearlyLimit",
-            "overtimePeriodFrom", "overtimePeriodTo",
-            "workplaceLimitationDate", "organizationLimitationDate",
-            "safetyResponsibilityDetail", "safetyRuleReference",
-            "dispatchHeadcount", "agreementTargetFlag",
-            "instructionRoute", "subcontractAllowed", "acceptanceMethod",
-            "dispatchPeriodStart", "dispatchPeriodEnd");
+    static final List<String> P2_ALLOWED_FIELDS = com.ses.service.compliance.ComplianceFieldMask.P2_ALLOWED_FIELDS;
 
     /** T066 gateまでのserver管理field（保存DTOに含めず、画面の編集対象にしない）。 */
     static final List<String> SERVER_MANAGED_FIELDS = List.of(
@@ -228,12 +194,9 @@ public class ContractComplianceProfileServiceImpl implements ContractComplianceP
 
     /** compliance menu権限を再チェックする（MonthlyClosingServiceImpl.canViewComplianceと同じ方式・fail-closed）。 */
     private boolean canViewCompliance(String role) {
-        if ("管理者".equals(role)) {
-            return true;
-        }
         try {
             MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
-            return menuCacheService != null && menuCacheService.getMenuKeysByRole(role).contains("compliance");
+            return com.ses.service.compliance.ComplianceAccessControl.canViewCompliance(role, menuCacheService);
         } catch (Exception e) {
             log.warn("compliance menu権限の確認に失敗したためfindingsを非表示にします（role={}）", role, e);
             return false;

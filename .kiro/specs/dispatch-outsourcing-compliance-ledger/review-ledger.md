@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 13: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS（P0=0/P1=0/P2=0）。R12-P1-01（SaveDto 2列削除・UI保存400解消）・R12-P2-01（contact顧客一致）をVERIFIED_CLOSED。T064〜T065解放可、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 14: T060〜T063 PASS確定。T064 B1実装提出済み（R10 Round 15確認待ち）。T065解放可、T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 13: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS（P0=0/P1=0/P2=0）。R12-P1-01（SaveDto 2列削除・UI保存400解消）・R12-P2-01（contact顧客一致）をVERIFIED_CLOSED。T064〜T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 12: T060/T061/T062 PASS維持。T063 A1 FAIL（R12-P1-01: SaveDto残留retention/legalHoldによるUI保存400、P2-01: contact顧客一致未検証）→ fix再提出済み・再Review待ち。T064〜T065停止、T066 M/本番gate未達、production authorizationなし**。
 
@@ -259,6 +261,32 @@ R10はHead `6d5e21f5` → `a6695026`（9ファイル/+112/-12）をread-only＋�
 **NOTE継続（非block）**: 営業write 403のdesign明文化推奨、guardのBigDecimal表記差、engine N+1（T066性能検証）。
 
 **境界**: DDL/migration/SecurityConfig変更なし。production release/apply authorizationなし。T063 checkboxを`[x]`化し、T064（B1）から着手可。
+
+## T064 B1 法定帳票/交付/archive delta（2026-08-10、R10 Round 15確認待ち）
+
+R10 Round 14のT064着手許可を受け、B1を実装した。S11 trackが同一worktreeをdirtyにしているため、**isolated worktree（`ses-manager-pro-s10-t063`、base `a26fa0d1`=origin/main）で実装・検証**し、push後にmainへ同期する。
+
+**変更file**:
+- `service/compliance/ComplianceSnapshotWriter.java`（新規）: profile→snapshotの作成・再利用。内容hash（profile業務fieldの決定的SHA-256）を冪等キーとし、最新snapshotのhashが一致すれば再利用。新規時はUNIQUE(contract_id,snapshot_version)＋operation row（operation_id一意）＋profile current pointerのversion CASで競合制御（design §5.4・field-mapping §4.1/§4.2、F1プロトコル準拠）。失敗は同一txで全rollback（orphan 0）。
+- `service/compliance/ComplianceDocumentGenerator.java`（新規・@Component）: 4帳票種別（就業条件明示書/派遣先通知書/派遣元管理台帳/個別契約書）の内容モデルをsnapshot typed列から構築（MAPPING-2026-07 baseline、current masterを再読しない）。sensitive行（待遇・保険・苦情・雇用安定・抵触日例外・worker PII）はmaskLevel!=FULLで「—」へ置換（R4.2）。PDFはopenpdf＋`PdfFontUtils.resolveCjkFont()`（日本語フォント埋め込み・A4）。
+- `service/compliance/ComplianceFieldMask.java`（新規）: T063/T064共有のSENSITIVE_FIELDS/P2_ALLOWED_FIELDS定数を集約（T063 serviceは参照へ切替、挙動不変）。
+- `service/compliance/ComplianceAccessControl.java`（新規）: compliance menu権限再チェック共通化。**design §5.3の「HR/法務=全件・全field」に合わせHRを常に可へ**（T063のcanViewComplianceもこの共通化へ切替）。
+- `service/ComplianceDocumentService.java`＋`service/impl/ComplianceDocumentServiceImpl.java`（新規）:
+  - list: 交付記録一覧（compliance権限ロールのみ、営業は403）
+  - generate: profile→snapshot→PDF→`DocumentService.registerGenerated`（document archive、businessKey=`COMPLIANCE:{contractId}:{docType}`、discriminator=`v{templateVersion}:{snapshotHash}`でarchive側も冪等）→`t_document_delivery`記録。冪等キー`(contract_id, document_type, template_version, snapshot_hash)`で既存交付行があれば再生成しない（design §5.4）。
+  - confirm: `confirmed_at`+note記録（CAS）。NULL=受領未確認（未交付ではない、design §5.1）
+  - download: 生成PDF配信。scanStatus CLEAN以外は403（fail-closed）＋DocumentAccessLog DOWNLOAD記録
+  - template versionは`m_system_config`（`compliance.template.<TYPE>.version`、既定1、SystemConfigServiceImplのSCHEMASへ4 key登録＝管理者が/system-configから変更可。GATE-T060の「判断値はconfigへ置く」方針）
+  - 営業は生成・確認・ダウンロード403（fail-closed）。受領者contactは存在＋契約顧客一致チェック
+- `controller/api/ComplianceDocumentApiController.java`（新規）: `GET /api/contracts/{id}/compliance-documents`、`POST .../generate`、`POST .../{deliveryId}/confirm`、`GET .../{deliveryId}/download`（契約メニュー権限配下・CSRF・audit）。
+- `templates/contract/detail.html`＋`static/js/modules/contract-compliance.js`: 法定帳票・交付カード（生成フォーム・交付記録一覧・受領確認・ダウンロード）。営業（LIMITED）にはカード非表示。
+- messages 4 bundle: doc.*/cpp.document.*/error key約60件追加。
+
+**実行test（L2〜L3定向・直接回帰、skip 0）**: ComplianceDocumentApiTest 7（生成→snapshot+archive+delivery・同一内容再生成で2件目なし・profile変更→新snapshot→新交付・templateVersion切替（config）で版が進む・受領確認・PDFダウンロード%PDF・不正種別/方法400・profile未作成400・営業403）、ComplianceDocumentGeneratorTest 5（golden content model・MASKでsensitive「—」・worker PII mask・4帳票構成・PDF生成）、T063系（API 17・page 2・Mobile 26）、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1。**計124件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
+
+**Demo証跡（L2〜L3実測）**: 派遣元管理台帳等を生成→交付記録作成。同一snapshot（同一内容）の再生成でdelivery件数・snapshot件数とも増えない（冪等）。profile変更→snapshot v2→新hash→新交付記録（版差分が説明できる）。template version切替（m_system_config）で版が進む。PDFはscanStatus CLEANのみダウンロード可。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
+
+**境界**: DDL/migration変更なし（V84 shape・既存document archiveを利用。retention categoryはGATE-T066-RETENTION）。SecurityConfig/他機能未変更（canViewComplianceのHR常可化のみdesign §5.3準拠の共通化）。T064 checkboxはR10確認まで未完了。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 
