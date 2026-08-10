@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T071/T072 **PASS・完結**、**T073実装済み・独立Review待ち**、T074未着手） |
+| state | `REVIEW`（T071/T072 **PASS・完結**、T073独立Review **PASS**（R6-P2-01 FIXED_BY_IMPLEMENTER・独立再Review待ち、R6-NOTE-01/02対応済み）、T074未着手） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T073実装 `5c34db26`＝current merged HEAD（main=origin/main、push済み） |
+| head | T073 R6 fix delta `62e3d31`＝current merged HEAD（main=origin/main、push済み） |
 | merge | T073までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 R5-P2-03 fix delta再Review`（T072完結）。T073（`5c34db26`）は実装済み・独立Review待ち |
-| verdict | T072完結（P0=0/P1=0/P2=2/NOTE=3）。T073は実装・定向回帰済み（独立Review待ち） |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01, R2-P2-02）/ NOTE=3（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番）` |
-| next action | **T073独立Review→T074（M. 回帰/法務受入）着手**。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
+| latest review | `R11 Round 6 T073独立Review`（`5c34db26`/`11398d9`）。T073 R6 fix delta（`62e3d31`）は独立再Review待ち |
+| verdict | **T073 PASS**（P0=0/P1=0/P2=3/NOTE=5）。R6-P2-01（SQL境界）は`62e3d31`で修正済み（FIXED_BY_IMPLEMENTER）。R6-NOTE-01（閾値境界）はdesign.md追記済み、R6-NOTE-02（scheduler通知宛先）は運用方針としてledger記録 |
+| issue count | `P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R6-P2-01 FIXED_BY_IMPLEMENTER・独立再Review待ち）/ NOTE=5（R3-06, R4-03, R4-04, R6-NOTE-01, R6-NOTE-02）` |
+| next action | **T074（M. 回帰/法務受入）着手可**（R11 Round 6）。R6-P2-01の独立VERIFIED_CLOSED後が安全。cross-lane NOTE×3は統合担当OPEN。R2-P2-01/02はT074/Mで再評価 |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -32,6 +32,9 @@
 | attendance-leave-overtime-compliance-R5-P2-02 | P2 | tasks.md B1「外部データはread-onlyの照合に使われる」 | `AttendanceSyncServiceImpl.java:169-176`（pull） | pullはfetch→pulledCount加算→締め済み/承認済み上書き拒否のみで、**非締め月レコードは取得後破棄**（比較・差異の保存/表示なし） | 「照合」の実体が無く外部データを活かせない（安全側の拒否は実装済み） | 照合対象の保存または差異DTO化（T073の範囲と明確に線引きして実装） | 照合の一致/差異/該当なし集計、差異サンプル上限、read-only不変、T073差異表示との線引き | **FIXED（検証済み）**（`c750fcb3`: 外部レコードと本システム日次（manual/system）を比較し`matchedCount`/`diffCount`/`unmatchedCount`＋差異サンプル（最大20件）を`AttendanceSyncResultDto`へ追加。DB登録はしない。status API・管理画面UIで表示。T073（客先工数差異）とは別物として線引き。R5 fix delta再Reviewで実assert確認） | `c750fcb3` | R11 Round 5 fix delta再Review |
 | attendance-leave-overtime-compliance-R5-P1-01 | P1 | T070 Objective・design §5.3・R5、platform-invariants §2 | `AttendanceSyncServiceImpl.java:117-155`（syncPull） | HR-Aが法人Bの要員の外部レコードをpull。`rejectExternalUpdate`（:140）が任意法人の締め済み/承認済み月へfinding書込＋通知し、`reconcile`（:145）が他法人要員の日次勤怠PII（出退勤・各分・engineerId・workDate）を結果DTOへ返却 | 他法人要員のPII漏洩と誤finding書込（R4-P1-01と同じ根本原因クラスがpull経路に残存） | syncPullへcaller scope境界（管理者=全件/HR=担当法人/マネージャー=組織scope）を適用し、reject/reconcileを同一境界に統一。scope外・要員未解決レコードはskip | HR A→A処理/A→B skip、finding書込なし・PII非返却、管理者全件、マネージャー組織scope | **VERIFIED_CLOSED**（`1582d96`を独立検証: `pullScopeEngineerIds`（管理者=全件、HR=`allowedHrEngineerIds`月末asOf、マネージャー=組織scope・hasFullAccess先判定、その他403）＋scope外・要員未解決はreject/reconcile前にskip（:123,141-149）。test: HR-Aが自法人締め済み更新のみ拒否（rejectedCount=1）、他法人要員のfinding不書込（findingB=null）、管理者は全要員処理を実assert。read-only・PII/finding漏れは解消） | `1582d96` | R11 R5-P1-01 fix delta再Review |
 | attendance-leave-overtime-compliance-R5-P2-03 | P2 | tasks.md B1「締め済み月が外部から上書きされない」「黙って無視もしない」、design §5.4 | `AttendanceSyncServiceImpl.java:133-137,146-149,162-163`（syncPull） | **cursorがscope外レコードでも前進する**。`maxUpdatedAt`（:133-137）はscope skip（:146-149）より前に全レコードで更新され、単一グローバルcursor（`attendance.sync.freee.cursor`）へ保存（:162-163）。多法人DBでHR-Aが先にpullすると、HR-B配下要員のレコード分もcursorが進み、**HR-Bの後続pullでは該当レコードを取得できず、HR-B配下の締め済み月外部更新の拒否・照合が黙ってスキップされる** | 「黙って無視」になる（締め済み拒否の完全性がpull順に依存） | ①cursorをscope内レコードだけで前進、②legal entity別cursor keyへ分割、③pullをグローバル/system principalで実行し結果表示のみscope——のいずれかを決定表・設計で確定して実装 | HR-A→HR-Bの順序でpull、法人別cursor、締め済み拒否の他法人到達性 | **VERIFIED_CLOSED**（`3fce6d78`を独立検証: 法人別cursorキー（`attendance.sync.freee.cursor.le.<id>`、旧グローバルkeyはfallback保持）。`pullScopeLegalEntityIds`（管理者=全法人/HR=担当法人/マネージャー=組織scope要員の法人、hasFullAccess先判定）→ fetchは対象法人cursorの最小値、レコードは`legalEntityIdOf`（月次snapshot→要員組織の法人）で解決しscope外法人はskip・cursor不変、処理済み（法人cursor以前）はskip、処理したレコードの法人だけcursor前進・保存は変化した法人のみ。動的cursor keyはSYSTEM_MANAGED prefix管理。test: HR-A先pull→法人B cursor不変（行不存在）→HR-B後続pullでBレコード再取得（pulledCount=1）・締め済み拒否実行（rejectedCount=1）を実assert） | `3fce6d78` | R11 R5-P2-03 fix delta再Review |
+| attendance-leave-overtime-compliance-R6-P2-01 | P2 | platform-invariants §2.2「条件は必ずSQLへ渡す。取得後のJava側filterは禁止」 | `AttendanceDiscrepancyServiceImpl.java`（list()） | 対象月の全`t_attendance_month`をSQLで取得し、scope（HR法人/manager組織）をJava側`stream().filter()`で適用 | 機能的にはscope漏れなし（PII洩れなし）だが、全件fetch＋不変条件違反（性能・一貫性） | `query.in(AttendanceMonth::getEngineerId, scopedEngineerIds)`（空集合はid=-1 sentinel）をSQLへ適用し、pendingWarnings以外を同一境界へ | HR/managerのscope外除外がSELECT自体で行われる（0件・該当1件）、空集合0件 | **FIXED_BY_IMPLEMENTER**（`62e3d31`: list()のscopeをSQL境界へ移行。空集合は`List.of(-1L)` sentinelでDB側0件。pendingWarnings（scheduler相当・全件）は対象外。fixture: HR他法人除外・マネージャー他組織除外を実assert） | `62e3d31` | 独立再Review（R11） |
+| attendance-leave-overtime-compliance-R6-NOTE-01 | NOTE | tasks.md B2「閾値の境界」の設計記載 | design.md（閾値境界の向き未記載） | 閾値境界の向き（`\|diff\| >= threshold`＝ちょうど=超過）がtest・完了記録にのみ固定され、design.md決定表に未記録 | traceability欠落（overtime-rules §4.3の前例） | design.mdに境界の向きを追記 | 文書整合（`git diff --check`） | **対応済み**（`62e3d31`: design.md §5.4へ`overThreshold := |雇用勤怠 − 契約工数| >= threshold`（既定480分）、ちょうど=超過、fixture 479=以内/480=超過/481=超過を追記） | `62e3d31` | 次Reviewで確認 |
+| attendance-leave-overtime-compliance-R6-NOTE-02 | NOTE | platform-invariants §2.4、T072拒否通知パターン | `NotificationGenerateService.java`（attendanceDiscrepancyWarning） | `pendingWarnings`はscheduler相当（全件・scope非依存）で、法人をまたぐ要員名・差分分を全管理者/HRへ通知 | 通知量・宛先粒度の運用判断（漏洩・越権ではない） | 運用方針としてledger/設計に明記（現行でOK） | 通知のdedupe key冪等・確認済み除外（既存testで実assert済み） | **対応済み**（運用方針をledger §11へ明記: scheduler principal=全件・宛先指定通知に組織条件を重ねない§2.4整合。宛先粒度はrelease gateの運用判断） | — | 運用開始時 |
 
 ## 3. Closed/Deferred Issue
 
@@ -823,3 +826,25 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - rollback: 本番未適用。`5c34db26`をrevertすれば本deltaを戻せる。DDL変更なし（m_system_configの動的キーのみ）
 - next Review handoff: R11担当はread-only不変（理由保存前後のbilling_amount/actual_hours同一）、閾値境界（480-1/480/480+1分）、scope（HR法人/マネージャー組織/営業403）、通知の冪等（dedupe key）、pendingWarnings（scheduler相当）を独立再実行する。T074（M）は独立Review後に着手可
 - ledger/central synchronization: `tasks.md` B2を`[x]`化、中央台帳S11行をT073完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
+
+### Round 6 T073独立Review — 2026-08-10 — R11担当
+
+- review target: delta=`5c34db26`（実装）＋`11398d97`（完了記録）
+- independent evidence: 独立実行（31 class）**232 tests / 1 failure（既知NOTE-R4-03のみ）/ 0 errors / 0 skipped**、BUILD SUCCESS。T073新規 **13/0/0/0**（Service 8、API 5）
+- result: **PASS（T073）**。P0=0/P1=0/P2=3/NOTE=5。検証PASSの要点: R4.1比較（worked_minutes vs actual_hours×60、稼働中/終了契約のみ、月重複判定、engineer別合算）、**R4.2非連動（理由確認はm_system_config JSONのみ、testで保存前後のbilling_amount・actual_hoursがSQL同一を実assert）**、閾値境界（480ちょうど=超過・479以内=超過なしを両方向実測）、scope/security（list管理者全件/HR法人/manager組織、confirm assertScope他法人404、営業/要員403、CSRF）、通知（threshold超過かつ未確認のみ、dedupe key冪等、確認済み除外）、i18n 19キー×4バンドル
+- new issues: `R6-P2-01`（P2: list()がSQL取得後にJava filterでscope適用。platform-invariants §2.2違反。機能的漏れなし）、`R6-NOTE-01`（閾値境界の向きがdesign.mdに未記載。traceability欠落）、`R6-NOTE-02`（pendingWarningsは全管理者/HRへ通知。§2.4整合・運用判断として明記）
+- overall verdict: **PASS（T073）**。P0=0 / P1=0 / P2=3（R2-P2-01, R2-P2-02, R6-P2-01）/ NOTE=5（cross-lane 3＋R6 2）
+- next task/Wave: **T074（M 回帰/法務受入）開始可**。R6-P2-01（SQL境界）はT074/MのL4前にfix推奨（P2のため開始を止めない）。cross-lane 3件（R3-06/R4-03/R4-04）は統合担当が解消後、T074のL4全量（mvn test、fresh/legacy MySQL、desktop/390px browser、法務fixture golden file）を実行。次spec/次WaveはS11完了後
+- central ledger転記用短文: `R11 Round 6 T073独立Review: 新規13/0/0/0＋回帰232件（唯一FAILはcross-lane NOTE-R4-03）skip 0。R4.2非連動（理由保存前後でbilling_amount/actual_hours不変をSQL実測）、閾値境界480=超過/479=以内、scope（HR法人・manager組織・confirm 404）、通知冪等（dedupe key・確認済み除外）、CSRFを実assert。新規P2: R6-P2-01——list()がSQL取得後にJava filterでscope適用（platform-invariants §2.2違反、機能的漏れなし）。NOTE×2（閾値境界の設計未記載、scheduler通知の宛先運用）。P0=0/P1=0/P2=3/NOTE=5。T074（M）開始可。`
+
+### Round 6 R6-P2-01 fix delta — 2026-08-10 — 主担当
+
+- base/head: `11398d9` → fix `62e3d31`（rebase後、HEAD=origin/main、push済み）
+- fixes:
+  - **R6-P2-01**: list()のscopeをSQL境界へ移行。`LambdaQueryWrapper.in(AttendanceMonth::getEngineerId, scopedEngineerIds)`で適用し、空集合は`List.of(-1L)` sentinelでDB側0件（platform-invariants §2.2）。pendingWarnings（scheduler相当・全件）は対象外
+  - **R6-NOTE-01**: design.md §5.4へ閾値境界を追記（`overThreshold := |雇用勤怠 − 契約工数| >= threshold`、既定480分、ちょうど=超過、fixture 479=以内/480=超過/481=超過）
+  - **R6-NOTE-02**: 運用方針としてledger §11へ明記（scheduler principal=全件、§2.4「宛先指定通知に組織条件を重ねない」整合。宛先粒度はrelease gateの運用判断）
+- direct regression: 新規2 class **15/0/0/0 skip 0**（Service 10＝R6-P2-01のHR他法人除外・マネージャー他組織除外fixture 2件含む、API 5）＋指定回帰 **234/0/0/0 skip 0**（attendance全系＋sync系＋leave系＋approval共通＋migration integrity＋provider matrix＋SystemConfigApi）、`git diff --check` PASS。唯一の既知FAILはNOTE-R4-03（cross-lane・統合担当）
+- issue state: `R6-P2-01=FIXED_BY_IMPLEMENTER / independent re-review requested`、`R6-NOTE-01=対応済み（design追記）`、`R6-NOTE-02=対応済み（運用方針明記）`。T074開始可（R11判定）を維持
+- rollback: 本番未適用。`62e3d31`をrevertすれば本deltaを戻せる。DDL変更なし
+- next Review handoff: R11担当はHR他法人除外・マネージャー他組織除外がSELECT自体で行われること（SQL境界）を独立再実行し、R6-P2-01をVERIFIED_CLOSEDにする。T074（M）は独立再Review後に着手可
