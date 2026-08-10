@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 11: T060 PASS / T061 F1 PASS / T062 F2 PASS（P0=0/P1=0）。R10-P1-01（V84誤字・34c68f7バイト復元）・R10-P1-02（null-profile fail-open修正）をVERIFIED_CLOSED。T063 A1実装提出済み（R10 Round 12確認待ち）、T064〜T065解放可、T066 M/本番gate未達、production authorizationなし`。
+`R10 Round 12: T060/T061/T062 PASS維持。T063 A1 FAIL（R12-P1-01: SaveDto残留retention/legalHoldによるUI保存400、P2-01: contact顧客一致未検証）→ fix再提出済み・再Review待ち。T064〜T065停止、T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 11: T060 PASS / T061 F1 PASS / T062 F2 PASS（P0=0/P1=0）。R10-P1-01（V84誤字・34c68f7バイト復元）・R10-P1-02（null-profile fail-open修正）をVERIFIED_CLOSED。T063 A1実装提出済み（R10 Round 12確認待ち）、T064〜T065解放可、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 10: T060 PASS / T061 F1 PASS / T062 F2 FAIL（R10-P1-01: PASS済みV84誤字4行・復元済み、R10-P1-02: null-profile fail-open・修正済み）→ fix delta再提出済み・再Review待ち**。T062のcore実装・既存4 rule golden 12/12はclean独立実行で確認済み。T063〜T065はF2 PASS後に再開、T066 Mは未着手。production release/apply authorizationなし。
 
@@ -218,6 +220,25 @@ R10 Round 11のT062 F2 PASSを受け、T063 A1を実装した。S11 trackが同�
 **Demo証跡（L1〜L3実測）**: 派遣/準委任のsection切替はdetail.htmlの`data-section="dispatch"/"quasi"`とJSの`applyContractType`で実装し、page testでマークアップ確認。maskはAPIレスポンスをrole別に実測（管理者=dispatch_fee_amount 10000表示、マネージャー=doesNotExist、営業=限定fieldのみ）。ブラウザでの営業/マネージャーログイン画面DemoはR10 ReviewのDemo確認項目として提示（本環境はbrowser Demo不可のため）。CSV/Excel/PDF/downloadのmaskはT064（B1）のDemo範囲。
 
 **境界**: DDL/migration変更なし（V84 shapeをそのまま利用）。SecurityConfig/他機能未変更。T063 checkboxはR10確認まで`[x]`維持（実装提出済み）。production release/apply authorizationなし。
+
+## R10 Round 12 fix delta（2026-08-10）: R12-P1-01/P2-01
+
+R10 Round 12はT063 A1（`6d5e21f5`）を独立実行（121件中失敗2件は既知の他track起因、T063関連全PASS）で確認し、**FAIL**判定・新規P1×1/P2×1を提示した。本deltaはその最小修正である。
+
+| issue ID | violated | 根本原因と最小fix | 証跡 |
+|---|---|---|---|
+| R12-P1-01 | tasks.md A1 Demo（保存動線）、design §5.5、serviceコメント | `ContractComplianceProfileSaveDto`に`retentionDueDate`/`legalHoldFlag`が残り、`editableFields()`（DTO全field由来）がfull-DTO必須キーへ含めた。UI（data-key 76件）は両キーを送らないため**全ロールで保存400**。加えてマネージャーがmask済みretentionを盲書き換え可能だった（SENSITIVE_FIELDS guard対象外）。**SaveDtoから2フィールドを除去**（editableFields・missingチェック・BeanUtils copy対象から自動除外され、UI保存が成立。GETの管理者/HR表示はentity経由で維持） | `ContractComplianceProfileApiTest`へ**UI実送payload回帰test**追加: テンプレートの`data-key`属性を正規表現抽出し、そのkeyセットだけでPUT→200（retention/legalHoldが含まれないこともassert）。17/17 PASS |
+| R12-P2-01 | commit messageの顧客一致主張と実装の不一致 | contact（commandPersonContactId/clientResponsibleContactId）は存在チェックのみで、他顧客のcontact参照が通った。**contact.customer_idと契約customer_idの一致チェックを追加**（両方非null時のみ。workplaceと同じ規則） | 新test: 他顧客の担当者を指定したPUT→400。i18n key `contract.compliance.contactCustomerMismatch`×4バンドル追加 |
+
+**変更file**: `ContractComplianceProfileSaveDto.java`（retention/legalHold除去）、`ContractComplianceProfileServiceImpl.java`（requireContactOfCustomer追加）、`ContractComplianceProfileApiTest.java`（EDITABLE_KEYS同期＋UI payload回帰test＋contact顧客一致test、15→17件）、messages 4 bundle（contactCustomerMismatch）。
+
+**実行test（L1〜L3定向・直接回帰、skip 0）**: ContractComplianceProfileApiTest **17/0/0/0**、ContractComplianceDetailPageTest 2、MobileResponsiveLayoutTest 26、F2系30（golden 12/12）、F1系8、MigrationScriptIntegrity 27、ComplianceApi 1、JsSyntax 1。計112件中失敗1件は既知のR10-P2-01他track起因（`project.detail.desc`）のみ。`git diff --check` exit 0。
+
+**NOTE（R12・blockしない）**: ① 営業書き込み403・マネージャーmasked writeは決定表にwrite列が無い中のfail-closed実装判断（design §5.3へ明文化推奨）② `guardSensitiveUnchanged`の`String.valueOf`比較（BigDecimal表記差でfalse-403余地、UIがsensitiveを送らないため実害低）③ findingsカードはcanViewCompliance＋DataScope ✓。
+
+**Rollback**: DDL/migration/SecurityConfig変更なし。commit revertでDB rollback不要。
+
+**境界**: T063 checkboxはR10再Review PASSまで未完了へ戻し、再開条件: R10がR12-P1-01/P2-01のCLOSEを確認 → T064（B1）→ T065（B2）→ T066 M。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 

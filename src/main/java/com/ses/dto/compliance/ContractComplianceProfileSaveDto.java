@@ -112,7 +112,4 @@ public class ContractComplianceProfileSaveDto {
 
     private LocalDate dispatchPeriodStart;
     private LocalDate dispatchPeriodEnd;
-
-    private LocalDate retentionDueDate;
-    private Integer legalHoldFlag;
 }

@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -106,8 +107,7 @@ class ContractComplianceProfileApiTest {
             "pensionInsuranceStatus", "pensionInsuranceMissingReason", "pensionInsuranceExpectedDate",
             "employmentInsuranceStatus", "employmentInsuranceMissingReason", "employmentInsuranceExpectedDate",
             "instructionRoute", "subcontractAllowed", "acceptanceMethod",
-            "dispatchPeriodStart", "dispatchPeriodEnd",
-            "retentionDueDate", "legalHoldFlag");
+            "dispatchPeriodStart", "dispatchPeriodEnd");
 
     @Test
     @WithMockUser(roles = "管理者")
@@ -353,6 +353,48 @@ class ContractComplianceProfileApiTest {
                 .andExpect(jsonPath("$.code").value(400));
     }
 
+    @Test
+    @WithMockUser(roles = "管理者")
+    void UIが実際に送るpayloadで保存できるdata_keyとDTOの同期回帰_R12_P1_01() throws Exception {
+        long contractId = insertDispatchContract();
+        insertProfile(contractId);
+
+        // 画面テンプレートの data-key 属性と同一のkeyセットだけでPUTし、missingFields 400にならないこと。
+        // （retentionDueDate/legalHoldFlagはserver管理のためDTOに含まれない＝UIも送らない）
+        List<String> uiKeys = readTemplateDataKeys();
+        assertThat(uiKeys).doesNotContain("retentionDueDate", "legalHoldFlag");
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        uiKeys.forEach(key -> payload.put(key, null));
+        payload.put("version", 0);
+        payload.put("workDescription", "UIから保存");
+
+        mockMvc.perform(put("/api/contracts/" + contractId + "/compliance-profile")
+                        .with(csrf()).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.profile.workDescription").value("UIから保存"));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 他顧客の担当者を指定したPUTは400でrejectされる() throws Exception {
+        long contractId = insertDispatchContract();
+        insertProfile(contractId);
+        long otherCustomerId = insertOtherCustomerAndContact();
+
+        Map<String, Object> payload = fullPayload();
+        payload.put("version", 0);
+        payload.put("commandPersonContactId", otherCustomerId);
+
+        mockMvc.perform(put("/api/contracts/" + contractId + "/compliance-profile")
+                        .with(csrf()).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(payload)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
     // ===== データ準備 =====
 
     private long insertDispatchContract() {
@@ -387,6 +429,31 @@ class ContractComplianceProfileApiTest {
         jdbcTemplate.update("INSERT INTO t_compliance_finding "
                 + "(tenant_id, contract_id, code, severity, status, condition_fingerprint) "
                 + "VALUES ('default', ?, 'MISSING_COMMAND_PERSON', 'WARNING', 'OPEN', 'command-person')", contractId);
+    }
+
+    /** 他顧客＋他顧客の担当者を挿入し、そのcontact idを返す。 */
+    private long insertOtherCustomerAndContact() {
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('cpp other customer')");
+        Long customerId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_customer WHERE company_name='cpp other customer'", Long.class);
+        jdbcTemplate.update("INSERT INTO t_customer_contact (customer_id, name, valid_from) "
+                + "VALUES (?, '他顧客担当者', '2026-01-01')", customerId);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM t_customer_contact WHERE customer_id=?", Long.class, customerId);
+    }
+
+    /** 画面テンプレートの data-key 属性一覧を抽出する（UI payloadとAPI必須keyの同期回帰）。 */
+    private List<String> readTemplateDataKeys() throws java.io.IOException {
+        String html = new org.springframework.core.io.ClassPathResource(
+                "templates/contract/detail.html").getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("data-key=\"([^\"]+)\"").matcher(html);
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        while (matcher.find()) {
+            keys.add(matcher.group(1));
+        }
+        assertThat(keys).as("テンプレートにdata-keyが存在すること").isNotEmpty();
+        return new java.util.ArrayList<>(keys);
     }
 
     /** 全編集可能keyを含むfull payload（値はnull）。テストごとに上書きして使う。 */

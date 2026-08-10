@@ -330,7 +330,6 @@ public class ContractComplianceProfileServiceImpl implements ContractComplianceP
         requireFlag("contract.compliance.invalidFlag", dto.getBenefitsProvidedFlag());
         requireFlag("contract.compliance.invalidFlag", dto.getAgreementTargetFlag());
         requireFlag("contract.compliance.invalidFlag", dto.getSubcontractAllowed());
-        requireFlag("contract.compliance.invalidFlag", dto.getLegalHoldFlag());
         if (dto.getWorkplaceId() != null) {
             Workplace workplace = workplaceMapper.selectById(dto.getWorkplaceId());
             if (workplace == null) {
@@ -341,14 +340,26 @@ public class ContractComplianceProfileServiceImpl implements ContractComplianceP
                 throw BusinessException.of(400, "contract.compliance.workplaceCustomerMismatch");
             }
         }
-        if (dto.getCommandPersonContactId() != null && customerContactMapper.selectById(dto.getCommandPersonContactId()) == null) {
-            throw BusinessException.of(400, "contract.compliance.invalidContact");
+        if (dto.getCommandPersonContactId() != null) {
+            requireContactOfCustomer(dto.getCommandPersonContactId(), contract, "contract.compliance.invalidContact");
         }
-        if (dto.getClientResponsibleContactId() != null && customerContactMapper.selectById(dto.getClientResponsibleContactId()) == null) {
-            throw BusinessException.of(400, "contract.compliance.invalidContact");
+        if (dto.getClientResponsibleContactId() != null) {
+            requireContactOfCustomer(dto.getClientResponsibleContactId(), contract, "contract.compliance.invalidContact");
         }
         if (dto.getDispatchResponsibleUserId() != null && sysUserMapper.selectById(dto.getDispatchResponsibleUserId()) == null) {
             throw BusinessException.of(400, "contract.compliance.invalidUser");
+        }
+    }
+
+    /** 顧客担当者IDの存在＋契約顧客との一致を検証する（cross-customer参照の防止、R12-P2-01）。 */
+    private void requireContactOfCustomer(Long contactId, Contract contract, String errorKey) {
+        com.ses.entity.CustomerContact contact = customerContactMapper.selectById(contactId);
+        if (contact == null) {
+            throw BusinessException.of(400, errorKey);
+        }
+        if (contract.getCustomerId() != null && contact.getCustomerId() != null
+                && !contract.getCustomerId().equals(contact.getCustomerId())) {
+            throw BusinessException.of(400, "contract.compliance.contactCustomerMismatch");
         }
     }
 
