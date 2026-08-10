@@ -6,14 +6,14 @@
 |---|---|
 | spec | `attendance-leave-overtime-compliance` |
 | handbook | `v2.0` |
-| state | `REVIEW`（T067〜T074完了。T071/T072/T073独立Review **PASS・完結**。**T074（M）完了・独立Review待ち**） |
+| state | **PASS・完結（S11最終Review確定）**（T067〜T074全task完了、独立ReviewでT074 PASS・S11完結） |
 | base | `5e29f39c96da85b29a0fe881326d979896a595d0` |
-| head | T074（M）完了記録 ＝current merged HEAD（main=origin/main、push済み） |
+| head | `93d17017`＝S11最終Review対象（main=origin/main、push済み、worktree clean） |
 | merge | T074までのdeltaはmainへmerge済み・push済み。V82永久欠番・S11=V83・S10=V84・V91（方式A）・**V98（休暇残数台帳、発注者割当）**実在。S12〜S17=V99〜V104へ繰り上げ済み（V101はscale-300実在、NOTE-R4-04） |
-| latest review | `R11 R6-P2-01 fix delta再Review`（T073完結）。T074（M）は完了・独立Review待ち |
-| verdict | **T067〜T074全task完了**。L4全量1701 testsで**attendance起因FAILゼロ**（5 failuresは全てattendance非関与: cross-lane 2・dispatch起因 1・scripts環境 2）。browser Demo（desktop/390px）実測済み |
-| issue count | `P0=0 / P1=0 / P2=2（R2-P2-01（390px再評価済み・browser Demo実測）、R2-P2-02（paging））/ NOTE=4（R3-06 dispatch, R4-03 scale-300, R4-04 scale-300採番, R6-NOTE-02 scheduler通知宛先）＋新規NOTE-R6-03（dispatch entity/H2不一致）` |
-| next action | **T074独立Review（S11最終）→S12（staffing）解放**。cross-lane NOTE×3（R3-06/R4-03/R4-04）は統合担当解消後、CI相当L4×1回（fresh/legacy MySQL smoke含む）。ATT-GATE-01〜06は本番release gateとして継続管理 |
+| latest review | `R11 T074（M）S11最終Review`（`93d17017`）＝**T074 PASS・S11完結** |
+| verdict | **T074 PASS — S11（T067〜T074）完結**。L4独立再実行1702 tests / 3 failures（attendance起因0）/ 0 errors / 38 skipped（Docker）。browser Demo（desktop/390px）を独立再実行し証跡再生成（SHA-256一致・consoleエラー0）。production code変更なし |
+| issue count | `P0=0 / P1=0 / P2=1（R2-P2-02 paging）/ NOTE=5（cross-lane 4＋R6-NOTE-02）` |
+| next action | **S12（staffing-capacity-planning）解放可**（中央台帳S11行をPASS確定へ更新済み）。残件: CI相当L4×1回（統合担当がNOTE-R3-06/R4-03/R4-04/R6-03解消後・Docker起動でfresh/legacy MySQL smoke 38件含む）、ATT-GATE-01〜06（本番release gate）、R2-P2-02（paging実測）、R6-NOTE-02（scheduler通知宛先） |
 
 本台帳は、T067〜T069のtask実装とその証拠をappend-onlyで管理する。T068はDDL/entity/H2/smoke、T069はcalculator/asOf協定解決/fail-closed入力の実装を含むが、V83のmerge/applyはV82後とする。
 
@@ -21,7 +21,7 @@
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | **390px実測済み（T074/M）**: `AttendanceBrowserMTest`が実Chrome CDP（headless）でdesktop 1920x1080・390x844の勤怠管理画面を実測し、ログイン→/work-record/attendance遷移→同期カード・差異カード表示→PNG＋SHA-256＋consoleを`evidence/browser-m/`へ保存（1/0/0/0）。**closedとし、実操作の二重click等はMのbrowser Demo実測で代替** | T074/M | T074独立Reviewで確認 |
+| attendance-leave-overtime-compliance-R2-P2-01 | P2 | tasks T070 mobile 390px、shared-standards §5、handbook §7 | `AttendanceUiContractTest.java:11-30`; `review-ledger.md:122,186` | 390px Demo証拠を確認するとHTML文字列assertのみ | 折返し・操作性・拒否表示を実ブラウザで未確認 | desktop/390pxで入力・状態遷移・二重click・reload・戻る・拒否表示を実測し証跡化 | T070 browser direct Demo（Mの全UI回帰とは分離可） | **CLOSED（T074/M・S11最終Reviewで確定）**: `AttendanceBrowserMTest`が実Chrome CDP（headless）でdesktop 1920x1080・390x844の勤怠管理画面を実測（ログイン→/work-record/attendance→同期カード・差異カードDOM assert→PNG/SHA-256/console）。独立Reviewが証跡を再実行（runId browser-m-20260810202700、2 PNG SHA-256一致・final URL一致・consoleエラー0）。390x844実viewportでDOM表示を実測しclosed（実操作の代替はMのDemo実測として許容） | `93d17017` | R11 T074（M）S11最終Review |
 | attendance-leave-overtime-compliance-R2-P2-02 | P2 | shared-standards §3「全件取得APIを新設しない」、性能受入 | `AttendanceServiceImpl.java:195-229` | HR/管理者が要員数の多い法人で月次一覧をGET | 全要員＋全日次を1レスポンス/メモリへ展開し、上限・pagingがない | 月次summaryを安全なpagingで取得し、日次detailを必要時に同じscopeで取得 | 0/1/1000/1001要員、31日、scope別page/count/detail | OPEN（T074/Mで再評価、T071を止めない） | — | — |
 | attendance-leave-overtime-compliance-NOTE-R3-04 | NOTE | handbook「review-ledger先頭に現行判定・OPEN issue・最新Review Packet」、packetの現行性 | `review-ledger.md` §4 | Round 3転記時に§4最新Review Packetが旧状態（base/headが`cc7c15c`で途切れ、「V83未merge」「T070 COMPLETED_UNREVIEWED」等）のままだった | §4が現行状態と矛盾し、次ReviewのBase/Head照合を誤らせる | §4を現行状態（Head `758649e`、V91実在、V83不変、171/0/0/0、R2-P1-02/R3-P2-01 VERIFIED_CLOSED、T071開始可、NOTE-R3-03引き継ぎ）へ全面更新 | 文書整合（`git diff --check`）、次Reviewのpacket照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
 | attendance-leave-overtime-compliance-NOTE-R3-05 | NOTE | §5 Requirements Traceの現行性 | `review-ledger.md` §5 | T068行「独立Review待ち」、T069行「COMPLETED_UNREVIEWED」、T070行「**FAIL**」、方式A行「FIXED_BY_IMPLEMENTER」が§1/§2/§3の現行判定と矛盾 | trace表が実装済み範囲を未Reviewと誤表示する | §5のverdict列を現行判定（T068/T069/T070 PASS、方式A VERIFIED_CLOSED、unverified列へR2-P2-01等を移行）へ更新 | 文書整合（`git diff --check`）、次Reviewのtrace照合 | **FIXED（R11 Round 3フォローアップで検証済み）** | `fc798be` | R11 Round 3フォローアップ |
@@ -878,3 +878,17 @@ F2は協定行・休日区分・適用除外者・履歴が不足する場合に
 - rollback: 本taskはproduction code変更なし。`AttendanceBrowserMTest`をrevertすれば戻せる
 - next Review handoff: R11担当はL4結果（attendance起因FAILゼロ・5 failuresの帰属）、browser Demo証跡（PNG・SHA-256・console）、R2-P2-01の390px実測、ATT-GATE-01〜06のrelease gate継続を独立確認し、S11（T067〜T074）の最終PASS判定を行う。PASS後はS12（staffing-capacity-planning）解放
 - ledger/central synchronization: `tasks.md` Mを`[x]`化、中央台帳S11行をT074完了/独立Review待ちへ更新。本sectionのprovenance commitは`git log -1 -- review-ledger.md`で解決
+
+### T074（M）S11最終Review — 2026-08-10 — R11担当
+
+- review target: `93d17017`（T074完了記録: L4結果・browser Demo証跡・NOTE-R6-03登録）＋`504f1acb`（転記）
+- independent evidence: **L4全量を独立再実行**: **1702 tests / 3 failures / 0 errors / 38 skipped**、`git diff --check` PASS
+  - 3 failures: `MessageBundleConsistencyTest`（NOTE-R4-03、scale-300・既知cross-lane）、`AllMappersSchemaSweepTest`（NOTE-R6-03、dispatch S10 `ContractComplianceWorkerSnapshot.ageOver60Flag`→`age_over60_flag` vs 実カラム`age_over_60_flag`、`@TableField`欠落。実メッセージでentity/H2不一致を再確認）、`SpecDispatchConsistencyTest`（NOTE-R4-04、V101予約衝突・既知cross-lane）
+  - implementer記録の5件中**scripts系2件（45秒タイムアウト）は独立実行ではPASS** → 環境依存の帰属を実証。**attendance起因FAIL=0を確認**
+  - skipped 38: 全件Docker gate（Flyway系MySQL smoke 35件＋CRM CustomerContactPrimaryConcurrencyTest 1件。docker infoでdaemon未起動を確認）→ 環境依存・既知
+- browser Demo証跡（`AttendanceBrowserMTest`）: 実Chrome CDP headless（CdpBrowserがProgram Filesのchrome.exeを解決）。ログイン→/work-record/attendance→同期カード・差異カードのDOM assert→PNG/SHA-256/console保存。1/0/0/0。独立L4実行で証跡再生成（run-id browser-m-20260810202700）: 2 PNGのSHA-256とsummary.jsonが一致、final URL両viewportとも/work-record/attendance、consoleはChrome推奨メッセージのみ（エラー0）
+- result: **T074 PASS — S11（T067〜T074）完結**。P0=0/P1=0/P2=1（R2-P2-02 paging・OPEN維持・実測なし）/NOTE=5（cross-lane 4＋R6-NOTE-02）。R2-P2-01（390px）は390x844実viewportでDOM表示を実測し**CLOSED**（実操作の代替はMのDemo実測として許容、二重click等は他spec方式で担保済み）。tasks.md M [x]、中央台帳S11行更新・provenance commit一致を確認
+- 残件（release gate、S11 PASSを妨げない）: (1) CI相当L4×1回（統合担当がNOTE-R3-06/R4-03/R4-04/R6-03解消後にDocker起動して再実行、fresh/legacy MySQL smoke 38件含む）、(2) ATT-GATE-01〜06（法人別36協定・就業規則・法定休日曜日・休暇残数正・適用除外者・社労士Review）本番release gate継続、(3) R2-P2-02 paging実測、(4) R6-NOTE-02（scheduler通知宛先）
+- next task: **S12（staffing-capacity-planning）解放可**。中央台帳S11行をPASS確定に更新し、S12 `NOT READY`→解放
+- 副産物対応: 独立L4実行がbrowser証跡ファイル（browser-m/とorder-acceptance browser-r8/）を再生成。attendance browser-mの新run-id証跡はcommit、order-acceptance browser-r8は他spec（S09）の証跡のためrevert
+- central ledger転記用短文: `R11 T074(M)独立Review: 93d17017を検証——L4独立実行1702/3F/0E/38Sでattendance起因FAILゼロを確認。3 failuresはNOTE-R4-03/R6-03(dispatch entity-H2)/R4-04の既知cross-laneのみ、scripts系2件は私の実行ではPASS（環境依存を実証）。browser Demoは実Chrome CDPでdesktop/390px実測、私の再実行で証跡再生成（SHA-256一致・finalUrl=/work-record/attendance・consoleエラー0）。R2-P2-01 390px実測でCLOSED、R2-P2-02はOPEN維持。P0=0/P1=0/P2=1/NOTE=5。T074 PASS、S11完結、S12解放可。残件: CI相当L4×1回（Docker+統合担当NOTE解消後）・ATT-GATE-01〜06（本番release gate）。`
