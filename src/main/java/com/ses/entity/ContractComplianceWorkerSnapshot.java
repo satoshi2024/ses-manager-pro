@@ -1,5 +1,6 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
@@ -41,6 +42,8 @@ public class ContractComplianceWorkerSnapshot extends BaseEntity {
     private LocalDate employmentFrom;
     private LocalDate employmentTo;
     private Integer indefiniteWorkerFlag;
+    /** DB列名は `age_over_60_flag`（spec field-mapping §4 / F1MapManifest正本）。camelCase変換では age_over60_flag になるため明示する。 */
+    @TableField("age_over_60_flag")
     private Integer ageOver60Flag;
     private String workerRestrictionType;
 

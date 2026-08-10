@@ -13,8 +13,7 @@ SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
 
 SET @ddl = IF(@col_exists = 0,
     'ALTER TABLE t_compliance_finding
-       ADD COLUMN exception_expires_at DATETIME COMMENT ''例外承認の有効期限（NULL=無期限、期限超過でOPENへ戻る）'''
-        .  ' AFTER evidence_document_id',
+       ADD COLUMN exception_expires_at DATETIME COMMENT ''例外承認の有効期限（NULL=無期限、期限超過でOPENへ戻る）'' AFTER evidence_document_id',
     'SELECT 1');
 
 PREPARE stmt FROM @ddl;

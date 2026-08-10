@@ -20,7 +20,7 @@ class FlywayV63UpgradeMigrationSmokeTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_v63_upgrade")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     @Test

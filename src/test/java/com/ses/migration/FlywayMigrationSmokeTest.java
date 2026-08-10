@@ -36,7 +36,7 @@ class FlywayMigrationSmokeTest {
     @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_db")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     /** V77適用済みlegacy DBへ、V78の成功/停止両経路を適用する専用container。 */
@@ -44,7 +44,7 @@ class FlywayMigrationSmokeTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> LEGACY_V78 = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_legacy_v78")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     @Test

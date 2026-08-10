@@ -41,7 +41,7 @@ class CustomerContactPrimaryConcurrencyTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_crm_contact_concurrency")
-            .withUsername("ses")
+            .withUsername("root")
             .withPassword("ses");
 
     @DynamicPropertySource
