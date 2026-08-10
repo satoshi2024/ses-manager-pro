@@ -58,6 +58,22 @@
 - **当事者（派遣元=自社）** は`company.name`/`company.address`/`company.representative`
   （m_system_config）をsnapshot化して出力する。自社マスタが未実装のためconfigを正とする。
 
+### 3.2 T065実装時の逸脱・決定（R3.3/R3.4）
+
+- **期限通知の源**: 抵触日・文書期限の90/60/30日前通知は`t_compliance_finding.due_date`を正とする
+  （ruleが算定した抵触日等）。帳票特有の期限はT066で`DEADLINE_*`系findingへ拡張する。
+- **通知宛先は個人指定**（design §5.3）: 担当営業（契約sales_user_id）とHRユーザー（role=HR・有効）
+  の各ユーザーへ`publishToUser`で発行する。組織一斉通知はしない。
+  通知のdedupeKeyは`COMPLIANCE_DEADLINE:{findingId}:{段階}:user:{userId}`（宛先込みで1回）。
+- **段階**: 90/60/30日前の各段階は初回該当時に1回だけ通知（同日・同段階の再実行で増えない）。
+  91日=通知なし、90日ちょうど=90日前段階、89日=追加なし（60日前段階は60日ちょうどに発火）。
+- **例外承認の失効**: EXCEPTION_APPROVEDには`t_compliance_finding.exception_expires_at`
+  （V85で追加、V1は定義しない=MigrationScriptIntegrityTest規則）を保存し、
+  期限超過を日次scheduler（ShedLock）でOPENへ戻す。
+- **finding対応操作**: ack（OPEN/IN_PROGRESS→ACKNOWLEDGED）、in-progress、resolve（根拠note必須、
+  任意evidence_document_id）、exception（note＋未来expiresAt必須）をAPI化。管理者/HR/マネージャーのみ
+  （営業403）。遷移は@Version CASでrule実行との競合を制御。
+
 ## 4. UI
 
 - contract detailにcompliance profile/findings/documents。

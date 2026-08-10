@@ -128,14 +128,31 @@ const ContractCompliance = (function () {
         $('#cpp-findings-table-wrap').removeClass('d-none');
         const body = $('#cpp-findings-body');
         body.empty();
+        const canAct = detail && detail.canEdit && detail.maskLevel !== 'LIMITED';
         findings.forEach(function (f) {
             const statusBadge = '<span class="badge ' + (f.status === 'OPEN' ? 'bg-danger' : f.status === 'ACK' || f.status === 'IN_PROGRESS' ? 'bg-warning text-dark' : 'bg-success') + '">'
                 + SES.escapeHtml(f.status || '') + '</span>';
+            let actions = '';
+            if (canAct) {
+                const canAck = f.status === 'OPEN' || f.status === 'IN_PROGRESS';
+                const canResolve = f.status !== 'RESOLVED';
+                const canException = f.status === 'OPEN' || f.status === 'ACKNOWLEDGED' || f.status === 'IN_PROGRESS';
+                if (canAck) {
+                    actions += '<button type="button" class="btn btn-sm btn-outline-warning py-0 px-2 me-1" title="' + SES.i18n.t('cpp.finding.ack', '対応開始') + '" onclick="ContractCompliance.ackFinding(' + f.id + ')"><i class="bi bi-check2-square"></i></button>';
+                }
+                if (canResolve) {
+                    actions += '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2 me-1" title="' + SES.i18n.t('cpp.finding.resolve', '解消') + '" onclick="ContractCompliance.resolveFinding(' + f.id + ')"><i class="bi bi-check-circle"></i></button>';
+                }
+                if (canException) {
+                    actions += '<button type="button" class="btn btn-sm btn-outline-info py-0 px-2" title="' + SES.i18n.t('cpp.finding.exception', '例外承認') + '" onclick="ContractCompliance.exceptionFinding(' + f.id + ')"><i class="bi bi-shield-check"></i></button>';
+                }
+            }
             body.append(
                 '<tr>' +
                 '<td class="px-3 py-2">' + statusBadge + '</td>' +
                 '<td class="py-2 small"><code class="text-accent-blue">' + SES.escapeHtml(f.code || '') + '</code></td>' +
                 '<td class="px-3 py-2 small text-muted">' + SES.escapeHtml(f.dueDate || '—') + '</td>' +
+                '<td class="px-3 py-2 text-end text-nowrap">' + actions + '</td>' +
                 '</tr>');
         });
     }
@@ -292,7 +309,80 @@ const ContractCompliance = (function () {
         window.open('/api/contracts/' + contractId + '/compliance-documents/' + deliveryId + '/download', '_blank');
     }
 
-    return { init: init, save: save, generateDocument: generateDocument, confirmDelivery: confirmDelivery, downloadDelivery: downloadDelivery };
+    // ===== finding対応（T065 B2） =====
+
+    function findingAction(url, body, successKey) {
+        $.ajax({
+            url: url,
+            method: 'POST',
+            contentType: 'application/json',
+            data: body ? JSON.stringify(body) : '{}',
+            success: function (res) {
+                if (res.code === 200) {
+                    Toast.success(SES.i18n.t(successKey, '記録しました'));
+                    load();
+                } else {
+                    Toast.error(res.message || SES.i18n.t('js.common.error_network', '通信エラー'));
+                }
+            },
+            error: function (err) {
+                Toast.error((err.responseJSON && err.responseJSON.message)
+                    || SES.i18n.t('js.common.error_network', '通信エラー'));
+            }
+        });
+    }
+
+    function ackFinding(findingId) {
+        findingAction('/api/contracts/' + contractId + '/compliance-findings/' + findingId + '/ack',
+            null, 'cpp.finding.ackDone');
+    }
+
+    function resolveFinding(findingId) {
+        Swal.fire({
+            title: SES.i18n.t('cpp.finding.resolve', '解消'),
+            input: 'textarea',
+            inputLabel: SES.i18n.t('cpp.finding.notePrompt', '対応内容・根拠'),
+            inputPlaceholder: SES.i18n.t('cpp.finding.notePrompt', '対応内容・根拠'),
+            inputAttributes: { required: 'required' },
+            showCancelButton: true,
+            confirmButtonText: SES.i18n.t('common.register', '登録'),
+            cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+        }).then(function (result) {
+            if (!result.isConfirmed || !result.value) {
+                return;
+            }
+            findingAction('/api/contracts/' + contractId + '/compliance-findings/' + findingId + '/resolve',
+                { note: result.value, evidenceDocumentId: null }, 'cpp.finding.resolveDone');
+        });
+    }
+
+    function exceptionFinding(findingId) {
+        Swal.fire({
+            title: SES.i18n.t('cpp.finding.exception', '例外承認'),
+            input: 'textarea',
+            inputLabel: SES.i18n.t('cpp.finding.notePrompt', '対応内容・根拠'),
+            inputPlaceholder: SES.i18n.t('cpp.finding.notePrompt', '対応内容・根拠'),
+            showCancelButton: true,
+            confirmButtonText: SES.i18n.t('common.register', '登録'),
+            cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+        }).then(function (result) {
+            if (!result.isConfirmed || !result.value) {
+                return;
+            }
+            const expiresAt = prompt(SES.i18n.t('cpp.finding.expiresPrompt', '有効期限（例: 2026-12-31T23:59）'));
+            if (!expiresAt) {
+                return;
+            }
+            findingAction('/api/contracts/' + contractId + '/compliance-findings/' + findingId + '/exception',
+                { note: result.value, expiresAt: expiresAt }, 'cpp.finding.exceptionDone');
+        });
+    }
+
+    return {
+        init: init, save: save,
+        generateDocument: generateDocument, confirmDelivery: confirmDelivery, downloadDelivery: downloadDelivery,
+        ackFinding: ackFinding, resolveFinding: resolveFinding, exceptionFinding: exceptionFinding
+    };
 })();
 
 $(function () {

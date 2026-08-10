@@ -647,6 +647,7 @@ CREATE TABLE t_compliance_finding (
   acknowledged_at       DATETIME,
   resolution_note       VARCHAR(2000),
   evidence_document_id  BIGINT,
+  exception_expires_at  DATETIME,
   version               INT NOT NULL DEFAULT 0,
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,

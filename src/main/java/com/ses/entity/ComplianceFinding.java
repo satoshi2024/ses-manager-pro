@@ -28,6 +28,9 @@ public class ComplianceFinding extends BaseEntity {
     private String resolutionNote;
     private Long evidenceDocumentId;
 
+    /** 例外承認の有効期限（T065。NULL=無期限。期限超過でOPENへ戻る）。 */
+    private LocalDateTime exceptionExpiresAt;
+
     @Version
     private Integer version;
 }

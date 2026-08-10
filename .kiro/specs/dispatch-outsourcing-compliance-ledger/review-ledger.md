@@ -2,7 +2,9 @@
 
 ## 現行判定
 
-`R10 Round 16: T060 PASS / T061 F1 PASS / T062 F2 PASS / T063 A1 PASS / T064 B1 PASS（P0=0/P1=0/P2=0）。R15-P1-01〜04（download再mask・party snapshot化・mapping scope・営業動線）をVERIFIED_CLOSED。T065解放可、T066 M（帳票全項目化＋G2 gate）未達、production authorizationなし`。
+`R10 Round 16: T060〜T064 PASS確定。T065 B2実装提出済み（R10 Round 17確認待ち）。T066 M/本番gate未達、production authorizationなし`。
+
+**R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし**。
 
 **R10 Round 15: T060〜T063 PASS維持。T064 B1 FAIL（R15-P1-01〜04）→ fix再提出済み・再Review待ち。T065停止、T066 M/本番gate未達、production authorizationなし**。
 
@@ -328,6 +330,27 @@ R10はHead `84101461` → `ca47e7f1`（12ファイル/+272/-38）をread-only＋
 **NOTE（非block・T066で検証）**: ① download再レンダリングのengineer名は現在マスタ由来（正本PDFはsnapshot固定でR1.4担保）② operation_idがserver派生（§4.1と構造差異・観測挙動はF1-SNAPSHOT-01合致）③ profileHashのBigDecimal表記感度 ④ 帳票PDFの実ブラウザ目視はM/本番gate。
 
 **境界**: DDL/migration/SecurityConfig変更なし。production release/apply authorizationなし。T064 checkboxを`[x]`化し、T065（B2）から着手可。
+
+## T065 B2 deadline/リスク運用 delta（2026-08-10、R10 Round 17確認待ち）
+
+R10 Round 16のT064 B1 PASSを受け、B2を実装した。**isolated worktree（`ses-manager-pro-s10-t063`、base `e52ac7c2`=origin/main）で実装・検証**し、push後にmainへ同期する。
+
+**変更file**:
+- `db/migration/V85__dispatch_compliance_finding_exception_expiry.sql`（新規）: `t_compliance_finding.exception_expires_at`を条件付きADD COLUMN（information_schema確認＋prepared statementで冪等）。**V1には定義しない**（MigrationScriptIntegrityTestの「V1定義列の重複ADD禁止」規則。後続列は本migrationが唯一の定義源）。
+- V1/H2同期: V1は変更なし。`schema-dispatch-compliance-h2.sql`・`engineer-schema-h2.sql`へ列追加、`entity/ComplianceFinding.java`へexceptionExpiresAt追加。
+- `service/ComplianceFindingActionService.java`＋`service/impl/ComplianceFindingActionServiceImpl.java`（新規）: ack（OPEN/IN_PROGRESS→ACKNOWLEDGED、acknowledged_by/at記録）/in-progress/resolve（根拠note必須・evidence任意・document存在検証）/exception（note＋未来expiresAt必須）→EXCEPTION_APPROVED。遷移不正400、@Version CAS（409）、管理者/HR/マネージャーのみ（営業403）、DataScope＋契約一致。
+- `controller/api/ComplianceFindingApiController.java`（新規）: `POST /api/contracts/{id}/compliance-findings/{findingId}/{ack|in-progress|resolve|exception}`（契約メニュー権限配下・CSRF・audit）。
+- `service/ComplianceDeadlineService.java`＋`service/impl/ComplianceDeadlineServiceImpl.java`（新規）: 90/60/30日前のdeadline通知（finding.due_date基準、各段階初回のみ。dedupeKey=`COMPLIANCE_DEADLINE:{findingId}:{段階}:user:{userId}`で宛先別1回）。宛先は担当営業（sales_user_id）＋HRユーザーの個人指定（design §5.3、組織一斉にしない）。EXCEPTION_APPROVEDのexpires_at超過をOPENへ戻す。**NotificationServiceImplが重複を内部握りつぶすため、存在pre-checkで発行件数を正確化**（DB UNIQUEが最終冪等保証）。
+- `service/scheduler/ComplianceDeadlineScheduler.java`（新規）: 日次06:30 cron＋`@SchedulerLock`（ShedLock）。テストは明示asOfで呼ぶ。
+- UI: `contract/detail.html`＋`contract-compliance.js`のfindingsカードへ対応操作ボタン（対応開始/解消/例外承認。Swalでnote・expiresAt入力。管理者/HR/マネージャーのみ）。
+- messages 4 bundle: finding操作・エラーkey約20件追加。
+- design.md §3.2: 期限通知の源（finding.due_date）、宛先個人指定、段階境界（91=なし/90=90日前/89=追加なし）、例外失効、V85列の決定を明記。
+
+**実行test（L2〜L3定向・直接回帰、skip 0）**: ComplianceDeadlineServiceTest 5（91日=なし/90日=90日前段階×2名/89日=追加なし、60日・30日で段階が進み境界翌日は追加なし、同一段階冪等（再実行0）、宛先個人指定（営業/HR各8件）、例外失効→OPEN＋通知対象化）、ComplianceFindingActionApiTest 5（ack→in-progress→resolve遷移、note必須400、RESOLVEDからのack 400、exception expiresAt必須/過去400/未来OK、営業403、契約不一致404）、T063系45、T064系13、F2系30、F1系8、Integrity 27、ComplianceApi 1、JsSyntax 1、Mobile 26。**計135件全PASS（失敗0・skip 0）**。`git diff --check` exit 0。
+
+**Demo証跡（L2〜L3実測）**: 抵触日alert→ack→対応中→解消、例外承認（expiresAt付き）→失効でOPENへ戻る。90日ちょうどで90日前段階、89日で追加なし（60日前段階は60日ちょうどに発火）を実測。ブラウザ画面DemoはR10 ReviewのDemo確認項目として提示。
+
+**境界**: V85はS10正式migration（V84）の後続列追加のみ。SecurityConfig/他機能未変更。T065 checkboxはR10確認まで未完了。production release/apply authorizationなし。
 
 ## M / 本番gateと再開条件
 

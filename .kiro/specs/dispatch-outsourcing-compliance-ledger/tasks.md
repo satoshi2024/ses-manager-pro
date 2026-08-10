@@ -78,7 +78,7 @@
     同一snapshotの再生成で版が増えないこと。
   - **Demo**: 派遣元台帳等を生成し交付記録。同じsnapshotで再生成して版が増えないことを確認し、CSV/Excel/PDF/downloadの全経路でT064のfield allow-list/maskが維持されることを確認。
 
-- [ ] B2. deadline/リスク運用
+- [ ] B2. deadline/リスク運用（T065実装提出済み・R10確認待ち）
   - **Objective**: 抵触日と文書期限の90/60/30日前に通知が届き、対応担当・ack・解消・例外承認が記録できる。
     同じ期限で通知が重複しない。
   - **実装ガイダンス**: 90/60/30日、担当、ack/resolution/evidence。
