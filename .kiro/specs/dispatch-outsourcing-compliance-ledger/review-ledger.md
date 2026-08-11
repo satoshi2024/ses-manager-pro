@@ -1,30 +1,30 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R21 second follow-up docs-only rework / R10再Review待ち）
+## 現行判定（R21 canonical payload sync docs-only rework / R10再Review待ち）
 
-`R21 second follow-up独立ReviewはFAIL（P1×1、P2×1、P1-02/P1-03/P1-04/P2-01 VERIFIED_CLOSED）。R19-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`
-今回の再差戻しに対して、recipient/display/company/configの実render content hashをbusiness keyへ追加し、R8.5/R8.6の番号・traceを一意化する。
+`R21 second follow-up独立ReviewはFAIL（P1×1、P2×1）。R21-P2-02はVERIFIED_CLOSED_BY_R10、R21-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`
+今回の再差戻しに対して、§9.1 authoritative canonical payloadへ`recipientDisplaySnapshotHash`と`companyConfigSnapshotHash`を追加し、business key計算値・delivery保存列・G2-DEL-17のcanonicalizer assertを一致させる。
 前回確定したstable time-independent key、legacy NULL download、future_slot lifecycle、worker NULL、operation lease、effective period、existing snapshot/PDF rendition、credential AAD、source freezeの決定は維持する。
 発注者の許可範囲どおり文書とdirect regression matrixだけを更新する。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102、DDL、Java、HTML、JS、CSS、message、test、seed、DBを変更しない。
 T066未完了、S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
 
-### R21-P1-01〜04 / P2-01 docs-only fix packet
+### R21-P1-01 canonical payload docs-only fix packet
 
 | task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T066 / R21-P1-01 / P2-02 | R5/R6.5/R8.2/R8.4/R8.5/R8.6、G2-IDEMPOTENCY-01、G2-DELIVERY-IMMUTABILITY-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。decision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | recipient/display/company/config snapshot hash、R8番号trace一意化、G2-DEL-17を含む122 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `5948e4a98205260c86c09afe8ec5c94da6463266` → docs fix / packet provenance sync commitが最終Head。最終SHAはR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
+| T066 / R21-P1-01 | R5/R6.5/R8.2/R8.4、G2-IDEMPOTENCY-01、G2-DELIVERY-IMMUTABILITY-01 | g2 decision delta、review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | authoritative canonical payloadへ2 hashを追加、delivery保存列・business key・G2-DEL-17を同期、122 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `18ace09f030d630e6fd1d8d98aa7188800e4133a` → docs fix / packet provenance sync commitが最終Head。最終SHAはR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
 
 ### R21 issue status
 
 | issue | status | 最小対応 |
 |---|---|---|
-| R21-P1-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | client operation keyとdelivery_business_keyを分離し、recipient/display/company/config実render content hashを含むstable basisで異key・異時刻同入力を1 delivery/rendition/notification/resultへ収束。内容変更時は新key/group、A→B→Aは元A result再利用 |
+| R21-P1-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | §9.1 authoritative canonical payloadへrecipientDisplaySnapshotHash/companyConfigSnapshotHashを含め、business key計算・delivery保存列・G2-DEL-17 canonicalizerを同一値へ固定。内容変更時は新key/group、A→B→Aは元A result再利用 |
 | R21-P1-02 | `VERIFIED_CLOSED_BY_R10` | future_slot=1＋UNIQUE(tenant,mapping_code,future_slot)で異key同時作成を1件へ収束し、成功transitionだけslotをNULL化、失敗/時刻経過では維持 |
 | R21-P1-04 | `VERIFIED_CLOSED_BY_R10` | INSERT前operation_id AAD、AES-256-GCM/key version/32-byte key/optional NULL/rotation/prod fail-closedを確認済み |
 | R21-P2-01 | `VERIFIED_CLOSED_BY_R10` | DRAFT sourceのINSERT/UPDATE/DELETE許可とfreeze後3操作拒否triggerを確認済み |
-| R21-P2-02 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | R8.5 legacy / R8.6 previewの番号とG2-DEL-08/09..11 traceを一意化 |
+| R21-P2-02 | `VERIFIED_CLOSED_BY_R10` | R8.5 legacy / R8.6 previewの番号とG2-DEL-08/09..11 traceを一意化。R10再Reviewで一意性を確認 |
 
-R21-P1-01とR21-P2-02は実装担当側でcloseしない。R10が独立Reviewし、受理なら`ACCEPTED_FOR_IMPLEMENTATION`、不足なら具体的な差戻しを返す。P1-02/P1-03/P1-04/P2-01はR10の`VERIFIED_CLOSED`を履歴として保持する。
+R21-P1-01は実装担当側でcloseしない。R10が独立Reviewし、受理なら`ACCEPTED_FOR_IMPLEMENTATION`、不足なら具体的な差戻しを返す。P1-02/P1-03/P1-04/P2-01/P2-02はR10の`VERIFIED_CLOSED`を履歴として保持する。
 
 ## 現行判定（R19-P1-01 docs-only decision delta / R10 Review待ち）
 

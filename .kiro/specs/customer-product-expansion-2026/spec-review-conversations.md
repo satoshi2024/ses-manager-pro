@@ -728,9 +728,9 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
 
 【Review対象】
-- 現行Round: R21 second follow-up docs-only再Review。Base `5948e4a98205260c86c09afe8ec5c94da6463266`、HeadはR10依頼messageで固定する。
-- R21残存P1/P2の確認点: recipient/display/company/config実render content hashをbusiness keyへ含めること、R8.5 legacy/R8.6 preview traceの一意化、A→B→A content再利用規則。
-  R21-P1-02（future slot）、P1-03（worker NULL）、P1-04（credential crypto）、P2-01（source freeze trigger）はVERIFIED_CLOSEDを維持する。現行decision IDは16件、direct regression matrixは122件。
+- 現行Round: R21 canonical payload sync docs-only再Review。Base `18ace09f030d630e6fd1d8d98aa7188800e4133a`、HeadはR10依頼messageで固定する。
+- R21残存P1の確認点: §9.1 authoritative canonical payloadへ`recipientDisplaySnapshotHash`と`companyConfigSnapshotHash`を含め、business key計算・delivery保存列・G2-DEL-17 canonicalizer assertを同一値へ同期すること。
+  R21-P2-02（R8.5/R8.6 trace）は`VERIFIED_CLOSED_BY_R10`、P1-02（future slot）、P1-03（worker NULL）、P1-04（credential crypto）、P2-01（source freeze trigger）もVERIFIED_CLOSEDを維持する。現行decision IDは16件、direct regression matrixは122件。
   R10受理前はV102/DDL/code/testを変更せず、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
 - T060: 0. G2公式様式field mapping
 - T061: F1. workplace/profile/finding/delivery DDL
@@ -769,7 +769,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【Review観点】
-- R21 second follow-up docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
+- R21 canonical payload sync docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
   tenant ACTIVE/workplace delivery分離、dynamic policy、9 domain table + operation ledger、複数hash/reducer、ACTIVE 21-step、
   stable delivery business key、recipient/display/company/config render hash、legacy NULL download、R8.5/R8.6 trace、future candidate slot lifecycle、worker NULL契約、credential crypto/source freeze、security/G0/HISTORY/V102〜V108/122 direct regression/Phase A-Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。

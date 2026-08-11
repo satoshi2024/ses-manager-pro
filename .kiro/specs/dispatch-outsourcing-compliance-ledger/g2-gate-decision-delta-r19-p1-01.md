@@ -510,9 +510,9 @@ mapping/policy/gateを固定してFULL、MASK、LIMITEDの3つの`DocumentVersio
 
 client idempotency keyは共通operation ledgerの再送識別だけに使う。deliveryの業務一意keyは、生成時に新設される`rendition_group_id`、delivery ID、
 operation_id、client idempotency key、notification ID、`gate_snapshot_hash`、`render_input_hash`、gate evaluated asOf、worker asOf、
-`delivered_at`を除外し、serverが選択したstable inputだけから作る。canonical payloadは
-`tenantId,contractId,documentType,templateVersion,profileSnapshotId,profileSnapshotHash,workerSnapshotId,workerSnapshotHash-or-ABSENT,workplaceId,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,approvalEventId,externalReviewEventIds(sorted),evidenceDocumentVersionIds(sorted),evidenceHashes(sorted),fieldMaskPolicyHash,renderEngineVersion`
-とする。worker snapshot不在は`workerSnapshotId=NULL,workerSnapshotHash=NULL,workerSnapshotPresence=ABSENT`を固定する。各ID/hashは採用証跡・保存snapshot・template/mask/engineの版を示すstable値であり、時間経過だけでは変わらない。
+`delivered_at`を除外し、serverが選択したstable inputだけから作る。authoritative canonical payloadは
+`tenantId,contractId,documentType,templateVersion,profileSnapshotId,profileSnapshotHash,workerSnapshotId,workerSnapshotHash-or-ABSENT,workplaceId,recipientDisplaySnapshotHash,companyConfigSnapshotHash,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,approvalEventId,externalReviewEventIds(sorted),evidenceDocumentVersionIds(sorted),evidenceHashes(sorted),fieldMaskPolicyHash,renderEngineVersion`
+とする。worker snapshot不在は`workerSnapshotId=NULL,workerSnapshotHash=NULL,workerSnapshotPresence=ABSENT`を固定する。`recipientDisplaySnapshotHash`と`companyConfigSnapshotHash`は、直前のrenderへ渡したcanonical objectから同じcanonicalizerで計算し、`t_document_delivery`の同名保存列およびbusiness key計算へ同一値を渡す。各ID/hashは採用証跡・保存snapshot・recipient/company/configの実render内容・template/mask/engineの版を示すstable値であり、時間経過だけでは変わらない。
 `UNIQUE(tenant_id,delivery_business_key)`の予約INSERTが異key同入力を直列化し、既存READY rowから同じdelivery/rendition/resultを返す。business keyが同じでも、formal generate前に現在gateを再評価し、期限切れ・撤回・scope不成立なら既存deliveryを新規formal resultとして返さず409とする。
 notificationは`COMPLIANCE_DELIVERY:{delivery_business_key}`をidempotency keyとし、予約ownerだけが1件作成する。mapping/policy/review evidence/render inputのいずれかが変わった時だけbusiness keyが変わり、新group/notificationを許可する。
 
@@ -669,7 +669,7 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-DEL-14 / R8.3 | L2 | one role rendition missing/unclean | admin | A | A | t0 | generate/download | 409/403 | delivery or rendition not usable | rollback/no cache |
 | G2-DEL-15 / R8.3 | L2 | FULL/MASK/LIMITED same rendition group | HR/manager/sales | A | A | t1 | download | 200 | role output from exact stored version, no current reread | access log only |
 | G2-DEL-16 / R8.3/T066-ASOF-01 | L2 | profile snapshotあり、交付時点以前のworker snapshotなし／片側NULL | admin/DB | A | A | t0 | generate then download/invalid insert | 200/409 | delivery成功、worker ID/hash両NULL、worker項目なし、partial NULL拒否、bytes/hash不変 | rollback/no cache |
-| G2-DEL-17 / R8.4 | L2 | company/recipient/display render content A→B→A、template version同一 | admin | A | A | t0/t1/t2 | K1 generate, config change, K2 generate, K3 generate | 200/200/200 | A→Bはrecipient_display_snapshot_hash/company_config_snapshot_hashとbusiness key/groupが変わり新delivery、K1 historical bytes不変、B→Aは元A business key/READY resultを再利用 | content hash/key reservation 1 per content |
+| G2-DEL-17 / R8.4 | L2 | company/recipient/display render content A→B→A、template version同一 | admin | A | A | t0/t1/t2 | K1 generate, config change, K2 generate, K3 generate | 200/200/200 | canonicalizerのpayloadへrecipientDisplaySnapshotHash/companyConfigSnapshotHashが存在し、A≠Bで2 hash・business key・groupが変わり新delivery、K1 historical bytes不変、B→Aで元A hash・business key・READY resultを再利用 | content hash/key reservation 1 per content |
 | G2-SEC-12 / R7.4 | L1 | required/optional credential single append | DB | A | A | t0 | one INSERT | — | requiredはencrypted/key version/CGC1/masked全て非NULL、optional未入力は4項目全NULL、平文/中間row 0 | 不変 |
 | G2-SEC-13 / R7.4 | L1 | same credential twice / AAD operation ID | admin | A | A | t0 | review insert×2 | 200 | random IV/ciphertext differs、identity hash stable、AADはINSERT前operation_id、event ID後UPDATE 0 | afterCommit |
 | G2-SEC-14 / R7.4 | L2 | restart with current/old key | app | A | A | t0 | review/gate | 200 | decrypt old version、new write current | 不変 |

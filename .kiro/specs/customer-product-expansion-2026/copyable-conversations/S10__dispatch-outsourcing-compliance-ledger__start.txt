@@ -18,8 +18,8 @@
   特定自然人の事前指名と実actor承認eventは開始条件ではなく、`ACTIVE`化/M/本番gateとする。
 - R19再開gate: `g2-gate-decision-delta-r19-p1-01.md`はR10 Review対象。R10 acceptance前はdocs-onlyとし、
   DDL/code/test/seed/DB、T066 checkbox、S10/S12 statusを変更しない。
-- R21 second follow-up再Review差戻し: recipient/display/company/config実render content hashのbusiness key包含、R8.5 legacy/R8.6 preview trace、既存stable keyのA→B→A規則のdocs具体化だけを許可する。
-  R21-P1-02/P1-03/P1-04/P2-01のfuture slot/worker NULL/credential/source freeze決定はVERIFIED_CLOSEDを維持する。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102/DDL/code/testを作成せず、
+- R21 canonical payload sync再Review差戻し: §9.1 authoritative canonical payloadへのrecipientDisplaySnapshotHash/companyConfigSnapshotHash追加と、business key・delivery保存列・G2-DEL-17 canonicalizer同期だけを許可する。
+  R21-P2-02およびP1-02/P1-03/P1-04/P2-01の決定はVERIFIED_CLOSEDを維持する。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102/DDL/code/testを作成せず、
   T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 

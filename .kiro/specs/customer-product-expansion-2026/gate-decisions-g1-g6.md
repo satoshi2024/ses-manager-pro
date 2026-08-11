@@ -61,6 +61,11 @@
   future candidateは`future_slot=1`のUNIQUEで1件へ直列化し、成功ACTIVE/SUPERSEDED transitionだけ同一CAS transactionでNULL化、失敗・rollback・時刻経過では1を維持する。worker snapshot不在はID/hash同時NULL・worker項目省略・明示NULL sentinelで生成継続する。credential crypto/source freeze/worker NULL/future slotはVERIFIED_CLOSED、R8番号traceも一意化し、direct regressionを122 IDへ拡張する。
 - R10 acceptance前はV102/DDL/code/testを変更せず、T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
 
+### 3.3 R21 canonical payload sync docs-only fix
+
+- R21再ReviewでR21-P2-02は`VERIFIED_CLOSED_BY_R10`。R21-P1-01は、§9.1 authoritative canonical payload列挙へ`recipientDisplaySnapshotHash`と`companyConfigSnapshotHash`を追加し、business key計算・`t_document_delivery`保存列・G2-DEL-17 canonicalizer assertを同じ値へ同期する修正をR10へ再提出する。
+- P1-01がOPENの間は`ACCEPTED_FOR_IMPLEMENTATION`を付与せず、V102/DDL/code/testを変更しない。T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
+
 ## 4. G3 — 外部Portal境界
 
 - 公開hostは設定可能な`portal.<base-domain>`とし、内部管理画面と別subdomain、別SecurityFilterChain、

@@ -17,6 +17,12 @@
 | G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 未決 |
 | G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 未決 |
 
+## G2 R21 canonical payload sync docs-only fix（2026-08-11）
+
+- Base `18ace09f030d630e6fd1d8d98aa7188800e4133a`のR10差戻しに対し、§9.1 authoritative canonical payloadへ`recipientDisplaySnapshotHash`と`companyConfigSnapshotHash`を明示追加する。
+- business key計算、`t_document_delivery`の同名保存列、G2-DEL-17 canonicalizer単体assertは同一2 hashを使用し、A→Bでhash/key/groupを変更、B→Aで元A resultを再利用する。R8.5/R8.6 traceはR10確認済みのため変更しない。
+- R21-P1-01はOPEN、R21-P2-02は`VERIFIED_CLOSED_BY_R10`。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102/DDL/code/testを変更せず、T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
+
 ## G2 R21 second follow-up docs-only decision delta（2026-08-11）
 
 - R21再ReviewはFAIL（P0=0、P1=1、P2=1）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
