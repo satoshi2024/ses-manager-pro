@@ -11,7 +11,7 @@ T066未完了、S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/del
 
 | task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T066 / R21-P1-01〜04 / R21-P2-01 | R6.5〜R8.3、R7.4、R10.2、G2-IDEMPOTENCY-01、G2-EFFECTIVE-PERIOD-01、G2-DELIVERY-IMMUTABILITY-01、G2-CREDENTIAL-CRYPTO-01、G2-SOURCE-FREEZE-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。旧11＋新5でdecision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | operation ledger/period/rendition/crypto/source triggerのdecision ID、111 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9` → fix Headはpush後のR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
+| T066 / R21-P1-01〜04 / R21-P2-01 | R6.5〜R8.3、R7.4、R10.2、G2-IDEMPOTENCY-01、G2-EFFECTIVE-PERIOD-01、G2-DELIVERY-IMMUTABILITY-01、G2-CREDENTIAL-CRYPTO-01、G2-SOURCE-FREEZE-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。旧11＋新5でdecision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | operation ledger/period/rendition/crypto/source triggerのdecision ID、111 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9` → decision docs commit `9bc6567a` → packet sync commitが最終Head。最終SHAはR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
 
 ### R21 issue status
 
