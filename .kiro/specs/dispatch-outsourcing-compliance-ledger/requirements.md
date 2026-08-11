@@ -43,7 +43,7 @@
 - 抵触日30日前、期間外工数、責任者欠落を検知。
 - 準委任のdirect command flagだけでなく指示経路/承認者不足を表示。
 
-## R6. G2 scope、assignment、lifecycle
+## R6. G2 scope、assignment、lifecycle、operation idempotency
 
 1. THE mapping SHALL tenant scope、`COMPLIANCE_RESPONSIBLE` assignment SHALL workplace scopeとし、対象contractの
    workplaceをserver-sideで`t_contract_compliance_profile.workplace_id`からだけ解決する。
@@ -53,9 +53,14 @@
 4. THE production generate/delivery SHALL target workplaceの現在assignmentとapprovalを毎回再評価し、workplace Aのapproval、
    旧assignment actorのapprovalをworkplace Bまたは交代後の新規deliveryへ流用しない。
 5. THE approval/external review/status history SHALL append-only event reducerで管理し、REJECT/REVOKE、再APPROVE、同時刻順序、
-   idempotency、concurrent insertを決定的に解決する。
+   concurrent insertを決定的に解決する。state-changing operationは共通operation ledgerでtenant+operation type+
+   idempotency key、request hash、PROCESSING/SUCCEEDED/FAILED、immutable result reference/allow-list result summary、failure retryability、
+   永久保持を管理し、commit後response喪失の再送で同じ成功結果を返す。PROCESSING中は`IDEMPOTENCY_IN_PROGRESS`、同key異payloadは
+   `IDEMPOTENCY_KEY_REUSED`、retryable=0は`IDEMPOTENCY_RETRY_NOT_ALLOWED`として、同時再送、rollback後再送を決定的に拒否/再開する。
 6. THE lifecycle SHALL `DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`とし、DRAFT以外のmapping/source/policy編集、
    SUPERSEDEDの再ACTIVE化を禁止する。ACTIVE current rowはexpected version CASで遷移する。
+7. THE mapping version SHALL platform既定どおりinclusive effective periodを持つ。future versionをeffective date前にACTIVE化せず、
+   expired/gap periodのgenerate/deliveryはfail-closedとする。PROVISIONALの明示SUPERSEDEDはgate hashなしでreason付きeventを保存する。
 
 ## R7. 動的external reviewer policy
 
@@ -68,6 +73,8 @@
 4. THE reviewer identity SHALL reviewer type、資格/登録識別子、所属組織、reviewer名のcanonical hashで識別し、
    credential原文、storage path/key、内部metadataを不要に公開しない。
 5. THE system SHALL reviewer typeをJava enum/static Set、DB CHECK、固定select、`m_system_config` JSON、業務seedで固定しない。
+6. THE credential snapshot SHALL 専用AES-GCM envelope、random IV、key version、current/old key rotation、prod key必須validation、
+   tamper/wrong-key fail-closedを持つ。MFA/Freee/BP用鍵を流用せず、平文credentialをDB/API/logへ出さない。
 
 ## R8. ACTIVE、delivery、preview
 
@@ -76,7 +83,8 @@
    他workplaceのdelivery authorizationを与えない。
 2. THE new delivery SHALL mapping version ID/version/hash、review policy hash、gate evaluated at、gate snapshot hashを保存し、
    mapping/policy/review evidenceの変更後に旧idempotency/archiveを新規結果として再利用しない。legacy rowはNULLのまま表示する。
-3. THE historical delivery SHALL current mapping/review/assignmentを再評価せず、当時のarchive/snapshotからrole別にdownloadできる。
+3. THE historical delivery SHALL current mapping/review/assignmentを再評価せず、交付時に保存したimmutable FULL/MASK/LIMITED
+   document versionとcontract/profile/worker/workplace/render input snapshotからrole別にdownloadできる。current master/configを再renderに使わない。
    document ACL、tenant/data/organization/file scope、scan=CLEAN、access auditは維持する。
 4. THE preview SHALL formal generateと別APIとし、archive/delivery/notification/delivery IDを作らず、watermarkと
    非本番content-dispositionを付ける。
@@ -95,7 +103,7 @@
 1. THE G2 follow-up SHALL R10 acceptance後にV102を使用し、V84/V85/V101を変更しない。common V99は永久欠番、
    migration-dev V100はcommonで再利用せず、S12〜S17はV103〜V108とする。
 2. THE migration verification SHALL fresh/legacy/partial/failed-history-repair/post-apply rollback、V1/V102/H2/entity/mapper、
-   append-only DB拒否、common/dev location採番を検証する。
+   operation ledger、source freeze trigger、append-only DB拒否、common/dev location採番を検証する。
 3. `GATE-T066-HISTORY` SHALL `TRACKED P2 / production release gate`として別specへ分離し、S10 PASS/S12開始を阻害しない。
    未実装を受入済みとせず、対象fieldを必要とするproduction帳票はwrite/asOf/correction/permission/golden完了まで禁止する。
 4. T066/S10 PASS SHALL G2 mechanism、実在assignment actor approval、freeze済みpolicyを満たす実在external review、
@@ -109,12 +117,12 @@
 | requirement | direct regression ID | level |
 |---|---|---|
 | R6.1〜R6.4 assignment/scope | `G2-ASG-01..13`, `G2-DEL-02..04` | L2〜L3 |
-| R6.5 event reducer | `G2-EVT-01..11`, `G2-MIG-07` | L2〜L3 |
-| R6.6 lifecycle/ACTIVE | `G2-ACT-01..06` | L2〜L3 |
+| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..09`, `G2-MIG-07` | L2〜L3 |
+| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..08` | L2〜L3 |
 | R7.1〜R7.3 dynamic policy/freeze | `G2-POL-01..16` | L0〜L2 |
-| R7.4/R9.3 PII/evidence | `G2-EVT-12..14`, `G2-SEC-09..10` | L1〜L2 |
-| R8.1〜R8.4 delivery/preview | `G2-DEL-01..11` | L1〜L2 |
+| R7.4/R9.3 PII/evidence/credential crypto | `G2-EVT-12..14`, `G2-SEC-09..10`, `G2-SEC-12..18` | L1〜L2 |
+| R8.1〜R8.4 delivery/preview/immutable rendition | `G2-DEL-01..15` | L1〜L2 |
 | R9.1〜R9.3 role/CSRF/DTO/i18n | `G2-SEC-01..11` | L0〜L2 |
-| R10.1〜R10.2 migration | `G2-MIG-01..09` | L0〜L2 |
+| R10.1〜R10.2 migration/source freeze | `G2-MIG-01..12` | L0〜L2 |
 | R10.3 history gate | `G2-HISTORY-01` inventory + production catalog L0 | L0 |
 | R10.4 browser/real evidence | `G2-BROWSER-01` Phase A/B | L3 Demo |

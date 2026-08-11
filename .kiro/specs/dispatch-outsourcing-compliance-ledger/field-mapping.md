@@ -458,4 +458,11 @@ review policyは別の`review_policy_hash`、delivery採用証跡は`gate_snapsh
 - DRAFTでpolicyを作成し、PROVISIONAL_REVIEWED以降はtype snapshotとpolicy hashをfreezeする。
 - ACTIVE化に使うapproval event IDをrequestで指定するが、tenant/workplace/assignment/actor/hashはDB再解決する。
 - formal generate/deliveryはtarget workplaceのcurrent gateを毎回再評価し、past delivery downloadはcurrent gateを再評価しない。
+- formal generate/deliveryは交付時にFULL/MASK/LIMITEDのimmutable document versionを同一`rendition_group_id`で保存し、
+  `t_document_delivery`へcontract/profile/worker/workplace/render input snapshot ID/hashと各version/hashを記録する。
+  downloadはcurrent master/configを再render入力へ使わず、保存済みrole renditionだけを返す。
+- state-changing operationは`t_compliance_operation_ledger`でtenant+operation type+idempotency key/request hash/result referenceを管理し、
+  response喪失再送、同key異payload、同時再送、rollback後再送を決定的に処理する。既存snapshot operationとは別契約である。
+- external reviewer credentialは専用AES-GCM envelope、random IV、key version、rotation、prod key必須、復号失敗fail-closedを適用し、
+  MFA/Freee/BP用鍵を流用しない。mapping sourceはDRAFTだけ編集可、freeze後はDB direct UPDATE/DELETEを拒否する。
 - R10の`ACCEPTED_FOR_IMPLEMENTATION`前は本sectionを含むdocs-onlyで停止し、V102や実装/testを作成しない。

@@ -17,6 +17,16 @@
 | G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 未決 |
 | G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 未決 |
 
+## G2 R21 decision delta rework（2026-08-11）
+
+- R21独立ReviewはFAIL（P0=0、P1=4、P2=1）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
+  `ACCEPTED_FOR_IMPLEMENTATION`、V102、DDL、Java、HTML、JS、CSS、message、test、seed、DB変更を禁止する。
+- docs-only reworkで、operation idempotency ledger、mapping inclusive effective period/future/expired、transition別gate hash、
+  delivery時FULL/MASK/LIMITED immutable rendition、専用credential AES-GCM/key rotation/prod fail-closed、source freeze triggerを決定する。
+- 新decision IDは`G2-IDEMPOTENCY-01`、`G2-EFFECTIVE-PERIOD-01`、`G2-DELIVERY-IMMUTABILITY-01`、
+  `G2-CREDENTIAL-CRYPTO-01`、`G2-SOURCE-FREEZE-01`。旧11 ID、tenant/workplace/G0、V102〜V108予約は維持する。
+- T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
+
 ## G0 決定記録
 
 - ID: G0
@@ -65,8 +75,9 @@
 - 決定案: mapping=tenant scope、assignment=workplace scope、contract workplace=profileからserver-side解決、
   tenant ACTIVEとworkplace delivery authorizationを分離する。reviewer typeは完全動的設定、policyはmapping versionへfreezeし、
   group AND/type OR/minimum distinct reviewerで評価する。approval/external review/statusはappend-only reducer、
-  mapping/policy/gateの3 canonical hash、ACTIVE 18-step transaction、formal generate/preview、過去downloadを固定する。
-- data model: 9 physical table + `t_document_delivery`のmapping/policy/gate snapshot列をV102候補とする。
+  mapping/policy/gateの3 canonical hash、ACTIVE 18-step transaction（旧R19案）、formal generate/preview、過去downloadを固定する。
+- data model: 旧deltaの「9 physical table」案をR21で具体化し、現行候補は9 domain table + 共通`t_compliance_operation_ledger`、
+  source freeze trigger、`t_document_delivery`のmapping/policy/gate/rendition/snapshot列とする。
 - migration: common V99は永久欠番、migration-dev V100はcommon再利用禁止、common V101は既存用途維持、
   S10 follow-up=V102、S12〜S17=V103〜V108。V84/V85/V101を変更しない。
 - G0: deployment tenantはserver設定から取得しrequest値を信用しない。現行独立DBを維持し、共有DB完成とは扱わない。

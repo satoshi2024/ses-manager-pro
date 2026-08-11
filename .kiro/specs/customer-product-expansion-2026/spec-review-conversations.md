@@ -728,6 +728,10 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
 
 【Review対象】
+- 現行Round: R21 docs-only再Review。Base `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9`、HeadはR10依頼messageで固定する。
+- R21差戻しの確認点: 共通operation ledgerのstate-changing idempotency、mapping inclusive effective periodとtransition別gate hash、
+  formal deliveryのimmutable FULL/MASK/LIMITED rendition、credential専用AES-GCM/key rotation、mapping source freeze trigger。
+- 現行decision IDは16件、direct regression matrixは111件。R10受理前はV102/DDL/code/testを変更せず、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
 - T060: 0. G2公式様式field mapping
 - T061: F1. workplace/profile/finding/delivery DDL
 - T062: F2. ComplianceRule分割/拡張
@@ -765,8 +769,9 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【Review観点】
-- R19-P1-01 docs-only deltaではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
-  scope/dynamic policy/9表/3 hash/reducer/ACTIVE/delivery/security/G0/HISTORY/V102〜V108/direct regression/Phase A-Bを逐項照合する。
+- R21 docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
+  tenant ACTIVE/workplace delivery分離、dynamic policy、9 domain table + operation ledger、複数hash/reducer、ACTIVE 21-step、
+  immutable rendition/delivery、credential crypto/source freeze、security/G0/HISTORY/V102〜V108/direct regression/Phase A-Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
 - 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
 - CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。
@@ -810,7 +815,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 5. spec総合判定: PASS / CONDITIONAL PASS / FAIL / NOT REVIEWABLE。
 6. 次specまたは次Waveを開始してよいか。
 7. review-ledgerと中央ledgerへ転記する短い結論。
-8. R19-P1-01 docsが実装時の推測を残さず整合する場合だけ`ACCEPTED_FOR_IMPLEMENTATION`を明示する。
+8. R21 docs-only decision deltaが実装時の推測を残さず整合する場合だけ`ACCEPTED_FOR_IMPLEMENTATION`を明示する。
    docs受理だけでT066/S10をPASSにせず、不足時は同keywordを使わない。
 問題がない場合は根拠を示してPASSとし、不要なrefactorを提案しないでください。
 ```

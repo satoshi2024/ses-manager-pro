@@ -1,4 +1,4 @@
-# G1〜G6正式決定（2026-07-26、G2開発gate改訂 2026-08-09、R19 decision delta候補 2026-08-11）
+# G1〜G6正式決定（2026-07-26、G2開発gate改訂 2026-08-09、R19/R21 decision delta候補 2026-08-11）
 
 ## 1. 決定原則
 
@@ -53,6 +53,13 @@
 - mapping/policy/gateの3 hash、event reducer、ACTIVE transaction、formal generate/preview、過去delivery download、
   `/compliance-gate` action permissionを同decision deltaで固定する。
 - 本節は`PROPOSED_FOR_R10_REVIEW`である。R10が`ACCEPTED_FOR_IMPLEMENTATION`を明示するまでV102/DDL/code/testを変更しない。
+
+### 3.2 R21 docs-only rework
+
+- R21独立ReviewはP0=0、P1=4、P2=1でFAIL。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`とする。
+- 冪等operation ledger、mapping inclusive effective period/future/expired、transition別gate hash、交付時immutable rendition、
+  credential専用AES-GCM/key version/rotation/source freezeをdocsへ追加し、direct regressionを111 IDへ拡張する。
+- R10 acceptance前はV102/DDL/code/testを変更せず、T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
 
 ## 4. G3 — 外部Portal境界
 

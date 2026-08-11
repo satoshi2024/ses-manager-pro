@@ -1,5 +1,30 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R21 docs-only rework / R10再Review待ち）
+
+`R21独立ReviewはFAIL（P1×4/P2×1）。R19-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`
+指摘はoperation idempotency ledger、mapping effective period/status event、immutable role rendition、credential crypto、source freezeであり、
+発注者の許可範囲どおり文書とdirect regression matrixだけを更新する。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102、DDL、Java、HTML、JS、CSS、message、test、seed、DBを変更しない。
+T066未完了、S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
+
+### R21-P1-01〜04 / P2-01 docs-only fix packet
+
+| task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R21-P1-01〜04 / R21-P2-01 | R6.5〜R8.3、R7.4、R10.2、G2-IDEMPOTENCY-01、G2-EFFECTIVE-PERIOD-01、G2-DELIVERY-IMMUTABILITY-01、G2-CREDENTIAL-CRYPTO-01、G2-SOURCE-FREEZE-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。旧11＋新5でdecision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | operation ledger/period/rendition/crypto/source triggerのdecision ID、111 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9` → fix Headはpush後のR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
+
+### R21 issue status
+
+| issue | status | 最小対応 |
+|---|---|---|
+| R21-P1-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | operation ledgerでkey scope/request hash/state/result/retention/retryを固定 |
+| R21-P1-02 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | mapping inclusive period、future/expired/gap、transition別gate hashを固定 |
+| R21-P1-03 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | 交付時FULL/MASK/LIMITED immutable renditionとexact snapshot参照を固定 |
+| R21-P1-04 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | 専用AES-GCM/key version/rotation/prod fail-closedを固定 |
+| R21-P2-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | DRAFT source編集とfreeze後direct UPDATE/DELETE triggerを固定 |
+
+R21-P1-01〜04/P2-01は実装担当側でcloseしない。R10が独立Reviewし、受理なら`ACCEPTED_FOR_IMPLEMENTATION`、不足なら具体的な差戻しを返す。
+
 ## 現行判定（R19-P1-01 docs-only decision delta / R10 Review待ち）
 
 `R19-P1-01はOPEN / SPEC_CONCRETIZATION_REQUIREDのまま。発注者指示に基づきG2-SCOPE/LIFECYCLE/DYNAMIC-REVIEW/
@@ -22,8 +47,8 @@ S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・producti
 | R19-P2-02 PDF browser | `OPEN / T066 PASS GATE` | Phase A previewと、実在actor/reviewer/CLEAN evidenceを使うPhase B formal deliveryをdesktop/390pxで実施 |
 
 現行decisionの全文は`g2-gate-decision-delta-r19-p1-01.md`。専門家type/組合せ/minimumはtenant画面の業務dataであり、
-Java enum、DB CHECK、固定option、`m_system_config` JSON、seedへ固定しない。9 physical tableとdelivery snapshotはV102候補だが、
-R10 acceptance前にDDLを作成しない。
+Java enum、DB CHECK、固定option、`m_system_config` JSON、seedへ固定しない。旧deltaの9 physical table案はR21で、
+9 domain table + 共通operation ledger、source freeze trigger、delivery rendition/snapshotへ具体化した。R10 acceptance前にDDLを作成しない。
 
 ## 現行判定（R19-P1-02 / R19-P2-03 VERIFIED_CLOSED）
 

@@ -156,8 +156,8 @@
 | 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
 |---|---|---|---|---|
 | mapping DRAFT | →PROVISIONAL_REVIEWED | 公式source/版/effective period＋L0＋独立Review、mapping hash固定 | mapping編集 | DRAFTの新versionを作成 |
-| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋外部専門家Review | 承認とmapping改定 | 承認対象hash不一致なら遷移拒否 |
-| mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS | 法令・様式更新 | 旧versionと過去帳票snapshotを保持 |
+| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋freeze済み動的Review、ACTIVEはinclusive effective period内 | 承認とmapping改定 | future/expired、承認対象hash不一致なら遷移拒否。未使用PROVISIONALのSUPERSEDEDはreasonのみでgate hash NULL |
+| mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS、または明示終了 | 法令・様式更新 | 置換時だけ旧SUPERSEDED eventへgate snapshot hashを保存し、過去帳票snapshotを保持 |
 | profile 未入力 | →入力済 | 状態CAS | — | — |
 | 入力済 | →確定（帳票生成可） | version CAS | 同時編集 | 入力済へ |
 | 確定 | →改定（新version） | current pointerのexpected-version CAS | pointerをロックしてversion予約→snapshot INSERT→pointer切替 | CAS/一意/FK失敗は全rollback、A/B/Aの履歴を保持 |
@@ -170,7 +170,8 @@
 - findingは(contract_id, code, condition_fingerprint)でupsertし、既存4ruleのcode/挙動を維持する。
 - content hashは履歴の同一性を示すがretryの冪等性キーではない。A(v1,hA)→B(v2,hB)→A(v3,hA)を許可する。
 - V102適用前の帳票生成冪等キーは(contract_id, document_type, template_version, snapshot_hash)である。
-  G2 follow-up後はmapping version/hash、review policy hash、gate snapshot hashを追加し、snapshot保存のoperation idempotencyとは別契約にする。
+  G2 follow-up後はmapping version/hash、review policy hash、gate snapshot hash、render input/rendition groupを追加し、snapshot保存の
+  operation idempotencyとは別契約にする。state-changing G2 operationは`t_compliance_operation_ledger`で再送結果を固定する。
 
 ### 5.5 F1 schema / history matrix（R5で確定する技術契約）
 
@@ -182,6 +183,9 @@
 | 苦情・雇用安定・教育・career・紹介予定 | currentは条件/窓口のみ | 各history tableを反復行として保存 | event訂正は新event INSERT、旧event不変 | T061/T062/B1 |
 | profile snapshot | current profile＋current_snapshot_id/current_snapshot_version | t_contract_compliance_snapshot、UNIQUE(contract_id,snapshot_version)、content hashは非一意索引 | operation idempotencyはoperation_idで分離。A/B/Aを3version保持 | T061/B1 |
 | snapshot operation | current pointerには含めない | t_compliance_snapshot_operation（operation_id、expected version、resulting snapshot、request hash、status） | 同じoperation retryは1行、新operationは同じcontentでも新version | T061 |
+| G2 operation | current rowには含めない | t_compliance_operation_ledger（tenant/type/key/request hash/state/result reference/result summary/failure/lease） | response喪失は同じresult、同key異payloadは409、永久保持 | T061/T066 |
+| delivery rendition | current masterには依存しない | FULL/MASK/LIMITEDのimmutable `t_document_version`＋delivery exact snapshot refs | current master/configをdownload時に再読込しない。3 renditionのいずれか失敗は全rollback | T064/T066 |
+| reviewer credential | reviewer masterには原文を戻さない | credential crypto envelope＋key version＋masked snapshot | 専用AES-GCM、旧key read/current key write、復号失敗はgate fail-closed | T066 |
 | explicit NULL | mutable current nullable columns only | history/snapshotは不変 | FieldStrategy.ALWAYS＋full DTO。省略PATCHはreject、CAS失敗はrollback | T061/T062 |
 | history correction | current clear inventoryには含めない | event_id/event_type/supersedes_event_id/correction_reason/actor/occurred_at/effective interval/asOf key | 旧行UPDATE/DELETE禁止、CORRECTED/CANCELLEDは新行 | T061/T064 |
 | retention purge | 通常mapperには削除操作なし | legal hold対象は保持 | 承認済みpurge operation id＋権限分離procedure＋監査eventのみ | T066/B1 |
@@ -199,6 +203,9 @@
 5. snapshot/history tableはDB triggerまたは権限境界でUPDATE/DELETEを拒否する。application mapperはINSERT/SELECTのみを公開する。
 6. legal hold確認済みのretention purgeだけは承認済みpurge operation id、権限分離procedure、監査eventを伴う明示経路とする。通常endpointから呼べない。
 7. history訂正はevent_type=CORRECTED/CANCELLED、supersedes_event_id、correction_reasonを持つ新行INSERTで行い、asOf解決は最新の有効eventを読む。
+8. mapping sourceはDRAFT parent中だけ通常編集を許可し、freeze後はDB triggerでUPDATE/DELETEを拒否する。source triggerの欠落・partial適用は
+   V102 direct regressionでfail-closedとする。
+9. G2 operationのresponse retryは`t_compliance_operation_ledger`のresult referenceからallow-list DTOを再構成し、raw response/PIIを保存しない。
 
 ## 6. テスト
 
@@ -213,7 +220,8 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 ### 6.1 G2 gate test matrix
 
 以下の既存IDはG2 gateのbaseline回帰IDとして維持する。R19-P1-01実装では§7及び
-`g2-gate-decision-delta-r19-p1-01.md` §13のtraceable matrixへ展開し、固定専門家typeを前提にしない。
+`g2-gate-decision-delta-r19-p1-01.md` §13のtraceable matrixへ展開し、固定専門家typeを前提にしない。R21 fixでは
+`G2-IDP-01..09`、`G2-LIFE-01..08`、`G2-DEL-12..15`、`G2-SEC-12..18`、`G2-MIG-10..12`を追加する。
 
 | test ID | level / task | setup | operation | expected |
 |---|---|---|---|---|
@@ -256,11 +264,15 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 
 - tenant-level mapping ACTIVEとworkplace-level delivery approvalを分離する。ACTIVE化で指定するapproval eventは
   tenant mappingの有効化根拠であって他workplaceの交付権限ではない。
-- 9 physical table（mapping version/source、dynamic reviewer type、requirement group/type、workplace assignment、
-  approval/external review/status event）をV102候補とし、event 3表はMySQL triggerでもUPDATE/DELETEを拒否する。
+- 9 domain table（mapping version/source、dynamic reviewer type、requirement group/type、workplace assignment、
+  approval/external review/status event）に`t_compliance_operation_ledger`を加えたV102候補とし、source freezeとevent 3表は
+  MySQL triggerでもUPDATE/DELETEを拒否する。
 - reviewer policyはgroup間AND、group内type OR、minimum distinct reviewerで評価する。typeは完全動的、policyはmapping versionへfreezeする。
-- `mapping_hash`、`review_policy_hash`、`gate_snapshot_hash`を別canonical payloadとして計算する。
-- internal/external event reducer、ACTIVE 18-step transaction、formal generate/preview、過去delivery download、
+- `mapping_hash`、`review_policy_hash`、`gate_snapshot_hash`、`render_input_hash`、operation request hashを別canonical payloadとして計算する。
+- delivery時にFULL/MASK/LIMITEDのimmutable document versionとexact contract/profile/worker/workplace/config snapshotを保存し、downloadはcurrent masterをrender入力にしない。
+- credential snapshotは専用AES-GCM/key version/rotation契約で保存し、prod key欠落・改竄・復号失敗はfail-closedとする。
+- credential keyは`ComplianceGateCredentialKeyProvider`がdeployment secret storeから解決し、MFA/Freee/BP鍵や別providerへfallbackしない。
+- internal/external event reducer、ACTIVE 21-step transaction、formal generate/preview、過去delivery download、
   `/compliance-gate` action permission/capability/evidence DTOを同decision delta §§5〜10で固定する。
 - 現行独立DBではdeployment tenantを`app.security.oidc.tenant-id`からserver-side取得し、request tenantを信用しない。
   A/B testは防御的SQL境界であり、共有DB production対応完了を意味しない。
