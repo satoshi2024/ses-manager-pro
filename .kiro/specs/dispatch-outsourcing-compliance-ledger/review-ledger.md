@@ -11,7 +11,7 @@ S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・producti
 
 | task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T066 / `dispatch-outsourcing-compliance-ledger-R19-P1-01` | R5〜R10、design §7、`G2-SCOPE-01`〜`G2-BROWSER-01` | S10 requirements/design/tasks/field-mapping/review-ledgerと新decision delta、中央G2/migration/ledger/dependency資料、S10/R10・S12〜S17のstart/review/task/copyable会話、S12〜S17 design/tasksのdocsだけ。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | migration/Flyway location inventory、現行/履歴番号scan、decision ID/trace matrix/Phase A-B整合、non-doc差分0、`git diff --check`を実施。browser/API/DB DemoはR10 acceptance前のため未実施 | Base `aeb734871782f739bbcb907532ca5cdd13521689`。Review Headはpush後のR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。R10 acceptance前の実装開始が最大risk |
+| T066 / `dispatch-outsourcing-compliance-ledger-R19-P1-01` | R5〜R10、design §7、`G2-SCOPE-01`〜`G2-BROWSER-01` | S10 requirements/design/tasks/field-mapping/review-ledgerと新decision delta、中央G2/migration/ledger/dependency資料、S10/R10・S12〜S17のstart/review/task/copyable会話、S12〜S17 design/tasksのdocsだけ。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | migration/Flyway location inventory、現行/履歴番号scan、decision ID/trace matrix/Phase A-B整合、non-doc差分0、`git diff --check`を実施。browser/API/DB DemoはR10 acceptance前のため未実施 | Base `aeb734871782f739bbcb907532ca5cdd13521689` → decision docs commit `513e6d3e`。最終Review Headはpacket commit/push後のR10依頼messageで固定 | docs commitのrevertだけでrollback可能、DB rollbackなし。R10 acceptance前の実装開始が最大risk |
 
 ### 現行OPEN / 非block分離
 
