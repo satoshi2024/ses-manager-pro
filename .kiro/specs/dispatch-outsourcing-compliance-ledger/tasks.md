@@ -91,7 +91,7 @@
   - **Objective**: 法務fixtureの3契約について台帳とfindingが期待どおりで、
     既存のcompliance機能・契約機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
-    既存4 ruleの回帰、法務fixture golden file、worker snapshotの交付時点asOf回帰（T066-ASOF-01）、
+    既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
     Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
   - **Demo**: 法務fixture3契約の台帳とfindingを照合。既存4 ruleの出力が変わっていないことを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。

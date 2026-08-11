@@ -121,10 +121,13 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             return toDto(existing);
         }
 
+        // 交付物の基準時刻は生成処理全体で一度だけ確定し、archiveとdeliveryへ同じ値を保存する。
+        // DATETIMEの秒精度に合わせ、download時の再読込でもworker snapshotの境界を変えない。
+        LocalDateTime deliveredAt = LocalDateTime.now().withNano(0);
         String engineerName = contract.getEngineerId() == null ? null
                 : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
-        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract, snapshot.getSnapshotAt());
+        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract, deliveredAt);
         // archive正本は常にFULLで生成する（R4.2）。download時にviewer roleで再maskする。
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
                 contract, snapshot, request.getDocumentType(), "FULL", engineerName, workerSnapshot);
@@ -161,7 +164,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         fillRecipient(delivery, request.getRecipientContactId(), contract);
         delivery.setDeliveryMethod(request.getDeliveryMethod());
         delivery.setDeliveryStatus("DELIVERED");
-        delivery.setDeliveredAt(LocalDateTime.now());
+        delivery.setDeliveredAt(deliveredAt);
         delivery.setIdempotencyKey(idempotencyKey);
         try {
             deliveryMapper.insert(delivery);

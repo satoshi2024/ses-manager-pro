@@ -1,6 +1,9 @@
 package com.ses.controller.api;
 
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.service.storage.DocumentStorage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -11,7 +14,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.util.Map;
+import java.io.ByteArrayInputStream;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,12 +54,16 @@ class ComplianceDocumentApiTest {
     @Autowired
     private com.ses.service.SystemConfigService systemConfigService;
 
+    @Autowired
+    private DocumentStorage documentStorage;
+
     @org.springframework.boot.test.mock.mockito.MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         org.mockito.Mockito.when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        systemConfigService.put("compliance.template.DISPATCH_LEDGER.version", "1", "test");
     }
 
     @Test
@@ -186,6 +195,65 @@ class ComplianceDocumentApiTest {
     }
 
     @Test
+    void 生成archiveとdownloadは同じ交付時刻のworkerSnapshotを使いtemplate切替後もmaskされる() throws Exception {
+        long contractId = insertContractWithProfile();
+        // 先に契約snapshotを作成し、後から作成したworker snapshotが交付時点asOfで選ばれる条件にする。
+        generate(contractId, "DISPATCH_NOTICE", "EMAIL");
+        Long workerId = jdbcTemplate.queryForObject(
+                "SELECT engineer_id FROM t_contract WHERE id=?", Long.class, contractId);
+        LocalDateTime before = LocalDateTime.now().minusMinutes(5).withNano(0);
+        LocalDateTime at = LocalDateTime.now().withNano(0);
+        insertWorkerSnapshot(contractId, workerId, 1, before, "BEFORE_VERSION");
+        insertWorkerSnapshot(contractId, workerId, 2, at, "AT_VERSION");
+        insertWorkerSnapshot(contractId, workerId, 3, at.plusMinutes(5), "AFTER_VERSION");
+        insertWorkerSnapshot(contractId, workerId, 4, null, "NULL_VERSION");
+
+        long firstId = generate(contractId, "DISPATCH_LEDGER", "EMAIL");
+        String archiveText = archiveText(firstId);
+        byte[] fullDownload = mockMvc.perform(get("/api/contracts/" + contractId
+                        + "/compliance-documents/" + firstId + "/download"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        String fullDownloadText = extractPdfText(fullDownload);
+
+        assertThat(archiveText).contains("AT_VERSION")
+                .doesNotContain("BEFORE_VERSION", "AFTER_VERSION", "NULL_VERSION");
+        assertThat(fullDownloadText).contains("AT_VERSION")
+                .doesNotContain("BEFORE_VERSION", "AFTER_VERSION", "NULL_VERSION");
+        LocalDateTime deliveredAt = jdbcTemplate.queryForObject(
+                "SELECT delivered_at FROM t_document_delivery WHERE id=?", LocalDateTime.class, firstId);
+        assertThat(deliveredAt).isNotNull();
+        assertThat(deliveredAt).isAfterOrEqualTo(at);
+
+        // template versionを進めても同じsnapshot/交付時点のworker値を使い、同じ版の再生成は冪等にする。
+        systemConfigService.put("compliance.template.DISPATCH_LEDGER.version", "2", "test");
+        long secondId = generate(contractId, "DISPATCH_LEDGER", "EMAIL");
+        assertThat(secondId).isNotEqualTo(firstId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT template_version FROM t_document_delivery WHERE id=?", String.class, secondId))
+                .isEqualTo("2");
+        assertThat(archiveText(secondId)).contains("AT_VERSION");
+        assertThat(generate(contractId, "DISPATCH_LEDGER", "EMAIL")).isEqualTo(secondId);
+        assertEquals(2, queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId
+                + " AND document_type='DISPATCH_LEDGER'"));
+
+        byte[] managerPdf = mockMvc.perform(get("/api/contracts/" + contractId
+                        + "/compliance-documents/" + secondId + "/download")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                                .user("2").roles("マネージャー")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        byte[] salesPdf = mockMvc.perform(get("/api/contracts/" + contractId
+                        + "/compliance-documents/" + secondId + "/download")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                                .user("3").roles("営業")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(extractPdfText(managerPdf)).doesNotContain("AT_VERSION", "BEFORE_VERSION", "AFTER_VERSION");
+        assertThat(extractPdfText(salesPdf)).doesNotContain("AT_VERSION", "BEFORE_VERSION", "AFTER_VERSION");
+    }
+
+    @Test
     void 受領確認でconfirmedAtが記録されダウンロードでPDFが返る() throws Exception {
         long contractId = insertContractWithProfile();
         long deliveryId = generate(contractId, "INDIVIDUAL_CONTRACT", "EMAIL");
@@ -286,5 +354,40 @@ class ComplianceDocumentApiTest {
     private int queryInt(String sql) {
         Integer value = jdbcTemplate.queryForObject(sql, Integer.class);
         return value == null ? 0 : value;
+    }
+
+    private void insertWorkerSnapshot(long contractId, long workerId, int snapshotVersion,
+                                      LocalDateTime snapshotAt, String gender) {
+        if (snapshotAt == null) {
+            jdbcTemplate.update("INSERT INTO t_contract_compliance_worker_snapshot "
+                            + "(tenant_id, contract_id, worker_id, snapshot_version, snapshot_hash, snapshot_at, gender) "
+                            + "VALUES ('default', ?, ?, ?, ?, NULL, ?)",
+                    contractId, workerId, snapshotVersion, "worker-hash-" + snapshotVersion, gender);
+            return;
+        }
+        jdbcTemplate.update("INSERT INTO t_contract_compliance_worker_snapshot "
+                        + "(tenant_id, contract_id, worker_id, snapshot_version, snapshot_hash, snapshot_at, gender) "
+                        + "VALUES ('default', ?, ?, ?, ?, ?, ?)",
+                contractId, workerId, snapshotVersion, "worker-hash-" + snapshotVersion,
+                Timestamp.valueOf(snapshotAt), gender);
+    }
+
+    private String archiveText(long deliveryId) throws Exception {
+        String storageKey = jdbcTemplate.queryForObject(
+                "SELECT v.storage_key FROM t_document_delivery d "
+                        + "JOIN t_document_version v ON v.document_id=d.document_id "
+                        + "WHERE d.id=? ORDER BY v.version_no DESC LIMIT 1", String.class, deliveryId);
+        return extractPdfText(documentStorage.readAll(storageKey));
+    }
+
+    private String extractPdfText(byte[] pdf) throws Exception {
+        StringBuilder text = new StringBuilder();
+        try (PdfReader reader = new PdfReader(new ByteArrayInputStream(pdf))) {
+            PdfTextExtractor extractor = new PdfTextExtractor(reader);
+            for (int page = 1; page <= reader.getNumberOfPages(); page++) {
+                text.append(extractor.getTextFromPage(page)).append('\n');
+            }
+        }
+        return text.toString();
     }
 }

@@ -237,5 +237,5 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 
 | test ID | level | fixture / operation | expected |
 |---|---|---|---|
-| T066-ASOF-01 | L2 | worker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULLで用意し、生成/downloadの帳票内容を確認 | 前・同時刻のうち最も新しい確定版だけを出力し、交付後またはasOf不明のworker項目は出力しない。過去帳票へ現在値を混入させない |
+| T066-ASOF-01 | L2 | H2実APIでworker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULLで用意し、生成archive・FULL download・MASK/LIMITED download・template version切替・再生成を実行 | 生成時に一度だけ確定した`deliveredAt`をdeliveryへ保存し、archiveとdownloadが同じ交付時点の最新確定版だけを使う。交付後またはasOf不明のworker項目は出力せず、mask・template切替・冪等性を維持する |
 

@@ -1,5 +1,9 @@
 # 17spec中央実行台帳
 
+## S10 dispatch R19-P1-02 update
+
+R19独立ReviewはFAIL。旧R19-P2-01をR19-P1-02へ昇格・置換し、生成前に確定した単一`deliveredAt`をarchive生成・delivery保存へ共有、downloadは保存済み`delivered_at`をasOfに使用するfix deltaを実装した。H2実API direct regressionは17/0/0/0（ComplianceDocumentApiTest 9、ComplianceDocumentGeneratorTest 6、ComplianceWorkerSnapshotAsOfTest 2）。P1-02はR10再Review待ち。G2-P1-01、GATE-T066-HISTORY、PDF実ブラウザ目視はOPEN、T066 checkbox・ACTIVE化・本番交付・S12開始は禁止維持。
+
 ## 1. 運用ルール
 
 本台帳を対話管理の唯一の入口とする。通常は1specにつき主実装対話1つ、独立Review対話1つを使用し、

@@ -1,5 +1,18 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R19-P1-02 fix delta）
+
+`R19独立ReviewはFAIL。旧R19-P2-01はcloseせずR19-P1-02へ昇格・置換。単一deliveredAtを生成前に確定し、archive生成とt_document_delivery.delivered_atへ同じ値を保存し、downloadも保存済みdelivered_atだけをasOfに使う修正を実装済み・再Review待ち。G2 gate機構、GATE-T066-HISTORY、PDF実ブラウザ目視は未達。T066 checkbox・ACTIVE化・本番交付・production authorizationは禁止維持。S12は開始しない。`
+
+### R19-P1-02 fix delta
+
+| issue | status | 対応 | 検証 / 次action |
+|---|---|---|---|
+| R19-P1-02 worker snapshot asOf不一致 | `FIXED_BY_IMPLEMENTER / REVIEW_REQUIRED` | 生成前に秒精度の`deliveredAt`を一度だけ確定し、worker query・archive生成・delivery rowへ同じ値を渡す。downloadは保存済み`delivery.deliveredAt`を使用。`snapshot_at` NULLと交付後版は除外 | `ComplianceDocumentApiTest` 9/0/0/0（H2実APIでarchive/FULL/MASK/LIMITED/template切替/冪等）、`ComplianceDocumentGeneratorTest` 6/0/0/0、`ComplianceWorkerSnapshotAsOfTest` 2/0/0/0。R10はarchiveとFULL downloadのworker版一致、単一deliveredAt、境界SQLを独立確認し、P1-02をVERIFIED_CLOSEDへ進める |
+| R19-P2-01 worker snapshot asOf | `SUPERSEDED_BY_R19-P1-02 / NOT_CLOSED` | 生成がcontract snapshot_at、downloadがdelivered_atを使う不一致を旧P2としてcloseせず、R19-P1-02へ昇格・置換。旧asOf helper testだけでは経路保証にならないため、H2実API回帰を追加 | R10の独立Review対象はR19-P1-02。P1-02がVERIFIED_CLOSEDになるまでT066 M判定を進めない |
+
+R19-P1-01、GATE-T066-HISTORY、R19-P2-02は従前どおりOPEN。G2のDB/API契約が具体化されるまで推測実装せず、S12および次Waveは開始しない。
+
 ## 現行判定（R19 implementer response）
 
 `R19: T060〜T065 PASS維持。T066 Mのworker snapshot asOf不整合は修正済み・独立Review待ち。G2 gate機構（runtime assignment／実actor承認event／外部専門家Reviewの永続化・ACTIVE遷移）とGATE-T066-HISTORYの書込み経路は未達。PDF実ブラウザ目視も未実施。M checkbox・ACTIVE化・本番交付・production authorizationは維持禁止。`
