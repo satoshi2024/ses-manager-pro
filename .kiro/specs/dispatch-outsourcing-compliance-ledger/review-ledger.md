@@ -1,5 +1,20 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R19 implementer response）
+
+`R19: T060〜T065 PASS維持。T066 Mのworker snapshot asOf不整合は修正済み・独立Review待ち。G2 gate機構（runtime assignment／実actor承認event／外部専門家Reviewの永続化・ACTIVE遷移）とGATE-T066-HISTORYの書込み経路は未達。PDF実ブラウザ目視も未実施。M checkbox・ACTIVE化・本番交付・production authorizationは維持禁止。`
+
+### R19 指摘対応の記録
+
+| issue | status | 対応 | 検証 / 次action |
+|---|---|---|---|
+| R19-P2-01 worker snapshot asOf | `FIXED_BY_IMPLEMENTER / REVIEW_REQUIRED` | `ComplianceDocumentServiceImpl`が生成時はcontract snapshot時刻、download時はdelivery時刻以前の`worker snapshot`だけを選択するよう修正。`snapshot_at` NULLはasOf不明として出力しない | `ComplianceWorkerSnapshotAsOfTest` 2/0/0/0、`ComplianceDocumentGeneratorTest` 6/0/0/0。独立Reviewでquery境界と帳票経路を確認し、`VERIFIED_CLOSED`へ進める |
+| R19-P1-01 G2 gate mechanism | `OPEN / SPEC_CONCRETIZATION_REQUIRED` | 現実装にはmapping registry、runtime assignment、実actor承認event、外部専門家Review証跡、`PROVISIONAL_REVIEWED → ACTIVE`遷移、production交付gateの永続化/APIが存在しない。未決の保存形状・scope・activation endpointを推測して実装しない | 発注者がDB/API契約（mapping version/hashの正本、assignmentの有効期間scope、eventのactor/evidence fields、外部review fields、ACTIVE遷移権限、dev/prod境界、migration番号）を具体化するまでMを停止。受領後にG2-GATE-M-01/02を実装・実DB回帰 |
+| GATE-T066-HISTORY | `OPEN / TRACKED P2` | 苦情処理状況・career・教育訓練・紹介予定・紛争防止・差異通知は、現行specにhistory write pathがないため帳票出力対象外として記録済み。未実装を受入済みとは扱わない | それらの履歴書込み経路を持つ別spec完了後、同一snapshot/asOf・訂正event・field permission・帳票goldenを追加し、T066 gateを解除 |
+| R19-P2-02 PDF browser visual | `OPEN / RELEASE GATE` | PDF生成のunit/API goldenは通過したが、実ブラウザでのfont/layout目視は未実施 | desktop/390pxでログインrole別に生成・downloadし、フォント埋込、改ページ、mask表示、横幅を確認。確認まではM PASS/本番交付不可 |
+
+> R19-P1-01は、requirements R5・design §3/§5.4/§6.1のfail-closed要件に対する実装blockerである。一方、assignment/event/reviewの具体schema・APIはdesignの決定表にないため、推測実装を避けて発注者回答待ちとする。T066の全量testがgreenでもこのgateを代替しない。
+
 ## 現行判定
 
 `R10 Round 18: T060〜T065 PASS確定。T066 M: 実装・L4全量（1824件・失敗0・skip 38=Docker gateのみ）完了。G2 gate（COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視）未取得のためM PASS条件未達・production authorizationなし`。

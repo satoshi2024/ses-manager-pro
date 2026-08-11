@@ -58,7 +58,8 @@
   - **T066 Mでの最終化（R18）**: worker snapshot由来項目（性別・年齢区分・雇用期間種別/期間・
     無期雇用flag・60歳以上flag・労働者制限種別）は、`t_contract_compliance_worker_snapshot`が
     存在する場合に派遣元管理台帳へ出力する（`ComplianceDocumentGenerator`のworker引数。
-    worker snapshot未作成時は出力しない）。**履歴table由来項目（苦情処理状況・キャリアconsulting・
+    worker snapshotは帳票の交付日時点以前で最も新しい確定版だけを選び、交付後の版や
+    `snapshot_at`不明の版は出力しない。worker snapshot未作成時も出力しない）。**履歴table由来項目（苦情処理状況・キャリアconsulting・
     教育訓練・紹介予定・紛争防止・差異通知）は、当該履歴を作成する書き込み経路が本specの実装範囲に
     存在しないため、受入対象外としてGATE-T066-HISTORYに記録する**（既存の反復履歴tableはT061で
     整備済み。書き込み経路は別spec/将来実装）。
@@ -231,4 +232,10 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 | F1-MYSQL-FAILED-HISTORY-REPAIR-01 | L2 | failed history row、checksum不一致、repair→forward migration | repair前は起動/交付fail-closed、repair/checksum/installed_onをassert、V84は一度だけ完了 |
 | F1-MYSQL-POST-APPLY-ROLLBACK-01 | L2 | 適用前commit revertと適用後commit revertを別実行 | 適用前revertは安全、適用後revertはDB rollback扱いせずforward repairのみ許可 |
 | F1-PII-OWNERSHIP-01 | L1 | T061 entityのportal/AI consumer scan | 直接公開0件。detail/list/countはT063、CSV/Excel/PDF/downloadはT064のmatrixで証明 |
+
+### 6.3 T066 M direct regression matrix
+
+| test ID | level | fixture / operation | expected |
+|---|---|---|---|
+| T066-ASOF-01 | L2 | worker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULLで用意し、生成/downloadの帳票内容を確認 | 前・同時刻のうち最も新しい確定版だけを出力し、交付後またはasOf不明のworker項目は出力しない。過去帳票へ現在値を混入させない |
 

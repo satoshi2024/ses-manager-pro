@@ -41,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -123,7 +124,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         String engineerName = contract.getEngineerId() == null ? null
                 : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
-        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract);
+        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract, snapshot.getSnapshotAt());
         // archive正本は常にFULLで生成する（R4.2）。download時にviewer roleで再maskする。
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
                 contract, snapshot, request.getDocumentType(), "FULL", engineerName, workerSnapshot);
@@ -229,22 +230,45 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
         String viewerMask = maskLevel();
         com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName, workerSnapshot(contract));
+                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName,
+                workerSnapshot(contract, delivery.getDeliveredAt()));
         return documentGenerator.toPdf(content, messageSource);
     }
 
-    /** 契約の要員の最新worker snapshot（無ければnull）。 */
-    private com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot(Contract contract) {
-        if (contract.getEngineerId() == null) {
+    /**
+     * 帳票の基準時点以前で確定した要員snapshotだけを読む（無ければnull）。
+     * 交付後に作成されたworker snapshotを参照すると、過去帳票が現在値で変わるため、
+     * snapshotAtが不明な行も安全側で帳票へ渡さない。
+     */
+    private com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot(Contract contract,
+                                                                            LocalDateTime asOf) {
+        if (contract.getEngineerId() == null || asOf == null) {
             return null;
         }
         List<com.ses.entity.ContractComplianceWorkerSnapshot> list = workerSnapshotMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ContractComplianceWorkerSnapshot>()
                         .eq(com.ses.entity.ContractComplianceWorkerSnapshot::getContractId, contract.getId())
                         .eq(com.ses.entity.ContractComplianceWorkerSnapshot::getWorkerId, contract.getEngineerId())
+                        .le(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotAt, asOf)
+                        .isNotNull(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotAt)
+                        .orderByDesc(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotAt)
                         .orderByDesc(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotVersion)
                         .last("LIMIT 1"));
-        return list.isEmpty() ? null : list.get(0);
+        return selectWorkerSnapshotAsOf(list, asOf);
+    }
+
+    static com.ses.entity.ContractComplianceWorkerSnapshot selectWorkerSnapshotAsOf(
+            List<com.ses.entity.ContractComplianceWorkerSnapshot> snapshots, LocalDateTime asOf) {
+        if (asOf == null) {
+            return null;
+        }
+        return snapshots.stream()
+                .filter(snapshot -> snapshot.getSnapshotAt() != null
+                        && !snapshot.getSnapshotAt().isAfter(asOf))
+                .max(Comparator.comparing(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotAt)
+                        .thenComparing(com.ses.entity.ContractComplianceWorkerSnapshot::getSnapshotVersion,
+                                Comparator.nullsFirst(Comparator.naturalOrder())))
+                .orElse(null);
     }
 
     // ===== 共通 =====
