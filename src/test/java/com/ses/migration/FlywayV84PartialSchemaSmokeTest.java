@@ -54,6 +54,8 @@ class FlywayV84PartialSchemaSmokeTest {
             st.execute("DROP TABLE IF EXISTS t_contract_compliance_profile");
             st.execute("DROP TABLE IF EXISTS t_contract_compliance_snapshot");
             // old definition: t_document_deliveryを旧shape（新5列なし・FKなし）で事前作成
+            // V84実shapeと同じcollation（utf8mb4_unicode_ci）を明示する。DB既定collationのままだと
+            // V102のcomposite FK（tenant_id参照）がcollation不一致（MySQL 3780）で失敗する。
             st.executeUpdate("CREATE TABLE t_document_delivery ("
                     + "id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',"
                     + "contract_id BIGINT, document_id BIGINT NOT NULL, recipient_contact_id BIGINT,"
@@ -63,7 +65,8 @@ class FlywayV84PartialSchemaSmokeTest {
                     + "idempotency_key VARCHAR(200), version INT NOT NULL DEFAULT 0,"
                     + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
                     + "deleted_flag TINYINT NOT NULL DEFAULT 0,"
-                    + "UNIQUE KEY uk_document_delivery_idempotency (tenant_id, idempotency_key))");
+                    + "UNIQUE KEY uk_document_delivery_idempotency (tenant_id, idempotency_key))"
+                    + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             // absent: t_contract_compliance_snapshot等は未作成のまま
         }
 

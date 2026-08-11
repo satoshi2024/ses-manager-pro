@@ -707,18 +707,21 @@ DELIMITER $$
 DROP PROCEDURE IF EXISTS __ses_g2_repair_fk$$
 CREATE PROCEDURE __ses_g2_repair_fk(IN p_table VARCHAR(64), IN p_constraint VARCHAR(64), IN p_sql TEXT)
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.table_constraints
-    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table
-      AND CONSTRAINT_NAME = p_constraint AND CONSTRAINT_TYPE = 'FOREIGN KEY') THEN
+  DECLARE v_cols INT DEFAULT 0;
+  SELECT COUNT(*) INTO v_cols FROM information_schema.KEY_COLUMN_USAGE
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND CONSTRAINT_NAME = p_constraint;
+  IF v_cols = 1 THEN
     SET @g2_drop_fk_sql = CONCAT('ALTER TABLE ', p_table, ' DROP FOREIGN KEY ', p_constraint);
     PREPARE g2_drop_fk_stmt FROM @g2_drop_fk_sql;
     EXECUTE g2_drop_fk_stmt;
     DEALLOCATE PREPARE g2_drop_fk_stmt;
   END IF;
-  SET @g2_add_fk_sql = p_sql;
-  PREPARE g2_add_fk_stmt FROM @g2_add_fk_sql;
-  EXECUTE g2_add_fk_stmt;
-  DEALLOCATE PREPARE g2_add_fk_stmt;
+  IF v_cols <> 2 THEN
+    SET @g2_add_fk_sql = p_sql;
+    PREPARE g2_add_fk_stmt FROM @g2_add_fk_sql;
+    EXECUTE g2_add_fk_stmt;
+    DEALLOCATE PREPARE g2_add_fk_stmt;
+  END IF;
 END$$
 DELIMITER ;
 
@@ -849,18 +852,21 @@ DELIMITER $$
 DROP PROCEDURE IF EXISTS __ses_g2_repair_delivery_fk$$
 CREATE PROCEDURE __ses_g2_repair_delivery_fk(IN p_constraint VARCHAR(64), IN p_sql TEXT)
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.table_constraints
-    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 't_document_delivery'
-      AND CONSTRAINT_NAME = p_constraint AND CONSTRAINT_TYPE = 'FOREIGN KEY') THEN
+  DECLARE v_cols INT DEFAULT 0;
+  SELECT COUNT(*) INTO v_cols FROM information_schema.KEY_COLUMN_USAGE
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 't_document_delivery' AND CONSTRAINT_NAME = p_constraint;
+  IF v_cols = 1 THEN
     SET @g2_delivery_drop_fk_sql = CONCAT('ALTER TABLE t_document_delivery DROP FOREIGN KEY ', p_constraint);
     PREPARE g2_delivery_drop_fk_stmt FROM @g2_delivery_drop_fk_sql;
     EXECUTE g2_delivery_drop_fk_stmt;
     DEALLOCATE PREPARE g2_delivery_drop_fk_stmt;
   END IF;
-  SET @g2_delivery_add_fk_sql = p_sql;
-  PREPARE g2_delivery_add_fk_stmt FROM @g2_delivery_add_fk_sql;
-  EXECUTE g2_delivery_add_fk_stmt;
-  DEALLOCATE PREPARE g2_delivery_add_fk_stmt;
+  IF v_cols <> 2 THEN
+    SET @g2_delivery_add_fk_sql = p_sql;
+    PREPARE g2_delivery_add_fk_stmt FROM @g2_delivery_add_fk_sql;
+    EXECUTE g2_delivery_add_fk_stmt;
+    DEALLOCATE PREPARE g2_delivery_add_fk_stmt;
+  END IF;
 END$$
 DELIMITER ;
 CALL __ses_g2_repair_delivery_fk('fk_delivery_g2_mapping_version',
