@@ -17,15 +17,14 @@
 | G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 未決 |
 | G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 未決 |
 
-## G2 R21 follow-up decision delta rework（2026-08-11）
+## G2 R21 second follow-up docs-only decision delta（2026-08-11）
 
-- R21独立ReviewはFAIL（P0=0、P1=4、P2=1）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
+- R21再ReviewはFAIL（P0=0、P1=3、P2=0）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
   `ACCEPTED_FOR_IMPLEMENTATION`、V102、DDL、Java、HTML、JS、CSS、message、test、seed、DB変更を禁止する。
-- docs-only reworkで、lease中409→完了後同result 200のoperation idempotency、reviewer type/requirement write、current ACTIVEとfuture versionのschedule、
-  transition別gate hash、既存profile/worker snapshotとPDF rendition正本、INSERT前operation_id AADを決定する。
-  source freezeはDRAFT parentだけINSERT/UPDATE/DELETEを許可し、freeze後3操作をtrigger拒否する。
+- deliveryはclient idempotency keyと業務一意keyを分離し、`delivery_business_key`を予約して同一canonical入力を1 delivery・1 rendition group・3 rendition・1 notificationへ収束させる。
+  future candidateは`future_slot=1`で1件へ直列化し、worker snapshot不在はID/hash同時NULL、worker項目省略、明示NULL sentinelで生成継続する。
 - 新decision IDは`G2-IDEMPOTENCY-01`、`G2-EFFECTIVE-PERIOD-01`、`G2-DELIVERY-IMMUTABILITY-01`、
-  `G2-CREDENTIAL-CRYPTO-01`、`G2-SOURCE-FREEZE-01`を維持し、direct regressionは111件から116件へ拡張した。
+  `G2-CREDENTIAL-CRYPTO-01`、`G2-SOURCE-FREEZE-01`を維持し、direct regressionは116件から119件へ拡張した。両decisionはVERIFIED_CLOSEDを維持する。
   旧11 ID、tenant/workplace/G0、V102〜V108予約は維持する。
 - T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
 

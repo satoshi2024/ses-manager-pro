@@ -61,10 +61,10 @@
 6. THE lifecycle SHALL `DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`とし、DRAFT以外のmapping/source/policy編集、
    SUPERSEDEDの再ACTIVE化を禁止する。ACTIVE current rowはexpected version CASで遷移する。
 7. THE mapping version SHALL platform既定どおりinclusive effective periodを持つ。current ACTIVEの`effective_to=NULL`と、
-   `effective_from`がasOfより後のfuture DRAFT/PROVISIONAL 1件だけは法改定scheduleとして共存できる。future候補同士の重複、
-   2件目のfuture候補、effective date前のACTIVE化は禁止する。deployment timezoneが欠落・空・不正ならJVM defaultへfallbackせず
-   `GATE_TIMEZONE_UNAVAILABLE`でfail-closedとし、expired/gap periodのgenerate/deliveryも拒否する。PROVISIONALの明示SUPERSEDEDは
-   gate hashなしでreason付きeventを保存する。
+   `effective_from`がasOfより後のfuture DRAFT/PROVISIONAL 1件だけは法改定scheduleとして共存できる。future candidateは`future_slot=1`とし、
+   `UNIQUE(tenant_id,mapping_code,future_slot)`で異なるclient keyの同時作成も1件に制限する。future候補同士の重複、2件目のfuture候補、
+   effective date前のACTIVE化は禁止する。deployment timezoneが欠落・空・不正ならJVM defaultへfallbackせず`GATE_TIMEZONE_UNAVAILABLE`で
+   fail-closedとし、expired/gap periodのgenerate/deliveryも拒否する。PROVISIONALの明示SUPERSEDEDはgate hashなしでreason付きeventを保存する。
 
 ## R7. 動的external reviewer policy
 
@@ -90,10 +90,11 @@
 2. THE new delivery SHALL mapping version ID/version/hash、review policy hash、gate evaluated at、gate snapshot hashを保存し、
    mapping/policy/review evidenceの変更後に旧idempotency/archiveを新規結果として再利用しない。legacy rowはNULLのまま表示する。
 3. THE historical delivery SHALL current mapping/review/assignmentを再評価せず、交付時に保存したimmutable FULL/MASK/LIMITED
-   document version、既存profile/worker snapshot ID/hash、resolved workplace ID、render_input_hashからrole別にdownloadできる。
+   document version、profile snapshot、worker snapshot ID/hash（未作成時は両NULL）、resolved workplace ID、render_input_hashからrole別にdownloadできる。
    新しいworkplace/config snapshot tableは作らず、PDF renditionをcontentの唯一の正本とし、current master/configを再renderに使わない。
    document ACL、tenant/data/organization/file scope、scan=CLEAN、access auditは維持する。
-4. THE preview SHALL formal generateと別APIとし、archive/delivery/notification/delivery IDを作らず、watermarkと
+4. THE delivery SHALL client idempotency keyと別の`delivery_business_key`を持ち、後者はgenerated rendition_group_idを含めず、同一canonical render inputなら異keyでも既存delivery/rendition/notification/resultを1組だけ返す。render input変更時だけ新business key/new groupを許可する。
+5. THE preview SHALL formal generateと別APIとし、archive/delivery/notification/delivery IDを作らず、watermarkと
    非本番content-dispositionを付ける。
 
 ## R9. UI/API/security
@@ -124,11 +125,11 @@
 | requirement | direct regression ID | level |
 |---|---|---|
 | R6.1〜R6.4 assignment/scope | `G2-ASG-01..13`, `G2-DEL-02..04` | L2〜L3 |
-| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..13`, `G2-MIG-07` | L2〜L3 |
-| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..09` | L2〜L3 |
+| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..14`, `G2-MIG-07` | L2〜L3 |
+| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..10` | L2〜L3 |
 | R7.1〜R7.3 dynamic policy/freeze | `G2-POL-01..16` | L0〜L2 |
 | R7.4/R9.3 PII/evidence/credential crypto | `G2-EVT-12..14`, `G2-SEC-09..10`, `G2-SEC-12..18` | L1〜L2 |
-| R8.1〜R8.4 delivery/preview/immutable rendition | `G2-DEL-01..15` | L1〜L2 |
+| R8.1〜R8.4 delivery/preview/immutable rendition | `G2-DEL-01..16` | L1〜L2 |
 | R9.1〜R9.3 role/CSRF/DTO/i18n | `G2-SEC-01..11` | L0〜L2 |
 | R10.1〜R10.2 migration/source freeze | `G2-MIG-01..12` | L0〜L2 |
 | R10.3 history gate | `G2-HISTORY-01` inventory + production catalog L0 | L0 |

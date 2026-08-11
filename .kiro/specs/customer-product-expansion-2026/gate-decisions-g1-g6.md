@@ -54,12 +54,11 @@
   `/compliance-gate` action permissionを同decision deltaで固定する。
 - 本節は`PROPOSED_FOR_R10_REVIEW`である。R10が`ACCEPTED_FOR_IMPLEMENTATION`を明示するまでV102/DDL/code/testを変更しない。
 
-### 3.2 R21 follow-up docs-only rework
+### 3.2 R21 second follow-up docs-only rework
 
-- R21独立ReviewはP0=0、P1=4、P2=1でFAIL。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`とする。
-- 前回のR21差戻しを受け、lease中409→完了後同result 200、reviewer type/requirement write、current ACTIVEとfuture versionのschedule、
-  既存profile/worker snapshot＋PDF rendition正本、INSERT前operation_id AAD、source BEFORE INSERT/UPDATE/DELETE freezeをdocsへ追加し、
-  direct regressionを116 IDへ拡張する。
+- R21再ReviewはP0=0、P1=3、P2=0でFAIL。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`とする。
+- delivery業務一意keyとclient keyを分離し、同一canonical入力を1 delivery/group/rendition/notificationへ収束させる。future candidateは`future_slot=1`のUNIQUEで1件へ直列化し、
+  worker snapshot不在はID/hash同時NULL・worker項目省略・明示NULL sentinelで生成継続する。credential crypto/source freezeはVERIFIED_CLOSEDを維持し、direct regressionを119 IDへ拡張する。
 - R10 acceptance前はV102/DDL/code/testを変更せず、T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
 
 ## 4. G3 — 外部Portal境界

@@ -1,11 +1,10 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R21 follow-up docs-only rework / R10再Review待ち）
+## 現行判定（R21 second follow-up docs-only rework / R10再Review待ち）
 
-`R21独立ReviewはFAIL（P1×4/P2×1）。R19-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`
-指摘はoperation idempotency ledger、mapping effective period/status event、immutable role rendition、credential crypto、source freezeであり、
-今回の再差戻しに対して、lease中409→完了後同結果200、reviewer type/requirement writeのoperation ledger対象化、current ACTIVEとfuture versionのschedule共存、
-既存profile/worker snapshotとPDF rendition正本、INSERT前operation_id AAD、source BEFORE INSERT triggerを文書とdirect regression matrixへ追加した。
+`R21 second follow-up独立ReviewはFAIL（P1×3、P1-04/P2-01 VERIFIED_CLOSED）。R19-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`
+今回の再差戻しに対して、delivery client keyと業務一意keyの分離、future candidate専用slot UNIQUE、worker snapshot不在時のpair NULLとworker項目省略を
+文書とdirect regression matrixへ追加する。前回確定したoperation lease、effective period、existing snapshot/PDF rendition、credential AAD、source freezeの決定は維持する。
 発注者の許可範囲どおり文書とdirect regression matrixだけを更新する。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はV102、DDL、Java、HTML、JS、CSS、message、test、seed、DBを変更しない。
 T066未完了、S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
 
@@ -13,19 +12,19 @@ T066未完了、S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/del
 
 | task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T066 / R21-P1-01〜04 / R21-P2-01 | R6.5〜R8.3、R7.4、R10.2、G2-IDEMPOTENCY-01、G2-EFFECTIVE-PERIOD-01、G2-DELIVERY-IMMUTABILITY-01、G2-CREDENTIAL-CRYPTO-01、G2-SOURCE-FREEZE-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。旧11＋新5でdecision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | operation ledger/period/rendition/crypto/source triggerのdecision ID、116 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `307c61125f6b716135057248be59abdc728c3628` → docs fix `4457fb5d` → packet provenance sync commitが最終Head。最終SHAはR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
+| T066 / R21-P1-01〜03 | R5/R6.5/R6.6/R8.2/R8.3、G2-IDEMPOTENCY-01、G2-EFFECTIVE-PERIOD-01、G2-DELIVERY-IMMUTABILITY-01 | g2 decision delta、requirements/design/tasks/field-mapping/review-ledger、中央ledger/decision/gate、R10 review/copyable文書のdocsだけ。decision ID 16件。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | delivery business key、future_slot、worker NULL契約のdecision ID、119 direct regression ID、stale scan、non-doc 0、`git diff --check`。browser/API/DB DemoはR10受理前のため未実施 | Base `9f52c39f199efd7cb96f23e203c32de362c871db` → docs fix / packet provenance sync commitが最終Head。最終SHAはR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。決定表未受理のまま実装を開始することが最大risk |
 
 ### R21 issue status
 
 | issue | status | 最小対応 |
 |---|---|---|
-| R21-P1-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | lease中409→完了後同result 200、14 operation type、reviewer type/requirement writeをoperation ledger/CASへ含める |
-| R21-P1-02 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | current ACTIVE無期限＋future candidate 1件のschedule例外、inclusive asOf、deployment timezone fail-closed、transition別gate hashを固定 |
-| R21-P1-03 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | 既存profile/worker snapshot ID/hash＋resolved workplace ID、既存PDF renditionを唯一のimmutable content sourceとして固定 |
-| R21-P1-04 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | INSERT前operation_id AAD、AES-256-GCM/key version/32-byte key/optional NULL/rotation/prod fail-closedを固定 |
-| R21-P2-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | DRAFT sourceのINSERT/UPDATE/DELETE許可とfreeze後3操作拒否triggerを固定 |
+| R21-P1-01 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | client operation keyとdelivery_business_keyを分離し、異key同入力を1 delivery/rendition/notification/resultへ収束 |
+| R21-P1-02 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | future_slot=1＋UNIQUE(tenant,mapping_code,future_slot)で異key同時作成を1件へ収束 |
+| R21-P1-03 | `OPEN / DECISION_DELTA_REWORK_REQUIRED` | worker snapshot pairを同時NULL可とし、NULL時worker項目省略・render hash NULL sentinel・生成継続を固定 |
+| R21-P1-04 | `VERIFIED_CLOSED_BY_R10` | INSERT前operation_id AAD、AES-256-GCM/key version/32-byte key/optional NULL/rotation/prod fail-closedを確認済み |
+| R21-P2-01 | `VERIFIED_CLOSED_BY_R10` | DRAFT sourceのINSERT/UPDATE/DELETE許可とfreeze後3操作拒否triggerを確認済み |
 
-R21-P1-01〜04/P2-01は実装担当側でcloseしない。R10が独立Reviewし、受理なら`ACCEPTED_FOR_IMPLEMENTATION`、不足なら具体的な差戻しを返す。
+R21-P1-01〜03は実装担当側でcloseしない。R10が独立Reviewし、受理なら`ACCEPTED_FOR_IMPLEMENTATION`、不足なら具体的な差戻しを返す。P1-04/P2-01はR10の`VERIFIED_CLOSED`を履歴として保持する。
 
 ## 現行判定（R19-P1-01 docs-only decision delta / R10 Review待ち）
 

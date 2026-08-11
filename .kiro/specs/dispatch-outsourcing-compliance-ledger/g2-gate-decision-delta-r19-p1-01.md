@@ -91,6 +91,7 @@
   `new_from <= existing_to AND existing_from <= new_to`で拒否する。ただし、現在ACTIVEで`effective_to=NULL`の版と、
   `effective_from > asOf local date`の将来DRAFT/PROVISIONAL版の組だけは、法改定のscheduleとして重複保存を許可する。
   同一mapping_codeに将来DRAFT/PROVISIONAL候補を2件以上作ること、将来候補同士の重複、将来候補のeffective_from以前のACTIVE化は拒否する。
+  future candidateは`future_slot=1`を設定し、`UNIQUE(tenant_id,mapping_code,future_slot)`の競合で異なるidempotency keyの同時作成を1件へ収束させる。
 - `PROVISIONAL_REVIEWED -> ACTIVE`はtransactionのasOfが`effective_from <= asOf`かつ
   (`effective_to IS NULL`または`asOf <= effective_to`)を満たす場合だけ許可する。future versionはeffective_from前にACTIVE化できず、
   満了後のACTIVEはformal generate/deliveryの対象にならずfail-closedとする。
@@ -205,13 +206,15 @@ columns:
 | `effective_from`, `effective_to` | DATE、from NOT NULL、to NULLは無期限。通常のplatform inclusive期間 |
 | `status` | NOT NULL。4状態のみ |
 | `active_slot` | ACTIVEだけ1、それ以外NULL |
+| `future_slot` | current ACTIVEとのschedule例外で、`effective_from > asOf local date`のfuture DRAFT/PROVISIONALだけ1、それ以外NULL |
 | `activated_at`, `activated_by` | ACTIVE/SUPERSEDEDの旧ACTIVEだけ値を保持。DRAFT/PROVISIONALはNULL |
 | `version` | NOT NULL、current rowのCAS |
 | actor/time | `created_by/at`, `updated_by/at` |
 
 制約/index: `UNIQUE(tenant_id,mapping_version)`、`UNIQUE(tenant_id,mapping_code,active_slot)`、
-`UNIQUE(tenant_id,id)`、index `(tenant_id,mapping_code,status,effective_from,effective_to)`、
-FK `activated_by -> sys_user.id`。ACTIVE時だけslot=1をserviceとDB CHECKの双方で検証する。
+`UNIQUE(tenant_id,mapping_code,future_slot)`、`UNIQUE(tenant_id,id)`、index `(tenant_id,mapping_code,status,effective_from,effective_to)`、
+FK `activated_by -> sys_user.id`。ACTIVE時だけactive_slot=1、schedule候補だけfuture_slot=1となることをserviceとDB CHECK/triggerの双方で検証する。
+future candidate作成は同一tenant/mapping_codeの`future_slot=1` UNIQUEを競合境界とし、異なるclient idempotency keyでも一方だけがINSERT成功、他方は409でdomain/event/cacheを変更しない。
 
 ### 4.2 `m_compliance_mapping_source`
 
@@ -320,7 +323,7 @@ freeze済みsourceの3操作とeventの6操作が拒否され、行/hashが不�
 | external review REVOKE | tenant mapping+group | 管理者 | recorder本人 | PROVISIONAL/ACTIVE/SUPERSEDED | 不要 | 不要 | targetが同chainの有効positive | target evidence再解決 | target hash完全一致 | tenant+target event | append REVOKED | `GATE_REVOKE_TARGET_INVALID`/409 | operation ledger + event UNIQUE | afterCommit | domain event+API audit |
 | ACTIVE化 | tenant mapping | 管理者 | active user | PROVISIONAL | request approval eventのassignmentがasOf有効、mapping effective period内 | 指定event有効 | 全group成立 | 全evidence CLEAN/exact | 完全一致 | tenant、approval workplace | 旧SUPERSEDED+新ACTIVE events | §8 failure codes | operation ledger + CAS + active slot | commit後のみ | 2 status events+API audit |
 | PROVISIONAL→SUPERSEDED | tenant mapping | 管理者 | active user | PROVISIONAL_REVIEWED | expected version | 不要 | 不要 | reason必須 | hash不変、gate hash=NULL | tenant+mapping | SUPERSEDED status event | `GATE_SUPERSEDE_REASON_REQUIRED`/409 | operation ledger + CAS | afterCommit | status event |
-| formal generate/delivery | contract workplace | 管理者/HR/マネージャー | role+DataScope | ACTIVEかつmapping effective period内 | profile workplaceの現assignment有効 | 同assignment actorの有効APPROVE | 現在時点で全group成立 | CLEAN/exact、3 rendition全てCLEAN | current mapping/policy一致 | tenant+contract+profile workplace | FULL/MASK/LIMITED immutable document version + delivery snapshot | `GATE_*`/409、scope404 | operation ledger + composite key | afterCommit | delivery+API audit |
+| formal generate/delivery | contract workplace | 管理者/HR/マネージャー | role+DataScope | ACTIVEかつmapping effective period内 | profile workplaceの現assignment有効 | 同assignment actorの有効APPROVE | 現在時点で全group成立 | CLEAN/exact、3 rendition全てCLEAN | current mapping/policy一致 | tenant+contract+profile workplace | delivery_business_keyで予約した1 delivery、FULL/MASK/LIMITED immutable document version + delivery snapshot | `GATE_*`/409、scope404 | client keyはoperation ledger、business keyはdelivery UNIQUE。異key同入力は既存result 200 | afterCommit | delivery+API audit、notification key=business key |
 | preview | contract workplace | 管理者/HR/マネージャー | role+DataScope | DRAFT/PROVISIONAL/ACTIVE | 不要 | 不要 | 構造的に非空/整合 | document evidence不要 | draft mapping/policy再計算一致 | tenant+contract+profile workplace | watermark responseのみ | 403/409 | request key、永続行0 | cache更新なし | API auditのみ |
 | delivery一覧/confirm | contract workplace | 既存R4 matrix | role+DataScope | delivery状態 | 新gate再評価不要 | 新gate再評価不要 | 新gate再評価不要 | file scope | 保存済hashを表示 | tenant+contract+workplace | 既存状態CAS | 403/404/409 | CAS | afterCommit | API audit |
 | 過去delivery download | delivery snapshot | 管理者/HR/マネージャー/営業 | document ACL+role mask | delivery済み | 現assignment不要 | 現approval不要 | 現review不要 | 選択したimmutable renditionがCLEAN | 保存済hash、current master不使用 | tenant+delivery+contract ACL | 保存済みFULL/MASK/LIMITED document version | 403/404/`FILE_NOT_CLEAN` | access log key | current gate cache不使用 | download access log |
@@ -393,8 +396,8 @@ deliveryごとに再計算し、`t_document_delivery`へ保存する。ACTIVE化
 ### 6.6 delivery render input hash
 
 `render_input_hash`はmapping/policy/gate hashの代替ではなく、交付時renderのcontent provenance hashである。canonical payloadは
-既存`t_contract_compliance_snapshot`のprofile snapshot ID/hash、既存worker snapshot ID/hash、profileから解決したworkplace ID、
-recipient/display name snapshot、template version、field mask policy hash/version、render engine version、worker asOf、
+既存`t_contract_compliance_snapshot`のprofile snapshot ID/hash、既存worker snapshot ID/hashまたは明示的な`worker_snapshot_presence=ABSENT`とNULL sentinel、
+profileから解決したworkplace ID、recipient/display name snapshot、template version、field mask policy hash/version、render engine version、worker asOf、
 選択したFULL/MASK/LIMITED rendition discriminatorを含む。actual config snapshot tableやstorage path/key、current masterの更新時刻、
 表示専用のlocale labelは保存・hash対象にせず、PDF renditionがcontentの唯一のimmutable正本である。downloadはこのhashから業務内容を
 再構成せず、保存済みDocumentVersionのsha256と照合する。
@@ -486,21 +489,24 @@ ACTIVE statusだけを見てdeliveryを許可せず、formal generateごとにta
 | `mapping_version_id`, `mapping_version`, `mapping_hash` | legacyはNULL表示、新規はNOT NULL相当 |
 | `review_policy_hash` | legacyはNULL、新規必須 |
 | `gate_evaluated_at`, `gate_snapshot_hash` | legacyはNULL、新規必須 |
-| `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_id` | `profile_snapshot_id/hash`は既存`t_contract_compliance_snapshot.id/snapshot_hash`、workerは既存`t_contract_compliance_worker_snapshot.id/snapshot_hash`へ1対1 mapping。`workplace_id`はprofileからserver解決したscope scalarで、名称/住所/組織の内容はprofile snapshot内のtyped workplace fieldsを正本とする。legacyはNULL、新規必須 |
+| `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_id` | `profile_snapshot_id/hash`は既存`t_contract_compliance_snapshot.id/snapshot_hash`へ1対1 mappingで新規必須。workerは既存`t_contract_compliance_worker_snapshot.id/snapshot_hash`へ1対1 mappingし、交付時点以前の確定版が無い場合はID/hashを同時NULLとしてworker項目を省略する。片側NULLは拒否する。`workplace_id`はprofileからserver解決したscope scalarで新規必須。legacyはNULL |
 | `render_input_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。actual config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。render_input_hashはprofile/worker/workplace scope、template、mapping/policy/gate、mask policy、engine、roleのprovenance hashであり、hashから業務内容を再構成しない |
 | `rendition_group_id`、`full_document_version_id/sha256`、`mask_document_version_id/sha256`、`limited_document_version_id/sha256` | legacyはNULL、新規は3 role renditionのimmutable document version/hashを必須保存 |
+| `delivery_business_key`, `generation_state` | legacyはNULL。新規はbusiness keyをNOT NULL、`generation_state`は`CREATING`または`READY`。`UNIQUE(tenant_id,delivery_business_key)`でclient idempotency keyとは分離し、`CREATING`予約→3 rendition/CLEAN/notification準備→`READY`を同一transactionで行う。失敗は予約をrollbackし、READYだけをdownload対象とする |
 
 既存行へのactor/mapping/reviewの捏造backfillは禁止する。DTOはlegacyを`LEGACY_GATE_SNAPSHOT_UNAVAILABLE`として表示する。
-新規deliveryはprofile/worker snapshot、resolved workplace_id、mapping/policy/gate、3 rendition refsなしで保存できない。
+新規deliveryはprofile snapshot、resolved workplace_id、mapping/policy/gate、3 rendition refsなしで保存できない。worker snapshotが交付時点以前に無い場合はworker ID/hashを同時NULLで保存し、worker項目を省略して生成を継続する。
 新しいworkplace snapshot table、render config snapshot table、canonical input JSON列は作らず、actual contentは既存のappend-only
-`t_document_version`へ保存した3つのPDF renditionだけを正本とする。formal generateは同一交付transactionで、同じprofile/worker/workplace
-scope/mapping/policy/gateを入力にFULL、MASK、LIMITEDの3つの`DocumentVersion`を生成し、それぞれ`source_type=COMPLIANCE_DELIVERY_RENDITION`、
+`t_document_version`へ保存した3つのPDF renditionだけを正本とする。formal generateは同一交付transactionで、同じprofile/workplace scopeと、存在する場合だけworker snapshotを入力に、
+mapping/policy/gateを固定してFULL、MASK、LIMITEDの3つの`DocumentVersion`を生成し、それぞれ`source_type=COMPLIANCE_DELIVERY_RENDITION`、
 `scan_status=CLEAN`、独立sha256、同一`rendition_group_id`を持たせる。FULLはarchive正本、MASK/LIMITEDはrole別downloadの正本であり、
 1つでも生成・scanに失敗したらdeliveryと全renditionをrollbackする。
 
-idempotency keyとarchive version discriminatorは少なくとも
-`contractId,documentType,templateVersion,profileSnapshotHash,workerSnapshotHash,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,gateSnapshotHash`
-と`rendition_group_id,render_input_hash`を含む。mapping/policy/review evidence切替後に旧delivery/archive/renditionを新規生成結果として返さない。
+client idempotency keyは共通operation ledgerの再送識別だけに使う。deliveryの業務一意keyは、生成時に新設される`rendition_group_id`、delivery ID、
+operation_id、client idempotency key、notification IDを除外し、少なくとも
+`tenantId,contractId,documentType,templateVersion,profileSnapshotHash,workerSnapshotHash-or-NULL-sentinel,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,gateSnapshotHash,renderInputHash`
+のcanonical SHA-256とする。`UNIQUE(tenant_id,delivery_business_key)`の予約INSERTが異key同入力を直列化し、既存READY rowから同じdelivery/rendition/resultを返す。
+notificationは`COMPLIANCE_DELIVERY:{delivery_business_key}`をidempotency keyとし、予約ownerだけが1件作成する。mapping/policy/review evidence/render inputのいずれかが変わった時だけbusiness keyが変わり、新group/notificationを許可する。
 
 ### 9.2 preview
 
@@ -637,19 +643,22 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-IDP-11 / R6.5 | L2 | reviewer type update response loss/concurrent same key | admin×2 | A | — | t0 | update then retry | 200/409→200 | master CAS 1、same result | cache 1 |
 | G2-IDP-12 / R6.5 | L2 | reviewer type disable response loss/concurrent same key | admin×2 | A | — | t0 | disable then retry | 200/409→200 | disabled state 1、same result | cache 1 |
 | G2-IDP-13 / R6.5 | L2 | review requirement update response loss/concurrent same key | admin×2 | A | A | t0 | DRAFT policy update then retry | 200/409→200 | requirement rows 1、same policy hash/result | cache 1 |
+| G2-IDP-14 / R6.5/R8.2 | L3 | same delivery input with different client keys, sequential/L3 concurrent, response loss | admin×2 | A | A | t0 | K1/K2 generate then retry | 200/200 | delivery 1、business key 1、rendition group 1、3 rendition、notification 1、both results same | duplicate branch no-op or reservation rollback; cache 1 |
 | G2-LIFE-01 / R6.6 | L2 | mapping from=t0+1day | admin | A | A | t0 | ACTIVE | 409 | PROVISIONAL/status 0 | 不変 |
 | G2-LIFE-02 / R6.6 | L2 | mapping from=t0 | admin | A | A | t0 | ACTIVE | 200 | ACTIVE 1、gate hashあり | afterCommit 1 |
 | G2-LIFE-03 / R6.6 | L2 | finite to=t0 | admin | A | A | t0 / t0+1day | generate | 200 / 409 | boundary day allowed、after expired delivery 0 | 不変 |
-| G2-LIFE-04 / R6.6 | L2 | old ACTIVE effective_to=NULL + future PROVISIONAL | admin | A | A | t0 / future date | create future then activate | 200 / 409 before date | future row saved, old ACTIVE unchanged; activation only on effective date | 不変 |
+| G2-LIFE-04 / R6.6 | L2 | old ACTIVE effective_to=NULL + future PROVISIONAL | admin | A | A | t0 / future date | create future then activate | 200 / 409 before date | future row saved with future_slot=1, old ACTIVE unchanged; activation only on effective date | 不変 |
 | G2-LIFE-05 / R6.6 | L2 | period gap after old expiry | admin | A | A | t0+gap | generate | 409 | delivery 0、no auto transition | cache old |
 | G2-LIFE-06 / R6.6 | L2 | unused PROVISIONAL | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、gate hash NULL | afterCommit 1 |
 | G2-LIFE-07 / R6.6 | L2 | old ACTIVE replacement | admin | A | A | t0 | new ACTIVE | 200 | old SUPERSEDED/new ACTIVE, same gate hash/correlation | afterCommit 1 |
 | G2-LIFE-08 / R6.6 | L2 | explicit ACTIVE end/no replacement | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、reasonあり、gate hash NULL | delivery now fail-closed |
 | G2-LIFE-09 / R6.6 | L2 | missing/invalid deployment timezone | admin | A | A | t0 | ACTIVE/generate | 409 | `GATE_TIMEZONE_UNAVAILABLE`、state/event/delivery 0 | cache 0 |
+| G2-LIFE-10 / R6.6 | L3 | current ACTIVE + two different-key future candidates, same/partial/different future dates | admin×2 | A | A | t0 | concurrent future create | 200/409 | future_slot=1候補1件、loserのrow/event/cache 0 | rollback/no cache |
 | G2-DEL-12 / R8.3 | L2 | delivery後master/config/profile/worker変更 | manager/sales | A | A | t1 | download all roles | 200 | bytes/sha256 unchanged | access log only |
 | G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | existing profile/worker snapshot ID+hash、resolved workplace_id、render_input_hash、3 rendition refs persisted | afterCommit 1 |
 | G2-DEL-14 / R8.3 | L2 | one role rendition missing/unclean | admin | A | A | t0 | generate/download | 409/403 | delivery or rendition not usable | rollback/no cache |
 | G2-DEL-15 / R8.3 | L2 | FULL/MASK/LIMITED same rendition group | HR/manager/sales | A | A | t1 | download | 200 | role output from exact stored version, no current reread | access log only |
+| G2-DEL-16 / R8.3/T066-ASOF-01 | L2 | profile snapshotあり、交付時点以前のworker snapshotなし／片側NULL | admin/DB | A | A | t0 | generate then download/invalid insert | 200/409 | delivery成功、worker ID/hash両NULL、worker項目なし、partial NULL拒否、bytes/hash不変 | rollback/no cache |
 | G2-SEC-12 / R7.4 | L1 | required/optional credential single append | DB | A | A | t0 | one INSERT | — | requiredはencrypted/key version/CGC1/masked全て非NULL、optional未入力は4項目全NULL、平文/中間row 0 | 不変 |
 | G2-SEC-13 / R7.4 | L1 | same credential twice / AAD operation ID | admin | A | A | t0 | review insert×2 | 200 | random IV/ciphertext differs、identity hash stable、AADはINSERT前operation_id、event ID後UPDATE 0 | afterCommit |
 | G2-SEC-14 / R7.4 | L2 | restart with current/old key | app | A | A | t0 | review/gate | 200 | decrypt old version、new write current | 不変 |
