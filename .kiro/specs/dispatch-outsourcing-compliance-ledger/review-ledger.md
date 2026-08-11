@@ -1,5 +1,15 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R22 regression follow-up / R10再Review待ち）
+
+R22再ReviewのP1-01〜03は実装shape修正済みだが、前回direct regression不足で未closeだったため、H2/MySQL実SQL回帰を追加した。P1-04はpartial old-definitionのindex/UNIQUE/CHECK/column contractをmetadataで照合し、不一致をfail-closedするV102契約とMySQL smokeを追加した。P1-05はretryable FAILED再開、遷移別CAS、PROCESSING不正field改変拒否をmapper/trigger/direct regressionへ追加した。R22-P2-01はimplementation commitとpacket tipの記録を分離する。
+
+| task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R22 follow-up | R6.1/R6.2/R6.5/R6.6/R10.2、G2-ASG-14..16、G2-FK-01..03、G2-OP-01..06、G2-MIG-13..20 | V102、operation mapper、G2 mapper contract、H2/MySQL smoke、forward-repair smoke/contract、decision/design/requirements/tasks | focused 6/0/0/0、schema sweep 161/0/0/0（AllMappers 125、MigrationIntegrity 27、SpecDispatch 9）。MySQL fresh/forward-repair smokeは各1 skip（Docker未起動）。T066 L4、G2 service/API/UI、実actor/reviewer/evidence、Phase A/Bは未実施 | implementation commit `9d1f1f7237f59e0847230f4b6990be735cd11ad2`。packet tipは本docs同期commit後の`git rev-parse HEAD`で解決し、implementation commitと混同しない | R10独立ReviewとDocker付きMySQL 0-skipが必要。rollbackはDB revertではなくforward repair。T066 checkbox/S10/S12/ACTIVE/formal deliveryは変更なし |
+
+R10へ再Reviewを依頼済み。R22 issueは実装者側のfix提出であり、R10確認前にVERIFIED_CLOSEDへ変更しない。S10は`IN PROGRESS / FAIL`、T066未完了、S12は`NOT READY`を維持する。
+
 ## 現行判定（R22 schema rework / R10再Review待ち）
 
 R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R21-P1-01/P1-02/P1-03/P1-04/P2-01/P2-02はVERIFIED_CLOSEDとして履歴・現行判定を同期した。R22独立ReviewはFAIL（P1×5）であり、以下の修正を実装してR10再Reviewへ提出する。

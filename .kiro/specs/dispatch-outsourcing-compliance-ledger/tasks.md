@@ -94,8 +94,8 @@
   - **テスト要件**: R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とした後、L1〜L3で
     `g2-gate-decision-delta-r19-p1-01.md` §13の`G2-ASG-01..13`、`G2-POL-01..16`、`G2-EVT-01..14`、
     `G2-ACT-01..06`、`G2-DEL-01..17`、`G2-SEC-01..18`、`G2-MIG-01..12`、
-    `G2-IDP-01..15`、`G2-LIFE-01..11`、R22追加の`G2-ASG-14..15`、`G2-FK-01..02`、
-    `G2-OP-01..03`、`G2-MIG-13..16`を実行する。
+    `G2-IDP-01..15`、`G2-LIFE-01..11`、R22追加の`G2-ASG-14..16`、`G2-FK-01..03`、
+    `G2-OP-01..06`、`G2-MIG-13..20`を実行する。
     最終L4では`mvn test`全量、fresh/legacy MySQL smoke、
     既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
     Node/JS syntax、desktop/390px browser Demo Phase A/B、`git diff --check`。

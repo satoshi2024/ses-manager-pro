@@ -805,15 +805,24 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 |---|---|---|---|
 | G2-ASG-14 / R6.2 | L1/L2 | open assignment 2件、finite assignmentのslot誤値、ACTIVE mappingのslot NULL | openはslot=1で1件、finite/non-ACTIVEはslot=NULL、NULL-safe CHECK/trigger |
 | G2-ASG-15 / R6.2 | L2 | `DATETIME(6)` assignmentをt0−1µs/t0/t0+1µsで評価 | 半開区間を秒・マイクロ秒精度で再現し、隣接だけ許可 |
+| G2-ASG-16 / R6.2 | L2 | H2/MySQLのasOf predicate、隣接、部分重複、有限終了 | `from <= asOf AND (to IS NULL OR asOf < to)`を実SQLでassertし、隣接は許可、部分重複は検出 |
 | G2-FK-01 / R6.1/R7.2 | L2 | G2 childの同tenant/cross-tenant parent | `(tenant_id,parent_id)`複合FKの同tenantだけ成功、cross-tenant拒否 |
 | G2-FK-02 / R6.5 | L2 | event target/supersedesの存在なし・別tenant | self複合FKで孤立chain/別tenant targetを拒否 |
+| G2-FK-03 / R6.1/R6.5 | L2 | mapping→group、group→type、mapping/assignment→approvalの同tenant/cross-tenant direct INSERT | 各relation familyで同tenantのみ成功、cross-tenant/孤立parentは拒否、FK列順もmetadataで一致 |
 | G2-OP-01 / R6.5 | L0 | event/operation mapper API inventory | eventはINSERT/SELECT、operationはclaim/SELECT/CASのみ。BaseMapper/deleteById/updateById 0 |
 | G2-OP-02 / R6.5 | L2 | PROCESSING operationのDELETE、SUCCEEDED result改変 | DB triggerが拒否、result/reference row不変 |
 | G2-OP-03 / R6.5 | L2/L3 | PROCESSING→SUCCEEDED/FAILEDとexpected version競合 | 許可されたCASだけ1勝、terminal rowは永久保持 |
-| G2-MIG-13 / R10.1 | L1 | index/parent uniqueが既存・欠落・別phase | `information_schema`確認後、欠落だけ作成。duplicate error 0 |
-| G2-MIG-14 / R10.1 | L1/L2 | G2 tableがabsent/partial/old definition | canonical columns/type/precisionをassertし、shape mismatchは`G2_V102_SHAPE_MISMATCH`または`G2_V102_COLUMN_SHAPE_MISMATCH`でfail-closed |
-| G2-MIG-15 / R10.2 | L2 | FK/triggerがabsent、旧定義、途中失敗後 | named FK/triggerをdrop/re-addしてcanonical shapeへ収束 |
+| G2-OP-04 / R6.5 | L2/L3 | retryable/non-retryable FAILED、同時restart、stale version | retryable=1だけFAILED→PROCESSINGを許可し、同時restartは1勝、非retryable/staleは拒否 |
+| G2-OP-05 / R6.5 | L2 | PROCESSING→PROCESSINGでresult/reference/failureを改変 | lease/attempt/version以外のfield改変を拒否 |
+| G2-OP-06 / R6.5 | L2 | FAILED/terminal rowのDELETE・result改変 | DELETEとterminal/result改変を拒否、row/result不変 |
+| G2-MIG-13 / R10.1 | L1 | index/parent uniqueが既存・欠落・別phase | `information_schema`確認後、欠落だけ作成し、列順/列数/NON_UNIQUE不一致は明示fail-closed |
+| G2-MIG-14 / R10.1 | L1/L2 | G2 tableがabsent/partial/old definition | canonical columns/type/length/NULL/default/precisionをassertし、shape/column contract mismatchはfail-closed |
+| G2-MIG-15 / R10.2 | L2 | UNIQUE/CHECK/FK/triggerがabsent、旧定義、途中失敗後 | canonical constraint manifestを検証し、named FK/triggerをdrop/re-add、不一致はforward repair要求 |
 | G2-MIG-16 / R10.2 | L2 | V102適用後にgit commitをrevert | DBをgit revertで戻さず、checksum/history確認後のforward repairのみ |
+| G2-MIG-17 / R10.1 | L2 | 同名誤定義index、欠落unique/check、途中失敗後retry | MySQLでcanonical index/constraint mismatchを検出し、Flyway V102を成功扱いにしない |
+| G2-MIG-18 / R10.1 | L2 | MySQL fresh/partial/old-definition | 重要columnの型/長さ/NULL/default/precisionをmanifest検証 |
+| G2-MIG-19 / R10.2 | L2 | FK/trigger absent・旧定義・history repair | named objectをcanonical状態へ収束または明示fail-closed、history 102を誤成功登録しない |
+| G2-MIG-20 / R10.2 | L2 | post-apply repair/rollback | apply後はforward repair、git revertでDBを旧状態へ戻さない |
 
 ## 14. Browser acceptance
 
