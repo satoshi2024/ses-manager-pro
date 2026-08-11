@@ -1,16 +1,16 @@
 これは `dispatch-outsourcing-compliance-ledger` 専用の独立Review対話です。実装対話の説明を信用せず、spec、review ledger、実diffから検証してください。
 Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
 
-【現行R21 docs-only再Review依頼】
-- Base: `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9`
+【現行R21 follow-up docs-only再Review依頼】
+- Base: `307c61125f6b716135057248be59abdc728c3628`
 - Head: 実装対話のpush後にReview依頼messageで固定する。
 - R21-P1-01〜04/P2-01の差戻しを、以下のdocs decisionとdirect regressionへ反映したか独立に確認する。
-  1. 9 domain tableとは別の共通operation ledgerで、tenant+operation type+idempotency key、request hash、PROCESSING/SUCCEEDED/FAILED、result reference、永久保持、同key異payload、response喪失後再送、同時再送、rollback後再送を固定。
-  2. mappingのplatform inclusive effective period、future/expired/gap、旧ACTIVEとの切替、PROVISIONAL廃止とACTIVE置換のtransition別gate_snapshot_hashを固定。
-  3. formal delivery時のimmutable FULL/MASK/LIMITED DocumentVersion、exact render input snapshot、role rendition hashを保存し、downloadでcurrent masterを再renderしない契約を固定。
-  4. credential専用AES-256-GCM、random IV、key version、current-write/old-read rotation、prod key必須、tamper/decrypt fail-closed、secret非出力を固定。
-  5. mapping sourceのDRAFT編集許可とPROVISIONAL_REVIEWED以降のDB direct UPDATE/DELETE拒否triggerをV102 inventory/direct regressionへ追加。
-- 現行docsはdecision ID 16件、direct regression ID 111件、migration reservation V102〜V108、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
+  1. lease中は409 `IDEMPOTENCY_IN_PROGRESS`、完了後の同key再送は保存resultを200で返す共通operation ledgerへ、reviewer type create/update/disableとrequirement updateも含める。
+  2. current ACTIVEの無期限期間とfuture candidate 1件のschedule共存、inclusive asOf、timezone欠落/不正fail-closed、旧ACTIVE切替とtransition別gate hashを固定。
+  3. formal deliveryは既存profile/worker snapshot ID/hash、resolved workplace ID、既存t_document_versionのFULL/MASK/LIMITED PDFを正本とし、downloadでcurrent masterを再renderしない。
+  4. credential専用AES-256-GCM、random IV、INSERT前operation_id AAD、key version/32-byte key、current-write/old-read rotation、optional全NULL、prod key必須、tamper/decrypt fail-closedを固定。
+  5. mapping sourceのDRAFT INSERT/UPDATE/DELETE許可とPROVISIONAL_REVIEWED以降のDB direct INSERT/UPDATE/DELETE拒否triggerをV102 inventory/direct regressionへ追加。
+- 現行docsはdecision ID 16件、direct regression ID 116件、migration reservation V102〜V108、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
 - production/DDL/Java/HTML/JS/CSS/message/test/seed/DB変更、V102作成、T066 checkbox変更は今回も禁止。
 - 不足がなければ結論に `ACCEPTED_FOR_IMPLEMENTATION` を明示する。不足時はR19-P1-01をOPENのまま、R21 issue形式で差戻す。S10/T066をPASSにせず、S12開始通知を送らない。
 
@@ -52,10 +52,10 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【Review観点】
-- R21 docs-only再Reviewでは、production/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを最初に確認する。
+- R21 follow-up docs-only再Reviewでは、production/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを最初に確認する。
 - tenant ACTIVE/workplace delivery分離、dynamic reviewer type/policy、9 domain table + operation ledger、mapping/policy/gate/render/request hash、
   event reducer、ACTIVE 21-step、formal generate/preview、immutable past download、UI/API/permission、G0、HISTORY分離、
-  V102/V103〜V108、111 direct regression、Phase A/Bを逐項照合する。
+  V102/V103〜V108、116 direct regression、Phase A/Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
 - 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
 - CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。

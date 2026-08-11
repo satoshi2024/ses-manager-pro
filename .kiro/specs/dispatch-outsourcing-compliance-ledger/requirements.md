@@ -55,12 +55,16 @@
 5. THE approval/external review/status history SHALL append-only event reducerで管理し、REJECT/REVOKE、再APPROVE、同時刻順序、
    concurrent insertを決定的に解決する。state-changing operationは共通operation ledgerでtenant+operation type+
    idempotency key、request hash、PROCESSING/SUCCEEDED/FAILED、immutable result reference/allow-list result summary、failure retryability、
-   永久保持を管理し、commit後response喪失の再送で同じ成功結果を返す。PROCESSING中は`IDEMPOTENCY_IN_PROGRESS`、同key異payloadは
+   永久保持を管理し、commit後response喪失の再送で同じ成功結果を返す。PROCESSING中の同一key再送は、lease有効中は
+   `409 IDEMPOTENCY_IN_PROGRESS`、元operation完了後の再送は同じ成功結果を`200`で返す。同key異payloadは
    `IDEMPOTENCY_KEY_REUSED`、retryable=0は`IDEMPOTENCY_RETRY_NOT_ALLOWED`として、同時再送、rollback後再送を決定的に拒否/再開する。
 6. THE lifecycle SHALL `DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`とし、DRAFT以外のmapping/source/policy編集、
    SUPERSEDEDの再ACTIVE化を禁止する。ACTIVE current rowはexpected version CASで遷移する。
-7. THE mapping version SHALL platform既定どおりinclusive effective periodを持つ。future versionをeffective date前にACTIVE化せず、
-   expired/gap periodのgenerate/deliveryはfail-closedとする。PROVISIONALの明示SUPERSEDEDはgate hashなしでreason付きeventを保存する。
+7. THE mapping version SHALL platform既定どおりinclusive effective periodを持つ。current ACTIVEの`effective_to=NULL`と、
+   `effective_from`がasOfより後のfuture DRAFT/PROVISIONAL 1件だけは法改定scheduleとして共存できる。future候補同士の重複、
+   2件目のfuture候補、effective date前のACTIVE化は禁止する。deployment timezoneが欠落・空・不正ならJVM defaultへfallbackせず
+   `GATE_TIMEZONE_UNAVAILABLE`でfail-closedとし、expired/gap periodのgenerate/deliveryも拒否する。PROVISIONALの明示SUPERSEDEDは
+   gate hashなしでreason付きeventを保存する。
 
 ## R7. 動的external reviewer policy
 
@@ -73,8 +77,10 @@
 4. THE reviewer identity SHALL reviewer type、資格/登録識別子、所属組織、reviewer名のcanonical hashで識別し、
    credential原文、storage path/key、内部metadataを不要に公開しない。
 5. THE system SHALL reviewer typeをJava enum/static Set、DB CHECK、固定select、`m_system_config` JSON、業務seedで固定しない。
-6. THE credential snapshot SHALL 専用AES-GCM envelope、random IV、key version、current/old key rotation、prod key必須validation、
-   tamper/wrong-key fail-closedを持つ。MFA/Freee/BP用鍵を流用せず、平文credentialをDB/API/logへ出さない。
+6. THE credential snapshot SHALL 専用AES-256-GCM envelope、random IV、key version、current/old key rotation、prod key必須validation、
+   tamper/wrong-key fail-closedを持つ。AADはINSERT前に確定したserver UUIDv4 `operation_id`を使い、AUTO_INCREMENT event IDの
+   後付けUPDATEを行わない。credential未入力時はencrypted/key-version/cipher-format/maskedの4項目を全NULL、入力時は全非NULLとし、
+   key versionは許容文字列、key設定はpaddingなしbase64url decoded 32 bytesを要求する。MFA/Freee/BP用鍵を流用せず、平文credentialをDB/API/logへ出さない。
 
 ## R8. ACTIVE、delivery、preview
 
@@ -84,7 +90,8 @@
 2. THE new delivery SHALL mapping version ID/version/hash、review policy hash、gate evaluated at、gate snapshot hashを保存し、
    mapping/policy/review evidenceの変更後に旧idempotency/archiveを新規結果として再利用しない。legacy rowはNULLのまま表示する。
 3. THE historical delivery SHALL current mapping/review/assignmentを再評価せず、交付時に保存したimmutable FULL/MASK/LIMITED
-   document versionとcontract/profile/worker/workplace/render input snapshotからrole別にdownloadできる。current master/configを再renderに使わない。
+   document version、既存profile/worker snapshot ID/hash、resolved workplace ID、render_input_hashからrole別にdownloadできる。
+   新しいworkplace/config snapshot tableは作らず、PDF renditionをcontentの唯一の正本とし、current master/configを再renderに使わない。
    document ACL、tenant/data/organization/file scope、scan=CLEAN、access auditは維持する。
 4. THE preview SHALL formal generateと別APIとし、archive/delivery/notification/delivery IDを作らず、watermarkと
    非本番content-dispositionを付ける。
@@ -103,7 +110,7 @@
 1. THE G2 follow-up SHALL R10 acceptance後にV102を使用し、V84/V85/V101を変更しない。common V99は永久欠番、
    migration-dev V100はcommonで再利用せず、S12〜S17はV103〜V108とする。
 2. THE migration verification SHALL fresh/legacy/partial/failed-history-repair/post-apply rollback、V1/V102/H2/entity/mapper、
-   operation ledger、source freeze trigger、append-only DB拒否、common/dev location採番を検証する。
+   operation ledger、source `BEFORE INSERT/UPDATE/DELETE` freeze trigger、append-only DB拒否、common/dev location採番を検証する。
 3. `GATE-T066-HISTORY` SHALL `TRACKED P2 / production release gate`として別specへ分離し、S10 PASS/S12開始を阻害しない。
    未実装を受入済みとせず、対象fieldを必要とするproduction帳票はwrite/asOf/correction/permission/golden完了まで禁止する。
 4. T066/S10 PASS SHALL G2 mechanism、実在assignment actor approval、freeze済みpolicyを満たす実在external review、
@@ -117,8 +124,8 @@
 | requirement | direct regression ID | level |
 |---|---|---|
 | R6.1〜R6.4 assignment/scope | `G2-ASG-01..13`, `G2-DEL-02..04` | L2〜L3 |
-| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..09`, `G2-MIG-07` | L2〜L3 |
-| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..08` | L2〜L3 |
+| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..13`, `G2-MIG-07` | L2〜L3 |
+| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..09` | L2〜L3 |
 | R7.1〜R7.3 dynamic policy/freeze | `G2-POL-01..16` | L0〜L2 |
 | R7.4/R9.3 PII/evidence/credential crypto | `G2-EVT-12..14`, `G2-SEC-09..10`, `G2-SEC-12..18` | L1〜L2 |
 | R8.1〜R8.4 delivery/preview/immutable rendition | `G2-DEL-01..15` | L1〜L2 |

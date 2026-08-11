@@ -57,7 +57,8 @@
   履歴table・worker snapshot由来の項目（苦情処理状況・キャリアconsulting・教育訓練・紹介予定・
   紛争防止・差異通知・性別/年齢/雇用期間・無期/60歳区分など）は、それらの行を作成する実装が
   存在しないためT064では出力せず、**T066（M）で履歴連携と共に全項目化**する。
-  template versionは`m_system_config`の`compliance.template.<TYPE>.version`（既定1）。
+  template versionは生成時に`m_system_config`の`compliance.template.<TYPE>.version`から解決し、render_input_hashへ含める。
+  download時にconfigを再読せず、PDF renditionだけを正本とする。
   - **T066 Mでの最終化（R18）**: worker snapshot由来項目（性別・年齢区分・雇用期間種別/期間・
     無期雇用flag・60歳以上flag・労働者制限種別）は、`t_contract_compliance_worker_snapshot`が
     存在する場合に派遣元管理台帳へ出力する（`ComplianceDocumentGenerator`のworker引数。
@@ -156,7 +157,7 @@
 | 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
 |---|---|---|---|---|
 | mapping DRAFT | →PROVISIONAL_REVIEWED | 公式source/版/effective period＋L0＋独立Review、mapping hash固定 | mapping編集 | DRAFTの新versionを作成 |
-| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋freeze済み動的Review、ACTIVEはinclusive effective period内 | 承認とmapping改定 | future/expired、承認対象hash不一致なら遷移拒否。未使用PROVISIONALのSUPERSEDEDはreasonのみでgate hash NULL |
+| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋freeze済み動的Review、ACTIVEはinclusive effective period内。current ACTIVEの無期限期間とはfuture candidate 1件だけschedule共存可 | 承認とmapping改定 | future/expired、承認対象hash不一致、invalid deployment timezoneなら遷移拒否。未使用PROVISIONALのSUPERSEDEDはreasonのみでgate hash NULL |
 | mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS、または明示終了 | 法令・様式更新 | 置換時だけ旧SUPERSEDED eventへgate snapshot hashを保存し、過去帳票snapshotを保持 |
 | profile 未入力 | →入力済 | 状態CAS | — | — |
 | 入力済 | →確定（帳票生成可） | version CAS | 同時編集 | 入力済へ |
@@ -183,9 +184,9 @@
 | 苦情・雇用安定・教育・career・紹介予定 | currentは条件/窓口のみ | 各history tableを反復行として保存 | event訂正は新event INSERT、旧event不変 | T061/T062/B1 |
 | profile snapshot | current profile＋current_snapshot_id/current_snapshot_version | t_contract_compliance_snapshot、UNIQUE(contract_id,snapshot_version)、content hashは非一意索引 | operation idempotencyはoperation_idで分離。A/B/Aを3version保持 | T061/B1 |
 | snapshot operation | current pointerには含めない | t_compliance_snapshot_operation（operation_id、expected version、resulting snapshot、request hash、status） | 同じoperation retryは1行、新operationは同じcontentでも新version | T061 |
-| G2 operation | current rowには含めない | t_compliance_operation_ledger（tenant/type/key/request hash/state/result reference/result summary/failure/lease） | response喪失は同じresult、同key異payloadは409、永久保持 | T061/T066 |
-| delivery rendition | current masterには依存しない | FULL/MASK/LIMITEDのimmutable `t_document_version`＋delivery exact snapshot refs | current master/configをdownload時に再読込しない。3 renditionのいずれか失敗は全rollback | T064/T066 |
-| reviewer credential | reviewer masterには原文を戻さない | credential crypto envelope＋key version＋masked snapshot | 専用AES-GCM、旧key read/current key write、復号失敗はgate fail-closed | T066 |
+| G2 operation | current rowには含めない | t_compliance_operation_ledger（tenant/type/key/request hash/state/result reference/result summary/failure/lease） | lease中の同key再送は409、完了後は保存resultを200で返す。同key異payloadは409、永久保持 | T061/T066 |
+| delivery rendition | current masterには依存しない | 既存profile/worker snapshot ID/hash＋resolved workplace ID＋FULL/MASK/LIMITEDのimmutable `t_document_version`、deliveryのrender_input_hash | workplace/config snapshot tableは作らず、PDF renditionをcontent正本とする。current master/configをdownload時に再読込しない。3 renditionのいずれか失敗は全rollback | T064/T066 |
+| reviewer credential | reviewer masterには原文を戻さない | credential crypto envelope＋key version＋masked snapshot | 専用AES-256-GCM、INSERT前operation_id AAD、optional未入力4項目NULL、旧key read/current key write、復号失敗はgate fail-closed | T066 |
 | explicit NULL | mutable current nullable columns only | history/snapshotは不変 | FieldStrategy.ALWAYS＋full DTO。省略PATCHはreject、CAS失敗はrollback | T061/T062 |
 | history correction | current clear inventoryには含めない | event_id/event_type/supersedes_event_id/correction_reason/actor/occurred_at/effective interval/asOf key | 旧行UPDATE/DELETE禁止、CORRECTED/CANCELLEDは新行 | T061/T064 |
 | retention purge | 通常mapperには削除操作なし | legal hold対象は保持 | 承認済みpurge operation id＋権限分離procedure＋監査eventのみ | T066/B1 |
@@ -203,7 +204,7 @@
 5. snapshot/history tableはDB triggerまたは権限境界でUPDATE/DELETEを拒否する。application mapperはINSERT/SELECTのみを公開する。
 6. legal hold確認済みのretention purgeだけは承認済みpurge operation id、権限分離procedure、監査eventを伴う明示経路とする。通常endpointから呼べない。
 7. history訂正はevent_type=CORRECTED/CANCELLED、supersedes_event_id、correction_reasonを持つ新行INSERTで行い、asOf解決は最新の有効eventを読む。
-8. mapping sourceはDRAFT parent中だけ通常編集を許可し、freeze後はDB triggerでUPDATE/DELETEを拒否する。source triggerの欠落・partial適用は
+8. mapping sourceはDRAFT parent中だけ通常編集を許可し、freeze後はDB triggerでINSERT/UPDATE/DELETEを拒否する。source triggerの欠落・partial適用は
    V102 direct regressionでfail-closedとする。
 9. G2 operationのresponse retryは`t_compliance_operation_ledger`のresult referenceからallow-list DTOを再構成し、raw response/PIIを保存しない。
 
@@ -221,7 +222,7 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 
 以下の既存IDはG2 gateのbaseline回帰IDとして維持する。R19-P1-01実装では§7及び
 `g2-gate-decision-delta-r19-p1-01.md` §13のtraceable matrixへ展開し、固定専門家typeを前提にしない。R21 fixでは
-`G2-IDP-01..09`、`G2-LIFE-01..08`、`G2-DEL-12..15`、`G2-SEC-12..18`、`G2-MIG-10..12`を追加する。
+`G2-IDP-01..13`、`G2-LIFE-01..09`、`G2-DEL-12..15`、`G2-SEC-12..18`、`G2-MIG-10..12`を追加する。
 
 | test ID | level / task | setup | operation | expected |
 |---|---|---|---|---|
@@ -265,11 +266,12 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 - tenant-level mapping ACTIVEとworkplace-level delivery approvalを分離する。ACTIVE化で指定するapproval eventは
   tenant mappingの有効化根拠であって他workplaceの交付権限ではない。
 - 9 domain table（mapping version/source、dynamic reviewer type、requirement group/type、workplace assignment、
-  approval/external review/status event）に`t_compliance_operation_ledger`を加えたV102候補とし、source freezeとevent 3表は
-  MySQL triggerでもUPDATE/DELETEを拒否する。
+  approval/external review/status event）に`t_compliance_operation_ledger`を加えたV102候補とし、source freezeは
+  parent statusに応じたINSERT/UPDATE/DELETE、event 3表はUPDATE/DELETEをMySQL triggerでも拒否する。
 - reviewer policyはgroup間AND、group内type OR、minimum distinct reviewerで評価する。typeは完全動的、policyはmapping versionへfreezeする。
 - `mapping_hash`、`review_policy_hash`、`gate_snapshot_hash`、`render_input_hash`、operation request hashを別canonical payloadとして計算する。
-- delivery時にFULL/MASK/LIMITEDのimmutable document versionとexact contract/profile/worker/workplace/config snapshotを保存し、downloadはcurrent masterをrender入力にしない。
+- delivery時に既存profile/worker snapshot ID/hash、resolved workplace ID、render_input_hashとFULL/MASK/LIMITEDのimmutable document versionを保存し、
+  新しいworkplace/config snapshot tableは作らず、downloadはcurrent masterをrender入力にしない。PDF renditionをcontent正本とする。
 - credential snapshotは専用AES-GCM/key version/rotation契約で保存し、prod key欠落・改竄・復号失敗はfail-closedとする。
 - credential keyは`ComplianceGateCredentialKeyProvider`がdeployment secret storeから解決し、MFA/Freee/BP鍵や別providerへfallbackしない。
 - internal/external event reducer、ACTIVE 21-step transaction、formal generate/preview、過去delivery download、

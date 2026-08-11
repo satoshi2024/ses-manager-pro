@@ -26,7 +26,7 @@
 | `G2-EFFECTIVE-PERIOD-01` | mapping inclusive period、future/expired version、SUPERSEDED時のgate hash規則 |
 | `G2-DELIVERY-IMMUTABILITY-01` | 交付時のimmutable FULL/MASK/LIMITED renditionとsnapshot入力 |
 | `G2-CREDENTIAL-CRYPTO-01` | credential専用暗号化、key version/rotation、prod fail-closed |
-| `G2-SOURCE-FREEZE-01` | mapping sourceのDRAFT編集とfreeze後direct UPDATE/DELETE拒否 |
+| `G2-SOURCE-FREEZE-01` | mapping sourceのDRAFT INSERT/UPDATE/DELETEとfreeze後direct INSERT/UPDATE/DELETE拒否 |
 
 本書は本spec固有の決定であり、`platform-invariants.md`を再定義しない。相違するのは
 `t_compliance_responsible_assignment`の期間だけである。
@@ -58,6 +58,9 @@
 - G0の現行正本は顧客ごとの独立DBであり、共有DB SaaSの全表tenant化は延期中である。
 - 本機能のdeployment tenant IDはserver設定`app.security.oidc.tenant-id`（環境変数`OIDC_TENANT_ID`、
   未指定時`default`）から取得する。request body/query/headerの`tenantId`は受理せず、server値で上書きする。
+- 現行G0の独立DBではtenantのtimezoneはdeployment設定`spring.jackson.time-zone`から取得する（現行値は設定ファイルの
+  `Asia/Tokyo`）。これはコードへの直書きではなくtenant/deployment設定であり、欠落・空・不正時はJVM defaultへfallbackしない。
+  共有DB化でtenant別timezoneが必要になった場合はG0再決定と共通timezone resolverを先行させ、S10で先取りしない。
 - G2の9 domain table + 共通operation ledgerとdelivery更新は将来互換の`tenant_id VARCHAR(100) NOT NULL`を持つが、`m_tenant`は作成せず
   tenant FKも追加しない。これはS10だけで共有DB architectureを再開しないための意図的境界である。
 - SQLは全て`tenant_id = :deploymentTenantId`をpredicateの先頭へ置く。child IDだけで取得せず、mapping、group、event、
@@ -82,14 +85,21 @@
 
 - `DRAFT`中だけmapping本体、source、review requirement group/typeを編集できる。
 - mapping versionの`effective_from/effective_to`はplatform既定どおりDATEの両端inclusive、`effective_to=NULL`は無期限とする。
-  transaction開始時に1回だけ確定したasOf instantをdeployment timezoneへ変換し、そのlocal dateをeffective period比較へ使う。
-  同一tenant/mapping_codeのversion期間は重複させず、`new_from <= existing_to AND existing_from <= new_to`となるversion作成を拒否する。
+  transaction開始時に1回だけ確定したasOf instantを`spring.jackson.time-zone`のdeployment ZoneIdへ変換し、そのlocal dateをeffective period比較へ使う。
+  propertyが欠落・空・不正ならJVM defaultへfallbackせず、G2 gate operationを`409 GATE_TIMEZONE_UNAVAILABLE`でfail-closedする。
+- mapping version periodはPROVISIONAL_REVIEWED以降不変である。通常は同一tenant/mapping_codeのDRAFT/PROVISIONAL同士の期間重複を
+  `new_from <= existing_to AND existing_from <= new_to`で拒否する。ただし、現在ACTIVEで`effective_to=NULL`の版と、
+  `effective_from > asOf local date`の将来DRAFT/PROVISIONAL版の組だけは、法改定のscheduleとして重複保存を許可する。
+  同一mapping_codeに将来DRAFT/PROVISIONAL候補を2件以上作ること、将来候補同士の重複、将来候補のeffective_from以前のACTIVE化は拒否する。
 - `PROVISIONAL_REVIEWED -> ACTIVE`はtransactionのasOfが`effective_from <= asOf`かつ
   (`effective_to IS NULL`または`asOf <= effective_to`)を満たす場合だけ許可する。future versionはeffective_from前にACTIVE化できず、
   満了後のACTIVEはformal generate/deliveryの対象にならずfail-closedとする。
-- future versionは旧ACTIVEと同時にPROVISIONALで存在できる。effective date当日以降に新versionをACTIVE化したtransactionだけが
-  旧ACTIVEをSUPERSEDEDにする。自動schedulerによる状態変更は行わず、空白期間は交付を拒否する。
-- `PROVISIONAL_REVIEWED`以降はmapping/source/policyをUPDATE/DELETEしない。変更は新しいmapping versionを作る。
+- future versionは旧ACTIVEと同時にPROVISIONALで存在できる。旧ACTIVEの`effective_to=NULL`とmapping_hashは変更しない。
+  effective date当日以降に新versionをACTIVE化したtransactionだけが旧ACTIVEをSUPERSEDEDにする。
+  current `active_slot`は現在状態の一意性だけを示し、asOf過去日のmapping選択はstatus event reducerで行う。
+  status eventの`occurred_at <= asOf`かつeffective period内のACTIVEを1件だけ選び、同時刻はevent ID順で解決する。
+  自動schedulerによる状態変更は行わず、空白期間は交付を拒否する。
+- `PROVISIONAL_REVIEWED`以降はmapping/source/policyをINSERT/UPDATE/DELETEしない。変更は新しいmapping versionを作る。
 - 既存versionの`mapping_hash`/`review_policy_hash`を書き換えない。
 - reviewer type masterの表示名変更・disabled化はfreeze済みpolicy snapshotと過去eventを変更しない。
 - disabled typeは新しいDRAFT policyと新しいexternal review登録で選択できない。
@@ -156,11 +166,16 @@ columns:
 `result_summary_canonical`はSUCCEEDED時必須、PROCESSING/FAILED時はNULLとし、`result_reference_*`も成功時だけ設定する。
 現行運用では全rowの`expires_at`をNULL（永久保持）とする。保持期間短縮、purge、key再利用は別decisionなしに許可しない。
 
+`operation_id`はserverがledger claim前に生成するUUIDv4文字列（canonical lowercase、36文字）であり、同一operationのeventへ保存する。
+
 - `operation_type`は次のaction codeだけを許可する: `MAPPING_DRAFT_UPSERT`, `MAPPING_PROVISIONAL_REVIEW`,
   `ASSIGNMENT_CREATE`, `ASSIGNMENT_END`, `MAPPING_ACTIVE`, `MAPPING_SUPERSEDE`, `INTERNAL_APPROVAL`,
-  `EXTERNAL_REVIEW`, `EXTERNAL_REVIEW_REVOKE`, `DELIVERY_GENERATE`。専門家typeや業務dataをenum化するものではない。
+  `EXTERNAL_REVIEW`, `EXTERNAL_REVIEW_REVOKE`, `DELIVERY_GENERATE`, `REVIEWER_TYPE_CREATE`,
+  `REVIEWER_TYPE_UPDATE`, `REVIEWER_TYPE_DISABLE`, `REVIEW_REQUIREMENT_UPDATE`。専門家typeや業務dataをenum化するものではない。
 - `state`は`PROCESSING`、`SUCCEEDED`、`FAILED`の3値。`PROCESSING` leaseは5分。同keyの同時再送は別operationを作らず、
   leaseが有効な間は`409 IDEMPOTENCY_IN_PROGRESS`を返す。stale leaseだけがtarget rowを再確認して同じoperationをCAS再開する。
+  callerは409を成功結果と解釈せず、lease終了または元requestの完了後に同じkey/request hashで再送する。元operationがSUCCEEDEDなら再送は
+  保存済みallow-list resultを`200`で返し、別operation/eventは作らない。
 - `UNIQUE(tenant_id,operation_type,idempotency_key)`、`UNIQUE(tenant_id,operation_id)`、index
   `(tenant_id,state,lease_until)`、`(tenant_id,result_reference_type,result_reference_id)`を持つ。
 - `request_hash`はserver再解決後のtenant/workplace/target、operation type、allow-list body、expected version、
@@ -260,7 +275,10 @@ columns: `tenant_id`, `mapping_id`, `mapping_version`, `mapping_hash`, `review_p
 `review_chain_id`, `target_event_id`, `supersedes_event_id`, `reviewed_at`, `valid_until`, `recorded_at`,
 `evidence_document_id`, `evidence_document_version_id`, `evidence_document_version`, `evidence_document_hash`,
 `recorded_by`, `operation_id`, `correlation_id`, `idempotency_key`。
-organization/credential/valid_untilはpolicyに応じてNULL可。credential_required typeでcredential NULLは拒否。
+`operation_id`はevent INSERT前に確定したledger UUIDv4であり、credential暗号化のAADへ使う。AUTO_INCREMENTのexternal event IDはAADへ使わず、
+event INSERT後のUPDATEも行わない。credentialが任意で未入力なら`credential_snapshot_encrypted`、`credential_key_version`,
+`credential_cipher_format`, `credential_masked_snapshot`の4項目を全てNULLにする。入力時は4項目全て非NULLとし、暗号値だけをINSERTする。
+organization/valid_untilはpolicyに応じてNULL可。credential_required typeでcredential NULLは拒否し、optional typeで未入力ならcredential関連4項目を全NULLにする。
 credentialは専用暗号契約（§6.5）のenvelopeとkey versionで保存し、`credential_key_version`/`credential_cipher_format`を
 平文credentialと別に必ず保持する。
 `UNIQUE(tenant_id,idempotency_key)`、`UNIQUE(tenant_id,id)`、index
@@ -280,21 +298,23 @@ mapping/user FK。INSERTのみ。DB triggerで直接UPDATE/DELETEを拒否する
 
 ### 4.10 DB immutability
 
-V102はmapping sourceへfreeze状態を参照する`BEFORE UPDATE`/`BEFORE DELETE` triggerを作り、DRAFT parentだけ編集を許可し、
+V102はmapping sourceへfreeze状態を参照する`BEFORE INSERT`/`BEFORE UPDATE`/`BEFORE DELETE` triggerを作り、DRAFT parentだけ編集を許可し、
 PROVISIONAL_REVIEWED/ACTIVE/SUPERSEDED parentでは直接変更を拒否する。さらにapproval/external review/status eventの各tableへ`BEFORE UPDATE`/`BEFORE DELETE` triggerを作り、
 `SIGNAL SQLSTATE '45000'`で直接変更を拒否する。application mapperはINSERT/SELECTだけを公開する。
-MySQL direct regressionはapplicationを経由しないSQLでsourceとeventへUPDATE/DELETEを発行し、DRAFT sourceの編集だけが成功し、
-freeze済みsourceの2操作とeventの6操作が拒否され、行/hashが不変で
+MySQL direct regressionはapplicationを経由しないSQLでsourceとeventへINSERT/UPDATE/DELETEを発行し、DRAFT sourceの3操作だけが成功し、
+freeze済みsourceの3操作とeventの6操作が拒否され、行/hashが不変で
 あることをassertする。修復が必要な場合は公開済みV102を編集せず、承認済みforward repair migrationで扱う。
 
 ## 5. Operation / transition decision table
 
 | operation / transition | scope | caller role | service actor condition | current status | assignment条件 | approval条件 | external Review policy条件 | evidence条件 | mapping/policy hash条件 | SQL tenant/workplace境界 | success state/event | failure code | idempotency | cache | audit |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| DRAFT作成/編集 | tenant mapping | 管理者 | active user | DRAFT | 不要 | 不要 | 非空group/type/minimum整合 | source/evidence pickerはscope内 | write後3 hashのうちmapping/policyを再計算 | deployment tenant | DRAFT row、監査 | 403/`GATE_DRAFT_FROZEN` | G2-IDEMPOTENCY-01 ledger + CAS | afterCommit | API audit+before/after hash |
+| DRAFT作成/編集 | tenant mapping | 管理者 | active user | DRAFT | 不要 | 不要 | 非空group/type/minimum整合 | source/evidence pickerはscope内 | write後3 hashのうちmapping/policyを再計算 | deployment tenant | DRAFT row、監査 | 403/`GATE_DRAFT_FROZEN` | `MAPPING_DRAFT_UPSERT` ledger + CAS | afterCommit | API audit+before/after hash |
 | PROVISIONAL化 | tenant mapping | 管理者 | active user | DRAFT | 不要 | 不要 | 非空・整合・freeze可能 | L0/独立Review evidence CLEAN | 再計算一致 | tenant+mapping | PROVISIONAL status event、gate hash=NULL | `GATE_POLICY_INVALID`/409 | operation ledger + CAS | afterCommit | status event |
 | assignment作成 | workplace | 管理者 | assignee role eligible | 任意 | 半開区間、overlap 0 | 不要 | 不要 | 任命理由 | — | tenant+workplace lock | assignment INSERT | `GATE_ASSIGNMENT_CONFLICT`/409 | operation ledger + UNIQUE | afterCommit | API audit |
 | assignment終了 | workplace | 管理者 | active user | 任意 | expected version、end>from | 不要 | 不要 | end reason | — | tenant+workplace lock | assignment CAS | 409 | operation ledger + CAS | afterCommit | API audit |
+| reviewer type create/update/disable | tenant reviewer master | 管理者 | active user | 任意 | 不要 | 不要 | type code参照後不変、disabledは新規policy/review不可 | credential label等allow-list | tenant/type code再解決 | tenant | master row/CAS、監査。過去freeze snapshot不変 | 403/409 | `REVIEWER_TYPE_CREATE/UPDATE/DISABLE` ledger + CAS | afterCommit | API audit+before/after hash |
+| review requirement update | tenant mapping policy | 管理者 | active user | DRAFT | mapping DRAFT、minimum/group/type整合 | 不要 | freeze前のみ | enabled typeとscope内evidence | policy hash再計算 | tenant+mapping | requirement rows/CAS | `GATE_DRAFT_FROZEN`/409 | `REVIEW_REQUIREMENT_UPDATE` ledger + CAS | afterCommit | API audit+before/after hash |
 | internal APPROVE/REJECT/REVOKE | workplace+mapping | 管理者/HR/マネージャー | asOf有効assignmentのuser本人。管理者bypassなし | PROVISIONAL/ACTIVE | actorとassignment一致 | reducer §7 | 不要 | APPROVEはCLEAN exact evidence | mapping/policy完全一致 | tenant+workplace+assignment | append event | 403/`GATE_ACTOR_MISMATCH`、409 | operation ledger + event UNIQUE | afterCommit | domain event+API audit |
 | external review登録 | tenant mapping+group | 管理者 | recorder本人 | PROVISIONAL/ACTIVE | 不要 | 不要 | enabled typeがfreeze groupに存在 | exact version/hash+CLEAN | mapping/policy完全一致 | tenant+mapping+group | append APPROVED/REJECTED | `GATE_REVIEW_TYPE_INVALID`等409 | operation ledger + event UNIQUE | afterCommit | domain event+API audit |
 | external review REVOKE | tenant mapping+group | 管理者 | recorder本人 | PROVISIONAL/ACTIVE/SUPERSEDED | 不要 | 不要 | targetが同chainの有効positive | target evidence再解決 | target hash完全一致 | tenant+target event | append REVOKED | `GATE_REVOKE_TARGET_INVALID`/409 | operation ledger + event UNIQUE | afterCommit | domain event+API audit |
@@ -305,8 +325,9 @@ freeze済みsourceの2操作とeventの6操作が拒否され、行/hashが不�
 | delivery一覧/confirm | contract workplace | 既存R4 matrix | role+DataScope | delivery状態 | 新gate再評価不要 | 新gate再評価不要 | 新gate再評価不要 | file scope | 保存済hashを表示 | tenant+contract+workplace | 既存状態CAS | 403/404/409 | CAS | afterCommit | API audit |
 | 過去delivery download | delivery snapshot | 管理者/HR/マネージャー/営業 | document ACL+role mask | delivery済み | 現assignment不要 | 現approval不要 | 現review不要 | 選択したimmutable renditionがCLEAN | 保存済hash、current master不使用 | tenant+delivery+contract ACL | 保存済みFULL/MASK/LIMITED document version | 403/404/`FILE_NOT_CLEAN` | access log key | current gate cache不使用 | download access log |
 
-全state-changing rowは、業務transaction前にoperation ledgerのkey claimを行う。同key同payloadのSUCCEEDEDは同じresultを返し、
-同key異payloadは409、処理中は409、retryable FAILEDだけが同じkeyでCAS再開する。HTTP responseの再送をdomain CASの再実行で代替しない。
+全state-changing row（reviewer type create/update/disable、review requirement updateを含む）は、業務transaction前にoperation ledgerのkey claimを行う。
+同key同payloadのSUCCEEDEDは同じresultを返し、同key異payloadは409、処理中は409、retryable FAILEDだけが同じkeyでCAS再開する。
+HTTP responseの再送をdomain CASの再実行で代替しない。
 
 ## 6. Hash contract
 
@@ -356,10 +377,12 @@ deliveryごとに再計算し、`t_document_delivery`へ保存する。ACTIVE化
 
 - `credential_snapshot_encrypted`は専用credential crypto providerだけが読み書きする。MFA、Freee、BP bank accountの鍵を流用しない。
 - envelopeは`CGC1:<keyVersion>:<base64url(random 12-byte IV)>:<base64url(ciphertext+128-bit GCM tag)>`とし、AES-256-GCM、
-  random IV、AAD=`tenantId|mappingId|mappingVersion|externalReviewEventId|credentialField`を固定する。
+  random IV、AAD=`tenantId|mappingId|mappingVersion|operationId|credentialField`を固定する。operationIdはINSERT前に確定済みである。
   plaintext、鍵、AAD、復号値はDB、API response、audit、通常log、exception messageへ出さない。
 - `credential_key_version`はenvelopeのversionと一致し、`credential_cipher_format=CGC1`を保存する。writeはcurrent keyだけ、readはcurrentと
   rotation前の許可済み旧keyだけを使う。key rotationは新key versionで新規writeし、過去eventのciphertext/hashを上書きしない。
+- key versionは`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`、key configはbase64url（paddingなし）で、decode後が必ず32 bytesでなければならない。
+  空白、standard base64、長さ不一致、未知versionは拒否する。
 - providerは`ComplianceGateCredentialKeyProvider`に固定し、productionではdeployment secret storeから
   `compliance.gate.credential-crypto.current-key-version`と
   `compliance.gate.credential-crypto.keys.<version>`を解決する。prodはcurrent keyと参照される旧keyが全て設定済みでなければ起動時fail-fast、
@@ -370,9 +393,11 @@ deliveryごとに再計算し、`t_document_delivery`へ保存する。ACTIVE化
 ### 6.6 delivery render input hash
 
 `render_input_hash`はmapping/policy/gate hashの代替ではなく、交付時renderのcontent provenance hashである。canonical payloadは
-contract/profile/worker/workplaceのsnapshot ID/hash、recipient/display name snapshot、template version、field mask policy version、
-render config snapshot、worker asOf、選択したFULL/MASK/LIMITED rendition discriminatorを含む。storage path/key、current masterの更新時刻、
-表示専用のlocale labelは除外する。downloadはこのhashを再計算してcontentを作り直さず、保存済みDocumentVersionのsha256と照合する。
+既存`t_contract_compliance_snapshot`のprofile snapshot ID/hash、既存worker snapshot ID/hash、profileから解決したworkplace ID、
+recipient/display name snapshot、template version、field mask policy hash/version、render engine version、worker asOf、
+選択したFULL/MASK/LIMITED rendition discriminatorを含む。actual config snapshot tableやstorage path/key、current masterの更新時刻、
+表示専用のlocale labelは保存・hash対象にせず、PDF renditionがcontentの唯一のimmutable正本である。downloadはこのhashから業務内容を
+再構成せず、保存済みDocumentVersionのsha256と照合する。
 
 ## 7. Event reducer
 
@@ -461,18 +486,20 @@ ACTIVE statusだけを見てdeliveryを許可せず、formal generateごとにta
 | `mapping_version_id`, `mapping_version`, `mapping_hash` | legacyはNULL表示、新規はNOT NULL相当 |
 | `review_policy_hash` | legacyはNULL、新規必須 |
 | `gate_evaluated_at`, `gate_snapshot_hash` | legacyはNULL、新規必須 |
-| `contract_snapshot_id/hash`, `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_snapshot_id/hash` | legacyはNULL、新規は交付時に採用したexact snapshotを必須保存 |
-| `render_input_hash`, `render_config_snapshot_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。表示名/configを含むcanonical render inputの説明hash |
+| `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_id` | `profile_snapshot_id/hash`は既存`t_contract_compliance_snapshot.id/snapshot_hash`、workerは既存`t_contract_compliance_worker_snapshot.id/snapshot_hash`へ1対1 mapping。`workplace_id`はprofileからserver解決したscope scalarで、名称/住所/組織の内容はprofile snapshot内のtyped workplace fieldsを正本とする。legacyはNULL、新規必須 |
+| `render_input_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。actual config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。render_input_hashはprofile/worker/workplace scope、template、mapping/policy/gate、mask policy、engine、roleのprovenance hashであり、hashから業務内容を再構成しない |
 | `rendition_group_id`、`full_document_version_id/sha256`、`mask_document_version_id/sha256`、`limited_document_version_id/sha256` | legacyはNULL、新規は3 role renditionのimmutable document version/hashを必須保存 |
 
 既存行へのactor/mapping/reviewの捏造backfillは禁止する。DTOはlegacyを`LEGACY_GATE_SNAPSHOT_UNAVAILABLE`として表示する。
-新規deliveryは上記snapshotなしで保存できない。formal generateは同一交付transactionで、同じcontract/profile/worker/workplace/mapping/policy/gate
-snapshotを入力にFULL、MASK、LIMITEDの3つの`DocumentVersion`を生成し、それぞれ`source_type=COMPLIANCE_DELIVERY_RENDITION`、
+新規deliveryはprofile/worker snapshot、resolved workplace_id、mapping/policy/gate、3 rendition refsなしで保存できない。
+新しいworkplace snapshot table、render config snapshot table、canonical input JSON列は作らず、actual contentは既存のappend-only
+`t_document_version`へ保存した3つのPDF renditionだけを正本とする。formal generateは同一交付transactionで、同じprofile/worker/workplace
+scope/mapping/policy/gateを入力にFULL、MASK、LIMITEDの3つの`DocumentVersion`を生成し、それぞれ`source_type=COMPLIANCE_DELIVERY_RENDITION`、
 `scan_status=CLEAN`、独立sha256、同一`rendition_group_id`を持たせる。FULLはarchive正本、MASK/LIMITEDはrole別downloadの正本であり、
 1つでも生成・scanに失敗したらdeliveryと全renditionをrollbackする。
 
 idempotency keyとarchive version discriminatorは少なくとも
-`contractId,documentType,templateVersion,complianceSnapshotHash,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,gateSnapshotHash`
+`contractId,documentType,templateVersion,profileSnapshotHash,workerSnapshotHash,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,gateSnapshotHash`
 と`rendition_group_id,render_input_hash`を含む。mapping/policy/review evidence切替後に旧delivery/archive/renditionを新規生成結果として返さない。
 
 ### 9.2 preview
@@ -604,29 +631,34 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-IDP-05 / R6.5 | L2 | ACTIVE成功後response喪失 | admin | A | A | t0 | same key retry | 200/200 | old/new status event 2、same result | cache 1 |
 | G2-IDP-06 / R6.5 | L2 | formal delivery成功後response喪失 | admin | A | A | t0 | same key retry | 200/200 | delivery/rendition 1組、same IDs | cache 1 |
 | G2-IDP-07 / R6.5 | L2 | same key異payload | admin | A | A | t0 | retry changed body | 409 | operation unchanged、`IDEMPOTENCY_KEY_REUSED` | 不変 |
-| G2-IDP-08 / R6.5 | L3 | same key concurrent 2request | admin×2 | A | A | t0 | concurrent action | 200/200 | operation 1、domain event 1 | loser no mutation |
+| G2-IDP-08 / R6.5 | L3 | same key concurrent 2request while first lease is valid | admin×2 | A | A | t0 | concurrent action then retry after completion | 200/409→200 | operation 1、domain event 1、retry returns same result | loser no mutation |
 | G2-IDP-09 / R6.5 | L2 | transient failure/rollback後retry | admin | A | A | t0 | retry same key | 503→200 | failed domain 0、retry success 1 | rollback then cache 1 |
+| G2-IDP-10 / R6.5 | L2 | reviewer type create response loss/concurrent same key | admin×2 | A | — | t0 | create then retry | 200/409→200 | type row 1、same result | cache 1 |
+| G2-IDP-11 / R6.5 | L2 | reviewer type update response loss/concurrent same key | admin×2 | A | — | t0 | update then retry | 200/409→200 | master CAS 1、same result | cache 1 |
+| G2-IDP-12 / R6.5 | L2 | reviewer type disable response loss/concurrent same key | admin×2 | A | — | t0 | disable then retry | 200/409→200 | disabled state 1、same result | cache 1 |
+| G2-IDP-13 / R6.5 | L2 | review requirement update response loss/concurrent same key | admin×2 | A | A | t0 | DRAFT policy update then retry | 200/409→200 | requirement rows 1、same policy hash/result | cache 1 |
 | G2-LIFE-01 / R6.6 | L2 | mapping from=t0+1day | admin | A | A | t0 | ACTIVE | 409 | PROVISIONAL/status 0 | 不変 |
 | G2-LIFE-02 / R6.6 | L2 | mapping from=t0 | admin | A | A | t0 | ACTIVE | 200 | ACTIVE 1、gate hashあり | afterCommit 1 |
 | G2-LIFE-03 / R6.6 | L2 | finite to=t0 | admin | A | A | t0 / t0+1day | generate | 200 / 409 | boundary day allowed、after expired delivery 0 | 不変 |
-| G2-LIFE-04 / R6.6 | L2 | old ACTIVE + future PROVISIONAL | admin | A | A | t0 | activate future | 409 | old ACTIVE unchanged | 不変 |
+| G2-LIFE-04 / R6.6 | L2 | old ACTIVE effective_to=NULL + future PROVISIONAL | admin | A | A | t0 / future date | create future then activate | 200 / 409 before date | future row saved, old ACTIVE unchanged; activation only on effective date | 不変 |
 | G2-LIFE-05 / R6.6 | L2 | period gap after old expiry | admin | A | A | t0+gap | generate | 409 | delivery 0、no auto transition | cache old |
 | G2-LIFE-06 / R6.6 | L2 | unused PROVISIONAL | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、gate hash NULL | afterCommit 1 |
 | G2-LIFE-07 / R6.6 | L2 | old ACTIVE replacement | admin | A | A | t0 | new ACTIVE | 200 | old SUPERSEDED/new ACTIVE, same gate hash/correlation | afterCommit 1 |
 | G2-LIFE-08 / R6.6 | L2 | explicit ACTIVE end/no replacement | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、reasonあり、gate hash NULL | delivery now fail-closed |
+| G2-LIFE-09 / R6.6 | L2 | missing/invalid deployment timezone | admin | A | A | t0 | ACTIVE/generate | 409 | `GATE_TIMEZONE_UNAVAILABLE`、state/event/delivery 0 | cache 0 |
 | G2-DEL-12 / R8.3 | L2 | delivery後master/config/profile/worker変更 | manager/sales | A | A | t1 | download all roles | 200 | bytes/sha256 unchanged | access log only |
-| G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | 3 rendition refs + input hashes persisted | afterCommit 1 |
+| G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | existing profile/worker snapshot ID+hash、resolved workplace_id、render_input_hash、3 rendition refs persisted | afterCommit 1 |
 | G2-DEL-14 / R8.3 | L2 | one role rendition missing/unclean | admin | A | A | t0 | generate/download | 409/403 | delivery or rendition not usable | rollback/no cache |
 | G2-DEL-15 / R8.3 | L2 | FULL/MASK/LIMITED same rendition group | HR/manager/sales | A | A | t1 | download | 200 | role output from exact stored version, no current reread | access log only |
-| G2-SEC-12 / R7.4 | L1 | credential DB capture | DB | A | A | t0 | review insert | — | plaintext 0、ciphertext/key version only | 不変 |
-| G2-SEC-13 / R7.4 | L1 | same credential twice | admin | A | A | t0 | review insert×2 | 200 | random IV/ciphertext differs、identity hash stable | afterCommit |
+| G2-SEC-12 / R7.4 | L1 | required/optional credential single append | DB | A | A | t0 | one INSERT | — | requiredはencrypted/key version/CGC1/masked全て非NULL、optional未入力は4項目全NULL、平文/中間row 0 | 不変 |
+| G2-SEC-13 / R7.4 | L1 | same credential twice / AAD operation ID | admin | A | A | t0 | review insert×2 | 200 | random IV/ciphertext differs、identity hash stable、AADはINSERT前operation_id、event ID後UPDATE 0 | afterCommit |
 | G2-SEC-14 / R7.4 | L2 | restart with current/old key | app | A | A | t0 | review/gate | 200 | decrypt old version、new write current | 不変 |
 | G2-SEC-15 / R7.4 | L2 | rotation old read/new write | admin | A | A | t0 | review update/new event | 200 | old event unchanged、new key version | afterCommit |
-| G2-SEC-16 / R7.4 | L2 | prod key missing/placeholder | app | A | A | t0 | startup/gate | startup fail / 409 | no ACTIVE/delivery | no cache |
+| G2-SEC-16 / R7.4 | L2 | prod key missing/placeholder/32-byte invalid | app | A | A | t0 | startup/gate | startup fail / 409 | no ACTIVE/delivery、key decode length mismatch拒否 | no cache |
 | G2-SEC-17 / R7.4 | L2 | tamper/wrong key/unknown version | admin | A | A | t0 | reducer/ACTIVE | 409 | `GATE_CREDENTIAL_UNAVAILABLE`, no status | 不変 |
 | G2-SEC-18 / R7.4 | L1 | response/log/exception capture | admin | A | A | t0 | review/evidence | 200 | plaintext credential 0 | audit masked |
-| G2-MIG-10 / R6.6 | L2 | DRAFT source direct SQL | DB | A | A | t0 | UPDATE/DELETE | — | DRAFT edit/delete allowed by contract | transaction |
-| G2-MIG-11 / R6.6 | L2 | PROVISIONAL/ACTIVE/SUPERSEDED source direct SQL | DB | A | A | t0 | UPDATE/DELETE | — | both rejected, hash/row unchanged | rollback |
+| G2-MIG-10 / R6.6 | L2 | DRAFT source direct SQL | DB | A | A | t0 | INSERT/UPDATE/DELETE | — | DRAFT insert/edit/delete allowed by contract | transaction |
+| G2-MIG-11 / R6.6 | L2 | PROVISIONAL/ACTIVE/SUPERSEDED source direct SQL | DB | A | A | t0 | INSERT/UPDATE/DELETE | — | all three rejected, hash/row unchanged | rollback |
 | G2-MIG-12 / R6.6 | L2 | partial/missing source freeze trigger | DB | A | A | t0 | V102 smoke | — | trigger inventory mismatch fails apply/assert | migration rollback |
 
 ### 13.1 Assignment
@@ -739,7 +771,7 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-MIG-03 / R10.1 | L2 | partial table/index/trigger | DB | — | — | — | apply/retry | — | canonical shape収束 | forward repair |
 | G2-MIG-04 / R10.1 | L2 | failed history/checksum | DB | — | — | — | repair→apply | — | 1回成功、history assert | runbook |
 | G2-MIG-05 / R10.1 | L2 | post-apply code revert | DB | — | — | — | startup | — | DB rollback禁止 | forward migration |
-| G2-MIG-06 / R10.1 | L1 | V1/V102/H2/entity/mapper | DB | — | — | — | manifest/sweep | — | 9 domain table + operation ledger + delivery rendition/snapshot列一致 | — |
+| G2-MIG-06 / R10.1 | L1 | V1/V102/H2/entity/mapper | DB | — | — | — | manifest/sweep | — | 9 domain table + operation ledger、deliveryの既存profile/worker snapshot FK/ID/hash、resolved workplace_id、3 rendition refs、render_input_hash列一致。不存在のworkplace/config snapshot table/FKは0 | — |
 | G2-MIG-07 / R6.5 | L2 | event各1行 | DB direct | A | A | t0 | UPDATE/DELETE×6 | — | trigger全拒否、行不変 | transaction rollback |
 | G2-MIG-08 / R10.2 | L0 | common/dev/prod inventory | — | — | — | — | version scan | — | V100実在、V102予約、重複0 | — |
 | G2-MIG-09 / R10.2 | L0 | S12〜S17 docs | — | — | — | — | monotonic scan | — | V103<V104<...<V108 | — |
@@ -759,7 +791,7 @@ font埋込み、改ページ、横overflowなし、mask、console error 0、arch
 controlled acceptance tenantでACTIVE化する。formal generate/archive/delivery/downloadをdesktop/390pxで実行し、
 管理者/HR=FULL、マネージャー=MASK、営業=LIMITED download（generateは403）、要員=403を確認する。
 4帳票それぞれのPDF SHA-256、screenshot、role、viewport、mapping version/hash、review policy hash、gate snapshot hash、
-delivery ID、rendition_group_id、FULL/MASK/LIMITED DocumentVersion ID/sha256、render_input_hash、render_config_snapshot_hash、
+delivery ID、rendition_group_id、FULL/MASK/LIMITED DocumentVersion ID/sha256、既存profile/worker snapshot ID+hash、resolved workplace_id、render_input_hash、
 downloaded file、console error 0を記録する。mappingをSUPERSEDEDにした後、同じdeliveryを再downloadし、
 原版/role renditionが変わらないことを確認する。Phase Bもproduction authorizationそのものではない。
 

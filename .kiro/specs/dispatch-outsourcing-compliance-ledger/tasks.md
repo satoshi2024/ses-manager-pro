@@ -94,19 +94,20 @@
   - **テスト要件**: R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とした後、L1〜L3で
     `g2-gate-decision-delta-r19-p1-01.md` §13の`G2-ASG-01..13`、`G2-POL-01..16`、`G2-EVT-01..14`、
     `G2-ACT-01..06`、`G2-DEL-01..15`、`G2-SEC-01..18`、`G2-MIG-01..12`、
-    `G2-IDP-01..09`、`G2-LIFE-01..08`を実行する。
+    `G2-IDP-01..13`、`G2-LIFE-01..09`を実行する。
     最終L4では`mvn test`全量、fresh/legacy MySQL smoke、
     既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
     Node/JS syntax、desktop/390px browser Demo Phase A/B、`git diff --check`。
   - **Demo**: 法務fixture3契約の台帳とfindingを照合し、既存4 ruleの出力不変を提示する。
     Phase Aはpreviewのみでdesktop/390px、4帳票、FULL/MASK/営業403、watermark、archive/delivery 0を確認する。
     Phase Bは実在assignment actor approval、ページでfreezeしたpolicyを満たす実在external review、実在CLEAN evidenceで
-    ACTIVE化後、formal generate/archive/delivery/download、交付時immutable FULL/MASK/LIMITED rendition、role別403、
-    4帳票、master/config/profile/worker変更後のbytes/hash不変、SUPERSEDED後再downloadを確認する。
+    ACTIVE化後、formal generate/archive/delivery/download、交付時immutable FULL/MASK/LIMITED rendition、既存profile/worker snapshot ID/hash、
+    resolved workplace ID、render_input_hash、role別403、4帳票、master/config/profile/worker変更後のbytes/hash不変、SUPERSEDED後再downloadを確認する。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
     `g2-gate-decision-delta-r19-p1-01.md`をR19-P1-01の正本とし、reviewer typeをcode/DDL/seedへ固定しない。
     state-changing operationは共通operation ledgerのrequest hash/result reference/PROCESSING-SUCCEEDED-FAILED契約を使い、
-    source freeze trigger、専用credential AES-GCM/key rotation、current masterを再読込しないimmutable renditionを実装する。
+    lease中は409、完了後同じresultを200で返す。sourceはBEFORE INSERT/UPDATE/DELETE freeze trigger、専用credential AES-256-GCM/
+    INSERT前operation_id AAD/key rotation、current masterを再読込しないimmutable renditionを実装する。
     runtime workplace assignment、対象mapping version/hash/review policy hashへの実actor承認event、freeze済みpolicyを満たす
     実在external Review、実在CLEAN evidenceを**本taskのPASSかつ本番releaseのgate**として確認する。
     いずれか未取得なら`ACTIVE`化・本番交付・M PASSを禁止する。

@@ -28,5 +28,5 @@
 - S01/R01はT002〜T007の将来再開用であり、現在はDEFERRED。
 - T001は完了済みで、再実行・再Reviewしない。
 - G1〜G6は決定済み。最初に使う実装対話はS02。
-- 現行S10はT066/R19-P1-01のR21 docs-only decision delta再Review（operation ledger/effective period/rendition/credential crypto/source freeze）とR10 acceptance待ち。S12はS10/S11双方PASSまでNOT READY。
+- 現行S10はT066/R19-P1-01のR21 follow-up docs-only decision delta再Review（operation concurrency/type write/effective-period schedule/snapshot/rendition/credential AAD/source freeze）とR10 acceptance待ち。S12はS10/S11双方PASSまでNOT READY。
 - 現行migration予約はS10 follow-up V102、S12〜S17 V103〜V108。common V99は永久欠番、V100はmigration-dev実在、common V101は既存用途維持。

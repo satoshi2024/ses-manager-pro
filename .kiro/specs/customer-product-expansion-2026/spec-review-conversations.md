@@ -728,10 +728,10 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
 
 【Review対象】
-- 現行Round: R21 docs-only再Review。Base `84ab217b9dfb64343d1d5dcbf1693f4fc3283aa9`、HeadはR10依頼messageで固定する。
-- R21差戻しの確認点: 共通operation ledgerのstate-changing idempotency、mapping inclusive effective periodとtransition別gate hash、
-  formal deliveryのimmutable FULL/MASK/LIMITED rendition、credential専用AES-GCM/key rotation、mapping source freeze trigger。
-- 現行decision IDは16件、direct regression matrixは111件。R10受理前はV102/DDL/code/testを変更せず、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
+- 現行Round: R21 follow-up docs-only再Review。Base `307c61125f6b716135057248be59abdc728c3628`、HeadはR10依頼messageで固定する。
+- R21差戻しの確認点: lease中409→完了後同result 200の共通operation ledgerとreviewer type/requirement write、current ACTIVE＋future version scheduleとtimezone、
+  既存profile/worker snapshot＋PDF rendition正本、INSERT前operation_id AAD、mapping source INSERT/UPDATE/DELETE freeze trigger。
+- 現行decision IDは16件、direct regression matrixは116件。R10受理前はV102/DDL/code/testを変更せず、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
 - T060: 0. G2公式様式field mapping
 - T061: F1. workplace/profile/finding/delivery DDL
 - T062: F2. ComplianceRule分割/拡張
@@ -769,9 +769,9 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【Review観点】
-- R21 docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
+- R21 follow-up docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
   tenant ACTIVE/workplace delivery分離、dynamic policy、9 domain table + operation ledger、複数hash/reducer、ACTIVE 21-step、
-  immutable rendition/delivery、credential crypto/source freeze、security/G0/HISTORY/V102〜V108/direct regression/Phase A-Bを逐項照合する。
+  effective-period schedule、既存snapshot/PDF rendition、credential crypto/source freeze、security/G0/HISTORY/V102〜V108/116 direct regression/Phase A-Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
 - 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
 - CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。
