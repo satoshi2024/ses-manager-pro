@@ -1,5 +1,10 @@
 # R4-P1-01 migration order decision
 
+> **履歴正本（2026-08-09時点）**: 本書のV84〜V90予約はR4-P1-01をcloseした当時の証跡として保持する。
+> 2026-08-11の現行予約は`g2-gate-decision-delta-r19-p1-01.md` §12を正とし、
+> S10=V84/V85実在+V102 follow-up、S12〜S17=V103〜V108、common V99永久欠番、
+> migration-dev V100実在、common V101既存用途維持である。本書の過去番号を現行予約として使用しない。
+
 ## Decision metadata
 
 - Decision ID: `S10-R4-P1-01-V83-REALIZED-RENUMBER`

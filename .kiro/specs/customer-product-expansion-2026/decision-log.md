@@ -7,7 +7,7 @@
 |---|---|---|---|---|---|
 | G0 | yes | 顧客ごと単独DBか、共有DB SaaSマルチテナントか | 当面は顧客ごと単独DB。共有DB販売が確定した時だけ全表tenant_id化 | 全spec | 決定済（2026-07-26） |
 | G1 | yes | 第1IdPとMFA方式 | Entra ID OIDC、全内部user MFA、管理者FIDO2、local TOTP break-glass 2アカウント | identity/portal | 決定済（2026-07-26） |
-| G2 | yes | 派遣・準委任・フリーランス・取適法の法務監修者 | 公式資料+L0+独立Reviewでprovisional開発を進め、runtime社内承認+専門家ReviewをM/本番gate化 | BP/compliance/archive | 決定済（2026-07-26、2026-08-09開発gate改訂） |
+| G2 | yes | 派遣・準委任・フリーランス・取適法の法務監修者 | 公式資料+L0+独立Reviewでprovisional開発を進め、workplace実actor承認+動的policyを満たす実在external ReviewをM/本番gate化 | BP/compliance/archive | 開発gate決定済。R19実装decision deltaはR10 acceptance待ち |
 | G3 | yes | 外部ポータルの公開ドメイン、利用規約、本人確認 | 別subdomain/chain、招待制、別identity、全portal user TOTP MFA | portal | 決定済（2026-07-26） |
 | G4 | yes | freeeの契約プランと利用可能API、仕訳方針 | freeeを会計の正、公式OAuth/API+CSV fallback、legal entity別connection | accounting | 決定済（2026-07-26） |
 | G5 | yes | Peppol Certified Service Provider | ファーストアカウンティングPeppol AP API、provider adapter、PDF/email併存 | JP PINT | 決定済（2026-07-26） |
@@ -56,6 +56,25 @@
 - 影響するspecへ反映するファイル: `gate-decisions-g1-g6.md`、`README.md`、
   `dispatch-outsourcing-compliance-ledger/requirements.md`、`design.md`、`tasks.md`、`field-mapping.md`、
   `review-ledger.md`、S10/R10派工対話、T060 task対話。
+
+## G2 R19-P1-01 implementation decision delta
+
+- ID: `G2-R19-IMPLEMENTATION-DELTA`
+- 状態: `PROPOSED_FOR_R10_REVIEW / ACCEPTED_FOR_IMPLEMENTATION待ち`
+- 発注者指示日: 2026-08-11
+- 決定案: mapping=tenant scope、assignment=workplace scope、contract workplace=profileからserver-side解決、
+  tenant ACTIVEとworkplace delivery authorizationを分離する。reviewer typeは完全動的設定、policyはmapping versionへfreezeし、
+  group AND/type OR/minimum distinct reviewerで評価する。approval/external review/statusはappend-only reducer、
+  mapping/policy/gateの3 canonical hash、ACTIVE 18-step transaction、formal generate/preview、過去downloadを固定する。
+- data model: 9 physical table + `t_document_delivery`のmapping/policy/gate snapshot列をV102候補とする。
+- migration: common V99は永久欠番、migration-dev V100はcommon再利用禁止、common V101は既存用途維持、
+  S10 follow-up=V102、S12〜S17=V103〜V108。V84/V85/V101を変更しない。
+- G0: deployment tenantはserver設定から取得しrequest値を信用しない。現行独立DBを維持し、共有DB完成とは扱わない。
+- history: `GATE-T066-HISTORY`は`TRACKED P2 / production release gate`へ分離し、S10 PASS/S12開始は阻害しない。
+  未実装・未受入であり、対象history fieldを必要とするproduction帳票は禁止する。
+- 実装gate: R10が`ACCEPTED_FOR_IMPLEMENTATION`を明示するまでdocs-only。R19-P1-01/T066を実装担当がcloseせず、
+  ACTIVE化、本番generate/delivery、production authorization、S12開始を行わない。
+- 詳細: `dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md`。
 
 ## 決定テンプレート
 

@@ -1,4 +1,4 @@
-# G1〜G6正式決定（2026-07-26、G2開発gate改訂 2026-08-09）
+# G1〜G6正式決定（2026-07-26、G2開発gate改訂 2026-08-09、R19 decision delta候補 2026-08-11）
 
 ## 1. 決定原則
 
@@ -24,16 +24,17 @@
 
 - 開発時の法令source of truthは国税庁、公正取引委員会、厚生労働省、デジタル庁の公式資料とし、
   URL、確認日、文書版をfield mappingへ保存する。
-- 社内の責任者roleは「コンプライアンス責任者」とし、管理者が指名する。法的適否をAIやruleが自動確定せず、
-  `未確認/要確認/確認済`、確認者、確認日、根拠資料を記録する。
+- 社内の責任者roleは「コンプライアンス責任者」とし、管理者がworkplace単位で指名する。法的適否をAIやruleが
+  自動確定せず、append-only approval/review/status eventへactor、日時、対象hash、根拠資料を記録する。
 - 「コンプライアンス責任者」はruntimeで管理者が指名・交代するroleであり、特定の自然人、氏名、user IDを
-  開発時のspec、code、seedへ固定しない。指名には有効開始/終了を持たせ、承認event発生時にactor、role、日時、
+  開発時のspec、code、seedへ固定しない。指名には半開区間`[effective_from,effective_to)`を持たせ、承認event発生時にactor、role、日時、
   対象version/hash、根拠資料を監査snapshotとして保存する。
 - mapping lifecycleは`DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`とする。task 0は公式資料に基づく
   provisional mapping、L0、独立Reviewで`PROVISIONAL_REVIEWED`へ到達すれば完了でき、後続の開発taskを開始できる。
   runtimeの社内責任者assignmentまたは実actor承認eventをtask 0の開発blockerにしない。
-- `ACTIVE`化、法定帳票の本番交付および各specのM taskのPASSには、runtimeで指名された社内責任者による
-  対象mapping version/hashへの承認eventと、社労士/弁護士/税理士による外部専門家Reviewを必須とする。
+- `ACTIVE`化、法定帳票の本番交付および各specのM taskのPASSには、runtimeで指名されたworkplace責任者本人による
+  対象mapping version/hash/review policy hashへの承認eventと、tenant画面で動的設定・freezeされた全requirement groupを
+  満たす実在external reviewer Review/CLEAN evidenceを必須とする。reviewer typeの具体値をenum/CHECK/固定option/seedにしない。
   assignment、承認event、外部Reviewのいずれかが欠ける場合はfail-closedとし、`PROVISIONAL_REVIEWED`のまま
   本番交付しない。
 - 税務取引文書は欠損金年度も考慮してdefault 10年保存とする。法的hold中は削除しない。
@@ -41,6 +42,17 @@
   legal holdへ該当する場合だけ延長する。個人情報を一律10年保持しない。
 - 取適法は2026-01-01施行版、フリーランス法は取引条件の書面/電磁的方法による明示をbaselineとする。
 - 法令・公式様式更新時は自動上書きせず、新しいmapping versionとしてReview後に有効化する。
+
+### 3.1 R19-P1-01 decision delta候補
+
+- 詳細正本候補は`dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md`。
+- mapping ACTIVEはtenant-level、assignment/approval/delivery authorizationはworkplace-levelである。ACTIVE化に使った
+  workplace approvalは他workplaceへ流用しない。formal generateごとにprofile workplaceのcurrent gateを再評価する。
+- mapping/source/policyはDRAFTだけ編集し、PROVISIONAL_REVIEWED以降freezeする。policyはgroup間AND、group内type OR、
+  groupごとのminimum distinct reviewerで評価する。
+- mapping/policy/gateの3 hash、event reducer、ACTIVE transaction、formal generate/preview、過去delivery download、
+  `/compliance-gate` action permissionを同decision deltaで固定する。
+- 本節は`PROPOSED_FOR_R10_REVIEW`である。R10が`ACCEPTED_FOR_IMPLEMENTATION`を明示するまでV102/DDL/code/testを変更しない。
 
 ## 4. G3 — 外部Portal境界
 

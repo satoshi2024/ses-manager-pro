@@ -19,6 +19,21 @@ CRM + proposal + staffing + outcomes ─ AI feedback
 - V59は作成せず、従来の予約を取消して永久欠番とする。T002/F1、DDL、TenantContext、tenant interceptor、tenant単位backup/restoreは共有DB方式の正式再開まで延期し、現在のtenant実装taskは存在しない。再開時はV59を再利用せず、当時のFlyway最新番号`latest + 1`から新たに採番する。
 - データ隔離の考え方は削除しない。現行のDB境界、認証、データスコープ、ファイル参照検証を維持し、将来の新規テーブルもtenant互換性とglobal/tenant分類を設計時に確認する。
 
+## 1.2 Wave 2以降の現行gate / migration（2026-08-11）
+
+```text
+S10 dispatch（V84/V85実在 + G2 follow-up V102） ─┐
+                                                   ├─ 双方PASS ─ S12 staffing V103
+S11 attendance（V83/V91/V98実在、PASS）───────────┘
+S12 V103 → S13 V104 → S14 V105 → S15 V106 → S16 V107 → S17 V108
+```
+
+- S10はT060〜T065 PASS、T066/R19-P1-01 decision deltaのR10 acceptance待ちで`IN PROGRESS`。
+- S12はS11 PASSだけでは開始せず、S10/S11双方PASSまで`NOT READY`を維持する。
+- common V99は永久欠番。V100は`migration-dev`に実在するためcommonで再利用しない。common V101は既存用途を維持する。
+- R10の`ACCEPTED_FOR_IMPLEMENTATION`前にS10 V102を作成しない。V102とV103〜V108は予約であり、着手時に
+  common/dev/prodの全Flyway locationを再確認し、衝突時は後発を上へ繰り上げ、前の欠番を埋めない。
+
 ## 2. 主な共有ファイル
 
 | ファイル/領域 | 触るspec | 競合回避 |

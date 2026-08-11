@@ -14,8 +14,8 @@
 | 7 | `approval-workflow-internal-control` | [S07](S07__approval-workflow-internal-control__start.txt) | [R07](R07__approval-workflow-internal-control__review.txt) | 7 |
 | 8 | `crm-contact-opportunity` | [S08](S08__crm-contact-opportunity__start.txt) | [R08](R08__crm-contact-opportunity__review.txt) | 6 |
 | 9 | `order-acceptance-workflow` | [S09](S09__order-acceptance-workflow__start.txt) | [R09](R09__order-acceptance-workflow__review.txt) | 6 |
-| 10 | `dispatch-outsourcing-compliance-ledger` | [S10](S10__dispatch-outsourcing-compliance-ledger__start.txt) | [R10](R10__dispatch-outsourcing-compliance-ledger__review.txt) | 7 |
-| 11 | `attendance-leave-overtime-compliance` | [S11](S11__attendance-leave-overtime-compliance__start.txt) | [R11](R11__attendance-leave-overtime-compliance__review.txt) | 8 |
+| 10 | `dispatch-outsourcing-compliance-ledger` | [S10](S10__dispatch-outsourcing-compliance-ledger__start.txt) | [R10](R10__dispatch-outsourcing-compliance-ledger__review.txt) | 1 |
+| 11 | `attendance-leave-overtime-compliance` | [S11](S11__attendance-leave-overtime-compliance__start.txt) | [R11](R11__attendance-leave-overtime-compliance__review.txt) | 0 |
 | 12 | `staffing-capacity-planning` | [S12](S12__staffing-capacity-planning__start.txt) | [R12](R12__staffing-capacity-planning__review.txt) | 6 |
 | 13 | `external-customer-bp-portal` | [S13](S13__external-customer-bp-portal__start.txt) | [R13](R13__external-customer-bp-portal__review.txt) | 7 |
 | 14 | `engineer-self-service-portal-v2` | [S14](S14__engineer-self-service-portal-v2__start.txt) | [R14](R14__engineer-self-service-portal-v2__review.txt) | 6 |
@@ -28,3 +28,5 @@
 - S01/R01はT002〜T007の将来再開用であり、現在はDEFERRED。
 - T001は完了済みで、再実行・再Reviewしない。
 - G1〜G6は決定済み。最初に使う実装対話はS02。
+- 現行S10はT066/R19-P1-01 docs-only decision deltaのR10 acceptance待ち。S12はS10/S11双方PASSまでNOT READY。
+- 現行migration予約はS10 follow-up V102、S12〜S17 V103〜V108。common V99は永久欠番、V100はmigration-dev実在、common V101は既存用途維持。

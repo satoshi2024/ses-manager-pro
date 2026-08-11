@@ -12,10 +12,12 @@
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V84（V83実在を確認したためV82は欠番として保持。着手時にmerge済み`db/migration`の最新を再確認し、さらに衝突していれば後発である本specを上へ繰り上げ、前の欠番は埋めない。V59は永久欠番）
+- Migration: V84/V85実在。R19-P1-01 G2 follow-upはV102（common V99永久欠番、migration-dev V100実在、common V101既存用途維持）。R10の`ACCEPTED_FOR_IMPLEMENTATION`前にV102を作成しない。着手時は全Flyway locationを再確認し、衝突時は後発を上へ繰り上げ、前の欠番を埋めない。
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2-DEV-GATE確定済み。T060は公式mapping+L0+独立Reviewで`PROVISIONAL_REVIEWED`へ進める。
   特定自然人の事前指名と実actor承認eventは開始条件ではなく、`ACTIVE`化/M/本番gateとする。
+- R19再開gate: `g2-gate-decision-delta-r19-p1-01.md`はR10 Review対象。R10 acceptance前はdocs-onlyとし、
+  DDL/code/test/seed/DB、T066 checkbox、S10/S12 statusを変更しない。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
 
 【最初に完全に読むもの】
@@ -34,6 +36,7 @@
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/requirements.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/design.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/tasks.md
+- .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【既定解と決定表】
 - `platform-invariants.md` はcheck listではなく**既定解の表**である。時間/履歴/明示NULL、認可母集団の結合規則、
@@ -65,3 +68,5 @@
 - `.kiro/specs/dispatch-outsourcing-compliance-ledger/review-ledger.md` を作成または更新し、task、requirements、変更file、test、Demo、commit、riskを1行ずつ記録する。
 - 完了時はtask別対応表、実行test、Demo、未検証事項、rollback、base/head commit、Review開始条件を報告する。
 - Review合格前に次specを開始済みと記録しない。
+- R19-P1-01を実装担当自身でcloseしない。docs-only delta完成時はcommit/push後にR10へ独立Review開始を依頼し、
+  `ACCEPTED_FOR_IMPLEMENTATION`まで停止する。S12へ開始通知しない。

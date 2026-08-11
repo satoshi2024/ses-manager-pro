@@ -1,5 +1,9 @@
 # R4-P1-01 environment Flyway evidence packet
 
+> **履歴packet**: V82/V83/V84採番を決定した2026-08-09時点のread-only証跡である。
+> 現行G2 follow-up V102とS12〜S17 V103〜V108の予約は
+> `g2-gate-decision-delta-r19-p1-01.md` §12を正とし、本packetの旧後続予約を現行として使用しない。
+
 ## Status
 
 `SUBMITTED / REPO_KNOWN_ENVIRONMENTS_COMPLETE / R10_SCOPE_VERIFICATION_REQUIRED`（2026-08-09、秘密情報なし）。

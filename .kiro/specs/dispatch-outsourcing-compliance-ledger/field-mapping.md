@@ -6,7 +6,9 @@
 > production code、DDL、migration、SecurityConfigを変更しない。項目をシステムへ対応付ける文書であり、
 > 個別契約の法的適否を自動判定するものではない。`コンプライアンス責任者` は個人を固定しない
 > application roleであり、runtimeで管理者が指名・交代する。role assignment、実actor承認event、資格/根拠確認、
-> 外部専門家ReviewはACTIVE化/M/本番gateで管理し、T060完了と後続開発をブロックしない。
+> ページ設定された動的policyを満たす実在external ReviewはACTIVE化/M/本番gateで管理し、T060完了と後続開発をブロックしない。
+> reviewer typeの具体値をcode/DDL/seedへ固定しない。R19-P1-01の現行governanceは
+> `g2-gate-decision-delta-r19-p1-01.md`を正とし、96 stable mapping rowの内容は本deltaで変更しない。
 
 ## 1. source of truth と version / effective period
 
@@ -57,18 +59,18 @@
 - `ARCHIVE_PENDING`: 個別契約書、就業条件明示書、派遣先通知書の保存categoryと起算点はG2責任者の承認待ち。台帳の3年baselineをこれらへ黙って一般化しない。税務文書categoryならG2既定の10年を適用する。
 - `ASOF_SNAPSHOT`: 帳票は交付・再生成要求時に指定されたtemplate versionと、契約時点の `typed snapshot` を読む。現在マスタの値で過去帳票を書き換えない。
 - 明示NULLは「安全」「不要」を意味しない。`workplace_limitation_date` または `organization_limitation_date` がNULL は未算定、保険状態NULLは未確認、`confirmed_at IS NULL` は受領未確認としてfinding/状態へ渡す。
-### 2.3 コンプライアンス責任者 role と承認状態
+### 2.3 コンプライアンス責任者 role と承認event
 
 内部のmapping承認主体は、法定帳票に記載される派遣元責任者・派遣先責任者とは別の application role とする。自然人の氏名・user IDをspec、seed、mappingへ事前固定しない。
 
-| 項目 | T060で確定する値 |
+| 項目 | 現行決定 |
 |---|---|
 | role code / 表示名 | `COMPLIANCE_RESPONSIBLE` / `コンプライアンス責任者` |
-| 承認可能な操作 | mappingの閲覧、公式source/version/effective periodの確認、mapping version/hashの承認、`未確認`→`要確認`→`確認済`のstatus遷移、差戻し、承認取消し（理由必須）。法的適否の自動確定は不可。 |
-| approval status | `UNCONFIRMED`（未確認）、`REVIEW_REQUIRED`（要確認）、`CONFIRMED`（確認済）。productionではassignment/資格/根拠資料が不足している場合 `CONFIRMED` と帳票交付をfail-closedする。developmentでは未指名・未確認fixtureを許容する。 |
-| runtime assignment | 管理者が `role_code`、`user_id`、`valid_from`、`valid_to`、任命理由、active flagをruntimeで指名・交代する。旧assignmentを終了して新assignmentを追加し、自然人を事前固定しない。 |
-| 承認event監査 | `actor_user_id`、`actor_display_name_snapshot`、`actor_role_code`、操作、before/after status、mapping version、mapping hash、根拠資料URL/版、理由、`occurred_at`、correlation IDを保存する。 |
-| 未指名/失効時 | productionのmapping確認済化、法定帳票本番交付、期限運用の確定処理を拒否する。開発・テストは `UNCONFIRMED` のまま継続できる。 |
+| assignment scope | workplace単位。contractから`t_contract_compliance_profile.workplace_id`をserver-side解決し、request workplaceを信用しない |
+| assignment period | `[effective_from,effective_to)`、NULL endは無限未来。管理者が指名・終了し、同一tenant/workplace/asOfで1件だけ |
+| 承認可能な主体 | asOf時点の有効assignmentへ指名されたuser本人。内部roleは管理者/HR/マネージャー。管理者も別actorのassignmentをbypassできない |
+| approval action | append-only `APPROVE / REJECT / REVOKE`。target/supersedes/chain、mapping version/hash、review policy hash、evidence exact version/hashを保存 |
+| 未指名/失効時 | ACTIVE化と新規formal generate/deliveryをfail-closed。過去delivery downloadはcurrent gateを再評価しない |
 
 法定の派遣元責任者・派遣先責任者は、事業所/契約ごとのruntime master/assignmentであり、`valid_from`/`valid_to`を持つ別概念とする。交代時は旧行を終了し、新行の部署・役職・氏名・連絡先を帳票作成時にsnapshotする。過去帳票を上書きしない。
 
@@ -77,12 +79,12 @@
 | 状態 | 到達条件 | 許可 | 禁止 |
 |---|---|---|---|
 | `DRAFT` | 公式field mappingを起草中 | 文書編集、L0 | 後続実装baseline、本番交付 |
-| `PROVISIONAL_REVIEWED` | 公式URL/版/確認日/effective period、全項目mapping、L0、独立Review、対象blob/hash固定 | T061〜T065の開発baseline | `CONFIRMED`化、M PASS、本番交付 |
-| `ACTIVE` | runtimeのactive assignment、対象version/hashへの実actor承認event、外部専門家Reviewがすべて有効 | M PASS、本番交付 | 対象hash不一致の承認利用 |
+| `PROVISIONAL_REVIEWED` | 公式URL/版/確認日/effective period、全項目mapping、非空のdynamic review policy、L0、独立Review、mapping/policy hash固定 | T061〜T065の開発baseline | mapping/source/policy編集、M PASS、本番交付 |
+| `ACTIVE` | tenant mappingが有効。指定approval eventのassignment/actor/hashと、全policy groupを満たす実在external review/evidenceをDB再解決 | target workplaceでcurrent assignment/approval/reviewを再評価した新規交付 | 他workplace・旧assignment approvalの流用 |
 | `SUPERSEDED` | 後継versionがACTIVE | 過去帳票再現、監査参照 | 新規契約/交付への適用 |
 
 `PROVISIONAL_REVIEWED`は法的適否の承認ではなく、開発に必要なfield対応が独立Review済みであることを示す。
-実actor承認eventを捏造して開発gateを通過させず、実運用時に対象version/hashへ結び付けて取得する。
+実actor承認eventやexternal Reviewを捏造して開発gateを通過させず、実運用時に対象version/hash/policy hashへ結び付けて取得する。
 
 ## 3. 帳票別 field mapping
 
@@ -410,18 +412,19 @@ F1-MAP-01は96 stable IDすべてを専用typed columnまたは指定historyへ�
 `design.md` §5.3をそのまま適用する。画面、list/detail/count、CSV/Excel/PDF、download、notification、schedulerを同じscopeへ対応付ける。待遇、保険、性別、年齢、苦情詳細、キャリア内容などのsensitive fieldはfield単位でmaskし、export/PDFでmaskを解除しない。portal userは不可視、schedulerは帳票生成に必要な最小fieldだけを使う。
 ### 5.3 状態機械と競合
 
-`design.md` §5.4をそのまま適用する。profile確定は `version` CAS、findingは `(contract_id, code, condition_fingerprint)` のDB UNIQUE + upsert、帳票再生成は `(contract_id, document_type, template_version, snapshot_hash)` の業務一意キーとする。mappingはL0と独立Reviewで`PROVISIONAL_REVIEWED`としてT061以降へ渡せるが、`ACTIVE`化、本番の確認済化・法定帳票交付は必要なassignment、対象hashへの承認event、外部専門家Reviewが揃わなければfail-closedとする。
+`design.md` §5.4と§7を適用する。profile確定は `version` CAS、findingは `(contract_id, code, condition_fingerprint)` のDB UNIQUE + upsertとする。V102後の帳票冪等keyにはmapping version/hash、review policy hash、gate snapshot hashを含める。mappingはL0と独立Reviewで`PROVISIONAL_REVIEWED`としてT061以降へ渡せるが、`ACTIVE`化とformal generate/deliveryはworkplace assignment、対象mapping/policy hashへの実actor approval、freeze済みdynamic policyを満たす実在external Review/CLEAN evidenceが揃わなければfail-closedとする。
 
 ## 6. 未決gate（role assignment / 後続実装・本番gate）
 
 | gate ID | 未決事項 | owner / 承認対象 | 影響 | 状態 |
 |---|---|---|---|---|
-| GATE-T066-FIELD-SEMANTICS | 派遣料金の意味・表示可否、2種抵触日の法的表示条件、複数就業場所・直接雇用紛争防止・紹介予定派遣の条件解釈 | T066法務受入責任者が技術mappingを確認し、外部社労士/弁護士Reviewを本番gateで記録する。`COMPLIANCE_RESPONSIBLE` runtime assignmentは承認actorを提供するが、法的field semanticsのownerではない | F1の保存形状は維持したまま、T062/T064/B1の算定・表示・交付をfail-closed | **OPEN（T066 / 本番gate）** |
+| GATE-T066-FIELD-SEMANTICS | 派遣料金の意味・表示可否、2種抵触日の法的表示条件、複数就業場所・直接雇用紛争防止・紹介予定派遣の条件解釈 | T066法務受入責任者が技術mappingを確認し、tenant画面でfreezeしたreview policyを満たす実在external Reviewを本番gateで記録する。`COMPLIANCE_RESPONSIBLE` runtime assignmentは承認actorを提供するが、法的field semanticsのownerではない | F1の保存形状は維持したまま、T062/T064/B1の算定・表示・交付をfail-closed | **OPEN（T066 / 本番gate）** |
 | COMPLIANCE_RESPONSIBLE runtime role | `COMPLIANCE_RESPONSIBLE` のrole code、承認可能操作、`未確認/要確認/確認済`、監査項目、runtime指名・交代、未指名時fail-closed | 管理者がruntimeでassignmentを作成・終了する。自然人の氏名/user IDをT060の成果物へ事前固定しない | `ACTIVE`化、M PASS、本番確認済化 | **T060定義済み／M・本番assignment gate** |
-| GATE-T060-2026-10 | 2026-10-01施行分の待遇差説明を求める権利の正確な文言、対象、適用境界、旧版非遡及 | `COMPLIANCE_RESPONSIBLE` roleのruntime approval。外部社労士/弁護士照合はT066/本番gate | B1 template version、2026-10交付 | **OPEN（後続・本番gate）** |
-| GATE-T066-RETENTION | 個別契約書・就業条件明示書・派遣先通知書のarchive category/保存起算点。台帳R3Y以外を推測しない | T066法務受入責任者が技術mappingを確認し、管理者/法務がrole assignment経由で保持category、tax category、legal holdを確認。外部社労士/弁護士Reviewを本番gateで記録する | B1 retention/deletion。T066 PASSまでfail-closed | **OPEN（T066 / 本番gate）** |
+| GATE-T060-2026-10 | 2026-10-01施行分の待遇差説明を求める権利の正確な文言、対象、適用境界、旧版非遡及 | `COMPLIANCE_RESPONSIBLE` roleのruntime approvalと、freeze済みpolicyを満たす実在external Review | B1 template version、2026-10交付 | **OPEN（後続・本番gate）** |
+| GATE-T066-RETENTION | 個別契約書・就業条件明示書・派遣先通知書のarchive category/保存起算点。台帳R3Y以外を推測しない | T066法務受入責任者が技術mappingを確認し、管理者/法務がrole assignment経由で保持category、tax category、legal holdを確認。freeze済みpolicyを満たす実在external Reviewを本番gateで記録する | B1 retention/deletion。T066 PASSまでfail-closed | **OPEN（T066 / 本番gate）** |
 | GATE-T060-COOLING | クーリング期間の日数、組織単位変更を同一実体とみなす確認基準 | `COMPLIANCE_RESPONSIBLE` roleが `m_system_config` 値と運用基準を承認 | T062/T065の抵触日算定 | **OPEN（T062/T065具体化gate）** |
-| GATE-T060-EXTERNAL | 外部社労士/弁護士による照合 | 発注者がT066 M / 本番release gateとして管理 | 本番法定帳票交付、S10最終PASS | **RELEASE GATE（T060起草は非block）** |
+| GATE-T060-EXTERNAL | tenant画面で動的設定・freezeしたrequirement group/type/minimumを満たす実在external reviewerによる照合 | 発注者がT066 M / 本番release gateとして管理。具体type/組合せ/人数をcode既定にしない | 本番法定帳票交付、S10最終PASS | **RELEASE GATE（T060起草は非block）** |
+| GATE-T066-HISTORY | 月次実績、苦情処理、教育訓練、career、紹介予定、紛争防止、差異通知のwrite/asOf/correction/permission/golden | 後続history spec | 対象fieldを必要とするproduction帳票だけを禁止。S10 PASS/S12開始は阻害しない | **TRACKED P2 / PRODUCTION RELEASE GATE（未実装・未受入）** |
 
 承認event発生時は、runtimeの実actorについて `actor_user_id`、`actor_display_name_snapshot`、`actor_role_code`、承認権限、操作、承認日時、対象commit hash、mapping version/hash、根拠資料URL/版、コメントを監査履歴へ保存する。actorは事前に書き死にさせず、管理者が指名・交代できる。法定の派遣元責任者・派遣先責任者は別の事業所/契約assignmentとして有効期間を持ち、帳票生成時に氏名・役職・連絡先をsnapshotする。
 
@@ -441,3 +444,18 @@ F1-MAP-01は96 stable IDすべてを専用typed columnまたは指定historyへ�
 - [x] 特定の自然人名またはuser IDを事前固定せず、承認event時のactor ID・表示名snapshot・role・日時・mapping version/hash・根拠資料を保存する規則を定義した。
 - [x] 実actor承認eventはT060の開発完了条件ではなく、`ACTIVE`化、M PASS、本番交付のgateとして分離した。未取得を虚偽に補完しない。
 - [x] G2正本、spec、決定表、L0 matrix、派工対話を含む本fix deltaのL0 PASS、`SpecDispatchConsistencyTest` 8/8、`git diff --check` exit 0。form mapping 96行、SRC-E ⑱=1行、SRC-L ④=1行、根拠なし2026-10 mapping行=0行を維持した。
+
+## 8. R19-P1-01 governance delta（96 mapping row不変）
+
+本sectionはmapping field内容ではなくACTIVE/delivery gateのgovernanceを具体化する。§3の96 stable row、公式source URL、
+source version、effective period、DB resolutionは変更しない。今後の`mapping_hash`はMarkdown blob全体ではなく、
+`g2-gate-decision-delta-r19-p1-01.md` §6.2のcanonical mapping/source payloadから計算する。
+review policyは別の`review_policy_hash`、delivery採用証跡は`gate_snapshot_hash`であり、3つを混同しない。
+
+- mappingはtenant scope、assignmentはworkplace scope。contract workplaceはprofileからserver-side解決する。
+- assignmentは半開区間で、approvalは有効assignment actor本人だけがappendできる。
+- reviewer typeはtenant画面で動的設定し、group AND / type OR / minimum distinct reviewerで評価する。
+- DRAFTでpolicyを作成し、PROVISIONAL_REVIEWED以降はtype snapshotとpolicy hashをfreezeする。
+- ACTIVE化に使うapproval event IDをrequestで指定するが、tenant/workplace/assignment/actor/hashはDB再解決する。
+- formal generate/deliveryはtarget workplaceのcurrent gateを毎回再評価し、past delivery downloadはcurrent gateを再評価しない。
+- R10の`ACCEPTED_FOR_IMPLEMENTATION`前は本sectionを含むdocs-onlyで停止し、V102や実装/testを作成しない。

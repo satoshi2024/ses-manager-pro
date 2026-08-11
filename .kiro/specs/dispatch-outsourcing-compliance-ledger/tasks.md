@@ -8,14 +8,15 @@
 >
 > **Migration**: 本specの正式migrationは **V84**。order(V80/V81)のmerge後、attendance(V83)と並行可。V83実在のためV82は欠番として保持する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
-> S10の正式migrationは **V84**。V82は欠番として保持する。
+> S10の実在migrationは **V84/V85**。R19-P1-01のG2 follow-upはR10 acceptance後に **V102** を使用する。
+> common V99は永久欠番、V100は`migration-dev`実在、common V101は既存用途を維持する。R10 acceptance前にV102を作成しない。
 
 - [x] 0. G2公式様式field mapping
   - **Objective**: 派遣元管理台帳・就業条件明示書・派遣先通知書・個別契約書の各法定項目が、
     DB列・画面・生成位置へ1対1で対応付けられる。以降の帳票生成が「どの項目をどこから取るか」を推測せずに済む。
   - **成果物**: 帳票ごとの法定項目→DB/画面/生成位置、保存期間、権限。
   - **Demo**: 厚生労働省公式URL/版/確認日/effective period付きmappingを独立Reviewし、mapping hashを固定して
-    `PROVISIONAL_REVIEWED`にする。runtime社内責任者assignment、実actor承認event、外部社労士/法務Reviewは
+    `PROVISIONAL_REVIEWED`にする。runtime社内責任者assignment、実actor承認event、freeze済み動的Review policyを満たす実在外部Reviewは
     `ACTIVE`化、M PASS、本番交付のgate。
   - **実装ガイダンス**: production codeを変更しない。`field-mapping.md`として保存する（design §3）。
     **システムは法的適否を自動確定しない**（前提節）。mappingは項目の対応であって適法性の判断ではない。
@@ -90,10 +91,32 @@
 - [ ] M. 法務受入/回帰（T066実装・L4全量実行済み・G2 gate未達のためPASS条件未達）
   - **Objective**: 法務fixtureの3契約について台帳とfindingが期待どおりで、
     既存のcompliance機能・契約機能が壊れていない。
-  - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
+  - **テスト要件**: R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とした後、L1〜L3で
+    `g2-gate-decision-delta-r19-p1-01.md` §13の`G2-ASG-01..13`、`G2-POL-01..16`、`G2-EVT-01..14`、
+    `G2-ACT-01..06`、`G2-DEL-01..11`、`G2-SEC-01..11`、`G2-MIG-01..09`を実行する。
+    最終L4では`mvn test`全量、fresh/legacy MySQL smoke、
     既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
-    Node/JS syntax、desktop/390px browser Demo、`git diff --check`。
-  - **Demo**: 法務fixture3契約の台帳とfindingを照合。既存4 ruleの出力が変わっていないことを提示。
+    Node/JS syntax、desktop/390px browser Demo Phase A/B、`git diff --check`。
+  - **Demo**: 法務fixture3契約の台帳とfindingを照合し、既存4 ruleの出力不変を提示する。
+    Phase Aはpreviewのみでdesktop/390px、4帳票、FULL/MASK/営業403、watermark、archive/delivery 0を確認する。
+    Phase Bは実在assignment actor approval、ページでfreezeしたpolicyを満たす実在external review、実在CLEAN evidenceで
+    ACTIVE化後、formal generate/archive/delivery/download、role別FULL/MASK/LIMITED/403、4帳票、SUPERSEDED後再downloadを確認する。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
-    runtime社内責任者assignment、対象mapping version/hashへの実actor承認event、外部社労士/弁護士Reviewを
-    **本taskのPASSかつ本番releaseのgate**として確認する。いずれか未取得なら`ACTIVE`化・本番交付・M PASSを禁止する。
+    `g2-gate-decision-delta-r19-p1-01.md`をR19-P1-01の正本とし、reviewer typeをcode/DDL/seedへ固定しない。
+    runtime workplace assignment、対象mapping version/hash/review policy hashへの実actor承認event、freeze済みpolicyを満たす
+    実在external Review、実在CLEAN evidenceを**本taskのPASSかつ本番releaseのgate**として確認する。
+    いずれか未取得なら`ACTIVE`化・本番交付・M PASSを禁止する。
+    `GATE-T066-HISTORY`はtracked P2 / production release gateへ分離し、S10 PASS/S12開始を阻害しないが、
+    未実装を受入済みとせず対象history fieldを必要とするproduction帳票を交付しない。
+
+  - **R19-P1-01実行順（1回に1段階）**:
+    1. docs-only decision deltaをR10へ提出し、`ACCEPTED_FOR_IMPLEMENTATION`まで停止する。
+    2. V1/V102/H2/entity/mapperとMySQL append-only/5形状direct regressionを同期する。
+    3. G2 service/API/UI/security/auditとdynamic reviewer type/requirement画面を実装する。
+    4. ACTIVE guard、delivery gate snapshot/idempotency、previewを実装する。
+    5. L1〜L3とPhase A browser evidenceを完了する。
+    6. 実在assignment actor/external reviewer/CLEAN evidenceを用意し、ACTIVE化とPhase Bを完了する。
+    7. T066 L4を1回実行し、R10最終Review Packetを提出する。
+  - **migration test計画**: R10 acceptance後に`SpecDispatchConsistencyTest`へ、S12〜S17のV103〜V108単調増加、
+    中央README/ledger/task-start同期、S10 V84/V85実在+V102予約、common/migration-dev/prod全location重複検査を追加する。
+    本docs-only deltaではtest codeを変更しない。

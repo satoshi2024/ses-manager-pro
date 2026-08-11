@@ -3132,7 +3132,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. workplace/profile/finding/delivery DDL
   - **Objective**: F1. workplace/profile/finding/delivery DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V77/V1/H2/smoke、snapshot/permission。
+  - **実装ガイダンス**: V84/V1/H2/smoke、snapshot/permission。
   - **テスト要件**: FK/期間/PII scope。
   - **Demo**: F1. workplace/profile/finding/delivery DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -3383,13 +3383,14 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/requirements.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/design.md
 - .kiro/specs/dispatch-outsourcing-compliance-ledger/tasks.md
+- .kiro/specs/dispatch-outsourcing-compliance-ledger/g2-gate-decision-delta-r19-p1-01.md
 
 【担当task原文】
 - [ ] M. 法務受入/回帰
   - **Objective**: M. 法務受入/回帰 を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **テスト要件**: 全test/MySQL smoke/既存compliance回帰。
   - **Demo**: 法務fixture3契約の台帳とfindingを照合。
-  - **実装ガイダンス**: requirements.md、design.md、全体shared-standards.mdの境界と既存資産再利用規約に従い、未決事項を黙って補完しない。
+  - **実装ガイダンス**: requirements.md、design.md、全体shared-standards.md、G2 decision deltaの境界と既存資産再利用規約に従う。R10の`ACCEPTED_FOR_IMPLEMENTATION`前はdocs-onlyで停止し、R19-P1-01を自分でcloseしない。
 
 【着手判定】
 1. design/tasksに記載された先行taskが完了し、そのdiffが現在のbranchへ取り込まれているか確認する。
@@ -3847,7 +3848,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. position/allocation/scenario DDL
   - **Objective**: F1. position/allocation/scenario DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V79/V1/H2/smoke、状態/区間/競合service。
+  - **実装ガイダンス**: V103/V1/H2/smoke、状態/区間/競合service。
   - **テスト要件**: 50+50/60+50、期間、scenario isolation。
   - **Demo**: F1. position/allocation/scenario DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4205,7 +4206,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. portal org/user/invite/consent DDL
   - **Objective**: F1. portal org/user/invite/consent DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V80/V1/H2/smoke、token/hash/session/permission。
+  - **実装ガイダンス**: V104/V1/H2/smoke、token/hash/session/permission。
   - **テスト要件**: token/reuse/expiry/email/tenant/停止。
   - **Demo**: F1. portal org/user/invite/consent DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4511,7 +4512,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. change/expense/1on1/survey DDL
   - **Objective**: F1. change/expense/1on1/survey DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V81/V1/H2/smoke、本人scope、field allowlist。
+  - **実装ガイダンス**: V105/V1/H2/smoke、本人scope、field allowlist。
   - **テスト要件**: A/B、JSON不正、状態、version競合。
   - **Demo**: F1. change/expense/1on1/survey DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4869,7 +4870,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. connection/mapping/job DDLと既存connection移行
   - **Objective**: F1. connection/mapping/job DDLと既存connection移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V102/V1/H2/smoke、暗号/token race/outbox。
+  - **実装ガイダンス**: V106/V1/H2/smoke、暗号/token race/outbox。
   - **テスト要件**: unique/rotation/claim/CAS/tenant。
   - **Demo**: F1. connection/mapping/job DDLと既存connection移行 の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -5278,7 +5279,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. participant/digital invoice/event DDL
   - **Objective**: F1. participant/digital invoice/event DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V83/V1/H2/smoke、state/idempotency。
+  - **実装ガイダンス**: V107/V1/H2/smoke、state/idempotency。
   - **テスト要件**: unique/status/event order。
   - **Demo**: F1. participant/digital invoice/event DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -5636,7 +5637,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: F1. version/run/item/feedback/outcome/evaluation DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V104/V1/H2/smoke、legacy移行方針。
+  - **実装ガイダンス**: V108/V1/H2/smoke、legacy移行方針。
   - **テスト要件**: active一意、trace、tenant、保存期限。
   - **Demo**: F1. version/run/item/feedback/outcome/evaluation DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

@@ -37,8 +37,11 @@
 - 公式様式の項目対応表を`field-mapping.md`としてURL/版/確認日/effective period付きで保存する。
 - mapping lifecycleは`DRAFT -> PROVISIONAL_REVIEWED -> ACTIVE -> SUPERSEDED`。L0と独立Reviewで
   `PROVISIONAL_REVIEWED`となり開発baselineにできる。runtimeの`COMPLIANCE_RESPONSIBLE` assignment、
-  対象version/hashへの実actor承認event、外部専門家Reviewが揃うまで`ACTIVE`化と本番交付を禁止する。
-- `COMPLIANCE_RESPONSIBLE`は管理者が有効期間付きで指名・交代する。特定の自然人をcode/spec/seedへ固定せず、
+  対象version/hash及びreview policy hashへの実actor承認event、ページ設定された動的policyを満たす実在external Reviewが
+  揃うまで`ACTIVE`化と本番交付を禁止する。reviewer typeの具体値をcode/DDL/seedへ固定しない。
+- `COMPLIANCE_RESPONSIBLE`は管理者がworkplace単位・半開区間`[effective_from,effective_to)`で指名・交代する。
+  対象workplaceはcontract requestではなく`t_contract_compliance_profile.workplace_id`からserver-side解決する。
+  特定の自然人をcode/spec/seedへ固定せず、
   承認eventにactor ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。
 - PDF/Excelどちらを採用するか帳票別に決め、生成物はarchive登録。
 
@@ -61,8 +64,9 @@
     worker snapshotは帳票の交付日時点以前で最も新しい確定版だけを選び、交付後の版や
     `snapshot_at`不明の版は出力しない。worker snapshot未作成時も出力しない）。**履歴table由来項目（苦情処理状況・キャリアconsulting・
     教育訓練・紹介予定・紛争防止・差異通知）は、当該履歴を作成する書き込み経路が本specの実装範囲に
-    存在しないため、受入対象外としてGATE-T066-HISTORYに記録する**（既存の反復履歴tableはT061で
-    整備済み。書き込み経路は別spec/将来実装）。
+    存在しないため、`GATE-T066-HISTORY`を**TRACKED P2 / production release gate**へ分離する**（既存の反復履歴tableはT061で
+    整備済み。書き込み経路は別spec/将来実装）。未実装を受入済みとは扱わず、対象fieldを必要とするproduction帳票は
+    後続history spec完了まで交付禁止とする。一方、S10 spec PASSとS12開始は阻害しない。
 - **当事者（派遣元=自社）** は`company.name`/`company.address`/`company.representative`
   （m_system_config）をsnapshot化して出力する。自社マスタが未実装のためconfigを正とする。
 
@@ -165,7 +169,8 @@
 
 - findingは(contract_id, code, condition_fingerprint)でupsertし、既存4ruleのcode/挙動を維持する。
 - content hashは履歴の同一性を示すがretryの冪等性キーではない。A(v1,hA)→B(v2,hB)→A(v3,hA)を許可する。
-- 帳票生成の冪等キーは従来どおり(contract_id, document_type, template_version, snapshot_hash)とし、snapshot保存のoperation idempotencyとは別契約にする。
+- V102適用前の帳票生成冪等キーは(contract_id, document_type, template_version, snapshot_hash)である。
+  G2 follow-up後はmapping version/hash、review policy hash、gate snapshot hashを追加し、snapshot保存のoperation idempotencyとは別契約にする。
 
 ### 5.5 F1 schema / history matrix（R5で確定する技術契約）
 
@@ -202,10 +207,13 @@ rule境界、finding upsert/解消、帳票field mapping、deadline scheduler、
 
 T060 L0は、全mapping行の公式URL/版/確認日/effective period、mapping hash、`DRAFT -> PROVISIONAL_REVIEWED`条件、
 特定自然人の事前固定がないことを検証する。実actor承認eventがないことは開発baselineの失敗条件にしない。
-Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが欠ける場合に`ACTIVE`化と本番交付が拒否され、
+Mでは、runtime assignment/承認event/freeze済み動的Review policyを満たす実在外部Reviewのいずれかが欠ける場合に`ACTIVE`化と本番交付が拒否され、
 対象hash不一致の承認eventが無効であることを検証する。
 
 ### 6.1 G2 gate test matrix
+
+以下の既存IDはG2 gateのbaseline回帰IDとして維持する。R19-P1-01実装では§7及び
+`g2-gate-decision-delta-r19-p1-01.md` §13のtraceable matrixへ展開し、固定専門家typeを前提にしない。
 
 | test ID | level / task | setup | operation | expected |
 |---|---|---|---|---|
@@ -214,8 +222,8 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 | G2-GATE-L2-01 | L2 / T061-T064 | PROVISIONAL_REVIEWED、active assignmentなし | ACTIVE化または本番交付 | fail-closed。状態不変、監査event |
 | G2-GATE-L2-02 | L2 / T061-T064 | active assignmentあり、承認eventのmapping hashが不一致 | ACTIVE化 | 拒否。対象version/hash一致を要求 |
 | G2-GATE-L2-03 | L2 / T061-T064 | 旧責任者の承認後に管理者が交代 | assignment終了/追加 | 旧承認actor snapshotと過去帳票は不変 |
-| G2-GATE-M-01 | L4 / T066 | assignment/承認eventあり、外部専門家Reviewなし | M PASSまたは本番交付 | 拒否。PROVISIONAL_REVIEWEDを維持 |
-| G2-GATE-M-02 | L4 / T066 | active assignment、対象hash承認event、外部専門家Reviewが有効 | ACTIVE化と本番交付 | 成功。version/hashと全証跡を監査保存 |
+| G2-GATE-M-01 | L4 / T066 | assignment/承認eventあり、freeze済み動的Review policyを満たす実在外部Reviewなし | M PASSまたは本番交付 | 拒否。PROVISIONAL_REVIEWEDを維持 |
+| G2-GATE-M-02 | L4 / T066 | active assignment、対象hash承認event、freeze済み動的Review policyを満たす実在外部Reviewが有効 | ACTIVE化と本番交付 | 成功。version/hashと全証跡を監査保存 |
 
 ### 6.2 T061 F1 direct regression matrix（R5 fix scope）
 
@@ -238,4 +246,32 @@ Mでは、runtime assignment/承認event/外部専門家Reviewのいずれかが
 | test ID | level | fixture / operation | expected |
 |---|---|---|---|
 | T066-ASOF-01 | L2 | H2実APIでworker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULLで用意し、生成archive・FULL download・MASK/LIMITED download・template version切替・再生成を実行 | 生成時に一度だけ確定した`deliveredAt`をdeliveryへ保存し、archiveとdownloadが同じ交付時点の最新確定版だけを使う。交付後またはasOf不明のworker項目は出力せず、mask・template切替・冪等性を維持する |
+
+## 7. R19-P1-01 G2 gate decision delta（現行正本候補）
+
+`g2-gate-decision-delta-r19-p1-01.md`を本sectionの詳細決定表とする。状態は
+`PROPOSED_FOR_R10_REVIEW`であり、R10が`ACCEPTED_FOR_IMPLEMENTATION`を記録するまでproduction/DDL/test codeを変更しない。
+
+### 7.1 確定した設計境界
+
+- tenant-level mapping ACTIVEとworkplace-level delivery approvalを分離する。ACTIVE化で指定するapproval eventは
+  tenant mappingの有効化根拠であって他workplaceの交付権限ではない。
+- 9 physical table（mapping version/source、dynamic reviewer type、requirement group/type、workplace assignment、
+  approval/external review/status event）をV102候補とし、event 3表はMySQL triggerでもUPDATE/DELETEを拒否する。
+- reviewer policyはgroup間AND、group内type OR、minimum distinct reviewerで評価する。typeは完全動的、policyはmapping versionへfreezeする。
+- `mapping_hash`、`review_policy_hash`、`gate_snapshot_hash`を別canonical payloadとして計算する。
+- internal/external event reducer、ACTIVE 18-step transaction、formal generate/preview、過去delivery download、
+  `/compliance-gate` action permission/capability/evidence DTOを同decision delta §§5〜10で固定する。
+- 現行独立DBではdeployment tenantを`app.security.oidc.tenant-id`からserver-side取得し、request tenantを信用しない。
+  A/B testは防御的SQL境界であり、共有DB production対応完了を意味しない。
+
+### 7.2 migrationと受入
+
+- common V99は永久欠番、V100は`migration-dev`実在、common V101は既存用途を維持する。
+- S10 G2 follow-upはV102、S12〜S17はV103〜V108。V84/V85/V101を変更しない。
+- direct regressionはdecision delta §13の`G2-ASG/POL/EVT/ACT/DEL/SEC/MIG`全caseをrequirements R6〜R10へtraceする。
+- browserはPhase A previewとPhase B formal deliveryへ分ける。Phase Bは実在assignment actor、実在external reviewer、
+  freeze済みpolicy、実在CLEAN evidenceを必要とする。
+- `GATE-T066-HISTORY`はtracked P2 / production release gateであり、S10 PASS/S12開始のblockerではない。
+  G2 mechanism、実在証跡、browser目視、R10最終Reviewは引き続きT066/S10 PASS条件である。
 

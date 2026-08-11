@@ -1,5 +1,30 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R19-P1-01 docs-only decision delta / R10 Review待ち）
+
+`R19-P1-01はOPEN / SPEC_CONCRETIZATION_REQUIREDのまま。発注者指示に基づきG2-SCOPE/LIFECYCLE/DYNAMIC-REVIEW/
+EVENT/HASH/ACTIVE/DELIVERY/SECURITY/HISTORY/MIGRATION/BROWSERのdecision deltaをdocsだけで具体化した。
+R10がACCEPTED_FOR_IMPLEMENTATIONを明示するまでV102・DDL・production/test codeへ進まない。T066未完了、
+S10 IN PROGRESS、S12 NOT READY、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。`
+
+### R19-P1-01 docs-only Review Packet
+
+| task / issue | requirements | 変更境界 | L0 / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / `dispatch-outsourcing-compliance-ledger-R19-P1-01` | R5〜R10、design §7、`G2-SCOPE-01`〜`G2-BROWSER-01` | S10 requirements/design/tasks/field-mapping/review-ledgerと新decision delta、中央G2/migration/ledger/dependency資料、S10/R10・S12〜S17のstart/review/task/copyable会話、S12〜S17 design/tasksのdocsだけ。V1/V84/V85/V101/V102/H2/Java/HTML/JS/CSS/messages/test/seed/DBは変更0 | migration/Flyway location inventory、現行/履歴番号scan、decision ID/trace matrix/Phase A-B整合、non-doc差分0、`git diff --check`を実施。browser/API/DB DemoはR10 acceptance前のため未実施 | Base `aeb734871782f739bbcb907532ca5cdd13521689`。Review Headはpush後のR10依頼messageで固定 | docs revertだけでrollback可能、DB rollbackなし。R10 acceptance前の実装開始が最大risk |
+
+### 現行OPEN / 非block分離
+
+| issue / gate | status | 次action |
+|---|---|---|
+| R19-P1-01 | `OPEN / DECISION_DELTA_REVIEW_REQUIRED` | R10が独立に`ACCEPTED_FOR_IMPLEMENTATION`または具体的な差戻しを記録する。実装担当はcloseしない |
+| GATE-T066-HISTORY | `TRACKED P2 / PRODUCTION RELEASE GATE / NOT IMPLEMENTED` | 月次実績、苦情処理、教育訓練、career、紹介予定、紛争防止、差異通知のwrite/correction/asOf/permission/goldenを別history specで実装。S10 PASS/S12開始は阻害しない |
+| R19-P2-02 PDF browser | `OPEN / T066 PASS GATE` | Phase A previewと、実在actor/reviewer/CLEAN evidenceを使うPhase B formal deliveryをdesktop/390pxで実施 |
+
+現行decisionの全文は`g2-gate-decision-delta-r19-p1-01.md`。専門家type/組合せ/minimumはtenant画面の業務dataであり、
+Java enum、DB CHECK、固定option、`m_system_config` JSON、seedへ固定しない。9 physical tableとdelivery snapshotはV102候補だが、
+R10 acceptance前にDDLを作成しない。
+
 ## 現行判定（R19-P1-02 / R19-P2-03 VERIFIED_CLOSED）
 
 `R19独立ReviewでR19-P1-02はVERIFIED_CLOSED。旧R19-P2-01はcloseせずR19-P1-02へ昇格・置換。G2 gate機構、GATE-T066-HISTORY、PDF実ブラウザ目視は未達。T066 checkbox・ACTIVE化・本番交付・production authorizationは禁止維持。S12は開始しない。`
