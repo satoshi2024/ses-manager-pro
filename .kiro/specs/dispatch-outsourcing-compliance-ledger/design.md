@@ -158,7 +158,7 @@
 | 状態 | 許可遷移 | 防重手段 | competing writer | rollback |
 |---|---|---|---|---|
 | mapping DRAFT | →PROVISIONAL_REVIEWED | 公式source/版/effective period＋L0＋独立Review、mapping hash固定 | mapping編集 | DRAFTの新versionを作成 |
-| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋freeze済み動的Review、ACTIVEはinclusive effective period内。current ACTIVEの無期限期間とはfuture candidate 1件だけschedule共存可。future_slot UNIQUEで競合を直列化 | 承認とmapping改定 | future/expired、承認対象hash不一致、invalid deployment timezone、future_slot競合なら遷移拒否。未使用PROVISIONALのSUPERSEDEDはreasonのみでgate hash NULL |
+| mapping PROVISIONAL_REVIEWED | →ACTIVE / →SUPERSEDED | runtime role assignment＋対象hash承認event＋freeze済み動的Review、ACTIVEはinclusive effective period内。current ACTIVEの無期限期間とはfuture candidate 1件だけschedule共存可。future_slot UNIQUEで競合を直列化 | 承認とmapping改定 | future/expired、承認対象hash不一致、invalid deployment timezone、future_slot競合なら遷移拒否。成功transitionだけfuture_slot=NULLを同一CAS transactionで行い、時刻経過・失敗・rollbackでは1を維持。未使用PROVISIONALのSUPERSEDEDはreasonのみでgate hash NULL |
 | mapping ACTIVE | →SUPERSEDED | 新versionの有効化CAS、または明示終了 | 法令・様式更新 | 置換時だけ旧SUPERSEDED eventへgate snapshot hashを保存し、過去帳票snapshotを保持 |
 | profile 未入力 | →入力済 | 状態CAS | — | — |
 | 入力済 | →確定（帳票生成可） | version CAS | 同時編集 | 入力済へ |
@@ -186,7 +186,7 @@
 | profile snapshot | current profile＋current_snapshot_id/current_snapshot_version | t_contract_compliance_snapshot、UNIQUE(contract_id,snapshot_version)、content hashは非一意索引 | operation idempotencyはoperation_idで分離。A/B/Aを3version保持 | T061/B1 |
 | snapshot operation | current pointerには含めない | t_compliance_snapshot_operation（operation_id、expected version、resulting snapshot、request hash、status） | 同じoperation retryは1行、新operationは同じcontentでも新version | T061 |
 | G2 operation | current rowには含めない | t_compliance_operation_ledger（tenant/type/key/request hash/state/result reference/result summary/failure/lease） | lease中の同key再送は409、完了後は保存resultを200で返す。同key異payloadは409、永久保持 | T061/T066 |
-| delivery rendition | current masterには依存しない | delivery_business_key UNIQUE＋既存profile snapshot、optional worker snapshot ID/hash、resolved workplace ID＋FULL/MASK/LIMITEDのimmutable `t_document_version`、deliveryのrender_input_hash | client keyとbusiness keyを分離。worker snapshot不在はpair NULL＋worker項目省略で生成継続。workplace/config snapshot tableは作らず、PDF renditionをcontent正本とする。3 renditionのいずれか失敗は全rollback | T064/T066 |
+| delivery rendition | current masterには依存しない | delivery_business_key UNIQUE＋既存profile snapshot、optional worker snapshot ID/hash、resolved workplace ID＋FULL/MASK/LIMITEDのimmutable `t_document_version`、deliveryのrender_input_hash | client keyとbusiness keyを分離。business keyはstable snapshot/証跡/版から作り、gate/render評価時刻とasOfを含めない。worker snapshot不在はpair NULL＋worker項目省略で生成継続。workplace/config snapshot tableは作らず、PDF renditionをcontent正本とする。3 renditionのいずれか失敗は全rollback。legacy NULL rowは既存ACL/CLEANでdownload可、新規rowはREADYだけdownload可 | T064/T066 |
 | reviewer credential | reviewer masterには原文を戻さない | credential crypto envelope＋key version＋masked snapshot | 専用AES-256-GCM、INSERT前operation_id AAD、optional未入力4項目NULL、旧key read/current key write、復号失敗はgate fail-closed | T066 |
 | explicit NULL | mutable current nullable columns only | history/snapshotは不変 | FieldStrategy.ALWAYS＋full DTO。省略PATCHはreject、CAS失敗はrollback | T061/T062 |
 | history correction | current clear inventoryには含めない | event_id/event_type/supersedes_event_id/correction_reason/actor/occurred_at/effective interval/asOf key | 旧行UPDATE/DELETE禁止、CORRECTED/CANCELLEDは新行 | T061/T064 |
@@ -223,7 +223,7 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 
 以下の既存IDはG2 gateのbaseline回帰IDとして維持する。R19-P1-01実装では§7及び
 `g2-gate-decision-delta-r19-p1-01.md` §13のtraceable matrixへ展開し、固定専門家typeを前提にしない。R21 fixでは
-`G2-IDP-01..14`、`G2-LIFE-01..10`、`G2-DEL-12..16`、`G2-SEC-12..18`、`G2-MIG-10..12`を追加する。
+`G2-IDP-01..15`、`G2-LIFE-01..11`、`G2-DEL-12..16`、`G2-SEC-12..18`、`G2-MIG-10..12`を追加する。
 
 | test ID | level / task | setup | operation | expected |
 |---|---|---|---|---|
@@ -255,7 +255,7 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 
 | test ID | level | fixture / operation | expected |
 |---|---|---|---|
-| T066-ASOF-01 | L2 | H2実APIでworker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULL・未作成で用意し、生成archive・FULL download・MASK/LIMITED download・template version切替・再生成を実行 | 生成時に一度だけ確定した`deliveredAt`をdeliveryへ保存し、archiveとdownloadが同じ交付時点の最新確定版だけを使う。交付後/asOf不明のworker項目は出力せず、snapshot未作成時はworker項目なしで生成を継続し、ID/hashは同時NULL、partial NULLを拒否する。mask・template切替・冪等性を維持する |
+| T066-ASOF-01 | L2 | H2実APIでworker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULL・未作成で用意し、生成archive・FULL download・MASK/LIMITED download・template version切替・再生成を実行 | 生成時に一度だけ確定した`deliveredAt`をdeliveryへ保存し、archiveとdownloadが同じ交付時点の最新確定版だけを使う。交付後/asOf不明のworker項目は出力せず、snapshot未作成時はworker項目なしで生成を継続し、ID/hashは同時NULL、partial NULLを拒否する。mask・template切替・stable business keyによる時刻を跨ぐ異key再生成・legacy NULL downloadを維持する |
 
 ## 7. R19-P1-01 G2 gate decision delta（現行正本候補）
 

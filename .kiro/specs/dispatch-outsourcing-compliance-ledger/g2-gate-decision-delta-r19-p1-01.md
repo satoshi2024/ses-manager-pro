@@ -206,15 +206,17 @@ columns:
 | `effective_from`, `effective_to` | DATE、from NOT NULL、to NULLは無期限。通常のplatform inclusive期間 |
 | `status` | NOT NULL。4状態のみ |
 | `active_slot` | ACTIVEだけ1、それ以外NULL |
-| `future_slot` | current ACTIVEとのschedule例外で、`effective_from > asOf local date`のfuture DRAFT/PROVISIONALだけ1、それ以外NULL |
+| `future_slot` | future DRAFT/PROVISIONAL候補を作成したtransactionで1。作成時のserver asOfで`effective_from`が将来であることを確認し、時刻経過だけでは再計算・解放しない。対象候補がACTIVEまたはSUPERSEDEDへ成功遷移する同一transactionでだけNULL化し、それ以外は1を維持 |
 | `activated_at`, `activated_by` | ACTIVE/SUPERSEDEDの旧ACTIVEだけ値を保持。DRAFT/PROVISIONALはNULL |
 | `version` | NOT NULL、current rowのCAS |
 | actor/time | `created_by/at`, `updated_by/at` |
 
 制約/index: `UNIQUE(tenant_id,mapping_version)`、`UNIQUE(tenant_id,mapping_code,active_slot)`、
 `UNIQUE(tenant_id,mapping_code,future_slot)`、`UNIQUE(tenant_id,id)`、index `(tenant_id,mapping_code,status,effective_from,effective_to)`、
-FK `activated_by -> sys_user.id`。ACTIVE時だけactive_slot=1、schedule候補だけfuture_slot=1となることをserviceとDB CHECK/triggerの双方で検証する。
+FK `activated_by -> sys_user.id`。ACTIVE時だけactive_slot=1、未遷移のfuture DRAFT/PROVISIONAL候補だけfuture_slot=1となることをserviceとDB CHECK/triggerの双方で検証する。DB CHECK/triggerはdeployment時刻を再計算せず、statusとslotの許可された遷移だけを検証する。
 future candidate作成は同一tenant/mapping_codeの`future_slot=1` UNIQUEを競合境界とし、異なるclient idempotency keyでも一方だけがINSERT成功、他方は409でdomain/event/cacheを変更しない。
+
+future slotの解放契約は明示的である。effective date到来だけでは解放せず、対象候補の`PROVISIONAL -> ACTIVE`、または未使用候補の`PROVISIONAL -> SUPERSEDED`を、status event・CAS・`future_slot=NULL`の同一transactionで成功させた場合だけ解放する。ACTIVE化のgate/CAS/競合失敗、SUPERSEDE失敗、transaction rollbackでは候補statusとfuture_slot=1を維持し、次候補は409とする。
 
 ### 4.2 `m_compliance_mapping_source`
 
@@ -492,9 +494,9 @@ ACTIVE statusだけを見てdeliveryを許可せず、formal generateごとにta
 | `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_id` | `profile_snapshot_id/hash`は既存`t_contract_compliance_snapshot.id/snapshot_hash`へ1対1 mappingで新規必須。workerは既存`t_contract_compliance_worker_snapshot.id/snapshot_hash`へ1対1 mappingし、交付時点以前の確定版が無い場合はID/hashを同時NULLとしてworker項目を省略する。片側NULLは拒否する。`workplace_id`はprofileからserver解決したscope scalarで新規必須。legacyはNULL |
 | `render_input_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。actual config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。render_input_hashはprofile/worker/workplace scope、template、mapping/policy/gate、mask policy、engine、roleのprovenance hashであり、hashから業務内容を再構成しない |
 | `rendition_group_id`、`full_document_version_id/sha256`、`mask_document_version_id/sha256`、`limited_document_version_id/sha256` | legacyはNULL、新規は3 role renditionのimmutable document version/hashを必須保存 |
-| `delivery_business_key`, `generation_state` | legacyはNULL。新規はbusiness keyをNOT NULL、`generation_state`は`CREATING`または`READY`。`UNIQUE(tenant_id,delivery_business_key)`でclient idempotency keyとは分離し、`CREATING`予約→3 rendition/CLEAN/notification準備→`READY`を同一transactionで行う。失敗は予約をrollbackし、READYだけをdownload対象とする |
+| `delivery_business_key`, `generation_state` | legacyはNULL。新規はbusiness keyをNOT NULL、`generation_state`は`CREATING`または`READY`。`UNIQUE(tenant_id,delivery_business_key)`でclient idempotency keyとは分離し、`CREATING`予約→3 rendition/CLEAN/notification準備→`READY`を同一transactionで行う。失敗は予約をrollbackする。新規rowのformal downloadはREADYだけを許可するが、legacyのNULL rowは既存delivery ACL、file scope、scan=CLEAN、安全な保存済みDocumentVersionを再検証してdownload 200を許可する |
 
-既存行へのactor/mapping/reviewの捏造backfillは禁止する。DTOはlegacyを`LEGACY_GATE_SNAPSHOT_UNAVAILABLE`として表示する。
+既存行へのactor/mapping/reviewの捏造backfillは禁止する。DTOはlegacyを`LEGACY_GATE_SNAPSHOT_UNAVAILABLE`として表示する。legacyの`generation_state=NULL`をREADY不足として拒否してはならず、既存ACL/CLEAN条件を満たすlist/downloadだけを許可する。
 新規deliveryはprofile snapshot、resolved workplace_id、mapping/policy/gate、3 rendition refsなしで保存できない。worker snapshotが交付時点以前に無い場合はworker ID/hashを同時NULLで保存し、worker項目を省略して生成を継続する。
 新しいworkplace snapshot table、render config snapshot table、canonical input JSON列は作らず、actual contentは既存のappend-only
 `t_document_version`へ保存した3つのPDF renditionだけを正本とする。formal generateは同一交付transactionで、同じprofile/workplace scopeと、存在する場合だけworker snapshotを入力に、
@@ -503,9 +505,11 @@ mapping/policy/gateを固定してFULL、MASK、LIMITEDの3つの`DocumentVersio
 1つでも生成・scanに失敗したらdeliveryと全renditionをrollbackする。
 
 client idempotency keyは共通operation ledgerの再送識別だけに使う。deliveryの業務一意keyは、生成時に新設される`rendition_group_id`、delivery ID、
-operation_id、client idempotency key、notification IDを除外し、少なくとも
-`tenantId,contractId,documentType,templateVersion,profileSnapshotHash,workerSnapshotHash-or-NULL-sentinel,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,gateSnapshotHash,renderInputHash`
-のcanonical SHA-256とする。`UNIQUE(tenant_id,delivery_business_key)`の予約INSERTが異key同入力を直列化し、既存READY rowから同じdelivery/rendition/resultを返す。
+operation_id、client idempotency key、notification ID、`gate_snapshot_hash`、`render_input_hash`、gate evaluated asOf、worker asOf、
+`delivered_at`を除外し、serverが選択したstable inputだけから作る。canonical payloadは
+`tenantId,contractId,documentType,templateVersion,profileSnapshotId,profileSnapshotHash,workerSnapshotId,workerSnapshotHash-or-ABSENT,workplaceId,mappingVersionId,mappingVersion,mappingHash,reviewPolicyHash,approvalEventId,externalReviewEventIds(sorted),evidenceDocumentVersionIds(sorted),evidenceHashes(sorted),fieldMaskPolicyHash,renderEngineVersion`
+とする。worker snapshot不在は`workerSnapshotId=NULL,workerSnapshotHash=NULL,workerSnapshotPresence=ABSENT`を固定する。各ID/hashは採用証跡・保存snapshot・template/mask/engineの版を示すstable値であり、時間経過だけでは変わらない。
+`UNIQUE(tenant_id,delivery_business_key)`の予約INSERTが異key同入力を直列化し、既存READY rowから同じdelivery/rendition/resultを返す。business keyが同じでも、formal generate前に現在gateを再評価し、期限切れ・撤回・scope不成立なら既存deliveryを新規formal resultとして返さず409とする。
 notificationは`COMPLIANCE_DELIVERY:{delivery_business_key}`をidempotency keyとし、予約ownerだけが1件作成する。mapping/policy/review evidence/render inputのいずれかが変わった時だけbusiness keyが変わり、新group/notificationを許可する。
 
 ### 9.2 preview
@@ -644,16 +648,18 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-IDP-12 / R6.5 | L2 | reviewer type disable response loss/concurrent same key | admin×2 | A | — | t0 | disable then retry | 200/409→200 | disabled state 1、same result | cache 1 |
 | G2-IDP-13 / R6.5 | L2 | review requirement update response loss/concurrent same key | admin×2 | A | A | t0 | DRAFT policy update then retry | 200/409→200 | requirement rows 1、same policy hash/result | cache 1 |
 | G2-IDP-14 / R6.5/R8.2 | L3 | same delivery input with different client keys, sequential/L3 concurrent, response loss | admin×2 | A | A | t0 | K1/K2 generate then retry | 200/200 | delivery 1、business key 1、rendition group 1、3 rendition、notification 1、both results same | duplicate branch no-op or reservation rollback; cache 1 |
+| G2-IDP-15 / R6.5/R8.2/R8.4 | L3 | same stable inputs at t0 and t0+1秒/翌日 with different client keys; gate remains valid | admin×2 | A | A | t0/t1 | K1/K2 generate | 200/200 | time-independent business key、delivery/group/rendition/notification各1、same result; changed snapshot/template/evidence only creates new key | gate/render audit hashes may differ; business reservation 1 |
 | G2-LIFE-01 / R6.6 | L2 | mapping from=t0+1day | admin | A | A | t0 | ACTIVE | 409 | PROVISIONAL/status 0 | 不変 |
 | G2-LIFE-02 / R6.6 | L2 | mapping from=t0 | admin | A | A | t0 | ACTIVE | 200 | ACTIVE 1、gate hashあり | afterCommit 1 |
 | G2-LIFE-03 / R6.6 | L2 | finite to=t0 | admin | A | A | t0 / t0+1day | generate | 200 / 409 | boundary day allowed、after expired delivery 0 | 不変 |
-| G2-LIFE-04 / R6.6 | L2 | old ACTIVE effective_to=NULL + future PROVISIONAL | admin | A | A | t0 / future date | create future then activate | 200 / 409 before date | future row saved with future_slot=1, old ACTIVE unchanged; activation only on effective date | 不変 |
+| G2-LIFE-04 / R6.6 | L2 | old ACTIVE effective_to=NULL + future PROVISIONAL | admin | A | A | t0 / future date | create future then activate | 200 / 409 before date | future row saved with future_slot=1, old ACTIVE unchanged; activation only on effective date; successful activation sets future_slot=NULL in same CAS transaction | 不変 |
 | G2-LIFE-05 / R6.6 | L2 | period gap after old expiry | admin | A | A | t0+gap | generate | 409 | delivery 0、no auto transition | cache old |
-| G2-LIFE-06 / R6.6 | L2 | unused PROVISIONAL | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、gate hash NULL | afterCommit 1 |
-| G2-LIFE-07 / R6.6 | L2 | old ACTIVE replacement | admin | A | A | t0 | new ACTIVE | 200 | old SUPERSEDED/new ACTIVE, same gate hash/correlation | afterCommit 1 |
+| G2-LIFE-06 / R6.6 | L2 | unused PROVISIONAL future candidate | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、gate hash NULL、future_slot NULL in same transaction | afterCommit 1 |
+| G2-LIFE-07 / R6.6 | L2 | old ACTIVE replacement by future candidate | admin | A | A | t0/effective date | new ACTIVE | 200 | old SUPERSEDED/new ACTIVE, same gate hash/correlation; candidate future_slot NULL and old active_slot NULL in CAS transaction | afterCommit 1 |
 | G2-LIFE-08 / R6.6 | L2 | explicit ACTIVE end/no replacement | admin | A | A | t0 | SUPERSEDE | 200 | status event 1、reasonあり、gate hash NULL | delivery now fail-closed |
 | G2-LIFE-09 / R6.6 | L2 | missing/invalid deployment timezone | admin | A | A | t0 | ACTIVE/generate | 409 | `GATE_TIMEZONE_UNAVAILABLE`、state/event/delivery 0 | cache 0 |
 | G2-LIFE-10 / R6.6 | L3 | current ACTIVE + two different-key future candidates, same/partial/different future dates | admin×2 | A | A | t0 | concurrent future create | 200/409 | future_slot=1候補1件、loserのrow/event/cache 0 | rollback/no cache |
+| G2-LIFE-11 / R6.6/R6.7 | L2/L3 | future candidate success/failure/time passage | admin×2 | A | A | t0/effective date | ACTIVE or SUPERSEDE then next create; CAS/gate failure; wait without transition | 200/409 | success transition sets future_slot=NULL and next candidate succeeds; failure/rollback keeps slot=1 and next candidate 409; time passage alone does not clear slot | rollback/cache unchanged |
 | G2-DEL-12 / R8.3 | L2 | delivery後master/config/profile/worker変更 | manager/sales | A | A | t1 | download all roles | 200 | bytes/sha256 unchanged | access log only |
 | G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | existing profile/worker snapshot ID+hash、resolved workplace_id、render_input_hash、3 rendition refs persisted | afterCommit 1 |
 | G2-DEL-14 / R8.3 | L2 | one role rendition missing/unclean | admin | A | A | t0 | generate/download | 409/403 | delivery or rendition not usable | rollback/no cache |
@@ -750,7 +756,7 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-DEL-05 / R8.2 | L2 | mapping hash変更/new version | admin | A | A | t0 | generate same old key | 200 | 新delivery/key | afterCommit |
 | G2-DEL-06 / R8.2 | L2 | policy/gate evidence変更 | admin | A | A | t0 | generate | 200 | 旧deliveryを返さず新規 | afterCommit |
 | G2-DEL-07 / R8.3 | L2 | delivery後mapping SUPERSEDED | HR/manager/sales | A | A | t1 | download | 200 | access log、原版/role mask | current gate cache不使用 |
-| G2-DEL-08 / R8.2 | L1 | legacy NULL snapshot | admin | A | A | t0 | list/download | 200 | LEGACY表示、backfill 0 | 不変 |
+| G2-DEL-08 / R8.2 | L1 | legacy NULL snapshot / generation_state=NULL | admin | A | A | t0 | list/download | 200 | LEGACY表示、既存ACL/file scope/scan=CLEANを満たす保存済みDocumentVersionをdownload、backfill 0; READY-onlyは新規rowだけ | 不変 |
 | G2-DEL-09 / R8.4 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | archive 0 | cache 0 |
 | G2-DEL-10 / R8.4 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | delivery/notification 0 | cache 0 |
 | G2-DEL-11 / R8.4 | L2 | preview PDF | admin/manager | A | A | t0 | preview | 200 | watermark、deliveryIdなし | cache 0 |

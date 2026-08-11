@@ -62,7 +62,8 @@
    SUPERSEDEDの再ACTIVE化を禁止する。ACTIVE current rowはexpected version CASで遷移する。
 7. THE mapping version SHALL platform既定どおりinclusive effective periodを持つ。current ACTIVEの`effective_to=NULL`と、
    `effective_from`がasOfより後のfuture DRAFT/PROVISIONAL 1件だけは法改定scheduleとして共存できる。future candidateは`future_slot=1`とし、
-   `UNIQUE(tenant_id,mapping_code,future_slot)`で異なるclient keyの同時作成も1件に制限する。future候補同士の重複、2件目のfuture候補、
+   `UNIQUE(tenant_id,mapping_code,future_slot)`で異なるclient keyの同時作成も1件に制限する。future_slotは作成時に1を予約し、
+   effective date到来だけでは解放せず、対象候補のACTIVEまたはSUPERSEDED成功transitionと同一CAS transactionでNULL化する。future候補同士の重複、2件目のfuture候補、
    effective date前のACTIVE化は禁止する。deployment timezoneが欠落・空・不正ならJVM defaultへfallbackせず`GATE_TIMEZONE_UNAVAILABLE`で
    fail-closedとし、expired/gap periodのgenerate/deliveryも拒否する。PROVISIONALの明示SUPERSEDEDはgate hashなしでreason付きeventを保存する。
 
@@ -93,7 +94,10 @@
    document version、profile snapshot、worker snapshot ID/hash（未作成時は両NULL）、resolved workplace ID、render_input_hashからrole別にdownloadできる。
    新しいworkplace/config snapshot tableは作らず、PDF renditionをcontentの唯一の正本とし、current master/configを再renderに使わない。
    document ACL、tenant/data/organization/file scope、scan=CLEAN、access auditは維持する。
-4. THE delivery SHALL client idempotency keyと別の`delivery_business_key`を持ち、後者はgenerated rendition_group_idを含めず、同一canonical render inputなら異keyでも既存delivery/rendition/notification/resultを1組だけ返す。render input変更時だけ新business key/new groupを許可する。
+4. THE delivery SHALL client idempotency keyと別の`delivery_business_key`を持ち、後者はgenerated rendition_group_id、gate/render評価時刻、worker照会asOf、delivered_atを含めず、
+   stableなprofile/worker snapshot ID/hash、mapping/policy、採用approval/review/evidence、template/mask/engineからcanonical化する。同一stable inputなら異key・異時刻でも既存delivery/rendition/notification/resultを1組だけ返す。
+   formal generate前に現在gateを再評価し、期限切れ・撤回・scope不成立なら既存deliveryを新規結果として返さず409とする。render input変更時だけ新business key/new groupを許可する。
+5. THE legacy delivery SHALL generation_state=NULLをlegacy表示とし、既存ACL、tenant/data/file scope、scan=CLEAN、安全な保存済みDocumentVersionを満たすlist/downloadを許可する。新規deliveryだけCREATING/READYを要求し、formal downloadはREADYだけを許可する。legacyへgate/snapshot/backfillを捏造しない。
 5. THE preview SHALL formal generateと別APIとし、archive/delivery/notification/delivery IDを作らず、watermarkと
    非本番content-dispositionを付ける。
 
@@ -125,8 +129,8 @@
 | requirement | direct regression ID | level |
 |---|---|---|
 | R6.1〜R6.4 assignment/scope | `G2-ASG-01..13`, `G2-DEL-02..04` | L2〜L3 |
-| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..14`, `G2-MIG-07` | L2〜L3 |
-| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..10` | L2〜L3 |
+| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..15`, `G2-MIG-07` | L2〜L3 |
+| R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..11` | L2〜L3 |
 | R7.1〜R7.3 dynamic policy/freeze | `G2-POL-01..16` | L0〜L2 |
 | R7.4/R9.3 PII/evidence/credential crypto | `G2-EVT-12..14`, `G2-SEC-09..10`, `G2-SEC-12..18` | L1〜L2 |
 | R8.1〜R8.4 delivery/preview/immutable rendition | `G2-DEL-01..16` | L1〜L2 |

@@ -56,9 +56,9 @@
 
 ### 3.2 R21 second follow-up docs-only rework
 
-- R21再ReviewはP0=0、P1=3、P2=0でFAIL。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`とする。
-- delivery業務一意keyとclient keyを分離し、同一canonical入力を1 delivery/group/rendition/notificationへ収束させる。future candidateは`future_slot=1`のUNIQUEで1件へ直列化し、
-  worker snapshot不在はID/hash同時NULL・worker項目省略・明示NULL sentinelで生成継続する。credential crypto/source freezeはVERIFIED_CLOSEDを維持し、direct regressionを119 IDへ拡張する。
+- R21再ReviewはP0=0、P1=2、P2=0でFAIL。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`とする。
+- delivery業務一意keyとclient keyを分離し、評価時刻・worker asOf・gate/render hashを除外したstable snapshot/証跡/版basisで同一入力を1 delivery/group/rendition/notificationへ収束させる。legacy NULL rowのdownloadも既存ACL/CLEANで許可する。
+  future candidateは`future_slot=1`のUNIQUEで1件へ直列化し、成功ACTIVE/SUPERSEDED transitionだけ同一CAS transactionでNULL化、失敗・rollback・時刻経過では1を維持する。worker snapshot不在はID/hash同時NULL・worker項目省略・明示NULL sentinelで生成継続する。credential crypto/source freezeはVERIFIED_CLOSED、worker NULLもVERIFIED_CLOSEDを維持し、direct regressionを121 IDへ拡張する。
 - R10 acceptance前はV102/DDL/code/testを変更せず、T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`を維持する。
 
 ## 4. G3 — 外部Portal境界
