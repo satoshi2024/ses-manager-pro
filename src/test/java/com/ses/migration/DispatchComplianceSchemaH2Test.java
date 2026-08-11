@@ -12,6 +12,7 @@ import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -144,6 +145,50 @@ class DispatchComplianceSchemaH2Test {
         }
     }
 
+    @Test
+    void H2でG2assignmentのactive_slotと秒精度境界を再現できる() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:t061_dispatch_g2;MODE=MySQL;DB_CLOSE_DELAY=-1")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TABLE t_contract (id BIGINT PRIMARY KEY)");
+            }
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("sql/schema-dispatch-compliance-h2.sql"));
+
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO m_compliance_mapping_version "
+                        + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status) "
+                        + "VALUES ('default', 'H2-G2', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'DRAFT')");
+                statement.execute("INSERT INTO m_workplace (tenant_id, customer_id, name, valid_from) "
+                        + "VALUES ('default', 1, 'H2-G2-W', '2026-01-01')");
+                long workplaceId = queryLong(statement,
+                        "SELECT id FROM m_workplace WHERE tenant_id='default' AND name='H2-G2-W'");
+                statement.execute("INSERT INTO t_compliance_responsible_assignment "
+                        + "(tenant_id, workplace_id, user_id, effective_from, active_slot, assigned_by) VALUES "
+                        + "('default', " + workplaceId + ", 1, '2026-08-01 00:00:01.000000', 1, 1)");
+                assertEquals(6, queryInt(statement, "SELECT DATETIME_PRECISION FROM INFORMATION_SCHEMA.COLUMNS "
+                        + "WHERE TABLE_NAME='T_COMPLIANCE_RESPONSIBLE_ASSIGNMENT' AND COLUMN_NAME='EFFECTIVE_FROM'"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO t_compliance_responsible_assignment "
+                                + "(tenant_id, workplace_id, user_id, effective_from, active_slot, assigned_by) VALUES "
+                                + "('default', " + workplaceId + ", 2, '2026-08-01 00:00:02.000000', 1, 2)"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO t_compliance_responsible_assignment "
+                                + "(tenant_id, workplace_id, user_id, effective_from, effective_to, active_slot, assigned_by, ended_by, end_reason) VALUES "
+                                + "('default', " + workplaceId + ", 2, '2026-08-02 00:00:01.000000', "
+                                + "'2026-08-03 00:00:01.000000', 1, 2, 2, 'invalid')"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO m_compliance_mapping_version "
+                                + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
+                                + "VALUES ('default', 'H2-G2-ACTIVE-NULL', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'ACTIVE', NULL)"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO m_compliance_mapping_version "
+                                + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
+                                + "VALUES ('default', 'H2-G2-DRAFT-SLOT', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'DRAFT', 1)"));
+            }
+        }
+    }
+
     private boolean hasColumn(Statement statement, String table, String column) throws Exception {
         try (ResultSet resultSet = statement.executeQuery(
                 "SELECT COUNT(*) FROM information_schema.columns "
@@ -157,6 +202,13 @@ class DispatchComplianceSchemaH2Test {
         try (ResultSet resultSet = statement.executeQuery(sql)) {
             assertTrue(resultSet.next());
             return resultSet.getInt(1);
+        }
+    }
+
+    private long queryLong(Statement statement, String sql) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            assertTrue(resultSet.next());
+            return resultSet.getLong(1);
         }
     }
 }

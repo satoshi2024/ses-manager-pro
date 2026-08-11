@@ -1478,6 +1478,7 @@ CREATE TABLE IF NOT EXISTS m_workplace (
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag      TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_workplace_period UNIQUE (customer_id, name, valid_from),
+  CONSTRAINT uk_workplace_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_workplace_period CHECK (valid_to IS NULL OR valid_from <= valid_to)
 );
 CREATE INDEX IF NOT EXISTS idx_workplace_scope ON m_workplace(tenant_id, customer_id, organization_id);
@@ -1580,6 +1581,7 @@ CREATE TABLE IF NOT EXISTS t_contract_compliance_snapshot (
   updated_at                        DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag                      TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_compliance_snapshot_version UNIQUE (contract_id, snapshot_version),
+  CONSTRAINT uk_compliance_snapshot_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT fk_snapshot_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON DELETE CASCADE
 );
@@ -1725,6 +1727,7 @@ CREATE TABLE IF NOT EXISTS t_contract_compliance_worker_snapshot (
   updated_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag                  TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_worker_snapshot_version UNIQUE (contract_id, worker_id, snapshot_version),
+  CONSTRAINT uk_worker_snapshot_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT fk_worker_snapshot_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON DELETE CASCADE
 );
@@ -2169,14 +2172,16 @@ CREATE TABLE IF NOT EXISTS m_compliance_mapping_version (
   effective_from DATE NOT NULL, effective_to DATE, status VARCHAR(30) NOT NULL, active_slot TINYINT, future_slot TINYINT,
   activated_at TIMESTAMP(6), activated_by BIGINT, version INT NOT NULL DEFAULT 0, created_by BIGINT,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, mapping_version), UNIQUE(tenant_id, mapping_code, active_slot), UNIQUE(tenant_id, mapping_code, future_slot), UNIQUE(tenant_id, id)
+   deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, mapping_version), UNIQUE(tenant_id, mapping_code, active_slot), UNIQUE(tenant_id, mapping_code, future_slot), UNIQUE(tenant_id, id),
+   CHECK((status = 'ACTIVE' AND active_slot = 1) OR (status <> 'ACTIVE' AND active_slot IS NULL))
 );
 CREATE TABLE IF NOT EXISTS m_compliance_mapping_source (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL,
   source_code VARCHAR(100) NOT NULL, source_url VARCHAR(1000) NOT NULL, source_version VARCHAR(100) NOT NULL,
   confirmed_on DATE NOT NULL, effective_from DATE NOT NULL, effective_to DATE, created_by BIGINT,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, mapping_id, source_code), UNIQUE(tenant_id, id)
+   deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, mapping_id, source_code), UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_source_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS m_compliance_external_reviewer_type (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', type_code VARCHAR(100) NOT NULL,
@@ -2189,22 +2194,27 @@ CREATE TABLE IF NOT EXISTS m_compliance_mapping_review_requirement_group (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL,
   requirement_group_code VARCHAR(100) NOT NULL, display_name VARCHAR(200) NOT NULL, minimum_distinct_reviewers INT NOT NULL,
   sort_order INT NOT NULL DEFAULT 0, version INT NOT NULL DEFAULT 0, created_by BIGINT, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
-  UNIQUE(tenant_id, mapping_id, requirement_group_code), UNIQUE(tenant_id, id)
+   updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
+   UNIQUE(tenant_id, mapping_id, requirement_group_code), UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_review_group_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS m_compliance_mapping_review_requirement_type (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', requirement_group_id BIGINT NOT NULL,
   reviewer_type_id BIGINT NOT NULL, reviewer_type_code_snapshot VARCHAR(100) NOT NULL, reviewer_type_name_snapshot VARCHAR(200) NOT NULL,
   credential_label_snapshot VARCHAR(200) NOT NULL, credential_required_snapshot TINYINT NOT NULL, created_by BIGINT,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, requirement_group_id, reviewer_type_id), UNIQUE(tenant_id, id)
+   deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, requirement_group_id, reviewer_type_id), UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_review_type_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
+   CONSTRAINT fk_g2_review_type_reviewer FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS t_compliance_responsible_assignment (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', workplace_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-  role_code VARCHAR(40) NOT NULL DEFAULT 'COMPLIANCE_RESPONSIBLE', effective_from DATE NOT NULL, effective_to DATE, active_slot TINYINT,
+   role_code VARCHAR(40) NOT NULL DEFAULT 'COMPLIANCE_RESPONSIBLE', effective_from TIMESTAMP(6) NOT NULL, effective_to TIMESTAMP(6), active_slot TINYINT,
   assigned_by BIGINT NOT NULL, ended_by BIGINT, end_reason VARCHAR(500), version INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
-  UNIQUE(tenant_id, workplace_id, active_slot), UNIQUE(tenant_id, id)
+   UNIQUE(tenant_id, workplace_id, active_slot), UNIQUE(tenant_id, id),
+   CHECK((effective_to IS NULL AND active_slot = 1 AND ended_by IS NULL AND end_reason IS NULL) OR (effective_to IS NOT NULL AND active_slot IS NULL AND ended_by IS NOT NULL AND end_reason IS NOT NULL)),
+   CONSTRAINT fk_g2_assignment_workplace FOREIGN KEY (tenant_id, workplace_id) REFERENCES m_workplace(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS t_compliance_mapping_approval_event (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL, mapping_version VARCHAR(50) NOT NULL,
@@ -2212,8 +2222,13 @@ CREATE TABLE IF NOT EXISTS t_compliance_mapping_approval_event (
   actor_id BIGINT NOT NULL, actor_display_name_snapshot VARCHAR(200) NOT NULL, actor_role_snapshot VARCHAR(50) NOT NULL, action VARCHAR(20) NOT NULL,
   event_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, occurred_at TIMESTAMP(6) NOT NULL, reason VARCHAR(1000),
   evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
-  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id)
+   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_approval_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
+   CONSTRAINT fk_g2_approval_assignment FOREIGN KEY (tenant_id, assignment_id) REFERENCES t_compliance_responsible_assignment(tenant_id, id),
+   CONSTRAINT fk_g2_approval_workplace FOREIGN KEY (tenant_id, workplace_id_snapshot) REFERENCES m_workplace(tenant_id, id),
+   CONSTRAINT fk_g2_approval_target FOREIGN KEY (tenant_id, target_event_id) REFERENCES t_compliance_mapping_approval_event(tenant_id, id),
+   CONSTRAINT fk_g2_approval_supersedes FOREIGN KEY (tenant_id, supersedes_event_id) REFERENCES t_compliance_mapping_approval_event(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS t_compliance_external_review_event (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL, mapping_version VARCHAR(50) NOT NULL,
@@ -2223,15 +2238,21 @@ CREATE TABLE IF NOT EXISTS t_compliance_external_review_event (
   credential_cipher_format VARCHAR(20), credential_masked_snapshot VARCHAR(255), reviewer_identity_hash CHAR(64) NOT NULL, action VARCHAR(20) NOT NULL,
   review_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, reviewed_at TIMESTAMP(6) NOT NULL, valid_until TIMESTAMP(6), recorded_at TIMESTAMP(6) NOT NULL,
   evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64), recorded_by BIGINT NOT NULL,
-  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id)
+   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_external_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
+   CONSTRAINT fk_g2_external_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
+   CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id),
+   CONSTRAINT fk_g2_external_target FOREIGN KEY (tenant_id, target_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id),
+   CONSTRAINT fk_g2_external_supersedes FOREIGN KEY (tenant_id, supersedes_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS t_compliance_mapping_status_event (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL, mapping_version VARCHAR(50) NOT NULL,
   mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL, before_status VARCHAR(30), after_status VARCHAR(30) NOT NULL,
   actor_id BIGINT NOT NULL, actor_display_name_snapshot VARCHAR(200) NOT NULL, actor_role_snapshot VARCHAR(50) NOT NULL, occurred_at TIMESTAMP(6) NOT NULL,
   expected_version INT NOT NULL, gate_snapshot_hash CHAR(64), operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, reason VARCHAR(1000),
-  created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, UNIQUE(tenant_id, id)
+   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, UNIQUE(tenant_id, id),
+   CONSTRAINT fk_g2_status_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', operation_id VARCHAR(36) NOT NULL,

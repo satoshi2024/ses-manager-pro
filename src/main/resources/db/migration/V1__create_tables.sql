@@ -675,7 +675,8 @@ CREATE TABLE t_document (
   INDEX idx_document_counterparty (counterparty_type, counterparty_id),
   INDEX idx_document_status    (status),
   INDEX idx_document_retention (retention_until),
-  INDEX idx_document_tenant    (tenant_id)
+  INDEX idx_document_tenant    (tenant_id),
+  UNIQUE KEY uk_document_tenant_id (tenant_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文書台帳';
 
 CREATE TABLE t_document_version (
@@ -700,6 +701,7 @@ CREATE TABLE t_document_version (
   deleted_flag     TINYINT       NOT NULL DEFAULT 0,
   UNIQUE KEY uk_document_version_no (document_id, version_no),
   UNIQUE KEY uk_document_idempotency (tenant_id, source_type, business_key, version_discriminator),
+  UNIQUE KEY uk_document_version_tenant_id (tenant_id, id),
   INDEX idx_dv_document   (document_id),
   INDEX idx_dv_sha256     (sha256),
   INDEX idx_dv_external   (external_id),
@@ -1335,6 +1337,7 @@ CREATE TABLE m_workplace (
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag      TINYINT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_workplace_period (customer_id, name, valid_from),
+  UNIQUE KEY uk_workplace_tenant_id (tenant_id, id),
   INDEX idx_workplace_scope (tenant_id, customer_id, organization_id),
   INDEX idx_workplace_period (valid_from, valid_to),
   CONSTRAINT chk_workplace_period CHECK (valid_to IS NULL OR valid_from <= valid_to),
@@ -1440,7 +1443,8 @@ CREATE TABLE t_contract_compliance_snapshot (
   created_at                        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at                        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag                      TINYINT NOT NULL DEFAULT 0,
-  UNIQUE KEY uk_compliance_snapshot_version (contract_id, snapshot_version),
+   UNIQUE KEY uk_compliance_snapshot_version (contract_id, snapshot_version),
+   UNIQUE KEY uk_compliance_snapshot_tenant_id (tenant_id, id),
   INDEX idx_compliance_snapshot_hash (snapshot_hash),
   INDEX idx_compliance_snapshot_contract (contract_id),
   CONSTRAINT fk_snapshot_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
@@ -1587,7 +1591,8 @@ CREATE TABLE t_contract_compliance_worker_snapshot (
   created_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at                    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag                  TINYINT NOT NULL DEFAULT 0,
-  UNIQUE KEY uk_worker_snapshot_version (contract_id, worker_id, snapshot_version),
+   UNIQUE KEY uk_worker_snapshot_version (contract_id, worker_id, snapshot_version),
+   UNIQUE KEY uk_worker_snapshot_tenant_id (tenant_id, id),
   INDEX idx_worker_snapshot_hash (snapshot_hash),
   INDEX idx_worker_snapshot_worker (worker_id),
   CONSTRAINT fk_worker_snapshot_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
@@ -2050,7 +2055,7 @@ CREATE TABLE m_compliance_mapping_version (
   CONSTRAINT uk_g2_mapping_future_slot UNIQUE (tenant_id, mapping_code, future_slot),
   CONSTRAINT uk_g2_mapping_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_g2_mapping_status CHECK (status IN ('DRAFT','PROVISIONAL_REVIEWED','ACTIVE','SUPERSEDED')),
-  CONSTRAINT chk_g2_mapping_active_slot CHECK (active_slot IS NULL OR active_slot = 1),
+  CONSTRAINT chk_g2_mapping_active_slot CHECK ((status = 'ACTIVE' AND active_slot = 1) OR (status <> 'ACTIVE' AND active_slot IS NULL)),
   CONSTRAINT chk_g2_mapping_future_slot CHECK (future_slot IS NULL OR future_slot = 1),
   CONSTRAINT fk_g2_mapping_activated_by FOREIGN KEY (activated_by) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2065,7 +2070,7 @@ CREATE TABLE m_compliance_mapping_source (
   updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_g2_mapping_source UNIQUE (tenant_id, mapping_id, source_code),
   CONSTRAINT uk_g2_mapping_source_tenant_id UNIQUE (tenant_id, id),
-  CONSTRAINT fk_g2_source_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_source_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
   CONSTRAINT fk_g2_source_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id),
   CONSTRAINT fk_g2_source_updated_by FOREIGN KEY (updated_by) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2092,7 +2097,7 @@ CREATE TABLE m_compliance_mapping_review_requirement_group (
   updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_g2_review_group UNIQUE (tenant_id, mapping_id, requirement_group_code), CONSTRAINT uk_g2_review_group_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_g2_review_group_minimum CHECK (minimum_distinct_reviewers >= 1),
-  CONSTRAINT fk_g2_review_group_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_review_group_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
   CONSTRAINT fk_g2_review_group_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id),
   CONSTRAINT fk_g2_review_group_updated_by FOREIGN KEY (updated_by) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2105,22 +2110,22 @@ CREATE TABLE m_compliance_mapping_review_requirement_type (
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_by BIGINT,
   updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_g2_review_type UNIQUE (tenant_id, requirement_group_id, reviewer_type_id), CONSTRAINT uk_g2_review_type_tenant_id UNIQUE (tenant_id, id),
-  CONSTRAINT fk_g2_review_type_group FOREIGN KEY (requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(id),
-  CONSTRAINT fk_g2_review_type_reviewer FOREIGN KEY (reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(id),
+  CONSTRAINT fk_g2_review_type_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
+  CONSTRAINT fk_g2_review_type_reviewer FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id),
   CONSTRAINT fk_g2_review_type_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_g2_review_type_reviewer ON m_compliance_mapping_review_requirement_type (tenant_id, reviewer_type_id);
 
 CREATE TABLE t_compliance_responsible_assignment (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', workplace_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-  role_code VARCHAR(40) NOT NULL DEFAULT 'COMPLIANCE_RESPONSIBLE', effective_from DATE NOT NULL, effective_to DATE, active_slot TINYINT,
+  role_code VARCHAR(40) NOT NULL DEFAULT 'COMPLIANCE_RESPONSIBLE', effective_from DATETIME(6) NOT NULL, effective_to DATETIME(6), active_slot TINYINT,
   assigned_by BIGINT NOT NULL, ended_by BIGINT, end_reason VARCHAR(500), version INT NOT NULL DEFAULT 0,
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
   deleted_flag TINYINT NOT NULL DEFAULT 0, CONSTRAINT uk_g2_assignment_active_slot UNIQUE (tenant_id, workplace_id, active_slot),
   CONSTRAINT uk_g2_assignment_tenant_id UNIQUE (tenant_id, id), CONSTRAINT chk_g2_assignment_role CHECK (role_code = 'COMPLIANCE_RESPONSIBLE'),
   CONSTRAINT chk_g2_assignment_period CHECK (effective_to IS NULL OR effective_from < effective_to),
-  CONSTRAINT chk_g2_assignment_open_fields CHECK ((effective_to IS NULL AND active_slot IS NULL AND ended_by IS NULL AND end_reason IS NULL) OR (effective_to IS NOT NULL AND ended_by IS NOT NULL AND end_reason IS NOT NULL)),
-  CONSTRAINT fk_g2_assignment_workplace FOREIGN KEY (workplace_id) REFERENCES m_workplace(id),
+  CONSTRAINT chk_g2_assignment_open_fields CHECK ((effective_to IS NULL AND active_slot = 1 AND ended_by IS NULL AND end_reason IS NULL) OR (effective_to IS NOT NULL AND active_slot IS NULL AND ended_by IS NOT NULL AND end_reason IS NOT NULL)),
+  CONSTRAINT fk_g2_assignment_workplace FOREIGN KEY (tenant_id, workplace_id) REFERENCES m_workplace(tenant_id, id),
   CONSTRAINT fk_g2_assignment_user FOREIGN KEY (user_id) REFERENCES sys_user(id),
   CONSTRAINT fk_g2_assignment_assigned_by FOREIGN KEY (assigned_by) REFERENCES sys_user(id),
   CONSTRAINT fk_g2_assignment_ended_by FOREIGN KEY (ended_by) REFERENCES sys_user(id)
@@ -2137,12 +2142,14 @@ CREATE TABLE t_compliance_mapping_approval_event (
   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   CONSTRAINT uk_g2_approval_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_approval_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_g2_approval_action CHECK (action IN ('APPROVE','REJECT','REVOKE')),
-  CONSTRAINT fk_g2_approval_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
-  CONSTRAINT fk_g2_approval_assignment FOREIGN KEY (assignment_id) REFERENCES t_compliance_responsible_assignment(id),
+  CONSTRAINT fk_g2_approval_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
+  CONSTRAINT fk_g2_approval_assignment FOREIGN KEY (tenant_id, assignment_id) REFERENCES t_compliance_responsible_assignment(tenant_id, id),
   CONSTRAINT fk_g2_approval_actor FOREIGN KEY (actor_id) REFERENCES sys_user(id),
-  CONSTRAINT fk_g2_approval_workplace FOREIGN KEY (workplace_id_snapshot) REFERENCES m_workplace(id),
-  CONSTRAINT fk_g2_approval_evidence_document FOREIGN KEY (evidence_document_id) REFERENCES t_document(id),
-  CONSTRAINT fk_g2_approval_evidence_version FOREIGN KEY (evidence_document_version_id) REFERENCES t_document_version(id)
+  CONSTRAINT fk_g2_approval_workplace FOREIGN KEY (tenant_id, workplace_id_snapshot) REFERENCES m_workplace(tenant_id, id),
+  CONSTRAINT fk_g2_approval_target FOREIGN KEY (tenant_id, target_event_id) REFERENCES t_compliance_mapping_approval_event(tenant_id, id),
+  CONSTRAINT fk_g2_approval_supersedes FOREIGN KEY (tenant_id, supersedes_event_id) REFERENCES t_compliance_mapping_approval_event(tenant_id, id),
+  CONSTRAINT fk_g2_approval_evidence_document FOREIGN KEY (tenant_id, evidence_document_id) REFERENCES t_document(tenant_id, id),
+  CONSTRAINT fk_g2_approval_evidence_version FOREIGN KEY (tenant_id, evidence_document_version_id) REFERENCES t_document_version(tenant_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_g2_approval_scope ON t_compliance_mapping_approval_event (tenant_id, mapping_id, workplace_id_snapshot, assignment_id, occurred_at, id);
 CREATE INDEX idx_g2_approval_chain ON t_compliance_mapping_approval_event (tenant_id, event_chain_id, occurred_at, id);
@@ -2159,11 +2166,13 @@ CREATE TABLE t_compliance_external_review_event (
   CONSTRAINT uk_g2_external_review_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_external_review_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_g2_external_review_action CHECK (action IN ('APPROVED','REJECTED','REVOKED')),
   CONSTRAINT chk_g2_external_credential_pair CHECK ((credential_snapshot_encrypted IS NULL AND credential_key_version IS NULL AND credential_cipher_format IS NULL AND credential_masked_snapshot IS NULL) OR (credential_snapshot_encrypted IS NOT NULL AND credential_key_version IS NOT NULL AND credential_cipher_format IS NOT NULL AND credential_masked_snapshot IS NOT NULL)),
-  CONSTRAINT fk_g2_external_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
-  CONSTRAINT fk_g2_external_group FOREIGN KEY (requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(id),
-  CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(id),
-  CONSTRAINT fk_g2_external_evidence_document FOREIGN KEY (evidence_document_id) REFERENCES t_document(id),
-  CONSTRAINT fk_g2_external_evidence_version FOREIGN KEY (evidence_document_version_id) REFERENCES t_document_version(id),
+  CONSTRAINT fk_g2_external_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
+  CONSTRAINT fk_g2_external_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
+  CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id),
+  CONSTRAINT fk_g2_external_target FOREIGN KEY (tenant_id, target_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id),
+  CONSTRAINT fk_g2_external_supersedes FOREIGN KEY (tenant_id, supersedes_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id),
+  CONSTRAINT fk_g2_external_evidence_document FOREIGN KEY (tenant_id, evidence_document_id) REFERENCES t_document(tenant_id, id),
+  CONSTRAINT fk_g2_external_evidence_version FOREIGN KEY (tenant_id, evidence_document_version_id) REFERENCES t_document_version(tenant_id, id),
   CONSTRAINT fk_g2_external_recorded_by FOREIGN KEY (recorded_by) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_g2_external_review_scope ON t_compliance_external_review_event (tenant_id, mapping_id, requirement_group_id, reviewer_identity_hash, recorded_at, id);
@@ -2176,7 +2185,7 @@ CREATE TABLE t_compliance_mapping_status_event (
   expected_version INT NOT NULL, gate_snapshot_hash CHAR(64), operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, reason VARCHAR(1000),
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), CONSTRAINT uk_g2_status_tenant_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_g2_status_after CHECK (after_status IN ('DRAFT','PROVISIONAL_REVIEWED','ACTIVE','SUPERSEDED')),
-  CONSTRAINT fk_g2_status_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_status_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
   CONSTRAINT fk_g2_status_actor FOREIGN KEY (actor_id) REFERENCES sys_user(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_g2_status_mapping ON t_compliance_mapping_status_event (tenant_id, mapping_id, occurred_at, id);
@@ -2198,19 +2207,19 @@ CREATE INDEX idx_g2_operation_lease ON t_compliance_operation_ledger (tenant_id,
 CREATE INDEX idx_g2_operation_result ON t_compliance_operation_ledger (tenant_id, result_reference_type, result_reference_id);
 
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_mapping_version
-  FOREIGN KEY (mapping_version_id) REFERENCES m_compliance_mapping_version(id);
+  FOREIGN KEY (tenant_id, mapping_version_id) REFERENCES m_compliance_mapping_version(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_profile_snapshot
-  FOREIGN KEY (profile_snapshot_id) REFERENCES t_contract_compliance_snapshot(id);
+  FOREIGN KEY (tenant_id, profile_snapshot_id) REFERENCES t_contract_compliance_snapshot(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_worker_snapshot
-  FOREIGN KEY (worker_snapshot_id) REFERENCES t_contract_compliance_worker_snapshot(id);
+  FOREIGN KEY (tenant_id, worker_snapshot_id) REFERENCES t_contract_compliance_worker_snapshot(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_workplace
-  FOREIGN KEY (workplace_id) REFERENCES m_workplace(id);
+  FOREIGN KEY (tenant_id, workplace_id) REFERENCES m_workplace(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_full_document_version
-  FOREIGN KEY (full_document_version_id) REFERENCES t_document_version(id);
+  FOREIGN KEY (tenant_id, full_document_version_id) REFERENCES t_document_version(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_mask_document_version
-  FOREIGN KEY (mask_document_version_id) REFERENCES t_document_version(id);
+  FOREIGN KEY (tenant_id, mask_document_version_id) REFERENCES t_document_version(tenant_id, id);
 ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_limited_document_version
-  FOREIGN KEY (limited_document_version_id) REFERENCES t_document_version(id);
+  FOREIGN KEY (tenant_id, limited_document_version_id) REFERENCES t_document_version(tenant_id, id);
 
 -- ============================================================
 -- DDL完了

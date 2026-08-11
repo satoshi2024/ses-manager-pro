@@ -1,11 +1,11 @@
 # G2 gate decision delta — R19-P1-01 / T066
 
-> 状態: `PROPOSED_FOR_R10_REVIEW / ACCEPTED_FOR_IMPLEMENTATION待ち`
+> 状態: `ACCEPTED_FOR_IMPLEMENTATION / R22_SCHEMA_REWORK_IN_PROGRESS`
 >
 > 発注者の2026-08-11 docs-only着手指示を、実装時の推測が残らない粒度へ具体化した正本候補である。
-> R10が本書を独立Reviewし、`ACCEPTED_FOR_IMPLEMENTATION`を明示するまでは、V1、V102、既存migration、
-> H2、Java、HTML、JavaScript、CSS、message bundle、test、seed、実在DBを変更しない。
-> R19-P1-01を実装担当自身がcloseしない。T066は未完了、S10は`IN PROGRESS`、S12は`NOT READY`を維持する。
+> R10はHead `3f7cc518e928c02f8eba7c08f368beb5d8f33526`を独立Reviewし、`ACCEPTED_FOR_IMPLEMENTATION`を明示した。
+> 以後の実装は本deltaの決定とR22修正契約に限定する。R19-P1-01を実装担当自身がcloseしない。
+> T066は未完了、S10は`IN PROGRESS / FAIL`、S12は`NOT READY`を維持する。
 
 ## 0. Decision IDと優先順位
 
@@ -252,7 +252,9 @@ group/typeへのFK。snapshotはpolicy freeze時の値であり、type master re
 
 columns: `tenant_id`, `workplace_id`, `user_id`, `role_code`, `effective_from`, `effective_to`, `active_slot`,
 `assigned_by`, `ended_by`, `end_reason`, `version`, actor/time。`role_code`は常に`COMPLIANCE_RESPONSIBLE`。
-`effective_to/active_slot/ended_by/end_reason`はopen assignmentではNULL。終了時は`effective_to/ended_by/end_reason`を必須にする。
+`effective_from/effective_to`は`DATETIME(6)`で保存する。`effective_to`はexclusiveで、open assignmentは
+`effective_to IS NULL`かつ`active_slot=1`、`ended_by/end_reason=NULL`とする。有限assignmentは
+`active_slot=NULL`かつ`effective_to/ended_by/end_reason`を必須にする。
 `UNIQUE(tenant_id,workplace_id,active_slot)`、`UNIQUE(tenant_id,id)`、
 index `(tenant_id,workplace_id,effective_from,effective_to)`と`(tenant_id,user_id,effective_from,effective_to)`、
 FK `workplace_id -> m_workplace.id`, `user_id/assigned_by/ended_by -> sys_user.id`。
@@ -305,7 +307,8 @@ mapping/user FK。INSERTのみ。DB triggerで直接UPDATE/DELETEを拒否する
 
 V102はmapping sourceへfreeze状態を参照する`BEFORE INSERT`/`BEFORE UPDATE`/`BEFORE DELETE` triggerを作り、DRAFT parentだけ編集を許可し、
 PROVISIONAL_REVIEWED/ACTIVE/SUPERSEDED parentでは直接変更を拒否する。さらにapproval/external review/status eventの各tableへ`BEFORE UPDATE`/`BEFORE DELETE` triggerを作り、
-`SIGNAL SQLSTATE '45000'`で直接変更を拒否する。application mapperはINSERT/SELECTだけを公開する。
+`SIGNAL SQLSTATE '45000'`で直接変更を拒否する。event mapperはINSERT/SELECTだけを公開し、operation ledgerは
+claim、SELECT、PROCESSINGからのCAS遷移だけを明示APIで公開する。全G2 mapperで`BaseMapper`の汎用DELETE/UPDATE APIを公開しない。
 MySQL direct regressionはapplicationを経由しないSQLでsourceとeventへINSERT/UPDATE/DELETEを発行し、DRAFT sourceの3操作だけが成功し、
 freeze済みsourceの3操作とeventの6操作が拒否され、行/hashが不変で
 あることをassertする。修復が必要な場合は公開済みV102を編集せず、承認済みforward repair migrationで扱う。
@@ -796,6 +799,22 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-MIG-08 / R10.2 | L0 | common/dev/prod inventory | — | — | — | — | version scan | — | V100実在、V102予約、重複0 | — |
 | G2-MIG-09 / R10.2 | L0 | S12〜S17 docs | — | — | — | — | monotonic scan | — | V103<V104<...<V108 | — |
 
+### 13.8 R22 schema implementation direct regression
+
+| ID | level | fixture / operation | expected |
+|---|---|---|---|
+| G2-ASG-14 / R6.2 | L1/L2 | open assignment 2件、finite assignmentのslot誤値、ACTIVE mappingのslot NULL | openはslot=1で1件、finite/non-ACTIVEはslot=NULL、NULL-safe CHECK/trigger |
+| G2-ASG-15 / R6.2 | L2 | `DATETIME(6)` assignmentをt0−1µs/t0/t0+1µsで評価 | 半開区間を秒・マイクロ秒精度で再現し、隣接だけ許可 |
+| G2-FK-01 / R6.1/R7.2 | L2 | G2 childの同tenant/cross-tenant parent | `(tenant_id,parent_id)`複合FKの同tenantだけ成功、cross-tenant拒否 |
+| G2-FK-02 / R6.5 | L2 | event target/supersedesの存在なし・別tenant | self複合FKで孤立chain/別tenant targetを拒否 |
+| G2-OP-01 / R6.5 | L0 | event/operation mapper API inventory | eventはINSERT/SELECT、operationはclaim/SELECT/CASのみ。BaseMapper/deleteById/updateById 0 |
+| G2-OP-02 / R6.5 | L2 | PROCESSING operationのDELETE、SUCCEEDED result改変 | DB triggerが拒否、result/reference row不変 |
+| G2-OP-03 / R6.5 | L2/L3 | PROCESSING→SUCCEEDED/FAILEDとexpected version競合 | 許可されたCASだけ1勝、terminal rowは永久保持 |
+| G2-MIG-13 / R10.1 | L1 | index/parent uniqueが既存・欠落・別phase | `information_schema`確認後、欠落だけ作成。duplicate error 0 |
+| G2-MIG-14 / R10.1 | L1/L2 | G2 tableがabsent/partial/old definition | canonical columns/type/precisionをassertし、shape mismatchは`G2_V102_SHAPE_MISMATCH`または`G2_V102_COLUMN_SHAPE_MISMATCH`でfail-closed |
+| G2-MIG-15 / R10.2 | L2 | FK/triggerがabsent、旧定義、途中失敗後 | named FK/triggerをdrop/re-addしてcanonical shapeへ収束 |
+| G2-MIG-16 / R10.2 | L2 | V102適用後にgit commitをrevert | DBをgit revertで戻さず、checksum/history確認後のforward repairのみ |
+
 ## 14. Browser acceptance
 
 ### 14.1 Phase A — external review / ACTIVE前
@@ -817,7 +836,8 @@ downloaded file、console error 0を記録する。mappingをSUPERSEDEDにした
 
 ## 15. R10 acceptanceと実装順
 
-R10が本書と同期docsを独立Reviewし、`ACCEPTED_FOR_IMPLEMENTATION`を記録した後だけ次へ進む。
+R10はHead `3f7cc518e928c02f8eba7c08f368beb5d8f33526`のdocs deltaを独立Reviewし、
+`ACCEPTED_FOR_IMPLEMENTATION`を記録済みである。以下の実装順へ進めるが、T066/S10 PASS条件と本番gateは未達のまま維持する。
 
 1. V1/V102/H2/entity/mapper。
 2. MySQL migration direct regression。
@@ -840,7 +860,7 @@ code decisionではない。未解決なのは実在actor/reviewer/evidence/brow
 
 | item | 許可する選択肢 | 推奨 | 未達時の影響 |
 |---|---|---|---|
-| R10 decision delta Review | `ACCEPTED_FOR_IMPLEMENTATION`、またはdecision ID付き差戻し | R10がBase/Head固定の独立docs Reviewを行う | V102、DDL、code、testへ進まない。R19-P1-01 OPEN |
+| R10 decision delta Review | `ACCEPTED_FOR_IMPLEMENTATION`済み。以後は実装差分の独立Review | R10がBase/Head固定でschema/code/testをReviewする | R22 P1がOPENならT066完了、ACTIVE、本番交付、S10 PASSへ進まない |
 | 実在assignment actor / approval | 権限を持つ自然人をruntime指名して本人がapproval、またはgateを閉じたままにする | 実運用責任者を管理者が指名し、対象mapping/policy hashへ本人が承認する | ACTIVE、Phase B、formal generate/delivery、T066/S10 PASSを禁止 |
 | dynamic policy / external review / CLEAN evidence | tenant画面でpolicyを設定し実在reviewerと実在evidenceを記録、またはgateを閉じたままにする | code既定値やseedを作らず、実際の業務判断をfreezeして要件を満たすreviewを取得する | ACTIVE、Phase B、formal generate/delivery、T066/S10 PASSを禁止 |
 | PDF browser evidence | Phase AとPhase Bを§14どおり実施、または未達として停止 | desktop/390px・role別・4帳票の両phaseを証跡化する | R19-P2-02 OPEN、T066/S10 PASSを禁止 |

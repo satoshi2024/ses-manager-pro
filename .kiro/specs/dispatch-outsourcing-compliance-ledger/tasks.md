@@ -94,7 +94,8 @@
   - **テスト要件**: R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とした後、L1〜L3で
     `g2-gate-decision-delta-r19-p1-01.md` §13の`G2-ASG-01..13`、`G2-POL-01..16`、`G2-EVT-01..14`、
     `G2-ACT-01..06`、`G2-DEL-01..17`、`G2-SEC-01..18`、`G2-MIG-01..12`、
-    `G2-IDP-01..15`、`G2-LIFE-01..11`を実行する。
+    `G2-IDP-01..15`、`G2-LIFE-01..11`、R22追加の`G2-ASG-14..15`、`G2-FK-01..02`、
+    `G2-OP-01..03`、`G2-MIG-13..16`を実行する。
     最終L4では`mvn test`全量、fresh/legacy MySQL smoke、
     既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
     Node/JS syntax、desktop/390px browser Demo Phase A/B、`git diff --check`。
@@ -104,7 +105,7 @@
     ACTIVE化後、formal generate/archive/delivery/download、交付時immutable FULL/MASK/LIMITED rendition、既存profile/worker snapshot ID/hash、
     resolved workplace ID、recipient/display/company/config snapshot hash、render_input_hash、worker snapshotなし時のID/hash同時NULL・worker項目省略・生成継続、時刻を跨ぐ異key再生成の業務一意性、内容A→B→Aの新group/再利用、legacy generation_state=NULLのdownload、future_slot成功解放・失敗rollback、role別403、4帳票、master/config/profile/worker変更後のbytes/hash不変、SUPERSEDED後再downloadを確認する。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
-    `g2-gate-decision-delta-r19-p1-01.md`をR19-P1-01の正本とし、reviewer typeをcode/DDL/seedへ固定しない。
+    `g2-gate-decision-delta-r19-p1-01.md`をR19-P1-01/R22 schema reworkの正本とし、reviewer typeをcode/DDL/seedへ固定しない。
     state-changing operationは共通operation ledgerのrequest hash/result reference/PROCESSING-SUCCEEDED-FAILED契約を使い、
     lease中は409、完了後同じresultを200で返す。sourceはBEFORE INSERT/UPDATE/DELETE freeze trigger、専用credential AES-256-GCM/
     INSERT前operation_id AAD/key rotation、current masterを再読込しないimmutable renditionを実装する。

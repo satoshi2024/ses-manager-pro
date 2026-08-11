@@ -258,10 +258,11 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
 |---|---|---|---|
 | T066-ASOF-01 | L2 | H2実APIでworker snapshotを交付日時点の前・同時刻・後・`snapshot_at` NULL・未作成で用意し、生成archive・FULL download・MASK/LIMITED download・template version切替・再生成を実行 | 生成時に一度だけ確定した`deliveredAt`をdeliveryへ保存し、archiveとdownloadが同じ交付時点の最新確定版だけを使う。交付後/asOf不明のworker項目は出力せず、snapshot未作成時はworker項目なしで生成を継続し、ID/hashは同時NULL、partial NULLを拒否する。mask・template切替・stable business keyによる時刻を跨ぐ異key再生成・legacy NULL downloadを維持する |
 
-## 7. R19-P1-01 G2 gate decision delta（現行正本候補）
+## 7. R19-P1-01 G2 gate decision delta（R10受理済み現行正本）
 
-`g2-gate-decision-delta-r19-p1-01.md`を本sectionの詳細決定表とする。状態は
-`PROPOSED_FOR_R10_REVIEW`であり、R10が`ACCEPTED_FOR_IMPLEMENTATION`を記録するまでproduction/DDL/test codeを変更しない。
+`g2-gate-decision-delta-r19-p1-01.md`を本sectionの詳細決定表とする。R10はHead `3f7cc518`で
+`ACCEPTED_FOR_IMPLEMENTATION`を記録済みである。実装は許可されたが、実在証跡・browser受入・T066 L4・R10最終Reviewまでは
+ACTIVE化、本番交付、T066完了、S10 PASSを許可しない。
 
 ### 7.1 確定した設計境界
 
@@ -290,4 +291,23 @@ Mでは、runtime assignment/承認event/freeze済み動的Review policyを満�
   freeze済みpolicy、実在CLEAN evidenceを必要とする。
 - `GATE-T066-HISTORY`はtracked P2 / production release gateであり、S10 PASS/S12開始のblockerではない。
   G2 mechanism、実在証跡、browser目視、R10最終Reviewは引き続きT066/S10 PASS条件である。
+
+### 7.3 R22 schema implementation contract
+
+- assignmentの`effective_from/effective_to`はMySQL `DATETIME(6)`、Java `LocalDateTime`、H2 `TIMESTAMP(6)`で統一する。
+  半開区間は`from <= asOf AND (to IS NULL OR asOf < to)`、隣接だけ許可する。
+- open assignmentは`effective_to IS NULL AND active_slot=1 AND ended_by IS NULL AND end_reason IS NULL`、
+  finite assignmentは`effective_to IS NOT NULL AND active_slot IS NULL AND ended_by/end_reason IS NOT NULL`とする。
+  mappingもACTIVEだけslot=1、それ以外NULLであり、NULL-safe CHECK/triggerをMySQL/H2へ同期する。
+- G2 childのmapping/group/type/assignment/workplace/document/version/snapshot参照は、parentの`UNIQUE(tenant_id,id)`を参照する
+  `(tenant_id,parent_id)`複合FKとする。approval/external eventの`target_event_id/supersedes_event_id`も同tenant self複合FKとし、
+  `sys_user`だけはG0現行DBにtenant列がないためscalar FK＋service tenant境界を維持する。
+- V102 retryは`information_schema`でtable column shape、index/unique、named FK、triggerを確認し、欠落だけを追加、旧FK/triggerは
+  named drop/re-addする。部分適用でcanonical column shape/type/precisionを満たさない場合は`G2_V102_SHAPE_MISMATCH`または
+  `G2_V102_COLUMN_SHAPE_MISMATCH`でfail-closedし、承認済みforward repairを要求する。
+  V102適用後のgit revertはDB rollbackではなく、Flyway history/checksum確認後のforward repair migration/runbookで扱う。
+- event mapperは明示INSERT/SELECT APIのみ、operation ledgerはclaim/selectとPROCESSINGからのexpected-version CASのみを公開する。
+  operation ledger entityは`BaseEntity`を継承せず、DB triggerでDELETE、identity/result改変、terminal rowの再更新を拒否する。
+- R22 direct regressionは`G2-ASG-14..15`、`G2-FK-01..02`、`G2-OP-01..03`、`G2-MIG-13..16`とし、
+  `ComplianceG2MapperContractTest`、H2 slot/precision回帰、Flyway MySQL metadata/FK/trigger/immutability smokeで検証する。
 

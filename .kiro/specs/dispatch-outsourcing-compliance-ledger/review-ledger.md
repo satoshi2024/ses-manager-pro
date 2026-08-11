@@ -1,12 +1,12 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R10受理後 / T066 G2実装フェーズ1）
+## 現行判定（R22 schema rework / R10再Review待ち）
 
-R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R21-P1-01/P1-02/P1-03/P1-04/P2-01/P2-02はVERIFIED_CLOSEDとして履歴・現行判定を同期した。T066/R19-P1-01の実装フェーズ1として、V102、V1、H2、10 entity、10 mapper、既存DocumentDeliveryのG2 delivery列・immutable source FK、V102専用MySQL smokeを追加した。
+R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R21-P1-01/P1-02/P1-03/P1-04/P2-01/P2-02はVERIFIED_CLOSEDとして履歴・現行判定を同期した。R22独立ReviewはFAIL（P1×5）であり、以下の修正を実装してR10再Reviewへ提出する。
 
 | task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
-| T066 / R19-P1-01 implementation phase 1 | R5/R6/R8/R10.1、G2-MIG-01/06/07/10/11、G2-DEL-13/16 | V1/V102、schema-dispatch-compliance-h2.sql、engineer-schema-h2.sql、DocumentDelivery、G2 10 entity/mapper、FlywayG2GateSchemaSmokeTest、SpecDispatchConsistencyTest V102 follow-up guard | H2 schema 1/0/0/0、AllMappersSchemaSweep 129/0/0/0、MigrationScriptIntegrity 27/0/0/0、SpecDispatchConsistencyTest 9/0/0/0、定向合計167/0/0/1。V102 MySQL smokeはDocker不在で1 skip（CI実行前提）。DemoはG2 service/API未実装のため未実施 | Base `3f7cc518e928c02f8eba7c08f368beb5d8f33526` → 実装commitで固定 | R10再Reviewでschema/CI MySQL smokeを確認。rollbackは実装commit revert、T066 checkbox/S10/S12 status/ACTIVE/formal deliveryは変更なし |
+| T066 / R19-P1-01 R22 schema rework | R5/R6/R8/R10.1、G2-ASG-14/15、G2-FK-01/02、G2-OP-01/03、G2-MIG-13/16 | V1/V102、schema-dispatch-compliance-h2.sql、engineer-schema-h2.sql、assignment/entity、G2 4 mapper/entity、FlywayG2GateSchemaSmokeTest、DispatchComplianceSchemaH2Test、ComplianceG2MapperContractTest、V102ForwardRepairContractTest、g2 decision/design/requirements/tasks/review docs | focused 158/0/0/0（AllMappers 125、H2 2、MigrationScriptIntegrity 27、mapper contract 2、forward repair 2）。V102 MySQL smokeはDocker不在のため未実行/skip境界。G2 service/API/UI、実actor/reviewer/evidence、Phase A/B、T066 L4は未実施 | Base `72b30e9eb8556e8c8f992fcd4505ebdc13e79d3e` → commit後head | R10再ReviewでMySQL 0-skip smokeを確認。rollbackはforward repair、T066 checkbox/S10/S12 status/ACTIVE/formal deliveryは変更なし |
 
 実装フェーズ1ではG2 service/API/UI/security、ACTIVE化、実在actor/reviewer/evidence、正式generate/delivery、Phase A/B、T066 checkboxを変更・完了扱いにしない。S10は`IN PROGRESS / FAIL`、S12は`NOT READY`を維持する。
 

@@ -1,17 +1,18 @@
 package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.Version;
-import com.ses.common.base.BaseEntity;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
 
 @Data
-@EqualsAndHashCode(callSuper = true)
 @TableName("t_compliance_operation_ledger")
-public class ComplianceOperationLedger extends BaseEntity {
+public class ComplianceOperationLedger {
+    @TableId(type = IdType.AUTO)
+    private Long id;
     private String tenantId;
     private String operationId;
     private String operationType;
@@ -32,7 +33,12 @@ public class ComplianceOperationLedger extends BaseEntity {
     private String failureCode;
     private String correlationId;
     private LocalDateTime expiresAt;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 
-    @Version
+    @TableField("deleted_flag")
+    private Integer deletedFlag;
+
+    // operation ledgerはBaseEntityを継承しない。論理削除APIを公開せず、DB triggerで0固定する。
     private Integer version;
 }

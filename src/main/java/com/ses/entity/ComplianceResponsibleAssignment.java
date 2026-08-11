@@ -6,7 +6,7 @@ import com.ses.common.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -16,8 +16,8 @@ public class ComplianceResponsibleAssignment extends BaseEntity {
     private Long workplaceId;
     private Long userId;
     private String roleCode;
-    private LocalDate effectiveFrom;
-    private LocalDate effectiveTo;
+    private LocalDateTime effectiveFrom;
+    private LocalDateTime effectiveTo;
     private Integer activeSlot;
     private Long assignedBy;
     private Long endedBy;
