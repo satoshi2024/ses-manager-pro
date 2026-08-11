@@ -45,7 +45,7 @@ class ComplianceG2MapperContractTest {
         assertFalse(BaseMapper.class.isAssignableFrom(ComplianceOperationLedgerMapper.class));
         assertFalse(BaseEntity.class.isAssignableFrom(ComplianceOperationLedger.class));
         Set<String> allowed = Set.of("insertClaim", "selectByIdempotencyKey", "selectByOperationId",
-                "renewLeaseCas", "completeSuccessCas", "completeFailureCas");
+                "renewLeaseCas", "completeSuccessCas", "completeFailureCas", "restartFailedCas");
         for (Method method : ComplianceOperationLedgerMapper.class.getDeclaredMethods()) {
             assertTrue(allowed.contains(method.getName()), method.getName());
             assertFalse(method.getName().equals("deleteById") || method.getName().equals("updateById"),
@@ -55,5 +55,20 @@ class ComplianceG2MapperContractTest {
                             || method.isAnnotationPresent(Update.class),
                     method.getName() + "はclaim/select/CASだけを許可します");
         }
+
+        Method failure = getMethod("completeFailureCas");
+        assertTrue(failure.getAnnotation(Update.class).value()[0].contains("retryable_flag"));
+        Method restart = getMethod("restartFailedCas");
+        assertTrue(restart.getAnnotation(Update.class).value()[0].contains("state = 'FAILED'"));
+        assertTrue(restart.getAnnotation(Update.class).value()[0].contains("retryable_flag = 1"));
+    }
+
+    private Method getMethod(String name) {
+        for (Method method : ComplianceOperationLedgerMapper.class.getDeclaredMethods()) {
+            if (method.getName().equals(name)) {
+                return method;
+            }
+        }
+        throw new AssertionError("missing mapper method: " + name);
     }
 }

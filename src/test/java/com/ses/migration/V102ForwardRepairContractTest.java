@@ -20,16 +20,28 @@ class V102ForwardRepairContractTest {
 
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_assert_shape"));
         assertTrue(sql.contains("G2_V102_SHAPE_MISMATCH forward repair required"));
+        assertTrue(sql.contains("G2_V102_INDEX_SHAPE_MISMATCH forward repair required"));
+        assertTrue(sql.contains("G2_V102_CONSTRAINT_SHAPE_MISMATCH forward repair required"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_assert_column"));
         assertTrue(sql.contains("G2_V102_COLUMN_SHAPE_MISMATCH forward repair required"));
+        assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_assert_column_contract"));
+        assertTrue(sql.contains("G2_V102_COLUMN_CONTRACT_MISMATCH forward repair required"));
+        assertTrue(sql.contains("CHARACTER_MAXIMUM_LENGTH"));
+        assertTrue(sql.contains("IS_NULLABLE"));
+        assertTrue(sql.contains("COLUMN_DEFAULT"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_create_index"));
         assertTrue(sql.contains("information_schema.statistics"));
+        assertTrue(sql.contains("GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX"));
+        assertTrue(sql.contains("NON_UNIQUE"));
+        assertTrue(sql.contains("__ses_g2_assert_index('t_compliance_responsible_assignment'"));
+        assertTrue(sql.contains("__ses_g2_assert_constraint('t_compliance_responsible_assignment'"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_fk"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_delivery_fk"));
         assertTrue(sql.contains("information_schema.table_constraints"));
         assertTrue(sql.contains("information_schema.COLUMNS"));
         assertTrue(sql.contains("DROP TRIGGER IF EXISTS trg_g2_mapping_slot_check"));
         assertTrue(sql.contains("DROP TRIGGER IF EXISTS trg_g2_operation_no_delete"));
+        assertTrue(sql.contains("canonical manifest"));
         assertTrue(sql.contains("CREATE TRIGGER trg_g2_mapping_source_freeze_insert"));
         assertTrue(sql.contains("CREATE TRIGGER trg_g2_assignment_slot_check"));
     }
@@ -41,5 +53,6 @@ class V102ForwardRepairContractTest {
         assertTrue(sql.contains("forward repair"));
         assertTrue(sql.contains("DROP PROCEDURE IF EXISTS __ses_g2_assert_shape"));
         assertTrue(sql.contains("DROP PROCEDURE IF EXISTS __ses_g2_repair_fk"));
+        assertTrue(sql.contains("forward repair required"));
     }
 }

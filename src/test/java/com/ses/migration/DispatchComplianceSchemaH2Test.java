@@ -163,6 +163,10 @@ class DispatchComplianceSchemaH2Test {
                         + "VALUES ('default', 1, 'H2-G2-W', '2026-01-01')");
                 long workplaceId = queryLong(statement,
                         "SELECT id FROM m_workplace WHERE tenant_id='default' AND name='H2-G2-W'");
+                statement.execute("INSERT INTO m_workplace (tenant_id, customer_id, name, valid_from) "
+                        + "VALUES ('default', 1, 'H2-G2-FINITE', '2026-01-01')");
+                long finiteWorkplaceId = queryLong(statement,
+                        "SELECT id FROM m_workplace WHERE tenant_id='default' AND name='H2-G2-FINITE'");
                 statement.execute("INSERT INTO t_compliance_responsible_assignment "
                         + "(tenant_id, workplace_id, user_id, effective_from, active_slot, assigned_by) VALUES "
                         + "('default', " + workplaceId + ", 1, '2026-08-01 00:00:01.000000', 1, 1)");
@@ -185,7 +189,40 @@ class DispatchComplianceSchemaH2Test {
                         "INSERT INTO m_compliance_mapping_version "
                                 + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
                                 + "VALUES ('default', 'H2-G2-DRAFT-SLOT', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'DRAFT', 1)"));
+
+                statement.execute("INSERT INTO t_compliance_responsible_assignment "
+                        + "(tenant_id, workplace_id, user_id, effective_from, effective_to, active_slot, assigned_by, ended_by, end_reason) VALUES "
+                        + "('default', " + finiteWorkplaceId + ", 3, '2026-08-10 00:00:00.000000', "
+                        + "'2026-08-10 00:00:01.000000', NULL, 3, 3, 'adjacent-a')");
+                statement.execute("INSERT INTO t_compliance_responsible_assignment "
+                        + "(tenant_id, workplace_id, user_id, effective_from, effective_to, active_slot, assigned_by, ended_by, end_reason) VALUES "
+                        + "('default', " + finiteWorkplaceId + ", 4, '2026-08-10 00:00:01.000000', "
+                        + "'2026-08-10 00:00:02.000000', NULL, 4, 4, 'adjacent-b')");
+                assertEquals(-1L, queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-09 23:59:59.999999"));
+                long first = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:00.999999");
+                long second = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:01.000000");
+                assertTrue(first > 0L);
+                assertTrue(second > 0L && second != first);
+                assertEquals(-1L, queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:02.000000"));
+                assertEquals(0, queryInt(statement,
+                        "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE workplace_id=" + finiteWorkplaceId
+                                + " AND effective_from < '2026-08-10 00:00:03.000000'"
+                                + " AND (effective_to IS NULL OR effective_to > '2026-08-10 00:00:02.000000')"));
+                assertTrue(queryInt(statement,
+                        "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE workplace_id=" + finiteWorkplaceId
+                                + " AND effective_from < '2026-08-10 00:00:01.500000'"
+                                + " AND (effective_to IS NULL OR effective_to > '2026-08-10 00:00:00.500000')") > 0);
             }
+        }
+    }
+
+    private long queryAssignmentAt(Statement statement, long workplaceId, String asOf) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT id FROM t_compliance_responsible_assignment WHERE workplace_id=" + workplaceId
+                        + " AND effective_from <= '" + asOf + "'"
+                        + " AND (effective_to IS NULL OR '" + asOf + "' < effective_to)"
+                        + " ORDER BY effective_from DESC, id DESC LIMIT 1")) {
+            return resultSet.next() ? resultSet.getLong(1) : -1L;
         }
     }
 

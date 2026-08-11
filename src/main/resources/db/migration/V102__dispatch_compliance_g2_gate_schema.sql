@@ -423,6 +423,103 @@ CALL __ses_g2_create_index('t_compliance_operation_ledger', 'idx_g2_operation_le
   'CREATE INDEX idx_g2_operation_lease ON t_compliance_operation_ledger (tenant_id, state, lease_until)');
 CALL __ses_g2_create_index('t_compliance_operation_ledger', 'idx_g2_operation_result',
   'CREATE INDEX idx_g2_operation_result ON t_compliance_operation_ledger (tenant_id, result_reference_type, result_reference_id)');
+
+-- 同名indexが存在するだけではpartial/old-definitionを安全に再開できない。
+-- 列順、列数、UNIQUE属性をcanonical manifestと照合し、不一致はforward repairを要求する。
+DELIMITER $$
+DROP PROCEDURE IF EXISTS __ses_g2_assert_index$$
+CREATE PROCEDURE __ses_g2_assert_index(IN p_table VARCHAR(64), IN p_index VARCHAR(64),
+                                       IN p_columns TEXT, IN p_non_unique INT)
+BEGIN
+  DECLARE v_expected_count INT;
+  DECLARE v_actual_count INT;
+  DECLARE v_actual_non_unique INT;
+  DECLARE v_actual_columns TEXT;
+  SET v_expected_count = 1 + LENGTH(p_columns) - LENGTH(REPLACE(p_columns, ',', ''));
+  SELECT COUNT(*), COALESCE(MAX(NON_UNIQUE), -1),
+         COALESCE(GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ','), '')
+    INTO v_actual_count, v_actual_non_unique, v_actual_columns
+    FROM information_schema.STATISTICS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index;
+  IF v_actual_count <> v_expected_count OR v_actual_non_unique <> p_non_unique
+     OR v_actual_columns <> p_columns THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_INDEX_SHAPE_MISMATCH forward repair required';
+  END IF;
+END$$
+DELIMITER ;
+CALL __ses_g2_assert_index('m_compliance_mapping_version', 'idx_g2_mapping_effective',
+  'tenant_id,mapping_code,status,effective_from,effective_to', 1);
+CALL __ses_g2_assert_index('m_compliance_mapping_source', 'idx_g2_mapping_source_lookup',
+  'tenant_id,source_code,confirmed_on', 1);
+CALL __ses_g2_assert_index('m_compliance_external_reviewer_type', 'idx_g2_reviewer_type_enabled',
+  'tenant_id,enabled,sort_order', 1);
+CALL __ses_g2_assert_index('m_compliance_mapping_review_requirement_group', 'idx_g2_review_group_mapping',
+  'tenant_id,mapping_id,sort_order', 1);
+CALL __ses_g2_assert_index('m_compliance_mapping_review_requirement_type', 'idx_g2_review_type_reviewer',
+  'tenant_id,reviewer_type_id', 1);
+CALL __ses_g2_assert_index('t_compliance_responsible_assignment', 'idx_g2_assignment_period',
+  'tenant_id,workplace_id,effective_from,effective_to', 1);
+CALL __ses_g2_assert_index('t_compliance_responsible_assignment', 'idx_g2_assignment_user_period',
+  'tenant_id,user_id,effective_from,effective_to', 1);
+CALL __ses_g2_assert_index('t_compliance_mapping_approval_event', 'idx_g2_approval_scope',
+  'tenant_id,mapping_id,workplace_id_snapshot,assignment_id,occurred_at,id', 1);
+CALL __ses_g2_assert_index('t_compliance_mapping_approval_event', 'idx_g2_approval_chain',
+  'tenant_id,event_chain_id,occurred_at,id', 1);
+CALL __ses_g2_assert_index('t_compliance_external_review_event', 'idx_g2_external_review_scope',
+  'tenant_id,mapping_id,requirement_group_id,reviewer_identity_hash,recorded_at,id', 1);
+CALL __ses_g2_assert_index('t_compliance_external_review_event', 'idx_g2_external_review_chain',
+  'tenant_id,review_chain_id,recorded_at,id', 1);
+CALL __ses_g2_assert_index('t_compliance_external_review_event', 'idx_g2_external_review_valid_until',
+  'tenant_id,valid_until', 1);
+CALL __ses_g2_assert_index('t_compliance_mapping_status_event', 'idx_g2_status_mapping',
+  'tenant_id,mapping_id,occurred_at,id', 1);
+CALL __ses_g2_assert_index('t_compliance_mapping_status_event', 'idx_g2_status_correlation',
+  'tenant_id,correlation_id', 1);
+CALL __ses_g2_assert_index('t_compliance_operation_ledger', 'idx_g2_operation_lease',
+  'tenant_id,state,lease_until', 1);
+CALL __ses_g2_assert_index('t_compliance_operation_ledger', 'idx_g2_operation_result',
+  'tenant_id,result_reference_type,result_reference_id', 1);
+DROP PROCEDURE IF EXISTS __ses_g2_assert_index;
+
+DELIMITER $$
+DROP PROCEDURE IF EXISTS __ses_g2_assert_constraint$$
+CREATE PROCEDURE __ses_g2_assert_constraint(IN p_table VARCHAR(64), IN p_constraint VARCHAR(64),
+                                            IN p_type VARCHAR(30))
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
+                  WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table
+                    AND CONSTRAINT_NAME = p_constraint AND CONSTRAINT_TYPE = p_type) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_CONSTRAINT_SHAPE_MISMATCH forward repair required';
+  END IF;
+END$$
+DELIMITER ;
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'uk_g2_mapping_version', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'uk_g2_mapping_active_slot', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'uk_g2_mapping_future_slot', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'chk_g2_mapping_status', 'CHECK');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'chk_g2_mapping_active_slot', 'CHECK');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'chk_g2_mapping_future_slot', 'CHECK');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_source', 'uk_g2_mapping_source', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_external_reviewer_type', 'uk_g2_reviewer_type', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_review_requirement_group', 'uk_g2_review_group', 'UNIQUE');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_review_requirement_group', 'chk_g2_review_group_minimum', 'CHECK');
+CALL __ses_g2_assert_constraint('m_compliance_mapping_review_requirement_type', 'uk_g2_review_type', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_responsible_assignment', 'uk_g2_assignment_active_slot', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_responsible_assignment', 'chk_g2_assignment_period', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_responsible_assignment', 'chk_g2_assignment_open_fields', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_mapping_approval_event', 'uk_g2_approval_idempotency', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_mapping_approval_event', 'chk_g2_approval_action', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_external_review_event', 'uk_g2_external_review_idempotency', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_external_review_event', 'chk_g2_external_review_action', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_external_review_event', 'chk_g2_external_credential_pair', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_mapping_status_event', 'chk_g2_status_after', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'uk_g2_operation_key', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'uk_g2_operation_id', 'UNIQUE');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'chk_g2_operation_type', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'chk_g2_operation_state', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'chk_g2_operation_retryable', 'CHECK');
+CALL __ses_g2_assert_constraint('t_compliance_operation_ledger', 'chk_g2_operation_result', 'CHECK');
+DROP PROCEDURE IF EXISTS __ses_g2_assert_constraint;
 DROP PROCEDURE IF EXISTS __ses_g2_create_index;
 CALL __ses_g2_assert_shape('m_compliance_mapping_source',
   'id,tenant_id,mapping_id,source_code,source_url,source_version,confirmed_on,effective_from,effective_to,created_by,created_at,updated_by,updated_at,deleted_flag');
@@ -462,6 +559,48 @@ CALL __ses_g2_assert_column('t_compliance_responsible_assignment', 'effective_fr
 CALL __ses_g2_assert_column('t_compliance_responsible_assignment', 'effective_to', 'datetime', 6);
 DROP PROCEDURE IF EXISTS __ses_g2_assert_column;
 DROP PROCEDURE IF EXISTS __ses_g2_assert_shape;
+
+DELIMITER $$
+DROP PROCEDURE IF EXISTS __ses_g2_assert_column_contract$$
+CREATE PROCEDURE __ses_g2_assert_column_contract(IN p_table VARCHAR(64), IN p_column VARCHAR(64),
+                                                 IN p_type VARCHAR(32), IN p_char_length INT,
+                                                 IN p_datetime_precision INT, IN p_nullable VARCHAR(3),
+                                                 IN p_default VARCHAR(64))
+BEGIN
+  DECLARE v_actual INT;
+  SELECT COUNT(*) INTO v_actual
+    FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
+     AND LOWER(DATA_TYPE) = LOWER(p_type)
+     AND (p_char_length IS NULL OR CHARACTER_MAXIMUM_LENGTH = p_char_length)
+     AND (p_datetime_precision IS NULL OR COALESCE(DATETIME_PRECISION, 0) = p_datetime_precision)
+     AND (p_nullable IS NULL OR IS_NULLABLE = p_nullable)
+     AND (p_default IS NULL OR COALESCE(CAST(COLUMN_DEFAULT AS CHAR), '<NULL>') = p_default);
+  IF v_actual <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_COLUMN_CONTRACT_MISMATCH forward repair required';
+  END IF;
+END$$
+DELIMITER ;
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'mapping_hash', 'char', 64, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'review_policy_hash', 'char', 64, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'effective_from', 'date', NULL, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'status', 'varchar', 30, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'active_slot', 'tinyint', NULL, NULL, 'YES', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_version', 'future_slot', 'tinyint', NULL, NULL, 'YES', NULL);
+CALL __ses_g2_assert_column_contract('m_compliance_mapping_source', 'source_url', 'varchar', 1000, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_responsible_assignment', 'effective_from', 'datetime', NULL, 6, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_responsible_assignment', 'effective_to', 'datetime', NULL, 6, 'YES', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_responsible_assignment', 'active_slot', 'tinyint', NULL, NULL, 'YES', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_mapping_approval_event', 'occurred_at', 'datetime', NULL, 6, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_external_review_event', 'reviewed_at', 'datetime', NULL, 6, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_external_review_event', 'valid_until', 'datetime', NULL, 6, 'YES', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'request_hash', 'char', 64, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'state', 'varchar', 20, NULL, 'NO', NULL);
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'retryable_flag', 'tinyint', NULL, NULL, 'NO', '0');
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'attempt_count', 'int', NULL, NULL, 'NO', '0');
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'version', 'int', NULL, NULL, 'NO', '0');
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'deleted_flag', 'tinyint', NULL, NULL, 'NO', '0');
+DROP PROCEDURE IF EXISTS __ses_g2_assert_column_contract;
 
 DELIMITER $$
 DROP PROCEDURE IF EXISTS __ses_g2_repair_fk$$
@@ -760,15 +899,53 @@ FOR EACH ROW
 BEGIN
   IF NOT (NEW.tenant_id <=> OLD.tenant_id)
     OR NOT (NEW.operation_id <=> OLD.operation_id)
-    OR NOT (NEW.operation_type <=> OLD.operation_type)
-    OR NOT (NEW.idempotency_key <=> OLD.idempotency_key)
-    OR NOT (NEW.request_hash <=> OLD.request_hash)
-    OR NOT (NEW.correlation_id <=> OLD.correlation_id)
-    OR NEW.deleted_flag <> 0
-    OR NEW.version <> OLD.version + 1
-    OR OLD.state <> 'PROCESSING'
-    OR NEW.state NOT IN ('PROCESSING', 'SUCCEEDED', 'FAILED') THEN
+     OR NOT (NEW.operation_type <=> OLD.operation_type)
+     OR NOT (NEW.idempotency_key <=> OLD.idempotency_key)
+     OR NOT (NEW.request_hash <=> OLD.request_hash)
+     OR NOT (NEW.correlation_id <=> OLD.correlation_id)
+     OR NEW.deleted_flag <> 0
+     OR NEW.version <> OLD.version + 1
+     OR NEW.state NOT IN ('PROCESSING', 'SUCCEEDED', 'FAILED')
+     OR NOT (NEW.started_at <=> OLD.started_at)
+     OR NOT (NEW.expires_at <=> OLD.expires_at)
+     OR NOT (NEW.created_at <=> OLD.created_at) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation ledger transition is invalid';
+  END IF;
+  IF OLD.state = 'PROCESSING' AND NEW.state = 'PROCESSING' THEN
+    IF NEW.attempt_count <> OLD.attempt_count + 1
+       OR NOT (NEW.retryable_flag <=> OLD.retryable_flag)
+       OR NOT (NEW.finished_at <=> OLD.finished_at)
+       OR NOT (NEW.result_reference_type <=> OLD.result_reference_type)
+       OR NOT (NEW.result_reference_id <=> OLD.result_reference_id)
+       OR NOT (NEW.result_reference_version <=> OLD.result_reference_version)
+       OR NOT (NEW.result_summary_canonical <=> OLD.result_summary_canonical)
+       OR NOT (NEW.result_http_status <=> OLD.result_http_status)
+       OR NOT (NEW.result_hash <=> OLD.result_hash)
+       OR NOT (NEW.failure_code <=> OLD.failure_code) THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation lease transition is invalid';
+    END IF;
+  ELSEIF OLD.state = 'PROCESSING' AND NEW.state = 'SUCCEEDED' THEN
+    IF NEW.retryable_flag <> 0 OR NEW.finished_at IS NULL
+       OR NEW.result_summary_canonical IS NULL OR NEW.result_http_status IS NULL
+       OR NEW.failure_code IS NOT NULL OR NEW.attempt_count <> OLD.attempt_count THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation success transition is invalid';
+    END IF;
+  ELSEIF OLD.state = 'PROCESSING' AND NEW.state = 'FAILED' THEN
+    IF NEW.finished_at IS NULL OR NEW.failure_code IS NULL
+       OR NEW.attempt_count <> OLD.attempt_count THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation failure transition is invalid';
+    END IF;
+  ELSEIF OLD.state = 'FAILED' AND NEW.state = 'PROCESSING' THEN
+    IF OLD.retryable_flag <> 1 OR NEW.retryable_flag <> 1
+       OR NEW.attempt_count <> OLD.attempt_count + 1 OR NEW.lease_until IS NULL
+       OR NEW.finished_at IS NOT NULL OR NEW.failure_code IS NOT NULL
+       OR NEW.result_reference_type IS NOT NULL OR NEW.result_reference_id IS NOT NULL
+       OR NEW.result_reference_version IS NOT NULL OR NEW.result_summary_canonical IS NOT NULL
+       OR NEW.result_http_status IS NOT NULL OR NEW.result_hash IS NOT NULL THEN
+      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation retry transition is invalid';
+    END IF;
+  ELSE
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation state transition is invalid';
   END IF;
 END$$
 DROP TRIGGER IF EXISTS trg_g2_operation_no_delete$$

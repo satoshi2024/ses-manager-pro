@@ -107,25 +107,45 @@ class FlywayG2GateSchemaSmokeTest {
             long workplaceId = insertWorkplace(statement, "default", customerId, "G2-WORKPLACE-A");
             long assignmentId = insertOpenAssignment(statement, "default", workplaceId, userId,
                     "2026-08-01 00:00:01.000000");
+            long assignmentCountBeforeDuplicate = queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id="
+                            + workplaceId);
             assertThrows(SQLException.class, () -> insertOpenAssignment(statement, "default", workplaceId, userId,
                     "2026-08-02 00:00:01.000000"),
                     "同一workplaceのopen assignmentはactive_slot=1で一意であるはず");
+            assertEquals(assignmentCountBeforeDuplicate, queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id="
+                            + workplaceId));
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "INSERT INTO t_compliance_responsible_assignment "
                             + "(tenant_id, workplace_id, user_id, effective_from, effective_to, active_slot, assigned_by) "
                             + "VALUES ('default', " + workplaceId + ", " + userId
                             + ", '2026-08-03 00:00:01.000000', '2026-08-04 00:00:01.000000', 1, " + userId + ")"),
                     "finite assignmentにactive_slot=1は許可しないはず");
-            assertThrows(SQLException.class, () -> statement.executeUpdate(
-                    "INSERT INTO t_compliance_mapping_version "
+            long mappingCountBeforeActiveNull = queryLong(statement,
+                    "SELECT COUNT(*) FROM m_compliance_mapping_version");
+            SQLException activeNullFailure = assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "INSERT INTO m_compliance_mapping_version "
                             + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
                             + "VALUES ('default', 'G2-ACTIVE-NULL', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'ACTIVE', NULL)"),
                     "ACTIVE mappingのactive_slot=NULLは拒否するはず");
+            assertTrue(activeNullFailure.getSQLState().equals("23000") || activeNullFailure.getSQLState().equals("45000"));
+            assertEquals(mappingCountBeforeActiveNull, queryLong(statement,
+                    "SELECT COUNT(*) FROM m_compliance_mapping_version"));
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "INSERT INTO m_compliance_mapping_version "
                             + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
                             + "VALUES ('default', 'G2-DRAFT-SLOT', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'DRAFT', 1)"),
                     "非ACTIVE mappingのactive_slot=1は拒否するはず");
+
+            statement.executeUpdate("INSERT INTO m_compliance_mapping_version "
+                    + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
+                    + "VALUES ('default', 'G2-ACTIVE-DUP', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'ACTIVE', 1)");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "INSERT INTO m_compliance_mapping_version "
+                            + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
+                            + "VALUES ('default', 'G2-ACTIVE-DUP', 'v2', REPEAT('c', 64), REPEAT('d', 64), '2026-08-02', 'ACTIVE', 1)"),
+                    "同一mapping codeのACTIVE二重登録は拒否するはず");
 
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "UPDATE m_compliance_mapping_source SET source_version='tampered' WHERE mapping_id=" + mappingId));
@@ -169,15 +189,90 @@ class FlywayG2GateSchemaSmokeTest {
                     "DELETE FROM t_compliance_operation_ledger WHERE id=" + operationId),
                     "operation ledgerのDELETEは拒否するはず");
 
+            statement.executeUpdate("INSERT INTO t_compliance_operation_ledger "
+                    + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, "
+                    + "started_at, correlation_id, version, deleted_flag) VALUES "
+                    + "('default', 'g2-operation-retry', 'MAPPING_ACTIVE', 'g2-op-retry-key', REPEAT('e', 64), "
+                    + "'PROCESSING', '2026-08-01 00:00:01.000000', 'g2-op-retry-correlation', 0, 0)");
+            long retryOperationId = queryLong(statement,
+                    "SELECT id FROM t_compliance_operation_ledger WHERE operation_id='g2-operation-retry'");
+            statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
+                    + "finished_at='2026-08-01 00:00:02.000000', failure_code='TEMPORARY', version=1 WHERE id="
+                    + retryOperationId);
+            statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='PROCESSING', retryable_flag=1, "
+                    + "attempt_count=attempt_count+1, lease_until='2026-08-01 00:05:00.000000', finished_at=NULL, "
+                    + "failure_code=NULL, result_summary_canonical=NULL, result_http_status=NULL, result_hash=NULL, "
+                    + "version=2 WHERE id=" + retryOperationId);
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "UPDATE t_compliance_operation_ledger SET result_summary_canonical='tampered', version=3 "
+                            + "WHERE id=" + retryOperationId),
+                    "PROCESSING lease以外のresult改変は拒否するはず");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "UPDATE t_compliance_operation_ledger SET state='PROCESSING', retryable_flag=0, "
+                            + "finished_at='2026-08-01 00:00:03.000000', failure_code=NULL, version=3 WHERE id="
+                            + retryOperationId),
+                    "PROCESSING中の不正transitionは拒否するはず");
+            statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=0, "
+                    + "finished_at='2026-08-01 00:00:03.000000', failure_code='PERMANENT', version=3 WHERE id="
+                    + retryOperationId);
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "UPDATE t_compliance_operation_ledger SET state='PROCESSING', retryable_flag=1, "
+                            + "attempt_count=attempt_count+1, lease_until='2026-08-01 00:06:00.000000', "
+                            + "finished_at=NULL, failure_code=NULL, version=4 WHERE id=" + retryOperationId),
+                    "retryableでないFAILEDの再開は拒否するはず");
+
             long otherMappingId = insertMapping(statement, "other-tenant", "G2-OTHER", "v1", "DRAFT");
             long otherWorkplaceId = insertWorkplace(statement, "other-tenant", customerId, "G2-WORKPLACE-B");
             long otherAssignmentId = insertOpenAssignment(statement, "other-tenant", otherWorkplaceId, userId,
                     "2026-08-01 00:00:01.000000");
             long firstApprovalId = insertApproval(statement, "default", mappingId, assignmentId, workplaceId, userId,
                     null, "g2-approval-1");
+            statement.executeUpdate("INSERT INTO m_compliance_mapping_review_requirement_type "
+                    + "(tenant_id, requirement_group_id, reviewer_type_id, reviewer_type_code_snapshot, "
+                    + "reviewer_type_name_snapshot, credential_label_snapshot, credential_required_snapshot) "
+                    + "VALUES ('default', " + groupId + ", " + reviewerTypeId
+                    + ", 'TYPE-1', 'Type 1', 'Credential', 0)");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "INSERT INTO m_compliance_mapping_review_requirement_group "
+                            + "(tenant_id, mapping_id, requirement_group_code, display_name, minimum_distinct_reviewers) "
+                            + "VALUES ('other-tenant', " + mappingId + ", 'GROUP-CROSS', 'Cross', 1)"),
+                    "mapping→groupのcross-tenant参照は拒否するはず");
+            long otherReviewerTypeId = insertReviewerType(statement, "other-tenant", "TYPE-CROSS");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "INSERT INTO m_compliance_mapping_review_requirement_type "
+                            + "(tenant_id, requirement_group_id, reviewer_type_id, reviewer_type_code_snapshot, "
+                            + "reviewer_type_name_snapshot, credential_label_snapshot, credential_required_snapshot) "
+                            + "VALUES ('other-tenant', " + groupId + ", " + otherReviewerTypeId
+                            + ", 'TYPE-CROSS', 'Cross', 'Credential', 0)"),
+                    "group→reviewer typeのcross-tenant参照は拒否するはず");
             assertThrows(SQLException.class, () -> insertApproval(statement, "other-tenant", otherMappingId,
                     otherAssignmentId, otherWorkplaceId, userId, firstApprovalId, "g2-approval-cross-tenant"),
                     "別tenantのapproval self targetは拒否するはず");
+            assertThrows(SQLException.class, () -> insertApproval(statement, "default", mappingId, assignmentId,
+                    workplaceId, userId, 999999L, "g2-approval-orphan"),
+                    "approvalの存在しないself targetは拒否するはず");
+
+            long finiteWorkplaceId = insertWorkplace(statement, "default", customerId, "G2-WORKPLACE-FINITE");
+            insertFiniteAssignment(statement, "default", finiteWorkplaceId, userId,
+                    "2026-08-10 00:00:00.000000", "2026-08-10 00:00:01.000000", "finite-a");
+            insertFiniteAssignment(statement, "default", finiteWorkplaceId, userId,
+                    "2026-08-10 00:00:01.000000", "2026-08-10 00:00:02.000000", "finite-b");
+            long beforeAdjacent = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-09 23:59:59.999999");
+            long firstAdjacent = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:00.999999");
+            long secondAdjacent = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:01.000000");
+            long atEnd = queryAssignmentAt(statement, finiteWorkplaceId, "2026-08-10 00:00:02.000000");
+            assertEquals(-1L, beforeAdjacent);
+            assertTrue(firstAdjacent > 0L);
+            assertTrue(secondAdjacent > 0L && secondAdjacent != firstAdjacent);
+            assertEquals(-1L, atEnd);
+            assertEquals(0L, queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE workplace_id=" + finiteWorkplaceId
+                            + " AND effective_from < '2026-08-10 00:00:03.000000'"
+                            + " AND (effective_to IS NULL OR effective_to > '2026-08-10 00:00:02.000000')"));
+            assertTrue(queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE workplace_id=" + finiteWorkplaceId
+                            + " AND effective_from < '2026-08-10 00:00:01.500000'"
+                            + " AND (effective_to IS NULL OR effective_to > '2026-08-10 00:00:00.500000')") > 0);
         }
     }
 
@@ -222,10 +317,34 @@ class FlywayG2GateSchemaSmokeTest {
     }
 
     private long insertReviewerType(Statement statement) throws SQLException {
+        return insertReviewerType(statement, "default", "TYPE-1");
+    }
+
+    private long insertReviewerType(Statement statement, String tenant, String typeCode) throws SQLException {
         statement.executeUpdate("INSERT INTO m_compliance_external_reviewer_type "
-                + "(tenant_id, type_code, display_name, credential_label) VALUES ('default', 'TYPE-1', 'Type 1', 'Credential')");
+                + "(tenant_id, type_code, display_name, credential_label) VALUES ('" + tenant + "', '" + typeCode
+                + "', 'Type 1', 'Credential')");
         return queryLong(statement,
-                "SELECT id FROM m_compliance_external_reviewer_type WHERE type_code='TYPE-1'");
+                "SELECT id FROM m_compliance_external_reviewer_type WHERE tenant_id='" + tenant
+                        + "' AND type_code='" + typeCode + "'");
+    }
+
+    private void insertFiniteAssignment(Statement statement, String tenant, long workplaceId, long userId,
+                                        String effectiveFrom, String effectiveTo, String reason) throws SQLException {
+        statement.executeUpdate("INSERT INTO t_compliance_responsible_assignment "
+                + "(tenant_id, workplace_id, user_id, effective_from, effective_to, active_slot, assigned_by, ended_by, end_reason) VALUES ('"
+                + tenant + "', " + workplaceId + ", " + userId + ", '" + effectiveFrom + "', '" + effectiveTo
+                + "', NULL, " + userId + ", " + userId + ", '" + reason + "')");
+    }
+
+    private long queryAssignmentAt(Statement statement, long workplaceId, String asOf) throws SQLException {
+        try (ResultSet resultSet = statement.executeQuery(
+                "SELECT id FROM t_compliance_responsible_assignment WHERE workplace_id=" + workplaceId
+                        + " AND effective_from <= '" + asOf + "'"
+                        + " AND (effective_to IS NULL OR '" + asOf + "' < effective_to)"
+                        + " ORDER BY effective_from DESC, id DESC LIMIT 1")) {
+            return resultSet.next() ? resultSet.getLong(1) : -1L;
+        }
     }
 
     private long insertReviewGroup(Statement statement, long mappingId) throws SQLException {
