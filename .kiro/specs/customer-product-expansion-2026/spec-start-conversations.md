@@ -629,8 +629,8 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 【開始条件】
 - Wave: Wave 2
 - Migration: V84/V85実在。R19-P1-01 G2 follow-upはV102（common V99永久欠番、migration-dev V100実在、common V101既存用途維持）。R10の`ACCEPTED_FOR_IMPLEMENTATION`前にV102を作成しない。
-- R21 second follow-up docs-only再Reviewではdelivery business keyの時刻非依存basis、legacy NULL download、future candidate専用slot lifecycleだけを具体化し、
-  R21-P1-03/P1-04/P2-01の閉鎖を維持する。R10受理前のV102/DDL/code/test変更を禁止する。
+- R21 second follow-up docs-only再Reviewではrecipient/display/company/config render content hash、R8.5/R8.6 trace、stable business keyのA→B→A規則だけを具体化し、
+  R21-P1-02/P1-03/P1-04/P2-01の閉鎖を維持する。R10受理前のV102/DDL/code/test変更を禁止する。
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2-DEV-GATE確定済み。T060は公式mapping+L0+独立Reviewで`PROVISIONAL_REVIEWED`へ進める。
   特定自然人の事前指名と実actor承認eventは開始条件ではなく、`ACTIVE`化/M/本番gateとする。

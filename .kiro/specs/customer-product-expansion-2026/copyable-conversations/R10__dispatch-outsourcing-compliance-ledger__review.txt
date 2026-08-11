@@ -2,12 +2,12 @@
 Review中はfileを変更しません。問題の修正は元の実装対話へ返してください。
 
 【現行R21 second follow-up docs-only再Review依頼】
-- Base: `9d3116fd06c28bfe1d66f4b3e3813e3a83fa8a76`
+- Base: `5948e4a98205260c86c09afe8ec5c94da6463266`
 - Head: 実装対話のpush後にReview依頼messageで固定する。
-- R21-P1-01〜02の差戻しを、以下のdocs decisionとdirect regressionへ反映したか独立に確認する。P1-03/P1-04/P2-01はVERIFIED_CLOSEDを維持する。
-  1. delivery business keyから評価時刻・worker asOf・gate/render hashを除外し、stable snapshot/証跡/版basisで異key・異時刻同入力を1 delivery・1 group・3 rendition・1 notificationへ収束させる。legacy generation_state=NULLは既存ACL/CLEANでdownloadでき、新規rowだけREADYを要求する。
-  2. current ACTIVEとfuture candidateの共存を`future_slot=1`のUNIQUEで直列化し、成功ACTIVE/SUPERSEDED transitionだけ同一CAS transactionでslotをNULL化する。失敗・rollback・時刻経過だけではslot=1を維持する。
-- 現行docsはdecision ID 16件、direct regression ID 121件、migration reservation V102〜V108、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
+- R21-P1-01とR21-P2-02の差戻しを、以下のdocs decisionとdirect regressionへ反映したか独立に確認する。P1-02/P1-03/P1-04/P2-01はVERIFIED_CLOSEDを維持する。
+  1. delivery business keyへrecipient/display snapshot hashとcompany/config content snapshot hashを追加し、stable snapshot/実render content/証跡/版basisで異key・異時刻同入力を1 delivery・1 group・3 rendition・1 notificationへ収束させる。A→Bは新key/group、B→Aは元A result再利用。legacy generation_state=NULLは既存ACL/CLEANでdownloadでき、新規rowだけREADYを要求する。
+  2. R8.5 legacy、R8.6 preview、G2-DEL-08/09..11の番号とtraceを一意化する。
+- 現行docsはdecision ID 16件、direct regression ID 122件、migration reservation V102〜V108、T066未完了、S10 IN PROGRESS、S12 NOT READYを維持する。
 - production/DDL/Java/HTML/JS/CSS/message/test/seed/DB変更、V102作成、T066 checkbox変更は今回も禁止。
 - 不足がなければ結論に `ACCEPTED_FOR_IMPLEMENTATION` を明示する。不足時はR19-P1-01をOPENのまま、R21 issue形式で差戻す。S10/T066をPASSにせず、S12開始通知を送らない。
 
@@ -52,7 +52,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 - R21 second follow-up docs-only再Reviewでは、production/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを最初に確認する。
 - tenant ACTIVE/workplace delivery分離、dynamic reviewer type/policy、9 domain table + operation ledger、mapping/policy/gate/render/request hash、
   event reducer、ACTIVE 21-step、formal generate/preview、immutable past download、UI/API/permission、G0、HISTORY分離、
-  V102/V103〜V108、121 direct regression、Phase A/Bを逐項照合する。
+  V102/V103〜V108、122 direct regression、Phase A/Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
 - 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
 - CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。

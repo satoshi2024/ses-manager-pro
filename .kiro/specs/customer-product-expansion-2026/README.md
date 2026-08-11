@@ -51,7 +51,7 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 7 | `approval-workflow-internal-control` | 見積/契約/請求/BP支払/月次締めの職務分離 | XL | **V75, V76, V77, V78, V79** | S07実装中・独立Review NOT REVIEWABLE |
 | 8 | `crm-contact-opportunity` | 複数担当者・商機・失注理由・接点履歴 | XL | **V73, V74**（merge済み） | T048完了・T049着手可 |
 | 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | **PASS**・code/evidence Head `7caa5e6`・Packet/current merged HeadはPacket同期commit（main=origin/main）・R12 P2はprovenance記述のみ |
-| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V84/V85実在＋V102 G2 follow-up予約** | T060〜T065 PASS、T066/R19-P1-01はR21 second follow-up docs-only rework（stable business key/legacy download/future slot lifecycle）をR10 Review中。P1-03はVERIFIED_CLOSED |
+| 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V84/V85実在＋V102 G2 follow-up予約** | T060〜T065 PASS、T066/R19-P1-01はR21 second follow-up docs-only rework（render content hash/business key、R8.5/R8.6 trace）をR10 Review中。P1-02/P1-03はVERIFIED_CLOSED、P2-02 OPEN |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V83** | 仕様済み・G6決定済み |
 | 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V103** | 仕様済み・S10 PASS待ち |
 | 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V104** | 仕様済み・G3決定済み |

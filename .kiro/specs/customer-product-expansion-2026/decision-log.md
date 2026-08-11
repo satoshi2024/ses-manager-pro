@@ -19,12 +19,12 @@
 
 ## G2 R21 second follow-up docs-only decision delta（2026-08-11）
 
-- R21再ReviewはFAIL（P0=0、P1=2、P2=0）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
+- R21再ReviewはFAIL（P0=0、P1=1、P2=1）。R19-P1-01は`OPEN / DECISION_DELTA_REWORK_REQUIRED`であり、
   `ACCEPTED_FOR_IMPLEMENTATION`、V102、DDL、Java、HTML、JS、CSS、message、test、seed、DB変更を禁止する。
-- deliveryはclient idempotency keyと業務一意keyを分離し、`delivery_business_key`を時刻非依存のstable snapshot/証跡/版basisから作って同一入力を1 delivery・1 rendition group・3 rendition・1 notificationへ収束させる。legacy NULL rowのdownload契約も分離する。
-  future candidateは`future_slot=1`で1件へ直列化し、成功transitionだけ同一CAS transactionでNULL化し、失敗・rollback・時刻経過では維持する。worker snapshot不在はID/hash同時NULL、worker項目省略、明示NULL sentinelで生成継続する。
+- deliveryはclient idempotency keyと業務一意keyを分離し、`delivery_business_key`を時刻非依存のstable snapshot/recipient-display/company-config実render content hash/証跡/版basisから作って同一入力を1 delivery・1 rendition group・3 rendition・1 notificationへ収束させる。legacy NULL rowのdownload契約も分離する。
+  future candidateは`future_slot=1`で1件へ直列化し、成功transitionだけ同一CAS transactionでNULL化し、失敗・rollback・時刻経過では維持する。worker snapshot不在はID/hash同時NULL、worker項目省略、明示NULL sentinelで生成継続する。R8.5 legacy/R8.6 previewのtrace番号を一意化する。
 - 新decision IDは`G2-IDEMPOTENCY-01`、`G2-EFFECTIVE-PERIOD-01`、`G2-DELIVERY-IMMUTABILITY-01`、
-  `G2-CREDENTIAL-CRYPTO-01`、`G2-SOURCE-FREEZE-01`を維持し、direct regressionは119件から121件へ拡張した。P1-03/P1-04/P2-01はVERIFIED_CLOSEDを維持する。
+  `G2-CREDENTIAL-CRYPTO-01`、`G2-SOURCE-FREEZE-01`を維持し、direct regressionは121件から122件へ拡張した。P1-02/P1-03/P1-04/P2-01はVERIFIED_CLOSEDを維持する。
   旧11 ID、tenant/workplace/G0、V102〜V108予約は維持する。
 - T066未完了、S10 `IN PROGRESS`、S12 `NOT READY`、ACTIVE化・本番generate/delivery・production authorization禁止を維持する。
 

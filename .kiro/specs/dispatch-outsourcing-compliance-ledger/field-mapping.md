@@ -460,7 +460,7 @@ review policyは別の`review_policy_hash`、delivery採用証跡は`gate_snapsh
 - formal generate/deliveryはtarget workplaceのcurrent gateを毎回再評価し、past delivery downloadはcurrent gateを再評価しない。
 - formal generate/deliveryは交付時にFULL/MASK/LIMITEDのimmutable document versionを同一`rendition_group_id`で保存し、
   `t_document_delivery`へ既存profile snapshot、worker snapshot ID/hash（未作成時は同時NULL）、resolved workplace ID、render_input_hash、
-  `delivery_business_key`と各version/hashを記録する。business keyはstable snapshot/証跡/版から作り、gate/render評価時刻、worker asOf、delivered_atを含めない。
+  `delivery_business_key`と各version/hashを記録する。business keyはstable snapshot、recipient/display snapshot hash、company/config content snapshot hash、証跡/版から作り、gate/render評価時刻、worker asOf、delivered_atを含めない。
   worker snapshotが無い場合はworker項目を省略して生成を継続する。legacyのgeneration_state=NULLは既存ACL/CLEAN条件のdownloadを許可し、新規rowだけREADYを要求する。
   新しいworkplace/config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。
   downloadはcurrent master/configを再render入力へ使わず、保存済みrole renditionだけを返す。

@@ -399,10 +399,14 @@ deliveryごとに再計算し、`t_document_delivery`へ保存する。ACTIVE化
 
 `render_input_hash`はmapping/policy/gate hashの代替ではなく、交付時renderのcontent provenance hashである。canonical payloadは
 既存`t_contract_compliance_snapshot`のprofile snapshot ID/hash、既存worker snapshot ID/hashまたは明示的な`worker_snapshot_presence=ABSENT`とNULL sentinel、
-profileから解決したworkplace ID、recipient/display name snapshot、template version、field mask policy hash/version、render engine version、worker asOf、
+profileから解決したworkplace ID、recipient/display name snapshot、帳票に実際に渡すcompany/config content snapshot、template version、field mask policy hash/version、render engine version、worker asOf、
 選択したFULL/MASK/LIMITED rendition discriminatorを含む。actual config snapshot tableやstorage path/key、current masterの更新時刻、
 表示専用のlocale labelは保存・hash対象にせず、PDF renditionがcontentの唯一のimmutable正本である。downloadはこのhashから業務内容を
 再構成せず、保存済みDocumentVersionのsha256と照合する。
+
+recipient/display snapshot hashは、各帳票へ実際に渡すrecipient ID/versionと表示値（氏名、部署、役職、住所、電話等）のcanonical objectから作る。
+company/config content snapshot hashは、`m_system_config`から帳票へ実際に渡すcompany name/address/representativeおよびtemplateが参照するconfig key/valueの
+canonical objectから作る。両方とも現在masterの更新時刻、表示専用locale label、storage path/keyを含めず、値がAからBへ変わればhashが変わる。
 
 ## 7. Event reducer
 
@@ -492,7 +496,7 @@ ACTIVE statusだけを見てdeliveryを許可せず、formal generateごとにta
 | `review_policy_hash` | legacyはNULL、新規必須 |
 | `gate_evaluated_at`, `gate_snapshot_hash` | legacyはNULL、新規必須 |
 | `profile_snapshot_id/hash`, `worker_snapshot_id/hash`, `workplace_id` | `profile_snapshot_id/hash`は既存`t_contract_compliance_snapshot.id/snapshot_hash`へ1対1 mappingで新規必須。workerは既存`t_contract_compliance_worker_snapshot.id/snapshot_hash`へ1対1 mappingし、交付時点以前の確定版が無い場合はID/hashを同時NULLとしてworker項目を省略する。片側NULLは拒否する。`workplace_id`はprofileからserver解決したscope scalarで新規必須。legacyはNULL |
-| `render_input_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。actual config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。render_input_hashはprofile/worker/workplace scope、template、mapping/policy/gate、mask policy、engine、roleのprovenance hashであり、hashから業務内容を再構成しない |
+| `render_input_hash`, `recipient_display_snapshot_hash`, `company_config_snapshot_hash`, `field_mask_policy_hash`, `render_engine_version` | legacyはNULL、新規必須。actual config snapshot tableは作らず、PDF renditionをcontentの唯一のimmutable正本とする。render_input_hashはprofile/worker/workplace scope、recipient/display/company/configの実render値、template、mapping/policy/gate、mask policy、engine、roleのprovenance hashであり、hashから業務内容を再構成しない。2つのsnapshot hashはbusiness keyにも含める |
 | `rendition_group_id`、`full_document_version_id/sha256`、`mask_document_version_id/sha256`、`limited_document_version_id/sha256` | legacyはNULL、新規は3 role renditionのimmutable document version/hashを必須保存 |
 | `delivery_business_key`, `generation_state` | legacyはNULL。新規はbusiness keyをNOT NULL、`generation_state`は`CREATING`または`READY`。`UNIQUE(tenant_id,delivery_business_key)`でclient idempotency keyとは分離し、`CREATING`予約→3 rendition/CLEAN/notification準備→`READY`を同一transactionで行う。失敗は予約をrollbackする。新規rowのformal downloadはREADYだけを許可するが、legacyのNULL rowは既存delivery ACL、file scope、scan=CLEAN、安全な保存済みDocumentVersionを再検証してdownload 200を許可する |
 
@@ -661,10 +665,11 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-LIFE-10 / R6.6 | L3 | current ACTIVE + two different-key future candidates, same/partial/different future dates | admin×2 | A | A | t0 | concurrent future create | 200/409 | future_slot=1候補1件、loserのrow/event/cache 0 | rollback/no cache |
 | G2-LIFE-11 / R6.6/R6.7 | L2/L3 | future candidate success/failure/time passage | admin×2 | A | A | t0/effective date | ACTIVE or SUPERSEDE then next create; CAS/gate failure; wait without transition | 200/409 | success transition sets future_slot=NULL and next candidate succeeds; failure/rollback keeps slot=1 and next candidate 409; time passage alone does not clear slot | rollback/cache unchanged |
 | G2-DEL-12 / R8.3 | L2 | delivery後master/config/profile/worker変更 | manager/sales | A | A | t1 | download all roles | 200 | bytes/sha256 unchanged | access log only |
-| G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | existing profile/worker snapshot ID+hash、resolved workplace_id、render_input_hash、3 rendition refs persisted | afterCommit 1 |
+| G2-DEL-13 / R8.3 | L2 | delivery snapshot IDs/hashes | admin | A | A | t0 | generate | 200 | existing profile/worker snapshot ID+hash、resolved workplace_id、recipient/display/company/config snapshot hash、render_input_hash、3 rendition refs persisted | afterCommit 1 |
 | G2-DEL-14 / R8.3 | L2 | one role rendition missing/unclean | admin | A | A | t0 | generate/download | 409/403 | delivery or rendition not usable | rollback/no cache |
 | G2-DEL-15 / R8.3 | L2 | FULL/MASK/LIMITED same rendition group | HR/manager/sales | A | A | t1 | download | 200 | role output from exact stored version, no current reread | access log only |
 | G2-DEL-16 / R8.3/T066-ASOF-01 | L2 | profile snapshotあり、交付時点以前のworker snapshotなし／片側NULL | admin/DB | A | A | t0 | generate then download/invalid insert | 200/409 | delivery成功、worker ID/hash両NULL、worker項目なし、partial NULL拒否、bytes/hash不変 | rollback/no cache |
+| G2-DEL-17 / R8.4 | L2 | company/recipient/display render content A→B→A、template version同一 | admin | A | A | t0/t1/t2 | K1 generate, config change, K2 generate, K3 generate | 200/200/200 | A→Bはrecipient_display_snapshot_hash/company_config_snapshot_hashとbusiness key/groupが変わり新delivery、K1 historical bytes不変、B→Aは元A business key/READY resultを再利用 | content hash/key reservation 1 per content |
 | G2-SEC-12 / R7.4 | L1 | required/optional credential single append | DB | A | A | t0 | one INSERT | — | requiredはencrypted/key version/CGC1/masked全て非NULL、optional未入力は4項目全NULL、平文/中間row 0 | 不変 |
 | G2-SEC-13 / R7.4 | L1 | same credential twice / AAD operation ID | admin | A | A | t0 | review insert×2 | 200 | random IV/ciphertext differs、identity hash stable、AADはINSERT前operation_id、event ID後UPDATE 0 | afterCommit |
 | G2-SEC-14 / R7.4 | L2 | restart with current/old key | app | A | A | t0 | review/gate | 200 | decrypt old version、new write current | 不変 |
@@ -756,10 +761,10 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-DEL-05 / R8.2 | L2 | mapping hash変更/new version | admin | A | A | t0 | generate same old key | 200 | 新delivery/key | afterCommit |
 | G2-DEL-06 / R8.2 | L2 | policy/gate evidence変更 | admin | A | A | t0 | generate | 200 | 旧deliveryを返さず新規 | afterCommit |
 | G2-DEL-07 / R8.3 | L2 | delivery後mapping SUPERSEDED | HR/manager/sales | A | A | t1 | download | 200 | access log、原版/role mask | current gate cache不使用 |
-| G2-DEL-08 / R8.2 | L1 | legacy NULL snapshot / generation_state=NULL | admin | A | A | t0 | list/download | 200 | LEGACY表示、既存ACL/file scope/scan=CLEANを満たす保存済みDocumentVersionをdownload、backfill 0; READY-onlyは新規rowだけ | 不変 |
-| G2-DEL-09 / R8.4 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | archive 0 | cache 0 |
-| G2-DEL-10 / R8.4 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | delivery/notification 0 | cache 0 |
-| G2-DEL-11 / R8.4 | L2 | preview PDF | admin/manager | A | A | t0 | preview | 200 | watermark、deliveryIdなし | cache 0 |
+| G2-DEL-08 / R8.5 | L1 | legacy NULL snapshot / generation_state=NULL | admin | A | A | t0 | list/download | 200 | LEGACY表示、既存ACL/file scope/scan=CLEANを満たす保存済みDocumentVersionをdownload、backfill 0; READY-onlyは新規rowだけ | 不変 |
+| G2-DEL-09 / R8.6 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | archive 0 | cache 0 |
+| G2-DEL-10 / R8.6 | L2 | valid DRAFT | admin/HR/manager | A | A | t0 | preview | 200 | delivery/notification 0 | cache 0 |
+| G2-DEL-11 / R8.6 | L2 | preview PDF | admin/manager | A | A | t0 | preview | 200 | watermark、deliveryIdなし | cache 0 |
 
 ### 13.6 Security / UI
 
