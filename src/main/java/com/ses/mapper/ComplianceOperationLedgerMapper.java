@@ -60,8 +60,8 @@ public interface ComplianceOperationLedgerMapper {
 
     @Update("UPDATE t_compliance_operation_ledger SET state = 'FAILED', retryable_flag = #{retryableFlag}, "
             + "finished_at = #{finishedAt}, failure_code = #{failureCode}, "
-            + "result_summary_canonical = #{resultSummaryCanonical}, result_http_status = #{resultHttpStatus}, "
-            + "result_hash = #{resultHash}, version = version + 1, "
+            + "result_reference_type = NULL, result_reference_id = NULL, result_reference_version = NULL, "
+            + "result_summary_canonical = NULL, result_http_status = NULL, result_hash = NULL, version = version + 1, "
             + "updated_at = CURRENT_TIMESTAMP(6) "
             + "WHERE tenant_id = #{tenantId} AND operation_id = #{operationId} AND state = 'PROCESSING' "
             + "AND version = #{expectedVersion} AND deleted_flag = 0")
@@ -69,10 +69,7 @@ public interface ComplianceOperationLedgerMapper {
                            @Param("expectedVersion") Integer expectedVersion,
                            @Param("finishedAt") java.time.LocalDateTime finishedAt,
                            @Param("retryableFlag") Integer retryableFlag,
-                           @Param("failureCode") String failureCode,
-                           @Param("resultSummaryCanonical") String resultSummaryCanonical,
-                           @Param("resultHttpStatus") Integer resultHttpStatus,
-                           @Param("resultHash") String resultHash);
+                           @Param("failureCode") String failureCode);
 
     @Update("UPDATE t_compliance_operation_ledger SET state = 'PROCESSING', retryable_flag = 1, "
             + "attempt_count = attempt_count + 1, lease_until = #{leaseUntil}, finished_at = NULL, "

@@ -216,6 +216,38 @@ class DispatchComplianceSchemaH2Test {
         }
     }
 
+    @Test
+    void H2でoperationResultのstate別NULLとhash契約を再現できる() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:t061_dispatch_g2_operation;MODE=MySQL;DB_CLOSE_DELAY=-1")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TABLE t_contract (id BIGINT PRIMARY KEY)");
+            }
+            ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("sql/schema-dispatch-compliance-h2.sql"));
+
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO t_compliance_operation_ledger "
+                        + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, correlation_id) VALUES "
+                        + "('default', 'h2-op-1', 'MAPPING_ACTIVE', 'h2-op-key-1', REPEAT('a', 64), "
+                        + "'PROCESSING', '2026-08-01 00:00:01.000000', 'h2-op-correlation-1')");
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
+                                + "finished_at='2026-08-01 00:00:02.000000', failure_code='TEMPORARY', "
+                                + "result_summary_canonical='forbidden', result_http_status=500, result_hash=REPEAT('b', 64), version=1 "
+                                + "WHERE operation_id='h2-op-1'"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', result_summary_canonical='{}', "
+                                + "result_http_status=200, version=1 WHERE operation_id='h2-op-1'"));
+                statement.execute("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', result_summary_canonical='{}', "
+                        + "result_http_status=200, result_hash=REPEAT('c', 64), version=1 WHERE operation_id='h2-op-1'");
+                assertEquals(1, queryInt(statement,
+                        "SELECT COUNT(*) FROM t_compliance_operation_ledger WHERE operation_id='h2-op-1' "
+                                + "AND result_hash=REPEAT('c', 64)"));
+            }
+        }
+    }
+
     private long queryAssignmentAt(Statement statement, long workplaceId, String asOf) throws Exception {
         try (ResultSet resultSet = statement.executeQuery(
                 "SELECT id FROM t_compliance_responsible_assignment WHERE workplace_id=" + workplaceId

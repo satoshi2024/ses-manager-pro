@@ -82,10 +82,32 @@ class FlywayG2GateSchemaSmokeTest {
             assertColumnType(statement, "t_compliance_responsible_assignment", "effective_to", "datetime", 6);
             assertCompositeForeignKey(statement, "m_compliance_mapping_source", "fk_g2_source_mapping",
                     List.of("tenant_id", "mapping_id"), "m_compliance_mapping_version", List.of("tenant_id", "id"));
-            assertCompositeForeignKey(statement, "t_compliance_mapping_review_requirement_type", "fk_g2_review_type_group",
+            assertCompositeForeignKey(statement, "m_compliance_mapping_review_requirement_group", "fk_g2_review_group_mapping",
+                    List.of("tenant_id", "mapping_id"), "m_compliance_mapping_version", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "m_compliance_mapping_review_requirement_type", "fk_g2_review_type_group",
                     List.of("tenant_id", "requirement_group_id"), "m_compliance_mapping_review_requirement_group", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "m_compliance_mapping_review_requirement_type", "fk_g2_review_type_reviewer",
+                    List.of("tenant_id", "reviewer_type_id"), "m_compliance_external_reviewer_type", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_responsible_assignment", "fk_g2_assignment_workplace",
+                    List.of("tenant_id", "workplace_id"), "m_workplace", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_mapping_approval_event", "fk_g2_approval_mapping",
+                    List.of("tenant_id", "mapping_id"), "m_compliance_mapping_version", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_mapping_approval_event", "fk_g2_approval_assignment",
+                    List.of("tenant_id", "assignment_id"), "t_compliance_responsible_assignment", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_mapping_approval_event", "fk_g2_approval_workplace",
+                    List.of("tenant_id", "workplace_id_snapshot"), "m_workplace", List.of("tenant_id", "id"));
             assertCompositeForeignKey(statement, "t_compliance_mapping_approval_event", "fk_g2_approval_target",
                     List.of("tenant_id", "target_event_id"), "t_compliance_mapping_approval_event", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_mapping_approval_event", "fk_g2_approval_supersedes",
+                    List.of("tenant_id", "supersedes_event_id"), "t_compliance_mapping_approval_event", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_external_review_event", "fk_g2_external_mapping",
+                    List.of("tenant_id", "mapping_id"), "m_compliance_mapping_version", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_external_review_event", "fk_g2_external_group",
+                    List.of("tenant_id", "requirement_group_id"), "m_compliance_mapping_review_requirement_group", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_external_review_event", "fk_g2_external_reviewer_type",
+                    List.of("tenant_id", "reviewer_type_id"), "m_compliance_external_reviewer_type", List.of("tenant_id", "id"));
+            assertCompositeForeignKey(statement, "t_compliance_external_review_event", "fk_g2_external_target",
+                    List.of("tenant_id", "target_event_id"), "t_compliance_external_review_event", List.of("tenant_id", "id"));
             assertCompositeForeignKey(statement, "t_compliance_external_review_event", "fk_g2_external_supersedes",
                     List.of("tenant_id", "supersedes_event_id"), "t_compliance_external_review_event", List.of("tenant_id", "id"));
             assertCompositeForeignKey(statement, "t_compliance_mapping_status_event", "fk_g2_status_mapping",
@@ -181,7 +203,8 @@ class FlywayG2GateSchemaSmokeTest {
             long operationId = queryLong(statement,
                     "SELECT id FROM t_compliance_operation_ledger WHERE operation_id='g2-operation-1'");
             statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', "
-                    + "result_summary_canonical='{}', result_http_status=200, version=1 WHERE id=" + operationId);
+                    + "result_summary_canonical='{}', result_http_status=200, result_hash=REPEAT('f', 64), "
+                    + "version=1 WHERE id=" + operationId);
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "UPDATE t_compliance_operation_ledger SET result_summary_canonical='tampered', version=2 WHERE id=" + operationId),
                     "SUCCEEDED operationのresult改変は拒否するはず");
@@ -192,13 +215,34 @@ class FlywayG2GateSchemaSmokeTest {
             statement.executeUpdate("INSERT INTO t_compliance_operation_ledger "
                     + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, "
                     + "started_at, correlation_id, version, deleted_flag) VALUES "
+                    + "('default', 'g2-operation-nohash', 'MAPPING_ACTIVE', 'g2-op-nohash-key', REPEAT('g', 64), "
+                    + "'PROCESSING', '2026-08-01 00:00:01.000000', 'g2-op-nohash-correlation', 0, 0)");
+            long noHashOperationId = queryLong(statement,
+                    "SELECT id FROM t_compliance_operation_ledger WHERE operation_id='g2-operation-nohash'");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', result_summary_canonical='{}', "
+                            + "result_http_status=200, version=1 WHERE id=" + noHashOperationId),
+                    "SUCCEEDED operationはresult_hash必須のはず");
+
+            statement.executeUpdate("INSERT INTO t_compliance_operation_ledger "
+                    + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, "
+                    + "started_at, correlation_id, version, deleted_flag) VALUES "
                     + "('default', 'g2-operation-retry', 'MAPPING_ACTIVE', 'g2-op-retry-key', REPEAT('e', 64), "
                     + "'PROCESSING', '2026-08-01 00:00:01.000000', 'g2-op-retry-correlation', 0, 0)");
             long retryOperationId = queryLong(statement,
                     "SELECT id FROM t_compliance_operation_ledger WHERE operation_id='g2-operation-retry'");
+            assertThrows(SQLException.class, () -> statement.executeUpdate(
+                    "UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
+                            + "finished_at='2026-08-01 00:00:02.000000', failure_code='TEMPORARY', "
+                            + "result_summary_canonical='forbidden', result_http_status=500, result_hash=REPEAT('h', 64), "
+                            + "version=1 WHERE id=" + retryOperationId),
+                    "FAILED operationはresult payloadを保持しないはず");
             statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
                     + "finished_at='2026-08-01 00:00:02.000000', failure_code='TEMPORARY', version=1 WHERE id="
                     + retryOperationId);
+            assertEquals(0L, queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_operation_ledger WHERE id=" + retryOperationId
+                            + " AND (result_summary_canonical IS NOT NULL OR result_http_status IS NOT NULL OR result_hash IS NOT NULL)"));
             statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='PROCESSING', retryable_flag=1, "
                     + "attempt_count=attempt_count+1, lease_until='2026-08-01 00:05:00.000000', finished_at=NULL, "
                     + "failure_code=NULL, result_summary_canonical=NULL, result_http_status=NULL, result_hash=NULL, "
@@ -227,30 +271,167 @@ class FlywayG2GateSchemaSmokeTest {
                     "2026-08-01 00:00:01.000000");
             long firstApprovalId = insertApproval(statement, "default", mappingId, assignmentId, workplaceId, userId,
                     null, "g2-approval-1");
+            long secondApprovalId = insertApproval(statement, "default", mappingId, assignmentId, workplaceId, userId,
+                    firstApprovalId, firstApprovalId, "g2-approval-supersedes");
+            assertTrue(secondApprovalId > firstApprovalId);
             statement.executeUpdate("INSERT INTO m_compliance_mapping_review_requirement_type "
                     + "(tenant_id, requirement_group_id, reviewer_type_id, reviewer_type_code_snapshot, "
                     + "reviewer_type_name_snapshot, credential_label_snapshot, credential_required_snapshot) "
                     + "VALUES ('default', " + groupId + ", " + reviewerTypeId
                     + ", 'TYPE-1', 'Type 1', 'Credential', 0)");
-            assertThrows(SQLException.class, () -> statement.executeUpdate(
+            assertRejectedWithoutRowChange(statement,
                     "INSERT INTO m_compliance_mapping_review_requirement_group "
                             + "(tenant_id, mapping_id, requirement_group_code, display_name, minimum_distinct_reviewers) "
-                            + "VALUES ('other-tenant', " + mappingId + ", 'GROUP-CROSS', 'Cross', 1)"),
+                            + "VALUES ('other-tenant', " + mappingId + ", 'GROUP-CROSS', 'Cross', 1)",
+                    "m_compliance_mapping_review_requirement_group",
+                    "tenant_id='other-tenant' AND requirement_group_code='GROUP-CROSS'",
                     "mapping→groupのcross-tenant参照は拒否するはず");
             long otherReviewerTypeId = insertReviewerType(statement, "other-tenant", "TYPE-CROSS");
-            assertThrows(SQLException.class, () -> statement.executeUpdate(
+            long otherGroupId = insertReviewGroup(statement, "other-tenant", otherMappingId, "GROUP-OTHER");
+            long secondReviewId = insertExternalReview(statement, "default", mappingId, groupId, reviewerTypeId,
+                    userId, reviewId, reviewId, "g2-review-supersedes");
+            assertTrue(secondReviewId > reviewId);
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("default", otherMappingId, groupId, reviewerTypeId, userId,
+                            null, null, "g2-review-map-cross"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='default' AND idempotency_key='g2-review-map-cross'",
+                    "external review→mappingのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("default", mappingId, otherGroupId, reviewerTypeId, userId,
+                            null, null, "g2-review-group-cross"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='default' AND idempotency_key='g2-review-group-cross'",
+                    "external review→groupのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("default", mappingId, groupId, otherReviewerTypeId, userId,
+                            null, null, "g2-review-reviewer-cross"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='default' AND idempotency_key='g2-review-reviewer-cross'",
+                    "external review→reviewer typeのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("other-tenant", otherMappingId, otherGroupId, otherReviewerTypeId, userId,
+                            reviewId, null, "g2-review-target-cross"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='other-tenant' AND idempotency_key='g2-review-target-cross'",
+                    "external review targetのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("other-tenant", otherMappingId, otherGroupId, otherReviewerTypeId, userId,
+                            null, reviewId, "g2-review-supersedes-cross"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='other-tenant' AND idempotency_key='g2-review-supersedes-cross'",
+                    "external review supersedesのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("default", mappingId, groupId, reviewerTypeId, userId,
+                            999999L, null, "g2-review-target-orphan"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='default' AND idempotency_key='g2-review-target-orphan'",
+                    "external review targetの孤立参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    externalReviewSql("default", mappingId, groupId, reviewerTypeId, userId,
+                            null, 999999L, "g2-review-supersedes-orphan"),
+                    "t_compliance_external_review_event",
+                    "tenant_id='default' AND idempotency_key='g2-review-supersedes-orphan'",
+                    "external review supersedesの孤立参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
                     "INSERT INTO m_compliance_mapping_review_requirement_type "
                             + "(tenant_id, requirement_group_id, reviewer_type_id, reviewer_type_code_snapshot, "
                             + "reviewer_type_name_snapshot, credential_label_snapshot, credential_required_snapshot) "
                             + "VALUES ('other-tenant', " + groupId + ", " + otherReviewerTypeId
-                            + ", 'TYPE-CROSS', 'Cross', 'Credential', 0)"),
+                            + ", 'TYPE-CROSS', 'Cross', 'Credential', 0)",
+                    "m_compliance_mapping_review_requirement_type",
+                    "tenant_id='other-tenant' AND requirement_group_id=" + groupId,
                     "group→reviewer typeのcross-tenant参照は拒否するはず");
-            assertThrows(SQLException.class, () -> insertApproval(statement, "other-tenant", otherMappingId,
-                    otherAssignmentId, otherWorkplaceId, userId, firstApprovalId, "g2-approval-cross-tenant"),
-                    "別tenantのapproval self targetは拒否するはず");
-            assertThrows(SQLException.class, () -> insertApproval(statement, "default", mappingId, assignmentId,
-                    workplaceId, userId, 999999L, "g2-approval-orphan"),
-                    "approvalの存在しないself targetは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO m_compliance_mapping_review_requirement_type "
+                            + "(tenant_id, requirement_group_id, reviewer_type_id, reviewer_type_code_snapshot, "
+                            + "reviewer_type_name_snapshot, credential_label_snapshot, credential_required_snapshot) "
+                            + "VALUES ('default', " + groupId + ", " + otherReviewerTypeId
+                            + ", 'TYPE-CROSS', 'Cross', 'Credential', 0)",
+                    "m_compliance_mapping_review_requirement_type",
+                    "tenant_id='default' AND reviewer_type_id=" + otherReviewerTypeId,
+                    "group→reviewer typeのcross-tenant参照は拒否するはず");
+
+            long sourceCrossMappingId = insertMapping(statement, "default", "G2-SOURCE-CROSS", "v1", "DRAFT");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO m_compliance_mapping_source "
+                            + "(tenant_id, mapping_id, source_code, source_url, source_version, confirmed_on, effective_from) "
+                            + "VALUES ('other-tenant', " + sourceCrossMappingId + ", 'SRC-CROSS', "
+                            + "'https://example.invalid/cross', '1', '2026-08-01', '2026-08-01')",
+                    "m_compliance_mapping_source",
+                    "tenant_id='other-tenant' AND mapping_id=" + sourceCrossMappingId,
+                    "source→mappingのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_responsible_assignment "
+                            + "(tenant_id, workplace_id, user_id, effective_from, active_slot, assigned_by) VALUES "
+                            + "('default', " + otherWorkplaceId + ", " + userId
+                            + ", '2026-08-03 00:00:01.000000', 1, " + userId + ")",
+                    "t_compliance_responsible_assignment",
+                    "tenant_id='default' AND workplace_id=" + otherWorkplaceId,
+                    "assignment→workplaceのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_responsible_assignment "
+                            + "(tenant_id, workplace_id, user_id, effective_from, active_slot, assigned_by) VALUES "
+                            + "('default', 999999, " + userId
+                            + ", '2026-08-03 00:00:01.000000', 1, " + userId + ")",
+                    "t_compliance_responsible_assignment",
+                    "tenant_id='default' AND workplace_id=999999",
+                    "assignment→workplaceの孤立参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('other-tenant', "
+                            + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + otherAssignmentId + ", "
+                            + otherWorkplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-map-cross', "
+                            + "'2026-08-01 00:00:01.000000', UUID(), 'corr-map-cross', 'g2-approval-map-cross')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='other-tenant' AND idempotency_key='g2-approval-map-cross'",
+                    "approval→mappingのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('default', "
+                            + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + otherAssignmentId + ", "
+                            + workplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-asg-cross', "
+                            + "'2026-08-01 00:00:01.000000', UUID(), 'corr-asg-cross', 'g2-approval-asg-cross')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='default' AND idempotency_key='g2-approval-asg-cross'",
+                    "approval→assignmentのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('default', "
+                            + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + assignmentId + ", "
+                            + otherWorkplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-wp-cross', "
+                            + "'2026-08-01 00:00:01.000000', UUID(), 'corr-wp-cross', 'g2-approval-wp-cross')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='default' AND idempotency_key='g2-approval-wp-cross'",
+                    "approval→workplaceのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, target_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('other-tenant', "
+                            + otherMappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + otherAssignmentId + ", "
+                            + otherWorkplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-target-cross', "
+                            + firstApprovalId + ", '2026-08-01 00:00:01.000000', UUID(), 'corr-target-cross', 'g2-approval-target-cross')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='other-tenant' AND idempotency_key='g2-approval-target-cross'",
+                    "approval targetのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, supersedes_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('default', "
+                            + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + assignmentId + ", "
+                            + workplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-supersedes-orphan', "
+                            + "999999, '2026-08-01 00:00:01.000000', UUID(), 'corr-supersedes-orphan', 'g2-approval-supersedes-orphan')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='default' AND idempotency_key='g2-approval-supersedes-orphan'",
+                    "approval supersedesの孤立参照は拒否するはず");
 
             long finiteWorkplaceId = insertWorkplace(statement, "default", customerId, "G2-WORKPLACE-FINITE");
             insertFiniteAssignment(statement, "default", finiteWorkplaceId, userId,
@@ -304,16 +485,34 @@ class FlywayG2GateSchemaSmokeTest {
     private long insertApproval(Statement statement, String tenant, long mappingId, long assignmentId,
                                 long workplaceId, long userId, Long targetEventId, String idempotencyKey)
             throws SQLException {
+        return insertApproval(statement, tenant, mappingId, assignmentId, workplaceId, userId,
+                targetEventId, null, idempotencyKey);
+    }
+
+    private long insertApproval(Statement statement, String tenant, long mappingId, long assignmentId,
+                                long workplaceId, long userId, Long targetEventId, Long supersedesEventId,
+                                String idempotencyKey) throws SQLException {
         statement.executeUpdate("INSERT INTO t_compliance_mapping_approval_event "
                 + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
                 + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
-                + "event_chain_id, target_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('"
+                + "event_chain_id, target_event_id, supersedes_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('"
                 + tenant + "', " + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + assignmentId + ", "
                 + workplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-"
                 + idempotencyKey + "', " + (targetEventId == null ? "NULL" : targetEventId) + ", "
+                + (supersedesEventId == null ? "NULL" : supersedesEventId) + ", "
                 + "'2026-08-01 00:00:01.000000', UUID(), 'corr-" + idempotencyKey + "', '" + idempotencyKey + "')");
         return queryLong(statement, "SELECT id FROM t_compliance_mapping_approval_event WHERE tenant_id='"
                 + tenant + "' AND idempotency_key='" + idempotencyKey + "'");
+    }
+
+    private void assertRejectedWithoutRowChange(Statement statement, String sql, String table,
+                                                String predicate, String message) throws SQLException {
+        long before = queryLong(statement, "SELECT COUNT(*) FROM " + table + " WHERE " + predicate);
+        SQLException failure = assertThrows(SQLException.class, () -> statement.executeUpdate(sql), message);
+        assertTrue("23000".equals(failure.getSQLState()) || "45000".equals(failure.getSQLState()),
+                message + "のSQLStateが不正です: " + failure.getSQLState());
+        assertEquals(before, queryLong(statement, "SELECT COUNT(*) FROM " + table + " WHERE " + predicate),
+                message + "で行が残ってはいけません");
     }
 
     private long insertReviewerType(Statement statement) throws SQLException {
@@ -348,11 +547,43 @@ class FlywayG2GateSchemaSmokeTest {
     }
 
     private long insertReviewGroup(Statement statement, long mappingId) throws SQLException {
+        return insertReviewGroup(statement, "default", mappingId, "GROUP-1");
+    }
+
+    private long insertReviewGroup(Statement statement, String tenant, long mappingId, String groupCode)
+            throws SQLException {
         statement.executeUpdate("INSERT INTO m_compliance_mapping_review_requirement_group "
                 + "(tenant_id, mapping_id, requirement_group_code, display_name, minimum_distinct_reviewers) "
-                + "VALUES ('default', " + mappingId + ", 'GROUP-1', 'Group 1', 1)");
+                + "VALUES ('" + tenant + "', " + mappingId + ", '" + groupCode + "', 'Group 1', 1)");
         return queryLong(statement,
-                "SELECT id FROM m_compliance_mapping_review_requirement_group WHERE requirement_group_code='GROUP-1'");
+                "SELECT id FROM m_compliance_mapping_review_requirement_group WHERE tenant_id='" + tenant
+                        + "' AND requirement_group_code='" + groupCode + "'");
+    }
+
+    private long insertExternalReview(Statement statement, String tenant, long mappingId, long groupId,
+                                      long reviewerTypeId, long userId, Long targetEventId,
+                                      Long supersedesEventId, String idempotencyKey) throws SQLException {
+        statement.executeUpdate(externalReviewSql(tenant, mappingId, groupId, reviewerTypeId, userId,
+                targetEventId, supersedesEventId, idempotencyKey));
+        return queryLong(statement,
+                "SELECT id FROM t_compliance_external_review_event WHERE tenant_id='" + tenant
+                        + "' AND idempotency_key='" + idempotencyKey + "'");
+    }
+
+    private String externalReviewSql(String tenant, long mappingId, long groupId, long reviewerTypeId,
+                                     long userId, Long targetEventId, Long supersedesEventId,
+                                     String idempotencyKey) {
+        return "INSERT INTO t_compliance_external_review_event "
+                + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, requirement_group_id, "
+                + "requirement_group_code_snapshot, reviewer_type_id, reviewer_type_code_snapshot, "
+                + "reviewer_type_name_snapshot, reviewer_name_snapshot, reviewer_identity_hash, action, review_chain_id, "
+                + "target_event_id, supersedes_event_id, reviewed_at, recorded_at, recorded_by, operation_id, correlation_id, idempotency_key) VALUES ('"
+                + tenant + "', " + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + groupId + ", 'GROUP-1', "
+                + reviewerTypeId + ", 'TYPE-1', 'Type 1', 'Reviewer 1', REPEAT('c', 64), 'APPROVED', 'chain-"
+                + idempotencyKey + "', " + (targetEventId == null ? "NULL" : targetEventId) + ", "
+                + (supersedesEventId == null ? "NULL" : supersedesEventId)
+                + ", '2026-08-01 00:00:00.000000', '2026-08-01 00:00:00.000000', " + userId
+                + ", UUID(), 'corr-" + idempotencyKey + "', '" + idempotencyKey + "')";
     }
 
     private void assertTableExists(Statement statement, String table) throws SQLException {

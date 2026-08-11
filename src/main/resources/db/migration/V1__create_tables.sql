@@ -2201,7 +2201,12 @@ CREATE TABLE t_compliance_operation_ledger (
   CONSTRAINT uk_g2_operation_key UNIQUE (tenant_id, operation_type, idempotency_key), CONSTRAINT uk_g2_operation_id UNIQUE (tenant_id, operation_id),
   CONSTRAINT chk_g2_operation_type CHECK (operation_type IN ('MAPPING_DRAFT_UPSERT','MAPPING_PROVISIONAL_REVIEW','ASSIGNMENT_CREATE','ASSIGNMENT_END','MAPPING_ACTIVE','MAPPING_SUPERSEDE','INTERNAL_APPROVAL','EXTERNAL_REVIEW','EXTERNAL_REVIEW_REVOKE','DELIVERY_GENERATE','REVIEWER_TYPE_CREATE','REVIEWER_TYPE_UPDATE','REVIEWER_TYPE_DISABLE','REVIEW_REQUIREMENT_UPDATE')),
   CONSTRAINT chk_g2_operation_state CHECK (state IN ('PROCESSING','SUCCEEDED','FAILED')), CONSTRAINT chk_g2_operation_retryable CHECK (retryable_flag IN (0,1)),
-  CONSTRAINT chk_g2_operation_result CHECK ((state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL) OR state <> 'SUCCEEDED')
+  CONSTRAINT chk_g2_operation_result CHECK (
+    (state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
+    OR (state IN ('PROCESSING', 'FAILED') AND result_reference_type IS NULL AND result_reference_id IS NULL
+      AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL
+      AND result_hash IS NULL)
+  )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_g2_operation_lease ON t_compliance_operation_ledger (tenant_id, state, lease_until);
 CREATE INDEX idx_g2_operation_result ON t_compliance_operation_ledger (tenant_id, result_reference_type, result_reference_id);

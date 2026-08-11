@@ -30,11 +30,17 @@ class V102ForwardRepairContractTest {
         assertTrue(sql.contains("IS_NULLABLE"));
         assertTrue(sql.contains("COLUMN_DEFAULT"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_create_index"));
+        assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_check"));
+        assertTrue(sql.contains("DROP CHECK"));
         assertTrue(sql.contains("information_schema.statistics"));
         assertTrue(sql.contains("GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX"));
         assertTrue(sql.contains("NON_UNIQUE"));
         assertTrue(sql.contains("__ses_g2_assert_index('t_compliance_responsible_assignment'"));
+        assertTrue(sql.contains("__ses_g2_assert_index('m_compliance_mapping_version', 'uk_g2_mapping_active_slot'"));
+        assertTrue(sql.contains("__ses_g2_assert_index('t_compliance_operation_ledger', 'uk_g2_operation_key'"));
+        assertTrue(sql.contains("__ses_g2_assert_index('t_document_delivery', 'uk_delivery_business_key'"));
         assertTrue(sql.contains("__ses_g2_assert_constraint('t_compliance_responsible_assignment'"));
+        assertTrue(sql.contains("chk_g2_operation_result"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_fk"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_delivery_fk"));
         assertTrue(sql.contains("information_schema.table_constraints"));

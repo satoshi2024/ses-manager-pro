@@ -2261,5 +2261,8 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   result_reference_type VARCHAR(80), result_reference_id BIGINT, result_reference_version VARCHAR(100), result_summary_canonical CLOB, result_http_status INT,
   result_hash CHAR(64), failure_code VARCHAR(100), correlation_id VARCHAR(100) NOT NULL, expires_at TIMESTAMP(6), version INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
-  UNIQUE(tenant_id, operation_type, idempotency_key), UNIQUE(tenant_id, operation_id)
+  UNIQUE(tenant_id, operation_type, idempotency_key), UNIQUE(tenant_id, operation_id),
+  CHECK((state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
+    OR (state IN ('PROCESSING','FAILED') AND result_reference_type IS NULL AND result_reference_id IS NULL
+      AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL))
 );

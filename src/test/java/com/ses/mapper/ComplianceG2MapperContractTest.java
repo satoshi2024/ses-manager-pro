@@ -57,7 +57,14 @@ class ComplianceG2MapperContractTest {
         }
 
         Method failure = getMethod("completeFailureCas");
-        assertTrue(failure.getAnnotation(Update.class).value()[0].contains("retryable_flag"));
+        String failureSql = failure.getAnnotation(Update.class).value()[0];
+        assertTrue(failureSql.contains("retryable_flag"));
+        assertTrue(failureSql.contains("result_reference_type = NULL"));
+        assertTrue(failureSql.contains("result_reference_id = NULL"));
+        assertTrue(failureSql.contains("result_summary_canonical = NULL"));
+        assertTrue(failureSql.contains("result_http_status = NULL"));
+        assertTrue(failureSql.contains("result_hash = NULL"));
+        assertTrue(failure.getParameterCount() <= 7, "FAILED遷移へ成功result payloadを渡してはいけません");
         Method restart = getMethod("restartFailedCas");
         assertTrue(restart.getAnnotation(Update.class).value()[0].contains("state = 'FAILED'"));
         assertTrue(restart.getAnnotation(Update.class).value()[0].contains("retryable_flag = 1"));
