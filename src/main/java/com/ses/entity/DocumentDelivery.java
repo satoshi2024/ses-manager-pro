@@ -32,6 +32,31 @@ public class DocumentDelivery extends BaseEntity {
     private LocalDateTime confirmedAt;
     private String confirmationNote;
     private String idempotencyKey;
+    private Long mappingVersionId;
+    private String mappingVersion;
+    private String mappingHash;
+    private String reviewPolicyHash;
+    private LocalDateTime gateEvaluatedAt;
+    private String gateSnapshotHash;
+    private Long profileSnapshotId;
+    private String profileSnapshotHash;
+    private Long workerSnapshotId;
+    private String workerSnapshotHash;
+    private Long workplaceId;
+    private String renderInputHash;
+    private String recipientDisplaySnapshotHash;
+    private String companyConfigSnapshotHash;
+    private String fieldMaskPolicyHash;
+    private String renderEngineVersion;
+    private String renditionGroupId;
+    private Long fullDocumentVersionId;
+    private String fullDocumentSha256;
+    private Long maskDocumentVersionId;
+    private String maskDocumentSha256;
+    private Long limitedDocumentVersionId;
+    private String limitedDocumentSha256;
+    private String deliveryBusinessKey;
+    private String generationState;
 
     @Version
     private Integer version;

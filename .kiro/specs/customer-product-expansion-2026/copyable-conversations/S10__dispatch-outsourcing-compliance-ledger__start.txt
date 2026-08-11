@@ -11,6 +11,7 @@
 - T066: M. 法務受入/回帰
 
 【開始条件】
+- 採番規則: 衝突時は後発を繰り上げ、前の欠番は埋めない。
 - Wave: Wave 2
 - Migration: V84/V85実在。R19-P1-01 G2 follow-upはV102（common V99永久欠番、migration-dev V100実在、common V101既存用途維持）。R10の`ACCEPTED_FOR_IMPLEMENTATION`前にV102を作成しない。着手時は全Flyway locationを再確認し、衝突時は後発を上へ繰り上げ、前の欠番を埋めない。
 - 先行条件: order-acceptance-workflow完了・merge済み。

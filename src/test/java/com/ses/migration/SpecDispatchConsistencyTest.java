@@ -69,9 +69,13 @@ class SpecDispatchConsistencyTest {
             "attendance-leave-overtime-compliance", List.of(83),
             "dispatch-outsourcing-compliance-ledger", List.of(84));
 
+    /** S10の正式V84とは別に、R19-P1-01受理後のG2 follow-upはV102へ追加する。 */
+    private static final Map<String, List<Integer>> FOLLOW_UP_MIGRATIONS = Map.of(
+            "dispatch-outsourcing-compliance-ledger", List.of(102));
+
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
     private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|10|11)正式migration V(\\d+(?:/V\\d+)*)");
-    private static final Pattern TASKS_REALIZED = Pattern.compile("S(?:07|10|11)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
+    private static final Pattern TASKS_REALIZED = Pattern.compile("(?:(?:S(?:07|10|11))|本spec)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);
@@ -229,6 +233,27 @@ class SpecDispatchConsistencyTest {
                 "Migration予約番号が派工資料間でずれています。実装AIが従うのはtasks.mdと派工対話なので、"
                         + "ここがずれると適用済み番号を再利用してFlywayが起動時に例外を投げます。"
                         + "design.mdを正として全資料を揃えてください:\n  " + String.join("\n  ", mismatches));
+
+        // R10受理後に実装されたS10 follow-upを、正式V84とは別の追加migrationとして検査する。
+        for (Map.Entry<String, List<Integer>> entry : FOLLOW_UP_MIGRATIONS.entrySet()) {
+            String spec = entry.getKey();
+            String followUpText = String.join("\n",
+                    read(SPECS.resolve(spec).resolve("design.md")),
+                    read(SPECS.resolve(spec).resolve("tasks.md")),
+                    sectionIn(startConversations, "## S10 — "),
+                    sectionIn(reviewConversations, "## R10 — "),
+                    read(EXPANSION.resolve("copyable-conversations")
+                            .resolve("S10__" + spec + "__start.txt")),
+                    read(EXPANSION.resolve("copyable-conversations")
+                            .resolve("R10__" + spec + "__review.txt")));
+            for (int version : entry.getValue()) {
+                assertTrue(followUpText.contains("V" + version),
+                        spec + " のfollow-up V" + version + "が全派工資料へ同期されていません");
+            }
+            assertTrue(Files.exists(Path.of("src", "main", "resources", "db", "migration",
+                    "V102__dispatch_compliance_g2_gate_schema.sql")),
+                    "S10 G2 follow-up V102が実在しません");
+        }
     }
 
     /** 派工対話の該当節（次の "## " 見出しまで）を返す。 */

@@ -1,5 +1,15 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R10受理後 / T066 G2実装フェーズ1）
+
+R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R21-P1-01/P1-02/P1-03/P1-04/P2-01/P2-02はVERIFIED_CLOSEDとして履歴・現行判定を同期した。T066/R19-P1-01の実装フェーズ1として、V102、V1、H2、10 entity、10 mapper、既存DocumentDeliveryのG2 delivery列・immutable source FK、V102専用MySQL smokeを追加した。
+
+| task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R19-P1-01 implementation phase 1 | R5/R6/R8/R10.1、G2-MIG-01/06/07/10/11、G2-DEL-13/16 | V1/V102、schema-dispatch-compliance-h2.sql、engineer-schema-h2.sql、DocumentDelivery、G2 10 entity/mapper、FlywayG2GateSchemaSmokeTest、SpecDispatchConsistencyTest V102 follow-up guard | H2 schema 1/0/0/0、AllMappersSchemaSweep 129/0/0/0、MigrationScriptIntegrity 27/0/0/0、SpecDispatchConsistencyTest 9/0/0/0、定向合計167/0/0/1。V102 MySQL smokeはDocker不在で1 skip（CI実行前提）。DemoはG2 service/API未実装のため未実施 | Base `3f7cc518e928c02f8eba7c08f368beb5d8f33526` → 実装commitで固定 | R10再Reviewでschema/CI MySQL smokeを確認。rollbackは実装commit revert、T066 checkbox/S10/S12 status/ACTIVE/formal deliveryは変更なし |
+
+実装フェーズ1ではG2 service/API/UI/security、ACTIVE化、実在actor/reviewer/evidence、正式generate/delivery、Phase A/B、T066 checkboxを変更・完了扱いにしない。S10は`IN PROGRESS / FAIL`、S12は`NOT READY`を維持する。
+
 ## 現行判定（R21 canonical payload sync docs-only rework / R10再Review待ち）
 
 `R21 second follow-up独立ReviewはFAIL（P1×1、P2×1）。R21-P2-02はVERIFIED_CLOSED_BY_R10、R21-P1-01はOPEN / DECISION_DELTA_REWORK_REQUIREDのまま。`

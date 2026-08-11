@@ -11,6 +11,16 @@
 -- ============================================================
 DROP TABLE IF EXISTS t_notification_read;
 DROP TABLE IF EXISTS t_notification;
+DROP TABLE IF EXISTS t_compliance_operation_ledger;
+DROP TABLE IF EXISTS t_compliance_mapping_status_event;
+DROP TABLE IF EXISTS t_compliance_external_review_event;
+DROP TABLE IF EXISTS t_compliance_mapping_approval_event;
+DROP TABLE IF EXISTS t_compliance_responsible_assignment;
+DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_type;
+DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_group;
+DROP TABLE IF EXISTS m_compliance_external_reviewer_type;
+DROP TABLE IF EXISTS m_compliance_mapping_source;
+DROP TABLE IF EXISTS m_compliance_mapping_version;
 DROP TABLE IF EXISTS t_document_delivery;
 DROP TABLE IF EXISTS t_compliance_finding;
 DROP TABLE IF EXISTS t_ledger_work_snapshot;
@@ -1980,19 +1990,227 @@ CREATE TABLE t_document_delivery (
   confirmed_at             DATETIME COMMENT '受領確認日時（NULL=受領未確認。未交付ではない）',
   confirmation_note        VARCHAR(1000) COMMENT '受領確認メモ',
   idempotency_key          VARCHAR(200) COMMENT '交付冪等キー（生成キーは(contract_id, document_type, template_version, snapshot_hash)の業務一意）',
+  mapping_version_id       BIGINT COMMENT 'G2 mapping version ID（legacyはNULL）',
+  mapping_version          VARCHAR(50) COMMENT 'G2 mapping version',
+  mapping_hash             CHAR(64) COMMENT 'G2 mapping hash',
+  review_policy_hash       CHAR(64) COMMENT 'G2 review policy hash',
+  gate_evaluated_at        DATETIME(6) COMMENT 'G2 gate評価時刻',
+  gate_snapshot_hash       CHAR(64) COMMENT 'G2 gate snapshot hash',
+  profile_snapshot_id      BIGINT COMMENT '採用profile snapshot ID',
+  profile_snapshot_hash    CHAR(64) COMMENT '採用profile snapshot hash',
+  worker_snapshot_id       BIGINT COMMENT '採用worker snapshot ID（不存在時NULL）',
+  worker_snapshot_hash     CHAR(64) COMMENT '採用worker snapshot hash（不存在時NULL）',
+  workplace_id             BIGINT COMMENT 'profileからserver解決した就業先',
+  render_input_hash        CHAR(64) COMMENT 'render input provenance hash',
+  recipient_display_snapshot_hash CHAR(64) COMMENT 'recipient/display実render hash',
+  company_config_snapshot_hash    CHAR(64) COMMENT 'company/config実render hash',
+  field_mask_policy_hash   CHAR(64) COMMENT 'field mask policy hash',
+  render_engine_version    VARCHAR(100) COMMENT 'render engine version',
+  rendition_group_id       VARCHAR(36) COMMENT 'FULL/MASK/LIMITEDの不変group',
+  full_document_version_id BIGINT COMMENT 'FULL rendition document version ID',
+  full_document_sha256     CHAR(64) COMMENT 'FULL rendition SHA-256',
+  mask_document_version_id BIGINT COMMENT 'MASK rendition document version ID',
+  mask_document_sha256     CHAR(64) COMMENT 'MASK rendition SHA-256',
+  limited_document_version_id BIGINT COMMENT 'LIMITED rendition document version ID',
+  limited_document_sha256  CHAR(64) COMMENT 'LIMITED rendition SHA-256',
+  delivery_business_key    CHAR(64) COMMENT 'client keyと分離した業務一意key',
+  generation_state         VARCHAR(20) COMMENT 'CREATING/READY。legacyはNULL',
   version                  INT NOT NULL DEFAULT 0 COMMENT '楽観ロック版',
   created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag             TINYINT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_document_delivery_idempotency (tenant_id, idempotency_key),
+  UNIQUE KEY uk_delivery_business_key (tenant_id, delivery_business_key),
   INDEX idx_delivery_document (document_id, delivered_at),
   INDEX idx_delivery_contract (contract_id, delivered_at),
   INDEX idx_delivery_confirmation (confirmed_at),
+  INDEX idx_delivery_mapping_version (tenant_id, mapping_version_id),
+  INDEX idx_delivery_gate_evaluated (tenant_id, gate_evaluated_at),
+  INDEX idx_delivery_rendition_group (tenant_id, rendition_group_id),
   CONSTRAINT fk_delivery_contract FOREIGN KEY (contract_id) REFERENCES t_contract(id)
     ON UPDATE CASCADE ON DELETE SET NULL,
   CONSTRAINT fk_delivery_document FOREIGN KEY (document_id) REFERENCES t_document(id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='法定帳票交付履歴';
+
+-- ============================================================
+-- G2 gate tables (V1 fresh baseline; V102 is the legacy forward migration)
+-- ============================================================
+CREATE TABLE m_compliance_mapping_version (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  mapping_code VARCHAR(100) NOT NULL, mapping_version VARCHAR(50) NOT NULL,
+  mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL,
+  effective_from DATE NOT NULL, effective_to DATE, status VARCHAR(30) NOT NULL,
+  active_slot TINYINT, future_slot TINYINT, activated_at DATETIME(6), activated_by BIGINT,
+  version INT NOT NULL DEFAULT 0, created_by BIGINT, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_by BIGINT, updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_mapping_version UNIQUE (tenant_id, mapping_version),
+  CONSTRAINT uk_g2_mapping_active_slot UNIQUE (tenant_id, mapping_code, active_slot),
+  CONSTRAINT uk_g2_mapping_future_slot UNIQUE (tenant_id, mapping_code, future_slot),
+  CONSTRAINT uk_g2_mapping_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_mapping_status CHECK (status IN ('DRAFT','PROVISIONAL_REVIEWED','ACTIVE','SUPERSEDED')),
+  CONSTRAINT chk_g2_mapping_active_slot CHECK (active_slot IS NULL OR active_slot = 1),
+  CONSTRAINT chk_g2_mapping_future_slot CHECK (future_slot IS NULL OR future_slot = 1),
+  CONSTRAINT fk_g2_mapping_activated_by FOREIGN KEY (activated_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_mapping_effective ON m_compliance_mapping_version
+  (tenant_id, mapping_code, status, effective_from, effective_to);
+
+CREATE TABLE m_compliance_mapping_source (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL,
+  source_code VARCHAR(100) NOT NULL, source_url VARCHAR(1000) NOT NULL, source_version VARCHAR(100) NOT NULL,
+  confirmed_on DATE NOT NULL, effective_from DATE NOT NULL, effective_to DATE,
+  created_by BIGINT, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_by BIGINT,
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_mapping_source UNIQUE (tenant_id, mapping_id, source_code),
+  CONSTRAINT uk_g2_mapping_source_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT fk_g2_source_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_source_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_source_updated_by FOREIGN KEY (updated_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_mapping_source_lookup ON m_compliance_mapping_source (tenant_id, source_code, confirmed_on);
+
+CREATE TABLE m_compliance_external_reviewer_type (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', type_code VARCHAR(100) NOT NULL,
+  display_name VARCHAR(200) NOT NULL, description VARCHAR(1000), credential_label VARCHAR(200) NOT NULL,
+  credential_required TINYINT NOT NULL DEFAULT 0, enabled TINYINT NOT NULL DEFAULT 1, sort_order INT NOT NULL DEFAULT 0,
+  version INT NOT NULL DEFAULT 0, created_by BIGINT, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_by BIGINT, updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_reviewer_type UNIQUE (tenant_id, type_code), CONSTRAINT uk_g2_reviewer_type_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_reviewer_credential_required CHECK (credential_required IN (0,1)), CONSTRAINT chk_g2_reviewer_enabled CHECK (enabled IN (0,1)),
+  CONSTRAINT fk_g2_reviewer_type_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_reviewer_type_updated_by FOREIGN KEY (updated_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_reviewer_type_enabled ON m_compliance_external_reviewer_type (tenant_id, enabled, sort_order);
+
+CREATE TABLE m_compliance_mapping_review_requirement_group (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL,
+  requirement_group_code VARCHAR(100) NOT NULL, display_name VARCHAR(200) NOT NULL, minimum_distinct_reviewers INT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0, version INT NOT NULL DEFAULT 0, created_by BIGINT,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_by BIGINT,
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_review_group UNIQUE (tenant_id, mapping_id, requirement_group_code), CONSTRAINT uk_g2_review_group_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_review_group_minimum CHECK (minimum_distinct_reviewers >= 1),
+  CONSTRAINT fk_g2_review_group_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_review_group_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_review_group_updated_by FOREIGN KEY (updated_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_review_group_mapping ON m_compliance_mapping_review_requirement_group (tenant_id, mapping_id, sort_order);
+
+CREATE TABLE m_compliance_mapping_review_requirement_type (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', requirement_group_id BIGINT NOT NULL,
+  reviewer_type_id BIGINT NOT NULL, reviewer_type_code_snapshot VARCHAR(100) NOT NULL, reviewer_type_name_snapshot VARCHAR(200) NOT NULL,
+  credential_label_snapshot VARCHAR(200) NOT NULL, credential_required_snapshot TINYINT NOT NULL, created_by BIGINT,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_by BIGINT,
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_review_type UNIQUE (tenant_id, requirement_group_id, reviewer_type_id), CONSTRAINT uk_g2_review_type_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT fk_g2_review_type_group FOREIGN KEY (requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(id),
+  CONSTRAINT fk_g2_review_type_reviewer FOREIGN KEY (reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(id),
+  CONSTRAINT fk_g2_review_type_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_review_type_reviewer ON m_compliance_mapping_review_requirement_type (tenant_id, reviewer_type_id);
+
+CREATE TABLE t_compliance_responsible_assignment (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', workplace_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+  role_code VARCHAR(40) NOT NULL DEFAULT 'COMPLIANCE_RESPONSIBLE', effective_from DATE NOT NULL, effective_to DATE, active_slot TINYINT,
+  assigned_by BIGINT NOT NULL, ended_by BIGINT, end_reason VARCHAR(500), version INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_flag TINYINT NOT NULL DEFAULT 0, CONSTRAINT uk_g2_assignment_active_slot UNIQUE (tenant_id, workplace_id, active_slot),
+  CONSTRAINT uk_g2_assignment_tenant_id UNIQUE (tenant_id, id), CONSTRAINT chk_g2_assignment_role CHECK (role_code = 'COMPLIANCE_RESPONSIBLE'),
+  CONSTRAINT chk_g2_assignment_period CHECK (effective_to IS NULL OR effective_from < effective_to),
+  CONSTRAINT chk_g2_assignment_open_fields CHECK ((effective_to IS NULL AND active_slot IS NULL AND ended_by IS NULL AND end_reason IS NULL) OR (effective_to IS NOT NULL AND ended_by IS NOT NULL AND end_reason IS NOT NULL)),
+  CONSTRAINT fk_g2_assignment_workplace FOREIGN KEY (workplace_id) REFERENCES m_workplace(id),
+  CONSTRAINT fk_g2_assignment_user FOREIGN KEY (user_id) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_assignment_assigned_by FOREIGN KEY (assigned_by) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_assignment_ended_by FOREIGN KEY (ended_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_assignment_period ON t_compliance_responsible_assignment (tenant_id, workplace_id, effective_from, effective_to);
+CREATE INDEX idx_g2_assignment_user_period ON t_compliance_responsible_assignment (tenant_id, user_id, effective_from, effective_to);
+
+CREATE TABLE t_compliance_mapping_approval_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL,
+  mapping_version VARCHAR(50) NOT NULL, mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL, assignment_id BIGINT NOT NULL,
+  workplace_id_snapshot BIGINT NOT NULL, actor_id BIGINT NOT NULL, actor_display_name_snapshot VARCHAR(200) NOT NULL, actor_role_snapshot VARCHAR(50) NOT NULL,
+  action VARCHAR(20) NOT NULL, event_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, occurred_at DATETIME(6) NOT NULL,
+  reason VARCHAR(1000), evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_g2_approval_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_approval_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_approval_action CHECK (action IN ('APPROVE','REJECT','REVOKE')),
+  CONSTRAINT fk_g2_approval_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_approval_assignment FOREIGN KEY (assignment_id) REFERENCES t_compliance_responsible_assignment(id),
+  CONSTRAINT fk_g2_approval_actor FOREIGN KEY (actor_id) REFERENCES sys_user(id),
+  CONSTRAINT fk_g2_approval_workplace FOREIGN KEY (workplace_id_snapshot) REFERENCES m_workplace(id),
+  CONSTRAINT fk_g2_approval_evidence_document FOREIGN KEY (evidence_document_id) REFERENCES t_document(id),
+  CONSTRAINT fk_g2_approval_evidence_version FOREIGN KEY (evidence_document_version_id) REFERENCES t_document_version(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_approval_scope ON t_compliance_mapping_approval_event (tenant_id, mapping_id, workplace_id_snapshot, assignment_id, occurred_at, id);
+CREATE INDEX idx_g2_approval_chain ON t_compliance_mapping_approval_event (tenant_id, event_chain_id, occurred_at, id);
+
+CREATE TABLE t_compliance_external_review_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL, mapping_version VARCHAR(50) NOT NULL,
+  mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL, requirement_group_id BIGINT NOT NULL, requirement_group_code_snapshot VARCHAR(100) NOT NULL,
+  reviewer_type_id BIGINT NOT NULL, reviewer_type_code_snapshot VARCHAR(100) NOT NULL, reviewer_type_name_snapshot VARCHAR(200) NOT NULL,
+  reviewer_name_snapshot VARCHAR(200) NOT NULL, organization_snapshot VARCHAR(255), credential_snapshot_encrypted TEXT, credential_key_version VARCHAR(64),
+  credential_cipher_format VARCHAR(20), credential_masked_snapshot VARCHAR(255), reviewer_identity_hash CHAR(64) NOT NULL, action VARCHAR(20) NOT NULL,
+  review_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, reviewed_at DATETIME(6) NOT NULL, valid_until DATETIME(6), recorded_at DATETIME(6) NOT NULL,
+  evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64), recorded_by BIGINT NOT NULL,
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_g2_external_review_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_external_review_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_external_review_action CHECK (action IN ('APPROVED','REJECTED','REVOKED')),
+  CONSTRAINT chk_g2_external_credential_pair CHECK ((credential_snapshot_encrypted IS NULL AND credential_key_version IS NULL AND credential_cipher_format IS NULL AND credential_masked_snapshot IS NULL) OR (credential_snapshot_encrypted IS NOT NULL AND credential_key_version IS NOT NULL AND credential_cipher_format IS NOT NULL AND credential_masked_snapshot IS NOT NULL)),
+  CONSTRAINT fk_g2_external_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_external_group FOREIGN KEY (requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(id),
+  CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(id),
+  CONSTRAINT fk_g2_external_evidence_document FOREIGN KEY (evidence_document_id) REFERENCES t_document(id),
+  CONSTRAINT fk_g2_external_evidence_version FOREIGN KEY (evidence_document_version_id) REFERENCES t_document_version(id),
+  CONSTRAINT fk_g2_external_recorded_by FOREIGN KEY (recorded_by) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_external_review_scope ON t_compliance_external_review_event (tenant_id, mapping_id, requirement_group_id, reviewer_identity_hash, recorded_at, id);
+CREATE INDEX idx_g2_external_review_chain ON t_compliance_external_review_event (tenant_id, review_chain_id, recorded_at, id);
+
+CREATE TABLE t_compliance_mapping_status_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', mapping_id BIGINT NOT NULL, mapping_version VARCHAR(50) NOT NULL,
+  mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL, before_status VARCHAR(30), after_status VARCHAR(30) NOT NULL,
+  actor_id BIGINT NOT NULL, actor_display_name_snapshot VARCHAR(200) NOT NULL, actor_role_snapshot VARCHAR(50) NOT NULL, occurred_at DATETIME(6) NOT NULL,
+  expected_version INT NOT NULL, gate_snapshot_hash CHAR(64), operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, reason VARCHAR(1000),
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), CONSTRAINT uk_g2_status_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_status_after CHECK (after_status IN ('DRAFT','PROVISIONAL_REVIEWED','ACTIVE','SUPERSEDED')),
+  CONSTRAINT fk_g2_status_mapping FOREIGN KEY (mapping_id) REFERENCES m_compliance_mapping_version(id),
+  CONSTRAINT fk_g2_status_actor FOREIGN KEY (actor_id) REFERENCES sys_user(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_status_mapping ON t_compliance_mapping_status_event (tenant_id, mapping_id, occurred_at, id);
+CREATE INDEX idx_g2_status_correlation ON t_compliance_mapping_status_event (tenant_id, correlation_id);
+
+CREATE TABLE t_compliance_operation_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', operation_id VARCHAR(36) NOT NULL,
+  operation_type VARCHAR(60) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, request_hash CHAR(64) NOT NULL, state VARCHAR(20) NOT NULL,
+  retryable_flag TINYINT NOT NULL DEFAULT 0, attempt_count INT NOT NULL DEFAULT 1, started_at DATETIME(6) NOT NULL, lease_until DATETIME(6), finished_at DATETIME(6),
+  result_reference_type VARCHAR(80), result_reference_id BIGINT, result_reference_version VARCHAR(100), result_summary_canonical TEXT, result_http_status INT,
+  result_hash CHAR(64), failure_code VARCHAR(100), correlation_id VARCHAR(100) NOT NULL, expires_at DATETIME(6), version INT NOT NULL DEFAULT 0,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_operation_key UNIQUE (tenant_id, operation_type, idempotency_key), CONSTRAINT uk_g2_operation_id UNIQUE (tenant_id, operation_id),
+  CONSTRAINT chk_g2_operation_type CHECK (operation_type IN ('MAPPING_DRAFT_UPSERT','MAPPING_PROVISIONAL_REVIEW','ASSIGNMENT_CREATE','ASSIGNMENT_END','MAPPING_ACTIVE','MAPPING_SUPERSEDE','INTERNAL_APPROVAL','EXTERNAL_REVIEW','EXTERNAL_REVIEW_REVOKE','DELIVERY_GENERATE','REVIEWER_TYPE_CREATE','REVIEWER_TYPE_UPDATE','REVIEWER_TYPE_DISABLE','REVIEW_REQUIREMENT_UPDATE')),
+  CONSTRAINT chk_g2_operation_state CHECK (state IN ('PROCESSING','SUCCEEDED','FAILED')), CONSTRAINT chk_g2_operation_retryable CHECK (retryable_flag IN (0,1)),
+  CONSTRAINT chk_g2_operation_result CHECK ((state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL) OR state <> 'SUCCEEDED')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX idx_g2_operation_lease ON t_compliance_operation_ledger (tenant_id, state, lease_until);
+CREATE INDEX idx_g2_operation_result ON t_compliance_operation_ledger (tenant_id, result_reference_type, result_reference_id);
+
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_mapping_version
+  FOREIGN KEY (mapping_version_id) REFERENCES m_compliance_mapping_version(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_profile_snapshot
+  FOREIGN KEY (profile_snapshot_id) REFERENCES t_contract_compliance_snapshot(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_worker_snapshot
+  FOREIGN KEY (worker_snapshot_id) REFERENCES t_contract_compliance_worker_snapshot(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_workplace
+  FOREIGN KEY (workplace_id) REFERENCES m_workplace(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_full_document_version
+  FOREIGN KEY (full_document_version_id) REFERENCES t_document_version(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_mask_document_version
+  FOREIGN KEY (mask_document_version_id) REFERENCES t_document_version(id);
+ALTER TABLE t_document_delivery ADD CONSTRAINT fk_delivery_g2_limited_document_version
+  FOREIGN KEY (limited_document_version_id) REFERENCES t_document_version(id);
 
 -- ============================================================
 -- DDL完了
