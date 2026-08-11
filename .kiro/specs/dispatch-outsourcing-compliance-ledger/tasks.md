@@ -96,6 +96,9 @@
     `G2-ACT-01..06`、`G2-DEL-01..17`、`G2-SEC-01..18`、`G2-MIG-01..12`、
     `G2-IDP-01..15`、`G2-LIFE-01..11`、R22追加の`G2-ASG-14..16`、`G2-FK-01..03`、
     `G2-OP-01..06`、`G2-MIG-13..20`を実行する。
+    G2-FKはmapping/group/type/assignment/workplace/approval/external/statusの各複合FKとtarget/supersedesを、
+    G2-OPはPROCESSING/FAILEDのresult/reference全NULLとSUCCEEDEDのsummary/http/hash必須を含める。
+    G2-MIGは全named UNIQUEの列順・列数・NON_UNIQUE、同名CHECKのcanonical repair、partial/repair後のhistory未登録を含める。
     最終L4では`mvn test`全量、fresh/legacy MySQL smoke、
     既存4 ruleの回帰、法務fixture golden file、H2実APIでのworker snapshot交付時点asOf回帰（T066-ASOF-01、archive/FULL/MASK/LIMITED/template切替/冪等）、
     Node/JS syntax、desktop/390px browser Demo Phase A/B、`git diff --check`。

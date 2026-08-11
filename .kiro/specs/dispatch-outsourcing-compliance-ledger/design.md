@@ -303,15 +303,19 @@ ACTIVE化、本番交付、T066完了、S10 PASSを許可しない。
   `(tenant_id,parent_id)`複合FKとする。approval/external eventの`target_event_id/supersedes_event_id`も同tenant self複合FKとし、
   `sys_user`だけはG0現行DBにtenant列がないためscalar FK＋service tenant境界を維持する。
 - V102 retryは`information_schema`でtable column shape、column type/length/NULL/default/precision、indexの列順/列数/UNIQUE属性、
-  named UNIQUE/CHECK/FK、triggerをcanonical manifestと照合する。欠落indexは追加し、同名indexの誤定義、欠落constraint、
+  named UNIQUE/CHECK/FK、triggerをcanonical manifestと照合する。全named UNIQUEは列数・列順・`NON_UNIQUE=0`まで検証し、
+  named CHECKはcanonical expressionへdrop/re-addして旧定義を収束させる。欠落indexは追加し、同名indexの誤定義、欠落constraint、
   不一致columnは`G2_V102_INDEX_SHAPE_MISMATCH`、`G2_V102_CONSTRAINT_SHAPE_MISMATCH`、
   `G2_V102_COLUMN_CONTRACT_MISMATCH`でfail-closedし、承認済みforward repairを要求する。旧FK/triggerはnamed drop/re-addする。
   V102適用後のgit revertはDB rollbackではなく、Flyway history/checksum確認後のforward repair migration/runbookで扱う。
 - event mapperは明示INSERT/SELECT APIのみ、operation ledgerはclaim/selectとPROCESSINGからのexpected-version CAS、
-  retryable FAILEDからPROCESSINGへ戻すexpected-version CASのみを公開する。`completeFailureCas`はretryable flagを保存し、
+  retryable FAILEDからPROCESSINGへ戻すexpected-version CASのみを公開する。operation resultは、`SUCCEEDED`だけが
+  `result_summary_canonical`・`result_http_status`・`result_hash`を全て非NULLで保持し、`PROCESSING`/`FAILED`は
+  result/reference全列をNULLとする。`completeFailureCas`はpayloadを受け取らず、DB CHECK/triggerと同じNULL行列を適用する。
+  `completeFailureCas`はretryable flagを保存し、
   `restartFailedCas`はretryable=1だけを再開する。operation ledger entityは`BaseEntity`を継承せず、DB triggerでDELETE、
   identity/result改変、PROCESSING lease以外の同一state更新、非retryable/terminal rowの再更新を拒否する。
 - R22 direct regressionは`G2-ASG-14..16`、`G2-FK-01..03`、`G2-OP-01..06`、`G2-MIG-13..20`とし、
   `ComplianceG2MapperContractTest`、H2/MySQLのslot・microsecond半開区間回帰、Flyway MySQL metadata/FK/trigger/operation retry smoke、
-  同名誤定義indexのforward repair fail-closed smokeで検証する。
+  同名誤定義index、同名誤定義CHECK、operation resultの失敗payload/成功hash欠落を含むforward repair fail-closed smokeで検証する。
 
