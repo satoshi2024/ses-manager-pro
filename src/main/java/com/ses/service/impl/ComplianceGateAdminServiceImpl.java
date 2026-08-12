@@ -31,6 +31,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     private final com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper requirementGroupMapper;
     private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
     private final com.ses.mapper.ComplianceMappingVersionMapper versionMapper;
+    private final com.ses.mapper.WorkplaceMapper workplaceMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
 
     @Override
@@ -112,6 +113,24 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         LocalDateTime now = LocalDateTime.now();
         if (effectiveFrom.isAfter(now)) {
             throw BusinessException.of(400, "compliance.gate.invalidAssignment");
+        }
+        // P6・§2.2（G2-ASG）: anchor lockで同一workplaceの並行createAssignmentを直列化する
+        Long locked = workplaceMapper.selectIdForUpdate("default", workplaceId);
+        if (locked == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        // P6・§2.2（G2-ASG）: 有限期間assignmentとのoverlap拒否。
+        // 新開始時点（effectiveFrom）で既に有効区間が終了していない有限期間行（effective_to > effectiveFrom）が
+        // あれば、同一workplaceに有効1件の契約（asOfで有効は常に1件）に違反するため拒否する。
+        // 現行open（active_slot=1・effective_to NULL）は交代として終了されるため対象外。
+        Long overlapping = assignmentMapper.selectCount(
+                new LambdaQueryWrapper<ComplianceResponsibleAssignment>()
+                        .eq(ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
+                        .isNotNull(ComplianceResponsibleAssignment::getEffectiveTo)
+                        .gt(ComplianceResponsibleAssignment::getEffectiveTo, effectiveFrom));
+        if (overlapping != null && overlapping > 0) {
+            throw BusinessException.of(409, "compliance.gate.assignmentOverlap");
         }
         // 既存open（active_slot=1・effective_to NULL）を終了する
         List<ComplianceResponsibleAssignment> open = assignmentMapper.selectList(

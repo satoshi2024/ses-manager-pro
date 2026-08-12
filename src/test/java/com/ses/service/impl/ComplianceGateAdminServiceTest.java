@@ -207,6 +207,25 @@ class ComplianceGateAdminServiceTest {
         assertTrue(ended.getEffectiveTo().isAfter(ended.getEffectiveFrom()), "effective_to > effective_from が常に成立");
     }
 
+    @Test
+    void assignment作成は有限期間assignmentと重複する開始日を拒否する() {
+        Long workplaceId = insertWorkplace();
+        Long user1 = insertUser("gate-overlap-1", "HR");
+        Long user2 = insertUser("gate-overlap-2", "HR");
+        // 既存openを作成し、将来日付で終了（effective_toが将来の有限期間行を再現）
+        ComplianceResponsibleAssignment open = complianceGateAdminService.createAssignment(
+                workplaceId, user1, LocalDateTime.now().minusDays(1));
+        jdbcTemplate.update("UPDATE t_compliance_responsible_assignment "
+                + "SET effective_to = DATEADD('DAY', 10, CURRENT_TIMESTAMP), active_slot = NULL, "
+                + "ended_by = 1, end_reason = 'test' WHERE id = ?", open.getId());
+
+        // 終了予定日（10日後）より前の開始 → overlap拒否（409）
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createAssignment(workplaceId, user2, LocalDateTime.now()));
+        assertEquals(409, error.getCode());
+        assertEquals("compliance.gate.assignmentOverlap", error.getMessageKey());
+    }
+
     private Long insertWorkplace() {
         jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('gate customer')");
         Long customerId = jdbcTemplate.queryForObject(
