@@ -79,6 +79,15 @@
 
 **Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
 
+**Phase A step 3 第五increment（2026-08-13）: 資格保有者視点再レビュー指摘対応（P2-N1・P3-N1〜N3・NOTE-1〜2全件対応）**
+- **P2-N1修正（PROVISIONAL/ACTIVE化の非空review policy強制）**: `transition(PROVISIONAL_REVIEWED)` および `activate()` に `assertPolicyNotEmpty()` ガードを追加。Requirement Groupが1件も存在しない空policy状態のままでのPROVISIONAL化・ACTIVE化を 400（`compliance.gate.policyInvalid`）で拒否（decision delta §2 L80準拠）。
+- **P3-N1修正（promoteFutureToActiveの承認REVOKE再検証）**: `promoteFutureToActive()` 内で対象バージョンに付与された承認イベントの `countSubsequentRevokes == 0` を再確認。予約後に承認がREVOKE/REJECTされた場合の昇格を 400（`compliance.gate.approvalRevoked`）で遮断。
+- **P3-N2修正（status event pre-update expected_version統一一意化）**: `recordStatusEvent` に `expectedVersion` パラメータを追加し、更新前の事前バージョン（`version.getVersion()`）を全呼び出し箇所で明示指定・記録。
+- **P3-N3修正（future_slotのmapping_codeスコープ絞り込み）**: `activate()` の `future_slot=1` 存在確認クエリを `(tenant_id, mapping_code, future_slot)` に限定し、DB一意制約 `uk_g2_mapping_future_slot` と完全に整合。
+- **NOTE-1記載（idempotency replay）**: `approve()` での決定的一意キーによる `DuplicateKey -> 409 Conflict` 応答は、後続incrementの operation ledger 統合（R6.5 idempotency replay 200化）待ちであることを確定・明記。
+- i18n: `compliance.gate.policyInvalid` を全4バンドル（ja/en/zh_CN/ko）に追記。
+- 検証: focused tests **22/0/0/0 PASS**（GateAdmin 8・MappingService 7・Canonicalizer 3・MessageBundle 4）。`git diff --check` exit 0。
+
 **Phase A step 3 第四increment（2026-08-12）: 資格保有者視点レビュー指摘対応（P1×2・P2×2・P3×4全件修正）**
 - **P1-Q1修正（policy編集freeze）**: requirement group/type操作（`createRequirementGroup`, `addRequirementType`）および `refreshPolicyHash` を mapping version の status = DRAFT のみに限定。DRAFT以外での編集試行は 400（`compliance.gate.mappingFrozen`）で拒否。
 - **P1-Q2修正（review_policy_hash scope分離・複合列）**: `create()`, `refreshPolicyHash()`, `approve()` での requirement types 取得を `requirement_group_id IN (対象mappingのgroup IDs)` に限定し他mappingのtype混入を防止。`ComplianceMappingCanonicalizer.computeReviewPolicyHash` に parent `group_code` を複合出力（`type=group_code|type_code|...`）し、group紐付けを一意化。

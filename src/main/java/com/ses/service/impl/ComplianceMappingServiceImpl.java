@@ -110,6 +110,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                 throw BusinessException.of(400, "compliance.gate.invalidTransition");
             }
             assertSourcesComplete(version);
+            assertPolicyNotEmpty(version);
             version.setStatus(STATUS_PROVISIONAL_REVIEWED);
             recomputeHash(version);
         } else if (STATUS_ACTIVE.equals(toStatus)) {
@@ -128,16 +129,18 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     /**
      * ACTIVE guard（G2-ACTIVE-01・証跡gate R8.1）:
      *  - PROVISIONAL_REVIEWEDであること
+     *  - 非空レビューポリシー（1件以上のRequirement Group定義）を持つこと（P2-N1）
      *  - 指定のapprovalEventIdが存在し、action=APPROVEであること
      *  - そのapproval event以降にREVOKE/REJECTの取消イベントが存在しないこと
      *  - mapping_hash / review_policy_hash をDBから再解決・再計算し一致を確認すること
      *  - 承認に使用されたassignmentがopen（active_slot=1）かつworkplaceId一致であること
-     *  - tenantにactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（2件目future候補は禁止）
+     *  - tenant/mappingCode単位でactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（2件目future候補は禁止）
      */
     private void activate(ComplianceMappingVersion version, Long approvalEventId) {
         if (!STATUS_PROVISIONAL_REVIEWED.equals(version.getStatus())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
+        assertPolicyNotEmpty(version);
         if (approvalEventId == null) {
             throw BusinessException.of(400, "compliance.gate.approvalRequired");
         }
@@ -185,23 +188,26 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
         }
 
-        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1（STATUS_ACTIVE）、あればfuture_slot=1（STATUS_PROVISIONAL_REVIEWEDを維持。2件目future候補は禁止）
+        // slot管理: tenant + mappingCode単位（uk_g2_mapping_active_slot/future_slot一致）でopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1
         List<ComplianceMappingVersion> activeList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
                         .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
         if (activeList.isEmpty()) {
+            Integer expectedVer = version.getVersion();
             version.setActiveSlot(1);
             version.setFutureSlot(null);
             version.setStatus(STATUS_ACTIVE);
             version.setActivatedAt(java.time.LocalDateTime.now());
             version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
-            recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE);
+            recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE, expectedVer);
         } else {
             List<ComplianceMappingVersion> futureList = versionMapper.selectList(
                     new LambdaQueryWrapper<ComplianceMappingVersion>()
                             .eq(ComplianceMappingVersion::getTenantId, "default")
+                            .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                             .eq(ComplianceMappingVersion::getFutureSlot, 1));
             if (!futureList.isEmpty()) {
                 throw BusinessException.of(400, "compliance.gate.futureSlotAlreadyExists");
@@ -225,12 +231,27 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (version.getEffectiveFrom() != null && java.time.LocalDate.now().isBefore(version.getEffectiveFrom())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
+
+        // P3-N1: 昇格前に既存承認のREVOKE再検証
+        List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, version.getId())
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "APPROVE"));
+        for (com.ses.entity.ComplianceMappingApprovalEvent app : approvals) {
+            if (approvalEventMapper.countSubsequentRevokes("default", version.getId(), app.getId()) > 0) {
+                throw BusinessException.of(400, "compliance.gate.approvalRevoked");
+            }
+        }
+
         List<ComplianceMappingVersion> currentActiveList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
                         .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
         for (ComplianceMappingVersion oldActive : currentActiveList) {
+            Integer oldExpectedVer = oldActive.getVersion();
             oldActive.setStatus(STATUS_SUPERSEDED);
             oldActive.setActiveSlot(null);
             oldActive.setFutureSlot(null);
@@ -239,9 +260,10 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             if (rows == 0) {
                 throw BusinessException.of(409, "contract.compliance.versionConflict");
             }
-            recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED);
+            recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED, oldExpectedVer);
         }
         String beforeStatus = version.getStatus();
+        Integer expectedVer = version.getVersion();
         version.setStatus(STATUS_ACTIVE);
         version.setActiveSlot(1);
         version.setFutureSlot(null);
@@ -252,12 +274,22 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (rows == 0) {
             throw BusinessException.of(409, "contract.compliance.versionConflict");
         }
-        recordStatusEvent(version, beforeStatus, STATUS_ACTIVE);
+        recordStatusEvent(version, beforeStatus, STATUS_ACTIVE, expectedVer);
         return version;
     }
 
-    /** append-only status event記録（G2-EVENT-01）。 */
-    private void recordStatusEvent(ComplianceMappingVersion version, String before, String after) {
+    private void assertPolicyNotEmpty(ComplianceMappingVersion version) {
+        Long groupCount = requirementGroupMapper.selectCount(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
+        if (groupCount == null || groupCount == 0) {
+            throw BusinessException.of(400, "compliance.gate.policyInvalid");
+        }
+    }
+
+    /** append-only status event記録（G2-EVENT-01）。P3-N2: expectedVersionは更新前の事前値を一意記録する。 */
+    private void recordStatusEvent(ComplianceMappingVersion version, String before, String after, Integer expectedVersion) {
         com.ses.entity.SysUser actor = sysUserMapper.selectById(com.ses.common.util.SecurityUtils.currentUserId());
         com.ses.entity.ComplianceMappingStatusEvent event = new com.ses.entity.ComplianceMappingStatusEvent();
         event.setTenantId("default");
@@ -271,7 +303,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         event.setActorDisplayNameSnapshot(actor == null ? "" : actor.getRealName());
         event.setActorRoleSnapshot(actor == null ? "" : actor.getRole());
         event.setOccurredAt(java.time.LocalDateTime.now());
-        event.setExpectedVersion(version.getVersion());
+        event.setExpectedVersion(expectedVersion);
         event.setOperationId(java.util.UUID.randomUUID().toString());
         event.setCorrelationId(java.util.UUID.randomUUID().toString());
         statusEventMapper.insertEvent(event);

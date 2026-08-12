@@ -111,6 +111,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         // 指名者本人が承認 → event記録（canonical hash・64 hex）
@@ -135,6 +136,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         assertThrows(BusinessException.class,
                 () -> complianceApprovalService.approve(version.getId(), workplaceId, "他人の承認", null),
@@ -181,6 +183,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-IDEM",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent event1 = complianceApprovalService.approve(

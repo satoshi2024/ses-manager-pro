@@ -39,6 +39,9 @@ class ComplianceMappingServiceImplTest {
     private ComplianceMappingService complianceMappingService;
 
     @Autowired
+    private ComplianceGateAdminService complianceGateAdminService;
+
+    @Autowired
     private ComplianceMappingVersionMapper versionMapper;
 
     @Autowired
@@ -61,20 +64,30 @@ class ComplianceMappingServiceImplTest {
     }
 
     @Test
-    void DRAFTからPROVISIONAL_REVIEWEDへはsourceCompletenessを検証して遷移する() {
+    void DRAFTからPROVISIONAL_REVIEWEDへはsourceCompletenessとpolicy非空を検証して遷移する() {
         // source不足（SRC-INDEX欠落）→ 400
         List<ComplianceMappingSourceInput> incomplete = new java.util.ArrayList<>(allSources());
         incomplete.removeIf(s -> "SRC-INDEX".equals(s.getSourceCode()));
         ComplianceMappingVersion incompleteVersion = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), incomplete);
+        complianceGateAdminService.createRequirementGroup(incompleteVersion.getId(), "GRP-1", "グループ1", 1);
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(incompleteVersion.getId(), "PROVISIONAL_REVIEWED"));
 
-        // source完全 → 遷移成功・freeze（status変更でhash不変）
+        // policy未設定（Requirement Groupなし） → 400 (P2-N1)
+        ComplianceMappingVersion noPolicyVersion = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-TEST-NOPOLICY",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> complianceMappingService.transition(noPolicyVersion.getId(), "PROVISIONAL_REVIEWED"),
+                "policy未設定のままPROVISIONAL化は不可");
+
+        // source完全＋policy設定あり → 遷移成功・freeze（status変更でhash不変）
         ComplianceMappingVersion complete = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-2",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(complete.getId(), "GRP-1", "グループ1", 1);
         String draftHash = complete.getMappingHash();
         ComplianceMappingVersion reviewed = complianceMappingService.transition(complete.getId(), "PROVISIONAL_REVIEWED");
         assertEquals("PROVISIONAL_REVIEWED", reviewed.getStatus());
@@ -90,6 +103,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         // 承認eventなし → approvalRequiredで保留
         assertThrows(com.ses.common.exception.BusinessException.class,
@@ -114,6 +128,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-4",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         // 実actor（指名者=1）が承認
@@ -149,6 +164,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-REVOKE-TEST",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent approval = complianceApprovalService.approve(
@@ -191,6 +207,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-V1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
@@ -199,6 +216,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-10-V2",
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
         ComplianceMappingVersion v2Active = complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
@@ -209,6 +227,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v3 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2027-01-V3",
                 LocalDate.of(2027, 1, 1), LocalDate.of(2027, 3, 31), allSources());
+        complianceGateAdminService.createRequirementGroup(v3.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v3.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app3 = complianceApprovalService.approve(v3.getId(), workplaceId, "v3確認", null);
         assertThrows(com.ses.common.exception.BusinessException.class,
@@ -223,6 +242,54 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion oldV1 = complianceMappingService.getById(v1.getId());
         assertEquals("SUPERSEDED", oldV1.getStatus());
         assertNull(oldV1.getActiveSlot());
+    }
+
+    @Test
+    void promoteFutureToActiveは承認REVOKE済みの場合昇格を拒否する() {
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('promote revoke customer')");
+        Long customerId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_customer WHERE company_name='promote revoke customer'", Long.class);
+        jdbcTemplate.update("INSERT INTO m_workplace (tenant_id, customer_id, name, organization_unit) "
+                + "VALUES ('default', ?, 'promote revoke workplace', '開発部')", customerId);
+        Long workplaceId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_workplace WHERE name='promote revoke workplace'", Long.class);
+        jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
+                + "(tenant_id, workplace_id, user_id, role_code, effective_from, active_slot, assigned_by) "
+                + "VALUES ('default', ?, 1, 'COMPLIANCE_RESPONSIBLE', '2026-08-01 00:00:00.000000', 1, 1)",
+                workplaceId);
+
+        // Active version
+        ComplianceMappingVersion v1 = complianceMappingService.create(
+                "G2-MAPPING-PRO", "MAPPING-2026-07-P1",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
+        complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
+        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
+
+        // Future candidate version
+        ComplianceMappingVersion v2 = complianceMappingService.create(
+                "G2-MAPPING-PRO", "MAPPING-2026-10-P2",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
+        complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
+        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
+
+        // 予約後に承認がREVOKEされる（後続REVOKE挿入） (P3-N1)
+        jdbcTemplate.update("INSERT INTO t_compliance_mapping_approval_event "
+                + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                + "event_chain_id, target_event_id, occurred_at, reason, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, 'MAPPING-2026-10-P2', ?, ?, ?, ?, 1, '1名', '管理者', 'REVOKE', "
+                + "'chain-2', ?, CURRENT_TIMESTAMP, '予約後取消', 'op-2', 'corr-2', 'idempotency-revoke-2')",
+                v2.getId(), app2.getMappingHash(), app2.getReviewPolicyHash(),
+                app2.getAssignmentId(), app2.getWorkplaceIdSnapshot(), app2.getId());
+
+        // 昇格試行は承認REVOKEにより拒否される
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> complianceMappingService.promoteFutureToActive(v2.getId()),
+                "承認REVOKE済みのfuture版は昇格拒否される");
     }
 
     private List<ComplianceMappingSourceInput> allSources() {
