@@ -43,4 +43,11 @@ public interface ComplianceMappingApprovalEventMapper {
     List<ComplianceMappingApprovalEvent> selectByMapping(@Param("tenantId") String tenantId,
                                                          @Param("mappingId") Long mappingId,
                                                          @Param("action") String action);
+
+    @Select("SELECT COUNT(*) FROM t_compliance_mapping_approval_event "
+            + "WHERE tenant_id = #{tenantId} AND mapping_id = #{mappingId} "
+            + "AND id > #{approvalId} AND action IN ('REVOKE', 'REJECT')")
+    long countSubsequentRevokes(@Param("tenantId") String tenantId,
+                              @Param("mappingId") Long mappingId,
+                              @Param("approvalId") Long approvalId);
 }

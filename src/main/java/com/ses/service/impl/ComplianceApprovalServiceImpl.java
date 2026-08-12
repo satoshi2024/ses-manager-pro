@@ -85,9 +85,12 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
                 new LambdaQueryWrapper<ComplianceMappingReviewRequirementGroup>()
                         .eq(ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
-        List<ComplianceMappingReviewRequirementType> types = requirementTypeMapper.selectList(
-                new LambdaQueryWrapper<ComplianceMappingReviewRequirementType>()
-                        .eq(ComplianceMappingReviewRequirementType::getTenantId, "default"));
+        List<Long> groupIds = groups.stream().map(ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
+                requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<ComplianceMappingReviewRequirementType>()
+                                .eq(ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .in(ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String reviewPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
 
         SysUser actor = sysUserMapper.selectById(actorId);
@@ -109,7 +112,7 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         event.setEvidenceDocumentId(evidenceDocumentId);
         event.setOperationId(UUID.randomUUID().toString());
         event.setCorrelationId(UUID.randomUUID().toString());
-        event.setIdempotencyKey("MAPPING-APPROVE:" + mappingId + ":" + actorId + ":" + UUID.randomUUID());
+        event.setIdempotencyKey("MAPPING:APPROVE:" + mappingId + ":" + actorId + ":" + mappingHash + ":" + reviewPolicyHash);
         try {
             approvalEventMapper.insertEvent(event);
         } catch (org.springframework.dao.DuplicateKeyException e) {

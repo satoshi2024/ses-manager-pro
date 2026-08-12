@@ -79,6 +79,19 @@
 
 **Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
 
+**Phase A step 3 第四increment（2026-08-12）: 資格保有者視点レビュー指摘対応（P1×2・P2×2・P3×4全件修正）**
+- **P1-Q1修正（policy編集freeze）**: requirement group/type操作（`createRequirementGroup`, `addRequirementType`）および `refreshPolicyHash` を mapping version の status = DRAFT のみに限定。DRAFT以外での編集試行は 400（`compliance.gate.mappingFrozen`）で拒否。
+- **P1-Q2修正（review_policy_hash scope分離・複合列）**: `create()`, `refreshPolicyHash()`, `approve()` での requirement types 取得を `requirement_group_id IN (対象mappingのgroup IDs)` に限定し他mappingのtype混入を防止。`ComplianceMappingCanonicalizer.computeReviewPolicyHash` に parent `group_code` を複合出力（`type=group_code|type_code|...`）し、group紐付けを一意化。
+- **P2-Q3修正（ACTIVE guard徹底）**: `activate()` に `approvalEventId` を必須化。DBから承認eventを再取得し、後続の REVOKE/REJECT の非存在確認（`countSubsequentRevokes == 0`）、`mapping_hash`・`review_policy_hash` のDB再計算一致確認、指名assignmentの `assignmentId` 非null・`active_slot=1`・`workplaceIdSnapshot` 一致確認を追加（R8.1準拠）。
+- **P2-Q4修正（future_slot昇格・SUPERSEDE CAS）**: `promoteFutureToActive()` を実装。有効開始日到来後の `future_slot=1` 版を `active_slot=1` へ昇格し、旧ACTIVE版を `STATUS_SUPERSEDED`・`active_slot=null` へ同一CAS更新（R6.7準拠）。2件目の `future_slot` 候補作成は拒否。
+- **P3-Q5..Q8修正**:
+  - P3-Q5: `approve()` の `idempotency_key` を決定的キー `MAPPING:APPROVE:{mappingId}:{actorId}:{mappingHash}:{reviewPolicyHash}` に変更し重複承認を防止。
+  - P3-Q6: `refreshPolicyHash` で DRAFT 以外のサイレント処理を廃止（DRAFTのみ明示実行）。
+  - P3-Q7: `activate()` で assignment/workplace 再解決ガードを強化。
+  - P3-Q8: `+1µs` ガードの境界テスト（`effective_from == now`）を `ComplianceGateAdminServiceTest` へ追加。
+- i18n: `compliance.gate.mappingFrozen`, `policyHashMismatch`, `approvalRevoked`, `futureSlotAlreadyExists` の4キーを全4バンドル（ja/en/zh_CN/ko）に追記。
+- 検証: focused tests 21/0/0/0 PASS（GateAdmin 8・MappingService 6・Canonicalizer 3・MessageBundle 4）。フルスイート **1858/0/0/0**（skip 41=Docker/Node・既知）。`git diff --check` exit 0。
+
 **Phase A step 3 第三increment（2026-08-12）: requirement group設定＋ACTIVE guard（step 4前半）**
 - `ComplianceGateAdminService`: mapping別requirement group CRUD（groupCode・displayName・minimumDistinctReviewers）＋groupへのreviewer type追加（typeのcode/name/credentialをsnapshot・enabledのみ）。policy変更でmapping versionのreview_policy_hashを再計算（ACTIVE以外）。
 - `ComplianceMappingServiceImpl.transition(ACTIVE)`: **ACTIVE guard（G2-ACTIVE-01）**。PROVISIONAL_REVIEWED必須・**canonical hash再解決が保存hashと一致**・**実actor承認event（APPROVE）必須**・承認assignmentが現行open（active_slot=1）・slot管理（tenantのactive_slot=1が無ければactive_slot=1・あればfuture_slot=1）。遷移は`t_compliance_mapping_status_event`へappend-only記録（G2-EVENT-01）。

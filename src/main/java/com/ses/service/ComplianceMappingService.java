@@ -18,6 +18,10 @@ public interface ComplianceMappingService {
 
     ComplianceMappingVersion transition(Long mappingId, String toStatus);
 
+    ComplianceMappingVersion transition(Long mappingId, String toStatus, Long approvalEventId);
+
+    ComplianceMappingVersion promoteFutureToActive(Long mappingId);
+
     List<ComplianceMappingVersion> list();
 
     ComplianceMappingVersion getById(Long mappingId);

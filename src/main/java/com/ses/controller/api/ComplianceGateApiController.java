@@ -53,8 +53,15 @@ public class ComplianceGateApiController {
     }
 
     @PutMapping("/mappings/{id}/transition")
-    public ApiResult<ComplianceMappingVersion> transition(@PathVariable Long id, @RequestParam String toStatus) {
-        return ApiResult.success(complianceMappingService.transition(id, toStatus));
+    public ApiResult<ComplianceMappingVersion> transition(@PathVariable Long id,
+                                                         @RequestParam String toStatus,
+                                                         @RequestParam(required = false) Long approvalEventId) {
+        return ApiResult.success(complianceMappingService.transition(id, toStatus, approvalEventId));
+    }
+
+    @PutMapping("/mappings/{id}/promote")
+    public ApiResult<ComplianceMappingVersion> promote(@PathVariable Long id) {
+        return ApiResult.success(complianceMappingService.promoteFutureToActive(id));
     }
 
     // ===== reviewer type / assignment / approval（Phase A step 3） =====

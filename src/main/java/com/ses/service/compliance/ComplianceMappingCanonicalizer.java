@@ -66,18 +66,26 @@ public class ComplianceMappingCanonicalizer {
     public String computeReviewPolicyHash(List<ComplianceMappingReviewRequirementGroup> groups,
                                           List<ComplianceMappingReviewRequirementType> types) {
         StringBuilder payload = new StringBuilder();
+        java.util.Map<Long, String> groupCodeMap = new java.util.HashMap<>();
         List<ComplianceMappingReviewRequirementGroup> sortedGroups = new ArrayList<>(groups);
         sortedGroups.sort(Comparator.comparing(ComplianceMappingReviewRequirementGroup::getRequirementGroupCode,
                 Comparator.nullsLast(Comparator.naturalOrder())));
         for (ComplianceMappingReviewRequirementGroup group : sortedGroups) {
+            if (group.getId() != null) {
+                groupCodeMap.put(group.getId(), group.getRequirementGroupCode());
+            }
             payload.append("group=").append(nvl(group.getRequirementGroupCode())).append('|')
                     .append(nvl(group.getMinimumDistinctReviewers())).append('\n');
         }
         List<ComplianceMappingReviewRequirementType> sortedTypes = new ArrayList<>(types);
-        sortedTypes.sort(Comparator.comparing(ComplianceMappingReviewRequirementType::getReviewerTypeCodeSnapshot,
-                Comparator.nullsLast(Comparator.naturalOrder())));
+        sortedTypes.sort(Comparator.comparing((ComplianceMappingReviewRequirementType t) -> groupCodeMap.getOrDefault(t.getRequirementGroupId(), ""),
+                Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(ComplianceMappingReviewRequirementType::getReviewerTypeCodeSnapshot,
+                        Comparator.nullsLast(Comparator.naturalOrder())));
         for (ComplianceMappingReviewRequirementType type : sortedTypes) {
-            payload.append("type=").append(nvl(type.getReviewerTypeCodeSnapshot())).append('|')
+            String groupCode = groupCodeMap.getOrDefault(type.getRequirementGroupId(), "∅");
+            payload.append("type=").append(nvl(groupCode)).append('|')
+                    .append(nvl(type.getReviewerTypeCodeSnapshot())).append('|')
                     .append(nvl(type.getReviewerTypeNameSnapshot())).append('|')
                     .append(nvl(type.getCredentialLabelSnapshot())).append('|')
                     .append(nvl(type.getCredentialRequiredSnapshot())).append('\n');

@@ -193,6 +193,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         if (!StringUtils.hasText(groupCode) || !StringUtils.hasText(displayName) || minimumDistinctReviewers < 1) {
             throw BusinessException.of(400, "compliance.gate.invalidRequirementGroup");
         }
+        com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
+        if (version == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!ComplianceMappingServiceImpl.STATUS_DRAFT.equals(version.getStatus())) {
+            throw BusinessException.of(400, "compliance.gate.mappingFrozen");
+        }
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
                 new com.ses.entity.ComplianceMappingReviewRequirementGroup();
         group.setTenantId("default");
@@ -215,6 +222,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         if (group == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(group.getMappingId());
+        if (version == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!ComplianceMappingServiceImpl.STATUS_DRAFT.equals(version.getStatus())) {
+            throw BusinessException.of(400, "compliance.gate.mappingFrozen");
+        }
         com.ses.entity.ComplianceExternalReviewerType type = reviewerTypeMapper.selectById(reviewerTypeId);
         if (type == null || Integer.valueOf(0).equals(type.getEnabled())) {
             throw BusinessException.of(400, "compliance.gate.invalidRequirementType");
@@ -234,18 +248,22 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         return requirementType;
     }
 
-    /** policy（group/type）変更をmapping versionのreview_policy_hashへ反映する（ACTIVE以外）。 */
+    /** policy（group/type）変更をmapping versionのreview_policy_hashへ反映する（DRAFTのみ）。 */
     private void refreshPolicyHash(Long mappingId) {
         com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
-        if (version == null || "ACTIVE".equals(version.getStatus())) {
+        if (version == null || !ComplianceMappingServiceImpl.STATUS_DRAFT.equals(version.getStatus())) {
             return;
         }
-        version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups =
                 requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId)),
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default"))));
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
+        version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(groups, types));
         versionMapper.updateById(version);
     }
 }

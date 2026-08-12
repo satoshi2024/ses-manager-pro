@@ -153,6 +153,56 @@ class ComplianceGateAdminServiceTest {
                 () -> complianceApprovalService.approve(version.getId(), workplaceId, "早期承認", null));
     }
 
+    @Test
+    void requirementGroupとtypeの編集はDRAFTのみ許可する() {
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-FREEZE",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        // DRAFT状態ではgroup作成可能
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        assertNotNull(group.getId());
+
+        // PROVISIONAL_REVIEWEDへ遷移
+        complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
+
+        // PROVISIONAL_REVIEWED状態でのgroup追加・type追加は拒否される（P1-Q1 freeze）
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-2", "グループ2", 1));
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.addRequirementType(group.getId(), 1L));
+    }
+
+    @Test
+    void approvalのidempotencyKeyは決定的で重複承認を拒否する() {
+        Long workplaceId = insertWorkplace();
+        complianceGateAdminService.createAssignment(workplaceId, 1L, LocalDateTime.now().minusDays(1));
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-IDEM",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
+
+        ComplianceMappingApprovalEvent event1 = complianceApprovalService.approve(
+                version.getId(), workplaceId, "確認1", null);
+        assertNotNull(event1.getId());
+
+        // 同一actor・同一mappingへの重複承認は決定的なidempotencyKeyにより409 Conflictで拒否される
+        assertThrows(BusinessException.class,
+                () -> complianceApprovalService.approve(version.getId(), workplaceId, "確認2", null));
+    }
+
+    @Test
+    void endAssignmentのプラス1マイクロ秒ガードは同一tickでも有効区間を確保する() {
+        Long workplaceId = insertWorkplace();
+        Long user1 = insertUser("tick-user-1", "HR");
+        LocalDateTime startAt = LocalDateTime.now();
+        ComplianceResponsibleAssignment assignment = complianceGateAdminService.createAssignment(workplaceId, user1, startAt);
+
+        // assignment.getEffectiveFrom() と同一時刻で終了を試みる（P3-Q8）
+        ComplianceResponsibleAssignment ended = complianceGateAdminService.endAssignment(assignment.getId(), "即時終了");
+        assertTrue(ended.getEffectiveTo().isAfter(ended.getEffectiveFrom()), "effective_to > effective_from が常に成立");
+    }
+
     private Long insertWorkplace() {
         jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('gate customer')");
         Long customerId = jdbcTemplate.queryForObject(

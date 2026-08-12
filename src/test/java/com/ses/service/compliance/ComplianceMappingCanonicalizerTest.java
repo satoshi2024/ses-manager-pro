@@ -69,6 +69,33 @@ class ComplianceMappingCanonicalizerTest {
                 "status/active_slot等はcanonical payloadに含めない");
     }
 
+    @Test
+    void reviewPolicyHashはgroupCodeとtypeを紐付けて計算する() {
+        com.ses.entity.ComplianceMappingReviewRequirementGroup g1 = new com.ses.entity.ComplianceMappingReviewRequirementGroup();
+        g1.setId(10L);
+        g1.setRequirementGroupCode("GRP-A");
+        g1.setMinimumDistinctReviewers(1);
+
+        com.ses.entity.ComplianceMappingReviewRequirementGroup g2 = new com.ses.entity.ComplianceMappingReviewRequirementGroup();
+        g2.setId(20L);
+        g2.setRequirementGroupCode("GRP-B");
+        g2.setMinimumDistinctReviewers(1);
+
+        com.ses.entity.ComplianceMappingReviewRequirementType t1 = new com.ses.entity.ComplianceMappingReviewRequirementType();
+        t1.setRequirementGroupId(10L);
+        t1.setReviewerTypeCodeSnapshot("LEGAL");
+        t1.setReviewerTypeNameSnapshot("弁護士");
+
+        com.ses.entity.ComplianceMappingReviewRequirementType t2 = new com.ses.entity.ComplianceMappingReviewRequirementType();
+        t2.setRequirementGroupId(20L);
+        t2.setReviewerTypeCodeSnapshot("LEGAL");
+        t2.setReviewerTypeNameSnapshot("弁護士");
+
+        String hash1 = canonicalizer.computeReviewPolicyHash(List.of(g1, g2), List.of(t1));
+        String hash2 = canonicalizer.computeReviewPolicyHash(List.of(g1, g2), List.of(t2));
+        assertNotEquals(hash1, hash2, "同一typeでも紐付くRequirementGroupが異なれば異なるhashになる");
+    }
+
     private ComplianceMappingSource source(String code, String url, String version, LocalDate confirmedOn) {
         ComplianceMappingSource source = new ComplianceMappingSource();
         source.setSourceCode(code);

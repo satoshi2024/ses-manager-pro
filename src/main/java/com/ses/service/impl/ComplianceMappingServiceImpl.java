@@ -30,6 +30,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     public static final String STATUS_DRAFT = "DRAFT";
     public static final String STATUS_PROVISIONAL_REVIEWED = "PROVISIONAL_REVIEWED";
     public static final String STATUS_ACTIVE = "ACTIVE";
+    public static final String STATUS_SUPERSEDED = "SUPERSEDED";
 
     /** §6.1のsource completeness: 公式source（4帳票＋INDEX）が揃っていること。 */
     private static final java.util.Set<String> REQUIRED_SOURCES = java.util.Set.of(
@@ -81,12 +82,8 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         }
         // canonicalizerはversion/sourceのidに依存しないため、insert前にhashを計算してNOT NULL制約を満たす。
         version.setMappingHash(canonicalizer.computeMappingHash(version, sourceEntities));
-        // review_policy_hash（§6.3）: 現行のreview policy（group/type）から計算。policy未設定なら空policyの決定的hash。
-        version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(
-                requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")),
-                requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default"))));
+        // review_policy_hash（§6.3）: 現行のreview policy（group/type）から計算。create時点はgroup/type未設定のため空policyの決定的hash。
+        version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(List.of(), List.of()));
         versionMapper.insert(version);
         for (ComplianceMappingSource source : sourceEntities) {
             source.setMappingId(version.getId());
@@ -98,6 +95,12 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     @Override
     @Transactional
     public ComplianceMappingVersion transition(Long mappingId, String toStatus) {
+        return transition(mappingId, toStatus, null);
+    }
+
+    @Override
+    @Transactional
+    public ComplianceMappingVersion transition(Long mappingId, String toStatus, Long approvalEventId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -110,7 +113,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             version.setStatus(STATUS_PROVISIONAL_REVIEWED);
             recomputeHash(version);
         } else if (STATUS_ACTIVE.equals(toStatus)) {
-            activate(version);
+            activate(version, approvalEventId);
         } else {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
@@ -123,48 +126,83 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     }
 
     /**
-     * ACTIVE guard（G2-ACTIVE-01・証跡gate）:
+     * ACTIVE guard（G2-ACTIVE-01・証跡gate R8.1）:
      *  - PROVISIONAL_REVIEWEDであること
-     *  - 実actor承認event（APPROVE）が存在し、そのmapping_hashが現在のcanonical hashと一致すること
-     *  - 承認に使用されたassignmentがactivation時点でopen（active_slot=1）であること
-     *  - tenantにactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（保留版）
+     *  - 指定のapprovalEventIdが存在し、action=APPROVEであること
+     *  - そのapproval event以降にREVOKE/REJECTの取消イベントが存在しないこと
+     *  - mapping_hash / review_policy_hash をDBから再解決・再計算し一致を確認すること
+     *  - 承認に使用されたassignmentがopen（active_slot=1）かつworkplaceId一致であること
+     *  - tenantにactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（2件目future候補は禁止）
      */
-    private void activate(ComplianceMappingVersion version) {
+    private void activate(ComplianceMappingVersion version, Long approvalEventId) {
         if (!STATUS_PROVISIONAL_REVIEWED.equals(version.getStatus())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
-        // canonical hash再解決（§6.2: DBから再計算し保存hashと比較）
+        if (approvalEventId == null) {
+            throw BusinessException.of(400, "compliance.gate.approvalRequired");
+        }
+        com.ses.entity.ComplianceMappingApprovalEvent approval = approvalEventMapper.selectByTenantAndId("default", approvalEventId);
+        if (approval == null || !version.getId().equals(approval.getMappingId()) || !"APPROVE".equals(approval.getAction())) {
+            throw BusinessException.of(400, "compliance.gate.approvalRequired");
+        }
+        if (approvalEventMapper.countSubsequentRevokes("default", version.getId(), approvalEventId) > 0) {
+            throw BusinessException.of(400, "compliance.gate.approvalRevoked");
+        }
+
+        // canonical mapping hash再解決（§6.2: DBから再計算し保存hashおよび承認hashと比較）
         List<ComplianceMappingSource> sources = sourceMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingSource>()
                         .eq(ComplianceMappingSource::getMappingId, version.getId()));
-        String currentHash = canonicalizer.computeMappingHash(version, sources);
-        if (!currentHash.equals(version.getMappingHash())) {
+        String currentMappingHash = canonicalizer.computeMappingHash(version, sources);
+        if (!currentMappingHash.equals(version.getMappingHash()) || !currentMappingHash.equals(approval.getMappingHash())) {
             throw BusinessException.of(400, "compliance.gate.mappingHashMismatch");
         }
-        List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectByMapping(
-                "default", version.getId(), "APPROVE");
-        if (approvals.isEmpty()) {
-            throw BusinessException.of(400, "compliance.gate.approvalRequired");
+
+        // canonical review policy hash再解決（§6.3: DBから再計算し保存hashおよび承認hashと比較）
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
+                requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
+        String currentPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
+        if (!currentPolicyHash.equals(version.getReviewPolicyHash()) || !currentPolicyHash.equals(approval.getReviewPolicyHash())) {
+            throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
         }
-        com.ses.entity.ComplianceMappingApprovalEvent approval = approvals.get(approvals.size() - 1);
-        if (!currentHash.equals(approval.getMappingHash())) {
-            throw BusinessException.of(400, "compliance.gate.approvalHashMismatch");
+
+        // assignment再解決（openかつworkplaceId一致）
+        if (approval.getAssignmentId() == null) {
+            throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
         }
         com.ses.entity.ComplianceResponsibleAssignment assignment =
                 assignmentMapper.selectById(approval.getAssignmentId());
-        if (assignment == null || !Integer.valueOf(1).equals(assignment.getActiveSlot())) {
+        if (assignment == null || !Integer.valueOf(1).equals(assignment.getActiveSlot())
+                || approval.getWorkplaceIdSnapshot() == null || !approval.getWorkplaceIdSnapshot().equals(assignment.getWorkplaceId())) {
             throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
         }
-        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1
-        List<ComplianceMappingVersion> active = versionMapper.selectList(
+
+        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1（2件目future候補は禁止）
+        List<ComplianceMappingVersion> activeList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
                         .eq(ComplianceMappingVersion::getTenantId, "default")
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
-        if (active.isEmpty()) {
+        if (activeList.isEmpty()) {
             version.setActiveSlot(1);
             version.setFutureSlot(null);
         } else {
+            List<ComplianceMappingVersion> futureList = versionMapper.selectList(
+                    new LambdaQueryWrapper<ComplianceMappingVersion>()
+                            .eq(ComplianceMappingVersion::getTenantId, "default")
+                            .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
+                            .eq(ComplianceMappingVersion::getFutureSlot, 1));
+            if (!futureList.isEmpty()) {
+                throw BusinessException.of(400, "compliance.gate.futureSlotAlreadyExists");
+            }
             version.setActiveSlot(null);
             version.setFutureSlot(1);
         }
@@ -172,6 +210,45 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         version.setActivatedAt(java.time.LocalDateTime.now());
         version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
         recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE);
+    }
+
+    @Override
+    @Transactional
+    public ComplianceMappingVersion promoteFutureToActive(Long mappingId) {
+        ComplianceMappingVersion version = versionMapper.selectById(mappingId);
+        if (version == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!STATUS_ACTIVE.equals(version.getStatus()) || !Integer.valueOf(1).equals(version.getFutureSlot())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+        if (version.getEffectiveFrom() != null && java.time.LocalDate.now().isBefore(version.getEffectiveFrom())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+        List<ComplianceMappingVersion> currentActiveList = versionMapper.selectList(
+                new LambdaQueryWrapper<ComplianceMappingVersion>()
+                        .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
+                        .eq(ComplianceMappingVersion::getActiveSlot, 1));
+        for (ComplianceMappingVersion oldActive : currentActiveList) {
+            oldActive.setStatus(STATUS_SUPERSEDED);
+            oldActive.setActiveSlot(null);
+            oldActive.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+            int rows = versionMapper.updateById(oldActive);
+            if (rows == 0) {
+                throw BusinessException.of(409, "contract.compliance.versionConflict");
+            }
+            recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED);
+        }
+        version.setActiveSlot(1);
+        version.setFutureSlot(null);
+        version.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+        int rows = versionMapper.updateById(version);
+        if (rows == 0) {
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
+        recordStatusEvent(version, STATUS_ACTIVE, STATUS_ACTIVE);
+        return version;
     }
 
     /** append-only status event記録（G2-EVENT-01）。 */
