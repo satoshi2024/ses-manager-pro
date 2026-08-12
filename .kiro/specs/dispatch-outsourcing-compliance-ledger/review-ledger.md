@@ -1,6 +1,10 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R22 MySQL 0-skip検証 attempt / R10再Review待ち）
+## 現行判定（R22 packet提示 / R10 close判定待ち）
+
+`R10 Round 23再確認: R22-P1-04・P2-02 VERIFIED_CLOSED（CI 31565290865 = 1842/0/0/0 skip 0・MySQL smoke実実行）。P1-02/P1-05 unblock済み、P1-01/P1-03検証前提成立。R22 packet（P1-01〜05のacceptance criteria×証跡）提示済み・R10 close判定待ち。T066 M PASS条件未達（G2 gate・GATE-T066-HISTORY）、production authorizationなし、S12 NOT READY維持`。
+
+## R22 MySQL 0-skip検証 attempt（R10再Review待ち）
 
 R10の要求した実MySQL 0-skip証跡について、同一Head `99fbed8294dd1a6c320b4413b832f7c7b9292da1`でローカルおよびCIを確認した。ローカルではDocker CLIのcontextは`desktop-linux`だが、Docker Desktop daemonが起動不能であり、指定コマンドは`Tests run: 3, Failures: 0, Errors: 0, Skipped: 3`、`BUILD SUCCESS`となった。これは必須のzero-skip条件を満たさない。
 
@@ -573,6 +577,22 @@ R10 Round 23は`f212c7b0`をFAIL（CI run 31563321508: 1844/1/4/0。`FlywayG2For
 **R22 issue状態（R23時点）**: P1-04 `OPEN / CI_REPRODUCED`（本deltaでfix対象をPR #69実績と同一化）、P1-02/P1-05 `FIXED_BY_IMPLEMENTER / BLOCKED_BY_P1-04`、P1-01/P1-03 `OPEN / MYSQL_VERIFICATION_PENDING`、P2-01 `VERIFIED_CLOSED`、P2-02 表記訂正済み。
 
 **境界**: 本deltaはPR #69のcode変更portのみ。DDLのcanonical形状はPR #69実績どおり。production authorizationなし、S12 `NOT READY`維持。
+
+## R22 packet（P1-01〜P1-05 acceptance criteriaと証跡対応 / R10 close判定用）
+
+R10 Round 23再確認（R22-P1-04・P2-02 VERIFIED_CLOSED、P1-02/P1-05 unblock、P1-01/P1-03検証前提成立）を受け、各P1のacceptance criteriaと、CI run 31565290865（1842/0/0/0 skip 0・MySQL smoke実実行）＋H2回帰による証跡を対応付けて提示する。
+
+| issue | acceptance criteria | 証跡（MySQL実環境=CI 31565290865 / H2） |
+|---|---|---|
+| R22-P1-01（assignment slot shape、`G2-ASG-14..16`） | 業務一意性: `uk_g2_assignment_active_slot`（tenant_id, workplace_id, active_slot）でactive slot重複を拒否・same/cross-tenant境界・有効期間（DATETIME(6)半開区間） | `FlywayG2GateSchemaSmokeTest`（MySQL）: active_slot重複INSERT拒否・cross-tenant許容/same-tenant拒否・period CHECK（1=1の誤定義検出含む）を実測。H2: `DispatchComplianceSchemaH2Test` 3/0/0/0・`ComplianceG2MapperContractTest` 2/0/0/0 |
+| R22-P1-02（複合FK/self-FK family、`G2-FK-01..03`） | 全relation family（approval target孤立・supersedes cross-tenant・status→mapping same/cross-tenant）のFK整合・孤立行拒否 | `FlywayG2GateSchemaSmokeTest`（MySQL）: FK familyのsame/cross-tenant matrix・孤立参照拒否（SQLState 1452/1451系）を実測。`V102ForwardRepairContractTest` 2/0/0/0・`MigrationScriptIntegrityTest` 27/0/0/0 |
+| R22-P1-03（DATETIME(6)/半開区間・worker NULL物理契約） | 境界日時（DATETIME(6)精度）・半開区間の適用、worker NULL（employee NULL契約）の物理保存 | `FlywayG2GateSchemaSmokeTest`（MySQL）: DATETIME(6)精度・period境界を実測。`DispatchComplianceSchemaH2Test` 3/0/0/0・`AllMappersSchemaSweepTest` 125/0/0/0（entity↔H2全mapper整合） |
+| R22-P1-04（migration shape、`G2-MIG-13..20`） | **VERIFIED_CLOSED（R10確定）**: named UNIQUE列順・列数・NON_UNIQUE、同名CHECK canonical repair、metadata manifest（attempt_count=1）、同一DB forward repair、V102成功履歴1件 | `FlywayG2ForwardRepairSmokeTest`（MySQL）2/0/0/0: 誤定義index検出（`COUNT(DISTINCT index_name)=1`）→同一DB forward repair→V102 success history 1・canonical列順・FK・trigger。`FlywayG2GateSchemaSmokeTest` 1/0/0/0。V84 legacy/partial smoke 各1/0/0/0 |
+| R22-P1-05（operation state/claim、`G2-OP-01..06`） | claim初期値（attempt_count=1）・PROCESSING/FAILED result/reference全NULL・SUCCEEDED summary/http/hash必須・retryable FAILED再開・遷移別CAS・PROCESSING不正field改変拒否 | `FlywayG2GateSchemaSmokeTest`（MySQL）: operation state matrix・claim/retryable・BEFORE INSERT triggerを実測。`ComplianceG2MapperContractTest` 2/0/0/0（H2）・`V102ForwardRepairContractTest` 2/0/0/0 |
+
+**close条件の対応**: 上記criteriaは全てCI run 31565290865（新Head `16f40e0f`）のMySQL smoke実実行とH2回帰で満たされている。R10が本packetのcriteria対応を確認し、P1-01/P1-03・P1-02/P1-05のCLOSEを確定できる。
+
+**境界**: G2 service/API/UI/security、実actor/reviewer/evidence、Phase A/B、T066 L4（全量）は本packetの対象外。T066 M PASS条件未達（G2 gate・GATE-T066-HISTORY）、production authorizationなし、S12 `NOT READY`維持。
 
 ## M / 本番gateと再開条件
 
