@@ -206,12 +206,44 @@ class FlywayG2GateSchemaSmokeTest {
                     "FAILED初期operation INSERTは拒否するはず");
             assertRejectedWithoutRowChange(statement,
                     "INSERT INTO t_compliance_operation_ledger "
-                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, finished_at, failure_code, correlation_id) VALUES "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, finished_at, failure_code, correlation_id) VALUES "
                             + "('default', 'g2-operation-invalid-processing', 'MAPPING_ACTIVE', 'g2-op-invalid-processing-key', REPEAT('j', 64), "
-                            + "'PROCESSING', '2026-08-01 00:00:02.000000', 'BROKEN', 'g2-op-invalid-processing-correlation')",
+                            + "'PROCESSING', '2026-08-01 00:00:01.000000', '2026-08-01 00:00:02.000000', 'BROKEN', 'g2-op-invalid-processing-correlation')",
                     "t_compliance_operation_ledger",
                     "tenant_id='default' AND operation_id='g2-operation-invalid-processing'",
                     "finished/failure付きPROCESSING INSERTは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, retryable_flag, attempt_count, started_at, correlation_id, version, deleted_flag) VALUES "
+                            + "('default', 'g2-operation-invalid-retryable', 'MAPPING_ACTIVE', 'g2-op-invalid-retryable-key', REPEAT('k', 64), "
+                            + "'PROCESSING', 1, 1, '2026-08-01 00:00:01.000000', 'g2-op-invalid-retryable-correlation', 0, 0)",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-retryable'",
+                    "retryable_flag=1のclaim INSERTは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, retryable_flag, attempt_count, started_at, correlation_id, version, deleted_flag) VALUES "
+                            + "('default', 'g2-operation-invalid-attempt', 'MAPPING_ACTIVE', 'g2-op-invalid-attempt-key', REPEAT('l', 64), "
+                            + "'PROCESSING', 0, 2, '2026-08-01 00:00:01.000000', 'g2-op-invalid-attempt-correlation', 0, 0)",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-attempt'",
+                    "attempt_count!=1のclaim INSERTは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, retryable_flag, attempt_count, started_at, correlation_id, version, deleted_flag) VALUES "
+                            + "('default', 'g2-operation-invalid-version', 'MAPPING_ACTIVE', 'g2-op-invalid-version-key', REPEAT('m', 64), "
+                            + "'PROCESSING', 0, 1, '2026-08-01 00:00:01.000000', 'g2-op-invalid-version-correlation', 1, 0)",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-version'",
+                    "version!=0のclaim INSERTは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, retryable_flag, attempt_count, started_at, correlation_id, version, deleted_flag) VALUES "
+                            + "('default', 'g2-operation-invalid-deleted', 'MAPPING_ACTIVE', 'g2-op-invalid-deleted-key', REPEAT('n', 64), "
+                            + "'PROCESSING', 0, 1, '2026-08-01 00:00:01.000000', 'g2-op-invalid-deleted-correlation', 0, 1)",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-deleted'",
+                    "deleted_flag=1のclaim INSERTは拒否するはず");
             statement.executeUpdate("INSERT INTO t_compliance_operation_ledger "
                     + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, "
                     + "started_at, result_summary_canonical, result_http_status, correlation_id, version, deleted_flag) VALUES "
