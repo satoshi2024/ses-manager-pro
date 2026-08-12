@@ -1,27 +1,27 @@
 {
-  "runId" : "browser-r8-20260812154646",
+  "runId" : "browser-r8-20260809145958",
   "acceptanceId" : 1,
   "desktop" : {
     "viewport" : "desktop",
-    "finalUrl" : "http://localhost:51836/acceptance?workMonth=2026-07&acceptanceId=1",
-    "afterLoginUrl" : "http://localhost:51836/dashboard",
+    "finalUrl" : "http://localhost:58037/acceptance?workMonth=2026-07&acceptanceId=1",
+    "afterLoginUrl" : "http://localhost:58037/dashboard",
     "targetRowTableWarning" : true,
     "targetRowVisibleInViewport" : true,
     "scrollY" : 0.0,
     "screenshotFile" : "desktop-1920x1080.png",
-    "screenshotSha256" : "ac08ecc8689cfab7962de0b35bdb238ccab3f74cdade0e937dff09688c071c0d",
-    "consoleErrorCount" : 0
+    "screenshotSha256" : "3c1142dec6a111c2450cafc21e942005f7c76504bc052e6e0c095b2966fc138d",
+    "consoleErrorCount" : 1
   },
   "mobile" : {
     "viewport" : "mobile",
-    "finalUrl" : "http://localhost:51836/acceptance?workMonth=2026-07&acceptanceId=1",
-    "afterLoginUrl" : "http://localhost:51836/dashboard",
+    "finalUrl" : "http://localhost:58037/acceptance?workMonth=2026-07&acceptanceId=1",
+    "afterLoginUrl" : "http://localhost:58037/dashboard",
     "targetRowTableWarning" : true,
     "targetRowVisibleInViewport" : true,
     "scrollY" : 0.0,
     "screenshotFile" : "mobile-390x844.png",
-    "screenshotSha256" : "4a7dd828ac4f4dc549d7db8990ba7a797a3494e714e4b2becab8288878521c31",
-    "consoleErrorCount" : 0
+    "screenshotSha256" : "5cd34da709d0c1e431f861e4c880d4bf7cd917ae15bf21710907a8a119ac59fe",
+    "consoleErrorCount" : 1
   },
   "note" : "全PNG/HAR/consoleは同一ブラウザセッション（同一Cookieコンテキスト）の実CDPイベントから生成。Java側で結論文字列を連結していない。"
 }
