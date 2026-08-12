@@ -1,8 +1,22 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R24: R22全P1 CLOSE確定 / T066 MはG2 gate待ち）
+## 現行判定（R24対応確認PASS / M PASSはG2 gate証跡待ち）
 
-`R10 Round 24: R22 P1-01〜P1-05を全VERIFIED_CLOSED（R22 FAIL解消・V102 schema基盤受領）。T066 M: L4全量（1842件・失敗0・skip 41=Docker gateのみ・BUILD SUCCESS）最終確認済み。G2 gate（COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視・GATE-T066-HISTORY）未取得のためM PASS条件未達。production authorizationなし、S12 NOT READY維持`。
+`R10 R24対応確認: 6a8e2b80（混入revert＋ledger転記＋P2 note①訂正）を検証しPASS。net diff=review-ledger +3/-3のみ、codeはCI検証済み16f40e0fと同一、CI 1842/0/0/0 skip 0 SUCCESS。新規issueなし（P0=0/P1=0/P2=0）。T066 M: 実装・L4全量（1842/0/0/0・skip 0）最終確認済み。M PASS条件未達（G2 gate 5項目・人間/外部プロセス関与）。production authorizationなし、S12 NOT READY維持`。
+
+## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）
+
+T066 MのPASS条件であるG2 gate証跡は、システム外の人間/外部プロセスによる取得が必要である。実装AIは証跡を推測・捏造せずfail-closedとする（R10の証跡正確性方針）。取得側へ以下を要求する:
+
+| # | gate項目 | 必要な証跡（形式） | 取得主体 |
+|---|---|---|---|
+| 1 | `COMPLIANCE_RESPONSIBLE` runtime assignment | 管理者による指名記録（role_code、user_id、valid_from/to、任命理由、active flag） | 管理者（人間） |
+| 2 | 対象mapping version/hashへの実actor承認event | 承認event記録（actor_user_id、表示名snapshot、role、日時、mapping version/hash、根拠資料URL/版、理由、correlation ID） | 実actor（人間） |
+| 3 | 外部社労士/弁護士Review（GATE-T060-EXTERNAL） | 外部専門家のReview結果（資格・根拠・署名/日時） | 外部専門家 |
+| 4 | 帳票PDF実ブラウザ目視 | 実ブラウザでの帳票表示・レイアウト確認のスクリーンショット/記録 | レビュー担当（人間） |
+| 5 | GATE-T066-HISTORY（履歴table書き込み経路） | 履歴table（苦情処理状況・キャリア・教育訓練・紹介予定・紛争防止・差異通知）の書き込み経路の実装可否の決定 | 発注者（人間） |
+
+**実装AI側の到達点（確定）**: T060〜T066の実装可能範囲は全て完了・R10検証済み（T060 PASS・T061〜T065 PASS・T066 実装+L4 1842/0/0/0・R19〜R24のG2 schema phase含むR22全P1 CLOSE）。証跡1〜4の取得と5の決定後にR10がM PASS判定 → S10 PASS → S12解放。
 
 ## R22 MySQL 0-skip検証 attempt（R10再Review待ち）
 
