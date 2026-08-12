@@ -1,8 +1,8 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
-## 現行判定（R22 packet提示 / R10 close判定待ち）
+## 現行判定（R24: R22全P1 CLOSE確定 / T066 MはG2 gate待ち）
 
-`R10 Round 23再確認: R22-P1-04・P2-02 VERIFIED_CLOSED（CI 31565290865 = 1842/0/0/0 skip 0・MySQL smoke実実行）。P1-02/P1-05 unblock済み、P1-01/P1-03検証前提成立。R22 packet（P1-01〜05のacceptance criteria×証跡）提示済み・R10 close判定待ち。T066 M PASS条件未達（G2 gate・GATE-T066-HISTORY）、production authorizationなし、S12 NOT READY維持`。
+`R10 Round 24: R22 P1-01〜P1-05を全VERIFIED_CLOSED（R22 FAIL解消・V102 schema基盤受領）。T066 M: L4全量（1842件・失敗0・skip 41=Docker gateのみ・BUILD SUCCESS）最終確認済み。G2 gate（COMPLIANCE_RESPONSIBLE runtime assignment・実actor承認event・外部専門家Review・PDF目視・GATE-T066-HISTORY）未取得のためM PASS条件未達。production authorizationなし、S12 NOT READY維持`。
 
 ## R22 MySQL 0-skip検証 attempt（R10再Review待ち）
 
@@ -585,7 +585,7 @@ R10 Round 23再確認（R22-P1-04・P2-02 VERIFIED_CLOSED、P1-02/P1-05 unblock�
 | issue | acceptance criteria | 証跡（MySQL実環境=CI 31565290865 / H2） |
 |---|---|---|
 | R22-P1-01（assignment slot shape、`G2-ASG-14..16`） | 業務一意性: `uk_g2_assignment_active_slot`（tenant_id, workplace_id, active_slot）でactive slot重複を拒否・same/cross-tenant境界・有効期間（DATETIME(6)半開区間） | `FlywayG2GateSchemaSmokeTest`（MySQL）: active_slot重複INSERT拒否・cross-tenant許容/same-tenant拒否・period CHECK（1=1の誤定義検出含む）を実測。H2: `DispatchComplianceSchemaH2Test` 3/0/0/0・`ComplianceG2MapperContractTest` 2/0/0/0 |
-| R22-P1-02（複合FK/self-FK family、`G2-FK-01..03`） | 全relation family（approval target孤立・supersedes cross-tenant・status→mapping same/cross-tenant）のFK整合・孤立行拒否 | `FlywayG2GateSchemaSmokeTest`（MySQL）: FK familyのsame/cross-tenant matrix・孤立参照拒否（SQLState 1452/1451系）を実測。`V102ForwardRepairContractTest` 2/0/0/0・`MigrationScriptIntegrityTest` 27/0/0/0 |
+| R22-P1-02（複合FK/self-FK family、`G2-FK-01..03`） | 全relation family（approval target孤立・supersedes cross-tenant・status→mapping same/cross-tenant）のFK整合・孤立行拒否 | `FlywayG2GateSchemaSmokeTest`（MySQL）: FK familyのsame/cross-tenant matrix・孤立参照拒否（SQLState `23000`/`45000`＋行数不変。**R24 P2 note訂正: 当初の「1452/1451系」はMySQL ERRNO表記であり、実assertはSQLStateで正しく機能**）を実測。`V102ForwardRepairContractTest` 2/0/0/0・`MigrationScriptIntegrityTest` 27/0/0/0 |
 | R22-P1-03（DATETIME(6)/半開区間・worker NULL物理契約） | 境界日時（DATETIME(6)精度）・半開区間の適用、worker NULL（employee NULL契約）の物理保存 | `FlywayG2GateSchemaSmokeTest`（MySQL）: DATETIME(6)精度・period境界を実測。`DispatchComplianceSchemaH2Test` 3/0/0/0・`AllMappersSchemaSweepTest` 125/0/0/0（entity↔H2全mapper整合） |
 | R22-P1-04（migration shape、`G2-MIG-13..20`） | **VERIFIED_CLOSED（R10確定）**: named UNIQUE列順・列数・NON_UNIQUE、同名CHECK canonical repair、metadata manifest（attempt_count=1）、同一DB forward repair、V102成功履歴1件 | `FlywayG2ForwardRepairSmokeTest`（MySQL）2/0/0/0: 誤定義index検出（`COUNT(DISTINCT index_name)=1`）→同一DB forward repair→V102 success history 1・canonical列順・FK・trigger。`FlywayG2GateSchemaSmokeTest` 1/0/0/0。V84 legacy/partial smoke 各1/0/0/0 |
 | R22-P1-05（operation state/claim、`G2-OP-01..06`） | claim初期値（attempt_count=1）・PROCESSING/FAILED result/reference全NULL・SUCCEEDED summary/http/hash必須・retryable FAILED再開・遷移別CAS・PROCESSING不正field改変拒否 | `FlywayG2GateSchemaSmokeTest`（MySQL）: operation state matrix・claim/retryable・BEFORE INSERT triggerを実測。`ComplianceG2MapperContractTest` 2/0/0/0（H2）・`V102ForwardRepairContractTest` 2/0/0/0 |
