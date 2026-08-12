@@ -202,6 +202,7 @@ class ComplianceMappingServiceImplTest {
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
         ComplianceMappingVersion v2Active = complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
+        assertEquals("PROVISIONAL_REVIEWED", v2Active.getStatus(), "active_slotがNULLのためstatus=PROVISIONAL_REVIEWEDを維持");
         assertEquals(1, v2Active.getFutureSlot(), "既存ACTIVEがあるためfuture_slot=1");
 
         // Version 3: 2件目のfutureは拒否される

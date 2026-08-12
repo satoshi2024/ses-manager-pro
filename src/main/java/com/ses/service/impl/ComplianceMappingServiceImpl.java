@@ -185,7 +185,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
         }
 
-        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1（2件目future候補は禁止）
+        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1（STATUS_ACTIVE）、あればfuture_slot=1（STATUS_PROVISIONAL_REVIEWEDを維持。2件目future候補は禁止）
         List<ComplianceMappingVersion> activeList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
                         .eq(ComplianceMappingVersion::getTenantId, "default")
@@ -194,22 +194,22 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (activeList.isEmpty()) {
             version.setActiveSlot(1);
             version.setFutureSlot(null);
+            version.setStatus(STATUS_ACTIVE);
+            version.setActivatedAt(java.time.LocalDateTime.now());
+            version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+            recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE);
         } else {
             List<ComplianceMappingVersion> futureList = versionMapper.selectList(
                     new LambdaQueryWrapper<ComplianceMappingVersion>()
                             .eq(ComplianceMappingVersion::getTenantId, "default")
-                            .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                             .eq(ComplianceMappingVersion::getFutureSlot, 1));
             if (!futureList.isEmpty()) {
                 throw BusinessException.of(400, "compliance.gate.futureSlotAlreadyExists");
             }
             version.setActiveSlot(null);
             version.setFutureSlot(1);
+            // active_slotがNULLの行はstatus <> ACTIVEでなければDB CHECK違反になるためSTATUS_PROVISIONAL_REVIEWEDを維持
         }
-        version.setStatus(STATUS_ACTIVE);
-        version.setActivatedAt(java.time.LocalDateTime.now());
-        version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
-        recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE);
     }
 
     @Override
@@ -219,7 +219,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (version == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        if (!STATUS_ACTIVE.equals(version.getStatus()) || !Integer.valueOf(1).equals(version.getFutureSlot())) {
+        if (!Integer.valueOf(1).equals(version.getFutureSlot())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
         if (version.getEffectiveFrom() != null && java.time.LocalDate.now().isBefore(version.getEffectiveFrom())) {
@@ -233,6 +233,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         for (ComplianceMappingVersion oldActive : currentActiveList) {
             oldActive.setStatus(STATUS_SUPERSEDED);
             oldActive.setActiveSlot(null);
+            oldActive.setFutureSlot(null);
             oldActive.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
             int rows = versionMapper.updateById(oldActive);
             if (rows == 0) {
@@ -240,14 +241,18 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             }
             recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED);
         }
+        String beforeStatus = version.getStatus();
+        version.setStatus(STATUS_ACTIVE);
         version.setActiveSlot(1);
         version.setFutureSlot(null);
+        version.setActivatedAt(java.time.LocalDateTime.now());
+        version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
         version.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
         int rows = versionMapper.updateById(version);
         if (rows == 0) {
             throw BusinessException.of(409, "contract.compliance.versionConflict");
         }
-        recordStatusEvent(version, STATUS_ACTIVE, STATUS_ACTIVE);
+        recordStatusEvent(version, beforeStatus, STATUS_ACTIVE);
         return version;
     }
 
