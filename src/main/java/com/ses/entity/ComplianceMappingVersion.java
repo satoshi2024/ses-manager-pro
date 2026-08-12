@@ -21,7 +21,10 @@ public class ComplianceMappingVersion extends BaseEntity {
     private LocalDate effectiveFrom;
     private LocalDate effectiveTo;
     private String status;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Integer activeSlot;
+
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Integer futureSlot;
     private LocalDateTime activatedAt;
     private Long activatedBy;
