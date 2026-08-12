@@ -415,10 +415,14 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   CONSTRAINT chk_g2_operation_state CHECK (state IN ('PROCESSING', 'SUCCEEDED', 'FAILED')),
   CONSTRAINT chk_g2_operation_retryable CHECK (retryable_flag IN (0, 1)),
   CONSTRAINT chk_g2_operation_result CHECK (
-    (state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
-    OR (state IN ('PROCESSING', 'FAILED') AND result_reference_type IS NULL AND result_reference_id IS NULL
-      AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL
-      AND result_hash IS NULL)
+    (state = 'SUCCEEDED' AND finished_at IS NOT NULL AND failure_code IS NULL
+      AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
+    OR (state = 'PROCESSING' AND finished_at IS NULL AND failure_code IS NULL
+      AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL
+      AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL)
+    OR (state = 'FAILED' AND finished_at IS NOT NULL AND failure_code IS NOT NULL
+      AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL
+      AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL)
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='G2 state-changing operation idempotency ledger';
 CALL __ses_g2_create_index('t_compliance_operation_ledger', 'idx_g2_operation_lease',
@@ -588,7 +592,7 @@ CALL __ses_g2_repair_check('t_compliance_operation_ledger', 'chk_g2_operation_st
 CALL __ses_g2_repair_check('t_compliance_operation_ledger', 'chk_g2_operation_retryable',
   'ALTER TABLE t_compliance_operation_ledger ADD CONSTRAINT chk_g2_operation_retryable CHECK (retryable_flag IN (0,1))');
 CALL __ses_g2_repair_check('t_compliance_operation_ledger', 'chk_g2_operation_result',
-  'ALTER TABLE t_compliance_operation_ledger ADD CONSTRAINT chk_g2_operation_result CHECK ((state = ''SUCCEEDED'' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL) OR (state IN (''PROCESSING'',''FAILED'') AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL))');
+  'ALTER TABLE t_compliance_operation_ledger ADD CONSTRAINT chk_g2_operation_result CHECK ((state = ''SUCCEEDED'' AND finished_at IS NOT NULL AND failure_code IS NULL AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL) OR (state = ''PROCESSING'' AND finished_at IS NULL AND failure_code IS NULL AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL) OR (state = ''FAILED'' AND finished_at IS NOT NULL AND failure_code IS NOT NULL AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL))');
 DROP PROCEDURE IF EXISTS __ses_g2_repair_check;
 CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'uk_g2_mapping_version', 'UNIQUE');
 CALL __ses_g2_assert_constraint('m_compliance_mapping_version', 'uk_g2_mapping_active_slot', 'UNIQUE');
@@ -999,6 +1003,18 @@ FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 status event is appe
 DROP TRIGGER IF EXISTS trg_g2_status_no_delete$$
 CREATE TRIGGER trg_g2_status_no_delete BEFORE DELETE ON t_compliance_mapping_status_event
 FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 status event is append-only'$$
+DROP TRIGGER IF EXISTS trg_g2_operation_claim_insert$$
+CREATE TRIGGER trg_g2_operation_claim_insert BEFORE INSERT ON t_compliance_operation_ledger
+FOR EACH ROW
+BEGIN
+  IF NEW.state <> 'PROCESSING' OR NEW.retryable_flag <> 0 OR NEW.attempt_count <> 1 OR NEW.version <> 0
+     OR NEW.finished_at IS NOT NULL OR NEW.failure_code IS NOT NULL
+     OR NEW.result_reference_type IS NOT NULL OR NEW.result_reference_id IS NOT NULL
+     OR NEW.result_reference_version IS NOT NULL OR NEW.result_summary_canonical IS NOT NULL
+     OR NEW.result_http_status IS NOT NULL OR NEW.result_hash IS NOT NULL OR NEW.deleted_flag <> 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 operation claim insert is invalid';
+  END IF;
+END$$
 DROP TRIGGER IF EXISTS trg_g2_operation_no_update$$
 CREATE TRIGGER trg_g2_operation_no_update BEFORE UPDATE ON t_compliance_operation_ledger
 FOR EACH ROW

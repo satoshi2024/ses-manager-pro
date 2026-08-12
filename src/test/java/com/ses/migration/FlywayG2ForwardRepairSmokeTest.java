@@ -30,8 +30,10 @@ class FlywayG2ForwardRepairSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V102は同名誤定義indexを成功扱いせずforwardRepairを要求する() throws Exception {
-        configureFlyway("101").migrate();
+    void V102は失敗した同一DBをforwardRepair後に再実行できる() throws Exception {
+        Flyway baseline = configureFlyway("101");
+        baseline.clean();
+        baseline.migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             statement.execute("ALTER TABLE t_compliance_responsible_assignment DROP INDEX uk_g2_assignment_active_slot");
@@ -44,16 +46,45 @@ class FlywayG2ForwardRepairSmokeTest {
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             assertEquals(0, queryInt(statement,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102'"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() "
                             + "AND table_name='t_compliance_responsible_assignment' "
                             + "AND index_name='uk_g2_assignment_active_slot' AND non_unique=0"));
         }
 
-        Flyway repairFlyway = configureFlyway("101");
-        repairFlyway.clean();
-        repairFlyway.migrate();
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE t_compliance_responsible_assignment DROP INDEX uk_g2_assignment_active_slot");
+            statement.execute("CREATE UNIQUE INDEX uk_g2_assignment_active_slot "
+                    + "ON t_compliance_responsible_assignment (tenant_id, workplace_id, active_slot)");
+        }
+        configureFlyway("102").repair();
+        configureFlyway("102").migrate();
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE() "
+                            + "AND table_name='m_compliance_mapping_source' "
+                            + "AND constraint_name='fk_g2_source_mapping' AND constraint_type='FOREIGN KEY'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema=DATABASE() "
+                            + "AND trigger_name='trg_g2_mapping_source_freeze_insert'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema=DATABASE() "
+                            + "AND trigger_name='trg_g2_operation_claim_insert'"));
+            assertEquals("tenant_id,workplace_id,active_slot", queryString(statement,
+                    "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM information_schema.statistics "
+                            + "WHERE table_schema=DATABASE() AND table_name='t_compliance_responsible_assignment' "
+                            + "AND index_name='uk_g2_assignment_active_slot'"));
+        }
+    }
+
+    @Test
+    void V102は同名誤定義CHECKを同一適用でcanonicalへrepairする() throws Exception {
+        Flyway baseline = configureFlyway("101");
+        baseline.clean();
+        baseline.migrate();
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             statement.execute("ALTER TABLE t_compliance_responsible_assignment DROP CHECK chk_g2_assignment_period");
             statement.execute("ALTER TABLE t_compliance_responsible_assignment "
@@ -62,7 +93,7 @@ class FlywayG2ForwardRepairSmokeTest {
         configureFlyway("102").migrate();
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             assertEquals(1, queryInt(statement,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102'"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
             String checkClause;
             try (ResultSet resultSet = statement.executeQuery(
                     "SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS "
@@ -98,6 +129,13 @@ class FlywayG2ForwardRepairSmokeTest {
         try (ResultSet resultSet = statement.executeQuery(sql)) {
             assertTrue(resultSet.next());
             return resultSet.getInt(1);
+        }
+    }
+
+    private String queryString(Statement statement, String sql) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            assertTrue(resultSet.next());
+            return resultSet.getString(1);
         }
     }
 }

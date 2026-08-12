@@ -75,6 +75,7 @@ class FlywayG2GateSchemaSmokeTest {
             assertTriggerExists(statement, "trg_g2_assignment_slot_check_update");
             assertTriggerExists(statement, "trg_g2_external_review_no_update");
             assertTriggerExists(statement, "trg_g2_external_review_no_delete");
+            assertTriggerExists(statement, "trg_g2_operation_claim_insert");
             assertTriggerExists(statement, "trg_g2_operation_no_update");
             assertTriggerExists(statement, "trg_g2_operation_no_delete");
 
@@ -195,6 +196,22 @@ class FlywayG2GateSchemaSmokeTest {
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "DELETE FROM t_compliance_external_review_event WHERE id=" + reviewId));
 
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, correlation_id) VALUES "
+                            + "('default', 'g2-operation-invalid-failed', 'MAPPING_ACTIVE', 'g2-op-invalid-failed-key', REPEAT('i', 64), "
+                            + "'FAILED', '2026-08-01 00:00:01.000000', 'g2-op-invalid-failed-correlation')",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-failed'",
+                    "FAILED初期operation INSERTは拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_operation_ledger "
+                            + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, finished_at, failure_code, correlation_id) VALUES "
+                            + "('default', 'g2-operation-invalid-processing', 'MAPPING_ACTIVE', 'g2-op-invalid-processing-key', REPEAT('j', 64), "
+                            + "'PROCESSING', '2026-08-01 00:00:02.000000', 'BROKEN', 'g2-op-invalid-processing-correlation')",
+                    "t_compliance_operation_ledger",
+                    "tenant_id='default' AND operation_id='g2-operation-invalid-processing'",
+                    "finished/failure付きPROCESSING INSERTは拒否するはず");
             statement.executeUpdate("INSERT INTO t_compliance_operation_ledger "
                     + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, "
                     + "started_at, result_summary_canonical, result_http_status, correlation_id, version, deleted_flag) VALUES "
@@ -202,7 +219,7 @@ class FlywayG2GateSchemaSmokeTest {
                     + "'2026-08-01 00:00:01.000000', NULL, NULL, 'g2-op-correlation-1', 0, 0)");
             long operationId = queryLong(statement,
                     "SELECT id FROM t_compliance_operation_ledger WHERE operation_id='g2-operation-1'");
-            statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', "
+            statement.executeUpdate("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', finished_at='2026-08-01 00:00:02.000000', "
                     + "result_summary_canonical='{}', result_http_status=200, result_hash=REPEAT('f', 64), "
                     + "version=1 WHERE id=" + operationId);
             assertThrows(SQLException.class, () -> statement.executeUpdate(
@@ -425,6 +442,28 @@ class FlywayG2GateSchemaSmokeTest {
                     "INSERT INTO t_compliance_mapping_approval_event "
                             + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
                             + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, target_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('default', "
+                            + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + assignmentId + ", "
+                            + workplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-target-orphan', "
+                            + "999999, '2026-08-01 00:00:01.000000', UUID(), 'corr-target-orphan', 'g2-approval-target-orphan')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='default' AND idempotency_key='g2-approval-target-orphan'",
+                    "approval targetの孤立参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
+                            + "event_chain_id, supersedes_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('other-tenant', "
+                            + otherMappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + otherAssignmentId + ", "
+                            + otherWorkplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-supersedes-cross', "
+                            + firstApprovalId + ", '2026-08-01 00:00:01.000000', UUID(), 'corr-supersedes-cross', 'g2-approval-supersedes-cross')",
+                    "t_compliance_mapping_approval_event",
+                    "tenant_id='other-tenant' AND idempotency_key='g2-approval-supersedes-cross'",
+                    "approval supersedesのcross-tenant参照は拒否するはず");
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_approval_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
+                            + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
                             + "event_chain_id, supersedes_event_id, occurred_at, operation_id, correlation_id, idempotency_key) VALUES ('default', "
                             + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), " + assignmentId + ", "
                             + workplaceId + ", " + userId + ", 'Actor', 'COMPLIANCE_RESPONSIBLE', 'APPROVE', 'chain-supersedes-orphan', "
@@ -432,6 +471,22 @@ class FlywayG2GateSchemaSmokeTest {
                     "t_compliance_mapping_approval_event",
                     "tenant_id='default' AND idempotency_key='g2-approval-supersedes-orphan'",
                     "approval supersedesの孤立参照は拒否するはず");
+            statement.executeUpdate("INSERT INTO t_compliance_mapping_status_event "
+                    + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, before_status, after_status, "
+                    + "actor_id, actor_display_name_snapshot, actor_role_snapshot, occurred_at, expected_version, operation_id, correlation_id) VALUES "
+                    + "('default', " + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), 'DRAFT', 'PROVISIONAL_REVIEWED', "
+                    + userId + ", 'Actor', 'ADMIN', '2026-08-01 00:00:01.000000', 0, UUID(), 'corr-status-same')");
+            assertEquals(1L, queryLong(statement,
+                    "SELECT COUNT(*) FROM t_compliance_mapping_status_event WHERE tenant_id='default' AND correlation_id='corr-status-same'"));
+            assertRejectedWithoutRowChange(statement,
+                    "INSERT INTO t_compliance_mapping_status_event "
+                            + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, before_status, after_status, "
+                            + "actor_id, actor_display_name_snapshot, actor_role_snapshot, occurred_at, expected_version, operation_id, correlation_id) VALUES "
+                            + "('other-tenant', " + mappingId + ", 'v1', REPEAT('a', 64), REPEAT('b', 64), 'DRAFT', 'PROVISIONAL_REVIEWED', "
+                            + userId + ", 'Actor', 'ADMIN', '2026-08-01 00:00:01.000000', 0, UUID(), 'corr-status-cross')",
+                    "t_compliance_mapping_status_event",
+                    "tenant_id='other-tenant' AND correlation_id='corr-status-cross'",
+                    "status→mappingのcross-tenant参照は拒否するはず");
 
             long finiteWorkplaceId = insertWorkplace(statement, "default", customerId, "G2-WORKPLACE-FINITE");
             insertFiniteAssignment(statement, "default", finiteWorkplaceId, userId,

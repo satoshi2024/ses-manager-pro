@@ -41,12 +41,16 @@ class V102ForwardRepairContractTest {
         assertTrue(sql.contains("__ses_g2_assert_index('t_document_delivery', 'uk_delivery_business_key'"));
         assertTrue(sql.contains("__ses_g2_assert_constraint('t_compliance_responsible_assignment'"));
         assertTrue(sql.contains("chk_g2_operation_result"));
+        assertTrue(sql.contains("state = 'PROCESSING' AND finished_at IS NULL AND failure_code IS NULL"));
+        assertTrue(sql.contains("state = 'FAILED' AND finished_at IS NOT NULL AND failure_code IS NOT NULL"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_fk"));
         assertTrue(sql.contains("CREATE PROCEDURE __ses_g2_repair_delivery_fk"));
         assertTrue(sql.contains("information_schema.table_constraints"));
         assertTrue(sql.contains("information_schema.COLUMNS"));
         assertTrue(sql.contains("DROP TRIGGER IF EXISTS trg_g2_mapping_slot_check"));
         assertTrue(sql.contains("DROP TRIGGER IF EXISTS trg_g2_operation_no_delete"));
+        assertTrue(sql.contains("DROP TRIGGER IF EXISTS trg_g2_operation_claim_insert"));
+        assertTrue(sql.contains("G2 operation claim insert is invalid"));
         assertTrue(sql.contains("canonical manifest"));
         assertTrue(sql.contains("CREATE TRIGGER trg_g2_mapping_source_freeze_insert"));
         assertTrue(sql.contains("CREATE TRIGGER trg_g2_assignment_slot_check"));

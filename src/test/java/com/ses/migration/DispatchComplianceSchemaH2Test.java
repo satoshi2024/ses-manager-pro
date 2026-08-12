@@ -231,6 +231,20 @@ class DispatchComplianceSchemaH2Test {
                         + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, correlation_id) VALUES "
                         + "('default', 'h2-op-1', 'MAPPING_ACTIVE', 'h2-op-key-1', REPEAT('a', 64), "
                         + "'PROCESSING', '2026-08-01 00:00:01.000000', 'h2-op-correlation-1')");
+                assertEquals(1, queryInt(statement,
+                        "SELECT COUNT(*) FROM t_compliance_operation_ledger WHERE operation_id='h2-op-1' "
+                                + "AND state='PROCESSING' AND retryable_flag=0 AND attempt_count=1 AND version=0 "
+                                + "AND finished_at IS NULL AND failure_code IS NULL"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO t_compliance_operation_ledger "
+                                + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, correlation_id) VALUES "
+                                + "('default', 'h2-op-invalid-failed', 'MAPPING_ACTIVE', 'h2-op-invalid-failed-key', REPEAT('d', 64), "
+                                + "'FAILED', '2026-08-01 00:00:01.000000', 'h2-op-invalid-failed-correlation')"));
+                assertThrows(SQLException.class, () -> statement.execute(
+                        "INSERT INTO t_compliance_operation_ledger "
+                                + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, finished_at, failure_code, correlation_id) VALUES "
+                                + "('default', 'h2-op-invalid-processing', 'MAPPING_ACTIVE', 'h2-op-invalid-processing-key', REPEAT('e', 64), "
+                                + "'PROCESSING', '2026-08-01 00:00:02.000000', 'BROKEN', 'h2-op-invalid-processing-correlation')"));
                 assertThrows(SQLException.class, () -> statement.execute(
                         "UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
                                 + "finished_at='2026-08-01 00:00:02.000000', failure_code='TEMPORARY', "
@@ -239,11 +253,22 @@ class DispatchComplianceSchemaH2Test {
                 assertThrows(SQLException.class, () -> statement.execute(
                         "UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', result_summary_canonical='{}', "
                                 + "result_http_status=200, version=1 WHERE operation_id='h2-op-1'"));
-                statement.execute("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', result_summary_canonical='{}', "
-                        + "result_http_status=200, result_hash=REPEAT('c', 64), version=1 WHERE operation_id='h2-op-1'");
+                statement.execute("UPDATE t_compliance_operation_ledger SET state='SUCCEEDED', finished_at='2026-08-01 00:00:02.000000', "
+                        + "result_summary_canonical='{}', result_http_status=200, result_hash=REPEAT('c', 64), version=1 WHERE operation_id='h2-op-1'");
                 assertEquals(1, queryInt(statement,
                         "SELECT COUNT(*) FROM t_compliance_operation_ledger WHERE operation_id='h2-op-1' "
                                 + "AND result_hash=REPEAT('c', 64)"));
+                statement.execute("INSERT INTO t_compliance_operation_ledger "
+                        + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, started_at, correlation_id) VALUES "
+                        + "('default', 'h2-op-failed', 'MAPPING_ACTIVE', 'h2-op-failed-key', REPEAT('f', 64), "
+                        + "'PROCESSING', '2026-08-01 00:00:01.000000', 'h2-op-failed-correlation')");
+                statement.execute("UPDATE t_compliance_operation_ledger SET state='FAILED', retryable_flag=1, "
+                        + "finished_at='2026-08-01 00:00:03.000000', failure_code='TEMPORARY', version=1 "
+                        + "WHERE operation_id='h2-op-failed'");
+                assertEquals(1, queryInt(statement,
+                        "SELECT COUNT(*) FROM t_compliance_operation_ledger WHERE operation_id='h2-op-failed' "
+                                + "AND state='FAILED' AND finished_at IS NOT NULL AND failure_code='TEMPORARY' "
+                                + "AND result_summary_canonical IS NULL AND result_hash IS NULL"));
             }
         }
     }

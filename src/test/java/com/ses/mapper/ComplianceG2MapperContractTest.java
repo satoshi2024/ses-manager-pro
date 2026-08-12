@@ -56,6 +56,10 @@ class ComplianceG2MapperContractTest {
                     method.getName() + "はclaim/select/CASだけを許可します");
         }
 
+        String claimSql = getMethod("insertClaim").getAnnotation(Insert.class).value()[0];
+        assertTrue(claimSql.contains("'PROCESSING'"));
+        assertTrue(claimSql.contains("0, 1"), "claimのretryable/attempt初期値をserver側で固定します");
+        assertTrue(claimSql.endsWith("0, 0)"), "claimのversion/deleted_flag初期値をserver側で固定します");
         Method failure = getMethod("completeFailureCas");
         String failureSql = failure.getAnnotation(Update.class).value()[0];
         assertTrue(failureSql.contains("retryable_flag"));

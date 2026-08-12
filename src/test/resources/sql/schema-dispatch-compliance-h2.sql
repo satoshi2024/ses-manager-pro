@@ -856,9 +856,14 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   result_hash CHAR(64), failure_code VARCHAR(100), correlation_id VARCHAR(100) NOT NULL, expires_at TIMESTAMP(6), version INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
   UNIQUE(tenant_id, operation_type, idempotency_key), UNIQUE(tenant_id, operation_id), CHECK(state IN ('PROCESSING','SUCCEEDED','FAILED')), CHECK(retryable_flag IN (0,1)),
-  CHECK((state = 'SUCCEEDED' AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
-    OR (state IN ('PROCESSING','FAILED') AND result_reference_type IS NULL AND result_reference_id IS NULL
-      AND result_reference_version IS NULL AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL))
+  CHECK((state = 'SUCCEEDED' AND finished_at IS NOT NULL AND failure_code IS NULL
+      AND result_summary_canonical IS NOT NULL AND result_http_status IS NOT NULL AND result_hash IS NOT NULL)
+    OR (state = 'PROCESSING' AND finished_at IS NULL AND failure_code IS NULL
+      AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL
+      AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL)
+    OR (state = 'FAILED' AND finished_at IS NOT NULL AND failure_code IS NOT NULL
+      AND result_reference_type IS NULL AND result_reference_id IS NULL AND result_reference_version IS NULL
+      AND result_summary_canonical IS NULL AND result_http_status IS NULL AND result_hash IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_g2_operation_lease ON t_compliance_operation_ledger(tenant_id, state, lease_until);
 CREATE INDEX IF NOT EXISTS idx_g2_operation_result ON t_compliance_operation_ledger(tenant_id, result_reference_type, result_reference_id);

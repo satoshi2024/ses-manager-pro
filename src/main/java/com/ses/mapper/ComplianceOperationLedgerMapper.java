@@ -15,9 +15,9 @@ public interface ComplianceOperationLedgerMapper {
             + "(tenant_id, operation_id, operation_type, idempotency_key, request_hash, state, retryable_flag, "
             + "attempt_count, started_at, lease_until, correlation_id, expires_at, version, deleted_flag) VALUES "
             + "(#{ledger.tenantId}, #{ledger.operationId}, #{ledger.operationType}, #{ledger.idempotencyKey}, "
-            + "#{ledger.requestHash}, #{ledger.state}, #{ledger.retryableFlag}, #{ledger.attemptCount}, "
+            + "#{ledger.requestHash}, 'PROCESSING', 0, 1, "
             + "#{ledger.startedAt}, #{ledger.leaseUntil}, #{ledger.correlationId}, #{ledger.expiresAt}, "
-            + "#{ledger.version}, 0)")
+            + "0, 0)")
     @Options(useGeneratedKeys = true, keyProperty = "ledger.id")
     int insertClaim(@Param("ledger") ComplianceOperationLedger ledger);
 
