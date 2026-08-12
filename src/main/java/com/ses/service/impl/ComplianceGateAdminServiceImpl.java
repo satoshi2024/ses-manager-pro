@@ -28,6 +28,10 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
     private final ComplianceExternalReviewerTypeMapper reviewerTypeMapper;
     private final ComplianceResponsibleAssignmentMapper assignmentMapper;
+    private final com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper requirementGroupMapper;
+    private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
+    private final com.ses.mapper.ComplianceMappingVersionMapper versionMapper;
+    private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
 
     @Override
     public List<ComplianceExternalReviewerType> listReviewerTypes() {
@@ -116,7 +120,12 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(ComplianceResponsibleAssignment::getActiveSlot, 1));
         for (ComplianceResponsibleAssignment current : open) {
-            current.setEffectiveTo(now);
+            // endAssignmentと同じtick問題（TIMESTAMP(6)丸めで期間CHECK違反）へのガード
+            LocalDateTime endAt = LocalDateTime.now();
+            if (current.getEffectiveFrom() != null && !endAt.isAfter(current.getEffectiveFrom())) {
+                endAt = current.getEffectiveFrom().plusNanos(1000);
+            }
+            current.setEffectiveTo(endAt);
             current.setActiveSlot(null);
             current.setEndedBy(SecurityUtils.currentUserId());
             current.setEndReason("交代（新assignment開始）");
@@ -150,7 +159,14 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         if (!Integer.valueOf(1).equals(assignment.getActiveSlot())) {
             throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
         }
-        assignment.setEffectiveTo(LocalDateTime.now());
+        // Windows等の粗い時刻粒度でnow()がeffective_fromと同一tickになると、
+        // H2/MySQLのTIMESTAMP(6)丸めと合わせて期間CHECK（effective_from < effective_to）違反になり得るため、
+        // effective_toは常にeffective_fromより後になるようガードする（TIMESTAMP(6)はµs精度のため1µs余裕）。
+        LocalDateTime now = LocalDateTime.now();
+        if (assignment.getEffectiveFrom() != null && !now.isAfter(assignment.getEffectiveFrom())) {
+            now = assignment.getEffectiveFrom().plusNanos(1000);
+        }
+        assignment.setEffectiveTo(now);
         assignment.setActiveSlot(null);
         assignment.setEndedBy(SecurityUtils.currentUserId());
         assignment.setEndReason(reason);
@@ -159,5 +175,77 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(409, "contract.compliance.versionConflict");
         }
         return assignment;
+    }
+
+    @Override
+    public List<com.ses.entity.ComplianceMappingReviewRequirementGroup> listRequirementGroups(Long mappingId) {
+        return requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId)
+                .orderByAsc(com.ses.entity.ComplianceMappingReviewRequirementGroup::getRequirementGroupCode));
+    }
+
+    @Override
+    @Transactional
+    public com.ses.entity.ComplianceMappingReviewRequirementGroup createRequirementGroup(Long mappingId, String groupCode,
+                                                                                         String displayName,
+                                                                                         int minimumDistinctReviewers) {
+        if (!StringUtils.hasText(groupCode) || !StringUtils.hasText(displayName) || minimumDistinctReviewers < 1) {
+            throw BusinessException.of(400, "compliance.gate.invalidRequirementGroup");
+        }
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                new com.ses.entity.ComplianceMappingReviewRequirementGroup();
+        group.setTenantId("default");
+        group.setMappingId(mappingId);
+        group.setRequirementGroupCode(groupCode);
+        group.setDisplayName(displayName);
+        group.setMinimumDistinctReviewers(minimumDistinctReviewers);
+        group.setSortOrder(0);
+        group.setCreatedBy(SecurityUtils.currentUserId());
+        requirementGroupMapper.insert(group);
+        refreshPolicyHash(mappingId);
+        return group;
+    }
+
+    @Override
+    @Transactional
+    public com.ses.entity.ComplianceMappingReviewRequirementType addRequirementType(Long groupId, Long reviewerTypeId) {
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                requirementGroupMapper.selectById(groupId);
+        if (group == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        com.ses.entity.ComplianceExternalReviewerType type = reviewerTypeMapper.selectById(reviewerTypeId);
+        if (type == null || Integer.valueOf(0).equals(type.getEnabled())) {
+            throw BusinessException.of(400, "compliance.gate.invalidRequirementType");
+        }
+        com.ses.entity.ComplianceMappingReviewRequirementType requirementType =
+                new com.ses.entity.ComplianceMappingReviewRequirementType();
+        requirementType.setTenantId("default");
+        requirementType.setRequirementGroupId(group.getId());
+        requirementType.setReviewerTypeId(type.getId());
+        requirementType.setReviewerTypeCodeSnapshot(type.getTypeCode());
+        requirementType.setReviewerTypeNameSnapshot(type.getDisplayName());
+        requirementType.setCredentialLabelSnapshot(type.getCredentialLabel());
+        requirementType.setCredentialRequiredSnapshot(type.getCredentialRequired());
+        requirementType.setCreatedBy(SecurityUtils.currentUserId());
+        requirementTypeMapper.insert(requirementType);
+        refreshPolicyHash(group.getMappingId());
+        return requirementType;
+    }
+
+    /** policy（group/type）変更をmapping versionのreview_policy_hashへ反映する（ACTIVE以外）。 */
+    private void refreshPolicyHash(Long mappingId) {
+        com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
+        if (version == null || "ACTIVE".equals(version.getStatus())) {
+            return;
+        }
+        version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(
+                requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId)),
+                requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default"))));
+        versionMapper.updateById(version);
     }
 }

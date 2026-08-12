@@ -79,6 +79,14 @@
 
 **Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
 
+**Phase A step 3 第三increment（2026-08-12）: requirement group設定＋ACTIVE guard（step 4前半）**
+- `ComplianceGateAdminService`: mapping別requirement group CRUD（groupCode・displayName・minimumDistinctReviewers）＋groupへのreviewer type追加（typeのcode/name/credentialをsnapshot・enabledのみ）。policy変更でmapping versionのreview_policy_hashを再計算（ACTIVE以外）。
+- `ComplianceMappingServiceImpl.transition(ACTIVE)`: **ACTIVE guard（G2-ACTIVE-01）**。PROVISIONAL_REVIEWED必須・**canonical hash再解決が保存hashと一致**・**実actor承認event（APPROVE）必須**・承認assignmentが現行open（active_slot=1）・slot管理（tenantのactive_slot=1が無ければactive_slot=1・あればfuture_slot=1）。遷移は`t_compliance_mapping_status_event`へappend-only記録（G2-EVENT-01）。
+- `ComplianceMappingApprovalEventMapper.selectByMapping`追加（read-only）。
+- i18n: compliance.gate.* 4 key×4。
+- 修正: `ComplianceGateAdminServiceImpl.endAssignment`/`createAssignment`の終了時に、Windows等の粗い時刻粒度でnow()がeffective_fromと同一tickになる場合、H2/MySQLのTIMESTAMP(6)丸めと合わせて期間CHECK（effective_from < effective_to）違反になり得るため、effective_toは常にeffective_fromより後（+1µs）にガード（フルスイート順序依存失敗の根本修正）。
+- 検証: ComplianceGateAdminServiceTest 5/0/0/0（ACTIVE flow: 承認後ACTIVE遷移＋status event記録・active_slot=1）、MappingService 4/0/0/0（承認なしACTIVE拒否・ACTIVE成立）、Canonicalizer 2、MessageBundleConsistencyTest 4。フルスイート 1857/0/0/0（41 skipped=Testcontainers/Node・既知）。`git diff --check` exit 0。
+
 **Phase A step 3 第二increment（2026-08-12）**: reviewer type管理・COMPLIANCE_RESPONSIBLE assignment・approval event記録を実装。
 - `ComplianceGateAdminService`/`Impl`: reviewer type CRUD（type_code一意・credential label/required・enabled）、assignment（半開区間・active_slot単一・交代で旧open終了・endReason必須・CAS）。`ComplianceResponsibleAssignment`のactive_slot/effective_to/ended_by/end_reasonへALWAYSを付与（chk_g2_assignment_open_fieldsの第2分岐が値→NULLを要求するため）。
 - `ComplianceApprovalService`/`Impl`（証跡2）: PROVISIONAL_REVIEWEDのみ・実actor=現行open assignmentの指名者本人（不一致403）・mapping_hash/review_policy_hashをcanonicalizerから再計算・actor表示名/role snapshot・idempotency_key。

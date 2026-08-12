@@ -1,8 +1,10 @@
 package com.ses.service.impl;
 
 import com.ses.dto.compliance.ComplianceMappingSourceInput;
+import com.ses.entity.ComplianceMappingApprovalEvent;
 import com.ses.entity.ComplianceMappingVersion;
 import com.ses.mapper.ComplianceMappingVersionMapper;
+import com.ses.service.ComplianceApprovalService;
 import com.ses.service.ComplianceMappingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@org.springframework.security.test.context.support.WithMockUser(username = "1", roles = "管理者")
 class ComplianceMappingServiceImplTest {
 
     @Autowired
@@ -36,6 +39,12 @@ class ComplianceMappingServiceImplTest {
 
     @Autowired
     private ComplianceMappingVersionMapper versionMapper;
+
+    @Autowired
+    private ComplianceApprovalService complianceApprovalService;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @Test
     void createはcanonicalizerでhashを計算しDRAFTで登録する() {
@@ -76,16 +85,50 @@ class ComplianceMappingServiceImplTest {
     }
 
     @Test
-    void ACTIVE化は証跡gateで保留される() {
+    void ACTIVE化は承認eventが無ければ証跡gateで保留される() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
-        com.ses.common.exception.BusinessException e = assertThrows(
-                com.ses.common.exception.BusinessException.class,
+        // 承認eventなし → approvalRequiredで保留
+        assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(version.getId(), "ACTIVE"));
-        assertTrue(e.getMessageKey() == null || e.getMessageKey().contains("activeGated"),
-                "ACTIVE化は証跡gateで保留");
+    }
+
+    @Test
+    void ACTIVE化は承認eventとopenAssignmentとhash一致で成立しstatusEventが記録される() {
+        // workplace + open assignment（指名者=currentUserId 1）
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('active customer')");
+        Long customerId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_customer WHERE company_name='active customer'", Long.class);
+        jdbcTemplate.update("INSERT INTO m_workplace (tenant_id, customer_id, name, organization_unit) "
+                + "VALUES ('default', ?, 'active workplace', '開発部')", customerId);
+        Long workplaceId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_workplace WHERE name='active workplace'", Long.class);
+        jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
+                + "(tenant_id, workplace_id, user_id, role_code, effective_from, active_slot, assigned_by) "
+                + "VALUES ('default', ?, 1, 'COMPLIANCE_RESPONSIBLE', '2026-08-01 00:00:00.000000', 1, 1)",
+                workplaceId);
+
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-TEST-4",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
+
+        // 実actor（指名者=1）が承認
+        ComplianceMappingApprovalEvent approval = complianceApprovalService.approve(
+                version.getId(), workplaceId, "一次source確認済み", null);
+        assertEquals(64, approval.getMappingHash().length());
+
+        // ACTIVE化成立: active_slot=1・activatedAt・status event記録
+        ComplianceMappingVersion active = complianceMappingService.transition(version.getId(), "ACTIVE");
+        assertEquals("ACTIVE", active.getStatus());
+        assertEquals(1, active.getActiveSlot());
+        assertNotNull(active.getActivatedAt());
+        Integer eventCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_compliance_mapping_status_event WHERE mapping_id=? AND after_status='ACTIVE'",
+                Integer.class, version.getId());
+        assertEquals(1, eventCount, "status event（append-only）が記録される");
     }
 
     private List<ComplianceMappingSourceInput> allSources() {

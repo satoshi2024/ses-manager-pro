@@ -39,6 +39,10 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private final ComplianceMappingSourceMapper sourceMapper;
     private final com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper requirementGroupMapper;
     private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
+    private final com.ses.mapper.ComplianceMappingApprovalEventMapper approvalEventMapper;
+    private final com.ses.mapper.ComplianceMappingStatusEventMapper statusEventMapper;
+    private final com.ses.mapper.ComplianceResponsibleAssignmentMapper assignmentMapper;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final ComplianceMappingCanonicalizer canonicalizer;
 
     @Override
@@ -106,8 +110,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             version.setStatus(STATUS_PROVISIONAL_REVIEWED);
             recomputeHash(version);
         } else if (STATUS_ACTIVE.equals(toStatus)) {
-            // ACTIVE化は実actor承認event・資格保有者Review等の証跡gate（後続incrementで実装）。
-            throw BusinessException.of(400, "compliance.gate.activeGated");
+            activate(version);
         } else {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
@@ -117,6 +120,79 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(409, "contract.compliance.versionConflict");
         }
         return version;
+    }
+
+    /**
+     * ACTIVE guard（G2-ACTIVE-01・証跡gate）:
+     *  - PROVISIONAL_REVIEWEDであること
+     *  - 実actor承認event（APPROVE）が存在し、そのmapping_hashが現在のcanonical hashと一致すること
+     *  - 承認に使用されたassignmentがactivation時点でopen（active_slot=1）であること
+     *  - tenantにactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（保留版）
+     */
+    private void activate(ComplianceMappingVersion version) {
+        if (!STATUS_PROVISIONAL_REVIEWED.equals(version.getStatus())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+        // canonical hash再解決（§6.2: DBから再計算し保存hashと比較）
+        List<ComplianceMappingSource> sources = sourceMapper.selectList(
+                new LambdaQueryWrapper<ComplianceMappingSource>()
+                        .eq(ComplianceMappingSource::getMappingId, version.getId()));
+        String currentHash = canonicalizer.computeMappingHash(version, sources);
+        if (!currentHash.equals(version.getMappingHash())) {
+            throw BusinessException.of(400, "compliance.gate.mappingHashMismatch");
+        }
+        List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectByMapping(
+                "default", version.getId(), "APPROVE");
+        if (approvals.isEmpty()) {
+            throw BusinessException.of(400, "compliance.gate.approvalRequired");
+        }
+        com.ses.entity.ComplianceMappingApprovalEvent approval = approvals.get(approvals.size() - 1);
+        if (!currentHash.equals(approval.getMappingHash())) {
+            throw BusinessException.of(400, "compliance.gate.approvalHashMismatch");
+        }
+        com.ses.entity.ComplianceResponsibleAssignment assignment =
+                assignmentMapper.selectById(approval.getAssignmentId());
+        if (assignment == null || !Integer.valueOf(1).equals(assignment.getActiveSlot())) {
+            throw BusinessException.of(400, "compliance.gate.assignmentNotOpen");
+        }
+        // slot管理: tenantにopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1
+        List<ComplianceMappingVersion> active = versionMapper.selectList(
+                new LambdaQueryWrapper<ComplianceMappingVersion>()
+                        .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
+                        .eq(ComplianceMappingVersion::getActiveSlot, 1));
+        if (active.isEmpty()) {
+            version.setActiveSlot(1);
+            version.setFutureSlot(null);
+        } else {
+            version.setActiveSlot(null);
+            version.setFutureSlot(1);
+        }
+        version.setStatus(STATUS_ACTIVE);
+        version.setActivatedAt(java.time.LocalDateTime.now());
+        version.setActivatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+        recordStatusEvent(version, STATUS_PROVISIONAL_REVIEWED, STATUS_ACTIVE);
+    }
+
+    /** append-only status event記録（G2-EVENT-01）。 */
+    private void recordStatusEvent(ComplianceMappingVersion version, String before, String after) {
+        com.ses.entity.SysUser actor = sysUserMapper.selectById(com.ses.common.util.SecurityUtils.currentUserId());
+        com.ses.entity.ComplianceMappingStatusEvent event = new com.ses.entity.ComplianceMappingStatusEvent();
+        event.setTenantId("default");
+        event.setMappingId(version.getId());
+        event.setMappingVersion(version.getMappingVersion());
+        event.setMappingHash(version.getMappingHash());
+        event.setReviewPolicyHash(version.getReviewPolicyHash());
+        event.setBeforeStatus(before);
+        event.setAfterStatus(after);
+        event.setActorId(com.ses.common.util.SecurityUtils.currentUserId());
+        event.setActorDisplayNameSnapshot(actor == null ? "" : actor.getRealName());
+        event.setActorRoleSnapshot(actor == null ? "" : actor.getRole());
+        event.setOccurredAt(java.time.LocalDateTime.now());
+        event.setExpectedVersion(version.getVersion());
+        event.setOperationId(java.util.UUID.randomUUID().toString());
+        event.setCorrelationId(java.util.UUID.randomUUID().toString());
+        statusEventMapper.insertEvent(event);
     }
 
     @Override

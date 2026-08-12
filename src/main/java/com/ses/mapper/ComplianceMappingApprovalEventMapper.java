@@ -36,4 +36,11 @@ public interface ComplianceMappingApprovalEventMapper {
             + "ORDER BY occurred_at, id")
     List<ComplianceMappingApprovalEvent> selectChain(@Param("tenantId") String tenantId,
                                                       @Param("eventChainId") String eventChainId);
+
+    @Select("SELECT * FROM t_compliance_mapping_approval_event "
+            + "WHERE tenant_id = #{tenantId} AND mapping_id = #{mappingId} AND action = #{action} "
+            + "ORDER BY occurred_at, id")
+    List<ComplianceMappingApprovalEvent> selectByMapping(@Param("tenantId") String tenantId,
+                                                         @Param("mappingId") Long mappingId,
+                                                         @Param("action") String action);
 }
