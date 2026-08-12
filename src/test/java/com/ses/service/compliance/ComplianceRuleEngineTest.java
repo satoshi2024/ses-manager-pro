@@ -232,4 +232,40 @@ class ComplianceRuleEngineTest {
         assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
                 .contains("MISSING_INSTRUCTION_ROUTE");
     }
+
+    @Test
+    void 交付期限超過でDEADLINE系findingが発火し期限前は発火しない() {
+        // 派遣開始日 2026-01-01。profileに派遣期間を設定
+        ContractComplianceProfile p = profile();
+        p.setDispatchPeriodStart(LocalDate.parse("2026-01-01"));
+        p.setDispatchPeriodEnd(LocalDate.parse("2026-12-31"));
+        lenient().when(profileMapper.selectOne(any())).thenReturn(p);
+        // 通知書猶予日数は既定3日（compliance.delivery.notice-grace-days）
+        lenient().when(systemConfigService.getInt("compliance.delivery.notice-grace-days", 3)).thenReturn(3);
+
+        Contract contract = contract("派遣", LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"));
+        // 今日は2026-08-10: 明示書期限（2025-12-31）・通知書期限（2026-01-04）とも超過 → 発火
+        List<ComplianceFinding> findings = engine.evaluate(contract);
+        assertThat(findings).extracting(ComplianceFinding::getCode)
+                .contains("DEADLINE_DOCUMENT_DELIVERY", "DEADLINE_DISPATCH_NOTICE");
+
+        // 交付記録があれば発火しない（FAILED以外）
+        DocumentDelivery delivered = new DocumentDelivery();
+        delivered.setDocumentType("EMPLOYMENT_CONDITIONS_STATEMENT");
+        delivered.setDeliveryStatus("DELIVERED");
+        DocumentDelivery notice = new DocumentDelivery();
+        notice.setDocumentType("DISPATCH_NOTICE");
+        notice.setDeliveryStatus("DELIVERED");
+        when(deliveryMapper.selectList(any())).thenReturn(List.of(delivered, notice));
+        assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
+                .doesNotContain("DEADLINE_DOCUMENT_DELIVERY", "DEADLINE_DISPATCH_NOTICE");
+    }
+
+    @Test
+    void 派遣開始日未設定なら交付期限ruleは発火しない() {
+        lenient().when(profileMapper.selectOne(any())).thenReturn(profile());
+        Contract contract = contract("派遣", LocalDate.parse("2026-01-01"), LocalDate.parse("2026-12-31"));
+        assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
+                .doesNotContain("DEADLINE_DOCUMENT_DELIVERY", "DEADLINE_DISPATCH_NOTICE");
+    }
 }

@@ -194,6 +194,7 @@ public class ComplianceRuleEngine {
                 new MissingInsuranceRule(systemConfigService, messageSource),
                 new MissingDocumentDeliveryRule(systemConfigService, messageSource),
                 new MissingInstructionRouteRule(systemConfigService, messageSource),
-                new WorkOutsidePeriodRule(systemConfigService, messageSource));
+                new WorkOutsidePeriodRule(systemConfigService, messageSource),
+                new DeliveryDeadlineRule(systemConfigService, messageSource));
     }
 }

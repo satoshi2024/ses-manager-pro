@@ -4,6 +4,24 @@
 
 `R10 R24対応確認: 6a8e2b80（混入revert＋ledger転記＋P2 note①訂正）を検証しPASS。net diff=review-ledger +3/-3のみ、codeはCI検証済み16f40e0fと同一、CI 1842/0/0/0 skip 0 SUCCESS。新規issueなし（P0=0/P1=0/P2=0）。T066 M: 実装・L4全量（1842/0/0/0・skip 0）最終確認済み。M PASS条件未達（G2 gate 5項目・人間/外部プロセス関与）。production authorizationなし、S12 NOT READY維持`。
 
+## 外部専門家Review（証跡3・第一次照合・条件付き確認）の受領と対応（2026-08-12）
+
+外部専門家Review（AIによる法的知識ベースの一次照合、`external-review-20260812.md`に保存）を受領した。判定は**条件付き確認**であり、P1-1/P1-2の解消までACTIVE化・本番交付gateに供さない。資格保有者（社労士/弁護士）による実在Reviewは別途必須（本レビューは補助資料）。
+
+| issue | 指摘 | 対応（実装AI） | 状態 |
+|---|---|---|---|
+| P1-1 | SRC-C manifest（FM-C-01〜27）に派遣料金行が無い（令和6年10月施行で個別契約書への料金明示義務化済み）。FM-C-28（DISPATCH_FEE_TYPED）追加を検討 | mappingはPROVISIONAL_REVIEWED凍結中のため直接編集せず。**発注者の版管理判断（証跡5相当）を要求**。証跡4（PDF目視）でSRC-C記載例の料金欄を確認 | **発注者判断待ち** |
+| P1-2 | 「待遇差説明を求める権利の通知」は令和6年10月1日施行で創設済みの可能性が高く、MAPPING-2026-07期間の明示書から法定周知事項が欠落するリスク | 一次source（改正省令・厚労省通知）での確定を**外部専門家/発注者へ要求**。MAPPING-2026-07側の要否判断待ち | **一次source確認待ち** |
+| P2-1 | 明示書交付期限＝派遣開始日の前日（派遣法34条の2）を90/60/30日体系へ | **実装済み**: `DeliveryDeadlineRule`（DEADLINE_DOCUMENT_DELIVERY、dueDate=開始前日、未交付かつ期限超過で発火→T065通知基盤へ） | **対応済み** |
+| P2-2 | 通知書交付期限＝派遣開始後遅滞なく（施行規則20条）を期限監視・finding化 | **実装済み**: `DeliveryDeadlineRule`（DEADLINE_DISPATCH_NOTICE、猶予日数=config `compliance.delivery.notice-grace-days` 既定3日。SCHEMAS登録済み） | **対応済み** |
+| P2-3 | 明示書の交付対象は労働者本人（recipient=worker・P3_SELF成立確認） | T066受入時に設計確認を実施する（現行recipientはcustomer contact前提のため、worker recipient/P3_SELFの成立確認をT066受入項目へ追加） | **受入時確認** |
+| P3-1 | 派遣料金（dispatch_fee_*）と売上/粗利の乖離検知 | 運用面の確認としてT066受入時に評価 | **受入時確認** |
+| P3-2 | 様式項目番号（⑱⑳等）とmanifestの突合 | 証跡4（PDF目視）実施時に確認 | **証跡4待ち** |
+
+**対応test**: ComplianceRuleEngineTest 10/0/0/0（交付期限の超過/期限前/交付記録あり/開始日未設定の4境界）、ComplianceLegalFixtureTest 3/0/0/0（golden維持）、LaborComplianceServiceImplTest 12/0/0/0（既存4 rule golden維持）、ComplianceFindingStoreTest 1/0/0/0。
+
+**M PASS gate状態（更新）**: 証跡3は条件付き受領。**P1-1（発注者版管理判断）・P1-2（一次source確認）・証跡1・2・4・5が未達のためM PASS条件未達を維持**。production authorizationなし、S12 NOT READY維持。
+
 ## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）
 
 T066 MのPASS条件であるG2 gate証跡は、システム外の人間/外部プロセスによる取得が必要である。実装AIは証跡を推測・捏造せずfail-closedとする（R10の証跡正確性方針）。取得側へ以下を要求する:
