@@ -2,7 +2,7 @@
 
 ## S10 dispatch R22 MySQL 0-skip検証未達 / T066 G2実装フェーズ1停止
 
-R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R22実装フェーズ1の同一Head `99fbed8294dd1a6c320b4413b832f7c7b9292da1`について、ローカル指定実行はDocker daemon起動不能により`0/0/3` skip、同一HeadのCIはDocker check成功後も`1842/1/29/0`でBUILD FAILUREとなった。V102適用失敗とforward-repair history assert不一致が残り、MySQL 0-skip証跡は未成立。R22-P1-01/P1-03は`OPEN / MYSQL_VERIFICATION_PENDING`、P1-02/P1-04/P1-05は`FIXED_BY_IMPLEMENTER / MYSQL_VERIFICATION_PENDING`、P2-01は`VERIFIED_CLOSED`を維持する。S10は`IN PROGRESS / FAIL`、T066 checkbox未完了、ACTIVE化・本番generate/delivery・production authorization禁止、S12は`NOT READY`を維持する。G2 service/API/UI/security、L1〜L3、Phase A/B、実在証跡、T066 L4はR22全P1のR10 VERIFIED_CLOSED後に限り開始する。
+R10の独立ReviewでR21 canonical payload deltaは`PASS / ACCEPTED_FOR_IMPLEMENTATION`。R22実装フェーズ1の同一Head `99fbed8294dd1a6c320b4413b832f7c7b9292da1`について、ローカル指定実行はDocker daemon起動不能により`0/0/3` skip、同一HeadのCIはDocker check成功後も`1842/1/29/0`でBUILD FAILUREとなった。V102適用失敗とforward-repairの複合index metadata row-count assertion不一致（expected 1 / actual 2。誤定義indexが2列構成のためstatisticsが2行を返すことによる。**R22-P2-02訂正: 当初「Flyway history row数assert」と記載したが、Flyway history成功件数assertは0で成立しており、失敗はindex metadataのrow-count assertion**）が残り、MySQL 0-skip証跡は未成立。R22-P1-01/P1-03は`OPEN / MYSQL_VERIFICATION_PENDING`、**P1-02/P1-05は`FIXED_BY_IMPLEMENTER / BLOCKED_BY_P1-04`、R22-P1-04は`OPEN / CI_REPRODUCED`**、P2-01は`VERIFIED_CLOSED`を維持する。S10は`IN PROGRESS / FAIL`、T066 checkbox未完了、ACTIVE化・本番generate/delivery・production authorization禁止、S12は`NOT READY`を維持する。G2 service/API/UI/security、L1〜L3、Phase A/B、実在証跡、T066 L4はR22全P1のR10 VERIFIED_CLOSED後に限り開始する。
 
 ## 1. 運用ルール
 

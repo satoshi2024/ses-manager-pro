@@ -4,7 +4,7 @@
 
 R10の要求した実MySQL 0-skip証跡について、同一Head `99fbed8294dd1a6c320b4413b832f7c7b9292da1`でローカルおよびCIを確認した。ローカルではDocker CLIのcontextは`desktop-linux`だが、Docker Desktop daemonが起動不能であり、指定コマンドは`Tests run: 3, Failures: 0, Errors: 0, Skipped: 3`、`BUILD SUCCESS`となった。これは必須のzero-skip条件を満たさない。
 
-同一HeadのGitHub Actions [run 31555911786](https://github.com/satoshi2024/ses-manager-pro/actions/runs/31555911786)ではDocker availability checkは成功したが、CI全量（対象のR22 smokeを含む）は`1842 tests / 1 failure / 29 errors / 0 skipped`、`BUILD FAILURE`となった。R22関連では`FlywayG2GateSchemaSmokeTest`のV102適用失敗と、`FlywayG2ForwardRepairSmokeTest`のhistory row数assert（expected 1 / actual 2）が発生し、SQLState、失敗時row count不変、複合FK/self-FK、trigger、operation state matrix、同一DB forward repair、Flyway historyの成功証跡として採用できない。失敗を隠すための再実行・skip許容・P1 closeは行わない。
+同一HeadのGitHub Actions [run 31555911786](https://github.com/satoshi2024/ses-manager-pro/actions/runs/31555911786)ではDocker availability checkは成功したが、CI全量（対象のR22 smokeを含む）は`1842 tests / 1 failure / 29 errors / 0 skipped`、`BUILD FAILURE`となった。R22関連では`FlywayG2GateSchemaSmokeTest`のV102適用失敗と、`FlywayG2ForwardRepairSmokeTest`の複合index metadataのrow-count assertion（expected 1 / actual 2。誤定義indexが2列構成のためinformation_schema.statisticsが列ごとに2行を返すことによる）が発生し、SQLState、失敗時row count不変、複合FK/self-FK、trigger、operation state matrix、同一DB forward repair、Flyway historyの成功証跡として採用できない。失敗を隠すための再実行・skip許容・P1 closeは行わない。**（R22-P2-02訂正: 当初「Flyway history row数assert」と記載したが、実際のfailureは複合index metadataのrow-count assertionであり、Flyway history成功件数assert（同test line 48）は`0`で成立していた。R22-P1-04は`OPEN / CI_REPRODUCED`）**
 
 | task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
 |---|---|---|---|---|---|
@@ -544,6 +544,17 @@ R10 Round 18のT065 B2 PASSとR18-P1-01 fixを受け、Mを実施した。**isol
 - 履歴table由来の帳票項目（GATE-T066-HISTORY）— 書き込み経路不在のため受入対象外として記録
 
 **境界**: 本deltaはgenerator拡充・service・test・docsのみ。V85追加以外のDDL変更なし。SecurityConfig/他機能未変更。M checkboxはG2 gate取得まで未完了維持。production release/apply authorizationなし。再開条件: 上記G2 gateの証跡取得 → R10がM PASS判定 → 本番release gate。
+
+## R22-P1-04 fix delta（2026-08-11）: metadata manifest同期＋forward-repair assert訂正
+
+R10のR22独立Review（FAIL）指摘のうち、**R22-P1-04（OPEN / CI_REPRODUCED）** と **R22-P2-02（OPEN）** を修正した。
+
+| issue | violated | 根本原因と最小fix | 証跡 |
+|---|---|---|---|
+| R22-P1-04 | R10.1/R10.2、G2-MIG-13..20、V1/V102/H2/mapperのDDL同期、fresh/forward-repair MySQL 0-skip | ① V102 metadata manifest（`__ses_g2_assert_column_contract`）の`attempt_count`期待defaultが`'0'`で、canonical DDL（V1/V102とも`DEFAULT 1`）と不一致→fresh migrationが`G2_V102_COLUMN_CONTRACT_MISMATCH`で停止。**manifest期待値を`'1'`へ同期**。② `FlywayG2ForwardRepairSmokeTest`が誤定義index（2列構成）のmetadataを`COUNT(*)=1`と誤assert（statisticsは列ごとに1行=2行）。**列順`tenant_id,effective_from`と`NON_UNIQUE=0`の明示assertへ訂正**し、repair処理以降（V102成功履歴1件・canonical列順・FK・trigger）のassertは既存のまま到達させる。③ 同種再発防止として**`G2AttemptCountSyncTest`（新規）**を追加: V1/V102/H2 schema/metadata manifest/entity/mapperの`attempt_count=1`同期＋V1実DDL（H2実行）のCOLUMN_DEFAULT=1検証 | G2AttemptCountSyncTest 2/0/0/0、MigrationScriptIntegrityTest 27/0/0/0、SpecDispatchConsistencyTest 9/0/0/0（skip 0）。`FlywayG2GateSchemaSmokeTest`＋`FlywayG2ForwardRepairSmokeTest`はDocker daemon起動不能のためローカルskip（CIで3/0/0/0検証） |
+| R22-P2-02 | Review Packet・ledgerの証拠正確性 | review-ledger.mdとspec-execution-ledger.mdの「Flyway history row数assert（expected 1 / actual 2）」表記を**「複合index metadataのrow-count assertion」**へ訂正（Flyway history成功件数assertは同test line 48で`0`成立）。R22-P1-04を`OPEN / CI_REPRODUCED`として同期 | 両ledgerの該当行訂正済み。旧表記0件 |
+
+**境界**: 本deltaはV102 manifest・smoke test・同期test・ledgerのみ。DDL本体（canonical DEFAULT 1）は不変。他のR22 issue（P1-01/P1-03=OPEN / MYSQL_VERIFICATION_PENDING、P1-02/P1-05=FIXED_BY_IMPLEMENTER / BLOCKED_BY_P1-04）はP1-04のMySQL検証成立後に再検証する。production authorizationなし。
 
 ## M / 本番gateと再開条件
 

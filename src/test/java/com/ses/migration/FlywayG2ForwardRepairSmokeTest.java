@@ -47,6 +47,12 @@ class FlywayG2ForwardRepairSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             assertEquals(0, queryInt(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
+            // 誤定義indexは2列（tenant_id,effective_from）構成のためinformation_schema.statisticsは
+            // 列ごとに1行ずつ計2行を返す。raw countではなく列順と一意性を明示assertする（R22-P1-04）。
+            assertEquals("tenant_id,effective_from", queryString(statement,
+                    "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM information_schema.statistics "
+                            + "WHERE table_schema=DATABASE() AND table_name='t_compliance_responsible_assignment' "
+                            + "AND index_name='uk_g2_assignment_active_slot'"));
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() "
                             + "AND table_name='t_compliance_responsible_assignment' "

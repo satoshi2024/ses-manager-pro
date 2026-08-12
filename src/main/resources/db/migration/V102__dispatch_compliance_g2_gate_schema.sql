@@ -698,7 +698,7 @@ CALL __ses_g2_assert_column_contract('t_compliance_external_review_event', 'vali
 CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'request_hash', 'char', 64, NULL, 'NO', NULL);
 CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'state', 'varchar', 20, NULL, 'NO', NULL);
 CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'retryable_flag', 'tinyint', NULL, NULL, 'NO', '0');
-CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'attempt_count', 'int', NULL, NULL, 'NO', '0');
+CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'attempt_count', 'int', NULL, NULL, 'NO', '1');
 CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'version', 'int', NULL, NULL, 'NO', '0');
 CALL __ses_g2_assert_column_contract('t_compliance_operation_ledger', 'deleted_flag', 'tinyint', NULL, NULL, 'NO', '0');
 DROP PROCEDURE IF EXISTS __ses_g2_assert_column_contract;
