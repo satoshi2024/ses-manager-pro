@@ -55,8 +55,9 @@ class FlywayG2ForwardRepairSmokeTest {
                     "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM information_schema.statistics "
                             + "WHERE table_schema=DATABASE() AND table_name='t_compliance_responsible_assignment' "
                             + "AND index_name='uk_g2_assignment_active_slot'"));
+            // statisticsは列ごとに1行返すため、「同名誤定義indexが残っていること」はDISTINCT index名で検証する。
             assertEquals(1, queryInt(statement,
-                    "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() "
+                    "SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics WHERE table_schema=DATABASE() "
                             + "AND table_name='t_compliance_responsible_assignment' "
                             + "AND index_name='uk_g2_assignment_active_slot' AND non_unique=0"));
         }

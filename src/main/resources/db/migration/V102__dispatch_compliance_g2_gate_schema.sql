@@ -388,7 +388,7 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   request_hash             CHAR(64) NOT NULL,
   state                    VARCHAR(20) NOT NULL,
   retryable_flag           TINYINT NOT NULL DEFAULT 0,
-  attempt_count            INT NOT NULL DEFAULT 0,
+  attempt_count            INT NOT NULL DEFAULT 1,
   started_at               DATETIME(6) NOT NULL,
   lease_until              DATETIME(6),
   finished_at              DATETIME(6),
