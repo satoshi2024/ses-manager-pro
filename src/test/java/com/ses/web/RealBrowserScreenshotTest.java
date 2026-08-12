@@ -392,14 +392,27 @@ class RealBrowserScreenshotTest {
         if (root == null || !Files.exists(root)) {
             return;
         }
-        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
-            paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.deleteIfExists(p);
-                } catch (Exception ignored) {
-                    // ignore
+        // Chrome終了直後はサブプロセスがプロファイル内のファイルを削除している最中であり、
+        // Files.walkの走査中にファイルが消えるとUncheckedIOException(NoSuchFileException)が
+        // 発生してテストが落ちる。少し待って再試行し、それでも残った場合はベストエフォートで
+        // 見逃す（一時ディレクトリの後始末がテストの成否を決めてはならない）。
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (Exception ignored) {
+                        // ignore
+                    }
+                });
+                return;
+            } catch (java.io.UncheckedIOException e) {
+                if (e.getCause() instanceof java.nio.file.NoSuchFileException) {
+                    Thread.sleep(200);
+                    continue;
                 }
-            });
+                throw e;
+            }
         }
     }
 }
