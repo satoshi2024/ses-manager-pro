@@ -17,10 +17,15 @@ public class ComplianceResponsibleAssignment extends BaseEntity {
     private Long userId;
     private String roleCode;
     private LocalDateTime effectiveFrom;
+    /** 交代時に値→NULLを保存する必要があるためALWAYS（chk_g2_assignment_open_fieldsの第2分岐）。 */
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private LocalDateTime effectiveTo;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Integer activeSlot;
     private Long assignedBy;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Long endedBy;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String endReason;
 
     @Version

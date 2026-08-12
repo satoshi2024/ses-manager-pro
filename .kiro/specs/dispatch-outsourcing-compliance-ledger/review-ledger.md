@@ -79,6 +79,13 @@
 
 **Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
 
+**Phase A step 3 第二increment（2026-08-12）**: reviewer type管理・COMPLIANCE_RESPONSIBLE assignment・approval event記録を実装。
+- `ComplianceGateAdminService`/`Impl`: reviewer type CRUD（type_code一意・credential label/required・enabled）、assignment（半開区間・active_slot単一・交代で旧open終了・endReason必須・CAS）。`ComplianceResponsibleAssignment`のactive_slot/effective_to/ended_by/end_reasonへALWAYSを付与（chk_g2_assignment_open_fieldsの第2分岐が値→NULLを要求するため）。
+- `ComplianceApprovalService`/`Impl`（証跡2）: PROVISIONAL_REVIEWEDのみ・実actor=現行open assignmentの指名者本人（不一致403）・mapping_hash/review_policy_hashをcanonicalizerから再計算・actor表示名/role snapshot・idempotency_key。
+- `ComplianceGateApiController`拡張: reviewer-types/assignments/approvalsエンドポイント（管理者のみ）。
+- i18n: compliance.gate.* 7 key×4。
+- 検証: ComplianceGateAdminServiceTest 5/0/0/0（reviewer type CRUD・assignment半開区間/単一slot・approval指名者本人/canonical hash一致/不一致403・DRAFT承認拒否）。回帰195/0/0/0（MapperSweep 125含む）。
+
 **検証**: Engine 12・Deadline 5・LegalFixture 3・ActionApi 5・MessageBundle 4・Integrity 27・SpecDispatch 9・DocumentApi 9・canonicalizer 2・mapping service 3 = **74/0/0/0**。L4全量 1846/0/0/0（banded staging変更後の再確認は次回全量実行で実施予定）。`git diff --check` exit 0。
 
 ## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）

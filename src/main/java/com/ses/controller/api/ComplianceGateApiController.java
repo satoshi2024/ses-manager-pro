@@ -28,6 +28,8 @@ import java.util.Map;
 public class ComplianceGateApiController {
 
     private final ComplianceMappingService complianceMappingService;
+    private final com.ses.service.ComplianceGateAdminService complianceGateAdminService;
+    private final com.ses.service.ComplianceApprovalService complianceApprovalService;
 
     @PostMapping("/mappings")
     public ApiResult<ComplianceMappingVersion> create(@RequestBody Map<String, Object> body) {
@@ -53,6 +55,60 @@ public class ComplianceGateApiController {
     @PutMapping("/mappings/{id}/transition")
     public ApiResult<ComplianceMappingVersion> transition(@PathVariable Long id, @RequestParam String toStatus) {
         return ApiResult.success(complianceMappingService.transition(id, toStatus));
+    }
+
+    // ===== reviewer type / assignment / approval（Phase A step 3） =====
+
+    @GetMapping("/reviewer-types")
+    public ApiResult<List<com.ses.entity.ComplianceExternalReviewerType>> reviewerTypes() {
+        return ApiResult.success(complianceGateAdminService.listReviewerTypes());
+    }
+
+    @PostMapping("/reviewer-types")
+    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> createReviewerType(@RequestBody Map<String, Object> body) {
+        return ApiResult.success(complianceGateAdminService.createReviewerType(
+                (String) body.get("typeCode"),
+                (String) body.get("displayName"),
+                (String) body.get("description"),
+                (String) body.get("credentialLabel"),
+                Boolean.TRUE.equals(body.get("credentialRequired"))));
+    }
+
+    @PutMapping("/reviewer-types/{id}")
+    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> updateReviewerType(@PathVariable Long id,
+                                                                                       @RequestBody Map<String, Object> body) {
+        return ApiResult.success(complianceGateAdminService.updateReviewerType(
+                id, (String) body.get("displayName"), (String) body.get("description"),
+                (String) body.get("credentialLabel"), Boolean.TRUE.equals(body.get("credentialRequired"))));
+    }
+
+    @PutMapping("/reviewer-types/{id}/enabled")
+    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> setReviewerTypeEnabled(@PathVariable Long id,
+                                                                                           @RequestParam boolean enabled) {
+        return ApiResult.success(complianceGateAdminService.setReviewerTypeEnabled(id, enabled));
+    }
+
+    @PostMapping("/assignments")
+    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> createAssignment(@RequestBody Map<String, Object> body) {
+        return ApiResult.success(complianceGateAdminService.createAssignment(
+                Long.valueOf(String.valueOf(body.get("workplaceId"))),
+                Long.valueOf(String.valueOf(body.get("userId"))),
+                body.get("effectiveFrom") == null ? null : java.time.LocalDateTime.parse((String) body.get("effectiveFrom"))));
+    }
+
+    @PutMapping("/assignments/{id}/end")
+    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> endAssignment(@PathVariable Long id,
+                                                                                   @RequestParam String reason) {
+        return ApiResult.success(complianceGateAdminService.endAssignment(id, reason));
+    }
+
+    @PostMapping("/approvals")
+    public ApiResult<com.ses.entity.ComplianceMappingApprovalEvent> approve(@RequestBody Map<String, Object> body) {
+        return ApiResult.success(complianceApprovalService.approve(
+                Long.valueOf(String.valueOf(body.get("mappingId"))),
+                Long.valueOf(String.valueOf(body.get("workplaceId"))),
+                (String) body.get("reason"),
+                body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId")))));
     }
 
     @SuppressWarnings("unchecked")
