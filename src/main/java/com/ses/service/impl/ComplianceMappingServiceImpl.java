@@ -248,10 +248,17 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
         for (ComplianceMappingVersion oldActive : currentActiveList) {
+            if (oldActive.getEffectiveFrom() != null && version.getEffectiveFrom() != null
+                    && version.getEffectiveFrom().isBefore(oldActive.getEffectiveFrom())) {
+                throw BusinessException.of(400, "compliance.gate.invalidTransition");
+            }
             Integer oldExpectedVer = oldActive.getVersion();
             oldActive.setStatus(STATUS_SUPERSEDED);
             oldActive.setActiveSlot(null);
             oldActive.setFutureSlot(null);
+            if (version.getEffectiveFrom() != null && (oldActive.getEffectiveTo() == null || oldActive.getEffectiveTo().isAfter(version.getEffectiveFrom()))) {
+                oldActive.setEffectiveTo(version.getEffectiveFrom());
+            }
             oldActive.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
             int rows = versionMapper.updateById(oldActive);
             if (rows == 0) {

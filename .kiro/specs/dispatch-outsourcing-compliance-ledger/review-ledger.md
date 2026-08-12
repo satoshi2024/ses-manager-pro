@@ -85,6 +85,8 @@
 - **P3-N2修正（status event pre-update expected_version統一一意化）**: `recordStatusEvent` に `expectedVersion` パラメータを追加し、更新前の事前バージョン（`version.getVersion()`）を全呼び出し箇所で明示指定・記録。
 - **P3-N3修正（future_slotのmapping_codeスコープ絞り込み）**: `activate()` の `future_slot=1` 存在確認クエリを `(tenant_id, mapping_code, future_slot)` に限定し、DB一意制約 `uk_g2_mapping_future_slot` と完全に整合。
 - **NOTE-1記載（idempotency replay）**: `approve()` での決定的一意キーによる `DuplicateKey -> 409 Conflict` 応答は、後続incrementの operation ledger 統合（R6.5 idempotency replay 200化）待ちであることを確定・明記。
+- **P3-R1修正（昇格時の有効期間逆転防止・旧ACTIVE終話処理）**: `promoteFutureToActive()` 内で旧ACTIVE版と新ACTIVE版の `effective_from` 順序逆転を 400（`invalidTransition`）で検証遮断し、昇格時に旧ACTIVE版の `effective_to` を新ACTIVE版の `effective_from` に自動クローズ（半開区間境界の一意保全）。
+- **NOTE-R1/R2記載**: 承認REVOKE判定の最新APPROVE限定化およびfuture予約のoperation ledgerイベント記録は、今後再承認フロー/operation ledger実装に合わせて拡張する方針を追記。
 - i18n: `compliance.gate.policyInvalid` を全4バンドル（ja/en/zh_CN/ko）に追記。
 - 検証: focused tests **22/0/0/0 PASS**（GateAdmin 8・MappingService 7・Canonicalizer 3・MessageBundle 4）。`git diff --check` exit 0。
 

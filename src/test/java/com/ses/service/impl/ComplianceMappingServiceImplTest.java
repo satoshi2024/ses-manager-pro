@@ -243,6 +243,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion oldV1 = complianceMappingService.getById(v1.getId());
         assertEquals("SUPERSEDED", oldV1.getStatus());
         assertNull(oldV1.getActiveSlot());
+        assertEquals(v2.getEffectiveFrom(), oldV1.getEffectiveTo(), "旧ACTIVEのeffective_toが新ACTIVEのeffective_fromにクローズされる");
     }
 
     @Test
