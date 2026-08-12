@@ -817,7 +817,7 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-FK-02 / R6.5 | L2 | approval/external eventのtarget/supersedes存在なし・別tenant | self複合FKでtarget/supersedes双方の孤立chain/別tenant参照を拒否し、拒否後row count不変 |
 | G2-FK-03 / R6.1/R6.5 | L2 | mapping→group、group→type、mapping/assignment→approval、status→mappingの同tenant/cross-tenant direct INSERT | 各relation familyでsame-tenant成功、cross-tenant/孤立parent拒否、SQLState/row countとFK列順をmetadataでassert |
 | G2-OP-01 / R6.5 | L0 | event/operation mapper API inventory | eventはINSERT/SELECT、operationはclaim/SELECT/CASのみ。BaseMapper/deleteById/updateById 0 |
-| G2-OP-02 / R6.5 | L2 | claim初期FAILED、finished/failure付きPROCESSING、PROCESSING operationのDELETE、SUCCEEDED result改変、FAILED payload、PROCESSING payload | claimはPROCESSING/0/1/0で固定、初期不正stateと不正結果行列をDB CHECK/triggerが拒否、PROCESSING/FAILEDのresult/reference全列NULL、row不変 |
+| G2-OP-02 / R6.5 | L2 | claim初期FAILED、finished/failure付きPROCESSING、retryable/attempt/version/deleted各初期値不正、PROCESSING operationのDELETE、SUCCEEDED result改変、FAILED payload、PROCESSING payload | claimはPROCESSING/0/1/0/0で固定、各初期不正値と不正結果行列をDB CHECK/triggerが拒否、PROCESSING/FAILEDのresult/reference全列NULL、SQLState/row不変 |
 | G2-OP-03 / R6.5 | L2/L3 | PROCESSING→SUCCEEDED/FAILEDとexpected version競合、成功hash欠落 | `SUCCEEDED`はfinished_at非NULL・failure_code NULL・summary/http/hash全て必須、`FAILED`はfinished_at/failure_code必須、許可されたCASだけ1勝、terminal rowは永久保持 |
 | G2-OP-04 / R6.5 | L2/L3 | retryable/non-retryable FAILED、同時restart、stale version | retryable=1だけFAILED→PROCESSINGを許可し、同時restartは1勝、非retryable/staleは拒否 |
 | G2-OP-05 / R6.5 | L2 | PROCESSING→PROCESSINGでresult/reference/failureを改変 | lease/attempt/version以外のfield改変を拒否 |

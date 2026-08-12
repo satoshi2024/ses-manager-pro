@@ -99,7 +99,8 @@
     G2-FKはmapping/group/type/assignment/workplace/approval/external/statusの各複合FKとtarget/supersedesについて、
     same-tenant成功、cross-tenant/孤立拒否、SQLState/row count不変を含める。G2-OPはmapper/DB境界のclaim初期値
     PROCESSING/0/1/0、初期FAILED拒否、finished/failure付きPROCESSING拒否、PROCESSING→FAILEDのfinished/failure必須、
-    PROCESSING/FAILEDのresult/reference全NULLとSUCCEEDEDのfinished/summary/http/hash行列を含める。
+    retryable/attempt/version/deleted各初期値不正の個別INSERT拒否、PROCESSING/FAILEDのresult/reference全NULLと
+    SUCCEEDEDのfinished/summary/http/hash行列を含める。
     G2-MIGは全named UNIQUEの列順・列数・NON_UNIQUE、同名CHECKのcanonical repair、同一DBのV102失敗→forward repair→
     `repair()`→再実行後のhistory/FK/trigger、partial/repair後のhistory未登録を含める。
     最終L4では`mvn test`全量、fresh/legacy MySQL smoke、

@@ -322,6 +322,7 @@ ACTIVE化、本番交付、T066完了、S10 PASSを許可しない。
 - R22 direct regressionは`G2-ASG-14..16`、`G2-FK-01..03`、`G2-OP-01..06`、`G2-MIG-13..20`とし、
   `ComplianceG2MapperContractTest`、H2/MySQLのslot・microsecond半開区間回帰、Flyway MySQL metadata/FK/trigger/operation retry smoke、
   approval targetの孤立・cross-tenant、status→mappingのsame/cross-tenant direct SQL、同名誤定義index、同名誤定義CHECK、
-  失敗DBをcleanせずにforward repairして同一DBでV102を再実行する履歴・FK・trigger検証、operation claim初期値と
-  result状態行列の不正INSERT/正規CASを含むforward repair fail-closed smokeで検証する。
+  失敗DBをcleanせずにforward repairして同一DBでV102を再実行する履歴・FK・trigger検証、operation claim初期値
+  （retryable/attempt/version/deleted各不正値を個別に含む）とresult状態行列の不正INSERT/正規CASを含むforward repair
+  fail-closed smokeで検証する。
 

@@ -1,5 +1,15 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R22-P1-05 false-positive fixture fix / R10再Review待ち）
+
+R22再Reviewで指摘されたP1-05の偽陽性を修正提出した。H2/MySQLのfinished/failure付き`PROCESSING` INSERTへ有効な`started_at`を追加し、MySQL direct smokeへ`retryable_flag=1`、`attempt_count!=1`、`version!=0`、`deleted_flag=1`をそれぞれ単独で指定する完全なINSERTを追加した。拒否後のrow count不変とSQLState検証は既存helperで維持する。実装者側ではR22-P1-05を`VERIFIED_CLOSED`へ変更しない。Docker付きMySQL実行、R10独立Review、R22-P1-01/P1-03のMySQL検証を待つ。
+
+| task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R22-P1-05 | R6.5、`G2-OP-01..03` | `FlywayG2GateSchemaSmokeTest`、`DispatchComplianceSchemaH2Test`、G2 design/decision/tasks | H2 `3/0/0/0`、mapper contract `2/0/0/0`、Docker MySQL `1` test skip（Docker Desktop起動不能）、`git diff --check` PASS。MySQL 0-skip、T066 L4、G2 service/API/UI、実actor/reviewer/evidence、Phase A/Bは未実施 | Base `230ce013a487ddd24175926344a2185ee29b1af4` → implementation/docs同期後Headは`git rev-parse HEAD`で固定 | R10独立ReviewとDocker付きMySQL 0-skipが必要。P1-05は未close、T066 checkbox/S10/S12/ACTIVE/formal deliveryは変更なし |
+
+R10へ再Reviewを依頼するまで、R22-P1-05を`VERIFIED_CLOSED`へ変更しない。S10は`IN PROGRESS / FAIL`、T066未完了、S12は`NOT READY`を維持する。
+
 ## 現行判定（R22 follow-up P1-02/P1-04/P1-05 fix提出 / R10再Review待ち）
 
 R22 follow-upのP1-02、P1-04、P1-05へ追加修正を提出した。P1-02はapproval target孤立・supersedes cross-tenant・status→mapping same/cross-tenantのMySQL direct SQL、P1-04は失敗した同一DBをcleanせずにforward repairしてFlyway V102を再実行する証拠、P1-05はclaim初期値固定・MySQL BEFORE INSERT・H2/MySQL状態行列を追加した。実装者側ではいずれも`VERIFIED_CLOSED`へ変更しない。R22-P1-01/P1-03はDocker付きMySQL検証待ちとしてOPENを維持し、R22-P2-01の`VERIFIED_CLOSED`履歴も維持する。
