@@ -164,7 +164,14 @@ columns:
 `result_reference_version`, `result_summary_canonical`, `result_http_status`, `result_hash`, `failure_code`,
 `correlation_id`, `expires_at`, `version`。
 
-`result_summary_canonical`はSUCCEEDED時必須、PROCESSING/FAILED時はNULLとし、`result_reference_*`も成功時だけ設定する。
+claim INSERTはserver-side mapperが`state=PROCESSING`、`retryable_flag=0`、`attempt_count=1`、`version=0`、
+`deleted_flag=0`を固定し、`finished_at`、`failure_code`、`result_reference_*`、`result_summary_canonical`、
+`result_http_status`、`result_hash`を全てNULLで開始する。MySQL BEFORE INSERT triggerはentity/requestから渡された
+初期state・retryable・attempt・version・結果列を信用せず、同じclaim行列をDB境界でも拒否する。
+`SUCCEEDED`は`finished_at`非NULL、`failure_code` NULL、`result_summary_canonical`・`result_http_status`・`result_hash`
+全て非NULL、`PROCESSING`は`finished_at`・`failure_code`・result/reference全列NULL、`FAILED`は`finished_at`・
+`failure_code`非NULLかつresult/reference全列NULLとする。`completeFailureCas`は`finished_at`と`failure_code`を必須にし、
+result/referenceをNULLで保存する。`result_summary_canonical`と`result_reference_*`は成功時だけ設定する。
 現行運用では全rowの`expires_at`をNULL（永久保持）とする。保持期間短縮、purge、key再利用は別decisionなしに許可しない。
 
 `operation_id`はserverがledger claim前に生成するUUIDv4文字列（canonical lowercase、36文字）であり、同一operationのeventへ保存する。
@@ -806,12 +813,12 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-ASG-14 / R6.2 | L1/L2 | open assignment 2件、finite assignmentのslot誤値、ACTIVE mappingのslot NULL | openはslot=1で1件、finite/non-ACTIVEはslot=NULL、NULL-safe CHECK/trigger |
 | G2-ASG-15 / R6.2 | L2 | `DATETIME(6)` assignmentをt0−1µs/t0/t0+1µsで評価 | 半開区間を秒・マイクロ秒精度で再現し、隣接だけ許可 |
 | G2-ASG-16 / R6.2 | L2 | H2/MySQLのasOf predicate、隣接、部分重複、有限終了 | `from <= asOf AND (to IS NULL OR asOf < to)`を実SQLでassertし、隣接は許可、部分重複は検出 |
-| G2-FK-01 / R6.1/R7.2 | L2 | G2 childの同tenant/cross-tenant parent | `(tenant_id,parent_id)`複合FKの同tenantだけ成功、cross-tenant拒否 |
-| G2-FK-02 / R6.5 | L2 | event target/supersedesの存在なし・別tenant | self複合FKで孤立chain/別tenant targetを拒否 |
-| G2-FK-03 / R6.1/R6.5 | L2 | mapping→group、group→type、mapping/assignment→approvalの同tenant/cross-tenant direct INSERT | 各relation familyで同tenantのみ成功、cross-tenant/孤立parentは拒否、FK列順もmetadataで一致 |
+| G2-FK-01 / R6.1/R7.2 | L2 | G2 childの同tenant/cross-tenant parent | `(tenant_id,parent_id)`複合FKの同tenantだけ成功、cross-tenant拒否、row count/SQLStateをassert |
+| G2-FK-02 / R6.5 | L2 | approval/external eventのtarget/supersedes存在なし・別tenant | self複合FKでtarget/supersedes双方の孤立chain/別tenant参照を拒否し、拒否後row count不変 |
+| G2-FK-03 / R6.1/R6.5 | L2 | mapping→group、group→type、mapping/assignment→approval、status→mappingの同tenant/cross-tenant direct INSERT | 各relation familyでsame-tenant成功、cross-tenant/孤立parent拒否、SQLState/row countとFK列順をmetadataでassert |
 | G2-OP-01 / R6.5 | L0 | event/operation mapper API inventory | eventはINSERT/SELECT、operationはclaim/SELECT/CASのみ。BaseMapper/deleteById/updateById 0 |
-| G2-OP-02 / R6.5 | L2 | PROCESSING operationのDELETE、SUCCEEDED result改変、FAILED payload、PROCESSING payload | DB trigger/CHECKが拒否、PROCESSING/FAILEDのresult/reference全列NULL、row不変 |
-| G2-OP-03 / R6.5 | L2/L3 | PROCESSING→SUCCEEDED/FAILEDとexpected version競合、成功hash欠落 | `SUCCEEDED`はsummary/http/hash全て必須、許可されたCASだけ1勝、terminal rowは永久保持 |
+| G2-OP-02 / R6.5 | L2 | claim初期FAILED、finished/failure付きPROCESSING、PROCESSING operationのDELETE、SUCCEEDED result改変、FAILED payload、PROCESSING payload | claimはPROCESSING/0/1/0で固定、初期不正stateと不正結果行列をDB CHECK/triggerが拒否、PROCESSING/FAILEDのresult/reference全列NULL、row不変 |
+| G2-OP-03 / R6.5 | L2/L3 | PROCESSING→SUCCEEDED/FAILEDとexpected version競合、成功hash欠落 | `SUCCEEDED`はfinished_at非NULL・failure_code NULL・summary/http/hash全て必須、`FAILED`はfinished_at/failure_code必須、許可されたCASだけ1勝、terminal rowは永久保持 |
 | G2-OP-04 / R6.5 | L2/L3 | retryable/non-retryable FAILED、同時restart、stale version | retryable=1だけFAILED→PROCESSINGを許可し、同時restartは1勝、非retryable/staleは拒否 |
 | G2-OP-05 / R6.5 | L2 | PROCESSING→PROCESSINGでresult/reference/failureを改変 | lease/attempt/version以外のfield改変を拒否 |
 | G2-OP-06 / R6.5 | L2 | FAILED/terminal rowのDELETE・result改変 | DELETEとterminal/result改変を拒否、row/result不変 |
@@ -819,9 +826,9 @@ HTTP `—`はservice/DB direct test。rollback/cache欄の`不変`はmapping/eve
 | G2-MIG-14 / R10.1 | L1/L2 | G2 tableがabsent/partial/old definition | canonical columns/type/length/NULL/default/precisionをassertし、shape/column contract mismatchはfail-closed |
 | G2-MIG-15 / R10.2 | L2 | UNIQUE/CHECK/FK/triggerがabsent、旧定義、途中失敗後 | canonical constraint manifestを検証し、named CHECKはcanonical expressionへdrop/re-add、named FK/triggerも収束、不一致はforward repair要求 |
 | G2-MIG-16 / R10.2 | L2 | V102適用後にgit commitをrevert | DBをgit revertで戻さず、checksum/history確認後のforward repairのみ |
-| G2-MIG-17 / R10.1 | L2 | 同名誤定義index/UNIQUE/CHECK、欠落constraint、途中失敗後retry | MySQLでcanonical index/UNIQUE/CHECK mismatchを検出・repairし、Flyway V102を誤成功扱いにしない |
+| G2-MIG-17 / R10.1 | L2 | 同名誤定義index/UNIQUE/CHECK、欠落constraint、同一DBでの途中失敗後retry | 初回V102失敗時にhistory 102未成功を確認し、同じDBの誤定義をforward repairして`repair()`後にV102を再実行、canonical index/UNIQUE/CHECKとhistory 102=1をassert |
 | G2-MIG-18 / R10.1 | L2 | MySQL fresh/partial/old-definition | 重要columnの型/長さ/NULL/default/precisionをmanifest検証 |
-| G2-MIG-19 / R10.2 | L2 | FK/trigger absent・旧定義・history repair | named objectをcanonical状態へ収束または明示fail-closed、history 102を誤成功登録しない |
+| G2-MIG-19 / R10.2 | L2 | FK/trigger absent・旧定義・同一DBhistory repair | 同一DBの失敗後再実行でnamed FK/triggerをcanonical状態へ収束し、history 102を誤成功登録せず、成功後にFK/trigger存在をassert |
 | G2-MIG-20 / R10.2 | L2 | post-apply repair/rollback | apply後はforward repair、git revertでDBを旧状態へ戻さない |
 
 ## 14. Browser acceptance

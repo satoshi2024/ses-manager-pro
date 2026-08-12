@@ -309,13 +309,19 @@ ACTIVE化、本番交付、T066完了、S10 PASSを許可しない。
   `G2_V102_COLUMN_CONTRACT_MISMATCH`でfail-closedし、承認済みforward repairを要求する。旧FK/triggerはnamed drop/re-addする。
   V102適用後のgit revertはDB rollbackではなく、Flyway history/checksum確認後のforward repair migration/runbookで扱う。
 - event mapperは明示INSERT/SELECT APIのみ、operation ledgerはclaim/selectとPROCESSINGからのexpected-version CAS、
-  retryable FAILEDからPROCESSINGへ戻すexpected-version CASのみを公開する。operation resultは、`SUCCEEDED`だけが
-  `result_summary_canonical`・`result_http_status`・`result_hash`を全て非NULLで保持し、`PROCESSING`/`FAILED`は
-  result/reference全列をNULLとする。`completeFailureCas`はpayloadを受け取らず、DB CHECK/triggerと同じNULL行列を適用する。
+  retryable FAILEDからPROCESSINGへ戻すexpected-version CASのみを公開する。claim INSERTはmapperが
+  `state=PROCESSING`、`retryable_flag=0`、`attempt_count=1`、`version=0`、`deleted_flag=0`を固定し、
+  `finished_at`・`failure_code`・result/reference全列をNULLで開始する。MySQLのBEFORE INSERT triggerも同じ初期値を
+  再検証する。operation resultは、`SUCCEEDED`だけが`finished_at`非NULL、`failure_code` NULL、
+  `result_summary_canonical`・`result_http_status`・`result_hash`全て非NULLで保持する。`PROCESSING`は
+  `finished_at`・`failure_code`・result/reference全列をNULL、`FAILED`は`finished_at`・`failure_code`を非NULLかつ
+  result/reference全列をNULLとする。`completeFailureCas`はpayloadを受け取らず、DB CHECK/triggerと同じ状態行列を適用する。
   `completeFailureCas`はretryable flagを保存し、
   `restartFailedCas`はretryable=1だけを再開する。operation ledger entityは`BaseEntity`を継承せず、DB triggerでDELETE、
   identity/result改変、PROCESSING lease以外の同一state更新、非retryable/terminal rowの再更新を拒否する。
 - R22 direct regressionは`G2-ASG-14..16`、`G2-FK-01..03`、`G2-OP-01..06`、`G2-MIG-13..20`とし、
   `ComplianceG2MapperContractTest`、H2/MySQLのslot・microsecond半開区間回帰、Flyway MySQL metadata/FK/trigger/operation retry smoke、
-  同名誤定義index、同名誤定義CHECK、operation resultの失敗payload/成功hash欠落を含むforward repair fail-closed smokeで検証する。
+  approval targetの孤立・cross-tenant、status→mappingのsame/cross-tenant direct SQL、同名誤定義index、同名誤定義CHECK、
+  失敗DBをcleanせずにforward repairして同一DBでV102を再実行する履歴・FK・trigger検証、operation claim初期値と
+  result状態行列の不正INSERT/正規CASを含むforward repair fail-closed smokeで検証する。
 

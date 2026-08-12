@@ -1,5 +1,15 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R22 follow-up P1-02/P1-04/P1-05 fix提出 / R10再Review待ち）
+
+R22 follow-upのP1-02、P1-04、P1-05へ追加修正を提出した。P1-02はapproval target孤立・supersedes cross-tenant・status→mapping same/cross-tenantのMySQL direct SQL、P1-04は失敗した同一DBをcleanせずにforward repairしてFlyway V102を再実行する証拠、P1-05はclaim初期値固定・MySQL BEFORE INSERT・H2/MySQL状態行列を追加した。実装者側ではいずれも`VERIFIED_CLOSED`へ変更しない。R22-P1-01/P1-03はDocker付きMySQL検証待ちとしてOPENを維持し、R22-P2-01の`VERIFIED_CLOSED`履歴も維持する。
+
+| task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R22 follow-up P1-02/P1-04/P1-05 | R6.1/R6.5/R6.6/R10.1/R10.2、`G2-FK-01..03`、`G2-OP-01..06`、`G2-MIG-13..20` | V1/V102、operation mapper、H2 schema、FK/operation/forward-repair smoke・contract、design/requirements/tasks/delta | focused `7/0/0/0`（mapper 2、H2 3、V102 contract 2）、Docker MySQL smoke 3件は環境skip、schema/consistency `161/0/0/0`（AllMappers 125、MigrationIntegrity 27、SpecDispatch 9）、`git diff --check` PASS | Base `dfae039ec5dc54e730103f967f87782e36b36bc0` → implementation `76858448` → docs同期後Headは`git rev-parse HEAD`で固定 | R10独立ReviewとDocker付きMySQL 0-skipが必要。V102適用後rollbackはgit revertではなく同一DBのforward repair。T066 checkbox/S10/S12/ACTIVE/formal deliveryは変更なし |
+
+R10へ再Reviewを依頼するまで、R22-P1-02/P1-04/P1-05を`VERIFIED_CLOSED`へ変更しない。S10は`IN PROGRESS / FAIL`、T066未完了、S12は`NOT READY`を維持する。
+
 ## 現行判定（R22 FK / migration-shape / operation-result follow-up / R10再Review待ち）
 
 R22再Reviewで残ったP1-02（全relation familyの複合FK/self-FK direct証拠）、P1-04（全named UNIQUEの列順・列数・NON_UNIQUE、同名CHECKのcanonical repair）、P1-05（PROCESSING/FAILED result/reference全NULL、SUCCEEDED summary/http/hash必須）を修正提出した。P1-01/P1-03は実装shape修正済みだが、Docker付きMySQLでの業務一意性・worker NULL物理契約の実証待ちとしてOPENを維持する。R22-P2-01はR10の`VERIFIED_CLOSED`履歴を維持し、実装者側ではcloseしない。

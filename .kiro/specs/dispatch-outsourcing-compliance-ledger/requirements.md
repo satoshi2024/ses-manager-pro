@@ -130,7 +130,7 @@
 | requirement | direct regression ID | level |
 |---|---|---|
 | R6.1〜R6.4 assignment/scope | `G2-ASG-01..16`, `G2-DEL-02..04`, `G2-FK-01..03` | L1〜L3 |
-| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..15`, `G2-FK-02..03`, `G2-OP-01..06`, `G2-MIG-07` | L0〜L3 |
+| R6.5 event reducer/operation idempotency | `G2-EVT-01..11`, `G2-IDP-01..15`, `G2-FK-02..03`, `G2-OP-01..06`, `G2-MIG-07`（claim初期値・finished/failure/result状態行列を含む） | L0〜L3 |
 | R6.6 lifecycle/effective period/ACTIVE | `G2-ACT-01..06`, `G2-LIFE-01..11` | L2〜L3 |
 | R7.1〜R7.3 dynamic policy/freeze | `G2-POL-01..16` | L0〜L2 |
 | R7.4/R9.3 PII/evidence/credential crypto | `G2-EVT-12..14`, `G2-SEC-09..10`, `G2-SEC-12..18` | L1〜L2 |
