@@ -16,6 +16,7 @@
 | MOD01-04 | `/user/list` | 管理者 | ログイン中の自分自身 (`admin`) に対し「無効化」ボタン押下 | DB 変更なし (ガードブロック) | Swalエラー「ログイン中の自身を無効化することはできません」表示 |
 | MOD01-05 | `/user/list` | 管理者 | 権限設定タブで `営業` ロールから `invoice` メニューのチェックを外し保存 | `t_role_menu` から該当 `menu_id` 削除 | 保存完了。`営業` で再ログイン時、サイドバーから「請求書」メニュー消滅 |
 | MOD01-06 | `/audit-log/list` | 管理者 | 監査ログ照会画面で操作種別 `UPDATE`、日付指定で検索 | `t_audit_log` から SELECT 実行 | 上記 MOD01-03/05 のユーザー作成・権限変更履歴がログ一覧に正確に表示 |
+| MOD01-07 (Edge) | `/api/users` | 管理者 | CSRFトークン(`X-XSRF-TOKEN`)を意図的に削除または無効な値にしてPOSTリクエスト送信 | DB 変更なし (Spring Securityでブロック) | `403 Forbidden` となり、グローバルエラーハンドラー経由で JSON または Unified Error Page へフォールバック |
 
 ---
 
@@ -53,6 +54,7 @@
 |---|---|---|---|---|---|
 | MOD04-01 | `/customer/list` | 営業 | 「顧客企業追加」Modal で企業名・インボイス登録番号 T1234567890123 を入力 | `t_customer` (company_name, invoice_number) | 顧客一覧に新カード追加、登録番号バッジ表示 |
 | MOD04-02 | `/crm/list` | 営業 | リードから商談化ボタン押下、想定月額単価 85万円、確度 B を設定 | `t_lead.status` = '商談化'<br>`t_opportunity` に INSERT (amount=850000, probability='B') | 商談パイプラインに新カード登場、売上見込み合計額が自動再計算 |
+| MOD04-03 (Edge) | `/customer/list` | 営業 | インボイス登録番号フィールドに XSS ペイロード `<script>alert(1)</script>` および 256文字以上の文字列を入力し保存 | DB 変更なし (Validationでブロック) | `@Valid` または `@Size` 制約により HTTP 400 発生、入力フォームに「文字数超過/不正フォーマット」のバリデーションエラー表示 |
 
 ---
 
@@ -64,6 +66,7 @@
 |---|---|---|---|---|---|
 | MOD05-01 | `/project/list` | 営業 | 「案件登録」で月額単価80〜90万円、精算幅140-180h、Java/Spring必須を設定 | `t_project` (price_min=800000, settlement_hours_min=140...)<br>`t_project_skill` | 案件一覧に公開カード追加、精算条件が正しく表示 |
 | MOD05-02 | `/project/detail/{id}` | 営業 | 「AI適合度マッチング試算」ボタン押下 | `t_ai_match_score` に結果一時キャッシュ | 300人中適合率 80% 以上の要員 5 名がスコア順にポップアップ表示 |
+| MOD05-03 (Edge) | `/api/engineers/{id}` | HR | アクティブな契約 (`t_contract`) が存在するエンジニアに対して「論理削除 (DELETE)」を実行試行 | DB 変更なし (参照整合性ガード) | FK制約 または `BusinessException` により削除ブロック、「稼働中の契約があるため削除できません」Toastエラー |
 
 ---
 
@@ -181,5 +184,6 @@
 |---|---|---|---|---|---|
 | MOD15-01 | `/quotation/list` | 営業 | 見積書新規発行、捺印画像選択し PDF 出力 | `t_quotation` (quotation_number, total_amount) | 印影画像が正しく埋め込まれた見積書 PDF がプレビュー表示 |
 | MOD15-02 | `/approval/list` | マネージャー | 申請された見積・契約の多段階承認（第1段階承認）を実行 | `t_approval_request`, `t_approval_step` | ステータスが「第2次承認待ち」へ更新、次承認者へ通知送信 |
+| MOD15-03 (Edge) | `/api/resume/ingestion` | HR | 候補者履歴書として、10MBを超えるファイル、または拡張子を偽装した `.exe` をアップロード | DB / Storage 変更なし | `MaxUploadSizeExceededException` または MIME 型バリデーションにより HTTP 400/413 エラーが発生し安全にリジェクトされること |
 
 ---
