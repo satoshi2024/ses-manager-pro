@@ -6,6 +6,13 @@
 
 **L4再確認（2026-08-12）**: 外部専門家Review対応（DeliveryDeadlineRule追加）後の`mvn test`全量を2回実行。1回目は`SchedulerLockH2IntegrationTest`が1件失敗（実行0.166s・一意lock名のため構造的干渉なし・単体では1/0/0/0 PASS）→ **環境flake（本機低速、R18のVerifyLikeCi flakeと同種）と判断**。2回目は **1844/0/0/0・skip 41（Docker gate）・BUILD SUCCESS**。
 
+**CI検証（2026-08-12）**: GitHub Actionsにて最新のdispatch commitが全てsuccess。
+- `4e1a5fe1`（DeliveryDeadlineRule）: run 31576512607 = **success（1844 tests / skip 0・MySQL smoke含む）**
+- `b1fba27f`（FM-C-28提案）: run 31577457917 = success
+- `637a9899`（受入チェックリスト）: run 31580424282 = in_progress（docs-only）
+
+**P1-2一次source調査の到達点**: SRC-INDEX（北海道労働局）に「待遇に関する情報提供の例（労使協定方式/均等均衡方式）」の公式様式が存在することを確認済み（2026-08-12 fetch）。MHLW本省の改正派遣法ページは404で直接取得不可。**「待遇差説明/待遇情報提供」の施行時期・MAPPING-2026-07側の要否は、改正省令・厚労省通知を一次sourceとする外部専門家/発注者による法的確定に委ねる**（実装AIは法的適否を自動確定しない）。
+
 **T066 M受入チェックリスト**（`t066-m-acceptance-checklist.md`）を作成: 証跡4（PDF目視5項目・P1-1のSRC-C料金欄確認含む）、P2-3（worker recipientの方式決定）、P3-1（料金乖離の運用方針）、証跡5（T066-HISTORY可否＋P1-1版管理3択）、G2 gate（証跡1/2、資格保有者の実在Review、P1-2一次source）の検証手順を人間/外部プロセス向けに明文化。
 
 ## 外部専門家Review（証跡3・第一次照合・条件付き確認）の受領と対応（2026-08-12）
