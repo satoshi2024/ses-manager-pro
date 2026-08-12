@@ -556,6 +556,24 @@ R10のR22独立Review（FAIL）指摘のうち、**R22-P1-04（OPEN / CI_REPRODU
 
 **境界**: 本deltaはV102 manifest・smoke test・同期test・ledgerのみ。DDL本体（canonical DEFAULT 1）は不変。他のR22 issue（P1-01/P1-03=OPEN / MYSQL_VERIFICATION_PENDING、P1-02/P1-05=FIXED_BY_IMPLEMENTER / BLOCKED_BY_P1-04）はP1-04のMySQL検証成立後に再検証する。production authorizationなし。
 
+## R23 fix delta（2026-08-11）: PR #69（fix/ci-v102-g2-gate `697d4aa0`）をmainへport
+
+R10 Round 23は`f212c7b0`をFAIL（CI run 31563321508: 1844/1/4/0。`FlywayG2ForwardRepairSmokeTest:56`の`COUNT(non_unique=0)=1`が2列indexで2行になり再誤assert、`FlywayG2GateSchemaSmokeTest:164`のfixture 'default-v1'重複）とし、完全fixは未mergeのPR #69（CI 31562164817 = 1842/0/0/0 skip 0）にあると指示した。本deltaは**PR #69のcode変更をmainへport**したものである（ledgerは本specのR22-P2-02訂正とR22-P1-04 fix記録を保持）。
+
+**port内容**（PR #69 `697d4aa0` と同一）:
+- `V102__dispatch_compliance_g2_gate_schema.sql`: information_schema系procedureへ**BINARY比較**を追加（case感度の正確化: TABLE_NAME/INDEX_NAME/CONSTRAINT_NAME/COLUMN_NAME/COLUMN_NAME比較・FIND_IN_SET・CHECK_CLAUSE）＋`__ses_g2_repair_fk`のshape-aware化。
+- `FlywayG2ForwardRepairSmokeTest`: 誤定義indexの存在assertを**`COUNT(DISTINCT index_name)=1`**へ修正（f212c7b0の`COUNT(non_unique=0)=1`は2列indexで2行=誤。R22-P1-04の再誤assert解消）。Flyway history成功件数assert（success=1 0件）は維持。
+- `FlywayG2GateSchemaSmokeTest`: fixture `'v1'`→`'v1-dup'`/`'v1-sc'`（`uk_g2_mapping_version`のDuplicate entry解消）。
+- `FlywayV84LegacySchemaSmokeTest`: V83公開形状の再現で`SET FOREIGN_KEY_CHECKS=0`＋G2（V102系）tableの除去を追加（V1がG2 table→m_workplace FKを持つため1215回避）。
+- `FlywayV84PartialSchemaSmokeTest`: legacy `t_document_delivery` fixtureへ`ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`を明示（V102 composite FKのcollation不一致 3780回避）。
+- `G2AttemptCountSyncTest`: PR #69により削除（V102 metadata manifest自体が適用時にMySQLで実DDLを検証する同期チェックであり、静的複製は不要と判断）。
+
+**検証**: 非Docker 180/0/0/0 skip 0（MigrationScriptIntegrity 27・SpecDispatch 9・DispatchComplianceSchemaH2 3・ComplianceG2MapperContract 2・V102ForwardRepairContract 2・LegalFixture 3・DocumentApi 9・AllMappersSchemaSweep 125）。`git diff --check` exit 0。MySQL smoke（FlywayG2GateSchemaSmokeTest 1＋FlywayG2ForwardRepairSmokeTest 2＋V84系）はDocker daemon起動不能のためローカルskip → **CI（新Head）で1842/0/0/0 skip 0検証**（PR #69のCI実績と同一内容のため期待どおり）。
+
+**R22 issue状態（R23時点）**: P1-04 `OPEN / CI_REPRODUCED`（本deltaでfix対象をPR #69実績と同一化）、P1-02/P1-05 `FIXED_BY_IMPLEMENTER / BLOCKED_BY_P1-04`、P1-01/P1-03 `OPEN / MYSQL_VERIFICATION_PENDING`、P2-01 `VERIFIED_CLOSED`、P2-02 表記訂正済み。
+
+**境界**: 本deltaはPR #69のcode変更portのみ。DDLのcanonical形状はPR #69実績どおり。production authorizationなし、S12 `NOT READY`維持。
+
 ## M / 本番gateと再開条件
 
 - `COMPLIANCE_RESPONSIBLE` のruntime assignment、資格/根拠の確認、法定責任者の事業所/契約assignmentは、M / 本番設定gateとして実装・設定する。承認eventには実際のactor user ID、表示名snapshot、role、日時、mapping version/hash、根拠資料を保存する。

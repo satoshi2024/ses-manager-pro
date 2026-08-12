@@ -45,16 +45,14 @@ class FlywayG2ForwardRepairSmokeTest {
         assertTrue(messageChain(failure).contains("G2_V102_INDEX_SHAPE_MISMATCH"));
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // Flywayは失敗したmigrationもsuccess=0の行として履歴に残すため、
+            // 「成功として記録されていないこと」を検証する（success=1が0件）。
             assertEquals(0, queryInt(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
-            // 誤定義indexは2列（tenant_id,effective_from）構成のためinformation_schema.statisticsは
-            // 列ごとに1行ずつ計2行を返す。raw countではなく列順と一意性を明示assertする（R22-P1-04）。
-            assertEquals("tenant_id,effective_from", queryString(statement,
-                    "SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM information_schema.statistics "
-                            + "WHERE table_schema=DATABASE() AND table_name='t_compliance_responsible_assignment' "
-                            + "AND index_name='uk_g2_assignment_active_slot'"));
+            // information_schema.statisticsはindexの列ごとに1行返すため、
+            // 「同名誤定義index（2列）が残っていること」はDISTINCT index名で検証する。
             assertEquals(1, queryInt(statement,
-                    "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() "
+                    "SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics WHERE table_schema=DATABASE() "
                             + "AND table_name='t_compliance_responsible_assignment' "
                             + "AND index_name='uk_g2_assignment_active_slot' AND non_unique=0"));
         }

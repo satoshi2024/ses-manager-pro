@@ -35,6 +35,9 @@ class FlywayV84LegacySchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement st = connection.createStatement()) {
             // V83時点の公開形状はdispatch tableを持たない。現行V1は統合baselineでdispatch shapeを含むため、
             // V84適用前のlegacy stateとしてdispatch tableを除去してexact V83公開形状を再現する（推測backfillなし）。
+            // V1がG2 table（t_compliance_responsible_assignment等）からm_workplaceへのFKを持つため、
+            // 除去中はFK参照を一時無効化する。
+            st.execute("SET FOREIGN_KEY_CHECKS=0");
             st.execute("DROP TABLE IF EXISTS t_document_delivery");
             st.execute("DROP TABLE IF EXISTS t_compliance_finding");
             st.execute("DROP TABLE IF EXISTS t_ledger_work_snapshot");
@@ -52,7 +55,21 @@ class FlywayV84LegacySchemaSmokeTest {
             st.execute("DROP TABLE IF EXISTS t_contract_compliance_worker_snapshot");
             st.execute("DROP TABLE IF EXISTS t_contract_compliance_profile");
             st.execute("DROP TABLE IF EXISTS t_contract_compliance_snapshot");
+            // G2（V102系）tableもV83公開形状には存在しない。m_workplaceを参照するFKを持つため
+            // V84のCREATE TABLE IF NOT EXISTS m_workplace（(tenant_id,id) unique無し）が
+            // FK検証で1215にならないよう、先に除去する。
+            st.execute("DROP TABLE IF EXISTS t_compliance_operation_ledger");
+            st.execute("DROP TABLE IF EXISTS t_compliance_mapping_status_event");
+            st.execute("DROP TABLE IF EXISTS t_compliance_external_review_event");
+            st.execute("DROP TABLE IF EXISTS t_compliance_mapping_approval_event");
+            st.execute("DROP TABLE IF EXISTS t_compliance_responsible_assignment");
+            st.execute("DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_type");
+            st.execute("DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_group");
+            st.execute("DROP TABLE IF EXISTS m_compliance_external_reviewer_type");
+            st.execute("DROP TABLE IF EXISTS m_compliance_mapping_source");
+            st.execute("DROP TABLE IF EXISTS m_compliance_mapping_version");
             st.execute("DROP TABLE IF EXISTS m_workplace");
+            st.execute("SET FOREIGN_KEY_CHECKS=1");
             assertEquals(0, queryInt(st, "SELECT COUNT(*) FROM information_schema.tables "
                     + "WHERE table_schema=DATABASE() AND table_name='t_contract_compliance_snapshot'"),
                     "V83時点の公開形状にdispatch tableが存在しないこと");

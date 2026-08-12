@@ -163,7 +163,7 @@ class FlywayG2GateSchemaSmokeTest {
 
             statement.executeUpdate("INSERT INTO m_compliance_mapping_version "
                     + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
-                    + "VALUES ('default', 'G2-ACTIVE-DUP', 'v1', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'ACTIVE', 1)");
+                    + "VALUES ('default', 'G2-ACTIVE-DUP', 'v1-dup', REPEAT('a', 64), REPEAT('b', 64), '2026-08-01', 'ACTIVE', 1)");
             assertThrows(SQLException.class, () -> statement.executeUpdate(
                     "INSERT INTO m_compliance_mapping_version "
                             + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, status, active_slot) "
@@ -401,7 +401,7 @@ class FlywayG2GateSchemaSmokeTest {
                     "tenant_id='default' AND reviewer_type_id=" + otherReviewerTypeId,
                     "group→reviewer typeのcross-tenant参照は拒否するはず");
 
-            long sourceCrossMappingId = insertMapping(statement, "default", "G2-SOURCE-CROSS", "v1", "DRAFT");
+            long sourceCrossMappingId = insertMapping(statement, "default", "G2-SOURCE-CROSS", "v1-sc", "DRAFT");
             assertRejectedWithoutRowChange(statement,
                     "INSERT INTO m_compliance_mapping_source "
                             + "(tenant_id, mapping_id, source_code, source_url, source_version, confirmed_on, effective_from) "
