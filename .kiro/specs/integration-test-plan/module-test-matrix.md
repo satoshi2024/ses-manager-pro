@@ -40,6 +40,8 @@
 | MOD03-01 | `/engineer/list` | 営業/HR | 300人データ中、スキル `Java` かつ状態 `稼働中` で絞り込み検索 | `t_engineer` + `t_engineer_skill` SELECT | 255名中条件に合致する要員のみテーブル描画、件数カウント更新 |
 | MOD03-02 | `/engineer/detail/{id}` | 営業 | 担当営業変更カードで新営業 `s300.sales02` を「主担当設定」 | `t_engineer_sales` (primary_flag=1, assigned_at=NOW())<br>旧営業: `primary_flag`=0, `released_at`=NOW() | 旧営業が副担当へ降格、担当営業履歴テーブルに全期間が正確表示 |
 | MOD03-03 | `/engineer/detail/{id}` | HR | 職歴タブで過去の参加プロジェクト・役割・使用技術を入力追加 | `t_engineer_career` に INSERT (project_name, role, technologies) | 職歴タイムラインに新経歴カード追加、PDF プレビューに即時反映 |
+| MOD03-04 (Edge) | `/engineer/detail/{id}` | 営業 | `scope.sales-own-data-only=true` 環境下で他営業担当のエンジニアIDをURL直打ち | `DataScopeService.assertAllowedEngineer()` でブロック | 画面に「404 NotFound」または「アクセス権限がありません」エラー表示、データ漏洩なし |
+| MOD03-05 (Edge) | `/api/engineers/{id}/sales-reps` | 営業 | 2名の営業が同時に同一エンジニアの「主担当設定」APIを叩く (Concurrency) | `EngineerSalesServiceImpl` の `@Transactional` | 一方は成功し、もう一方は競合エラー(OptimisticLock/BusinessException)となり「既に更新されています」と表示 |
 
 ---
 
@@ -85,6 +87,7 @@
 | MOD07-01 | `/contract/list` | 営業 | 成約済みの提案から自動作成された契約ドラフトを開き単価改定（+5万円）保存 | `t_contract.unit_price` = 850000<br>`t_contract_price_history` に改定履歴 | 単価改定履歴モーダルに過去単価と新単価が並んで表示 |
 | MOD07-02 | `/compliance/dispatch-ledger` | 管理者 | **S10**: 派遣・請負コンプライアンスチェック実行、抵触日 3年ルール検証 | `t_dispatch_compliance` (limit_date) | 抵触日まで残り 30 日の要員に対し画面上に黄色警告バナー表示 |
 | MOD07-03 | `/contract-document/list` | 営業 | CloudSign 電子署名依頼ボタン押下 | `t_contract_document` (status='SENT', external_doc_id) | 文書ステータス「署名待ち」に変化、CloudSign モック連携完了 Toast |
+| MOD07-04 (Edge) | `/contract/list` | 営業 | **S10**: 抵触日を過ぎた要員に対して新規の派遣契約登録を試行 | `ComplianceMappingServiceImpl` によるバリデーション | 「抵触日(3年ルール)を超過しているため新規契約できません」エラー表示 |
 
 ---
 
@@ -97,6 +100,8 @@
 | MOD08-01 | `/my/timesheet` | 要員 | 画面カレンダーから当月全日の出退勤・休憩を入力し「提出」 | `t_work_record` (status='SUBMITTED', work_hours, overtime_hours) | 各カレンダーセルが「提出済」緑色になり、編集ロック |
 | MOD08-02 | `/attendance/overtime-alert` | マネージャー | **S11**: 月80時間超の過重労働アラート・36協定超過チェック画面照会 | `t_attendance_discrepancy` | 該当要員が赤色ハイライト一覧描画、面談推奨アラート表示 |
 | MOD08-03 | `/monthly-closing/list` | マネージャー | 対象月を選択し「月次締め確定」を押下 | `t_monthly_closing` (status='CLOSED', closed_at=NOW()) | 締め確定バナー表示、要員画面での同月勤怠変更が Swal で拒否される |
+| MOD08-04 (Edge) | `/api/my/timesheet` | 要員 | 締め済み月の勤怠データをAPI経由で強制的に更新試行 (cURL等) | `MonthlyClosingServiceImpl.assertOpenForUpdate()` でブロック | `BusinessException` がスローされ `{"code": 400, "message": "締め済み月のため更新できません"}` のJSON応答 |
+| MOD08-05 (Edge) | `/my/timesheet` | 要員 | **S11**: 深夜労働（22時以降）を複数日入力し保存 | `t_work_record` (night_shift_hours) | 「深夜労働時間が計上されました」のアラートと、割増賃金計算フラグが立つ |
 
 ---
 
@@ -153,6 +158,7 @@
 | テストID | 操作画面 | 操作ロール | UI操作内容・パラメータ | DBデータ反映先 (テーブル.カラム) | 期待される画面挙動・結果 |
 |---|---|---|---|---|---|
 | MOD13-01 | `/ai/feedback-learning` | 管理者 | 成約/失注データの適合度パラメータ調整、「再学習実行」押下 | `t_ai_feedback_log`, `t_ai_model_config` | AI プロンプト精度スコアと学習完了タイムスタンプが更新 |
+| MOD13-02 (Edge) | `/ai/feedback-learning` | マネージャー | **S17**: 推奨されたマッチングが「面談不合格」だったため、評価を「1 (最低)」としてフィードバック送信 | `t_ai_feedback_log` に低評価記録 | 次回のAIマッチング試算時、同系統の案件・スキルに対するスコアが有意に低下することを確認 |
 
 ---
 
