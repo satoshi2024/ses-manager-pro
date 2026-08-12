@@ -15,9 +15,13 @@ import java.util.List;
 /**
  * T066 M（外部専門家Review P2-1/P2-2対応）: 法定帳票の交付期限rule。
  *  - DEADLINE_DOCUMENT_DELIVERY: 就業条件明示書は派遣開始日の前日までに労働者へ交付（派遣法34条の2）。
- *    期限（=派遣開始前日）を過ぎても交付記録が無ければ発火し、dueDate=開始前日を通知基盤（T065 90/60/30日前）へ渡す。
  *  - DEADLINE_DISPATCH_NOTICE: 派遣先通知書は派遣開始後遅滞なく（施行規則20条）。
- *    猶予日数はm_system_config（compliance.delivery.notice-grace-days、既定3日）。
+ *    猶予日数はm_system_config（compliance.delivery.notice-grace-days、既定3日・運用基準）。
+ *  - 両ruleとも期限の90日前から未交付の間はfindingを存在させ、dueDateをT065の90/60/30日前
+ *    通知基盤へ渡す（P2-C: 期限超過後のみの発火では前倒し通知が成立しないため）。
+ *  - 設計意図（P3-R3）: 通知書の義務は派遣開始後に発生するが、findingは期限前からの計画的警告であり、
+ *    期限90日前からの発火により段階通知（90/60/30）が順に成立する。発火起点を開始日にすると
+ *    due=開始+猶予に対して90/60/30の全段階が同時発火するため、前倒しwindowを維持する。
  * 法的値の最終確認はGATE-T060-EXTERNAL/GATE-T066-FIELD-SEMANTICS（本実装はconfig既定値で駆動し、コードへ直書きしない）。
  */
 @Component

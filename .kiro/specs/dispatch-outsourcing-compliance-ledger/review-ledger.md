@@ -13,7 +13,7 @@
 
 **P1-2一次source調査の到達点**: SRC-INDEX（北海道労働局）に「待遇に関する情報提供の例（労使協定方式/均等均衡方式）」の公式様式が存在することを確認済み（2026-08-12 fetch）。MHLW本省の改正派遣法ページは404で直接取得不可。**「待遇差説明/待遇情報提供」の施行時期・MAPPING-2026-07側の要否は、改正省令・厚労省通知を一次sourceとする外部専門家/発注者による法的確定に委ねる**（実装AIは法的適否を自動確定しない）。
 
-**P1-1の判断材料（2026-08-12）**: FM-C-28提案書にmapping blob hashの事前計算値を追記。現行 `10a3fc78600a978aea8b17086d5ecce7b81c479b` → 案(a)（MAPPING-2026-07新version、manifest行＋§3.1表行追加）適用後 `e93d71b3a16ed278b42f1abedfae8b0324120ca0`。発注者が案(a)を承認した場合、証跡2の`mapping_hash`へ即時記録可能（`g2-gate-evidence-templates.md`と整合）。
+**P1-1の判断材料（2026-08-12）**: FM-C-28提案書にmapping blob hashの事前計算値を追記。現行 `10a3fc78600a978aea8b17086d5ecce7b81c479b` → 案(a)（MAPPING-2026-07新version、manifest行＋§3.1表行追加）適用後 `e93d71b3a16ed278b42f1abedfae8b0324120ca0`。発注者が案(a)を承認した場合、証跡2の`mapping_hash`へ即時記録可能（`g2-gate-evidence-templates.md`と整合）。**【P3-R2注記（2026-08-12）: 本行の事前計算hash `e93d71b3…` と「証跡2のmapping_hashへ即時記録可能」は、外部専門家第二次照合のP1-A（事前計算hash再現不能）・P1-B（mapping_hashは§6.2 canonical SHA-256でありblob hashではない）により無効。正しい手順は`mapping-amendment-proposal-fm-c-28.md`・`g2-gate-evidence-templates.md`の更新版を参照。誤操作防止のため本行は履歴として残す**。
 
 **T066 M受入チェックリスト**（`t066-m-acceptance-checklist.md`）を作成: 証跡4（PDF目視5項目・P1-1のSRC-C料金欄確認含む）、P2-3（worker recipientの方式決定）、P3-1（料金乖離の運用方針）、証跡5（T066-HISTORY可否＋P1-1版管理3択）、G2 gate（証跡1/2、資格保有者の実在Review、P1-2一次source）の検証手順を人間/外部プロセス向けに明文化。
 
@@ -49,6 +49,20 @@
 **検証**: ComplianceRuleEngineTest 12/0/0/0（@SpringBootTest併走でMP lambda cache登録済みJVM。単体JVMでは既知の順序依存のため全体実行で検証）。L4全量を再実行して確認（後述）。`git diff --check` exit 0。
 
 **次Review依頼条件**: 本対応の確認後、証跡取得順序（P1-A手順確立→P1-B様式→発注者判断(証跡5)→証跡1/2/4→資格保有者の実在Review→P1-2一次source）に従って再Reviewを依頼する。
+
+## 外部専門家 第三次照合（資格保有者視点・2026-08-12）への対応
+
+第三次照合（`external-review-round3-qualified-20260812.md`に保存。AI一次照合・実在Reviewの代替にならない）は、第二次指摘4件の対応を妥当とし、新規P0/P1/P2=ゼロ、**P3×3を対応推奨**とした。加えてP1-1/P1-2の法的見解を表明した。
+
+| issue | 指摘 | 対応 | 状態 |
+|---|---|---|---|
+| P3-R1 | DEADLINE_* findingは期限90日前から発火するのに、i18n文言が「期限を過ぎても交付記録がありません」と過去完了形で固定。期限前90日間は事実と異なる表示 | **i18n文言を「期限（…）までに交付記録がありません」へ中立化**（4バンドル: ja/en/ko/zh_CN） | **対応済み** |
+| P3-R2 | review-ledger.md:16の履歴節に、P1-Aで採用不可の事前計算hash `e93d71b3…`と「証跡2のmapping_hashへ即時記録可能」が残存。証跡2記録時の誤操作誘因 | **履歴行へ「P1-A/P1-Bにより無効」の注記を追加**（誤操作防止のため履歴として残す） | **対応済み** |
+| P3-R3 | DEADLINE_DISPATCH_NOTICEは開始約87日前から発火。義務は開始後に発生するため発火起点の変更も検討可（必須ではない） | **設計意図をjavadocへ明記**: 期限90日前からの発火は段階通知（90/60/30）を順に成立させるため。開始日発火にするとdue=開始+猶予に対して全段階が同時発火するため前倒しwindowを維持。挙動は変更しない | **対応済み（意図明記）** |
+
+**法的見解の反映（発注者判断（証跡5）の根拠資料として利用可）**: 派遣料金明示義務・待遇差説明を求める権利はともに令和6年10月1日施行分で創設済みとの見解。**(a)（MAPPING-2026-07 amendment版）推奨・P1-2の2026-07側組込み推奨** — FM-C-28提案書へ追記済み。
+
+**検証**: ComplianceRuleEngineTest 12/0/0/0（@SpringBootTest併走）。L4全量 1846/0/0/0・skip 41（Docker gate）を再確認。`git diff --check` exit 0。
 
 ## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）
 
