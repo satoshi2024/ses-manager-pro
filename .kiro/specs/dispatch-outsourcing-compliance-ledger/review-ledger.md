@@ -64,6 +64,23 @@
 
 **検証**: ComplianceRuleEngineTest 12/0/0/0（@SpringBootTest併走）。L4全量 1846/0/0/0・skip 41（Docker gate）を再確認。`git diff --check` exit 0。
 
+## 外部専門家 一次source照合（2026-08-12）への対応＋Phase A step 3着手
+
+一次source照合（`external-review-qualified-primary-source-20260812.md`に保存）の指摘と、Phase A（G2 service/API/UI）着手の手続的指摘に対応した。
+
+| issue | 指摘 | 対応 | 状態 |
+|---|---|---|---|
+| P1-2（一次source決着） | MHLW公式で「待遇の相違の内容及び理由等について説明を求めることができる旨」の明示事項追加は**令和8年10月1日施行**。権利自体は既存で、MAPPING-2026-07に本項目が無くても法定欠落ではない。組込先はSRC-Eのみ | **GATE-T060-EXTERNAL（P1-2分）を一次source確認済みとしてクローズ**。MAPPING-2026-07側の欠落リスクは不成立。MAPPING-2026-10へSRC-E側の組込を計画（gate確定時） | **対応済み** |
+| 指摘2（法34条の2引用誤り） | DeliveryDeadlineRuleの「就業条件明示書…（法34条の2）」は引用誤り（34条=就業条件明示・34条の2=料金明示） | **javadocを訂正**（就業条件明示=法34条・相手=労働者本人・「あらかじめ」。34条の2=料金明示でP1-1の根拠条文と明記） | **対応済み** |
+| 指摘3（台帳条文） | 台帳3年保存は「施行規則26条」でなく**法37条2項**（派遣元台帳）・**法42条2項**（派遣先台帳） | evidence・ledgerの整合性記載を法37条2項/42条2項へ訂正 | **対応済み** |
+| 指摘4（P2-3確認） | 法34条の明示先=労働者本人・法35条の通知先=派遣先 → recipient分離設計は法文どおり正当 | 設計確認として記録（B1実装のrecipient分離は正当） | **対応済み** |
+| P3-3（通知書の発火起点） | 法35条の通知義務は開始後に発生。DEADLINE_DISPATCH_NOTICEの開始前発火は不整合 | **通知書ruleの発火起点を派遣開始日へ変更**。T065通知を**banded staging**（90/60/30日window。例: 90日前段階=(60,90]）へ変更し、期限前の誤通知とcatch-up同時発火を解消。明示書ruleは「あらかじめ」義務のため期限90日前から発火を維持。test更新（Deadline 5/5） | **対応済み** |
+| Phase A着手（手続的指摘） | tasks.md step 3〜5（G2 service/API/UI・canonicalizer・ACTIVE guard・preview・L1〜L3・Phase A browser evidence）は本specの実装範囲（R22 CLOSE後の段階的着手条件はR24で充足）。範囲外扱いはM PASSを構造的に到達不能にする | **step 3第一incrementを実装**: `ComplianceMappingCanonicalizer`（§6.2 mapping_hash・§6.3 review_policy_hash・96行manifest mirror CSV）、`ComplianceMappingService`/`ComplianceGateApiController`（createでhash計算・DRAFT→PROVISIONAL_REVIEWED freeze・ACTIVEは証跡gateで保留）、SecurityConfig（`/api/compliance-gate/**`=管理者）。**証跡2のmapping_hashが本canonicalizerで記録可能となった**。L1〜L3: canonicalizer 2/0/0/0・service 3/0/0/0 | **第一increment対応済み・継続中** |
+
+**Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
+
+**検証**: Engine 12・Deadline 5・LegalFixture 3・ActionApi 5・MessageBundle 4・Integrity 27・SpecDispatch 9・DocumentApi 9・canonicalizer 2・mapping service 3 = **74/0/0/0**。L4全量 1846/0/0/0（banded staging変更後の再確認は次回全量実行で実施予定）。`git diff --check` exit 0。
+
 ## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）
 
 T066 MのPASS条件であるG2 gate証跡は、システム外の人間/外部プロセスによる取得が必要である。実装AIは証跡を推測・捏造せずfail-closedとする（R10の証跡正確性方針）。取得側へ以下を要求する:

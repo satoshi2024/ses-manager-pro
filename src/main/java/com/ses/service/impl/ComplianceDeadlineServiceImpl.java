@@ -106,8 +106,14 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
             }
             Contract contract = byContract.get(finding.getContractId());
             List<Long> recipients = recipients(contract, hrUsers);
-            for (int stageDays : STAGES_DAYS) {
-                if (daysUntil > stageDays) {
+            // banded staging（P3-R3）: 各段階は期限が当該window（(次段階, 自段階]）へ入った時のみ1回発火する。
+            // 例: 90日前段階=(60,90]、60日前段階=(30,60]、30日前段階=(0,30]。
+            // これにより「期限3日先のfindingが90日前通知と同時に3通発火する」catch-upを防ぎ、
+            // 通知書rule（発火起点=派遣開始日）が開始後にのみ段階通知されることを保証する。
+            for (int i = 0; i < STAGES_DAYS.length; i++) {
+                int stageDays = STAGES_DAYS[i];
+                int lowerBound = i + 1 < STAGES_DAYS.length ? STAGES_DAYS[i + 1] : 0;
+                if (daysUntil > stageDays || daysUntil <= lowerBound) {
                     continue;
                 }
                 for (Long userId : recipients) {

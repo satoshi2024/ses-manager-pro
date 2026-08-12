@@ -153,7 +153,9 @@ public class SecurityConfig {
                     "/audit-log/**",
                     "/api/audit-logs/**",
                     "/api/contracts/generate-renewals",
-                    "/api/autocomplete/users"
+                    "/api/autocomplete/users",
+                    // G2 gate（Phase A step 3）: mapping version等の管理は管理者のみ
+                    "/api/compliance-gate/**"
                 ).hasRole("管理者")
                 // 新雇用勤怠の管理画面/API。営業には客先工数のwork-record権限があっても見せない。
                 .requestMatchers("/work-record/attendance/**", "/api/work-records/attendance/**")

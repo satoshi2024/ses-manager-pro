@@ -95,7 +95,7 @@ class ComplianceDeadlineServiceTest {
     }
 
     @Test
-    void 期限60日と30日と10日は到達した各段階で1回ずつ通知される() {
+    void 期限60日と30日と10日は当該段階windowで1回ずつ通知される() {
         Long salesUserId = insertUser("deadline-sales2", "営業");
         Long hrUserId = insertUser("deadline-hr2", "HR");
         Long contractId = insertContract(salesUserId);
@@ -103,18 +103,20 @@ class ComplianceDeadlineServiceTest {
         long f30 = insertFinding(contractId, "D30", asOf.toLocalDate().plusDays(30));
         long f10 = insertFinding(contractId, "D10", asOf.toLocalDate().plusDays(10));
 
+        // banded staging（P3-R3）: 各段階は当該window（(次段階, 自段階]）でのみ1回発火する。
+        // f60（60日先）: 60日前段階のみ×2名=2 / f30（30日先）: 30日前段階のみ×2名=2 /
+        // f10（10日先）: 30日前段階のみ×2名=2
         int count = complianceDeadlineService.process(asOf);
-        // D60: 90+60 = 2段階×2名 = 4 / D30: 3段階×2名 = 6 / D10: 3段階×2名 = 6
-        assertEquals(16, count);
-        assertEquals(16, notificationCount());
-        assertEquals(4, notificationCountFor(f60));
-        assertEquals(6, notificationCountFor(f30));
-        assertEquals(6, notificationCountFor(f10));
+        assertEquals(6, count);
+        assertEquals(6, notificationCount());
+        assertEquals(2, notificationCountFor(f60));
+        assertEquals(2, notificationCountFor(f30));
+        assertEquals(2, notificationCountFor(f10));
 
         // 宛先が個人指定であること（組織一斉ではない）
-        assertEquals(8, jdbcTemplate.queryForObject(
+        assertEquals(3, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE recipient_user_id=" + salesUserId, Integer.class));
-        assertEquals(8, jdbcTemplate.queryForObject(
+        assertEquals(3, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE recipient_user_id=" + hrUserId, Integer.class));
     }
 
@@ -129,10 +131,10 @@ class ComplianceDeadlineServiceTest {
         int count = complianceDeadlineService.process(asOf);
         assertEquals("OPEN", jdbcTemplate.queryForObject(
                 "SELECT status FROM t_compliance_finding WHERE id=" + findingId, String.class));
-        assertEquals(4, count, "失効1件＋HR宛の3段階通知");
+        assertEquals(2, count, "失効1件＋HR宛の30日前段階通知1件");
 
-        // OPENに戻ったfindingは期限通知の対象になる（10日→3段階×宛先=担当営業なし・HR1名）
-        assertEquals(3, notificationCountFor(findingId), "HR個人宛に3段階分");
+        // OPENに戻ったfindingは期限通知の対象になる（10日先→bandedでは30日前段階のみ×HR1名）
+        assertEquals(1, notificationCountFor(findingId), "HR個人宛に30日前段階1件");
     }
 
     // ===== データ準備 =====
