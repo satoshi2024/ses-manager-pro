@@ -85,9 +85,11 @@
 - **P3-N2修正（status event pre-update expected_version統一一意化）**: `recordStatusEvent` に `expectedVersion` パラメータを追加し、更新前の事前バージョン（`version.getVersion()`）を全呼び出し箇所で明示指定・記録。
 - **P3-N3修正（future_slotのmapping_codeスコープ絞り込み）**: `activate()` の `future_slot=1` 存在確認クエリを `(tenant_id, mapping_code, future_slot)` に限定し、DB一意制約 `uk_g2_mapping_future_slot` と完全に整合。
 - **NOTE-1記載（idempotency replay）**: `approve()` での決定的一意キーによる `DuplicateKey -> 409 Conflict` 応答は、後続incrementの operation ledger 統合（R6.5 idempotency replay 200化）待ちであることを確定・明記。
-- **P3-R1修正（昇格時の有効期間逆転防止・旧ACTIVE終話処理）**: `promoteFutureToActive()` 内で旧ACTIVE版と新ACTIVE版の `effective_from` 順序逆転を 400（`invalidTransition`）で検証遮断し、昇格時に旧ACTIVE版の `effective_to` を新ACTIVE版の `effective_from` に自動クローズ（半開区間境界の一意保全）。
+- **P1-N1修正（旧ACTIVEのeffective_to不変・決定性/mapping_hash保全）**: decision delta §2 L98に準拠し、`promoteFutureToActive()` での `oldActive.effective_to` 書き換えを撤廃。旧ACTIVEは `status=SUPERSEDED` / `activeSlot=null` のみ変更し、`effective_to` および `mapping_hash` の不変性を保証。
+- **P2-N2修正（activate/promoteのasOf有効期間ガード）**: `activate()` および `promoteFutureToActive()` に asOf 日付チェックを追加（`effective_from <= asOf <= effective_to` 違反を 400 `invalidTransition` で拒否）。
+- **P2-N3修正（deployment timezone gate & fail-closed）**: `resolveDeploymentZoneId()` ヘルパーを実装。`spring.jackson.time-zone` が未設定・不正な場合は fallback せず 409（`compliance.gate.timezoneUnavailable`）で遮断。
 - **NOTE-R1/R2記載**: 承認REVOKE判定の最新APPROVE限定化およびfuture予約のoperation ledgerイベント記録は、今後再承認フロー/operation ledger実装に合わせて拡張する方針を追記。
-- i18n: `compliance.gate.policyInvalid` を全4バンドル（ja/en/zh_CN/ko）に追記。
+- i18n: `compliance.gate.policyInvalid`, `compliance.gate.timezoneUnavailable` を全4バンドル（ja/en/zh_CN/ko）に追記。
 - 検証: focused tests **22/0/0/0 PASS**（GateAdmin 8・MappingService 7・Canonicalizer 3・MessageBundle 4）。`git diff --check` exit 0。
 
 **Phase A step 3 第四increment（2026-08-12）: 資格保有者視点レビュー指摘対応（P1×2・P2×2・P3×4全件修正）**

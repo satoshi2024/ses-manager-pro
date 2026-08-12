@@ -126,6 +126,24 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         return version;
     }
 
+    @org.springframework.beans.factory.annotation.Value("${spring.jackson.time-zone:Asia/Tokyo}")
+    private String deploymentTimezone;
+
+    private java.time.ZoneId resolveDeploymentZoneId() {
+        if (!StringUtils.hasText(deploymentTimezone)) {
+            throw BusinessException.of(409, "compliance.gate.timezoneUnavailable");
+        }
+        try {
+            return java.time.ZoneId.of(deploymentTimezone.trim());
+        } catch (Exception e) {
+            throw BusinessException.of(409, "compliance.gate.timezoneUnavailable");
+        }
+    }
+
+    private java.time.LocalDate resolveAsOf() {
+        return java.time.LocalDate.now(resolveDeploymentZoneId());
+    }
+
     /**
      * ACTIVE guard（G2-ACTIVE-01・証跡gate R8.1）:
      *  - PROVISIONAL_REVIEWEDであること
@@ -134,6 +152,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
      *  - そのapproval event以降にREVOKE/REJECTの取消イベントが存在しないこと
      *  - mapping_hash / review_policy_hash をDBから再解決・再計算し一致を確認すること
      *  - 承認に使用されたassignmentがopen（active_slot=1）かつworkplaceId一致であること
+     *  - asOfがeffective period内（effective_from <= asOf <= effective_to）であること（P2-N2）
      *  - tenant/mappingCode単位でactive_slot=1のACTIVE versionが無ければactive_slot=1（現在版）、あればfuture_slot=1（2件目future候補は禁止）
      */
     private void activate(ComplianceMappingVersion version, Long approvalEventId) {
@@ -141,6 +160,14 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
         assertPolicyNotEmpty(version);
+        java.time.LocalDate asOf = resolveAsOf();
+        if (version.getEffectiveFrom() != null && asOf.isBefore(version.getEffectiveFrom())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+        if (version.getEffectiveTo() != null && asOf.isAfter(version.getEffectiveTo())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+
         if (approvalEventId == null) {
             throw BusinessException.of(400, "compliance.gate.approvalRequired");
         }
@@ -228,7 +255,11 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (!Integer.valueOf(1).equals(version.getFutureSlot())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
-        if (version.getEffectiveFrom() != null && java.time.LocalDate.now().isBefore(version.getEffectiveFrom())) {
+        java.time.LocalDate asOf = resolveAsOf();
+        if (version.getEffectiveFrom() != null && asOf.isBefore(version.getEffectiveFrom())) {
+            throw BusinessException.of(400, "compliance.gate.invalidTransition");
+        }
+        if (version.getEffectiveTo() != null && asOf.isAfter(version.getEffectiveTo())) {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
 
@@ -256,9 +287,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             oldActive.setStatus(STATUS_SUPERSEDED);
             oldActive.setActiveSlot(null);
             oldActive.setFutureSlot(null);
-            if (version.getEffectiveFrom() != null && (oldActive.getEffectiveTo() == null || oldActive.getEffectiveTo().isAfter(version.getEffectiveFrom()))) {
-                oldActive.setEffectiveTo(version.getEffectiveFrom());
-            }
+            // P1-N1: 旧ACTIVEのeffective_toやmapping_hashは一切書き換えない（決定性・hash整合性の維持）
             oldActive.setUpdatedBy(com.ses.common.util.SecurityUtils.currentUserId());
             int rows = versionMapper.updateById(oldActive);
             if (rows == 0) {
