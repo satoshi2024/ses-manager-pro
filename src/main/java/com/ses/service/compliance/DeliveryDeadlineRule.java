@@ -54,21 +54,23 @@ public class DeliveryDeadlineRule extends AbstractComplianceRule {
         List<ComplianceFinding> findings = new ArrayList<>();
 
         // P2-1: 就業条件明示書（労働者本人へ交付義務）は派遣開始日の前日まで
+        // 期限の90日前から未交付の間はfindingを存在させる（T065の90/60/30日前通知基盤へdueDateを渡す。
+        // 期限超過後も未交付の間は継続発火し、交付記録があればstoreがRESOLVEDへ同期する）。
         boolean statementDelivered = context.deliveries().stream().anyMatch(d ->
                 MissingDocumentDeliveryRule.DOC_TYPE_EMPLOYMENT_CONDITIONS.equals(d.getDocumentType())
-                        && !"FAILED".equals(d.getDeliveryStatus()));
+                        && "DELIVERED".equals(d.getDeliveryStatus()));
         LocalDate statementDue = profile.getDispatchPeriodStart().minusDays(1);
-        if (!statementDelivered && today.isAfter(statementDue)) {
+        if (!statementDelivered && !today.isBefore(statementDue.minusDays(90))) {
             findings.add(finding(context, CODE_DOCUMENT, contract.getId(), "DOC:EMPLOYMENT_CONDITIONS_STATEMENT", statementDue));
         }
 
-        // P2-2: 派遣先通知書は派遣開始後遅滞なく（猶予日数はconfig）
+        // P2-2: 派遣先通知書は派遣開始後遅滞なく（猶予日数はconfig・運用基準）
         boolean noticeDelivered = context.deliveries().stream().anyMatch(d ->
                 MissingDocumentDeliveryRule.DOC_TYPE_DISPATCH_NOTICE.equals(d.getDocumentType())
-                        && !"FAILED".equals(d.getDeliveryStatus()));
+                        && "DELIVERED".equals(d.getDeliveryStatus()));
         int graceDays = configInt(CONFIG_NOTICE_GRACE_DAYS, 3);
         LocalDate noticeDue = profile.getDispatchPeriodStart().plusDays(graceDays);
-        if (!noticeDelivered && today.isAfter(noticeDue)) {
+        if (!noticeDelivered && !today.isBefore(noticeDue.minusDays(90))) {
             findings.add(finding(context, CODE_NOTICE, contract.getId(), "DOC:DISPATCH_NOTICE", noticeDue));
         }
         return findings;

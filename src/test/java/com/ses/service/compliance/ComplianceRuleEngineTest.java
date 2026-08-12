@@ -268,4 +268,33 @@ class ComplianceRuleEngineTest {
         assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
                 .doesNotContain("DEADLINE_DOCUMENT_DELIVERY", "DEADLINE_DISPATCH_NOTICE");
     }
+
+    @Test
+    void 交付期限の90日前からfindingが存在し前倒し通知基盤へdueDateが渡る() {
+        // 派遣開始日を未来（today+89日）に設定: 明示書期限=today+88日=90日前window内 → 発火
+        ContractComplianceProfile p = profile();
+        p.setDispatchPeriodStart(LocalDate.now().plusDays(89));
+        p.setDispatchPeriodEnd(LocalDate.now().plusDays(500));
+        lenient().when(profileMapper.selectOne(any())).thenReturn(p);
+        lenient().when(systemConfigService.getInt("compliance.delivery.notice-grace-days", 3)).thenReturn(3);
+        Contract contract = contract("派遣", LocalDate.now(), LocalDate.now().plusDays(500));
+        List<ComplianceFinding> findings = engine.evaluate(contract);
+        // dueDateが通知基盤（T065 90/60/30日前）へ渡ること
+        ComplianceFinding doc = findings.stream()
+                .filter(f -> "DEADLINE_DOCUMENT_DELIVERY".equals(f.getCode())).findFirst().orElse(null);
+        assertThat(doc).isNotNull();
+        assertThat(doc.getDueDate()).isEqualTo(LocalDate.now().plusDays(88));
+    }
+
+    @Test
+    void 交付期限が90日より先ならまだ発火しない() {
+        // 派遣開始日 = today+120日: 明示書期限=today+119日 > 90日前window外 → 発火しない
+        ContractComplianceProfile p = profile();
+        p.setDispatchPeriodStart(LocalDate.now().plusDays(120));
+        p.setDispatchPeriodEnd(LocalDate.now().plusDays(500));
+        lenient().when(profileMapper.selectOne(any())).thenReturn(p);
+        Contract contract = contract("派遣", LocalDate.now(), LocalDate.now().plusDays(500));
+        assertThat(engine.evaluate(contract)).extracting(ComplianceFinding::getCode)
+                .doesNotContain("DEADLINE_DOCUMENT_DELIVERY", "DEADLINE_DISPATCH_NOTICE");
+    }
 }

@@ -35,6 +35,21 @@
 
 **M PASS gate状態（更新）**: 証跡3は条件付き受領。**P1-1（発注者版管理判断）・P1-2（一次source確認）・証跡1・2・4・5が未達のためM PASS条件未達を維持**。production authorizationなし、S12 NOT READY維持。
 
+## 外部専門家 第二次照合（2026-08-12）への対応
+
+外部専門家の再Review（条件付き確認・維持）の新規指摘P1-A/P1-B/P2-C/P3に対応した。
+
+| issue | 指摘 | 対応 | 状態 |
+|---|---|---|---|
+| P1-A | 事前計算hash `e93d71b3…` は提案記載どおりでは再現不能（CRLF保存で `db87acb4…`、5バリアント不一致）。事前計算値は証跡2に採用不可 | **提案書から事前計算hashを削除**し、正しい手順を明記: 発注者判断(a)→amendment適用・commit→**commit後の実blobからhash再計算**→証跡2へ記録。現行hash `10a3fc78…` のround-trip再現は維持 | **対応済み** |
+| P1-B | 証跡2の`mapping_hash`定義がspecと矛盾（§6.2正本=canonical payloadのSHA-256（64 hex）。blob hash（40 hex）は照合不能） | **証跡2様式を修正**: `mapping_hash`=§6.2 canonical payloadのSHA-256（64 hex）、**canonicalizer（G2 service）実装後にDB rowから算出・現状は記録不可（fail-closed）**。blob hashは`evidence_document_hash`等のprovenance欄へ別記録 | **対応済み** |
+| P2-C | DEADLINE_* ruleは期限超過後のみ発火し、90/60/30日前通知は構造的に発火しない（`daysUntil<=0` skipと整合しない） | **DeliveryDeadlineRuleを期限の90日前から発火**するよう変更（`!today.isBefore(due.minusDays(90))`）。期限前からfindingが存在しdueDateをT065基盤へ渡す（fingerprint同一でupsert重複なし）。境界test追加（90日前window内=発火・90日より先=未発火・dueDate値のassert） | **対応済み** |
+| P3 | CREATING状態のdeliveryを交付済み扱い（`!"FAILED"`）・通知書猶予3日のUI文言が法定期限風 | **交付判定を`"DELIVERED"`のみ**へ変更（DeliveryDeadlineRule・MissingDocumentDeliveryRuleの両方）。i18n文言へ「遅滞なく・運用基準」を追記（4バンドル） | **対応済み** |
+
+**検証**: ComplianceRuleEngineTest 12/0/0/0（@SpringBootTest併走でMP lambda cache登録済みJVM。単体JVMでは既知の順序依存のため全体実行で検証）。L4全量を再実行して確認（後述）。`git diff --check` exit 0。
+
+**次Review依頼条件**: 本対応の確認後、証跡取得順序（P1-A手順確立→P1-B様式→発注者判断(証跡5)→証跡1/2/4→資格保有者の実在Review→P1-2一次source）に従って再Reviewを依頼する。
+
 ## M PASS gate証跡の取得要求（人間/外部プロセスの関与が必要・実装AIは証跡を捏造しない）
 
 T066 MのPASS条件であるG2 gate証跡は、システム外の人間/外部プロセスによる取得が必要である。実装AIは証跡を推測・捏造せずfail-closedとする（R10の証跡正確性方針）。取得側へ以下を要求する:

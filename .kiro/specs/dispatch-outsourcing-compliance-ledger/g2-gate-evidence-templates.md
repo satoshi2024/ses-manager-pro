@@ -44,8 +44,8 @@ VALUES ('default', 1, 42, 'COMPLIANCE_RESPONSIBLE', '2026-08-12 09:00:00.000000'
 | tenant_id | `default` | — |
 | mapping_id | 対象mapping versionのid（m_compliance_mapping_version） | 実actor |
 | mapping_version | `MAPPING-2026-07`（FM-C-28版管理判断後の新version表記に従う） | 実actor |
-| mapping_hash | 承認時点で固定したmapping blob hash（64 hex。P1-1判断後に再固定） | 実actor |
-| review_policy_hash | dynamic review policyのhash | 実actor |
+| mapping_hash | **§6.2のcanonical mapping/source payloadのSHA-256（64 hex）**。canonicalizer（G2 service）実装後にDB rowから算出する。**現状はcanonicalizer未実装のため記録不可（fail-closed）** | G2 service実装後 |
+| review_policy_hash | 同様に§6.3 canonical payloadのSHA-256（64 hex）。canonicalizer実装後に記録 | G2 service実装後 |
 | assignment_id | 証跡1で記録したassignmentのid | 実actor |
 | workplace_id_snapshot | 対象事業所のid | 実actor |
 | actor_id | 承認者のsys_user.id | 実actor |
@@ -56,19 +56,19 @@ VALUES ('default', 1, 42, 'COMPLIANCE_RESPONSIBLE', '2026-08-12 09:00:00.000000'
 | supersedes_event_id | 取消/差戻し時の対象event id | 実actor |
 | occurred_at | 承認日時（DATETIME(6)） | 実actor |
 | reason | 承認理由（法的根拠・確認内容） | 実actor |
-| evidence_document_id / version / hash | 根拠資料（外部Review結果・省令/通知等）のdocument archive参照 | 実actor |
+| evidence_document_id / version / hash | 根拠資料（外部Review結果・省令/通知等）のdocument archive参照。**Markdown blob hash（40 hex）は`evidence_document_hash`等のprovenance欄へ記録し、`mapping_hash`と混同しない** | 実actor |
 | operation_id | UUID（操作識別子） | — |
 | correlation_id | UUID（追跡ID） | — |
 | idempotency_key | 一意キー（`MAPPING-2026-07:APPROVE:{mapping_hash}:{actor_id}` 等） | — |
 
-### 例
+### 例（canonicalizer実装後。現状はmapping_hash/review_policy_hash欄を記録しない）
 
 ```sql
 INSERT INTO t_compliance_mapping_approval_event
   (tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id,
    workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot,
    action, event_chain_id, occurred_at, reason, operation_id, correlation_id, idempotency_key)
-VALUES ('default', 1, 'MAPPING-2026-07', '<64hex>', '<64hex>', 1,
+VALUES ('default', 1, 'MAPPING-2026-07', '<64hex-SHA256>', '<64hex-SHA256>', 1,
         1, 42, '山田 太郎', 'HR',
         'APPROVE', '<uuid>', '2026-08-12 10:00:00.000000', '外部専門家Review（資格保有者）の確認済み',
         '<uuid>', '<uuid>', 'MAPPING-2026-07:APPROVE:<64hex>:42');

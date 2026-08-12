@@ -23,14 +23,14 @@
 ## 影響（版管理判断の論点）
 
 1. **manifest行数**: 96行 → 97行（FM-C-28追加）。mapping hashが変動する。
-   - **現行mapping blob hash（field-mapping.mdのgit blob hash、2026-08-12時点）**: `10a3fc78600a978aea8b17086d5ecce7b81c479b`
-   - **案(a)適用後のmapping blob hash（manifest行＋§3.1表行の両方を追加した場合の事前計算値）**: `e93d71b3a16ed278b42f1abedfae8b0324120ca0`
-   - 案(a)を承認する場合、証跡2（実actor承認event）の`mapping_hash`へ`e93d71b3...`を記録できる（`g2-gate-evidence-templates.md`参照）。
+   - **現行mapping blob hash（field-mapping.mdのgit blob hash、2026-08-12時点・round-trip再現確認済み）**: `10a3fc78600a978aea8b17086d5ecce7b81c479b`
+   - **注意（外部専門家P1-A）**: 事前計算のamendment後hashは、行末・配置バリアントで変動し再現不能のため採用しない。正しい手順は「発注者判断(a) → amendment適用・commit → **commit後の実blobから`git hash-object`で再計算** → 証跡2へ記録」である。
+   - **注意（外部専門家P1-B）**: `mapping_hash`（V102 `CHAR(64)`）の正本は§6.2のcanonical mapping/source payloadのSHA-256であり、Markdown blob hash（40 hex）ではない。blob hashはprovenanceとして別欄に記録し、`mapping_hash`欄はcanonicalizer実装後にDB rowから算出する（`g2-gate-evidence-templates.md`参照）。
 2. **lifecycle規則（§2.1）**: PROVISIONAL_REVIEWED以降は編集せず新versionを作る、が正本。
    選択肢:
    - (a) **MAPPING-2026-07の新version（amendment）**: 現行PROVISIONAL_REVIEWEDのmappingを
      `MAPPING-2026-07-r2` として新version化し、FM-C-28を追加。旧versionはSUPERSEDED。
-     新versionのhashは上記 `e93d71b3...`（事前計算済み）。
+     新versionのhashはcommit後の実blob/DB rowから再計算する。
    - (b) **MAPPING-2026-10へ組み込み**: 2026-10-01施行版にFM-C-28を追加し、MAPPING-2026-07期間の
      個別契約書には反映しない（外部専門家の指摘が「義務化済み」である場合、2026-07期間の欠落が残るため非推奨）。
    - (c) **判断保留**: P1-1の一次source（省令・厚労省通知）確定を待ってから版管理を決定。

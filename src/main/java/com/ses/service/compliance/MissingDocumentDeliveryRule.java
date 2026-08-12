@@ -45,7 +45,7 @@ public class MissingDocumentDeliveryRule extends AbstractComplianceRule {
         for (String documentType : List.of(DOC_TYPE_EMPLOYMENT_CONDITIONS, DOC_TYPE_DISPATCH_NOTICE)) {
             boolean delivered = context.deliveries().stream()
                     .anyMatch(d -> documentType.equals(d.getDocumentType())
-                            && !"FAILED".equals(d.getDeliveryStatus()));
+                            && "DELIVERED".equals(d.getDeliveryStatus()));
             if (!delivered) {
                 String label = DOC_TYPE_EMPLOYMENT_CONDITIONS.equals(documentType)
                         ? "就業条件明示書" : "派遣先通知書";
