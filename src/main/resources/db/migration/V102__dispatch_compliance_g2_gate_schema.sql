@@ -46,8 +46,8 @@ BEGIN
   SET v_expected = 1 + LENGTH(p_columns) - LENGTH(REPLACE(p_columns, ',', ''));
   SELECT COUNT(DISTINCT COLUMN_NAME) INTO v_actual
     FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table
-      AND FIND_IN_SET(COLUMN_NAME, p_columns) > 0;
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table
+      AND FIND_IN_SET(BINARY COLUMN_NAME, BINARY p_columns) > 0;
   IF v_actual <> v_expected THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_SHAPE_MISMATCH forward repair required';
   END IF;
@@ -61,7 +61,7 @@ DROP PROCEDURE IF EXISTS __ses_g2_create_index$$
 CREATE PROCEDURE __ses_g2_create_index(IN p_table VARCHAR(64), IN p_index VARCHAR(64), IN p_sql TEXT)
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.statistics
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index) THEN
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table AND INDEX_NAME = BINARY p_index) THEN
     SET @g2_index_sql = p_sql;
     PREPARE g2_index_stmt FROM @g2_index_sql;
     EXECUTE g2_index_stmt;
@@ -388,7 +388,7 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   request_hash             CHAR(64) NOT NULL,
   state                    VARCHAR(20) NOT NULL,
   retryable_flag           TINYINT NOT NULL DEFAULT 0,
-  attempt_count            INT NOT NULL DEFAULT 1,
+  attempt_count            INT NOT NULL DEFAULT 0,
   started_at               DATETIME(6) NOT NULL,
   lease_until              DATETIME(6),
   finished_at              DATETIME(6),
@@ -446,9 +446,9 @@ BEGIN
          COALESCE(GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ','), '')
     INTO v_actual_count, v_actual_non_unique, v_actual_columns
     FROM information_schema.STATISTICS
-   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND INDEX_NAME = p_index;
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table AND INDEX_NAME = BINARY p_index;
   IF v_actual_count <> v_expected_count OR v_actual_non_unique <> p_non_unique
-     OR v_actual_columns <> p_columns THEN
+     OR v_actual_columns <> BINARY p_columns THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_INDEX_SHAPE_MISMATCH forward repair required';
   END IF;
 END$$
@@ -534,8 +534,8 @@ CREATE PROCEDURE __ses_g2_assert_constraint(IN p_table VARCHAR(64), IN p_constra
                                             IN p_type VARCHAR(30))
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
-                  WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table
-                    AND CONSTRAINT_NAME = p_constraint AND CONSTRAINT_TYPE = p_type) THEN
+                  WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table
+                    AND CONSTRAINT_NAME = BINARY p_constraint AND CONSTRAINT_TYPE = BINARY p_type) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_CONSTRAINT_SHAPE_MISMATCH forward repair required';
   END IF;
 END$$
@@ -546,8 +546,8 @@ DROP PROCEDURE IF EXISTS __ses_g2_repair_check$$
 CREATE PROCEDURE __ses_g2_repair_check(IN p_table VARCHAR(64), IN p_constraint VARCHAR(64), IN p_sql TEXT)
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
-              WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table
-                AND CONSTRAINT_NAME = p_constraint AND CONSTRAINT_TYPE = 'CHECK') THEN
+              WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table
+                AND CONSTRAINT_NAME = BINARY p_constraint AND CONSTRAINT_TYPE = 'CHECK') THEN
     SET @g2_drop_check_sql = CONCAT('ALTER TABLE ', p_table, ' DROP CHECK ', p_constraint);
     PREPARE g2_drop_check_stmt FROM @g2_drop_check_sql;
     EXECUTE g2_drop_check_stmt;
@@ -648,8 +648,8 @@ BEGIN
   DECLARE v_actual INT;
   SELECT COUNT(*) INTO v_actual
     FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
-      AND LOWER(DATA_TYPE) = LOWER(p_type)
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table AND COLUMN_NAME = BINARY p_column
+      AND LOWER(DATA_TYPE) = BINARY LOWER(p_type)
       AND COALESCE(DATETIME_PRECISION, 0) = p_precision;
   IF v_actual <> 1 THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_COLUMN_SHAPE_MISMATCH forward repair required';
@@ -671,12 +671,12 @@ BEGIN
   DECLARE v_actual INT;
   SELECT COUNT(*) INTO v_actual
     FROM information_schema.COLUMNS
-   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
-     AND LOWER(DATA_TYPE) = LOWER(p_type)
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table AND COLUMN_NAME = BINARY p_column
+     AND LOWER(DATA_TYPE) = BINARY LOWER(p_type)
      AND (p_char_length IS NULL OR CHARACTER_MAXIMUM_LENGTH = p_char_length)
      AND (p_datetime_precision IS NULL OR COALESCE(DATETIME_PRECISION, 0) = p_datetime_precision)
-     AND (p_nullable IS NULL OR IS_NULLABLE = p_nullable)
-     AND (p_default IS NULL OR COALESCE(CAST(COLUMN_DEFAULT AS CHAR), '<NULL>') = p_default);
+     AND (p_nullable IS NULL OR IS_NULLABLE = BINARY p_nullable)
+     AND (p_default IS NULL OR COALESCE(CAST(COLUMN_DEFAULT AS CHAR), '<NULL>') = BINARY p_default);
   IF v_actual <> 1 THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2_V102_COLUMN_CONTRACT_MISMATCH forward repair required';
   END IF;
@@ -709,7 +709,7 @@ CREATE PROCEDURE __ses_g2_repair_fk(IN p_table VARCHAR(64), IN p_constraint VARC
 BEGIN
   DECLARE v_cols INT DEFAULT 0;
   SELECT COUNT(*) INTO v_cols FROM information_schema.KEY_COLUMN_USAGE
-    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND CONSTRAINT_NAME = p_constraint;
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = BINARY p_table AND CONSTRAINT_NAME = BINARY p_constraint;
   IF v_cols = 1 THEN
     SET @g2_drop_fk_sql = CONCAT('ALTER TABLE ', p_table, ' DROP FOREIGN KEY ', p_constraint);
     PREPARE g2_drop_fk_stmt FROM @g2_drop_fk_sql;
@@ -854,7 +854,7 @@ CREATE PROCEDURE __ses_g2_repair_delivery_fk(IN p_constraint VARCHAR(64), IN p_s
 BEGIN
   DECLARE v_cols INT DEFAULT 0;
   SELECT COUNT(*) INTO v_cols FROM information_schema.KEY_COLUMN_USAGE
-    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 't_document_delivery' AND CONSTRAINT_NAME = p_constraint;
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 't_document_delivery' AND CONSTRAINT_NAME = BINARY p_constraint;
   IF v_cols = 1 THEN
     SET @g2_delivery_drop_fk_sql = CONCAT('ALTER TABLE t_document_delivery DROP FOREIGN KEY ', p_constraint);
     PREPARE g2_delivery_drop_fk_stmt FROM @g2_delivery_drop_fk_sql;

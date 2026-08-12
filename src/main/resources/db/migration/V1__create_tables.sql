@@ -2194,7 +2194,7 @@ CREATE INDEX idx_g2_status_correlation ON t_compliance_mapping_status_event (ten
 CREATE TABLE t_compliance_operation_ledger (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', operation_id VARCHAR(36) NOT NULL,
   operation_type VARCHAR(60) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, request_hash CHAR(64) NOT NULL, state VARCHAR(20) NOT NULL,
-  retryable_flag TINYINT NOT NULL DEFAULT 0, attempt_count INT NOT NULL DEFAULT 1, started_at DATETIME(6) NOT NULL, lease_until DATETIME(6), finished_at DATETIME(6),
+  retryable_flag TINYINT NOT NULL DEFAULT 0, attempt_count INT NOT NULL DEFAULT 0, started_at DATETIME(6) NOT NULL, lease_until DATETIME(6), finished_at DATETIME(6),
   result_reference_type VARCHAR(80), result_reference_id BIGINT, result_reference_version VARCHAR(100), result_summary_canonical TEXT, result_http_status INT,
   result_hash CHAR(64), failure_code VARCHAR(100), correlation_id VARCHAR(100) NOT NULL, expires_at DATETIME(6), version INT NOT NULL DEFAULT 0,
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), deleted_flag TINYINT NOT NULL DEFAULT 0,

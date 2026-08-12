@@ -851,7 +851,7 @@ CREATE INDEX IF NOT EXISTS idx_g2_status_correlation ON t_compliance_mapping_sta
 CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default', operation_id VARCHAR(36) NOT NULL,
   operation_type VARCHAR(60) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, request_hash CHAR(64) NOT NULL, state VARCHAR(20) NOT NULL,
-  retryable_flag TINYINT NOT NULL DEFAULT 0, attempt_count INT NOT NULL DEFAULT 1, started_at TIMESTAMP(6) NOT NULL, lease_until TIMESTAMP(6), finished_at TIMESTAMP(6),
+  retryable_flag TINYINT NOT NULL DEFAULT 0, attempt_count INT NOT NULL DEFAULT 0, started_at TIMESTAMP(6) NOT NULL, lease_until TIMESTAMP(6), finished_at TIMESTAMP(6),
   result_reference_type VARCHAR(80), result_reference_id BIGINT, result_reference_version VARCHAR(100), result_summary_canonical CLOB, result_http_status INT,
   result_hash CHAR(64), failure_code VARCHAR(100), correlation_id VARCHAR(100) NOT NULL, expires_at TIMESTAMP(6), version INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,

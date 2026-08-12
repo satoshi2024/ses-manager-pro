@@ -45,6 +45,8 @@ class FlywayG2ForwardRepairSmokeTest {
         assertTrue(messageChain(failure).contains("G2_V102_INDEX_SHAPE_MISMATCH"));
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // Flywayは失敗したmigrationもsuccess=0の行として履歴に残すため、
+            // 「成功として記録されていないこと」を検証する（success=1が0件）。
             assertEquals(0, queryInt(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='102' AND success=1"));
             // 誤定義indexは2列（tenant_id,effective_from）構成のためinformation_schema.statisticsは
