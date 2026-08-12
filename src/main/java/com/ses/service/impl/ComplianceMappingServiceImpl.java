@@ -233,11 +233,8 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         }
 
         // P3-N1: 昇格前に既存承認のREVOKE再検証
-        List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectList(
-                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getTenantId, "default")
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, version.getId())
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "APPROVE"));
+        List<com.ses.entity.ComplianceMappingApprovalEvent> approvals =
+                approvalEventMapper.selectByMapping("default", version.getId(), "APPROVE");
         for (com.ses.entity.ComplianceMappingApprovalEvent app : approvals) {
             if (approvalEventMapper.countSubsequentRevokes("default", version.getId(), app.getId()) > 0) {
                 throw BusinessException.of(400, "compliance.gate.approvalRevoked");
