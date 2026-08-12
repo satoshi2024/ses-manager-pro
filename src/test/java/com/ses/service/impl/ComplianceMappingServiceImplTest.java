@@ -5,6 +5,7 @@ import com.ses.entity.ComplianceMappingApprovalEvent;
 import com.ses.entity.ComplianceMappingVersion;
 import com.ses.mapper.ComplianceMappingVersionMapper;
 import com.ses.service.ComplianceApprovalService;
+import com.ses.service.ComplianceGateAdminService;
 import com.ses.service.ComplianceMappingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
