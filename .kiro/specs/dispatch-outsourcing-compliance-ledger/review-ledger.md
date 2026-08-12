@@ -10,8 +10,8 @@
 
 | issue | 指摘 | 対応（実装AI） | 状態 |
 |---|---|---|---|
-| P1-1 | SRC-C manifest（FM-C-01〜27）に派遣料金行が無い（令和6年10月施行で個別契約書への料金明示義務化済み）。FM-C-28（DISPATCH_FEE_TYPED）追加を検討 | mappingはPROVISIONAL_REVIEWED凍結中のため直接編集せず。**発注者の版管理判断（証跡5相当）を要求**。証跡4（PDF目視）でSRC-C記載例の料金欄を確認 | **発注者判断待ち** |
-| P1-2 | 「待遇差説明を求める権利の通知」は令和6年10月1日施行で創設済みの可能性が高く、MAPPING-2026-07期間の明示書から法定周知事項が欠落するリスク | 一次source（改正省令・厚労省通知）での確定を**外部専門家/発注者へ要求**。MAPPING-2026-07側の要否判断待ち | **一次source確認待ち** |
+| P1-1 | SRC-C manifest（FM-C-01〜27）に派遣料金行が無い（令和6年10月施行で個別契約書への料金明示義務化済み）。FM-C-28（DISPATCH_FEE_TYPED）追加を検討 | mappingはPROVISIONAL_REVIEWED凍結中のため直接編集せず。**FM-C-28追加提案書（`mapping-amendment-proposal-fm-c-28.md`）を作成し発注者の版管理判断（(a)2026-07新version/(b)2026-10組込/(c)保留）を依頼**。証跡4（PDF目視）でSRC-C記載例の料金欄を確認（本AIのwebfetchではPDFが圧縮バイナリのため抽出不可と確認済み） | **発注者判断待ち** |
+| P1-2 | 「待遇差説明を求める権利の通知」は令和6年10月1日施行で創設済みの可能性が高く、MAPPING-2026-07期間の明示書から法定周知事項が欠落するリスク | **一次sourceの手がかりを取得**: SRC-INDEX（北海道労働局、2026-08-12 fetch）の公式様式一覧に「待遇に関する情報提供の例（労使協定方式の場合）」「待遇に関する情報提供の例（均等均衡方式の場合）」が存在することを確認（令和8年7月版※令和8年10月改正対応の公式セット内）。改正省令・厚労省通知での施行時期の確定とMAPPING-2026-07側の要否判断を**外部専門家/発注者へ依頼** | **一次source確認待ち** |
 | P2-1 | 明示書交付期限＝派遣開始日の前日（派遣法34条の2）を90/60/30日体系へ | **実装済み**: `DeliveryDeadlineRule`（DEADLINE_DOCUMENT_DELIVERY、dueDate=開始前日、未交付かつ期限超過で発火→T065通知基盤へ） | **対応済み** |
 | P2-2 | 通知書交付期限＝派遣開始後遅滞なく（施行規則20条）を期限監視・finding化 | **実装済み**: `DeliveryDeadlineRule`（DEADLINE_DISPATCH_NOTICE、猶予日数=config `compliance.delivery.notice-grace-days` 既定3日。SCHEMAS登録済み） | **対応済み** |
 | P2-3 | 明示書の交付対象は労働者本人（recipient=worker・P3_SELF成立確認） | T066受入時に設計確認を実施する（現行recipientはcustomer contact前提のため、worker recipient/P3_SELFの成立確認をT066受入項目へ追加） | **受入時確認** |
