@@ -1,5 +1,17 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（R22 MySQL 0-skip検証 attempt / R10再Review待ち）
+
+R10の要求した実MySQL 0-skip証跡について、同一Head `99fbed8294dd1a6c320b4413b832f7c7b9292da1`でローカルおよびCIを確認した。ローカルではDocker CLIのcontextは`desktop-linux`だが、Docker Desktop daemonが起動不能であり、指定コマンドは`Tests run: 3, Failures: 0, Errors: 0, Skipped: 3`、`BUILD SUCCESS`となった。これは必須のzero-skip条件を満たさない。
+
+同一HeadのGitHub Actions [run 31555911786](https://github.com/satoshi2024/ses-manager-pro/actions/runs/31555911786)ではDocker availability checkは成功したが、CI全量（対象のR22 smokeを含む）は`1842 tests / 1 failure / 29 errors / 0 skipped`、`BUILD FAILURE`となった。R22関連では`FlywayG2GateSchemaSmokeTest`のV102適用失敗と、`FlywayG2ForwardRepairSmokeTest`のhistory row数assert（expected 1 / actual 2）が発生し、SQLState、失敗時row count不変、複合FK/self-FK、trigger、operation state matrix、同一DB forward repair、Flyway historyの成功証跡として採用できない。失敗を隠すための再実行・skip許容・P1 closeは行わない。
+
+| task / issue | requirements | 変更file | test / Demo | base / head | risk / rollback |
+|---|---|---|---|---|---|
+| T066 / R22 MySQL 0-skip verification | R6.1/R6.2/R6.5/R6.6/R10.1/R10.2、`G2-FK-01..03`、`G2-ASG-14..16`、`G2-OP-01..06`、`G2-MIG-13..20` | review ledger、中央execution ledgerのみ。V102/V1/H2/entity/mapper/service/API/UI/test/T066 checkboxは今回変更0 | 指定ローカル実行は`0/0/3`（Docker daemon unavailable）。同一Head CIは`1842/1/29/0`でBUILD FAILURE。MySQL 0-skip、R22-P1-01〜P1-05の独立close条件、T066 L4、G2 service/API/UI、実在actor/reviewer/evidence、Phase A/Bは未達 | Base `99fbed8294dd1a6c320b4413b832f7c7b9292da1` → docs-only packet commit（本commit） | R22-P1-01/P1-03は`OPEN / MYSQL_VERIFICATION_PENDING`、P1-02/P1-04/P1-05は`FIXED_BY_IMPLEMENTER / MYSQL_VERIFICATION_PENDING`、P2-01は`VERIFIED_CLOSED`。Docker付き同一Headの0-skip再実行とR10独立確認が必要。rollbackはdocs commit revertのみ |
+
+今回の結果をもって、R22-P1-01〜P1-05を`VERIFIED_CLOSED`へ変更しない。S10は`IN PROGRESS / FAIL`、T066未完了、S12は`NOT READY`を維持する。G2 service/API/UI/security、ACTIVE化、formal generate/delivery、T066 L4、production authorizationは開始しない。外部専門家の実在証跡は後続のACTIVE/Phase B/T066・S10 PASS条件であり、今回のMySQL検証失敗を補うものではない。
+
 ## 現行判定（R22-P1-05 false-positive fix independent Review結果）
 
 R10独立Reviewは、Base `230ce013` → implementation `10097c3eb6bb26395597a89d4f16029478eb0671` → Head `9ff1003fe64f240730c685a16cdca8fdaf427960`を確認し、R22-P1-05を`FIXED_BY_IMPLEMENTER / MYSQL_VERIFICATION_PENDING`と判定した。H2/MySQL fixtureの`started_at`、retryable/attempt/version/deleted各独立INSERT、SQLState/row不変assertを確認したが、Docker Desktop起動不能でMySQL 0-skipを実行できないため`VERIFIED_CLOSED`には進めない。R22-P1-01/P1-03は`OPEN / MYSQL_VERIFICATION_PENDING`、P1-02/P1-04/P1-05は`FIXED_BY_IMPLEMENTER / MYSQL_VERIFICATION_PENDING`、P2-01は`VERIFIED_CLOSED`を維持する。
