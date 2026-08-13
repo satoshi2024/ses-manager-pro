@@ -88,7 +88,9 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final ComplianceFindingMapper findingMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
-    private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
+    private final com.ses.service.compliance.ComplianceGateEvaluationService gateEvaluationService;
+    private final com.ses.mapper.ComplianceExternalReviewAdoptionEventMapper adoptionEventMapper;
+    private final com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
     private final MessageSource messageSource;
 
@@ -692,27 +694,41 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                                 .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
                                 .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
 
-        // E-3: NO_EXTERNAL_REVIEW センチネルは撤去し、freeze済みpolicyを満たす実在external review eventのみを
-        // gate_snapshot_hashへ含める（type未設定グループは外部レビュー不要 — mapping側activateと同一判定）。
-        if (externalReviewEvaluator != null && !groups.isEmpty()) {
-            List<com.ses.entity.ComplianceExternalReviewEvent> allAdopted = new ArrayList<>();
-            for (com.ses.entity.ComplianceMappingReviewRequirementGroup grp : groups) {
-                boolean hasTypes = types.stream().anyMatch(t -> grp.getId().equals(t.getRequirementGroupId()));
-                if (hasTypes) {
-                    allAdopted.addAll(externalReviewEvaluator.evaluateGroup("default", activeMapping, grp, asOf));
+        // §4-8/10/11: gateはComplianceGateEvaluationService（APPROVED adoption event・adopted_at, id reducer）のみ採用。
+        // 旧ComplianceExternalReviewEvaluator（self-declared hash・latest evidence・旧APPROVED直接採用）はgate正本から除外。
+        // gate snapshotへadopted external review IDs・verification event IDs・全evidence version ID/hashを含める（§4-11）。
+        com.ses.entity.ComplianceExternalReviewAdoptionEvent latestAdoption =
+                adoptionEventMapper.selectLatestAdoptionByMapping("default", activeMapping.getId());
+        if (latestAdoption != null) {
+            boolean qualificationRequired = false;
+            boolean activeStatusRequired = false;
+            com.ses.entity.ComplianceExternalReviewerVerificationEvent authorshipVerification =
+                    verificationEventMapper.selectByTenantAndId("default", latestAdoption.getAuthorshipVerificationEventId());
+            if (authorshipVerification != null) {
+                List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId,
+                                        authorshipVerification.getReviewerTypeId()));
+                for (com.ses.entity.ComplianceMappingReviewRequirementType frozen : frozenTypes) {
+                    if (Integer.valueOf(1).equals(frozen.getCredentialRequiredSnapshot())) {
+                        qualificationRequired = true;
+                        activeStatusRequired = true;
+                    }
                 }
             }
-            allAdopted.sort(Comparator.comparing(com.ses.entity.ComplianceExternalReviewEvent::getRequirementGroupCodeSnapshot, Comparator.nullsFirst(Comparator.naturalOrder()))
-                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getReviewerIdentityHash, Comparator.nullsFirst(Comparator.naturalOrder()))
-                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getId));
-            for (com.ses.entity.ComplianceExternalReviewEvent ev : allAdopted) {
-                payload.append("external_review_event=")
-                        .append(ev.getRequirementGroupCodeSnapshot()).append(':')
-                        .append(ev.getReviewerIdentityHash()).append(':')
-                        .append(ev.getId()).append(':')
-                        .append(ev.getReviewedAt()).append(':')
-                        .append(ev.getValidUntil()).append('\n');
-            }
+            gateEvaluationService.adopt("default", latestAdoption.getReviewChainId(), activeMapping, asOf,
+                    qualificationRequired, activeStatusRequired);
+
+            payload.append("adoption_event_id=").append(latestAdoption.getId()).append('\n');
+            payload.append("adoption_action=").append(latestAdoption.getAction()).append('\n');
+            payload.append("adoption_review_chain_id=").append(latestAdoption.getReviewChainId()).append('\n');
+            payload.append("adoption_identity_verification_id=").append(latestAdoption.getIdentityVerificationEventId()).append('\n');
+            payload.append("adoption_qualification_verification_id=").append(latestAdoption.getQualificationVerificationEventId()).append('\n');
+            payload.append("adoption_active_status_verification_id=").append(latestAdoption.getActiveStatusVerificationEventId()).append('\n');
+            payload.append("adoption_authorship_verification_id=").append(latestAdoption.getAuthorshipVerificationEventId()).append('\n');
+            payload.append("adoption_evidence_version_id=").append(latestAdoption.getEvidenceDocumentVersionId()).append('\n');
+            payload.append("adoption_evidence_hash=").append(latestAdoption.getEvidenceDocumentHash()).append('\n');
         }
 
         payload.append("gate_evaluated_at=").append(gateEvaluatedAt).append('\n');

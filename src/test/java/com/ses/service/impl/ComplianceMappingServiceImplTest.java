@@ -137,6 +137,9 @@ class ComplianceMappingServiceImplTest {
                 version.getId(), workplaceId, "一次source確認済み", null);
         assertEquals(64, approval.getMappingHash().length());
 
+        // §3.2 event順序: SUBMITTED review → verification（IDENTITY/AUTHORSHIP）→ APPROVED adoption
+        setupExternalReviewGate(version.getId());
+
         // ACTIVE化成立: active_slot=1・activatedAt・status event記録
         ComplianceMappingVersion active = complianceMappingService.transition(version.getId(), "ACTIVE", approval.getId());
         assertEquals("ACTIVE", active.getStatus());
@@ -211,6 +214,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
         // Version 2 (future保留版)
@@ -220,6 +224,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        setupExternalReviewGate(v2.getId());
         ComplianceMappingVersion v2Active = complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
         assertEquals("PROVISIONAL_REVIEWED", v2Active.getStatus(), "active_slotがNULLのためstatus=PROVISIONAL_REVIEWEDを維持");
         assertEquals(1, v2Active.getFutureSlot(), "既存ACTIVEがあるためfuture_slot=1");
@@ -265,6 +270,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
         // Future candidate version
@@ -274,6 +280,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        setupExternalReviewGate(v2.getId());
         complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
 
         // 予約後に承認がREVOKEされる（後続REVOKE挿入） (P3-N1)
@@ -343,6 +350,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
         // Version 2 (future候補)
@@ -352,6 +360,7 @@ class ComplianceMappingServiceImplTest {
         complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        setupExternalReviewGate(v2.getId());
         complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
 
         // Promote昇格
@@ -373,6 +382,97 @@ class ComplianceMappingServiceImplTest {
                 source("SRC-N", "https://jsite.mhlw.go.jp/hokkaido-roudoukyoku/content/contents/002722633.pdf", "2026-07"),
                 source("SRC-L", "https://jsite.mhlw.go.jp/hokkaido-roudoukyoku/content/contents/002722641.pdf", "2026-07"),
                 source("SRC-INDEX", "https://jsite.mhlw.go.jp/hokkaido-roudoukyoku/hourei_seido_tetsuzuki/roudousha_haken/newpage_00448.html", "2026-07"));
+    }
+
+    /**
+     * §3.2 event順序のテストセットアップ: SUBMITTED review → verification（IDENTITY/AUTHORSHIP）→ APPROVED adoption。
+     * review/verification/adoption eventを直接INSERTし、gate採用条件（§3.2 K3）を満たすfixtureを作る。
+     */
+    private void setupExternalReviewGate(Long mappingId) {
+        com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
+        // fixture: reviewer type・subject（存在しなければ作成）
+        Integer typeCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_compliance_external_reviewer_type WHERE type_code='LABOR_CONSULTANT'", Integer.class);
+        if (typeCount == null || typeCount == 0) {
+            jdbcTemplate.update("INSERT INTO m_compliance_external_reviewer_type "
+                    + "(tenant_id, type_code, display_name, credential_label, enabled) VALUES ('default','LABOR_CONSULTANT','社労士','社労士登録番号',1)");
+        }
+        Integer subjectCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_compliance_external_reviewer_subject WHERE subject_code='SUBJ-TEST'", Integer.class);
+        if (subjectCount == null || subjectCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_compliance_external_reviewer_subject "
+                    + "(tenant_id, subject_code, display_name, organization_name, person_fingerprint_snapshot, fingerprint_key_version, created_by) "
+                    + "VALUES ('default','SUBJ-TEST','確認対象者','確認組織', REPEAT('c',64), 'v1', 1)");
+        }
+        String reviewChainId = "CHAIN-" + mappingId;
+        Long reviewerTypeId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_compliance_external_reviewer_type WHERE type_code='LABOR_CONSULTANT'", Long.class);
+        Long subjectId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_reviewer_subject WHERE subject_code='SUBJ-TEST'", Long.class);
+        Long groupId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_compliance_mapping_review_requirement_group WHERE mapping_id=? AND tenant_id='default'",
+                Long.class, mappingId);
+
+        // SUBMITTED review event
+        jdbcTemplate.update("INSERT INTO t_compliance_external_review_event "
+                + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, requirement_group_id, "
+                + "requirement_group_code_snapshot, reviewer_type_id, reviewer_type_code_snapshot, reviewer_type_name_snapshot, "
+                + "reviewer_name_snapshot, organization_snapshot, reviewer_identity_hash, action, review_chain_id, "
+                + "reviewed_at, recorded_at, recorded_by, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, ?, ?, ?, ?, 'G1', ?, 'LABOR_CONSULTANT', '社労士', '確認対象者', '確認組織', "
+                + "REPEAT('d',64), 'SUBMITTED', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?, ?, ?)",
+                mappingId, version.getMappingVersion(), version.getMappingHash(), version.getReviewPolicyHash(),
+                groupId, reviewerTypeId, reviewChainId, "op-sub-" + mappingId, "corr-sub-" + mappingId,
+                "review-sub-" + mappingId);
+        Long reviewEventId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_review_event WHERE review_chain_id=? AND action='SUBMITTED'",
+                Long.class, reviewChainId);
+        // verification: IDENTITY（VERIFIED）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_reviewer_verification_event "
+                + "(tenant_id, reviewer_type_id, reviewer_type_code_snapshot, reviewer_type_name_snapshot, "
+                + "reviewer_subject_id, person_fingerprint_snapshot, qualification_fingerprint_snapshot, "
+                + "fingerprint_key_version, verification_kind, result, method_code, authority_source_code, "
+                + "authority_source_name, checked_at, checked_by, submitted_review_event_id, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, 'LABOR_CONSULTANT', '社労士', ?, ?, ?, 'v1', "
+                + "'IDENTITY', 'VERIFIED', 'MANUAL_OFFICIAL_SOURCE', 'OFFICIAL_1', '公式確認source', CURRENT_TIMESTAMP, 1, "
+                + "?, ?, ?, ?)",
+                reviewerTypeId, subjectId, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                reviewEventId, "op-ver-i-" + mappingId, "corr-ver-i-" + mappingId, "ver-i-" + mappingId);
+        Long identityVerificationId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_reviewer_verification_event "
+                        + "WHERE submitted_review_event_id=? AND verification_kind='IDENTITY'",
+                Long.class, reviewEventId);
+        // verification: REVIEW_AUTHORSHIP（VERIFIED・binding必須）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_reviewer_verification_event "
+                + "(tenant_id, reviewer_type_id, reviewer_type_code_snapshot, reviewer_type_name_snapshot, "
+                + "reviewer_subject_id, person_fingerprint_snapshot, qualification_fingerprint_snapshot, "
+                + "fingerprint_key_version, verification_kind, result, method_code, authority_source_code, "
+                + "authority_source_name, checked_at, checked_by, review_policy_version, review_policy_hash, "
+                + "mapping_id, mapping_version, mapping_hash, external_review_event_id, external_review_chain_id, "
+                + "submitted_review_event_id, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, 'LABOR_CONSULTANT', '社労士', ?, ?, ?, 'v1', "
+                + "'REVIEW_AUTHORSHIP', 'VERIFIED', 'MANUAL_INTERNAL_AUTHORSHIP_CONFIRM', 'INTERNAL', '内部確認', "
+                + "CURRENT_TIMESTAMP, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                reviewerTypeId, subjectId, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                version.getMappingVersion(), version.getReviewPolicyHash(), mappingId, version.getMappingVersion(),
+                version.getMappingHash(), reviewEventId, reviewChainId, reviewEventId,
+                "op-ver-a-" + mappingId, "corr-ver-a-" + mappingId, "ver-a-" + mappingId);
+        Long authorshipVerificationId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_reviewer_verification_event "
+                        + "WHERE submitted_review_event_id=? AND verification_kind='REVIEW_AUTHORSHIP'",
+                Long.class, reviewEventId);
+        // APPROVED adoption（identity/authorship参照・mapping/policy/evidence snapshot）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_review_adoption_event "
+                + "(tenant_id, action, review_chain_id, submitted_review_event_id, identity_verification_event_id, "
+                + "authorship_verification_event_id, mapping_id, mapping_version, mapping_hash, review_policy_version, "
+                + "review_policy_hash, adopted_at, adopted_by, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', 'APPROVED', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, ?, ?, ?)",
+                reviewChainId, reviewEventId, identityVerificationId, authorshipVerificationId,
+                mappingId, version.getMappingVersion(), version.getMappingHash(),
+                version.getMappingVersion(), version.getReviewPolicyHash(),
+                "op-adopt-" + mappingId, "corr-adopt-" + mappingId, "adopt-" + mappingId);
     }
 
     private ComplianceMappingSourceInput source(String code, String url, String version) {

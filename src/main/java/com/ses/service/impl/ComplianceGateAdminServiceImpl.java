@@ -302,8 +302,10 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         if (!StringUtils.hasText(reviewerName) || !StringUtils.hasText(organization)) {
             throw BusinessException.of(400, "compliance.gate.invalidExternalReview");
         }
-        String normalizedAction = StringUtils.hasText(action) ? action.trim().toUpperCase() : "APPROVED";
-        if (!"APPROVED".equals(normalizedAction) && !"REJECTED".equals(normalizedAction) && !"REVOKED".equals(normalizedAction)) {
+        // K1: 新規write pathはSUBMITTEDのみ。旧APPROVED/REJECTED/REVOKED直接記録は廃止（legacy rowは新gate不採用）。
+        // adoption（APPROVED/REJECTED/REVOKED）はt_compliance_external_review_adoption_eventへ別途記録される。
+        String normalizedAction = StringUtils.hasText(action) ? action.trim().toUpperCase() : "SUBMITTED";
+        if (!"SUBMITTED".equals(normalizedAction)) {
             throw BusinessException.of(400, "compliance.gate.invalidAction");
         }
 
@@ -356,28 +358,15 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         Long supersedesId = null;
         Long targetId = null;
 
-        if ("REVOKED".equals(normalizedAction)) {
-            if (targetEventId == null) {
-                throw BusinessException.of(409, "compliance.gate.revokeTargetInvalid");
-            }
+        if (targetEventId != null) {
             com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId("default", targetEventId);
-            if (targetEvent == null || !mappingId.equals(targetEvent.getMappingId()) || !requirementGroupId.equals(targetEvent.getRequirementGroupId()) || !"APPROVED".equalsIgnoreCase(targetEvent.getAction())) {
-                throw BusinessException.of(409, "compliance.gate.revokeTargetInvalid");
+            if (targetEvent != null && mappingId.equals(targetEvent.getMappingId()) && requirementGroupId.equals(targetEvent.getRequirementGroupId())) {
+                reviewChainId = targetEvent.getReviewChainId();
+                supersedesId = targetEvent.getId();
             }
-            reviewChainId = targetEvent.getReviewChainId();
-            targetId = targetEvent.getId();
-            supersedesId = targetEvent.getId();
-        } else {
-            if (targetEventId != null) {
-                com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId("default", targetEventId);
-                if (targetEvent != null && mappingId.equals(targetEvent.getMappingId()) && requirementGroupId.equals(targetEvent.getRequirementGroupId())) {
-                    reviewChainId = targetEvent.getReviewChainId();
-                    supersedesId = targetEvent.getId();
-                }
-            }
-            if (!StringUtils.hasText(reviewChainId)) {
-                reviewChainId = java.util.UUID.randomUUID().toString();
-            }
+        }
+        if (!StringUtils.hasText(reviewChainId)) {
+            reviewChainId = java.util.UUID.randomUUID().toString();
         }
 
         com.ses.entity.ComplianceExternalReviewEvent event = new com.ses.entity.ComplianceExternalReviewEvent();

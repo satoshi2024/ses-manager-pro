@@ -1,0 +1,217 @@
+package com.ses.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
+import com.ses.entity.ComplianceExternalReviewEvent;
+import com.ses.entity.ComplianceExternalReviewerSubject;
+import com.ses.entity.ComplianceExternalReviewerVerificationEvent;
+import com.ses.entity.ComplianceMappingVersion;
+import com.ses.entity.DocumentVersion;
+import com.ses.mapper.ComplianceExternalReviewEventMapper;
+import com.ses.mapper.ComplianceExternalReviewerSubjectMapper;
+import com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper;
+import com.ses.mapper.ComplianceMappingVersionMapper;
+import com.ses.service.ComplianceExternalReviewVerificationService;
+import com.ses.service.compliance.ComplianceGateEvidenceResolver;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * R23-P1-01 §3.3/§4: verification eventの記録・revoke実装（append-only）。
+ * 新規write pathはSUBMITTED review eventをtargetにする（§3.2 event順序・後付けUPDATE禁止）。
+ */
+@Service
+public class ComplianceExternalReviewVerificationServiceImpl
+        implements ComplianceExternalReviewVerificationService {
+
+    private final ComplianceExternalReviewEventMapper reviewEventMapper;
+    private final ComplianceExternalReviewerSubjectMapper subjectMapper;
+    private final ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
+    private final ComplianceMappingVersionMapper versionMapper;
+    private final ComplianceGateEvidenceResolver evidenceResolver;
+
+    public ComplianceExternalReviewVerificationServiceImpl(
+            ComplianceExternalReviewEventMapper reviewEventMapper,
+            ComplianceExternalReviewerSubjectMapper subjectMapper,
+            ComplianceExternalReviewerVerificationEventMapper verificationEventMapper,
+            ComplianceMappingVersionMapper versionMapper,
+            ComplianceGateEvidenceResolver evidenceResolver) {
+        this.reviewEventMapper = reviewEventMapper;
+        this.subjectMapper = subjectMapper;
+        this.verificationEventMapper = verificationEventMapper;
+        this.versionMapper = versionMapper;
+        this.evidenceResolver = evidenceResolver;
+    }
+
+    @Override
+    @Transactional
+    public ComplianceExternalReviewerVerificationEvent record(
+            Long submittedReviewEventId,
+            Long reviewerSubjectId,
+            Long reviewerTypeId,
+            String verificationKind,
+            String result,
+            String methodCode,
+            String authoritySourceCode,
+            String authoritySourceName,
+            String officialUrlReference,
+            String registrationIdentifier,
+            LocalDateTime checkedAt,
+            LocalDateTime sourceDataAsOf,
+            Integer maxAgeDays,
+            LocalDateTime validUntil,
+            Long checkedBy,
+            Long evidenceDocumentId,
+            Long evidenceDocumentVersionId,
+            String reviewPolicyVersion,
+            String reviewPolicyHash,
+            Long mappingId,
+            String mappingVersion,
+            String mappingHash,
+            Long externalReviewEventId,
+            String externalReviewChainId,
+            String idempotencyKey) {
+        if (submittedReviewEventId == null || reviewerSubjectId == null || reviewerTypeId == null
+                || !StringUtils.hasText(verificationKind) || !StringUtils.hasText(result)
+                || checkedAt == null || checkedBy == null) {
+            throw BusinessException.of(400, "compliance.gate.invalidVerification");
+        }
+        // SUBMITTED review eventが存在し、同一tenant・SUBMITTED actionであること
+        ComplianceExternalReviewEvent submitted = reviewEventMapper.selectByTenantAndId("default", submittedReviewEventId);
+        if (submitted == null || !"SUBMITTED".equalsIgnoreCase(submitted.getAction())) {
+            throw BusinessException.of(400, "compliance.gate.verificationTargetInvalid");
+        }
+        // reviewer subjectが存在すること（person-stable）
+        ComplianceExternalReviewerSubject subject = subjectMapper.selectById(reviewerSubjectId);
+        if (subject == null) {
+            throw BusinessException.of(400, "compliance.gate.reviewerSubjectNotFound");
+        }
+        // exact evidence（§4-5/6）: server-side解決しCLEAN/SHA-256を検証
+        DocumentVersion evidence = null;
+        if (evidenceDocumentId != null || evidenceDocumentVersionId != null) {
+            evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        }
+        // AUTHORSHIP kindはmapping/policy/review binding必須（DB triggerでも担保）
+        boolean authorship = "REVIEW_AUTHORSHIP".equals(verificationKind);
+        if (authorship && (mappingId == null || !StringUtils.hasText(mappingVersion)
+                || !StringUtils.hasText(mappingHash) || externalReviewEventId == null
+                || !StringUtils.hasText(externalReviewChainId))) {
+            throw BusinessException.of(400, "compliance.gate.authorshipBindingRequired");
+        }
+        // REVIEW_AUTHORSHIPのmapping一致検証（§G2-VERIFY-12）
+        if (authorship && mappingId != null) {
+            ComplianceMappingVersion mapping = versionMapper.selectById(mappingId);
+            if (mapping == null || !mappingVersion.equals(mapping.getMappingVersion())
+                    || !mappingHash.equals(mapping.getMappingHash())) {
+                throw BusinessException.of(400, "compliance.gate.authorshipMappingMismatch");
+            }
+        }
+
+        String opId = UUID.randomUUID().toString();
+        String correlationId = UUID.randomUUID().toString();
+        String key = StringUtils.hasText(idempotencyKey) ? idempotencyKey
+                : "MAPPING-VERIFY:" + submittedReviewEventId + ":" + reviewerSubjectId + ":" + verificationKind + ":" + UUID.randomUUID();
+
+        ComplianceExternalReviewerVerificationEvent event = new ComplianceExternalReviewerVerificationEvent();
+        event.setTenantId("default");
+        event.setReviewerTypeId(reviewerTypeId);
+        event.setReviewerTypeCodeSnapshot(submitted.getReviewerTypeCodeSnapshot());
+        event.setReviewerTypeNameSnapshot(submitted.getReviewerTypeNameSnapshot());
+        event.setReviewerSubjectId(reviewerSubjectId);
+        event.setPersonFingerprintSnapshot(subject.getPersonFingerprintSnapshot());
+        event.setQualificationFingerprintSnapshot(subject.getPersonFingerprintSnapshot());
+        event.setFingerprintKeyVersion(subject.getFingerprintKeyVersion());
+        event.setVerificationKind(verificationKind);
+        event.setResult(result);
+        event.setMethodCode(methodCode);
+        event.setAuthoritySourceCode(authoritySourceCode);
+        event.setAuthoritySourceName(authoritySourceName);
+        event.setOfficialUrlReferenceSnapshot(officialUrlReference);
+        event.setCheckedAt(checkedAt);
+        event.setSourceDataAsOf(sourceDataAsOf);
+        event.setMaxAgeDaysSnapshot(maxAgeDays);
+        event.setValidUntil(validUntil);
+        event.setCheckedBy(checkedBy);
+        if (evidence != null) {
+            event.setEvidenceDocumentId(evidence.getDocumentId());
+            event.setEvidenceDocumentVersionId(evidence.getId());
+            event.setEvidenceDocumentVersion(String.valueOf(evidence.getVersionNo()));
+            event.setEvidenceDocumentHash(evidence.getSha256());
+        }
+        event.setReviewPolicyVersion(reviewPolicyVersion);
+        event.setReviewPolicyHash(reviewPolicyHash);
+        event.setMappingId(mappingId);
+        event.setMappingVersion(mappingVersion);
+        event.setMappingHash(mappingHash);
+        event.setExternalReviewEventId(externalReviewEventId);
+        event.setExternalReviewChainId(externalReviewChainId);
+        event.setSubmittedReviewEventId(submittedReviewEventId);
+        event.setOperationId(opId);
+        event.setCorrelationId(correlationId);
+        event.setIdempotencyKey(key);
+        // registration identifierは暗号化せず、maskedのみ記録する（§7 My Number非保存・raw保存禁止の契約に整合）。
+        // 暗号化が必要なidentifierはComplianceGateCredentialCryptoServiceを別途適用する。
+        if (StringUtils.hasText(registrationIdentifier)) {
+            String raw = registrationIdentifier.trim();
+            event.setRegistrationIdentifierMaskedSnapshot(
+                    raw.length() > 4 ? "****" + raw.substring(raw.length() - 4) : "VALIDATED");
+        }
+        try {
+            verificationEventMapper.insertEvent(event);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
+        return event;
+    }
+
+    @Override
+    @Transactional
+    public ComplianceExternalReviewerVerificationEvent revoke(
+            Long targetVerificationEventId, String reason, Long revokedBy, String idempotencyKey) {
+        if (targetVerificationEventId == null || !StringUtils.hasText(reason) || revokedBy == null) {
+            throw BusinessException.of(400, "compliance.gate.invalidVerificationRevoke");
+        }
+        ComplianceExternalReviewerVerificationEvent target =
+                verificationEventMapper.selectByTenantAndId("default", targetVerificationEventId);
+        if (target == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if ("REVOKED".equals(target.getResult())) {
+            throw BusinessException.of(400, "compliance.gate.verificationAlreadyRevoked");
+        }
+        ComplianceExternalReviewerVerificationEvent event = new ComplianceExternalReviewerVerificationEvent();
+        event.setTenantId("default");
+        event.setReviewerTypeId(target.getReviewerTypeId());
+        event.setReviewerTypeCodeSnapshot(target.getReviewerTypeCodeSnapshot());
+        event.setReviewerTypeNameSnapshot(target.getReviewerTypeNameSnapshot());
+        event.setReviewerSubjectId(target.getReviewerSubjectId());
+        event.setPersonFingerprintSnapshot(target.getPersonFingerprintSnapshot());
+        event.setQualificationFingerprintSnapshot(target.getQualificationFingerprintSnapshot());
+        event.setFingerprintKeyVersion(target.getFingerprintKeyVersion());
+        event.setVerificationKind(target.getVerificationKind());
+        event.setResult("REVOKED");
+        event.setMethodCode(target.getMethodCode());
+        event.setAuthoritySourceCode(target.getAuthoritySourceCode());
+        event.setAuthoritySourceName(target.getAuthoritySourceName());
+        event.setCheckedAt(target.getCheckedAt());
+        event.setCheckedBy(revokedBy);
+        event.setSubmittedReviewEventId(target.getSubmittedReviewEventId());
+        event.setRevokedVerificationEventId(target.getId());
+        event.setOperationId(UUID.randomUUID().toString());
+        event.setCorrelationId(UUID.randomUUID().toString());
+        event.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey
+                : "MAPPING-VERIFY-REVOKE:" + target.getId() + ":" + UUID.randomUUID());
+        try {
+            verificationEventMapper.insertEvent(event);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
+        return event;
+    }
+}

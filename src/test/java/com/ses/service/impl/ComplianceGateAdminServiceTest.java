@@ -208,7 +208,7 @@ class ComplianceGateAdminServiceTest {
     }
 
     @Test
-    void externalReviewをCGC1暗号化とidentityHash付きで登録できる() {
+    void externalReviewをCGC1暗号化とidentityHash付きでSUBMITTED登録できる() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-EXT",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
@@ -218,13 +218,14 @@ class ComplianceGateAdminServiceTest {
                 "LABOR_ATTORNEY", "弁護士", "労働法専門弁護士", "弁護士登録番号", true);
         complianceGateAdminService.addRequirementType(group.getId(), type.getId());
 
+        // K1: 新規write pathはSUBMITTEDのみ（旧APPROVED直接記録は廃止・legacy rowは新gate不採用）
         com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "山田弁護士", "山田法律事務所", "REG-123456",
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null);
 
         assertNotNull(event.getId());
-        assertEquals("APPROVED", event.getAction());
+        assertEquals("SUBMITTED", event.getAction());
         assertEquals("v1", event.getCredentialKeyVersion());
         assertEquals("CGC1", event.getCredentialCipherFormat());
         assertEquals("****3456", event.getCredentialMaskedSnapshot());
@@ -241,6 +242,12 @@ class ComplianceGateAdminServiceTest {
         List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(version.getId());
         assertEquals(1, list.size());
         assertEquals(event.getId(), list.get(0).getId());
+
+        // K1: SUBMITTED以外のaction（旧APPROVED/REJECTED/REVOKED）は直接記録不可
+        assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "山田弁護士", "山田法律事務所", "REG-123456",
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null));
     }
 
     @Test
@@ -256,11 +263,11 @@ class ComplianceGateAdminServiceTest {
                 "OTHER_REVIEWER", "その他専門家", "備考", "登録番号", false);
         complianceGateAdminService.addRequirementType(group.getId(), optType.getId());
 
-        // credential未入力で登録 → 4列全NULL
+        // credential未入力で登録 → 4列全NULL（SUBMITTED）
         com.ses.entity.ComplianceExternalReviewEvent eventOpt = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), optType.getId(),
                 "佐藤専門家", "佐藤事務所", null,
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
 
         assertNull(eventOpt.getCredentialSnapshotEncrypted());
         assertNull(eventOpt.getCredentialKeyVersion());
@@ -276,13 +283,13 @@ class ComplianceGateAdminServiceTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), reqType.getId(),
                 "田中税理士", "田中事務所", "",
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null));
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null));
         assertEquals(400, ex.getCode());
         assertEquals("compliance.gate.credentialRequired", ex.getMessageKey());
     }
 
     @Test
-    void REVOKEアクションは対象positiveイベントを無効化し鎖を維持する() {
+    void SUBMITTED登録はchainを採番し同一内容の再送は409で拒否する() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-REV",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
@@ -292,22 +299,29 @@ class ComplianceGateAdminServiceTest {
                 "AUDITOR", "監査人", "公認会計士", "登録番号", false);
         complianceGateAdminService.addRequirementType(group.getId(), type.getId());
 
-        // 1. APPROVED 登録
-        com.ses.entity.ComplianceExternalReviewEvent approved = complianceGateAdminService.recordExternalReview(
+        // 1. SUBMITTED 登録（新規chain採番）
+        com.ses.entity.ComplianceExternalReviewEvent submitted1 = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "鈴木会計士", "監査法人", null,
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
 
-        // 2. REVOKED 登録
-        com.ses.entity.ComplianceExternalReviewEvent revoked = complianceGateAdminService.recordExternalReview(
+        assertEquals("SUBMITTED", submitted1.getAction());
+        assertNotNull(submitted1.getReviewChainId());
+
+        // 2. 同一内容の再送 → 決定的idempotencyKeyにより409（§3.6・重複INSERT拒否）
+        BusinessException ex = assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "鈴木会計士", "監査法人", null,
-                "REVOKED", LocalDateTime.now(), null, null, "取消", approved.getId());
+                "SUBMITTED", LocalDateTime.now(), null, null, "再確認", null));
+        assertEquals(409, ex.getCode());
 
-        assertEquals("REVOKED", revoked.getAction());
-        assertEquals(approved.getReviewChainId(), revoked.getReviewChainId());
-        assertEquals(approved.getId(), revoked.getTargetEventId());
-        assertEquals(approved.getId(), revoked.getSupersedesEventId());
+        // 3. 別reviewerのSUBMITTEDは別identityHash→新規chain（§3.2: 再Reviewは新しいSUBMITTED chain）
+        com.ses.entity.ComplianceExternalReviewEvent submitted2 = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "佐藤会計士", "監査法人", null,
+                "SUBMITTED", LocalDateTime.now(), null, null, "別の確認内容", null);
+        assertNotNull(submitted2.getReviewChainId());
+        assertEquals("SUBMITTED", submitted2.getAction());
     }
 
     @Test
