@@ -1,0 +1,14 @@
+{
+  "statements": [
+    {
+      "employee_id": "501",
+      "gross_amount": "250000",
+      "deductions": "50000",
+      "net_amount": "200000",
+      "items": {
+        "基本給": 220000,
+        "通勤手当": 30000
+      }
+    }
+  ]
+}

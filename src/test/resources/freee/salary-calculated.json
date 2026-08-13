@@ -1,0 +1,36 @@
+{
+  "employee_payroll_statements": [
+    {
+      "id": 9001,
+      "company_id": 123,
+      "employee_id": 501,
+      "employee_name": "従業員 甲",
+      "employee_display_name": "従業員甲",
+      "employee_num": "E-501",
+      "pay_date": "2026-07-25",
+      "start_date": "2026-06-16",
+      "closing_date": "2026-07-15",
+      "fixed": true,
+      "calc_status": "calculated",
+      "calculated_at": "2026-07-20T10:00:00+09:00",
+      "pay_calc_type": "monthly",
+      "total_deduction_amount": "50000",
+      "total_deduction_employer_share": "32000",
+      "net_payment_amount": "200000",
+      "gross_payment_amount": "250000",
+      "payments": [
+        { "name": "基本給", "amount": "220000" },
+        { "name": "通勤手当", "amount": "30000" }
+      ],
+      "deductions": [
+        { "name": "所得税", "amount": "20000" },
+        { "name": "社会保険料", "amount": "30000" }
+      ],
+      "deductions_employer_share": [
+        { "name": "健康保険", "amount": "15000" },
+        { "name": "厚生年金", "amount": "17000" }
+      ]
+    }
+  ],
+  "total_count": 1
+}

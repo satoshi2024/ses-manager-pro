@@ -1,0 +1,13 @@
+{
+  "id": 1,
+  "companies": [
+    {
+      "id": 123,
+      "name": "テスト事業所",
+      "role": "self_only",
+      "external_cid": "ABC1234567",
+      "employee_id": 501,
+      "display_name": "一般 次郎"
+    }
+  ]
+}

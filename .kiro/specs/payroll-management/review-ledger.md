@@ -15,6 +15,68 @@
 
 ## 実装Runテンプレート（この区切りから複製して末尾へ追記）
 
+### HFP-01-RUN-20260814-01
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | 実装AI（opencode / deepseek-v4-flash） |
+| worktree / branch | `C:\Users\pc\Documents\ses-manager-pro-hfp-01` / `codex/hfp-01-payroll-freee` |
+| base / head | `841e10aaf67deb295d5b3397321f30e9d08c0fce` / 本Run末のcommit（HFP-01-001） |
+| 開始 / 終了（JST） | 2026-08-14 00:05 / 2026-08-14 01:10 |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（存在確認: **PASS**、2026-08-14 GitHub API） |
+| freee test事業所 | **BLOCKED**（`FREEE_CLIENT_ID`等の環境変数が未設定。秘密値は会話・repoへ不掲載） |
+| Docker / Node | BLOCKED（com.docker.service停止中。Docker Desktopを起動試行済み）/ READY（v24.18.0） |
+| dirty差分の取扱い | 開始時 `git status --porcelain` 空（dirtyなし）。既存変更の上書きなし |
+
+#### 外部preflight
+
+| 条件 | 状態 | 非機微証跡 / 次アクション |
+|---|---|---|
+| OAuth app / redirect URI | BLOCKED | 環境変数未設定。提供依頼（secret store/環境変数推奨） |
+| HR給与・賞与権限 | BLOCKED | app権限確認はapp登録後に実施 |
+| company_admin test user | BLOCKED | test事業所提供後に確認 |
+| 計算済み給与/賞与test period | BLOCKED | 事業所提供後に架空data用意 |
+| app審査/private運用条件 | BLOCKED | 事業所提供後に判断記録 |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-001 | **PASS**（sandbox条件のみBLOCKED） | `research.md`（再確認追記）、`src/test/resources/freee/README.md`＋fixture 11件、`src/test/java/com/ses/service/impl/FreeeContractBaselineTest.java`（10 test） | `mvn test -Dtest=FreeeContractBaselineTest` → 10 run / **10 fail** / 0 error / 0 skip / exit 1（redが正しい） | 公式endpoint/field⇔失敗test 1対1対応を以下に提示 | 旧OAuth host・旧payroll path・旧root/field・company_id欠落・null→0・BP誤判定を各assertで再現。production変更なし |
+
+**Demo（HFP-01-001）: 公式契約 ↔ 失敗test の1対1対応**
+
+| 公式契約（固定OpenAPI） | 失敗test | 失敗理由（実際の観測） |
+|---|---|---|
+| 認可host `accounts.secure.freee.co.jp/public_api/authorize`、`prompt=select_company`、scopeなし | `authorizationUrlは公式OAuth契約に従う` | 現行URL `https://api.freee.co.jp/oauth/authorize?...scope=read:hr employees:read payrolls:read...` |
+| token URL `accounts.secure.freee.co.jp/public_api/token` | `handleCallbackは公式tokenURLを使う` | Request URI expected=公式 / was=`https://api.freee.co.jp/oauth/token` |
+| token応答の`company_id`保存・必須 | `handleCallbackはcompany_idを保存する` | expected 123 / was null |
+| employees `GET /api/v1/companies/{company_id}/employees`（raw配列, limit/offset） | `employeesは公式companyPathを使う` / `employeesは公式rawArrayを返す` | was `/hr/api/v1/employees`、old root解析で0件 |
+| employees要素に`employment_type`なし（BP enumなし） | `employeesはfreeeのemploymentTypeでBP除外しない` | expected 3 / was 2（旧BP除外） |
+| salary `GET /api/v1/salaries/employee_payroll_statements`（company_id/year/month必須） | `statementsは公式salaryEndpointを使う` | was `/hr/api/v1/payroll-statements?year=...&month=...&type=...` |
+| root `employee_payroll_statements`、`gross_payment_amount`等 | `statementsは公式rootとfieldで変換する` | old root `statements` で0件 |
+| 金額はstring・nullable（計算中null） | `statementsは計算中nullを0へ変換しない` | expected null / was 0 |
+| `payments`/`deductions`/`deductions_employer_share`/`allowances`明細 | `statementsは区分付きitemsを返す` | itemsがnull（一切設定しない） |
+
+#### 自動gate集計（HFP-01-001時点）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---:|---:|---:|---:|---|---|
+| 既存freee関連test（baseline前） | `mvn test -Dtest=FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PayrollLandmarkA11yTest` | 11 | 0 | 0 | 0 | PASS | green baseline |
+| 新規baseline test | `mvn test -Dtest=FreeeContractBaselineTest` | 10 | 10 | 0 | 1 | FAIL（意図通り） | surefire-reports/com.ses.service.impl.FreeeContractBaselineTest.txt |
+| fixture秘密scan | 目視＋pattern scan（`access-token`/`refresh-token`は`fixture-` prefixのみ） | — | — | — | — | PASS | 実token・氏名・給与・外部IDなし |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | HFP-01-R12-4/5, AC15 | BLOCKED | freee test事業所・OAuth app・credential未提供。sandbox E2E（HFP-01-011）と全体PASS不可 | 発注者 / `FREEE_CLIENT_ID`等の環境変数提供 | HFP-01-011手順 |
+| HFP-01-RUN-ISSUE-02 | HFP-01-R12-4 | BLOCKED | Docker daemon停止中。MySQL migration smoke（HFP-01-002/010）は起動後に実施 | ローカル / Docker Desktop起動 | `scripts/verify-like-ci.ps1` |
+
+---
+
+## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
+
 ### HFP-01-RUN-YYYYMMDD-NN
 
 | 項目 | 値 |

@@ -1,0 +1,25 @@
+{
+  "employee_payroll_statements": [
+    {
+      "id": 9002,
+      "company_id": 123,
+      "employee_id": 501,
+      "employee_name": "従業員 甲",
+      "employee_display_name": "従業員甲",
+      "employee_num": "E-501",
+      "pay_date": null,
+      "fixed": false,
+      "calc_status": "calculating",
+      "calculated_at": null,
+      "pay_calc_type": "",
+      "total_deduction_amount": null,
+      "total_deduction_employer_share": null,
+      "net_payment_amount": null,
+      "gross_payment_amount": null,
+      "payments": [],
+      "deductions": [],
+      "deductions_employer_share": []
+    }
+  ],
+  "total_count": 1
+}

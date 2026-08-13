@@ -1,0 +1,33 @@
+[
+  {
+    "id": 501,
+    "num": "E-501",
+    "display_name": "従業員甲",
+    "entry_date": "2020-04-01",
+    "retire_date": null,
+    "user_id": null,
+    "email": null,
+    "payroll_calculation": true
+  },
+  {
+    "id": 502,
+    "num": "E-502",
+    "display_name": "従業員乙",
+    "entry_date": "2021-04-01",
+    "retire_date": "2026-03-31",
+    "user_id": null,
+    "email": null,
+    "payroll_calculation": true
+  },
+  {
+    "id": 503,
+    "num": "E-503",
+    "display_name": "従業員丙",
+    "entry_date": "2022-04-01",
+    "retire_date": null,
+    "user_id": null,
+    "email": null,
+    "payroll_calculation": false,
+    "employment_type": "BP"
+  }
+]

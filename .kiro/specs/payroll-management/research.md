@@ -9,6 +9,19 @@
 
 実装開始時に上記commitと公式release noteの差分を確認する。新しいcommitがあるだけでは自動更新せず、本specの契約に影響する差分を記録してからfixtureと実装を同時に更新する。
 
+### 実装開始時再確認（2026-08-14実施）
+
+- `52c69a6819ef14979a31b342123df816cb72c742`（freee-api-schema）: **存在確認PASS**（2026-08-07 "Update schema files"）。このcommit自体の変更は`sm/open-api-3/api-schema.yml`のみで、`hr/open-api-3/api-schema.json`には触れていない。
+- `hr/open-api-3/api-schema.json`の最終更新commitは`eb31780dd...`（2026-07-09、Revert/Revert後）であり、固定commit（2026-08-07）時点の内容は調査日時点と同一。固定commit以後に同fileへ触れたcommitはない（2026-08-14確認）。**契約差分なし**。
+- `826e22555a9befe5a672e9bdfc23070676f41969`（freee-mcp）: **存在確認PASS**（v0.32.3 release、参照のみ）。
+- 固定OpenAPIの該当endpoint/fieldを直接確認済み（2026-08-14、`hr/open-api-3/api-schema.json`）:
+  - `GET /api/v1/users/me` → `{id, companies:[{id, name, role, external_cid, employee_id, display_name}]}`。role enumに`company_admin`/`self_only`/`attendance_manager`/`physician`/`shift_admin`/`time_clock_device_setter`（`BP`は存在しない）。
+  - `GET /api/v1/companies/{company_id}/employees` → **raw配列**。query: `limit`(1-100, default 50), `offset`(default 0), `with_no_payroll_calculation`。要素: `id`, `num`, `display_name`, `entry_date`, `retire_date`(nullable), `payroll_calculation`, 等。
+  - `GET /api/v1/salaries/employee_payroll_statements` → **必須query: `company_id`/`year`/`month`**、`limit`/`offset`。root: `employee_payroll_statements` + `total_count`。合計: `gross_payment_amount`/`total_deduction_amount`/`net_payment_amount`/`total_deduction_employer_share`（全てJSON string、nullable）。明細配列: `payments`/`deductions`/`deductions_employer_share`（要素は`{name, amount}`、amountはstring）。
+  - `GET /api/v1/bonuses/employee_payroll_statements` → root/queryは給与と同様。明細配列: `allowances`/`deductions`。
+  - `calc_status`: `calculating`/`calculated`/`overwritten`/`imported`/`error`。計算中は金額null・配列空。
+- 外部条件（freee test事業所）: 環境変数`FREEE_CLIENT_ID`等は**未設定**。HFP-01-011のsandbox E2Eは`BLOCKED`。
+
 ## 2. 公式資料と確定事項
 
 | ID | 公式資料 | このspecで確定した事項 |
