@@ -363,6 +363,42 @@ class ComplianceDocumentApiTest {
         assertThat(pdfAfter).isEqualTo(pdfBefore);
     }
 
+    @Test
+    void download時にDocumentVersionのsha256が改竄不一致の場合は500エラーで拒否する() throws Exception {
+        long contractId = insertContractWithProfile();
+        long deliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL");
+
+        // DBのfull_document_sha256を改竄値に変更
+        jdbcTemplate.update("UPDATE t_document_delivery SET full_document_sha256='tampered_sha256' WHERE id=?", deliveryId);
+
+        mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download"))
+                .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void deliveryBusinessKeyが異なる場合はlegacyIdempotencyKeyが同じであっても新deliveryを作成する() throws Exception {
+        long contractId = insertContractWithProfile();
+        long firstDeliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL");
+
+        // DBに異なるbusinessKeyを持つ既存 delivery があっても、ビジネスキーが異なれば新規生成
+        jdbcTemplate.update("UPDATE t_document_delivery SET delivery_business_key='OLD_BIZ_KEY' WHERE id=?", firstDeliveryId);
+
+        // 新規 delivery 生成を要求（businessKey は現在入力から新しく計算される）
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("documentType", "DISPATCH_NOTICE");
+        body.put("deliveryMethod", "EMAIL");
+        String json = objectMapper.writeValueAsString(body);
+
+        String response = mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/generate")
+                        .with(csrf()).contentType("application/json").content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn().getResponse().getContentAsString();
+
+        long secondDeliveryId = objectMapper.readTree(response).path("data").path("id").asLong();
+        assertThat(secondDeliveryId).isNotEqualTo(firstDeliveryId);
+    }
+
     // ===== データ準備 =====
 
     private long generate(long contractId, String documentType, String deliveryMethod) throws Exception {

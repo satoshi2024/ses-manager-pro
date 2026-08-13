@@ -122,7 +122,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         ContractComplianceSnapshot snapshot = snapshotWriter.ensureSnapshot(contract, profile);
 
         LocalDateTime deliveredAt = LocalDateTime.now().withNano(0);
-        LocalDate asOf = LocalDate.now();
+        LocalDate asOf = resolveAsOf();
 
         // 1. ACTIVE mapping version gate evaluation (§5, §6.4, R6.4, R8.1, S4-1)
         com.ses.entity.ComplianceMappingVersion activeMapping = mappingVersionMapper != null ? mappingVersionMapper.selectOne(
@@ -235,12 +235,12 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         String legacyIdempotencyKey = idempotencyKey(contractId, request.getDocumentType(), templateVersion,
                 snapshot.getSnapshotHash());
 
-        // Check if delivery already exists for businessKey or legacy idempotencyKey (R8.4, S4-6)
+        // Check if delivery already exists for businessKey or legacy idempotencyKey (R8.4, S4-6, P2-N-3)
         DocumentDelivery existing = deliveryMapper.selectOne(
                 new LambdaQueryWrapper<DocumentDelivery>()
                         .eq(DocumentDelivery::getDeliveryBusinessKey, businessKey)
-                        .or()
-                        .eq(DocumentDelivery::getIdempotencyKey, legacyIdempotencyKey)
+                        .or(w -> w.isNull(DocumentDelivery::getDeliveryBusinessKey)
+                                .eq(DocumentDelivery::getIdempotencyKey, legacyIdempotencyKey))
                         .last("LIMIT 1"));
         if (existing != null && "READY".equals(existing.getGenerationState())) {
             return toDto(existing);
@@ -304,11 +304,11 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         delivery.setRenderEngineVersion("1.0.0");
         delivery.setRenditionGroupId(renditionGroupId);
         delivery.setFullDocumentVersionId(fullVersion != null ? fullVersion.getId() : null);
-        delivery.setFullDocumentSha256(fullSha256);
+        delivery.setFullDocumentSha256(fullVersion != null ? fullVersion.getSha256Hex() : fullSha256);
         delivery.setMaskDocumentVersionId(maskVersion != null ? maskVersion.getId() : null);
-        delivery.setMaskDocumentSha256(maskSha256);
+        delivery.setMaskDocumentSha256(maskVersion != null ? maskVersion.getSha256Hex() : maskSha256);
         delivery.setLimitedDocumentVersionId(limitedVersion != null ? limitedVersion.getId() : null);
-        delivery.setLimitedDocumentSha256(limitedSha256);
+        delivery.setLimitedDocumentSha256(limitedVersion != null ? limitedVersion.getSha256Hex() : limitedSha256);
         delivery.setDeliveryBusinessKey(businessKey);
         delivery.setGenerationState("READY");
 
@@ -416,17 +416,25 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         }
         recordAccessLog(delivery.getDocumentId() != null ? delivery.getDocumentId() : 0L, version.getId());
 
-        // Return the stored immutable PDF rendition bytes! (S4-2)
+        // Return the stored immutable PDF rendition bytes! (S4-2, P2-N-1 fail-closed)
         try {
             byte[] pdfBytes = documentStorage.readAll(version.getStorageKey());
             if (pdfBytes == null || pdfBytes.length == 0) {
                 throw BusinessException.of(404, "error.scope.notFound");
             }
+            String actualSha256 = sha256HexBytes(pdfBytes);
+            if (version.getSha256Hex() != null && !version.getSha256Hex().isBlank()) {
+                if (!version.getSha256Hex().equalsIgnoreCase(actualSha256)) {
+                    log.error("Stored DocumentVersion SHA-256 mismatch for versionId={}: expected={}, actual={}",
+                            version.getId(), version.getSha256Hex(), actualSha256);
+                    throw BusinessException.of(500, "error.file.readFailed");
+                }
+            }
             if (expectedSha256 != null && !expectedSha256.isBlank()) {
-                String actualSha256 = sha256HexBytes(pdfBytes);
                 if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
-                    log.warn("Stored PDF rendition SHA-256 mismatch for versionId={}: expected={}, actual={}",
+                    log.error("Delivery rendition SHA-256 mismatch for versionId={}: expected={}, actual={}",
                             version.getId(), expectedSha256, actualSha256);
+                    throw BusinessException.of(500, "error.file.readFailed");
                 }
             }
             return pdfBytes;
@@ -524,6 +532,22 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             return "MASK";
         }
         return "FULL";
+    }
+
+    private LocalDate resolveAsOf() {
+        return LocalDate.now(resolveDeploymentZoneId());
+    }
+
+    private java.time.ZoneId resolveDeploymentZoneId() {
+        try {
+            String tz = systemConfigService != null ? systemConfigService.getString("deployment.timezone", "Asia/Tokyo") : "Asia/Tokyo";
+            if (!org.springframework.util.StringUtils.hasText(tz)) {
+                tz = "Asia/Tokyo";
+            }
+            return java.time.ZoneId.of(tz);
+        } catch (Exception e) {
+            throw BusinessException.of(409, "compliance.gate.timezoneUnavailable");
+        }
     }
 
     private int templateVersion(String documentType) {

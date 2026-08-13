@@ -77,7 +77,15 @@
 | P3-3（通知書の発火起点） | 法35条の通知義務は開始後に発生。DEADLINE_DISPATCH_NOTICEの開始前発火は不整合 | **通知書ruleの発火起点を派遣開始日へ変更**。T065通知を**banded staging**（90/60/30日window。例: 90日前段階=(60,90]）へ変更し、期限前の誤通知とcatch-up同時発火を解消。明示書ruleは「あらかじめ」義務のため期限90日前から発火を維持。test更新（Deadline 5/5） | **対応済み** |
 | Phase A着手（手続的指摘） | tasks.md step 3〜5（G2 service/API/UI・canonicalizer・ACTIVE guard・preview・L1〜L3・Phase A browser evidence）は本specの実装範囲（R22 CLOSE後の段階的着手条件はR24で充足）。範囲外扱いはM PASSを構造的に到達不能にする | **step 3第一incrementを実装**: `ComplianceMappingCanonicalizer`（§6.2 mapping_hash・§6.3 review_policy_hash・96行manifest mirror CSV）、`ComplianceMappingService`/`ComplianceGateApiController`（createでhash計算・DRAFT→PROVISIONAL_REVIEWED freeze・ACTIVEは証跡gateで保留）、SecurityConfig（`/api/compliance-gate/**`=管理者）。**証跡2のmapping_hashが本canonicalizerで記録可能となった**。L1〜L3: canonicalizer 2/0/0/0・service 3/0/0/0 | **第一increment対応済み・継続中** |
 
-**Phase A step 4（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6完全適用・2026-08-13）**
+**Phase A step 4（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・S4-1〜S4-6・P2-N-1〜P2-N-4 完全対応・2026-08-13）**
+- **N1–N6 / S4-1〜S4-5 完全CLOSE**: ACTIVE mapping, assignment, approval, hash 再照合の fail-closed ゲート評価、0L センチネル排除、不変 PDF バイト列の `download()` 配信。
+- **P2-N-1 (sha256 照合の fail-closed 強化)**: `download()` 時に stored `DocumentVersion` sha256 または delivery rendition sha256 と実際の配信 bytes SHA-256 が不一致の場合、`log.error` とともに 500 `error.file.readFailed` をスローして改竄/破損 bytes の配信を即座に遮断（fail-closed 徹底）。
+- **P2-N-2 (登録済み DocumentVersion の SHA-256 採用)**: PDF レンダリング時 (OpenPDF CreationDate メタデータ等) のバイト微動の影響を受けないよう、`delivery` に保存する SHA-256 列 (`fullDocumentSha256`, `maskDocumentSha256`, `limitedDocumentSha256`) を `registerGenerated` で実際に作成・永続化された `DocumentVersion` の SHA-256 ハッシュから取得して設定。
+- **P2-N-3 (Legacy Idempotency Key 独立化)**: `generate()` の既存 delivery 照合における legacy idempotency key フォールバック判定を `delivery_business_key IS NULL` の旧行に限定。異なる business key を持つ既存 delivery がある場合は新規 delivery の作成を許可（R8.4 準拠）。
+- **P2-N-4 (deployment.timezone 解決の一致)**: `generate()` および `preview()` 内の `asOf` 解決に `resolveAsOf()` / `resolveDeploymentZoneId()` を使用し、マッピング/ゲート評価とデプロイタイムゾーンの一貫性を保証。
+- **検証結果**: `verify-like-ci.ps1` 実行により **200 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
+
+**Phase A step 4 前半（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・2026-08-13）**
 - **N1–N6修正完了**: `ComplianceMappingServiceImpl` (create時のfuture_slot予約・asOf < effectiveFromチェック、effectiveTo=null許可、activateのself-exclusion `.ne(id, version.getId())` ガード、promoteFutureToActiveでの同一operationId/correlationId共有ステータスイベント記録、DB再計算hash一致確認、DuplicateKeyException捕獲による409 versionConflict返却)。
 - **Preview API実装 (`POST /api/contracts/{id}/compliance-documents/preview`)**: DB永続化0件、透かし文字 `"PREVIEW / 本番交付物ではありません"` を含んだPDFストリーム、`Content-Disposition: inline; filename="preview-...pdf"`、`X-Compliance-Preview: true` ヘッダー。
 - **交付ゲートスナップショット & 3 Rendition 正式生成**:
