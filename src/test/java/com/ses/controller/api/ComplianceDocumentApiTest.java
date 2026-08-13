@@ -463,19 +463,19 @@ class ComplianceDocumentApiTest {
         }
 
         Integer asgCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id_snapshot=? AND active_slot=1", Integer.class, workplaceId);
+                "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id=? AND active_slot=1", Integer.class, workplaceId);
         if (asgCount == null || asgCount == 0) {
             jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
-                    + "(tenant_id, user_id, user_name_snapshot, role_code, workplace_id_snapshot, active_slot, effective_from, effective_to, created_by, version) "
-                    + "VALUES ('default', 1, '管理者', 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01', '2026-12-31', 1, 1)", workplaceId);
+                    + "(tenant_id, user_id, role_code, workplace_id, active_slot, effective_from, effective_to, version) "
+                    + "VALUES ('default', 1, 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01 00:00:00', '2026-12-31 23:59:59', 1)", workplaceId);
         }
 
         Integer appCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_compliance_mapping_approval_event WHERE mapping_id=? AND workplace_id=? AND action='APPROVE' AND count_subsequent_revokes=0", Integer.class, mappingId, workplaceId);
+                "SELECT COUNT(*) FROM t_compliance_mapping_approval_event WHERE mapping_id=? AND workplace_id_snapshot=? AND action='APPROVE'", Integer.class, mappingId, workplaceId);
         if (appCount == null || appCount == 0) {
             jdbcTemplate.update("INSERT INTO t_compliance_mapping_approval_event "
-                    + "(tenant_id, mapping_id, workplace_id, assignment_id, actor_user_id, actor_name_snapshot, actor_role_snapshot, action, count_subsequent_revokes, occurred_at, created_by) "
-                    + "VALUES ('default', ?, ?, 1, 1, '管理者', 'ROLE_管理者', 'APPROVE', 0, NOW(), 1)", mappingId, workplaceId);
+                    + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, occurred_at) "
+                    + "VALUES ('default', ?, 'MAPPING-2026-07', ?, ?, 1, ?, 1, '管理者', 'ROLE_管理者', 'APPROVE', NOW())", mappingId, mappingHash, policyHash, workplaceId);
         }
     }
 
