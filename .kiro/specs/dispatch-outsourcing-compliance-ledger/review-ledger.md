@@ -1,5 +1,12 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## 現行判定（S10 T066 本人性確認・資格有効性確認・Review作成者確認 decision packet提出 / R10受理待ち）
+
+`R23-P1-01（docs-only）: reviewer-verification-decision-delta-r23-p1-01.md を提出し、R10の ACCEPTED_FOR_IMPLEMENTATION を待つ。
+docs-only契約: V102_1 migration・verification DDL・entity・serviceは未作成（ReviewerVerificationMigrationOrderContractTest 3/0/0/0 が
+V102 < V102.1 < V103順序・V102_1未存在・V102不変をdirect検証）。既存P0指摘（空group skip・validateFrozenReviewPolicy複数実装・
+findLatestByDocumentId利用・evidence resolver欠如）は本delta §4の実装フェーズ契約として確定。`
+
 ## 現行判定（R24対応確認PASS / M PASSはG2 gate証跡待ち）
 
 `R10 R24対応確認: 6a8e2b80（混入revert＋ledger転記＋P2 note①訂正）を検証しPASS。net diff=review-ledger +3/-3のみ、codeはCI検証済み16f40e0fと同一、CI 1842/0/0/0 skip 0 SUCCESS。新規issueなし（P0=0/P1=0/P2=0）。T066 M: 実装・L4全量（1844/0/0/0・skip 41=Docker gateのみ・**DeliveryDeadlineRule追加後も再確認済み**）最終確認済み。M PASS条件未達（G2 gate 5項目・人間/外部プロセス関与）。production authorizationなし、S12 NOT READY維持`。
