@@ -34,6 +34,8 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     private final com.ses.mapper.WorkplaceMapper workplaceMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
     private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
+    private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
+    private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
 
     @Override
     public List<ComplianceExternalReviewerType> listReviewerTypes() {
@@ -278,6 +280,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                 requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
@@ -286,9 +289,6 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         versionMapper.updateById(version);
     }
 
-    private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
-    private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
-    private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
 
     @Override
     @Transactional
