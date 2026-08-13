@@ -1,12 +1,12 @@
 {
-  "runId" : "browser-m-20260810202700",
-  "baseUrl" : "http://localhost:60577",
+  "runId" : "browser-m-20260813101715",
+  "baseUrl" : "http://localhost:63593",
   "desktop-png" : "desktop-attendance-management.png",
-  "desktop-png-sha256" : "e48aae2997b1d35041b0d944881d1b0ed3fc69e073c1d4f555ad09462f5d6a65",
-  "desktop-finalUrl" : "http://localhost:60577/work-record/attendance",
+  "desktop-png-sha256" : "bf43dc637c06c0956a85397c0a9c8883b352b1380cf897af60e198428ed79afa",
+  "desktop-finalUrl" : "http://localhost:63593/work-record/attendance",
   "desktop-consoleCount" : 3,
   "mobile390-png" : "mobile390-attendance-management.png",
-  "mobile390-png-sha256" : "dbb8c7369ccad0324e99fa4a2767907e07b84141a85f94ee8cb7f865c5f31c92",
-  "mobile390-finalUrl" : "http://localhost:60577/work-record/attendance",
+  "mobile390-png-sha256" : "776d2c6eee2768920c644c4b371242fb2c89e8c036fc9716bdc89298fde3e2bf",
+  "mobile390-finalUrl" : "http://localhost:63593/work-record/attendance",
   "mobile390-consoleCount" : 3
 }

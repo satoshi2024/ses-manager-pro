@@ -267,6 +267,21 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         return requirementType;
     }
 
+    /** policy（group/type）変更をmapping versionのreview_policy_hashへ反映する（DRAFTのみ）。 */
+    private void refreshPolicyHash(Long mappingId) {
+        com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
+        if (version == null || !ComplianceMappingServiceImpl.STATUS_DRAFT.equals(version.getStatus())) {
+            return;
+        }
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups =
+                requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
+                requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(groups, types));
         versionMapper.updateById(version);
     }
