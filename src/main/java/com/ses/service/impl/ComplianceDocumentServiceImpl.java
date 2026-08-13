@@ -534,17 +534,19 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         return "FULL";
     }
 
+    @org.springframework.beans.factory.annotation.Value("${spring.jackson.time-zone:#{null}}")
+    private String deploymentTimezone;
+
     private LocalDate resolveAsOf() {
         return LocalDate.now(resolveDeploymentZoneId());
     }
 
     private java.time.ZoneId resolveDeploymentZoneId() {
+        if (!org.springframework.util.StringUtils.hasText(deploymentTimezone)) {
+            throw BusinessException.of(409, "compliance.gate.timezoneUnavailable");
+        }
         try {
-            String tz = systemConfigService != null ? systemConfigService.getString("deployment.timezone", "Asia/Tokyo") : "Asia/Tokyo";
-            if (!org.springframework.util.StringUtils.hasText(tz)) {
-                tz = "Asia/Tokyo";
-            }
-            return java.time.ZoneId.of(tz);
+            return java.time.ZoneId.of(deploymentTimezone.trim());
         } catch (Exception e) {
             throw BusinessException.of(409, "compliance.gate.timezoneUnavailable");
         }

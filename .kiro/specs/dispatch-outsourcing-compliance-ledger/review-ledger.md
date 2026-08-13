@@ -82,7 +82,7 @@
 - **P2-N-1 (sha256 照合の fail-closed 強化)**: `download()` 時に stored `DocumentVersion` sha256 または delivery rendition sha256 と実際の配信 bytes SHA-256 が不一致の場合、`log.error` とともに 500 `error.file.readFailed` をスローして改竄/破損 bytes の配信を即座に遮断（fail-closed 徹底）。
 - **P2-N-2 (登録済み DocumentVersion の SHA-256 採用)**: PDF レンダリング時 (OpenPDF CreationDate メタデータ等) のバイト微動の影響を受けないよう、`delivery` に保存する SHA-256 列 (`fullDocumentSha256`, `maskDocumentSha256`, `limitedDocumentSha256`) を `registerGenerated` で実際に作成・永続化された `DocumentVersion` の SHA-256 ハッシュから取得して設定。
 - **P2-N-3 (Legacy Idempotency Key 独立化)**: `generate()` の既存 delivery 照合における legacy idempotency key フォールバック判定を `delivery_business_key IS NULL` の旧行に限定。異なる business key を持つ既存 delivery がある場合は新規 delivery の作成を許可（R8.4 準拠）。
-- **P2-N-4 (deployment.timezone 解決の一致)**: `generate()` および `preview()` 内の `asOf` 解決に `resolveAsOf()` / `resolveDeploymentZoneId()` を使用し、マッピング/ゲート評価とデプロイタイムゾーンの一貫性を保証。
+- **P2-N-4 / P3-N-1 (deployment.timezone 統一 & 黙示 default 撤廃)**: `ComplianceDocumentServiceImpl` と `ComplianceMappingServiceImpl` のタイムゾーン解決を `@Value("${spring.jackson.time-zone:#{null}}")` へ一元化。欠落・不正時は両サービスとも統一して黙示デフォルト置換を行わずに 409 `compliance.gate.timezoneUnavailable` をスローする fail-closed 仕様に集約。
 - **検証結果**: `verify-like-ci.ps1` 実行により **200 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
 
 **Phase A step 4 前半（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・2026-08-13）**

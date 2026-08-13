@@ -441,18 +441,18 @@ class ComplianceDocumentApiTest {
     }
 
     private void seedGateData(Long workplaceId) {
+        com.ses.entity.ComplianceMappingVersion v = new com.ses.entity.ComplianceMappingVersion();
+        v.setMappingCode("G2-MAPPING");
+        v.setMappingVersion("MAPPING-2026-07");
+        v.setEffectiveFrom(java.time.LocalDate.of(2026, 1, 1));
+        v.setEffectiveTo(java.time.LocalDate.of(2026, 12, 31));
+        String mappingHash = canonicalizer.computeMappingHash(v, java.util.List.of());
+        String policyHash = canonicalizer.computeReviewPolicyHash(java.util.List.of(), java.util.List.of());
+
         Integer mappingCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM m_compliance_mapping_version WHERE tenant_id='default' AND mapping_code='G2-MAPPING' AND status='ACTIVE' AND active_slot=1", Integer.class);
         Long mappingId;
         if (mappingCount == null || mappingCount == 0) {
-            com.ses.entity.ComplianceMappingVersion v = new com.ses.entity.ComplianceMappingVersion();
-            v.setMappingCode("G2-MAPPING");
-            v.setMappingVersion("MAPPING-2026-07");
-            v.setEffectiveFrom(java.time.LocalDate.of(2026, 1, 1));
-            v.setEffectiveTo(java.time.LocalDate.of(2026, 12, 31));
-            String mappingHash = canonicalizer.computeMappingHash(v, java.util.List.of());
-            String policyHash = canonicalizer.computeReviewPolicyHash(java.util.List.of(), java.util.List.of());
-
             jdbcTemplate.update("INSERT INTO m_compliance_mapping_version "
                     + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, effective_to, status, active_slot, created_by, version) "
                     + "VALUES ('default', 'G2-MAPPING', 'MAPPING-2026-07', ?, ?, '2026-01-01', '2026-12-31', 'ACTIVE', 1, 1, 1)",
