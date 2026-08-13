@@ -35,18 +35,27 @@ public class ComplianceExternalReviewVerificationServiceImpl
     private final ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final ComplianceMappingVersionMapper versionMapper;
     private final ComplianceGateEvidenceResolver evidenceResolver;
+    private final com.ses.service.compliance.ComplianceReviewerFingerprintService fingerprintService;
+    private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
+    private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
 
     public ComplianceExternalReviewVerificationServiceImpl(
             ComplianceExternalReviewEventMapper reviewEventMapper,
             ComplianceExternalReviewerSubjectMapper subjectMapper,
             ComplianceExternalReviewerVerificationEventMapper verificationEventMapper,
             ComplianceMappingVersionMapper versionMapper,
-            ComplianceGateEvidenceResolver evidenceResolver) {
+            ComplianceGateEvidenceResolver evidenceResolver,
+            com.ses.service.compliance.ComplianceReviewerFingerprintService fingerprintService,
+            com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService,
+            com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider) {
         this.reviewEventMapper = reviewEventMapper;
         this.subjectMapper = subjectMapper;
         this.verificationEventMapper = verificationEventMapper;
         this.versionMapper = versionMapper;
         this.evidenceResolver = evidenceResolver;
+        this.fingerprintService = fingerprintService;
+        this.credentialCryptoService = credentialCryptoService;
+        this.keyProvider = keyProvider;
     }
 
     @Override
@@ -124,9 +133,12 @@ public class ComplianceExternalReviewVerificationServiceImpl
         event.setReviewerTypeCodeSnapshot(submitted.getReviewerTypeCodeSnapshot());
         event.setReviewerTypeNameSnapshot(submitted.getReviewerTypeNameSnapshot());
         event.setReviewerSubjectId(reviewerSubjectId);
-        event.setPersonFingerprintSnapshot(subject.getPersonFingerprintSnapshot());
-        event.setQualificationFingerprintSnapshot(subject.getPersonFingerprintSnapshot());
-        event.setFingerprintKeyVersion(subject.getFingerprintKeyVersion());
+        // §9 fingerprint domain分離（R23-S3-P1-01）: personとqualificationは別domainのtenant-HMAC。
+        event.setPersonFingerprintSnapshot(fingerprintService.personFingerprint("default", subject));
+        event.setQualificationFingerprintSnapshot(fingerprintService.qualificationFingerprint(
+                "default", subject, submitted.getReviewerTypeCodeSnapshot(), registrationIdentifier));
+        event.setFingerprintKeyVersion(subject.getFingerprintKeyVersion() != null
+                ? subject.getFingerprintKeyVersion() : keyProvider.getCurrentKeyVersion());
         event.setVerificationKind(verificationKind);
         event.setResult(result);
         event.setMethodCode(methodCode);
@@ -155,10 +167,16 @@ public class ComplianceExternalReviewVerificationServiceImpl
         event.setOperationId(opId);
         event.setCorrelationId(correlationId);
         event.setIdempotencyKey(key);
-        // registration identifierは暗号化せず、maskedのみ記録する（§7 My Number非保存・raw保存禁止の契約に整合）。
-        // 暗号化が必要なidentifierはComplianceGateCredentialCryptoServiceを別途適用する。
+        // §3.3/§7（R23-S3-P2-01）: registration identifierはAES-GCM（CGC1 envelope）で暗号化し、
+        // key version/cipher formatと共に保存する。My Numberは保存しない（§7）。
         if (StringUtils.hasText(registrationIdentifier)) {
             String raw = registrationIdentifier.trim();
+            String envelope = credentialCryptoService.encrypt(
+                    "default", mappingId, mappingVersion, opId, raw);
+            event.setRegistrationIdentifierEncrypted(envelope);
+            event.setRegistrationIdentifierKeyVersion(keyProvider.getCurrentKeyVersion());
+            event.setRegistrationIdentifierCipherFormat(
+                    com.ses.service.compliance.ComplianceGateCredentialCryptoServiceImpl.CIPHER_FORMAT_CGC1);
             event.setRegistrationIdentifierMaskedSnapshot(
                     raw.length() > 4 ? "****" + raw.substring(raw.length() - 4) : "VALIDATED");
         }
