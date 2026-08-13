@@ -8,9 +8,9 @@
 
 | ID | spec | spec状態 | implementation状態 | 開始 gate | base/head | Review | 次 action |
 |---|---|---|---|---|---|---|---|
-| HFP-01 | payroll-management | REVIEWABLE | NOT_STARTED | freee test company/API spike | 未設定 | commit固定Review待ち | READY後、HFP-01-001を実行 |
-| HFP-02 | contract-document-esign | REVIEWABLE | NOT_STARTED | CloudSign正式API/sandbox spike | 未設定 | commit固定Review待ち | READY後、HFP-02-00を実行 |
-| HFP-03 | database-backup-recovery | REVIEWABLE | NOT_STARTED | 隔離MySQL/repository/RPO-RTO決定 | 未設定 | commit固定Review待ち | READY後、HFP-03-001を実行 |
+| HFP-01 | payroll-management | READY | NOT_READY | freee test company/API spike | `be98790c` / plan `9c8141d8` | rebase後commit固定Review PASS | gate確認後、HFP-01-001を実行 |
+| HFP-02 | contract-document-esign | READY | NOT_READY | CloudSign正式API/sandbox spike | `be98790c` / plan `9c8141d8` | rebase後commit固定Review PASS | gate確認後、HFP-02-00を実行 |
+| HFP-03 | database-backup-recovery | READY | NOT_READY | 隔離MySQL/repository/RPO-RTO決定 | `be98790c` / plan `9c8141d8` | rebase後commit固定Review PASS | gate確認後、HFP-03-001を実行 |
 
 `spec状態` は本計画 branch の独立文書 Review 後に `READY` へ変更する。production 実装の開始 gate が未達なら、spec が READY でも implementation は NOT READY のままとする。
 

@@ -47,6 +47,11 @@ working diffでの結果: `PASS`。production sourceを変更していないた�
 
 | Round | Reviewed commit / delta | 判定 | Finding |
 |---|---|---|---|
-| 1 | commit後に記録 | NOT_RUN | commit固定前 |
+| 1 | `18e19b8c7129e075b5ca1773c07f09671d8fbe66` / base `99fbed8294dd1a6c320b4413b832f7c7b9292da1` | PASS | P0=0 / P1=0 / P2=0 |
+| 2 | rebase後の計画content `9c8141d8` / `origin/main` `be98790c6d1d213518542456de86d4c6802fbdc7` | PASS | P0=0 / P1=0 / P2=0 / NOTE=0 |
 
-commit固定Reviewが`PASS`になるまで、中央`execution-ledger.md`のspec状態を`READY`へ変更しない。
+独立Reviewerはclean worktree、HEAD/base/merge-base、32件の`.kiro`差分を固定し、`verify-spec-package.ps1`（AC=15/60/36、Task=11/11/12）と`git diff --check`を再実行した。初回6 findingとCloudSign post-merge canaryの収束を確認し、再現可能なP0/P1または確定P2なしで`PASS`と判定した。
+
+この文書だけを更新する台帳commitはproduction/spec契約を変更しないため、Round 1の対象commitに対する判定を維持する。
+
+Round 2ではworktree、HEAD/base/merge-baseを固定し、`origin/main..HEAD`の32件の`.kiro`差分、機械検証、重基前後のstable patch-id一致を独立Reviewerが確認した。計画contentは同一であり、最新mainとの競合や新規findingはなかった。本行と中央ledgerだけを更新するPR準備commitはspec契約を変更しない。
