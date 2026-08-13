@@ -1,8 +1,7 @@
 package com.ses.service.compliance;
 
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -21,9 +20,9 @@ import java.util.regex.Pattern;
  * In dev/test profiles: fallback to default test key version "v1" if unconfigured.
  */
 @Component
-@Slf4j
-@RequiredArgsConstructor
 public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCredentialKeyProvider {
+
+    private static final Logger log = LoggerFactory.getLogger(ComplianceGateCredentialKeyProviderImpl.class);
 
     private static final Pattern KEY_VERSION_PATTERN = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
     private static final String DEFAULT_TEST_KEY_VERSION = "v1";
@@ -31,6 +30,10 @@ public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCr
     private static final String DEFAULT_TEST_KEY_BASE64URL = Base64.getUrlEncoder().withoutPadding().encodeToString("01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8));
 
     private final Environment environment;
+
+    public ComplianceGateCredentialKeyProviderImpl(Environment environment) {
+        this.environment = environment;
+    }
 
     private String currentKeyVersion;
     private final Map<String, byte[]> keyMap = new HashMap<>();

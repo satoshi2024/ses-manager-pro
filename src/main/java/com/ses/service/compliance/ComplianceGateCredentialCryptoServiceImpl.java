@@ -1,8 +1,8 @@
 package com.ses.service.compliance;
 
 import com.ses.common.exception.BusinessException;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -22,9 +22,9 @@ import java.util.Base64;
  * Identity hash (§6.3): canonical JSON SHA-256 hex.
  */
 @Component
-@Slf4j
-@RequiredArgsConstructor
 public class ComplianceGateCredentialCryptoServiceImpl implements ComplianceGateCredentialCryptoService {
+
+    private static final Logger log = LoggerFactory.getLogger(ComplianceGateCredentialCryptoServiceImpl.class);
 
     public static final String CIPHER_FORMAT_CGC1 = "CGC1";
     private static final String AES_TRANSFORMATION = "AES/GCM/NoPadding";
@@ -33,6 +33,10 @@ public class ComplianceGateCredentialCryptoServiceImpl implements ComplianceGate
 
     private final ComplianceGateCredentialKeyProvider keyProvider;
     private final SecureRandom secureRandom = new SecureRandom();
+
+    public ComplianceGateCredentialCryptoServiceImpl(ComplianceGateCredentialKeyProvider keyProvider) {
+        this.keyProvider = keyProvider;
+    }
 
     @Override
     public String encrypt(String tenantId, Long mappingId, String mappingVersion, String operationId, String credentialRaw) {

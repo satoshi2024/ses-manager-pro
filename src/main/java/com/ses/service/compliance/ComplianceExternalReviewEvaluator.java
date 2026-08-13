@@ -7,8 +7,8 @@ import com.ses.entity.ComplianceMappingVersion;
 import com.ses.entity.DocumentVersion;
 import com.ses.mapper.ComplianceExternalReviewEventMapper;
 import com.ses.mapper.DocumentVersionMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -29,13 +29,21 @@ import java.util.Set;
  * evidence CLEAN status, valid_until expiry, and credential decryption verification.
  */
 @Component
-@Slf4j
-@RequiredArgsConstructor
 public class ComplianceExternalReviewEvaluator {
+
+    private static final Logger log = LoggerFactory.getLogger(ComplianceExternalReviewEvaluator.class);
 
     private final ComplianceExternalReviewEventMapper externalReviewEventMapper;
     private final ComplianceGateCredentialCryptoService credentialCryptoService;
     private final DocumentVersionMapper documentVersionMapper;
+
+    public ComplianceExternalReviewEvaluator(ComplianceExternalReviewEventMapper externalReviewEventMapper,
+                                               ComplianceGateCredentialCryptoService credentialCryptoService,
+                                               DocumentVersionMapper documentVersionMapper) {
+        this.externalReviewEventMapper = externalReviewEventMapper;
+        this.credentialCryptoService = credentialCryptoService;
+        this.documentVersionMapper = documentVersionMapper;
+    }
 
     /**
      * Evaluates a requirement group against external review events for a mapping version as of a target date.
