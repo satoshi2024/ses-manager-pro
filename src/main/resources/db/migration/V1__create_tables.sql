@@ -13,6 +13,9 @@ DROP TABLE IF EXISTS t_notification_read;
 DROP TABLE IF EXISTS t_notification;
 DROP TABLE IF EXISTS t_compliance_operation_ledger;
 DROP TABLE IF EXISTS t_compliance_mapping_status_event;
+DROP TABLE IF EXISTS t_compliance_external_review_adoption_event;
+DROP TABLE IF EXISTS t_compliance_external_reviewer_verification_event;
+DROP TABLE IF EXISTS t_compliance_external_reviewer_subject;
 DROP TABLE IF EXISTS t_compliance_external_review_event;
 DROP TABLE IF EXISTS t_compliance_mapping_approval_event;
 DROP TABLE IF EXISTS t_compliance_responsible_assignment;
@@ -2241,3 +2244,84 @@ ALTER TABLE t_contract ADD CONSTRAINT fk_contract_cost_center FOREIGN KEY (cost_
   ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE t_contract ADD CONSTRAINT fk_contract_order_line FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id)
   ON UPDATE CASCADE ON DELETE SET NULL;
+
+-- ============================================================
+-- R23-P1-01: reviewer subject / verification / adoption events
+-- （V102_1__reviewer_verification_events.sql と同一shapeをconsolidated baselineへfold）
+-- ============================================================
+CREATE TABLE t_compliance_external_reviewer_subject (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  subject_code VARCHAR(100) NOT NULL, display_name VARCHAR(200) NOT NULL, organization_name VARCHAR(200) NOT NULL,
+  person_fingerprint_snapshot CHAR(64) NOT NULL, fingerprint_key_version VARCHAR(64) NOT NULL,
+  created_by BIGINT, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_by BIGINT,
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  CONSTRAINT uk_g2_subject UNIQUE (tenant_id, subject_code), CONSTRAINT uk_g2_subject_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_subject_fingerprint CHECK (CHAR_LENGTH(person_fingerprint_snapshot) = 64),
+  CONSTRAINT fk_g2_subject_created_by FOREIGN KEY (created_by) REFERENCES sys_user(id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE t_compliance_external_reviewer_verification_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  reviewer_type_id BIGINT NOT NULL, reviewer_type_code_snapshot VARCHAR(100) NOT NULL, reviewer_type_name_snapshot VARCHAR(200) NOT NULL,
+  reviewer_subject_id BIGINT NOT NULL, person_fingerprint_snapshot CHAR(64) NOT NULL, qualification_fingerprint_snapshot CHAR(64) NOT NULL,
+  fingerprint_key_version VARCHAR(64) NOT NULL, verification_kind VARCHAR(20) NOT NULL, result VARCHAR(20) NOT NULL,
+  method_code VARCHAR(50) NOT NULL, authority_source_code VARCHAR(50) NOT NULL, authority_source_name VARCHAR(200) NOT NULL,
+  official_url_reference_snapshot VARCHAR(1000), registration_identifier_encrypted TEXT,
+  registration_identifier_key_version VARCHAR(64), registration_identifier_cipher_format VARCHAR(20), registration_identifier_masked_snapshot VARCHAR(255),
+  checked_at DATETIME(6) NOT NULL, source_data_as_of DATETIME(6), max_age_days_snapshot INT, valid_until DATETIME(6), checked_by BIGINT NOT NULL,
+  evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  review_policy_version VARCHAR(50), review_policy_hash CHAR(64), mapping_id BIGINT, mapping_version VARCHAR(50), mapping_hash CHAR(64),
+  external_review_event_id BIGINT, external_review_chain_id VARCHAR(36), submitted_review_event_id BIGINT NOT NULL,
+  revoked_verification_event_id BIGINT, supersedes_verification_event_id BIGINT,
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_g2_verification_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_verification_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_verification_kind CHECK (verification_kind IN ('IDENTITY','QUALIFICATION','ACTIVE_STATUS','REVIEW_AUTHORSHIP')),
+  CONSTRAINT chk_g2_verification_result CHECK (result IN ('VERIFIED','FAILED','INCONCLUSIVE','REVOKED')),
+  CONSTRAINT chk_g2_verification_fingerprint CHECK (CHAR_LENGTH(person_fingerprint_snapshot) = 64 AND CHAR_LENGTH(qualification_fingerprint_snapshot) = 64),
+  CONSTRAINT fk_g2_verification_subject FOREIGN KEY (tenant_id, reviewer_subject_id)
+    REFERENCES t_compliance_external_reviewer_subject(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_submitted FOREIGN KEY (tenant_id, submitted_review_event_id)
+    REFERENCES t_compliance_external_review_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_revoked FOREIGN KEY (tenant_id, revoked_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_supersedes FOREIGN KEY (tenant_id, supersedes_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_evidence FOREIGN KEY (tenant_id, evidence_document_version_id)
+    REFERENCES t_document_version(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_mapping FOREIGN KEY (tenant_id, mapping_id)
+    REFERENCES m_compliance_mapping_version(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_verification_review FOREIGN KEY (tenant_id, external_review_event_id)
+    REFERENCES t_compliance_external_review_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE t_compliance_external_review_adoption_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  action VARCHAR(20) NOT NULL, review_chain_id VARCHAR(36) NOT NULL, submitted_review_event_id BIGINT NOT NULL, revoked_adoption_event_id BIGINT,
+  identity_verification_event_id BIGINT, qualification_verification_event_id BIGINT, active_status_verification_event_id BIGINT,
+  authorship_verification_event_id BIGINT, mapping_id BIGINT, mapping_version VARCHAR(50), mapping_hash CHAR(64),
+  review_policy_version VARCHAR(50), review_policy_hash CHAR(64),
+  evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  adopted_at DATETIME(6) NOT NULL, adopted_by BIGINT NOT NULL,
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT uk_g2_adoption_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_adoption_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_g2_adoption_action CHECK (action IN ('APPROVED','REJECTED','REVOKED')),
+  CONSTRAINT fk_g2_adoption_submitted FOREIGN KEY (tenant_id, submitted_review_event_id)
+    REFERENCES t_compliance_external_review_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_revoked FOREIGN KEY (tenant_id, revoked_adoption_event_id)
+    REFERENCES t_compliance_external_review_adoption_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_identity FOREIGN KEY (tenant_id, identity_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_qualification FOREIGN KEY (tenant_id, qualification_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_active_status FOREIGN KEY (tenant_id, active_status_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_authorship FOREIGN KEY (tenant_id, authorship_verification_event_id)
+    REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_evidence FOREIGN KEY (tenant_id, evidence_document_version_id)
+    REFERENCES t_document_version(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_g2_adoption_mapping FOREIGN KEY (tenant_id, mapping_id)
+    REFERENCES m_compliance_mapping_version(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

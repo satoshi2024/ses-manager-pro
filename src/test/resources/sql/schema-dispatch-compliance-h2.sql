@@ -826,7 +826,7 @@ CREATE TABLE IF NOT EXISTS t_compliance_external_review_event (
   review_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, reviewed_at TIMESTAMP(6) NOT NULL, valid_until TIMESTAMP(6), recorded_at TIMESTAMP(6) NOT NULL,
   evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64), recorded_by BIGINT NOT NULL,
   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), CHECK(action IN ('APPROVED','REJECTED','REVOKED')),
+   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), CHECK(action IN ('SUBMITTED','APPROVED','REJECTED','REVOKED')),
    CONSTRAINT fk_g2_external_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
    CONSTRAINT fk_g2_external_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
    CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id),
