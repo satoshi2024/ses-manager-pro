@@ -33,6 +33,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     private final com.ses.mapper.ComplianceMappingVersionMapper versionMapper;
     private final com.ses.mapper.WorkplaceMapper workplaceMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
+    private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
 
     @Override
     public List<ComplianceExternalReviewerType> listReviewerTypes() {
@@ -288,8 +289,6 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
     private static final String CREDENTIAL_SECRET_KEY = "ComplianceExternalReviewKey2026";
 
-    private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
-
     @Override
     @Transactional
     public com.ses.entity.ComplianceExternalReviewEvent recordExternalReview(Long mappingId, Long requirementGroupId, Long reviewerTypeId,
@@ -344,6 +343,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         event.setRecordedBy(SecurityUtils.currentUserId());
         event.setOperationId(java.util.UUID.randomUUID().toString());
         event.setCorrelationId(java.util.UUID.randomUUID().toString());
+        event.setIdempotencyKey(sha256Hex("EXT_REV:" + mappingId + ":" + group.getId() + ":" + identityHash + ":" + event.getReviewedAt()));
 
         if (externalReviewEventMapper != null) {
             externalReviewEventMapper.insertEvent(event);

@@ -466,8 +466,8 @@ class ComplianceDocumentApiTest {
                 "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id=? AND active_slot=1", Integer.class, workplaceId);
         if (asgCount == null || asgCount == 0) {
             jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
-                    + "(tenant_id, user_id, role_code, workplace_id, active_slot, effective_from, effective_to, version) "
-                    + "VALUES ('default', 1, 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01 00:00:00', '2026-12-31 23:59:59', 1)", workplaceId);
+                    + "(tenant_id, user_id, role_code, workplace_id, active_slot, effective_from, effective_to, version, assigned_by) "
+                    + "VALUES ('default', 1, 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01 00:00:00', '2026-12-31 23:59:59', 1, 1)", workplaceId);
         }
 
         Integer appCount = jdbcTemplate.queryForObject(
