@@ -1,5 +1,38 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## pre-R10独立確認（R23-P1-01 corrected v2）: artifact boundary PASS・semantic blocker残存 — 履歴（上書き・削除しない）
+
+`pre-R10独立確認（361558cc・corrected v2）: artifact boundary PASS（parent=f42faea0・Markdown 2件のみ・+377/-0・non-md 0・
+diff --check PASS・V102 blob不変・V102_1未作成・local/remote一致）。しかしdecision semanticsに残存blocker（K1〜K8）を検出:
+K1（SUBMITTEDはV102のchk_g2_external_review_action='APPROVED/REJECTED/REVOKED'に違反・forward replacement要）、
+K2（polymorphic target_event_idは別tableを単一FKで参照不能・用途別列へ分離要）、
+K3（同一operation claimでstep1-4実行は誤り・各action別claim/transaction・adopted_at,id reducer・「4 verification」→「当該frozen policyが要求するverification set」）、
+K4（fingerprint決定表が本文に未記載・reviewer_subject_id DB正本化要）、K5（社労士/弁護士/日弁連等を固定value化しない・動的master要）、
+K6（master flag DEFAULT 0禁止・NULL=UNCONFIGURED・freeze点・review_policy_version正本・max_age統一）、
+K7（DDL/CHECKの型・長さ・nullability・CHECK matrix完全具体化要）、K8（文書整合: 「V102適用済み」→published/immutable・§6.3完全指定・
+Controller:121/137・Service:294/355・ledger過大表現訂正）。
+corrected v3作成を指示。T066/S10/S12/ACTIVE/productionは全て変更なし。`
+
+## 現行判定（R23-P1-01 corrected v3再提出 / R10受理待ち）
+
+`R23-P1-01（corrected v3・docs-only）: pre-R10独立確認（K1〜K8）への対応版を再提出。
+K1: chk_g2_external_review_actionをV102_1でforward replacement（SUBMITTED/APPROVED/REJECTED/REVOKED）・legacy扱い・backfill禁止を§3.2で明示。
+K2: polymorphic target_event_id廃止→verificationはsubmitted_review_event_id/revoked_verification_event_id/supersedes_verification_event_id、
+adoptionはsubmitted_review_event_id/revoked_adoption_event_idへ用途別分離（§3.3/3.4）。
+K3: 各action別operation claim・別transaction（5種）・gate採用条件固定・adopted_at,id reducer・「当該frozen policyが要求するverification set」へ統一（§3.2/3.6）。
+K4: t_compliance_external_reviewer_subject（reviewer_subject_id person-stable DB正本）・fingerprint snapshot列・HMAC契約（domain separator・normalization・
+key rotation・fail-closed・My Number不使用）を§9で決定表化。
+K5: 社労士/弁護士/日弁連等の固定value化禁止・dynamic reviewer type/source master（管理者画面設定・snapshot・hash包含）を§3.8で明示。
+K6: master flag NULL=UNCONFIGURED（DEFAULT 0禁止）・新規APIで明示選択必須・freeze点一意化・review_policy_version正本=mapping_version・
+expiry=min(valid_until, checked_at+max_age)・max_age未設定fail-closedを§8/§3.6/§3.7で固定。
+K7: 全列の型・長さ・nullability・CHECK matrix（kind×result・result×nullability・adoption action×references・transition・
+credential all-or-none・evidence all-or-none・flag一致）を§3.3/3.4/3.9で完全具体化。
+K8: 「V102適用済み」→repository published/immutable・environment適用状態=UNKNOWN（flyway_schema_history未採取）・
+§6.3参照をg2-gate-decision-delta-r19-p1-01.md §6.3と完全指定・R19 self-declared hash契約を本R23がsupersedeと明記・
+Controller:121/137・Service:294/355に訂正・v2 ledgerの過大表現を訂正しpre-R10確認履歴を追記。
+regression matrix 28行に拡張（#20-28追加）。
+Provenance: Base=8ffbcddb・前回R10 Head=f42faea0・v2 Head=361558cc・observed main=31d29305。V102 blob不変・V102_1未作成・Markdownのみのboundary維持。`
+
 ## R10判定（R23-P1-01 corrected・docs-only）: CHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED — 履歴（上書き・削除しない）
 
 `R10 Round R23-P1-01（corrected・docs-only）: Provenance REVIEWABLE（f42faea0/8ffbcddb・1 commit・Markdown +243/-0・V102 blob同一）。
