@@ -57,6 +57,9 @@ class ComplianceDocumentApiTest {
     @Autowired
     private DocumentStorage documentStorage;
 
+    @Autowired
+    private com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
+
     @org.springframework.boot.test.mock.mockito.MockBean
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
@@ -294,6 +297,72 @@ class ComplianceDocumentApiTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void previewAPIはDBレコードを永続化せず透かし付きPDFとプレビューヘッダーを返却する() throws Exception {
+        long contractId = insertContractWithProfile();
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("documentType", "DISPATCH_NOTICE");
+        body.put("deliveryMethod", "EMAIL");
+        String json = objectMapper.writeValueAsString(body);
+
+        int deliveryBefore = queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId);
+        int docBefore = queryInt("SELECT COUNT(*) FROM t_document");
+
+        byte[] pdf = mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/preview")
+                        .with(csrf()).contentType("application/json").content(json))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Compliance-Preview", "true"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Content-Disposition", org.hamcrest.Matchers.containsString("inline")))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(new String(pdf, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith("%PDF");
+
+        assertEquals(deliveryBefore, queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId));
+        assertEquals(docBefore, queryInt("SELECT COUNT(*) FROM t_document"));
+    }
+
+    @Test
+    void 承認イベントなしのworkplaceでのgenerateは409を返し交付を行わない() throws Exception {
+        long contractId = insertContract();
+        jdbcTemplate.update("INSERT INTO m_workplace (customer_id, name, organization_unit) "
+                + "VALUES ((SELECT customer_id FROM t_contract WHERE id=?), 'unapproved workplace', '営業部')", contractId);
+        Long workplaceId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_workplace WHERE name='unapproved workplace'", Long.class);
+        jdbcTemplate.update("INSERT INTO t_contract_compliance_profile "
+                + "(tenant_id, contract_id, workplace_id, work_description, dispatch_period_start, dispatch_period_end) "
+                + "VALUES ('default', ?, ?, 'システム開発', '2026-01-01', '2026-12-31')",
+                contractId, workplaceId);
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("documentType", "DISPATCH_NOTICE");
+        body.put("deliveryMethod", "EMAIL");
+        String json = objectMapper.writeValueAsString(body);
+
+        mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/generate")
+                        .with(csrf()).contentType("application/json").content(json))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void downloadは保存済みDocumentVersionの不変PDFバイト列を返す() throws Exception {
+        long contractId = insertContractWithProfile();
+        long deliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL");
+
+        byte[] pdfBefore = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        // profileやエンジニア名を変更
+        jdbcTemplate.update("UPDATE t_contract_compliance_profile SET command_person_name='変更後担当者' WHERE contract_id=?", contractId);
+
+        byte[] pdfAfter = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        // downloadはmaster/profileの動的変更を受けず保存済みimmutable bytesを維持
+        assertThat(pdfAfter).isEqualTo(pdfBefore);
+    }
+
     // ===== データ準備 =====
 
     private long generate(long contractId, String documentType, String deliveryMethod) throws Exception {
@@ -331,7 +400,47 @@ class ComplianceDocumentApiTest {
                 + "work_start_minute, work_end_minute, command_person_name, dispatch_fee_amount) "
                 + "VALUES ('default', ?, ?, 'システム開発', '2026-01-01', '2026-12-31', 540, 1080, '田中', 120000)",
                 contractId, workplaceId);
+        seedGateData(workplaceId);
         return contractId;
+    }
+
+    private void seedGateData(Long workplaceId) {
+        Integer mappingCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_compliance_mapping_version WHERE tenant_id='default' AND mapping_code='G2-MAPPING' AND status='ACTIVE' AND active_slot=1", Integer.class);
+        Long mappingId;
+        if (mappingCount == null || mappingCount == 0) {
+            com.ses.entity.ComplianceMappingVersion v = new com.ses.entity.ComplianceMappingVersion();
+            v.setMappingCode("G2-MAPPING");
+            v.setMappingVersion("MAPPING-2026-07");
+            v.setEffectiveFrom(java.time.LocalDate.of(2026, 1, 1));
+            v.setEffectiveTo(java.time.LocalDate.of(2026, 12, 31));
+            String mappingHash = canonicalizer.computeMappingHash(v, java.util.List.of());
+            String policyHash = canonicalizer.computeReviewPolicyHash(java.util.List.of(), java.util.List.of());
+
+            jdbcTemplate.update("INSERT INTO m_compliance_mapping_version "
+                    + "(tenant_id, mapping_code, mapping_version, mapping_hash, review_policy_hash, effective_from, effective_to, status, active_slot, created_by, version) "
+                    + "VALUES ('default', 'G2-MAPPING', 'MAPPING-2026-07', ?, ?, '2026-01-01', '2026-12-31', 'ACTIVE', 1, 1, 1)",
+                    mappingHash, policyHash);
+            mappingId = jdbcTemplate.queryForObject("SELECT id FROM m_compliance_mapping_version WHERE mapping_code='G2-MAPPING' AND active_slot=1", Long.class);
+        } else {
+            mappingId = jdbcTemplate.queryForObject("SELECT id FROM m_compliance_mapping_version WHERE mapping_code='G2-MAPPING' AND active_slot=1", Long.class);
+        }
+
+        Integer asgCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id_snapshot=? AND active_slot=1", Integer.class, workplaceId);
+        if (asgCount == null || asgCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
+                    + "(tenant_id, user_id, user_name_snapshot, role_code, workplace_id_snapshot, active_slot, effective_from, effective_to, created_by, version) "
+                    + "VALUES ('default', 1, '管理者', 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01', '2026-12-31', 1, 1)", workplaceId);
+        }
+
+        Integer appCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_compliance_mapping_approval_event WHERE mapping_id=? AND workplace_id=? AND action='APPROVE' AND count_subsequent_revokes=0", Integer.class, mappingId, workplaceId);
+        if (appCount == null || appCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_compliance_mapping_approval_event "
+                    + "(tenant_id, mapping_id, workplace_id, assignment_id, actor_user_id, actor_name_snapshot, actor_role_snapshot, action, count_subsequent_revokes, occurred_at, created_by) "
+                    + "VALUES ('default', ?, ?, 1, 1, '管理者', 'ROLE_管理者', 'APPROVE', 0, NOW(), 1)", mappingId, workplaceId);
+        }
     }
 
     private long insertContract() {

@@ -73,6 +73,14 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final CustomerContactMapper customerContactMapper;
     private final EngineerMapper engineerMapper;
     private final com.ses.mapper.CustomerMapper customerMapper;
+    private final com.ses.mapper.ComplianceMappingVersionMapper mappingVersionMapper;
+    private final com.ses.mapper.ComplianceResponsibleAssignmentMapper assignmentMapper;
+    private final com.ses.mapper.ComplianceMappingApprovalEventMapper approvalEventMapper;
+    private final com.ses.mapper.ComplianceMappingSourceMapper mappingSourceMapper;
+    private final com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper requirementGroupMapper;
+    private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
+    private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
+    private final com.ses.service.storage.DocumentStorage documentStorage;
     private final ComplianceFindingMapper findingMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
@@ -106,56 +114,159 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         ContractComplianceProfile profile = profileMapper.selectOne(
                 new LambdaQueryWrapper<ContractComplianceProfile>()
                         .eq(ContractComplianceProfile::getContractId, contractId));
-        if (profile == null) {
+        if (profile == null || profile.getWorkplaceId() == null) {
             throw BusinessException.of(400, "contract.compliance.profileRequired");
         }
+        Long workplaceId = profile.getWorkplaceId();
         ContractComplianceSnapshot snapshot = snapshotWriter.ensureSnapshot(contract, profile);
 
-        String idempotencyKey = idempotencyKey(contractId, request.getDocumentType(), templateVersion,
-                snapshot.getSnapshotHash());
-        DocumentDelivery existing = deliveryMapper.selectOne(
-                new LambdaQueryWrapper<DocumentDelivery>()
-                        .eq(DocumentDelivery::getIdempotencyKey, idempotencyKey)
-                        .last("LIMIT 1"));
-        if (existing != null) {
-            return toDto(existing);
+        LocalDateTime deliveredAt = LocalDateTime.now().withNano(0);
+        LocalDate asOf = LocalDate.now();
+
+        // 1. ACTIVE mapping version gate evaluation (§5, §6.4, R6.4, R8.1, S4-1)
+        com.ses.entity.ComplianceMappingVersion activeMapping = mappingVersionMapper != null ? mappingVersionMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingVersion>()
+                        .eq(com.ses.entity.ComplianceMappingVersion::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingVersion::getMappingCode, "G2-MAPPING")
+                        .eq(com.ses.entity.ComplianceMappingVersion::getStatus, "ACTIVE")
+                        .eq(com.ses.entity.ComplianceMappingVersion::getActiveSlot, 1)
+                        .last("LIMIT 1")) : null;
+        if (activeMapping == null) {
+            throw BusinessException.of(409, "compliance.gate.invalidTransition");
+        }
+        if ((activeMapping.getEffectiveFrom() != null && asOf.isBefore(activeMapping.getEffectiveFrom()))
+                || (activeMapping.getEffectiveTo() != null && asOf.isAfter(activeMapping.getEffectiveTo()))) {
+            throw BusinessException.of(409, "compliance.gate.invalidTransition");
         }
 
-        // 交付物の基準時刻は生成処理全体で一度だけ確定し、archiveとdeliveryへ同じ値を保存する。
-        // DATETIMEの秒精度に合わせ、download時の再読込でもworker snapshotの境界を変えない。
-        LocalDateTime deliveredAt = LocalDateTime.now().withNano(0);
+        // 2. Active responsible assignment for target workplace
+        com.ses.entity.ComplianceResponsibleAssignment activeAssignment = assignmentMapper != null ? assignmentMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceResponsibleAssignment>()
+                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getWorkplaceIdSnapshot, workplaceId)
+                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getActiveSlot, 1)
+                        .last("LIMIT 1")) : null;
+        if (activeAssignment == null) {
+            throw BusinessException.of(409, "compliance.gate.invalidTransition");
+        }
+        if ((activeAssignment.getEffectiveFrom() != null && asOf.isBefore(activeAssignment.getEffectiveFrom()))
+                || (activeAssignment.getEffectiveTo() != null && asOf.isAfter(activeAssignment.getEffectiveTo()))) {
+            throw BusinessException.of(409, "compliance.gate.invalidTransition");
+        }
+
+        // 3. Valid unrevoked approval event (action = "APPROVE", countSubsequentRevokes == 0)
+        com.ses.entity.ComplianceMappingApprovalEvent approvalEvent = approvalEventMapper != null ? approvalEventMapper.selectOne(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, activeMapping.getId())
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceId, workplaceId)
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "APPROVE")
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getCountSubsequentRevokes, 0)
+                        .orderByDesc(com.ses.entity.ComplianceMappingApprovalEvent::getId)
+                        .last("LIMIT 1")) : null;
+        if (approvalEvent == null) {
+            throw BusinessException.of(409, "compliance.gate.approvalRevoked");
+        }
+
+        // 4. Re-verify DB mapping_hash and review_policy_hash match
+        if (canonicalizer != null) {
+            List<com.ses.entity.ComplianceMappingSource> sources = mappingSourceMapper != null ? mappingSourceMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingSource>()
+                            .eq(com.ses.entity.ComplianceMappingSource::getMappingId, activeMapping.getId())) : List.of();
+            String recomputedMappingHash = canonicalizer.computeMappingHash(activeMapping, sources);
+            if (!recomputedMappingHash.equals(activeMapping.getMappingHash())) {
+                throw BusinessException.of(409, "compliance.gate.policyHashMismatch");
+            }
+
+            List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper != null ? requirementGroupMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, activeMapping.getId())) : List.of();
+            List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).filter(java.util.Objects::nonNull).toList();
+            List<com.ses.entity.ComplianceMappingReviewRequirementType> types = (!groupIds.isEmpty() && requirementTypeMapper != null) ? requirementTypeMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                            .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds)) : List.of();
+            String recomputedPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
+            if (!recomputedPolicyHash.equals(activeMapping.getReviewPolicyHash())) {
+                throw BusinessException.of(409, "compliance.gate.policyHashMismatch");
+            }
+        }
+
         String engineerName = contract.getEngineerId() == null ? null
                 : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
                 : engineerMapper.selectById(contract.getEngineerId()).getFullName());
         com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract, deliveredAt);
-        // archive正本は常にFULLで生成する（R4.2）。download時にviewer roleで再maskする。
-        com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, request.getDocumentType(), "FULL", engineerName, workerSnapshot);
-        byte[] pdf = documentGenerator.toPdf(content, messageSource);
 
-        com.ses.dto.document.DocumentRegisterRequest registerRequest =
-                com.ses.dto.document.DocumentRegisterRequest.builder()
-                        .documentType(request.getDocumentType())
-                        .title(messageSource.getMessage("doc.title." + request.getDocumentType(),
-                                null, request.getDocumentType(), org.springframework.context.i18n.LocaleContextHolder.getLocale()))
-                        .counterpartyType("CUSTOMER")
-                        .counterpartyId(contract.getCustomerId())
-                        .counterpartyNameSnapshot(customerName(contract))
-                        .transactionDate(java.time.LocalDate.now())
-                        .sourceType("GENERATED")
-                        .businessKey("COMPLIANCE:" + contractId + ":" + request.getDocumentType())
-                        .versionDiscriminator("v" + templateVersion + ":" + snapshot.getSnapshotHash())
-                        .originalName(request.getDocumentType() + "-" + contractId + ".pdf")
-                        .contentType("application/pdf")
-                        .targetType("CONTRACT")
-                        .targetId(contractId)
-                        .build();
-        Document document = documentService.registerGenerated(registerRequest, new ByteArrayInputStream(pdf));
+        Long mappingVersionId = activeMapping.getId();
+        String mappingVersionStr = activeMapping.getMappingVersion();
+        String mappingHashStr = activeMapping.getMappingHash();
+        String reviewPolicyHashStr = activeMapping.getReviewPolicyHash();
+
+        String recipientHash = recipientHash(request.getRecipientContactId(), contract);
+        String configHash = companyConfigHash();
+        String fieldMaskHash = sha256Hex(maskLevel());
+
+        String gateSnapshotHashStr = computeGateSnapshotHash(
+                activeMapping.getId(), activeMapping.getMappingVersion(), mappingHashStr, reviewPolicyHashStr,
+                workplaceId, activeAssignment, approvalEvent, deliveredAt);
+
+        String renderInputHashStr = computeRenderInputHash(
+                snapshot.getId(), snapshot.getSnapshotHash(),
+                workerSnapshot == null ? null : workerSnapshot.getId(),
+                workerSnapshot == null ? null : workerSnapshot.getSnapshotHash(),
+                workplaceId, recipientHash, configHash,
+                request.getDocumentType(), templateVersion, fieldMaskHash, deliveredAt);
+
+        String businessKey = computeDeliveryBusinessKey(contractId, request.getDocumentType(), templateVersion,
+                snapshot.getId(), snapshot.getSnapshotHash(),
+                workerSnapshot == null ? null : workerSnapshot.getId(),
+                workerSnapshot == null ? null : workerSnapshot.getSnapshotHash(),
+                workplaceId, recipientHash, configHash,
+                mappingVersionId, mappingVersionStr, mappingHashStr, reviewPolicyHashStr,
+                approvalEvent.getId(), fieldMaskHash);
+
+        String legacyIdempotencyKey = idempotencyKey(contractId, request.getDocumentType(), templateVersion,
+                snapshot.getSnapshotHash());
+
+        // Check if delivery already exists for businessKey or legacy idempotencyKey (R8.4, S4-6)
+        DocumentDelivery existing = deliveryMapper.selectOne(
+                new LambdaQueryWrapper<DocumentDelivery>()
+                        .eq(DocumentDelivery::getDeliveryBusinessKey, businessKey)
+                        .or()
+                        .eq(DocumentDelivery::getIdempotencyKey, legacyIdempotencyKey)
+                        .last("LIMIT 1"));
+        if (existing != null && "READY".equals(existing.getGenerationState())) {
+            return toDto(existing);
+        }
+
+        // 3 Renditions generation: FULL, MASK, LIMITED sharing single rendition_group_id (§9.1)
+        String renditionGroupId = java.util.UUID.randomUUID().toString();
+
+        byte[] fullPdf = documentGenerator.toPdf(
+                documentGenerator.build(contract, snapshot, request.getDocumentType(), "FULL", engineerName, workerSnapshot),
+                messageSource);
+        String fullSha256 = sha256HexBytes(fullPdf);
+        Document fullDoc = registerRendition(contract, request.getDocumentType(), templateVersion, snapshot.getSnapshotHash(), "FULL", fullPdf);
+
+        byte[] maskPdf = documentGenerator.toPdf(
+                documentGenerator.build(contract, snapshot, request.getDocumentType(), "MASK", engineerName, workerSnapshot),
+                messageSource);
+        String maskSha256 = sha256HexBytes(maskPdf);
+        Document maskDoc = registerRendition(contract, request.getDocumentType(), templateVersion, snapshot.getSnapshotHash(), "MASK", maskPdf);
+
+        byte[] limitedPdf = documentGenerator.toPdf(
+                documentGenerator.build(contract, snapshot, request.getDocumentType(), "LIMITED", engineerName, workerSnapshot),
+                messageSource);
+        String limitedSha256 = sha256HexBytes(limitedPdf);
+        Document limitedDoc = registerRendition(contract, request.getDocumentType(), templateVersion, snapshot.getSnapshotHash(), "LIMITED", limitedPdf);
+
+        DocumentVersion fullVersion = documentVersionMapper.findLatestByDocumentId(fullDoc.getId());
+        DocumentVersion maskVersion = documentVersionMapper.findLatestByDocumentId(maskDoc.getId());
+        DocumentVersion limitedVersion = documentVersionMapper.findLatestByDocumentId(limitedDoc.getId());
 
         DocumentDelivery delivery = new DocumentDelivery();
         delivery.setTenantId("default");
         delivery.setContractId(contractId);
-        delivery.setDocumentId(document.getId());
+        delivery.setDocumentId(fullDoc.getId());
         delivery.setDocumentType(request.getDocumentType());
         delivery.setTemplateVersion(String.valueOf(templateVersion));
         delivery.setEffectiveFrom(snapshot.getDispatchFrom());
@@ -165,13 +276,40 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         delivery.setDeliveryMethod(request.getDeliveryMethod());
         delivery.setDeliveryStatus("DELIVERED");
         delivery.setDeliveredAt(deliveredAt);
-        delivery.setIdempotencyKey(idempotencyKey);
+        delivery.setIdempotencyKey(legacyIdempotencyKey);
+
+        delivery.setMappingVersionId(mappingVersionId);
+        delivery.setMappingVersion(mappingVersionStr);
+        delivery.setMappingHash(mappingHashStr);
+        delivery.setReviewPolicyHash(reviewPolicyHashStr);
+        delivery.setGateEvaluatedAt(deliveredAt);
+        delivery.setGateSnapshotHash(gateSnapshotHashStr);
+        delivery.setProfileSnapshotId(snapshot.getId());
+        delivery.setProfileSnapshotHash(snapshot.getSnapshotHash());
+        delivery.setWorkerSnapshotId(workerSnapshot == null ? null : workerSnapshot.getId());
+        delivery.setWorkerSnapshotHash(workerSnapshot == null ? null : workerSnapshot.getSnapshotHash());
+        delivery.setWorkplaceId(workplaceId);
+        delivery.setRenderInputHash(renderInputHashStr);
+        delivery.setRecipientDisplaySnapshotHash(recipientHash);
+        delivery.setCompanyConfigSnapshotHash(configHash);
+        delivery.setFieldMaskPolicyHash(fieldMaskHash);
+        delivery.setRenderEngineVersion("1.0.0");
+        delivery.setRenditionGroupId(renditionGroupId);
+        delivery.setFullDocumentVersionId(fullVersion != null ? fullVersion.getId() : null);
+        delivery.setFullDocumentSha256(fullSha256);
+        delivery.setMaskDocumentVersionId(maskVersion != null ? maskVersion.getId() : null);
+        delivery.setMaskDocumentSha256(maskSha256);
+        delivery.setLimitedDocumentVersionId(limitedVersion != null ? limitedVersion.getId() : null);
+        delivery.setLimitedDocumentSha256(limitedSha256);
+        delivery.setDeliveryBusinessKey(businessKey);
+        delivery.setGenerationState("READY");
+
         try {
             deliveryMapper.insert(delivery);
         } catch (DuplicateKeyException e) {
             DocumentDelivery concurrent = deliveryMapper.selectOne(
                     new LambdaQueryWrapper<DocumentDelivery>()
-                            .eq(DocumentDelivery::getIdempotencyKey, idempotencyKey)
+                            .eq(DocumentDelivery::getDeliveryBusinessKey, businessKey)
                             .last("LIMIT 1"));
             if (concurrent != null) {
                 return toDto(concurrent);
@@ -179,6 +317,35 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             throw e;
         }
         return toDto(delivery);
+    }
+
+    @Override
+    public byte[] preview(Long contractId, ComplianceDocumentGenerateRequest request) {
+        Contract contract = requireVisibleContract(contractId);
+        requireComplianceAccess();
+        requireWritable();
+        if (request == null || !ComplianceDocumentGenerator.DOCUMENT_TYPES.contains(request.getDocumentType())) {
+            throw BusinessException.of(400, "contract.compliance.invalidDocumentType");
+        }
+
+        ContractComplianceProfile profile = profileMapper.selectOne(
+                new LambdaQueryWrapper<ContractComplianceProfile>()
+                        .eq(ContractComplianceProfile::getContractId, contractId));
+        if (profile == null) {
+            throw BusinessException.of(400, "contract.compliance.profileRequired");
+        }
+        ContractComplianceSnapshot snapshot = snapshotWriter.ensureSnapshot(contract, profile);
+
+        LocalDateTime deliveredAt = LocalDateTime.now().withNano(0);
+        String engineerName = contract.getEngineerId() == null ? null
+                : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
+                : engineerMapper.selectById(contract.getEngineerId()).getFullName());
+        com.ses.entity.ContractComplianceWorkerSnapshot workerSnapshot = workerSnapshot(contract, deliveredAt);
+
+        String viewerMask = maskLevel();
+        ComplianceDocumentGenerator.Content content = documentGenerator.build(
+                contract, snapshot, request.getDocumentType(), viewerMask, engineerName, workerSnapshot);
+        return documentGenerator.toPdf(content, messageSource, "PREVIEW / 本番交付物ではありません");
     }
 
     @Override
@@ -211,31 +378,56 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         if (delivery == null || !contractId.equals(delivery.getContractId())) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        DocumentVersion version = documentVersionMapper.findLatestByDocumentId(delivery.getDocumentId());
+        if (delivery.getGenerationState() != null && !"READY".equals(delivery.getGenerationState())) {
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
+
+        String viewerMask = maskLevel();
+        Long versionId = null;
+        String expectedSha256 = null;
+        if ("LIMITED".equals(viewerMask) && delivery.getLimitedDocumentVersionId() != null) {
+            versionId = delivery.getLimitedDocumentVersionId();
+            expectedSha256 = delivery.getLimitedDocumentSha256();
+        } else if ("MASK".equals(viewerMask) && delivery.getMaskDocumentVersionId() != null) {
+            versionId = delivery.getMaskDocumentVersionId();
+            expectedSha256 = delivery.getMaskDocumentSha256();
+        } else if (delivery.getFullDocumentVersionId() != null) {
+            versionId = delivery.getFullDocumentVersionId();
+            expectedSha256 = delivery.getFullDocumentSha256();
+        }
+
+        DocumentVersion version = null;
+        if (versionId != null) {
+            version = documentVersionMapper.selectById(versionId);
+        } else if (delivery.getDocumentId() != null) {
+            version = documentVersionMapper.findLatestByDocumentId(delivery.getDocumentId());
+        }
+
         if (version == null || !"CLEAN".equals(version.getScanStatus())) {
-            // 未知/未scanの生成物はfail-closed（download不可）
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
-        recordAccessLog(delivery.getDocumentId(), version.getId());
-        // R4.2: downloadはviewer roleで再maskする（archive正本はFULLのまま保持）。
-        // マネージャー=MASK、営業=LIMITED、管理者/HR=FULL。
-        ContractComplianceSnapshot snapshot = snapshotMapper.selectOne(
-                new LambdaQueryWrapper<ContractComplianceSnapshot>()
-                        .eq(ContractComplianceSnapshot::getContractId, contractId)
-                        .eq(ContractComplianceSnapshot::getSnapshotHash, delivery.getSnapshotHash())
-                        .orderByDesc(ContractComplianceSnapshot::getSnapshotVersion)
-                        .last("LIMIT 1"));
-        if (snapshot == null) {
-            throw BusinessException.of(404, "error.scope.notFound");
+        recordAccessLog(delivery.getDocumentId() != null ? delivery.getDocumentId() : 0L, version.getId());
+
+        // Return the stored immutable PDF rendition bytes! (S4-2)
+        try {
+            byte[] pdfBytes = documentStorage.readAll(version.getStorageKey());
+            if (pdfBytes == null || pdfBytes.length == 0) {
+                throw BusinessException.of(404, "error.scope.notFound");
+            }
+            if (expectedSha256 != null && !expectedSha256.isBlank()) {
+                String actualSha256 = sha256HexBytes(pdfBytes);
+                if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
+                    log.warn("Stored PDF rendition SHA-256 mismatch for versionId={}: expected={}, actual={}",
+                            version.getId(), expectedSha256, actualSha256);
+                }
+            }
+            return pdfBytes;
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            log.error("Failed to read document rendition bytes from storage for versionId={}", version.getId(), e);
+            throw BusinessException.of(500, "error.file.readFailed");
         }
-        String engineerName = contract.getEngineerId() == null ? null
-                : (engineerMapper.selectById(contract.getEngineerId()) == null ? null
-                : engineerMapper.selectById(contract.getEngineerId()).getFullName());
-        String viewerMask = maskLevel();
-        com.ses.service.compliance.ComplianceDocumentGenerator.Content content = documentGenerator.build(
-                contract, snapshot, delivery.getDocumentType(), viewerMask, engineerName,
-                workerSnapshot(contract, delivery.getDeliveredAt()));
-        return documentGenerator.toPdf(content, messageSource);
     }
 
     /**
@@ -371,6 +563,134 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         } catch (Exception e) {
             log.warn("document access logの記録に失敗しました（documentId={}）", documentId, e);
         }
+    }
+
+    private Document registerRendition(Contract contract, String documentType, int templateVersion, String snapshotHash, String renditionLevel, byte[] pdf) {
+        com.ses.dto.document.DocumentRegisterRequest registerRequest =
+                com.ses.dto.document.DocumentRegisterRequest.builder()
+                        .documentType(documentType)
+                        .title(messageSource.getMessage("doc.title." + documentType,
+                                null, documentType, org.springframework.context.i18n.LocaleContextHolder.getLocale()))
+                        .counterpartyType("CUSTOMER")
+                        .counterpartyId(contract.getCustomerId())
+                        .counterpartyNameSnapshot(customerName(contract))
+                        .transactionDate(java.time.LocalDate.now())
+                        .sourceType("COMPLIANCE_DELIVERY_RENDITION")
+                        .businessKey("COMPLIANCE:" + contract.getId() + ":" + documentType + ":" + renditionLevel)
+                        .versionDiscriminator("v" + templateVersion + ":" + snapshotHash + ":" + renditionLevel)
+                        .originalName(documentType + "-" + contract.getId() + "-" + renditionLevel + ".pdf")
+                        .contentType("application/pdf")
+                        .targetType("CONTRACT")
+                        .targetId(contract.getId())
+                        .build();
+        return documentService.registerGenerated(registerRequest, new ByteArrayInputStream(pdf));
+    }
+
+    private String sha256HexBytes(byte[] data) {
+        if (data == null) {
+            return "";
+        }
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(data);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 calculation failed", e);
+        }
+    }
+
+    private String sha256Hex(String text) {
+        return sha256HexBytes(text == null ? new byte[0] : text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private String recipientHash(Long contactId, Contract contract) {
+        if (contactId == null) {
+            return sha256Hex("NO_RECIPIENT");
+        }
+        CustomerContact contact = customerContactMapper.selectById(contactId);
+        if (contact == null) {
+            return sha256Hex("CONTACT_" + contactId);
+        }
+        return sha256Hex(contact.getName() + ":" + contact.getEmail());
+    }
+
+    private String companyConfigHash() {
+        String companyName = systemConfigService.getString("company.name", "");
+        String companyAddress = systemConfigService.getString("company.address", "");
+        return sha256Hex(companyName + ":" + companyAddress);
+    }
+
+    private String computeGateSnapshotHash(Long mappingId, String mappingVersion, String mappingHash, String reviewPolicyHash,
+                                           Long workplaceId, com.ses.entity.ComplianceResponsibleAssignment assignment,
+                                           com.ses.entity.ComplianceMappingApprovalEvent approvalEvent, LocalDateTime gateEvaluatedAt) {
+        StringBuilder payload = new StringBuilder();
+        payload.append("mapping_id=").append(mappingId).append('\n');
+        payload.append("mapping_version=").append(mappingVersion).append('\n');
+        payload.append("mapping_hash=").append(mappingHash).append('\n');
+        payload.append("review_policy_hash=").append(reviewPolicyHash).append('\n');
+        payload.append("workplace_id=").append(workplaceId).append('\n');
+        payload.append("assignment_id=").append(assignment.getId()).append('\n');
+        payload.append("assignment_user_id=").append(assignment.getUserId()).append('\n');
+        payload.append("assignment_effective_from=").append(assignment.getEffectiveFrom()).append('\n');
+        payload.append("assignment_effective_to=").append(assignment.getEffectiveTo()).append('\n');
+        payload.append("approval_event_id=").append(approvalEvent.getId()).append('\n');
+        payload.append("approval_event_action=").append(approvalEvent.getAction()).append('\n');
+        payload.append("approval_event_occurred_at=").append(approvalEvent.getOccurredAt()).append('\n');
+        payload.append("external_review_event=NO_EXTERNAL_REVIEW\n"); // Step 5 fallback
+        payload.append("gate_evaluated_at=").append(gateEvaluatedAt).append('\n');
+        return sha256Hex(payload.toString());
+    }
+
+    private String computeRenderInputHash(Long profileSnapshotId, String profileSnapshotHash,
+                                         Long workerSnapshotId, String workerSnapshotHash,
+                                         Long workplaceId, String recipientHash, String configHash,
+                                         String documentType, int templateVersion, String fieldMaskHash,
+                                         LocalDateTime deliveredAt) {
+        StringBuilder payload = new StringBuilder();
+        payload.append("profile_snapshot_id=").append(profileSnapshotId).append('\n');
+        payload.append("profile_snapshot_hash=").append(profileSnapshotHash).append('\n');
+        payload.append("worker_snapshot_id=").append(workerSnapshotId == null ? "NULL" : workerSnapshotId).append('\n');
+        payload.append("worker_snapshot_hash=").append(workerSnapshotHash == null ? "ABSENT" : workerSnapshotHash).append('\n');
+        payload.append("workplace_id=").append(workplaceId).append('\n');
+        payload.append("recipient_display_hash=").append(recipientHash).append('\n');
+        payload.append("company_config_hash=").append(configHash).append('\n');
+        payload.append("document_type=").append(documentType).append('\n');
+        payload.append("template_version=").append(templateVersion).append('\n');
+        payload.append("field_mask_policy_hash=").append(fieldMaskHash).append('\n');
+        payload.append("render_engine_version=1.0.0\n");
+        payload.append("delivered_at=").append(deliveredAt).append('\n');
+        return sha256Hex(payload.toString());
+    }
+
+    private String computeDeliveryBusinessKey(Long contractId, String documentType, int templateVersion,
+                                               Long profileSnapshotId, String profileSnapshotHash,
+                                               Long workerSnapshotId, String workerSnapshotHash,
+                                               Long workplaceId, String recipientHash, String configHash,
+                                               Long mappingVersionId, String mappingVersion,
+                                               String mappingHash, String reviewPolicyHash,
+                                               Long approvalEventId, String fieldMaskHash) {
+        String workerHashOrAbsent = (workerSnapshotId != null && workerSnapshotHash != null)
+                ? workerSnapshotHash : "ABSENT";
+        String workerIdStr = workerSnapshotId != null ? String.valueOf(workerSnapshotId) : "NULL";
+        String approvalIdStr = approvalEventId != null ? String.valueOf(approvalEventId) : "NULL";
+        String payload = String.format("%s,%d,%s,%d,%d,%s,%s,%s,%d,%s,%s,%d,%s,%s,%s,%s,,,,,%s,1.0.0",
+                "default", contractId, documentType, templateVersion,
+                profileSnapshotId, profileSnapshotHash,
+                workerIdStr, workerHashOrAbsent,
+                workplaceId,
+                recipientHash == null ? "" : recipientHash,
+                configHash == null ? "" : configHash,
+                mappingVersionId == null ? 0 : mappingVersionId,
+                mappingVersion == null ? "" : mappingVersion,
+                mappingHash == null ? "" : mappingHash,
+                reviewPolicyHash == null ? "" : reviewPolicyHash,
+                approvalIdStr,
+                fieldMaskHash == null ? "" : fieldMaskHash);
+        return sha256Hex(payload);
     }
 
     private ComplianceDocumentDeliveryDto toDto(DocumentDelivery delivery) {

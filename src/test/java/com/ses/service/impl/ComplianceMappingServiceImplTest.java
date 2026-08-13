@@ -224,15 +224,12 @@ class ComplianceMappingServiceImplTest {
         assertEquals("PROVISIONAL_REVIEWED", v2Active.getStatus(), "active_slotがNULLのためstatus=PROVISIONAL_REVIEWEDを維持");
         assertEquals(1, v2Active.getFutureSlot(), "既存ACTIVEがあるためfuture_slot=1");
 
-        // Version 3: 2件目のfutureは拒否される
-        ComplianceMappingVersion v3 = complianceMappingService.create(
-                "G2-MAPPING", "MAPPING-2027-01-V3",
-                LocalDate.of(2027, 1, 1), LocalDate.of(2027, 3, 31), allSources());
-        complianceGateAdminService.createRequirementGroup(v3.getId(), "GRP-1", "グループ1", 1);
-        complianceMappingService.transition(v3.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app3 = complianceApprovalService.approve(v3.getId(), workplaceId, "v3確認", null);
+        // Version 3: 2件目のfutureはcreate時点で拒否される（N1）
         assertThrows(com.ses.common.exception.BusinessException.class,
-                () -> complianceMappingService.transition(v3.getId(), "ACTIVE", app3.getId()), "2件目future候補は拒否");
+                () -> complianceMappingService.create(
+                        "G2-MAPPING", "MAPPING-2027-01-V3",
+                        LocalDate.of(2027, 1, 1), LocalDate.of(2027, 3, 31), allSources()),
+                "2件目future候補はcreate時点で拒否される");
 
         // Promote: v2をactive_slot=1へ昇格、v1はSUPERSEDED化
         ComplianceMappingVersion promoted = complianceMappingService.promoteFutureToActive(v2.getId());
@@ -293,6 +290,80 @@ class ComplianceMappingServiceImplTest {
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.promoteFutureToActive(v2.getId()),
                 "承認REVOKE済みのfuture版は昇格拒否される");
+    }
+
+    @Test
+    void createはeffectiveToがnullの無期限マスタを許可しcanonicalizerのhashが安定して出力される() {
+        ComplianceMappingVersion indefinite = complianceMappingService.create(
+                "G2-MAPPING-INDEFINITE", "MAPPING-2026-10",
+                LocalDate.of(2026, 10, 1), null, allSources());
+
+        assertNotNull(indefinite.getId());
+        assertNull(indefinite.getEffectiveTo());
+        assertEquals(64, indefinite.getMappingHash().length());
+    }
+
+    @Test
+    void createは将来候補asOf未満でfuture_slotを1予約し同一マスタコードの2件目を409で拒否する() {
+        // effectiveFrom > now (e.g. 2099-01-01) -> future candidate
+        LocalDate futureFrom = LocalDate.of(2099, 1, 1);
+        ComplianceMappingVersion futureCandidate = complianceMappingService.create(
+                "G2-MAPPING-FUTURE-RESERVE", "MAPPING-2099-01",
+                futureFrom, null, allSources());
+
+        assertNotNull(futureCandidate.getId());
+        assertEquals(1, futureCandidate.getFutureSlot(), "作成時asOf<effectiveFromによりfuture_slot=1が予約される");
+
+        // 2件目の将来候補作成は 409 futureSlotAlreadyExists で拒否
+        com.ses.common.exception.BusinessException ex = assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> complianceMappingService.create(
+                        "G2-MAPPING-FUTURE-RESERVE", "MAPPING-2099-02",
+                        futureFrom, null, allSources()));
+        assertEquals(409, ex.getCode());
+    }
+
+    @Test
+    void promoteFutureToActiveは単一のoperationIdとcorrelationIdを記録しhash不一致時に拒否する() {
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('uuid customer')");
+        Long customerId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_customer WHERE company_name='uuid customer'", Long.class);
+        jdbcTemplate.update("INSERT INTO m_workplace (tenant_id, customer_id, name, organization_unit) "
+                + "VALUES ('default', ?, 'uuid workplace', '開発部')", customerId);
+        Long workplaceId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_workplace WHERE name='uuid workplace'", Long.class);
+        jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
+                + "(tenant_id, workplace_id, user_id, role_code, effective_from, active_slot, assigned_by) "
+                + "VALUES ('default', ?, 1, 'COMPLIANCE_RESPONSIBLE', '2026-08-01 00:00:00.000000', 1, 1)",
+                workplaceId);
+
+        // Version 1 (現在版)
+        ComplianceMappingVersion v1 = complianceMappingService.create(
+                "G2-MAPPING-UUID", "MAPPING-2026-07-UUID1",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
+        complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
+        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
+
+        // Version 2 (future候補)
+        ComplianceMappingVersion v2 = complianceMappingService.create(
+                "G2-MAPPING-UUID", "MAPPING-2026-10-UUID2",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
+        complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
+        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
+
+        // Promote昇格
+        complianceMappingService.promoteFutureToActive(v2.getId());
+
+        // status eventのoperation_id, correlation_idを取得
+        List<java.util.Map<String, Object>> events = jdbcTemplate.queryForList(
+                "SELECT operation_id, correlation_id FROM t_compliance_mapping_status_event WHERE mapping_id IN (?, ?) ORDER BY id DESC LIMIT 2",
+                v1.getId(), v2.getId());
+        assertEquals(2, events.size());
+        assertEquals(events.get(0).get("operation_id"), events.get(1).get("operation_id"), "旧SUPERSEDEDと新ACTIVEでoperation_idが一致");
+        assertEquals(events.get(0).get("correlation_id"), events.get(1).get("correlation_id"), "旧SUPERSEDEDと新ACTIVEでcorrelation_idが一致");
     }
 
     private List<ComplianceMappingSourceInput> allSources() {

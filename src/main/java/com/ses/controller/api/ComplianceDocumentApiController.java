@@ -41,6 +41,17 @@ public class ComplianceDocumentApiController {
         return ApiResult.success(complianceDocumentService.generate(id, request));
     }
 
+    @PostMapping("/{id}/compliance-documents/preview")
+    public ResponseEntity<byte[]> preview(@PathVariable Long id,
+                                          @RequestBody ComplianceDocumentGenerateRequest request) {
+        byte[] pdf = complianceDocumentService.preview(id, request);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"preview-" + (request == null ? "doc" : request.getDocumentType()) + "-" + id + ".pdf\"")
+                .header("X-Compliance-Preview", "true")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdf);
+    }
+
     @PostMapping("/{id}/compliance-documents/{deliveryId}/confirm")
     public ApiResult<ComplianceDocumentDeliveryDto> confirm(@PathVariable Long id,
                                                             @PathVariable Long deliveryId,

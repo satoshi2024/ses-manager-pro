@@ -77,7 +77,15 @@
 | P3-3（通知書の発火起点） | 法35条の通知義務は開始後に発生。DEADLINE_DISPATCH_NOTICEの開始前発火は不整合 | **通知書ruleの発火起点を派遣開始日へ変更**。T065通知を**banded staging**（90/60/30日window。例: 90日前段階=(60,90]）へ変更し、期限前の誤通知とcatch-up同時発火を解消。明示書ruleは「あらかじめ」義務のため期限90日前から発火を維持。test更新（Deadline 5/5） | **対応済み** |
 | Phase A着手（手続的指摘） | tasks.md step 3〜5（G2 service/API/UI・canonicalizer・ACTIVE guard・preview・L1〜L3・Phase A browser evidence）は本specの実装範囲（R22 CLOSE後の段階的着手条件はR24で充足）。範囲外扱いはM PASSを構造的に到達不能にする | **step 3第一incrementを実装**: `ComplianceMappingCanonicalizer`（§6.2 mapping_hash・§6.3 review_policy_hash・96行manifest mirror CSV）、`ComplianceMappingService`/`ComplianceGateApiController`（createでhash計算・DRAFT→PROVISIONAL_REVIEWED freeze・ACTIVEは証跡gateで保留）、SecurityConfig（`/api/compliance-gate/**`=管理者）。**証跡2のmapping_hashが本canonicalizerで記録可能となった**。L1〜L3: canonicalizer 2/0/0/0・service 3/0/0/0 | **第一increment対応済み・継続中** |
 
-**Phase A step 3 継続increment（次回以降）**: reviewer type/requirement group画面・assignment（半開区間）・approval event記録・ACTIVE guard・delivery gate snapshot/preview・Phase A browser evidence・L1〜L3拡張。
+**Phase A step 4（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6完全適用・2026-08-13）**
+- **N1–N6修正完了**: `ComplianceMappingServiceImpl` (create時のfuture_slot予約・asOf < effectiveFromチェック、effectiveTo=null許可、activateのself-exclusion `.ne(id, version.getId())` ガード、promoteFutureToActiveでの同一operationId/correlationId共有ステータスイベント記録、DB再計算hash一致確認、DuplicateKeyException捕獲による409 versionConflict返却)。
+- **Preview API実装 (`POST /api/contracts/{id}/compliance-documents/preview`)**: DB永続化0件、透かし文字 `"PREVIEW / 本番交付物ではありません"` を含んだPDFストリーム、`Content-Disposition: inline; filename="preview-...pdf"`、`X-Compliance-Preview: true` ヘッダー。
+- **交付ゲートスナップショット & 3 Rendition 正式生成**:
+  - 単一の `generate` 呼び出しで共有 `rendition_group_id` UUID を持つ 3 個の不変 DocumentVersion (`FULL`, `MASK`, `LIMITED`) を全件 `CLEAN` スキャン済みで作成・保存。
+  - `delivery_business_key` カノニカルハッシュ決定論計算・冪等性保証（`READY` 状態は既存 DTO 200 返却）。
+  - V102 の全展開カラム (`mapping_version_id`, `mapping_version`, `mapping_hash`, `review_policy_hash`, `gate_evaluated_at`, `gate_snapshot_hash`, `profile_snapshot_id`, `profile_snapshot_hash`, `worker_snapshot_id`, `worker_snapshot_hash`, `workplace_id`, `render_input_hash`, `recipient_display_snapshot_hash`, `company_config_snapshot_hash`, `field_mask_policy_hash`, `render_engine_version`, `rendition_group_id`, `full_document_version_id/sha256`, `mask_document_version_id/sha256`, `limited_document_version_id/sha256`, `delivery_business_key`, `generation_state`) を書き込み。
+- **ロール別ダウンロードルーティング**: `FULL` (管理者/HR), `MASK` (マネージャー), `LIMITED` (営業) の閲覧者ロールに基づく厳格な DocumentVersion バイト選択配信。
+- **検証結果**: `verify-like-ci.ps1` 実行により **196 tests / 0 failures / 0 errors / 0 skipped (skip 0)** 成功。
 
 **Phase A step 3 第五increment（2026-08-13）: 資格保有者視点再レビュー指摘対応（P2-N1・P3-N1〜N3・NOTE-1〜2全件対応）**
 - **P2-N1修正（PROVISIONAL/ACTIVE化の非空review policy強制）**: `transition(PROVISIONAL_REVIEWED)` および `activate()` に `assertPolicyNotEmpty()` ガードを追加。Requirement Groupが1件も存在しない空policy状態のままでのPROVISIONAL化・ACTIVE化を 400（`compliance.gate.policyInvalid`）で拒否（decision delta §2 L80準拠）。

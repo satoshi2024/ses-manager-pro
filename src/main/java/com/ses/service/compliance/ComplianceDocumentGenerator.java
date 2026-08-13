@@ -79,11 +79,35 @@ public class ComplianceDocumentGenerator {
 
     /** 内容モデルをPDF（A4・日本語フォント埋め込み）へ変換する。 */
     public byte[] toPdf(Content content, MessageSource messageSource) {
+        return toPdf(content, messageSource, null);
+    }
+
+    /** 内容モデルをPDF（透かし対応）へ変換する（Preview専用§9.2）。 */
+    public byte[] toPdf(Content content, MessageSource messageSource, String watermarkText) {
         Locale locale = LocaleContextHolder.getLocale();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
              com.lowagie.text.Document document = new com.lowagie.text.Document(
                      com.lowagie.text.PageSize.A4, 36, 36, 36, 36)) {
-            com.lowagie.text.pdf.PdfWriter.getInstance(document, baos);
+            com.lowagie.text.pdf.PdfWriter writer = com.lowagie.text.pdf.PdfWriter.getInstance(document, baos);
+            if (org.springframework.util.StringUtils.hasText(watermarkText)) {
+                writer.setPageEvent(new com.lowagie.text.pdf.PdfPageEventHelper() {
+                    @Override
+                    public void onEndPage(com.lowagie.text.pdf.PdfWriter writer, com.lowagie.text.Document document) {
+                        try {
+                            com.lowagie.text.pdf.PdfContentByte cb = writer.getDirectContentUnder();
+                            com.lowagie.text.pdf.BaseFont baseFont = pdfFontUtils.resolveCjkFont();
+                            cb.saveState();
+                            cb.setColorFill(new java.awt.Color(200, 200, 200, 120));
+                            cb.beginText();
+                            cb.setFontAndSize(baseFont, 24);
+                            cb.showTextAligned(com.lowagie.text.Element.ALIGN_CENTER, watermarkText, 297, 420, 45);
+                            cb.endText();
+                            cb.restoreState();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                });
+            }
             document.open();
             com.lowagie.text.pdf.BaseFont baseFont = pdfFontUtils.resolveCjkFont();
             com.lowagie.text.Font titleFont = new com.lowagie.text.Font(baseFont, 14, com.lowagie.text.Font.BOLD);

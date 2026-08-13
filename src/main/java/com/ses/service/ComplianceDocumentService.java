@@ -19,6 +19,9 @@ public interface ComplianceDocumentService {
 
     ComplianceDocumentDeliveryDto generate(Long contractId, ComplianceDocumentGenerateRequest request);
 
+    /** プレビューPDFを返す（透かし付き・DB保存なし・§9.6）。 */
+    byte[] preview(Long contractId, ComplianceDocumentGenerateRequest request);
+
     ComplianceDocumentDeliveryDto confirm(Long contractId, Long deliveryId, String note);
 
     /** 生成済みPDFを返す（scanStatus CLEAN確認・アクセスログ記録済み）。 */

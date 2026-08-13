@@ -52,7 +52,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                                            java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo,
                                            List<ComplianceMappingSourceInput> sources) {
         if (!StringUtils.hasText(mappingCode) || !StringUtils.hasText(mappingVersion)
-                || effectiveFrom == null || effectiveTo == null || effectiveFrom.isAfter(effectiveTo)) {
+                || effectiveFrom == null || (effectiveTo != null && effectiveFrom.isAfter(effectiveTo))) {
             throw BusinessException.of(400, "compliance.gate.invalidMapping");
         }
         ComplianceMappingVersion version = new ComplianceMappingVersion();
@@ -63,6 +63,19 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         version.setEffectiveTo(effectiveTo);
         version.setStatus(STATUS_DRAFT);
         version.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
+
+        java.time.LocalDate asOf = resolveAsOf();
+        if (asOf.isBefore(effectiveFrom)) {
+            List<ComplianceMappingVersion> futureList = versionMapper.selectList(
+                    new LambdaQueryWrapper<ComplianceMappingVersion>()
+                            .eq(ComplianceMappingVersion::getTenantId, "default")
+                            .eq(ComplianceMappingVersion::getMappingCode, mappingCode)
+                            .eq(ComplianceMappingVersion::getFutureSlot, 1));
+            if (!futureList.isEmpty()) {
+                throw BusinessException.of(409, "compliance.gate.futureSlotAlreadyExists");
+            }
+            version.setFutureSlot(1);
+        }
 
         List<ComplianceMappingSource> sourceEntities = new java.util.ArrayList<>();
         for (ComplianceMappingSourceInput input : sources == null ? List.<ComplianceMappingSourceInput>of() : sources) {
@@ -84,7 +97,11 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         version.setMappingHash(canonicalizer.computeMappingHash(version, sourceEntities));
         // review_policy_hash（§6.3）: 現行のreview policy（group/type）から計算。create時点はgroup/type未設定のため空policyの決定的hash。
         version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(List.of(), List.of()));
-        versionMapper.insert(version);
+        try {
+            versionMapper.insert(version);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
         for (ComplianceMappingSource source : sourceEntities) {
             source.setMappingId(version.getId());
             sourceMapper.insert(source);
@@ -235,7 +252,8 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                     new LambdaQueryWrapper<ComplianceMappingVersion>()
                             .eq(ComplianceMappingVersion::getTenantId, "default")
                             .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
-                            .eq(ComplianceMappingVersion::getFutureSlot, 1));
+                            .eq(ComplianceMappingVersion::getFutureSlot, 1)
+                            .ne(ComplianceMappingVersion::getId, version.getId()));
             if (!futureList.isEmpty()) {
                 throw BusinessException.of(400, "compliance.gate.futureSlotAlreadyExists");
             }
@@ -263,6 +281,30 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.invalidTransition");
         }
 
+        // N5: 昇格前の mapping/policy hash 再検証
+        List<ComplianceMappingSource> sources = sourceMapper.selectList(
+                new LambdaQueryWrapper<ComplianceMappingSource>()
+                        .eq(ComplianceMappingSource::getMappingId, version.getId()));
+        String currentMappingHash = canonicalizer.computeMappingHash(version, sources);
+        if (!currentMappingHash.equals(version.getMappingHash())) {
+            throw BusinessException.of(400, "compliance.gate.mappingHashMismatch");
+        }
+
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
+                requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
+        String currentPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
+        if (!currentPolicyHash.equals(version.getReviewPolicyHash())) {
+            throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
+        }
+
         // P3-N1: 昇格前に既存承認のREVOKE再検証
         List<com.ses.entity.ComplianceMappingApprovalEvent> approvals =
                 approvalEventMapper.selectByMapping("default", version.getId(), "APPROVE");
@@ -271,6 +313,10 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                 throw BusinessException.of(400, "compliance.gate.approvalRevoked");
             }
         }
+
+        // N3: 旧ACTIVE supersede と新 ACTIVE 活性化で単一 operationId / correlationId を共有
+        String sharedOperationId = java.util.UUID.randomUUID().toString();
+        String sharedCorrelationId = java.util.UUID.randomUUID().toString();
 
         List<ComplianceMappingVersion> currentActiveList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
@@ -293,7 +339,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             if (rows == 0) {
                 throw BusinessException.of(409, "contract.compliance.versionConflict");
             }
-            recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED, oldExpectedVer);
+            recordStatusEvent(oldActive, STATUS_ACTIVE, STATUS_SUPERSEDED, oldExpectedVer, sharedOperationId, sharedCorrelationId);
         }
         String beforeStatus = version.getStatus();
         Integer expectedVer = version.getVersion();
@@ -307,7 +353,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (rows == 0) {
             throw BusinessException.of(409, "contract.compliance.versionConflict");
         }
-        recordStatusEvent(version, beforeStatus, STATUS_ACTIVE, expectedVer);
+        recordStatusEvent(version, beforeStatus, STATUS_ACTIVE, expectedVer, sharedOperationId, sharedCorrelationId);
         return version;
     }
 
@@ -321,8 +367,12 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         }
     }
 
-    /** append-only status event記録（G2-EVENT-01）。P3-N2: expectedVersionは更新前の事前値を一意記録する。 */
+    /** append-only status event記録（G2-EVENT-01）。P3-N2: expectedVersionは更新前の事前値を一意記録する。N3: UUID共有。 */
     private void recordStatusEvent(ComplianceMappingVersion version, String before, String after, Integer expectedVersion) {
+        recordStatusEvent(version, before, after, expectedVersion, java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString());
+    }
+
+    private void recordStatusEvent(ComplianceMappingVersion version, String before, String after, Integer expectedVersion, String operationId, String correlationId) {
         com.ses.entity.SysUser actor = sysUserMapper.selectById(com.ses.common.util.SecurityUtils.currentUserId());
         com.ses.entity.ComplianceMappingStatusEvent event = new com.ses.entity.ComplianceMappingStatusEvent();
         event.setTenantId("default");
@@ -337,8 +387,8 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         event.setActorRoleSnapshot(actor == null ? "" : actor.getRole());
         event.setOccurredAt(java.time.LocalDateTime.now());
         event.setExpectedVersion(expectedVersion);
-        event.setOperationId(java.util.UUID.randomUUID().toString());
-        event.setCorrelationId(java.util.UUID.randomUUID().toString());
+        event.setOperationId(operationId);
+        event.setCorrelationId(correlationId);
         statusEventMapper.insertEvent(event);
     }
 
