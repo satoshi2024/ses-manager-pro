@@ -41,4 +41,17 @@ public interface ComplianceExternalReviewEventMapper {
             + "ORDER BY reviewed_at, id")
     List<ComplianceExternalReviewEvent> selectChain(@Param("tenantId") String tenantId,
                                                      @Param("reviewChainId") String reviewChainId);
+
+    @Select("SELECT * FROM t_compliance_external_review_event "
+            + "WHERE tenant_id = #{tenantId} AND mapping_id = #{mappingId} AND requirement_group_id = #{groupId} "
+            + "ORDER BY reviewed_at, id")
+    List<ComplianceExternalReviewEvent> selectByMappingAndGroup(@Param("tenantId") String tenantId,
+                                                                 @Param("mappingId") Long mappingId,
+                                                                 @Param("groupId") Long groupId);
+
+    @Select("SELECT * FROM t_compliance_external_review_event "
+            + "WHERE tenant_id = #{tenantId} AND mapping_id = #{mappingId} "
+            + "ORDER BY reviewed_at, id")
+    List<ComplianceExternalReviewEvent> selectByMapping(@Param("tenantId") String tenantId,
+                                                         @Param("mappingId") Long mappingId);
 }

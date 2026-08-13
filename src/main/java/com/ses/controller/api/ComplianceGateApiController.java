@@ -118,6 +118,27 @@ public class ComplianceGateApiController {
                 body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId")))));
     }
 
+    @PostMapping("/external-reviews")
+    public ApiResult<com.ses.entity.ComplianceExternalReviewEvent> recordExternalReview(@RequestBody Map<String, Object> body) {
+        return ApiResult.success(complianceGateAdminService.recordExternalReview(
+                Long.valueOf(String.valueOf(body.get("mappingId"))),
+                Long.valueOf(String.valueOf(body.get("requirementGroupId"))),
+                Long.valueOf(String.valueOf(body.get("reviewerTypeId"))),
+                (String) body.get("reviewerName"),
+                (String) body.get("organization"),
+                (String) body.get("credentialRaw"),
+                (String) body.get("action"),
+                body.get("reviewedAt") == null ? null : java.time.LocalDateTime.parse((String) body.get("reviewedAt")),
+                body.get("validUntil") == null ? null : java.time.LocalDateTime.parse((String) body.get("validUntil")),
+                body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId"))),
+                (String) body.get("reason")));
+    }
+
+    @GetMapping("/mappings/{id}/external-reviews")
+    public ApiResult<List<com.ses.entity.ComplianceExternalReviewEvent>> listExternalReviews(@PathVariable Long id) {
+        return ApiResult.success(complianceGateAdminService.listExternalReviews(id));
+    }
+
     @SuppressWarnings("unchecked")
     private List<ComplianceMappingSourceInput> castSources(Object value) {
         if (!(value instanceof List<?> raw)) {

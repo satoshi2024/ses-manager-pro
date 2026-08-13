@@ -38,4 +38,12 @@ public interface ComplianceGateAdminService {
 
     /** groupへreviewer typeを追加し（typeのcode/name/credentialをsnapshot）、policy hashを反映する。 */
     com.ses.entity.ComplianceMappingReviewRequirementType addRequirementType(Long groupId, Long reviewerTypeId);
+
+    /** 外部資格保有者のReviewイベントをAES-256-GCM暗号化（§6.5）で記録する。 */
+    com.ses.entity.ComplianceExternalReviewEvent recordExternalReview(Long mappingId, Long requirementGroupId, Long reviewerTypeId,
+                                                                       String reviewerName, String organization, String credentialRaw,
+                                                                       String action, LocalDateTime reviewedAt,
+                                                                       LocalDateTime validUntil, Long evidenceDocumentId, String reason);
+
+    List<com.ses.entity.ComplianceExternalReviewEvent> listExternalReviews(Long mappingId);
 }

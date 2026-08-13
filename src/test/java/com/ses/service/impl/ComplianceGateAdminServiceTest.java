@@ -208,6 +208,35 @@ class ComplianceGateAdminServiceTest {
     }
 
     @Test
+    void externalReviewをAES256GCM暗号化とidentityHash付きで登録できる() {
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-EXT",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        ComplianceExternalReviewerType type = complianceGateAdminService.createReviewerType(
+                "LABOR_ATTORNEY", "弁護士", "労働法専門弁護士", "弁護士登録番号", true);
+        complianceGateAdminService.addRequirementType(group.getId(), type.getId());
+
+        com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "山田弁護士", "山田法律事務所", "REG-123456",
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK");
+
+        assertNotNull(event.getId());
+        assertEquals("APPROVED", event.getAction());
+        assertEquals("v1", event.getCredentialKeyVersion());
+        assertEquals("AES-256-GCM", event.getCredentialCipherFormat());
+        assertEquals("****3456", event.getCredentialMaskedSnapshot());
+        assertNotNull(event.getCredentialSnapshotEncrypted());
+        assertEquals(64, event.getReviewerIdentityHash().length());
+
+        List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(version.getId());
+        assertEquals(1, list.size());
+        assertEquals(event.getId(), list.get(0).getId());
+    }
+
+    @Test
     void assignment作成は有限期間assignmentと重複する開始日を拒否する() {
         Long workplaceId = insertWorkplace();
         Long user1 = insertUser("gate-overlap-1", "HR");

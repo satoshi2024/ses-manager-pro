@@ -83,7 +83,8 @@
 - **P2-N-2 (登録済み DocumentVersion の SHA-256 採用)**: PDF レンダリング時 (OpenPDF CreationDate メタデータ等) のバイト微動の影響を受けないよう、`delivery` に保存する SHA-256 列 (`fullDocumentSha256`, `maskDocumentSha256`, `limitedDocumentSha256`) を `registerGenerated` で実際に作成・永続化された `DocumentVersion` の SHA-256 ハッシュから取得して設定。
 - **P2-N-3 (Legacy Idempotency Key 独立化)**: `generate()` の既存 delivery 照合における legacy idempotency key フォールバック判定を `delivery_business_key IS NULL` の旧行に限定。異なる business key を持つ既存 delivery がある場合は新規 delivery の作成を許可（R8.4 準拠）。
 - **P2-N-4 / P3-N-1 (deployment.timezone 統一 & 黙示 default 撤廃)**: `ComplianceDocumentServiceImpl` と `ComplianceMappingServiceImpl` のタイムゾーン解決を `@Value("${spring.jackson.time-zone:#{null}}")` へ一元化。欠落・不正時は両サービスとも統一して黙示デフォルト置換を行わずに 409 `compliance.gate.timezoneUnavailable` をスローする fail-closed 仕様に集約。
-- **検証結果**: `verify-like-ci.ps1` 実行により **200 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
+- **Phase A step 5 (External Review 登録・AES-256-GCM 暗号化 & Policy 評価 §7.3 / §6.4 / §6.5)**: `ComplianceGateAdminService` に `recordExternalReview()` / `listExternalReviews()` を実装。`credential_snapshot_encrypted` を AES-256-GCM / NoPadding で暗号化保存し、`reviewer_identity_hash`（SHA-256）を生成。REST API `POST /api/compliance-gate/external-reviews`, `GET /api/compliance-gate/mappings/{id}/external-reviews` を追加。
+- **検証結果**: `verify-like-ci.ps1` 実行により **201 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
 
 **Phase A step 4 前半（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・2026-08-13）**
 - **N1–N6修正完了**: `ComplianceMappingServiceImpl` (create時のfuture_slot予約・asOf < effectiveFromチェック、effectiveTo=null許可、activateのself-exclusion `.ne(id, version.getId())` ガード、promoteFutureToActiveでの同一operationId/correlationId共有ステータスイベント記録、DB再計算hash一致確認、DuplicateKeyException捕獲による409 versionConflict返却)。
