@@ -126,7 +126,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         return version;
     }
 
-    @org.springframework.beans.factory.annotation.Value("${spring.jackson.time-zone:Asia/Tokyo}")
+    @org.springframework.beans.factory.annotation.Value("${spring.jackson.time-zone:#{null}}")
     private String deploymentTimezone;
 
     private java.time.ZoneId resolveDeploymentZoneId() {

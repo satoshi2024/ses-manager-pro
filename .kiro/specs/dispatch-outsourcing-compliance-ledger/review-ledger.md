@@ -87,7 +87,7 @@
 - **NOTE-1記載（idempotency replay）**: `approve()` での決定的一意キーによる `DuplicateKey -> 409 Conflict` 応答は、後続incrementの operation ledger 統合（R6.5 idempotency replay 200化）待ちであることを確定・明記。
 - **P1-N1修正（旧ACTIVEのeffective_to不変・決定性/mapping_hash保全）**: decision delta §2 L98に準拠し、`promoteFutureToActive()` での `oldActive.effective_to` 書き換えを撤廃。旧ACTIVEは `status=SUPERSEDED` / `activeSlot=null` のみ変更し、`effective_to` および `mapping_hash` の不変性を保証。
 - **P2-N2修正（activate/promoteのasOf有効期間ガード）**: `activate()` および `promoteFutureToActive()` に asOf 日付チェックを追加（`effective_from <= asOf <= effective_to` 違反を 400 `invalidTransition` で拒否）。
-- **P2-N3修正（deployment timezone gate & fail-closed）**: `resolveDeploymentZoneId()` ヘルパーを実装。`spring.jackson.time-zone` が未設定・不正な場合は fallback せず 409（`compliance.gate.timezoneUnavailable`）で遮断。
+- **P2-N3/P3-N1修正（deployment timezone gate & fail-closed）**: `@Value("${spring.jackson.time-zone:#{null}}")` によりプロパティ欠落・空文字・不正ZoneId時にデフォルト fallback せず確実に 409（`compliance.gate.timezoneUnavailable`）を返却する fail-closed 仕様に厳密化（decision delta §2 L88-89完全準拠）。
 - **NOTE-R1/R2記載**: 承認REVOKE判定の最新APPROVE限定化およびfuture予約のoperation ledgerイベント記録は、今後再承認フロー/operation ledger実装に合わせて拡張する方針を追記。
 - i18n: `compliance.gate.policyInvalid`, `compliance.gate.timezoneUnavailable` を全4バンドル（ja/en/zh_CN/ko）に追記。
 - 検証: focused tests **22/0/0/0 PASS**（GateAdmin 8・MappingService 7・Canonicalizer 3・MessageBundle 4）。`git diff --check` exit 0。
