@@ -1,5 +1,27 @@
 # dispatch-outsourcing-compliance-ledger review ledger
 
+## R10判定（R23-P1-01 corrected・docs-only）: CHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED — 履歴（上書き・削除しない）
+
+`R10 Round R23-P1-01（corrected・docs-only）: Provenance REVIEWABLE（f42faea0/8ffbcddb・1 commit・Markdown +243/-0・V102 blob同一）。
+CHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED。semantic blocker: B（REVIEW_AUTHORSHIP INSERT順序循環=verification↔review相互参照+UPDATE禁止trigger）、
+C（frozen policy flag保存先・freeze点・hash包含未定義+4検証必須と矛盾）、D（review_policy_version/external_review_event_id/external_review_chain_id列欠落）。
+P1-docs: A（Baseにexternal-reviews API実在=ComplianceGateApiController:121/137・ComplianceGateAdminServiceImpl:284/355、「未実装」記述は誤り）、
+G（§8参照欠落・V102 chk_g2_operation_typeにverification系なし・200/409契約不全）。P2: E/F/H/I/J。
+decision matrix: event順序・frozen flags・fingerprint・kind別・migration/idempotencyがGAP。
+受理は§3〜§5実装開始許可のみの前提で、修正版の再提出を依頼。T066/S10/S12/ACTIVE/productionは全て変更なし。`
+
+## 現行判定（R23-P1-01 corrected v2再提出 / R10受理待ち）
+
+`R23-P1-01（corrected v2・docs-only）: R10のCHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED（issue A〜J）への対応版を再提出。
+A: Baseのexternal-reviews API実在（Controller:119-140・Impl:284-351）を実測記載し「未実装」記述を訂正。B: SUBMITTED→verification→APPROVED/adoption→REVOKEDの
+append-only event順序を正式採用（G2-EVENT-ORDER-01・後付けUPDATE禁止）。C: frozen policy flags（master default・snapshot・freeze点・hash包含・
+type別評価）を§8で明示。D: review_policy_version/review_policy_hash/external_review_event_id/external_review_chain_id等のbinding列を追加。
+E: fingerprint decision table（person-stable/qualification-specific・HMAC・key version/rotation・fail-closed）。F: kind別決定表4種。
+G: 存在しない§8参照廃止・operation type 5種（V102_1でforward replacement）・idempotency 200/409/UNIQUE契約。H: 「V102 published/immutable」と
+「環境適用状態未確認（flyway_schema_history未採取）」を分離・欠番全列挙（V19/23/41/47/59/72/82/86-90/92-97/99/100）。I: legacy/backfill捏造禁止・
+NULL verification不採用・過去delivery維持を明文化。J: タイトル異常文字削除。regression matrix 24行に拡張。
+Provenance: Base=8ffbcddb・前回Head=f42faea0・observed main=31d29305。V102 blob不変・V102_1未作成・Markdownのみのboundary維持。`
+
 ## 現行判定（S10 T066 本人性確認・資格有効性確認・Review作成者確認 corrected decision packet提出 / R10受理待ち）
 
 `R23-P1-01（corrected・docs-only）: reviewer-verification-decision-delta-r23-p1-01.md を訂正版として提出し、R10の ACCEPTED_FOR_IMPLEMENTATION を待つ。
