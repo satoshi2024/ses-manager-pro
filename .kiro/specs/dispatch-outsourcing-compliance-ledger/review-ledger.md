@@ -1,3 +1,19 @@
+## Step 2（§3 schema）中間Review対応記録（2026-08-13・R10指摘3点）
+
+**① Error 3823 deviationの正式記録**: accepted v3 §3.9のCHECK matrixのうち、evoke target・credential all-or-none・evidence all-or-none・AUTHORSHIP binding・doption APPROVED refs・doption revoke target は、
+MySQL 8がCHECKとFKの同一列併用不可（Error 3823）のため、**MySQLではBEFORE INSERT trigger（trg_g2_verification_revoke_target・trg_g2_adoption_revoke_target）で担保し、
+H2ではCHECKで担保する2重担保方針**。accepted v3 §3.9のsemantics（kind×result・result×nullability・all-or-none・transition・flag一致）は
+service層＋trigger＋H2 CHECKで全て実装される。V102_1・V1・H2スキーマにSQLコメントで記録済み。
+
+**② 既存問題記録の訂正**: 前回報告の「ComplianceMappingServiceImplTest 4エラー・ComplianceDocumentApiTest 12エラー・ProductionSecurityConfigurationTest 3エラーはmain HEAD単独でも失敗」は
+**誤り**。R10独立検証により、3クラスともa16d104d・31d29305双方の単独実行で全PASS（ComplianceMappingServiceImplTest 10/0/0/0・ComplianceDocumentApiTest 14/0/0/0・
+ProductionSecurityConfigurationTest 3/0/0/0）。フルスイートも1884/0/0/0・41 skipped（全てDocker gate）でBUILD SUCCESS。
+前回の「19 errors」「1884/0/2」は、誤ってmain・旧workdir（ses-manager-pro-s10-t063）で実行した結果の取り違え。
+workdir指定を正しく行えば再現しない。Step 3ではこの記録を正とし、既存コードを不要に変更しない。
+
+**③ branch CI確立**: CIはmain push/PRのみで実行されるため、feat/r23-p1-01-verificationのCI確認にはPR作成が必要。
+MySQL fresh/upgrade smoke（Testcontainers・skip 0）を含むCI greenをStep 3完了の前提とする。
+
 ## Step 0/1実施記録（R23-P1-01実装開始・2026-08-13）
 
 **Step 0 docs統合**: Implementation Base = 31d29305、accepted decision Head = 75ba33e4。
