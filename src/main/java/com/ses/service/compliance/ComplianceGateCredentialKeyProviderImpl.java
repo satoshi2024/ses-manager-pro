@@ -1,7 +1,6 @@
-package com.ses.service.compliance;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -20,7 +19,7 @@ import java.util.regex.Pattern;
  * In dev/test profiles: fallback to default test key version "v1" if unconfigured.
  */
 @Component
-public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCredentialKeyProvider {
+public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCredentialKeyProvider, InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(ComplianceGateCredentialKeyProviderImpl.class);
 
@@ -38,7 +37,11 @@ public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCr
     private String currentKeyVersion;
     private final Map<String, byte[]> keyMap = new HashMap<>();
 
-    @PostConstruct
+    @Override
+    public void afterPropertiesSet() {
+        init();
+    }
+
     public void init() {
         String configuredVersion = environment.getProperty("compliance.gate.credential-crypto.current-key-version");
         boolean isProd = isProdProfile();
