@@ -304,11 +304,11 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         delivery.setRenderEngineVersion("1.0.0");
         delivery.setRenditionGroupId(renditionGroupId);
         delivery.setFullDocumentVersionId(fullVersion != null ? fullVersion.getId() : null);
-        delivery.setFullDocumentSha256(fullVersion != null ? fullVersion.getSha256Hex() : fullSha256);
+        delivery.setFullDocumentSha256(fullVersion != null ? fullVersion.getSha256() : fullSha256);
         delivery.setMaskDocumentVersionId(maskVersion != null ? maskVersion.getId() : null);
-        delivery.setMaskDocumentSha256(maskVersion != null ? maskVersion.getSha256Hex() : maskSha256);
+        delivery.setMaskDocumentSha256(maskVersion != null ? maskVersion.getSha256() : maskSha256);
         delivery.setLimitedDocumentVersionId(limitedVersion != null ? limitedVersion.getId() : null);
-        delivery.setLimitedDocumentSha256(limitedVersion != null ? limitedVersion.getSha256Hex() : limitedSha256);
+        delivery.setLimitedDocumentSha256(limitedVersion != null ? limitedVersion.getSha256() : limitedSha256);
         delivery.setDeliveryBusinessKey(businessKey);
         delivery.setGenerationState("READY");
 
@@ -423,10 +423,10 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                 throw BusinessException.of(404, "error.scope.notFound");
             }
             String actualSha256 = sha256HexBytes(pdfBytes);
-            if (version.getSha256Hex() != null && !version.getSha256Hex().isBlank()) {
-                if (!version.getSha256Hex().equalsIgnoreCase(actualSha256)) {
+            if (version.getSha256() != null && !version.getSha256().isBlank()) {
+                if (!version.getSha256().equalsIgnoreCase(actualSha256)) {
                     log.error("Stored DocumentVersion SHA-256 mismatch for versionId={}: expected={}, actual={}",
-                            version.getId(), version.getSha256Hex(), actualSha256);
+                            version.getId(), version.getSha256(), actualSha256);
                     throw BusinessException.of(500, "error.file.readFailed");
                 }
             }
