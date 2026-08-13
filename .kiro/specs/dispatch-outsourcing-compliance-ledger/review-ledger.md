@@ -1,10 +1,82 @@
+## R10判定（R23-P1-01 corrected v3）: ACCEPTED_FOR_IMPLEMENTATION — 2026-08-13
+
+`R10 Round R23-P1-01（corrected v3・docs-only）: ACCEPTED_FOR_IMPLEMENTATION を受領。
+authoritative decision Base = 8ffbcddb、accepted docs Head = 75ba33e4、current implementation Base = 31d29305。
+受理はdecision §3〜§5の実装開始許可のみ。未承認のまま: 8ffbcddb..31d29305の先行実装・T066 PASS・S10 PASS・S12開始・ACTIVE化・
+formal delivery・production利用・人間確認/資格保有者確認の完了。
+実装順序: Step 0（docs統合）→ Step 1（先行実装conformance inventory）→ Step 2（§3 schema）→ Step 3（§4 P0収束）→
+Step 4（§5 API/UI/security）→ Step 5（検証と人間証跡）。`
+
 # dispatch-outsourcing-compliance-ledger review ledger
+
+## pre-R10独立確認（R23-P1-01 corrected v2）: artifact boundary PASS・semantic blocker残存 — 履歴（上書き・削除しない）
+
+`pre-R10独立確認（361558cc・corrected v2）: artifact boundary PASS（parent=f42faea0・Markdown 2件のみ・+377/-0・non-md 0・
+diff --check PASS・V102 blob不変・V102_1未作成・local/remote一致）。しかしdecision semanticsに残存blocker（K1〜K8）を検出:
+K1（SUBMITTEDはV102のchk_g2_external_review_action='APPROVED/REJECTED/REVOKED'に違反・forward replacement要）、
+K2（polymorphic target_event_idは別tableを単一FKで参照不能・用途別列へ分離要）、
+K3（同一operation claimでstep1-4実行は誤り・各action別claim/transaction・adopted_at,id reducer・「4 verification」→「当該frozen policyが要求するverification set」）、
+K4（fingerprint決定表が本文に未記載・reviewer_subject_id DB正本化要）、K5（社労士/弁護士/日弁連等を固定value化しない・動的master要）、
+K6（master flag DEFAULT 0禁止・NULL=UNCONFIGURED・freeze点・review_policy_version正本・max_age統一）、
+K7（DDL/CHECKの型・長さ・nullability・CHECK matrix完全具体化要）、K8（文書整合: 「V102適用済み」→published/immutable・§6.3完全指定・
+Controller:121/137・Service:294/355・ledger過大表現訂正）。
+corrected v3作成を指示。T066/S10/S12/ACTIVE/productionは全て変更なし。`
+
+## 現行判定（R23-P1-01 corrected v3再提出 / R10受理待ち）
+
+`R23-P1-01（corrected v3・docs-only）: pre-R10独立確認（K1〜K8）への対応版を再提出。
+K1: chk_g2_external_review_actionをV102_1でforward replacement（SUBMITTED/APPROVED/REJECTED/REVOKED）・legacy扱い・backfill禁止を§3.2で明示。
+K2: polymorphic target_event_id廃止→verificationはsubmitted_review_event_id/revoked_verification_event_id/supersedes_verification_event_id、
+adoptionはsubmitted_review_event_id/revoked_adoption_event_idへ用途別分離（§3.3/3.4）。
+K3: 各action別operation claim・別transaction（5種）・gate採用条件固定・adopted_at,id reducer・「当該frozen policyが要求するverification set」へ統一（§3.2/3.6）。
+K4: t_compliance_external_reviewer_subject（reviewer_subject_id person-stable DB正本）・fingerprint snapshot列・HMAC契約（domain separator・normalization・
+key rotation・fail-closed・My Number不使用）を§9で決定表化。
+K5: 社労士/弁護士/日弁連等の固定value化禁止・dynamic reviewer type/source master（管理者画面設定・snapshot・hash包含）を§3.8で明示。
+K6: master flag NULL=UNCONFIGURED（DEFAULT 0禁止）・新規APIで明示選択必須・freeze点一意化・review_policy_version正本=mapping_version・
+expiry=min(valid_until, checked_at+max_age)・max_age未設定fail-closedを§8/§3.6/§3.7で固定。
+K7: 全列の型・長さ・nullability・CHECK matrix（kind×result・result×nullability・adoption action×references・transition・
+credential all-or-none・evidence all-or-none・flag一致）を§3.3/3.4/3.9で完全具体化。
+K8: 「V102適用済み」→repository published/immutable・environment適用状態=UNKNOWN（flyway_schema_history未採取）・
+§6.3参照をg2-gate-decision-delta-r19-p1-01.md §6.3と完全指定・R19 self-declared hash契約を本R23がsupersedeと明記・
+Controller:121/137・Service:294/355に訂正・v2 ledgerの過大表現を訂正しpre-R10確認履歴を追記。
+regression matrix 28行に拡張（#20-28追加）。
+Provenance: Base=8ffbcddb・前回R10 Head=f42faea0・v2 Head=361558cc・observed main=31d29305。V102 blob不変・V102_1未作成・Markdownのみのboundary維持。`
+
+## R10判定（R23-P1-01 corrected・docs-only）: CHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED — 履歴（上書き・削除しない）
+
+`R10 Round R23-P1-01（corrected・docs-only）: Provenance REVIEWABLE（f42faea0/8ffbcddb・1 commit・Markdown +243/-0・V102 blob同一）。
+CHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED。semantic blocker: B（REVIEW_AUTHORSHIP INSERT順序循環=verification↔review相互参照+UPDATE禁止trigger）、
+C（frozen policy flag保存先・freeze点・hash包含未定義+4検証必須と矛盾）、D（review_policy_version/external_review_event_id/external_review_chain_id列欠落）。
+P1-docs: A（Baseにexternal-reviews API実在=ComplianceGateApiController:121/137・ComplianceGateAdminServiceImpl:284/355、「未実装」記述は誤り）、
+G（§8参照欠落・V102 chk_g2_operation_typeにverification系なし・200/409契約不全）。P2: E/F/H/I/J。
+decision matrix: event順序・frozen flags・fingerprint・kind別・migration/idempotencyがGAP。
+受理は§3〜§5実装開始許可のみの前提で、修正版の再提出を依頼。T066/S10/S12/ACTIVE/productionは全て変更なし。`
+
+## 現行判定（R23-P1-01 corrected v2再提出 / R10受理待ち）
+
+`R23-P1-01（corrected v2・docs-only）: R10のCHANGES_REQUIRED / SPEC_CONCRETIZATION_REQUIRED（issue A〜J）への対応版を再提出。
+A: Baseのexternal-reviews API実在（Controller:119-140・Impl:284-351）を実測記載し「未実装」記述を訂正。B: SUBMITTED→verification→APPROVED/adoption→REVOKEDの
+append-only event順序を正式採用（G2-EVENT-ORDER-01・後付けUPDATE禁止）。C: frozen policy flags（master default・snapshot・freeze点・hash包含・
+type別評価）を§8で明示。D: review_policy_version/review_policy_hash/external_review_event_id/external_review_chain_id等のbinding列を追加。
+E: fingerprint decision table（person-stable/qualification-specific・HMAC・key version/rotation・fail-closed）。F: kind別決定表4種。
+G: 存在しない§8参照廃止・operation type 5種（V102_1でforward replacement）・idempotency 200/409/UNIQUE契約。H: 「V102 published/immutable」と
+「環境適用状態未確認（flyway_schema_history未採取）」を分離・欠番全列挙（V19/23/41/47/59/72/82/86-90/92-97/99/100）。I: legacy/backfill捏造禁止・
+NULL verification不採用・過去delivery維持を明文化。J: タイトル異常文字削除。regression matrix 24行に拡張。
+Provenance: Base=8ffbcddb・前回Head=f42faea0・observed main=31d29305。V102 blob不変・V102_1未作成・Markdownのみのboundary維持。`
+
+## 現行判定（S10 T066 本人性確認・資格有効性確認・Review作成者確認 corrected decision packet提出 / R10受理待ち）
+
+`R23-P1-01（corrected・docs-only）: reviewer-verification-decision-delta-r23-p1-01.md を訂正版として提出し、R10の ACCEPTED_FOR_IMPLEMENTATION を待つ。
+Provenance: authoritative Base = 8ffbcddb、旧提出candidate = de3cc8b7（9 commits・17 files・+1372/-52の先行実装が混入しdocs-only不成立）、
+observed main = 31d29305。8ffbcddb以降の先行実装はimplementation-order nonconformanceとして記録（本packetは承認しない）。
+corrected HeadはBase 8ffbcddbからisolatedに作成したMarkdownのみのcommit（Java production code・Java test・migration/DDL・V102_1・tasks checkbox・
+S10/S12 status変更は含めない）。実環境flyway_schema_historyは未採取であることを明記。V102 blob/checksum golden・実version順序の検証testは実装受理後に作り直す。
+R10受理は§3〜§5の実装開始許可だけであり、先行実装・T066 PASS・S10 PASS・S12開始・本番ACTIVE化を自動承認しない。`
 
 ## 現行判定（S10 T066 本人性確認・資格有効性確認・Review作成者確認 decision packet提出 / R10受理待ち）
 
 `R23-P1-01（docs-only）: reviewer-verification-decision-delta-r23-p1-01.md を提出し、R10の ACCEPTED_FOR_IMPLEMENTATION を待つ。
-docs-only契約: V102_1 migration・verification DDL・entity・serviceは未作成（ReviewerVerificationMigrationOrderContractTest 3/0/0/0 が
-V102 < V102.1 < V103順序・V102_1未存在・V102不変をdirect検証）。既存P0指摘（空group skip・validateFrozenReviewPolicy複数実装・
+docs-only契約: V102_1 migration・verification DDL・entity・serviceは未作成。既存P0指摘（空group skip・validateFrozenReviewPolicy複数実装・
 findLatestByDocumentId利用・evidence resolver欠如）は本delta §4の実装フェーズ契約として確定。`
 
 ## 現行判定（R24対応確認PASS / M PASSはG2 gate証跡待ち）
@@ -90,19 +162,8 @@ findLatestByDocumentId利用・evidence resolver欠如）は本delta §4の実�
 - **P2-N-2 (登録済み DocumentVersion の SHA-256 採用)**: PDF レンダリング時 (OpenPDF CreationDate メタデータ等) のバイト微動の影響を受けないよう、`delivery` に保存する SHA-256 列 (`fullDocumentSha256`, `maskDocumentSha256`, `limitedDocumentSha256`) を `registerGenerated` で実際に作成・永続化された `DocumentVersion` の SHA-256 ハッシュから取得して設定。
 - **P2-N-3 (Legacy Idempotency Key 独立化)**: `generate()` の既存 delivery 照合における legacy idempotency key フォールバック判定を `delivery_business_key IS NULL` の旧行に限定。異なる business key を持つ既存 delivery がある場合は新規 delivery の作成を許可（R8.4 準拠）。
 - **P2-N-4 / P3-N-1 (deployment.timezone 統一 & 黙示 default 撤廃)**: `ComplianceDocumentServiceImpl` と `ComplianceMappingServiceImpl` のタイムゾーン解決を `@Value("${spring.jackson.time-zone:#{null}}")` へ一元化。欠落・不正時は両サービスとも統一して黙示デフォルト置換を行わずに 409 `compliance.gate.timezoneUnavailable` をスローする fail-closed 仕様に集約。
-- **Phase A step 5 (External Review 登録・暗号化 & Policy 評価 E-1〜E-4 完全対応・§7.3 / §6.3 / §6.4 / §6.5 / G2-SEC-12..18)**:
-  - **E-1 (credential crypto)**: `ComplianceGateCredentialKeyProvider`（prod fail-fast / dev/test fallback・32B base64url 検証）および `ComplianceGateCredentialCryptoService`（`CGC1` エンベロープ `CGC1:<keyVersion>:<base64url(12B IV)>:<base64url(ciphertext+tag)>`・GCM AAD `tenantId|mappingId|mappingVersion|operationId|credential` バインド・4列 NULL 契約・`credential_required` チェック・§6.3 正規化 JSON SHA-256 カノニカルアイデンティティハッシュ）を全面実装。
-  - **E-2 (decrypt 経路 & fail-closed)**: `decrypt()` を実装し、GCM タグ不正・鍵不一致・改竄時に 409 `compliance.gate.credentialUnavailable` で fail-closed。
-  - **E-3 (gate 接続 & NO_EXTERNAL_REVIEW 撤去)**: `ComplianceExternalReviewEvaluator` を新規作成し、`activate()` および `generate()` 交付ゲートへ接続。Requirement Group AND / Reviewer Type OR / 最低必要人数 / 有効期間 (`valid_until > asOf`) / CLEAN 証跡 / 復号可否を検証。グループ定義時は `NO_EXTERNAL_REVIEW` センチネルを排除し実イベントスナップショットハッシュを計算。
-  - **E-4 (action 検証・REVOKE 鎖・DTO allow-list)**: `action` を `APPROVED`/`REJECTED`/`REVOKED` に制限、`REVOKED` 鎖マッピング（`targetEventId`/`supersedesEventId`/`reviewChainId`）、決定論的 `idempotencyKey`、生暗号文を除外した `ComplianceExternalReviewEventDto` (R9.3) を適用。
-- **Phase A step 5 仕上げ（2026-08-13）**:
-  - **E-4 完全化（idempotencyKey決定論化）**: `recordExternalReview()` の idempotencyKey から `reviewedAt` 依存を除去し、requestパラメータ（mappingId/groupId/identityHash/action）のみから導出。同内容再送は同一キーとなり `UNIQUE(tenant_id, idempotency_key)` の二重防御で重複挿入を409（`contract.compliance.versionConflict`）へ変換（approvalと同契約・NOTE-1のoperation ledger統合待ち）。
-  - **E-3 完全化（交付gateのNO_EXTERNAL_REVIEW撤去・type未設定groupは評価除外）**: `ComplianceDocumentServiceImpl.computeGateSnapshotHash` から `NO_EXTERNAL_REVIEW` センチネルを撤去し、freeze済みpolicyを満たす実在external review eventのみをsnapshot hashへ含める。`ComplianceMappingServiceImpl.activate()` と同一の判定（requirement type未設定groupは外部レビュー不要）を交付gateにも適用。
-  - **P2-N-3 完全化（新規deliveryのidempotency_key = businessKey）**: 新規delivery rowの `idempotency_key` を `delivery_business_key` と同一に設定（legacyKeyは `delivery_business_key IS NULL` の旧行フォールバック照合専用）。別businessKeyの再生成が `UK_DOCUMENT_DELIVERY_IDEMPOTENCY` と衝突する欠陥（500化）を解消。
-  - **G2-ASG（TIMESTAMP(6)丸めのtickガード厳密化）**: `createAssignment` の旧open終了・`endAssignment` で `LocalDateTime.now()` を µs へtruncateしてから比較・設定し、µs丸めで `effective_to` が `effective_from` と同値化して `chk_g2_assignment_period` 違反になる flake を除去（負荷時の1テスト失敗を解消）。
-  - **テスト分離（shared H2）**: `ComplianceDocumentApiTest` は `engineer-schema-h2.sql` がG2 gate表をDROPしないため、各テスト前にG2 seedを掃除（`clearGateSeed`）。他テストの行を読まない（AGENTS.md規約）ことによる `承認イベントなしworkplace 409` テストの順序依存失敗を解消。seedのCHECK（`chk_g2_assignment_open_fields`）・NOT NULL（approval event chain/op/corr/idempotency列）準拠化。
-  - **key config文書化**: `application.yml` に `compliance.gate.credential-crypto.*`（current-key-version/keys.v1・env変数）の設定契約を明記（prod未設定は起動時fail-fast）。
-- **検証結果**: `mvn -B clean test`（verify-like-ci.ps1と同一条件）で **1880 tests / 0 failures / 0 errors / skipped 41（全てTestcontainers/Docker要・CIでは実行）** で BUILD SUCCESS 達成。
+- **Phase A step 5 (External Review 登録・AES-256-GCM 暗号化 & Policy 評価 §7.3 / §6.4 / §6.5)**: `ComplianceGateAdminService` に `recordExternalReview()` / `listExternalReviews()` を実装。`credential_snapshot_encrypted` を AES-256-GCM / NoPadding で暗号化保存し、`reviewer_identity_hash`（SHA-256）を生成。REST API `POST /api/compliance-gate/external-reviews`, `GET /api/compliance-gate/mappings/{id}/external-reviews` を追加。
+- **検証結果**: `verify-like-ci.ps1` 実行により **201 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
 
 **Phase A step 4 前半（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・2026-08-13）**
 - **N1–N6修正完了**: `ComplianceMappingServiceImpl` (create時のfuture_slot予約・asOf < effectiveFromチェック、effectiveTo=null許可、activateのself-exclusion `.ne(id, version.getId())` ガード、promoteFutureToActiveでの同一operationId/correlationId共有ステータスイベント記録、DB再計算hash一致確認、DuplicateKeyException捕獲による409 versionConflict返却)。
