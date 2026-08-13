@@ -75,6 +75,49 @@
 
 ---
 
+### HFP-01-RUN-20260814-02
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | 実装AI（opencode） |
+| worktree / branch | `C:\Users\pc\Documents\ses-manager-pro-hfp-01` / `codex/hfp-01-payroll-freee` |
+| base / head | 前Run末commit / 本Run末commit（HFP-01-002） |
+| 開始 / 終了（JST） | 2026-08-14 01:30 / 2026-08-14 04:10 |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（前Runで確認済み） |
+| freee test事業所 | BLOCKED（継続。secret不掲載） |
+| Docker / Node | **READY**（Docker Desktop起動、daemon 29.6.1）/ READY（v24.18.0） |
+| dirty差分の取扱い | 開始時dirtyなし |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-002 | **PASS** | `db/migration/V103__freee_company_boundary.sql`（新規）、`FreeeConnection.connectionStatus`、`FreeeEmployeeLink.freeeCompanyId`、`schema-freee-payroll-h2.sql`、`engineer-schema-h2.sql`、`FlywayMigrationSmokeTest`（V103 assert追記）、`FlywayV103FreeeCompanyBoundarySmokeTest`（新規）、`FreeeCompanyBoundarySchemaH2Test`（新規） | H2: `mvn test -Dtest=FreeeCompanyBoundarySchemaH2Test` → 5/0/0/0 code 0。MySQL: `-Dtest=FlywayV103FreeeCompanyBoundarySmokeTest` → 2/0/0/0 code 0。`-Dtest=FlywayMigrationSmokeTest` → 2/0/0/0 code 0（V103 assert含む） | schema metadata: 下記Demo | 適用済みmigration編集なし。forward migrationのみ |
+
+**Demo（HFP-01-002）: schema metadata + 3 unique case**
+
+- `t_freee_connection.connection_status VARCHAR(32) NOT NULL DEFAULT 'CONNECTED'`（MySQL実DBで確認）
+- `t_freee_employee_link.freee_company_id BIGINT NULL`（legacyは一意company時のみbackfill、複数company時はNULLのまま要再確認）
+- 旧`uk_freee_link_employee`削除 → 新`uk_freee_link_company_employee (freee_company_id, freee_employee_id)`2列UNIQUE（information_schema.statisticsで確認）
+- 3 unique case（実MySQL・個人データなしfixture）: 同一employee別company登録**可** / 同一company内**拒否** / engineer重複（別companyでも）**常に拒否**
+- V102適用済み相当（V21含む）からのupgradeでbackfill適用・NULL残存の両経路を確認
+
+#### 自動gate集計（HFP-01-002時点）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---:|---:|---:|---:|---|---|
+| H2 schema/unique | `mvn test -Dtest=FreeeCompanyBoundarySchemaH2Test` | 5 | 0 | 0 | 0 | PASS | surefire-reports |
+| MySQL upgrade smoke | `mvn test -Dtest=FlywayV103FreeeCompanyBoundarySmokeTest` | 2 | 0 | 0 | 0 | PASS | surefire-reports |
+| MySQL full smoke | `mvn test -Dtest=FlywayMigrationSmokeTest` | 2 | 0 | 0 | 0 | PASS | surefire-reports |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
