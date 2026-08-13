@@ -331,8 +331,15 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(409, "compliance.gate.invalidRequirementType");
         }
 
-        // Credential Required check
-        boolean credentialRequired = Integer.valueOf(1).equals(type.getCredentialRequired());
+        // §4-4: credential必須判定はcurrent reviewer type masterではなくfreeze済みsnapshotを使用する
+        // （mapping policyはmapping versionへfreezeされ、master変更の影響を受けない）。
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, requirementGroupId)
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
+        boolean credentialRequired = !frozenTypes.isEmpty()
+                && Integer.valueOf(1).equals(frozenTypes.get(0).getCredentialRequiredSnapshot());
         boolean hasCredential = StringUtils.hasText(credentialRaw);
         if (credentialRequired && !hasCredential) {
             throw BusinessException.of(400, "compliance.gate.credentialRequired");

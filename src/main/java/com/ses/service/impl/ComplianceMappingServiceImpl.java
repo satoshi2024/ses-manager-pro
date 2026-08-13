@@ -391,13 +391,41 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         return version;
     }
 
+    /**
+     * §4-3（P0-FIX-2/3・G2-POL）: policy整合の単一検証（PROVISIONAL化・ACTIVE化・promote・generateで共用）。
+     * - 最低1group
+     * - 各group最低1type（空group/typeはskipせずinvalid frozen policyとしてfail-closed）
+     * - minimum_distinct_reviewers >= 1
+     * - review_policy_hashが現在のpolicyからの再計算と一致（freeze契約・snapshot/hash一致）
+     */
     private void assertPolicyNotEmpty(ComplianceMappingVersion version) {
-        Long groupCount = requirementGroupMapper.selectCount(
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
-        if (groupCount == null || groupCount == 0) {
+        if (groups.isEmpty()) {
             throw BusinessException.of(400, "compliance.gate.policyInvalid");
+        }
+        for (com.ses.entity.ComplianceMappingReviewRequirementGroup group : groups) {
+            if (group.getMinimumDistinctReviewers() == null || group.getMinimumDistinctReviewers() < 1) {
+                throw BusinessException.of(400, "compliance.gate.policyInvalid");
+            }
+            Long typeCount = requirementTypeMapper.selectCount(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, group.getId()));
+            if (typeCount == null || typeCount == 0) {
+                throw BusinessException.of(400, "compliance.gate.policyInvalid");
+            }
+        }
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = requirementTypeMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
+        String recomputed = canonicalizer.computeReviewPolicyHash(groups, types);
+        if (!recomputed.equals(version.getReviewPolicyHash())) {
+            throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
         }
     }
 

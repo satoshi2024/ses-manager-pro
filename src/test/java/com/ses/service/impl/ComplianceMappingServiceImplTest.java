@@ -72,7 +72,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion incompleteVersion = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), incomplete);
-        complianceGateAdminService.createRequirementGroup(incompleteVersion.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(incompleteVersion.getId());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(incompleteVersion.getId(), "PROVISIONAL_REVIEWED"));
 
@@ -88,7 +88,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion complete = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-2",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(complete.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(complete.getId());
         String draftHash = complete.getMappingHash();
         ComplianceMappingVersion reviewed = complianceMappingService.transition(complete.getId(), "PROVISIONAL_REVIEWED");
         assertEquals("PROVISIONAL_REVIEWED", reviewed.getStatus());
@@ -104,7 +104,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         // 承認eventなし → approvalRequiredで保留
         assertThrows(com.ses.common.exception.BusinessException.class,
@@ -129,7 +129,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-4",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         // 実actor（指名者=1）が承認
@@ -168,7 +168,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-REVOKE-TEST",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent approval = complianceApprovalService.approve(
@@ -211,7 +211,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-V1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
         setupExternalReviewGate(v1.getId());
@@ -221,7 +221,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-10-V2",
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
-        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
         setupExternalReviewGate(v2.getId());
@@ -267,7 +267,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING-PRO", "MAPPING-2026-07-P1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
         setupExternalReviewGate(v1.getId());
@@ -277,7 +277,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING-PRO", "MAPPING-2026-10-P2",
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
-        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
         setupExternalReviewGate(v2.getId());
@@ -347,7 +347,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING-UUID", "MAPPING-2026-07-UUID1",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
-        complianceGateAdminService.createRequirementGroup(v1.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
         setupExternalReviewGate(v1.getId());
@@ -357,7 +357,7 @@ class ComplianceMappingServiceImplTest {
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING-UUID", "MAPPING-2026-10-UUID2",
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
-        complianceGateAdminService.createRequirementGroup(v2.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
         setupExternalReviewGate(v2.getId());
@@ -373,6 +373,23 @@ class ComplianceMappingServiceImplTest {
         assertEquals(2, events.size());
         assertEquals(events.get(0).get("operation_id"), events.get(1).get("operation_id"), "旧SUPERSEDEDと新ACTIVEでoperation_idが一致");
         assertEquals(events.get(0).get("correlation_id"), events.get(1).get("correlation_id"), "旧SUPERSEDEDと新ACTIVEでcorrelation_idが一致");
+    }
+
+    /**
+     * §4-3（P0-FIX-3）: policyは各group最低1type必須のため、group作成と同時にtypeを追加する。
+     */
+    private void setupPolicy(Long mappingId) {
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(mappingId, "GRP-1", "グループ1", 1);
+        Integer typeCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_compliance_external_reviewer_type WHERE type_code='LABOR_CONSULTANT'", Integer.class);
+        if (typeCount == null || typeCount == 0) {
+            complianceGateAdminService.createReviewerType(
+                    "LABOR_CONSULTANT", "社労士", "社会保険労務士", "社労士登録番号", true);
+        }
+        Long reviewerTypeId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_compliance_external_reviewer_type WHERE type_code='LABOR_CONSULTANT'", Long.class);
+        complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId);
     }
 
     private List<ComplianceMappingSourceInput> allSources() {
@@ -463,13 +480,47 @@ class ComplianceMappingServiceImplTest {
                 "SELECT id FROM t_compliance_external_reviewer_verification_event "
                         + "WHERE submitted_review_event_id=? AND verification_kind='REVIEW_AUTHORSHIP'",
                 Long.class, reviewEventId);
-        // APPROVED adoption（identity/authorship参照・mapping/policy/evidence snapshot）
+        // verification: QUALIFICATION（VERIFIED・frozen policyがcredential_required=trueのため必須）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_reviewer_verification_event "
+                + "(tenant_id, reviewer_type_id, reviewer_type_code_snapshot, reviewer_type_name_snapshot, "
+                + "reviewer_subject_id, person_fingerprint_snapshot, qualification_fingerprint_snapshot, "
+                + "fingerprint_key_version, verification_kind, result, method_code, authority_source_code, "
+                + "authority_source_name, checked_at, checked_by, submitted_review_event_id, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, 'LABOR_CONSULTANT', '社労士', ?, ?, ?, 'v1', "
+                + "'QUALIFICATION', 'VERIFIED', 'MANUAL_REGISTRY', 'REGISTRY_1', '社労士名簿', CURRENT_TIMESTAMP, 1, "
+                + "?, ?, ?, ?)",
+                reviewerTypeId, subjectId, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                reviewEventId, "op-ver-q-" + mappingId, "corr-ver-q-" + mappingId, "ver-q-" + mappingId);
+        Long qualificationVerificationId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_reviewer_verification_event "
+                        + "WHERE submitted_review_event_id=? AND verification_kind='QUALIFICATION'",
+                Long.class, reviewEventId);
+        // verification: ACTIVE_STATUS（VERIFIED・業務停止なし）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_reviewer_verification_event "
+                + "(tenant_id, reviewer_type_id, reviewer_type_code_snapshot, reviewer_type_name_snapshot, "
+                + "reviewer_subject_id, person_fingerprint_snapshot, qualification_fingerprint_snapshot, "
+                + "fingerprint_key_version, verification_kind, result, method_code, authority_source_code, "
+                + "authority_source_name, checked_at, checked_by, submitted_review_event_id, operation_id, correlation_id, idempotency_key) VALUES "
+                + "('default', ?, 'LABOR_CONSULTANT', '社労士', ?, ?, ?, 'v1', "
+                + "'ACTIVE_STATUS', 'VERIFIED', 'MANUAL_REGISTRY', 'REGISTRY_1', '社労士名簿', CURRENT_TIMESTAMP, 1, "
+                + "?, ?, ?, ?)",
+                reviewerTypeId, subjectId, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                reviewEventId, "op-ver-s-" + mappingId, "corr-ver-s-" + mappingId, "ver-s-" + mappingId);
+        Long activeStatusVerificationId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_compliance_external_reviewer_verification_event "
+                        + "WHERE submitted_review_event_id=? AND verification_kind='ACTIVE_STATUS'",
+                Long.class, reviewEventId);
+        // APPROVED adoption（identity/qualification/active-status/authorship参照・mapping/policy/evidence snapshot）
         jdbcTemplate.update("INSERT INTO t_compliance_external_review_adoption_event "
                 + "(tenant_id, action, review_chain_id, submitted_review_event_id, identity_verification_event_id, "
+                + "qualification_verification_event_id, active_status_verification_event_id, "
                 + "authorship_verification_event_id, mapping_id, mapping_version, mapping_hash, review_policy_version, "
                 + "review_policy_hash, adopted_at, adopted_by, operation_id, correlation_id, idempotency_key) VALUES "
-                + "('default', 'APPROVED', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, ?, ?, ?)",
-                reviewChainId, reviewEventId, identityVerificationId, authorshipVerificationId,
+                + "('default', 'APPROVED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, ?, ?, ?)",
+                reviewChainId, reviewEventId, identityVerificationId, qualificationVerificationId,
+                activeStatusVerificationId, authorshipVerificationId,
                 mappingId, version.getMappingVersion(), version.getMappingHash(),
                 version.getMappingVersion(), version.getReviewPolicyHash(),
                 "op-adopt-" + mappingId, "corr-adopt-" + mappingId, "adopt-" + mappingId);

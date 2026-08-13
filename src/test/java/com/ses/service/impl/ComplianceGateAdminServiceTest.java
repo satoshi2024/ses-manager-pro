@@ -111,7 +111,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         // 指名者本人が承認 → event記録（canonical hash・64 hex）
@@ -136,7 +136,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         assertThrows(BusinessException.class,
                 () -> complianceApprovalService.approve(version.getId(), workplaceId, "他人の承認", null),
@@ -161,10 +161,12 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-FREEZE",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        // DRAFT状態ではgroup作成可能
+        // DRAFT状態ではgroup作成可能（§4-3: 各group最低1type必須のためtypeも追加）
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
                 complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         assertNotNull(group.getId());
+        Long reviewerTypeId = insertReviewerType("LABOR_CONSULTANT", true);
+        complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId);
 
         // PROVISIONAL_REVIEWEDへ遷移
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
@@ -173,7 +175,7 @@ class ComplianceGateAdminServiceTest {
         assertThrows(BusinessException.class,
                 () -> complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-2", "グループ2", 1));
         assertThrows(BusinessException.class,
-                () -> complianceGateAdminService.addRequirementType(group.getId(), 1L));
+                () -> complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId));
     }
 
     @Test
@@ -183,7 +185,7 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-IDEM",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent event1 = complianceApprovalService.approve(
@@ -357,6 +359,26 @@ class ComplianceGateAdminServiceTest {
         jdbcTemplate.update("INSERT INTO sys_user (username, real_name, role, status, password) "
                 + "VALUES (?, ?, ?, 1, 'x')", username, username + "名", role);
         return jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username=?", Long.class, username);
+    }
+
+    /** reviewer typeを作成してIDを返す（既存なら再利用・§4-3 type必須のfixture用）。 */
+    private Long insertReviewerType(String typeCode, boolean credentialRequired) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_compliance_external_reviewer_type WHERE type_code=?", Integer.class, typeCode);
+        if (count == null || count == 0) {
+            complianceGateAdminService.createReviewerType(
+                    typeCode, "社労士", "社会保険労務士", "社労士登録番号", credentialRequired);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM m_compliance_external_reviewer_type WHERE type_code=?", Long.class, typeCode);
+    }
+
+    /** §4-3（P0-FIX-3）: group＋typeを作成してfreeze可能な状態にする。 */
+    private void setupPolicy(Long mappingId) {
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(mappingId, "GRP-1", "グループ1", 1);
+        Long reviewerTypeId = insertReviewerType("LABOR_CONSULTANT", true);
+        complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId);
     }
 
     private List<ComplianceMappingSourceInput> sources() {
