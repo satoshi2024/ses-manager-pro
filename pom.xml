@@ -195,18 +195,6 @@
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
-            </plugin>
             <!-- docker-java が要求するDocker APIバージョンを明示する。
                  既定は1.32固定で、Docker Engine 29系(MinAPIVersion 1.40)が接続を拒否するため、
                  Dockerが起動していてもMySQL smoke(FlywayMigrationSmokeTest 等)が
