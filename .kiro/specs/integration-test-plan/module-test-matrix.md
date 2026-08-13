@@ -16,6 +16,9 @@
 | MOD01-04 | `/user/list` | 管理者 | ログイン中の自分自身 (`admin`) に対し「無効化」ボタン押下 | DB 変更なし (ガードブロック) | Swalエラー「ログイン中の自身を無効化することはできません」表示 |
 | MOD01-05 | `/user/list` | 管理者 | 権限設定タブで `営業` ロールから `invoice` メニューのチェックを外し保存 | `t_role_menu` から該当 `menu_id` 削除 | 保存完了。`営業` で再ログイン時、サイドバーから「請求書」メニュー消滅 |
 | MOD01-06 | `/audit-log/list` | 管理者 | 監査ログ照会画面で操作種別 `UPDATE`、日付指定で検索 | `t_audit_log` から SELECT 実行 | 上記 MOD01-03/05 のユーザー作成・権限変更履歴がログ一覧に正確に表示 |
+| MOD01-07 (Edge) | `/api/users` | 管理者 | CSRFトークン(`X-XSRF-TOKEN`)を意図的に削除または無効な値にしてPOSTリクエスト送信 | DB 変更なし (Spring Securityでブロック) | `403 Forbidden` となり、グローバルエラーハンドラー経由で JSON または Unified Error Page へフォールバック |
+| MOD01-08 (Edge) | `/my/timesheet` 等 | 全ロール | 画面を開いたままセッション有効期限(例:30分)を意図的に超過させ、その後「保存(AJAX POST)」を実行 | DB 変更なし | `common.js` の `ajaxSetup` が 401/403 (またはログイン画面HTML) を検知し、自動的に `/login` 画面へリダイレクト |
+| MOD01-09 (Edge) | 任意の画面 | 全ロール | サーバー内部で強制的に `RuntimeException` (500) を発生させる操作を実行 | 該当処理はロールバック | Spring Boot の Whitelabel エラー画面やスタックトレースが漏洩せず、統一された `templates/error.html` (ダークテーマ) が表示されること |
 
 ---
 
