@@ -208,7 +208,7 @@ class ComplianceGateAdminServiceTest {
     }
 
     @Test
-    void externalReviewをAES256GCM暗号化とidentityHash付きで登録できる() {
+    void externalReviewをCGC1暗号化とidentityHash付きで登録できる() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-EXT",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
@@ -221,19 +221,93 @@ class ComplianceGateAdminServiceTest {
         com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "山田弁護士", "山田法律事務所", "REG-123456",
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK");
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null);
 
         assertNotNull(event.getId());
         assertEquals("APPROVED", event.getAction());
         assertEquals("v1", event.getCredentialKeyVersion());
-        assertEquals("AES-256-GCM", event.getCredentialCipherFormat());
+        assertEquals("CGC1", event.getCredentialCipherFormat());
         assertEquals("****3456", event.getCredentialMaskedSnapshot());
-        assertNotNull(event.getCredentialSnapshotEncrypted());
+        assertTrue(event.getCredentialSnapshotEncrypted().startsWith("CGC1:v1:"), "CGC1 envelope");
         assertEquals(64, event.getReviewerIdentityHash().length());
+        assertNotNull(event.getIdempotencyKey());
+
+        // DTO allow-list検証 (R9.3)
+        com.ses.dto.compliance.ComplianceExternalReviewEventDto dto =
+                com.ses.dto.compliance.ComplianceExternalReviewEventDto.fromEntity(event);
+        assertEquals(event.getId(), dto.getId());
+        assertEquals("****3456", dto.getCredentialMaskedSnapshot());
 
         List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(version.getId());
         assertEquals(1, list.size());
         assertEquals(event.getId(), list.get(0).getId());
+    }
+
+    @Test
+    void credentialが未入力でoptionalの場合は4列全NULLで保存されrequiredの場合は400拒否される() {
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-EXT2",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+
+        // optional credential type
+        ComplianceExternalReviewerType optType = complianceGateAdminService.createReviewerType(
+                "OTHER_REVIEWER", "その他専門家", "備考", "登録番号", false);
+        complianceGateAdminService.addRequirementType(group.getId(), optType.getId());
+
+        // credential未入力で登録 → 4列全NULL
+        com.ses.entity.ComplianceExternalReviewEvent eventOpt = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), optType.getId(),
+                "佐藤専門家", "佐藤事務所", null,
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+
+        assertNull(eventOpt.getCredentialSnapshotEncrypted());
+        assertNull(eventOpt.getCredentialKeyVersion());
+        assertNull(eventOpt.getCredentialCipherFormat());
+        assertNull(eventOpt.getCredentialMaskedSnapshot());
+
+        // required credential type
+        ComplianceExternalReviewerType reqType = complianceGateAdminService.createReviewerType(
+                "TAX_ACCOUNTANT", "税理士", "税務専門家", "税理士登録番号", true);
+        complianceGateAdminService.addRequirementType(group.getId(), reqType.getId());
+
+        // requiredで未入力 → 400拒否
+        BusinessException ex = assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), reqType.getId(),
+                "田中税理士", "田中事務所", "",
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null));
+        assertEquals(400, ex.getCode());
+        assertEquals("compliance.gate.credentialRequired", ex.getMessageKey());
+    }
+
+    @Test
+    void REVOKEアクションは対象positiveイベントを無効化し鎖を維持する() {
+        ComplianceMappingVersion version = complianceMappingService.create(
+                "G2-MAPPING", "MAPPING-2026-07-REV",
+                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        ComplianceExternalReviewerType type = complianceGateAdminService.createReviewerType(
+                "AUDITOR", "監査人", "公認会計士", "登録番号", false);
+        complianceGateAdminService.addRequirementType(group.getId(), type.getId());
+
+        // 1. APPROVED 登録
+        com.ses.entity.ComplianceExternalReviewEvent approved = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "鈴木会計士", "監査法人", null,
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+
+        // 2. REVOKED 登録
+        com.ses.entity.ComplianceExternalReviewEvent revoked = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "鈴木会計士", "監査法人", null,
+                "REVOKED", LocalDateTime.now(), null, null, "取消", approved.getId());
+
+        assertEquals("REVOKED", revoked.getAction());
+        assertEquals(approved.getReviewChainId(), revoked.getReviewChainId());
+        assertEquals(approved.getId(), revoked.getTargetEventId());
+        assertEquals(approved.getId(), revoked.getSupersedesEventId());
     }
 
     @Test

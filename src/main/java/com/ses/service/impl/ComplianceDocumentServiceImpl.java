@@ -85,6 +85,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final ComplianceFindingMapper findingMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
+    private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
     private final MessageSource messageSource;
 
@@ -214,7 +215,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         String fieldMaskHash = sha256Hex(maskLevel());
 
         String gateSnapshotHashStr = computeGateSnapshotHash(
-                activeMapping.getId(), activeMapping.getMappingVersion(), mappingHashStr, reviewPolicyHashStr,
+                activeMapping, deliveredAt.toLocalDate(),
                 workplaceId, activeAssignment, approvalEvent, deliveredAt);
 
         String renderInputHashStr = computeRenderInputHash(
@@ -658,14 +659,14 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         return sha256Hex(companyName + ":" + companyAddress);
     }
 
-    private String computeGateSnapshotHash(Long mappingId, String mappingVersion, String mappingHash, String reviewPolicyHash,
+    private String computeGateSnapshotHash(com.ses.entity.ComplianceMappingVersion activeMapping, LocalDate asOf,
                                            Long workplaceId, com.ses.entity.ComplianceResponsibleAssignment assignment,
                                            com.ses.entity.ComplianceMappingApprovalEvent approvalEvent, LocalDateTime gateEvaluatedAt) {
         StringBuilder payload = new StringBuilder();
-        payload.append("mapping_id=").append(mappingId).append('\n');
-        payload.append("mapping_version=").append(mappingVersion).append('\n');
-        payload.append("mapping_hash=").append(mappingHash).append('\n');
-        payload.append("review_policy_hash=").append(reviewPolicyHash).append('\n');
+        payload.append("mapping_id=").append(activeMapping.getId()).append('\n');
+        payload.append("mapping_version=").append(activeMapping.getMappingVersion()).append('\n');
+        payload.append("mapping_hash=").append(activeMapping.getMappingHash()).append('\n');
+        payload.append("review_policy_hash=").append(activeMapping.getReviewPolicyHash()).append('\n');
         payload.append("workplace_id=").append(workplaceId).append('\n');
         payload.append("assignment_id=").append(assignment.getId()).append('\n');
         payload.append("assignment_user_id=").append(assignment.getUserId()).append('\n');
@@ -674,7 +675,33 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         payload.append("approval_event_id=").append(approvalEvent.getId()).append('\n');
         payload.append("approval_event_action=").append(approvalEvent.getAction()).append('\n');
         payload.append("approval_event_occurred_at=").append(approvalEvent.getOccurredAt()).append('\n');
-        payload.append("external_review_event=NO_EXTERNAL_REVIEW\n"); // Step 5 fallback
+
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, activeMapping.getId()));
+
+        if (groups != null && !groups.isEmpty() && externalReviewEvaluator != null) {
+            List<com.ses.entity.ComplianceExternalReviewEvent> allAdopted = new ArrayList<>();
+            for (com.ses.entity.ComplianceMappingReviewRequirementGroup grp : groups) {
+                List<com.ses.entity.ComplianceExternalReviewEvent> grpEvents = externalReviewEvaluator.evaluateGroup("default", activeMapping, grp, asOf);
+                allAdopted.addAll(grpEvents);
+            }
+            allAdopted.sort(Comparator.comparing(com.ses.entity.ComplianceExternalReviewEvent::getRequirementGroupCodeSnapshot, Comparator.nullsFirst(Comparator.naturalOrder()))
+                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getReviewerIdentityHash, Comparator.nullsFirst(Comparator.naturalOrder()))
+                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getId));
+            for (com.ses.entity.ComplianceExternalReviewEvent ev : allAdopted) {
+                payload.append("external_review_event=")
+                        .append(ev.getRequirementGroupCodeSnapshot()).append(':')
+                        .append(ev.getReviewerIdentityHash()).append(':')
+                        .append(ev.getId()).append(':')
+                        .append(ev.getReviewedAt()).append(':')
+                        .append(ev.getValidUntil()).append('\n');
+            }
+        } else {
+            payload.append("external_review_event=NO_EXTERNAL_REVIEW\n");
+        }
+
         payload.append("gate_evaluated_at=").append(gateEvaluatedAt).append('\n');
         return sha256Hex(payload.toString());
     }

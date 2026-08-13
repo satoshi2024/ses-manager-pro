@@ -119,8 +119,8 @@ public class ComplianceGateApiController {
     }
 
     @PostMapping("/external-reviews")
-    public ApiResult<com.ses.entity.ComplianceExternalReviewEvent> recordExternalReview(@RequestBody Map<String, Object> body) {
-        return ApiResult.success(complianceGateAdminService.recordExternalReview(
+    public ApiResult<com.ses.dto.compliance.ComplianceExternalReviewEventDto> recordExternalReview(@RequestBody Map<String, Object> body) {
+        com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
                 Long.valueOf(String.valueOf(body.get("mappingId"))),
                 Long.valueOf(String.valueOf(body.get("requirementGroupId"))),
                 Long.valueOf(String.valueOf(body.get("reviewerTypeId"))),
@@ -131,12 +131,18 @@ public class ComplianceGateApiController {
                 body.get("reviewedAt") == null ? null : java.time.LocalDateTime.parse((String) body.get("reviewedAt")),
                 body.get("validUntil") == null ? null : java.time.LocalDateTime.parse((String) body.get("validUntil")),
                 body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId"))),
-                (String) body.get("reason")));
+                (String) body.get("reason"),
+                body.get("targetEventId") == null ? null : Long.valueOf(String.valueOf(body.get("targetEventId"))));
+        return ApiResult.success(com.ses.dto.compliance.ComplianceExternalReviewEventDto.fromEntity(event));
     }
 
     @GetMapping("/mappings/{id}/external-reviews")
-    public ApiResult<List<com.ses.entity.ComplianceExternalReviewEvent>> listExternalReviews(@PathVariable Long id) {
-        return ApiResult.success(complianceGateAdminService.listExternalReviews(id));
+    public ApiResult<List<com.ses.dto.compliance.ComplianceExternalReviewEventDto>> listExternalReviews(@PathVariable Long id) {
+        List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(id);
+        List<com.ses.dto.compliance.ComplianceExternalReviewEventDto> dtoList = list.stream()
+                .map(com.ses.dto.compliance.ComplianceExternalReviewEventDto::fromEntity)
+                .toList();
+        return ApiResult.success(dtoList);
     }
 
     @SuppressWarnings("unchecked")

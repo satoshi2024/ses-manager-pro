@@ -278,7 +278,6 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                 requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
-        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
@@ -287,17 +286,25 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         versionMapper.updateById(version);
     }
 
-    private static final String CREDENTIAL_SECRET_KEY = "ComplianceExternalReviewKey2026";
+    private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
+    private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
+    private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
 
     @Override
     @Transactional
     public com.ses.entity.ComplianceExternalReviewEvent recordExternalReview(Long mappingId, Long requirementGroupId, Long reviewerTypeId,
                                                                                String reviewerName, String organization, String credentialRaw,
                                                                                String action, LocalDateTime reviewedAt,
-                                                                               LocalDateTime validUntil, Long evidenceDocumentId, String reason) {
+                                                                               LocalDateTime validUntil, Long evidenceDocumentId, String reason,
+                                                                               Long targetEventId) {
         if (!StringUtils.hasText(reviewerName) || !StringUtils.hasText(organization)) {
             throw BusinessException.of(400, "compliance.gate.invalidExternalReview");
         }
+        String normalizedAction = StringUtils.hasText(action) ? action.trim().toUpperCase() : "APPROVED";
+        if (!"APPROVED".equals(normalizedAction) && !"REJECTED".equals(normalizedAction) && !"REVOKED".equals(normalizedAction)) {
+            throw BusinessException.of(400, "compliance.gate.invalidAction");
+        }
+
         com.ses.entity.ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -311,10 +318,65 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidReviewerType");
         }
 
-        String rawCred = credentialRaw != null ? credentialRaw.trim() : "";
-        String masked = rawCred.length() > 4 ? "****" + rawCred.substring(rawCred.length() - 4) : "VALIDATED";
-        String encrypted = encryptCredential(rawCred);
-        String identityHash = sha256Hex(reviewerName + ":" + organization + ":" + rawCred);
+        // Verify reviewerType is assigned to requirementGroupId
+        Long reqTypeCount = requirementTypeMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, requirementGroupId)
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
+        if (reqTypeCount == null || reqTypeCount == 0) {
+            throw BusinessException.of(409, "compliance.gate.invalidRequirementType");
+        }
+
+        // Credential Required check
+        boolean credentialRequired = Integer.valueOf(1).equals(type.getCredentialRequired());
+        boolean hasCredential = StringUtils.hasText(credentialRaw);
+        if (credentialRequired && !hasCredential) {
+            throw BusinessException.of(400, "compliance.gate.credentialRequired");
+        }
+
+        String opId = java.util.UUID.randomUUID().toString();
+        String encrypted = null;
+        String keyVer = null;
+        String cipherFormat = null;
+        String masked = null;
+
+        if (hasCredential) {
+            String rawTrim = credentialRaw.trim();
+            encrypted = credentialCryptoService.encrypt("default", mappingId, version.getMappingVersion(), opId, rawTrim);
+            keyVer = keyProvider.getCurrentKeyVersion();
+            cipherFormat = com.ses.service.compliance.ComplianceGateCredentialCryptoServiceImpl.CIPHER_FORMAT_CGC1;
+            masked = rawTrim.length() > 4 ? "****" + rawTrim.substring(rawTrim.length() - 4) : "VALIDATED";
+        }
+
+        String identityHash = credentialCryptoService.computeIdentityHash(type.getTypeCode(), credentialRaw, organization, reviewerName);
+
+        String reviewChainId = null;
+        Long supersedesId = null;
+        Long targetId = null;
+
+        if ("REVOKED".equals(normalizedAction)) {
+            if (targetEventId == null) {
+                throw BusinessException.of(409, "compliance.gate.revokeTargetInvalid");
+            }
+            com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId("default", targetEventId);
+            if (targetEvent == null || !mappingId.equals(targetEvent.getMappingId()) || !requirementGroupId.equals(targetEvent.getRequirementGroupId()) || !"APPROVED".equalsIgnoreCase(targetEvent.getAction())) {
+                throw BusinessException.of(409, "compliance.gate.revokeTargetInvalid");
+            }
+            reviewChainId = targetEvent.getReviewChainId();
+            targetId = targetEvent.getId();
+            supersedesId = targetEvent.getId();
+        } else {
+            if (targetEventId != null) {
+                com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId("default", targetEventId);
+                if (targetEvent != null && mappingId.equals(targetEvent.getMappingId()) && requirementGroupId.equals(targetEvent.getRequirementGroupId())) {
+                    reviewChainId = targetEvent.getReviewChainId();
+                    supersedesId = targetEvent.getId();
+                }
+            }
+            if (!StringUtils.hasText(reviewChainId)) {
+                reviewChainId = java.util.UUID.randomUUID().toString();
+            }
+        }
 
         com.ses.entity.ComplianceExternalReviewEvent event = new com.ses.entity.ComplianceExternalReviewEvent();
         event.setTenantId("default");
@@ -330,20 +392,24 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         event.setReviewerNameSnapshot(reviewerName);
         event.setOrganizationSnapshot(organization);
         event.setCredentialSnapshotEncrypted(encrypted);
-        event.setCredentialKeyVersion("v1");
-        event.setCredentialCipherFormat("AES-256-GCM");
+        event.setCredentialKeyVersion(keyVer);
+        event.setCredentialCipherFormat(cipherFormat);
         event.setCredentialMaskedSnapshot(masked);
         event.setReviewerIdentityHash(identityHash);
-        event.setAction(StringUtils.hasText(action) ? action : "APPROVED");
-        event.setReviewChainId(java.util.UUID.randomUUID().toString());
+        event.setAction(normalizedAction);
+        event.setReviewChainId(reviewChainId);
+        event.setTargetEventId(targetId);
+        event.setSupersedesEventId(supersedesId);
         event.setReviewedAt(reviewedAt != null ? reviewedAt : LocalDateTime.now());
         event.setValidUntil(validUntil);
         event.setRecordedAt(LocalDateTime.now());
         event.setEvidenceDocumentId(evidenceDocumentId);
         event.setRecordedBy(SecurityUtils.currentUserId());
-        event.setOperationId(java.util.UUID.randomUUID().toString());
+        event.setOperationId(opId);
         event.setCorrelationId(java.util.UUID.randomUUID().toString());
-        event.setIdempotencyKey(sha256Hex("EXT_REV:" + mappingId + ":" + group.getId() + ":" + identityHash + ":" + event.getReviewedAt()));
+
+        String idemKey = sha256Hex("EXT_REV:default:" + mappingId + ":" + group.getId() + ":" + identityHash + ":" + normalizedAction + ":" + (reviewedAt != null ? reviewedAt.toString() : "DEF_TIME"));
+        event.setIdempotencyKey(idemKey);
 
         if (externalReviewEventMapper != null) {
             externalReviewEventMapper.insertEvent(event);
@@ -357,24 +423,6 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             return List.of();
         }
         return externalReviewEventMapper.selectByMapping("default", mappingId);
-    }
-
-    private String encryptCredential(String plainText) {
-        try {
-            byte[] keyBytes = java.util.Arrays.copyOf(CREDENTIAL_SECRET_KEY.getBytes(java.nio.charset.StandardCharsets.UTF_8), 32);
-            javax.crypto.spec.SecretKeySpec keySpec = new javax.crypto.spec.SecretKeySpec(keyBytes, "AES");
-            byte[] iv = new byte[12];
-            new java.security.SecureRandom().nextBytes(iv);
-            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, new javax.crypto.spec.GCMParameterSpec(128, iv));
-            byte[] cipherText = cipher.doFinal(plainText == null ? new byte[0] : plainText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            byte[] payload = new byte[iv.length + cipherText.length];
-            System.arraycopy(iv, 0, payload, 0, iv.length);
-            System.arraycopy(cipherText, 0, payload, iv.length, cipherText.length);
-            return java.util.Base64.getEncoder().encodeToString(payload);
-        } catch (Exception e) {
-            throw new RuntimeException("Credential encryption failed", e);
-        }
     }
 
     private String sha256Hex(String text) {

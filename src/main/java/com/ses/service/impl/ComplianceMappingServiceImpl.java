@@ -43,8 +43,8 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private final com.ses.mapper.ComplianceMappingApprovalEventMapper approvalEventMapper;
     private final com.ses.mapper.ComplianceMappingStatusEventMapper statusEventMapper;
     private final com.ses.mapper.ComplianceResponsibleAssignmentMapper assignmentMapper;
-    private final com.ses.mapper.SysUserMapper sysUserMapper;
-    private final ComplianceMappingCanonicalizer canonicalizer;
+    private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
+    private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
 
     @Override
     @Transactional
@@ -219,6 +219,13 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         String currentPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
         if (!currentPolicyHash.equals(version.getReviewPolicyHash()) || !currentPolicyHash.equals(approval.getReviewPolicyHash())) {
             throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
+        }
+
+        // §3.2 / §7.3 / G2-SEC-12..18 外部レビューポリシー評価 (Group AND)
+        if (externalReviewEvaluator != null && !groups.isEmpty()) {
+            for (com.ses.entity.ComplianceMappingReviewRequirementGroup group : groups) {
+                externalReviewEvaluator.evaluateGroup("default", version, group, asOf);
+            }
         }
 
         // assignment再解決（openかつworkplaceId一致）

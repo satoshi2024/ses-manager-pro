@@ -43,7 +43,8 @@ public interface ComplianceGateAdminService {
     com.ses.entity.ComplianceExternalReviewEvent recordExternalReview(Long mappingId, Long requirementGroupId, Long reviewerTypeId,
                                                                        String reviewerName, String organization, String credentialRaw,
                                                                        String action, LocalDateTime reviewedAt,
-                                                                       LocalDateTime validUntil, Long evidenceDocumentId, String reason);
+                                                                       LocalDateTime validUntil, Long evidenceDocumentId, String reason,
+                                                                       Long targetEventId);
 
     List<com.ses.entity.ComplianceExternalReviewEvent> listExternalReviews(Long mappingId);
 }
