@@ -1,3 +1,20 @@
+## R23-S3指摘対応記録（2026-08-14・P1-01/P2-01/P2-02/P2-03）
+
+**R23-S3-P1-01（fingerprint domain分離）**: ComplianceReviewerFingerprintService新規実装（§9 HMAC契約）。
+person（domain=person|tenant|subject_code|正規化氏名|正規化組織）とqualification（domain=qualification|tenant|subject_code|type_code|正規化登録番号）を
+別domainのtenant-HMAC（HMAC-SHA-256）で計算。NFKC正規化・空白/ハイフン除去・英字大文字化・registration ID optional対応・key version。
+VerificationServiceImplがperson/qualification fingerprintを正しくsnapshotするよう修正（旧: personを両方に代入）。
+ComplianceReviewerFingerprintServiceTest 5/0/0/0（domain分離・決定性・normalization・tenant分離・optional）。
+
+**R23-S3-P2-01（registration identifier AES-GCM）**: VerificationServiceImplがComplianceGateCredentialCryptoService.encrypt（CGC1 envelope）で
+registration identifierを暗号化し、key version/cipher format/masked snapshotを保存（§3.3）。My Number非保存（§7）は維持。
+
+**R23-S3-P2-02（旧evaluator dead code削除）**: ComplianceExternalReviewEvaluator.javaを削除（呼び出し0・gate正本から除外済み）。
+
+**R23-S3-P2-03（CI flake）**: NotificationOutboxSchedulerIntegrationTest（前回failure）は今回runでPASS（順序/infra依存flake）。
+CapacityBaselineScriptTest（フルスイート時NPE）は単独実行でPASS・flake確認。
+
+**CI検証**: PR #73 run 31720801920 = 1889/0/0/0・skip 0（MySQL fresh/upgrade smoke実実行）・BUILD SUCCESS。
 ## Step 2（§3 schema）中間Review対応記録（2026-08-13・R10指摘3点）
 
 **① Error 3823 deviationの正式記録**: accepted v3 §3.9のCHECK matrixのうち、evoke target・credential all-or-none・evidence all-or-none・AUTHORSHIP binding・doption APPROVED refs・doption revoke target は、
