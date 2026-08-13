@@ -40,6 +40,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -143,28 +144,39 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         com.ses.entity.ComplianceResponsibleAssignment activeAssignment = assignmentMapper != null ? assignmentMapper.selectOne(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceResponsibleAssignment>()
                         .eq(com.ses.entity.ComplianceResponsibleAssignment::getTenantId, "default")
-                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getWorkplaceIdSnapshot, workplaceId)
+                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(com.ses.entity.ComplianceResponsibleAssignment::getActiveSlot, 1)
                         .last("LIMIT 1")) : null;
         if (activeAssignment == null) {
             throw BusinessException.of(409, "compliance.gate.invalidTransition");
         }
-        if ((activeAssignment.getEffectiveFrom() != null && asOf.isBefore(activeAssignment.getEffectiveFrom()))
-                || (activeAssignment.getEffectiveTo() != null && asOf.isAfter(activeAssignment.getEffectiveTo()))) {
+        LocalDate asgFrom = activeAssignment.getEffectiveFrom() == null ? null : activeAssignment.getEffectiveFrom().toLocalDate();
+        LocalDate asgTo = activeAssignment.getEffectiveTo() == null ? null : activeAssignment.getEffectiveTo().toLocalDate();
+        if ((asgFrom != null && asOf.isBefore(asgFrom)) || (asgTo != null && asOf.isAfter(asgTo))) {
             throw BusinessException.of(409, "compliance.gate.invalidTransition");
         }
 
-        // 3. Valid unrevoked approval event (action = "APPROVE", countSubsequentRevokes == 0)
+        // 3. Valid unrevoked approval event (action = "APPROVE")
         com.ses.entity.ComplianceMappingApprovalEvent approvalEvent = approvalEventMapper != null ? approvalEventMapper.selectOne(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
                         .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, activeMapping.getId())
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceId, workplaceId)
+                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceIdSnapshot, workplaceId)
                         .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "APPROVE")
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getCountSubsequentRevokes, 0)
                         .orderByDesc(com.ses.entity.ComplianceMappingApprovalEvent::getId)
                         .last("LIMIT 1")) : null;
         if (approvalEvent == null) {
             throw BusinessException.of(409, "compliance.gate.approvalRevoked");
+        }
+        if (approvalEventMapper != null) {
+            Long revokeCount = approvalEventMapper.selectCount(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
+                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, activeMapping.getId())
+                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceIdSnapshot, workplaceId)
+                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "REVOKE")
+                            .gt(com.ses.entity.ComplianceMappingApprovalEvent::getId, approvalEvent.getId()));
+            if (revokeCount != null && revokeCount > 0) {
+                throw BusinessException.of(409, "compliance.gate.approvalRevoked");
+            }
         }
 
         // 4. Re-verify DB mapping_hash and review_policy_hash match
