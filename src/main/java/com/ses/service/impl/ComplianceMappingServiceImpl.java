@@ -45,6 +45,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private final com.ses.mapper.ComplianceResponsibleAssignmentMapper assignmentMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
     private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
 
     @Override
     @Transactional

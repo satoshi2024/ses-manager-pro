@@ -42,8 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -82,6 +84,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
     private final com.ses.service.storage.DocumentStorage documentStorage;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final ComplianceFindingMapper findingMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
