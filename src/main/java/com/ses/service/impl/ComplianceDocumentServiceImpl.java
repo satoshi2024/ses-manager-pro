@@ -288,7 +288,9 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         delivery.setDeliveryMethod(request.getDeliveryMethod());
         delivery.setDeliveryStatus("DELIVERED");
         delivery.setDeliveredAt(deliveredAt);
-        delivery.setIdempotencyKey(legacyIdempotencyKey);
+        // 新規deliveryはbusinessKeyをidempotency_keyとして使用（P2-N-3: legacyKeyはdelivery_business_key IS NULLの旧行の
+        // フォールバック照合専用。legacyKeyをそのまま保存するとUNIQUE(tenant_id, idempotency_key)が別businessKeyと衝突する）
+        delivery.setIdempotencyKey(businessKey);
 
         delivery.setMappingVersionId(mappingVersionId);
         delivery.setMappingVersion(mappingVersionStr);
@@ -683,12 +685,22 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, activeMapping.getId()));
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
+                requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
 
-        if (groups != null && !groups.isEmpty() && externalReviewEvaluator != null) {
+        // E-3: NO_EXTERNAL_REVIEW センチネルは撤去し、freeze済みpolicyを満たす実在external review eventのみを
+        // gate_snapshot_hashへ含める（type未設定グループは外部レビュー不要 — mapping側activateと同一判定）。
+        if (externalReviewEvaluator != null && !groups.isEmpty()) {
             List<com.ses.entity.ComplianceExternalReviewEvent> allAdopted = new ArrayList<>();
             for (com.ses.entity.ComplianceMappingReviewRequirementGroup grp : groups) {
-                List<com.ses.entity.ComplianceExternalReviewEvent> grpEvents = externalReviewEvaluator.evaluateGroup("default", activeMapping, grp, asOf);
-                allAdopted.addAll(grpEvents);
+                boolean hasTypes = types.stream().anyMatch(t -> grp.getId().equals(t.getRequirementGroupId()));
+                if (hasTypes) {
+                    allAdopted.addAll(externalReviewEvaluator.evaluateGroup("default", activeMapping, grp, asOf));
+                }
             }
             allAdopted.sort(Comparator.comparing(com.ses.entity.ComplianceExternalReviewEvent::getRequirementGroupCodeSnapshot, Comparator.nullsFirst(Comparator.naturalOrder()))
                     .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getReviewerIdentityHash, Comparator.nullsFirst(Comparator.naturalOrder()))
@@ -701,8 +713,6 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
                         .append(ev.getReviewedAt()).append(':')
                         .append(ev.getValidUntil()).append('\n');
             }
-        } else {
-            payload.append("external_review_event=NO_EXTERNAL_REVIEW\n");
         }
 
         payload.append("gate_evaluated_at=").append(gateEvaluatedAt).append('\n');

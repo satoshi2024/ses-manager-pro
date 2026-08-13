@@ -223,9 +223,13 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         }
 
         // §3.2 / §7.3 / G2-SEC-12..18 外部レビューポリシー評価 (Group AND)
+        // requirement typeが1つ以上設定されているグループのみ評価対象（type未設定グループは外部レビュー不要）
         if (externalReviewEvaluator != null && !groups.isEmpty()) {
             for (com.ses.entity.ComplianceMappingReviewRequirementGroup group : groups) {
-                externalReviewEvaluator.evaluateGroup("default", version, group, asOf);
+                boolean hasTypes = types.stream().anyMatch(t -> group.getId().equals(t.getRequirementGroupId()));
+                if (hasTypes) {
+                    externalReviewEvaluator.evaluateGroup("default", version, group, asOf);
+                }
             }
         }
 

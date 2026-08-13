@@ -104,12 +104,16 @@ public class ComplianceGateCredentialKeyProviderImpl implements ComplianceGateCr
 
     private boolean isProdProfile() {
         String[] activeProfiles = environment.getActiveProfiles();
+        boolean hasProd = false;
         for (String profile : activeProfiles) {
+            if ("test".equalsIgnoreCase(profile)) {
+                return false; // test プロファイルが優先: prod fail-fast 無効
+            }
             if ("prod".equalsIgnoreCase(profile)) {
-                return true;
+                hasProd = true;
             }
         }
-        return false;
+        return hasProd;
     }
 
     private void validateKeyVersion(String version) {

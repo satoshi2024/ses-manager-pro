@@ -228,3 +228,15 @@ ai:
   # api-url: https://your-resource.openai.azure.com/
   # model: gpt-4o
   # max-tokens: 4096
+
+# ===== G2外部Review資格credential暗号化（§6.5） =====
+# 値はdeployment secret storeから注入すること。prodプロファイルでは未設定・不正な鍵で起動時にfail-fastする。
+# dev/testプロファイルは未設定時、テスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
+compliance:
+  gate:
+    credential-crypto:
+      # 現在の鍵バージョン（^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$）
+      current-key-version: ${COMPLIANCE_CREDENTIAL_CURRENT_KEY_VERSION:}
+      # 鍵バージョンごとのAES-256鍵（32バイトをunpadded base64urlで指定。'='padding・空白禁止）
+      keys:
+        # v1: ${COMPLIANCE_CREDENTIAL_KEY_V1:}

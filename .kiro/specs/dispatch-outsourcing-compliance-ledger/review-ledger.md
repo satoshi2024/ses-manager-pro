@@ -95,7 +95,14 @@ findLatestByDocumentId利用・evidence resolver欠如）は本delta §4の実�
   - **E-2 (decrypt 経路 & fail-closed)**: `decrypt()` を実装し、GCM タグ不正・鍵不一致・改竄時に 409 `compliance.gate.credentialUnavailable` で fail-closed。
   - **E-3 (gate 接続 & NO_EXTERNAL_REVIEW 撤去)**: `ComplianceExternalReviewEvaluator` を新規作成し、`activate()` および `generate()` 交付ゲートへ接続。Requirement Group AND / Reviewer Type OR / 最低必要人数 / 有効期間 (`valid_until > asOf`) / CLEAN 証跡 / 復号可否を検証。グループ定義時は `NO_EXTERNAL_REVIEW` センチネルを排除し実イベントスナップショットハッシュを計算。
   - **E-4 (action 検証・REVOKE 鎖・DTO allow-list)**: `action` を `APPROVED`/`REJECTED`/`REVOKED` に制限、`REVOKED` 鎖マッピング（`targetEventId`/`supersedesEventId`/`reviewChainId`）、決定論的 `idempotencyKey`、生暗号文を除外した `ComplianceExternalReviewEventDto` (R9.3) を適用。
-- **検証結果**: `verify-like-ci.ps1` 実行により **206 tests / 0 failures / 0 errors / 0 skipped (skip 0)** で BUILD SUCCESS 達成。
+- **Phase A step 5 仕上げ（2026-08-13）**:
+  - **E-4 完全化（idempotencyKey決定論化）**: `recordExternalReview()` の idempotencyKey から `reviewedAt` 依存を除去し、requestパラメータ（mappingId/groupId/identityHash/action）のみから導出。同内容再送は同一キーとなり `UNIQUE(tenant_id, idempotency_key)` の二重防御で重複挿入を409（`contract.compliance.versionConflict`）へ変換（approvalと同契約・NOTE-1のoperation ledger統合待ち）。
+  - **E-3 完全化（交付gateのNO_EXTERNAL_REVIEW撤去・type未設定groupは評価除外）**: `ComplianceDocumentServiceImpl.computeGateSnapshotHash` から `NO_EXTERNAL_REVIEW` センチネルを撤去し、freeze済みpolicyを満たす実在external review eventのみをsnapshot hashへ含める。`ComplianceMappingServiceImpl.activate()` と同一の判定（requirement type未設定groupは外部レビュー不要）を交付gateにも適用。
+  - **P2-N-3 完全化（新規deliveryのidempotency_key = businessKey）**: 新規delivery rowの `idempotency_key` を `delivery_business_key` と同一に設定（legacyKeyは `delivery_business_key IS NULL` の旧行フォールバック照合専用）。別businessKeyの再生成が `UK_DOCUMENT_DELIVERY_IDEMPOTENCY` と衝突する欠陥（500化）を解消。
+  - **G2-ASG（TIMESTAMP(6)丸めのtickガード厳密化）**: `createAssignment` の旧open終了・`endAssignment` で `LocalDateTime.now()` を µs へtruncateしてから比較・設定し、µs丸めで `effective_to` が `effective_from` と同値化して `chk_g2_assignment_period` 違反になる flake を除去（負荷時の1テスト失敗を解消）。
+  - **テスト分離（shared H2）**: `ComplianceDocumentApiTest` は `engineer-schema-h2.sql` がG2 gate表をDROPしないため、各テスト前にG2 seedを掃除（`clearGateSeed`）。他テストの行を読まない（AGENTS.md規約）ことによる `承認イベントなしworkplace 409` テストの順序依存失敗を解消。seedのCHECK（`chk_g2_assignment_open_fields`）・NOT NULL（approval event chain/op/corr/idempotency列）準拠化。
+  - **key config文書化**: `application.yml` に `compliance.gate.credential-crypto.*`（current-key-version/keys.v1・env変数）の設定契約を明記（prod未設定は起動時fail-fast）。
+- **検証結果**: `mvn -B clean test`（verify-like-ci.ps1と同一条件）で **1880 tests / 0 failures / 0 errors / skipped 41（全てTestcontainers/Docker要・CIでは実行）** で BUILD SUCCESS 達成。
 
 **Phase A step 4 前半（Delivery Gate Snapshot & Preview・3 Renditions・N1–N6・2026-08-13）**
 - **N1–N6修正完了**: `ComplianceMappingServiceImpl` (create時のfuture_slot予約・asOf < effectiveFromチェック、effectiveTo=null許可、activateのself-exclusion `.ne(id, version.getId())` ガード、promoteFutureToActiveでの同一operationId/correlationId共有ステータスイベント記録、DB再計算hash一致確認、DuplicateKeyException捕獲による409 versionConflict返却)。

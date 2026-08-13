@@ -67,6 +67,23 @@ class ComplianceDocumentApiTest {
     void setUp() {
         org.mockito.Mockito.when(organizationScopeService.hasFullAccess()).thenReturn(true);
         systemConfigService.put("compliance.template.DISPATCH_LEDGER.version", "1", "test");
+        // engineer-schema-h2.sql はG2 gate表（m_compliance_mapping_version / t_compliance_responsible_assignment 等）を
+        // DROPしないため、前テストのseed行がm_workplaceのIDリセットと衝突して残る（shared H2 DB）。各テストの先頭で
+        // G2 gate seedを掃除して他テストの行を参照しないこと（AGENTS.md: 自分でinsertした行以外を読まない）。
+        clearGateSeed();
+    }
+
+    private void clearGateSeed() {
+        jdbcTemplate.update("DELETE FROM t_compliance_external_review_event");
+        jdbcTemplate.update("DELETE FROM t_compliance_mapping_status_event");
+        jdbcTemplate.update("DELETE FROM t_compliance_mapping_approval_event");
+        jdbcTemplate.update("DELETE FROM t_compliance_operation_ledger");
+        jdbcTemplate.update("DELETE FROM t_compliance_responsible_assignment");
+        jdbcTemplate.update("DELETE FROM m_compliance_mapping_review_requirement_type");
+        jdbcTemplate.update("DELETE FROM m_compliance_mapping_review_requirement_group");
+        jdbcTemplate.update("DELETE FROM m_compliance_mapping_source");
+        jdbcTemplate.update("DELETE FROM m_compliance_mapping_version");
+        jdbcTemplate.update("DELETE FROM m_compliance_external_reviewer_type");
     }
 
     @Test
@@ -81,8 +98,9 @@ class ComplianceDocumentApiTest {
 
         assertEquals(1, queryInt("SELECT COUNT(*) FROM t_contract_compliance_snapshot WHERE contract_id=" + contractId),
                 "snapshotが1件作成される");
-        assertEquals(1, queryInt("SELECT COUNT(*) FROM t_document WHERE document_type='EMPLOYMENT_CONDITIONS_STATEMENT'"),
-                "document archiveへ登録される");
+        assertEquals(3, queryInt("SELECT COUNT(*) FROM t_document WHERE document_type='EMPLOYMENT_CONDITIONS_STATEMENT'"),
+                "FULL/MASK/LIMITED の3レンディションがdocument archiveへ登録される");
+
         assertEquals(1, queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId),
                 "交付記録が1件");
         String snapshotHash = jdbcTemplate.queryForObject(
@@ -381,7 +399,8 @@ class ComplianceDocumentApiTest {
         long firstDeliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL");
 
         // DBに異なるbusinessKeyを持つ既存 delivery があっても、ビジネスキーが異なれば新規生成
-        jdbcTemplate.update("UPDATE t_document_delivery SET delivery_business_key='OLD_BIZ_KEY' WHERE id=?", firstDeliveryId);
+        // （新規deliveryのidempotency_keyはbusinessKeyのため、こちらも合わせて変更しないとUNIQUEが衝突する）
+        jdbcTemplate.update("UPDATE t_document_delivery SET delivery_business_key='OLD_BIZ_KEY', idempotency_key='OLD_BIZ_KEY' WHERE id=?", firstDeliveryId);
 
         // 新規 delivery 生成を要求（businessKey は現在入力から新しく計算される）
         java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
@@ -466,16 +485,21 @@ class ComplianceDocumentApiTest {
                 "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE tenant_id='default' AND workplace_id=? AND active_slot=1", Integer.class, workplaceId);
         if (asgCount == null || asgCount == 0) {
             jdbcTemplate.update("INSERT INTO t_compliance_responsible_assignment "
-                    + "(tenant_id, user_id, role_code, workplace_id, active_slot, effective_from, effective_to, version, assigned_by) "
-                    + "VALUES ('default', 1, 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01 00:00:00', '2026-12-31 23:59:59', 1, 1)", workplaceId);
+                    + "(tenant_id, user_id, role_code, workplace_id, active_slot, effective_from, assigned_by) "
+                    + "VALUES ('default', 1, 'COMPLIANCE_RESPONSIBLE', ?, 1, '2026-01-01 00:00:00.000000', 1)", workplaceId);
         }
 
         Integer appCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_compliance_mapping_approval_event WHERE mapping_id=? AND workplace_id_snapshot=? AND action='APPROVE'", Integer.class, mappingId, workplaceId);
         if (appCount == null || appCount == 0) {
+            String chainId = java.util.UUID.randomUUID().toString();
+            String opId = java.util.UUID.randomUUID().toString();
+            String corrId = java.util.UUID.randomUUID().toString();
+            String idempotencyKey = "seed-approval-wp-" + workplaceId;
             jdbcTemplate.update("INSERT INTO t_compliance_mapping_approval_event "
-                    + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, occurred_at) "
-                    + "VALUES ('default', ?, 'MAPPING-2026-07', ?, ?, 1, ?, 1, '管理者', 'ROLE_管理者', 'APPROVE', NOW())", mappingId, mappingHash, policyHash, workplaceId);
+                    + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, event_chain_id, occurred_at, operation_id, correlation_id, idempotency_key) "
+                    + "VALUES ('default', ?, 'MAPPING-2026-07', ?, ?, 1, ?, 1, '管理者', 'ROLE_管理者', 'APPROVE', ?, NOW(), ?, ?, ?)",
+                    mappingId, mappingHash, policyHash, workplaceId, chainId, opId, corrId, idempotencyKey);
         }
     }
 

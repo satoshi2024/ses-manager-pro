@@ -142,8 +142,10 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(ComplianceResponsibleAssignment::getActiveSlot, 1));
         for (ComplianceResponsibleAssignment current : open) {
-            // endAssignmentと同じtick問題（TIMESTAMP(6)丸めで期間CHECK違反）へのガード
-            LocalDateTime endAt = LocalDateTime.now();
+            // endAssignmentと同じtick問題（TIMESTAMP(6)丸めで期間CHECK違反）へのガード。
+            // DB保存はµs精度のため、nowをµsへtruncateしてから比較・設定しないと、
+            // nowがeffective_fromより後でもµs丸めで同値になりchk_g2_assignment_period違反になり得る。
+            LocalDateTime endAt = LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
             if (current.getEffectiveFrom() != null && !endAt.isAfter(current.getEffectiveFrom())) {
                 endAt = current.getEffectiveFrom().plusNanos(1000);
             }
@@ -183,8 +185,8 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         // Windows等の粗い時刻粒度でnow()がeffective_fromと同一tickになると、
         // H2/MySQLのTIMESTAMP(6)丸めと合わせて期間CHECK（effective_from < effective_to）違反になり得るため、
-        // effective_toは常にeffective_fromより後になるようガードする（TIMESTAMP(6)はµs精度のため1µs余裕）。
-        LocalDateTime now = LocalDateTime.now();
+        // effective_toは常にµs丸め後もeffective_fromより後になるようガードする（TIMESTAMP(6)はµs精度のため1µs余裕）。
+        LocalDateTime now = LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         if (assignment.getEffectiveFrom() != null && !now.isAfter(assignment.getEffectiveFrom())) {
             now = assignment.getEffectiveFrom().plusNanos(1000);
         }
@@ -408,11 +410,17 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         event.setOperationId(opId);
         event.setCorrelationId(java.util.UUID.randomUUID().toString());
 
-        String idemKey = sha256Hex("EXT_REV:default:" + mappingId + ":" + group.getId() + ":" + identityHash + ":" + normalizedAction + ":" + (reviewedAt != null ? reviewedAt.toString() : "DEF_TIME"));
+        // E-4: 決定論的idempotencyKey（requestパラメータのみから導出・reviewedAt等のサーバー既定時刻を含めない）。
+        // 同内容の再送は同一キーとなり、UNIQUE(tenant_id, idempotency_key)の二重防御で重複挿入を409で拒否する（approvalと同契約）。
+        String idemKey = sha256Hex("EXT_REV:default:" + mappingId + ":" + group.getId() + ":" + identityHash + ":" + normalizedAction);
         event.setIdempotencyKey(idemKey);
 
         if (externalReviewEventMapper != null) {
-            externalReviewEventMapper.insertEvent(event);
+            try {
+                externalReviewEventMapper.insertEvent(event);
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                throw BusinessException.of(409, "contract.compliance.versionConflict");
+            }
         }
         return event;
     }
