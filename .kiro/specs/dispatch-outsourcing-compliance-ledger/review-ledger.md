@@ -1,3 +1,27 @@
+## Step 0/1実施記録（R23-P1-01実装開始・2026-08-13）
+
+**Step 0 docs統合**: Implementation Base = 31d29305、accepted decision Head = 75ba33e4。
+integration commit = 37fc8c66（merge 31d29305×75ba33e4・parent両方）。
+decision delta = accepted v3とblob一致（b5efbc66）。integration差分はMarkdown 2件のみ・non-md 0・diff --check PASS。
+ledgerはmain側の既存記録＋corrected v1/v2/v3・R10 ACCEPTED履歴のunion（全体置換なし）。
+
+**Step 1 先行実装conformance inventory（8ffbcddb..31d29305・19 files・+1454/-65）**:
+
+| 対象 | 現状 | 分類 | 根拠 |
+|---|---|---|---|
+| ComplianceExternalReviewEvaluator.evaluateGroup | 旧APPROVED直接採用・self-declared reviewer_identity_hashでdistinct判定・findLatestByDocumentIdでevidence解決・valid_until単独評価 | **REWORK** | accepted v3 §3.2/§4-6/§G2-VERIFY-13に違反（adoption event・subject_id・exact evidence・frozen policyが正本） |
+| recordExternalReview（ACTION=APPROVED直接記録） | SUBMITTEDを持たずAPPROVED/REJECTED/REVOKEDを直接INSERT | **REWORK** | K1: SUBMITTEDを新規write pathに・旧action rowはlegacy扱い |
+| ComplianceGateCredentialCryptoService/KeyProvider | CGC1暗号化・key version・AAD・decrypt fail-closed | **KEEP（再検証）** | accepted v3 §3.3 registration_identifier_encrypted契約に整合。fingerprint HMAC（person/qualification）は別途追加 |
+| ComplianceExternalReviewEventDto | typed allow-list DTO・credential除外 | **KEEP（拡張）** | v3 §5 typed DTO契約に整合。verification/adoption/subject DTOを追加 |
+| ComplianceGateApiController | Map request・entity response・tenant='default'固定 | **REWORK** | v3 §5 typed DTO・tenant境界・capability server計算に違反 |
+| ComplianceMappingServiceImpl.activate | hasTypesで空group skip・旧evaluatorをACTIVE正本に利用 | **REWORK** | v3 §4-1（空group skip削除）・§4-8（共通EvaluationService）に違反 |
+| ComplianceDocumentServiceImpl.generate | computeGateSnapshotHashに旧evaluator経路・current assignment検証不明 | **REWORK** | v3 §4-9/11（assignment一致・共通gate・snapshot反映） |
+| ReviewerVerificationMigrationOrderContractTest | V102_1不存在を恒久assert | **REMOVE→置換** | 指示: V102 blob/checksum golden・V102_1存在・実version順序を検証するtestへ |
+| application.yml credential-crypto | config追加 | **KEEP** | credential暗号化設定として有効（fingerprint HMAC keyは別途） |
+| 空policy/type・tenant境界・security | 未変更 | **NEWLY REQUIRED** | v3 §3/§4/§5の未実装部分（subject master・verification/adoption event・trigger・UI等） |
+
+**§3実装対象一覧（次increment）**: V102_1（reviewer_subject・verification event・adoption event・action CHECK forward replacement・trigger）・entity/mapper・H2 schema同期・metadata manifest・MySQL smoke。
+
 ## R10判定（R23-P1-01 corrected v3）: ACCEPTED_FOR_IMPLEMENTATION — 2026-08-13
 
 `R10 Round R23-P1-01（corrected v3・docs-only）: ACCEPTED_FOR_IMPLEMENTATION を受領。
