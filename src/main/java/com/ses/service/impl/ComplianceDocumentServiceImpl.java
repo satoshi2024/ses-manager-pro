@@ -156,27 +156,23 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             throw BusinessException.of(409, "compliance.gate.invalidTransition");
         }
 
-        // 3. Valid unrevoked approval event (action = "APPROVE")
-        com.ses.entity.ComplianceMappingApprovalEvent approvalEvent = approvalEventMapper != null ? approvalEventMapper.selectOne(
-                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, activeMapping.getId())
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceIdSnapshot, workplaceId)
-                        .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "APPROVE")
-                        .orderByDesc(com.ses.entity.ComplianceMappingApprovalEvent::getId)
-                        .last("LIMIT 1")) : null;
+        // 3. Valid unrevoked approval event (action = "APPROVE", countSubsequentRevokes == 0)
+        com.ses.entity.ComplianceMappingApprovalEvent approvalEvent = null;
+        if (approvalEventMapper != null) {
+            List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectByMapping("default", activeMapping.getId(), "APPROVE");
+            if (approvals != null) {
+                for (com.ses.entity.ComplianceMappingApprovalEvent app : approvals) {
+                    if (workplaceId.equals(app.getWorkplaceIdSnapshot())) {
+                        long revokes = approvalEventMapper.countSubsequentRevokes("default", activeMapping.getId(), app.getId());
+                        if (revokes == 0) {
+                            approvalEvent = app;
+                        }
+                    }
+                }
+            }
+        }
         if (approvalEvent == null) {
             throw BusinessException.of(409, "compliance.gate.approvalRevoked");
-        }
-        if (approvalEventMapper != null) {
-            Long revokeCount = approvalEventMapper.selectCount(
-                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingApprovalEvent>()
-                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getMappingId, activeMapping.getId())
-                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getWorkplaceIdSnapshot, workplaceId)
-                            .eq(com.ses.entity.ComplianceMappingApprovalEvent::getAction, "REVOKE")
-                            .gt(com.ses.entity.ComplianceMappingApprovalEvent::getId, approvalEvent.getId()));
-            if (revokeCount != null && revokeCount > 0) {
-                throw BusinessException.of(409, "compliance.gate.approvalRevoked");
-            }
         }
 
         // 4. Re-verify DB mapping_hash and review_policy_hash match
