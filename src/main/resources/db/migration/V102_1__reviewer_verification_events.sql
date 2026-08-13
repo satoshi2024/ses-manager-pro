@@ -190,22 +190,26 @@ DROP TRIGGER IF EXISTS trg_g2_verification_revoke_target$$
 CREATE TRIGGER trg_g2_verification_revoke_target BEFORE INSERT ON t_compliance_external_reviewer_verification_event
 FOR EACH ROW
 BEGIN
-  IF (NEW.result = 'REVOKED' AND NEW.revoked_verification_event_id IS NULL)
-     OR (NEW.result <> 'REVOKED' AND NEW.revoked_verification_event_id IS NOT NULL) THEN
+  IF NEW.result = 'REVOKED' AND NEW.revoked_verification_event_id IS NULL THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 verification revoke target is invalid';
   END IF;
-  IF (NEW.registration_identifier_encrypted IS NULL AND NEW.registration_identifier_key_version IS NULL
-        AND NEW.registration_identifier_cipher_format IS NULL AND NEW.registration_identifier_masked_snapshot IS NULL)
-     OR (NEW.registration_identifier_encrypted IS NOT NULL AND NEW.registration_identifier_key_version IS NOT NULL
-        AND NEW.registration_identifier_cipher_format IS NOT NULL AND NEW.registration_identifier_masked_snapshot IS NOT NULL) THEN
+  IF NEW.result <> 'REVOKED' AND NEW.revoked_verification_event_id IS NOT NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 verification revoke target is invalid';
+  END IF;
+  IF NEW.registration_identifier_encrypted IS NULL AND NEW.registration_identifier_key_version IS NULL
+        AND NEW.registration_identifier_cipher_format IS NULL AND NEW.registration_identifier_masked_snapshot IS NULL THEN
+    SET @g2_cred_ok = 1;
+  ELSEIF NEW.registration_identifier_encrypted IS NOT NULL AND NEW.registration_identifier_key_version IS NOT NULL
+        AND NEW.registration_identifier_cipher_format IS NOT NULL AND NEW.registration_identifier_masked_snapshot IS NOT NULL THEN
     SET @g2_cred_ok = 1;
   ELSE
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 verification credential all-or-none violated';
   END IF;
-  IF (NEW.evidence_document_id IS NULL AND NEW.evidence_document_version_id IS NULL
-        AND NEW.evidence_document_version IS NULL AND NEW.evidence_document_hash IS NULL)
-     OR (NEW.evidence_document_id IS NOT NULL AND NEW.evidence_document_version_id IS NOT NULL
-        AND NEW.evidence_document_version IS NOT NULL AND NEW.evidence_document_hash IS NOT NULL) THEN
+  IF NEW.evidence_document_id IS NULL AND NEW.evidence_document_version_id IS NULL
+        AND NEW.evidence_document_version IS NULL AND NEW.evidence_document_hash IS NULL THEN
+    SET @g2_ev_ok = 1;
+  ELSEIF NEW.evidence_document_id IS NOT NULL AND NEW.evidence_document_version_id IS NOT NULL
+        AND NEW.evidence_document_version IS NOT NULL AND NEW.evidence_document_hash IS NOT NULL THEN
     SET @g2_ev_ok = 1;
   ELSE
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 verification evidence all-or-none violated';
@@ -234,8 +238,10 @@ DROP TRIGGER IF EXISTS trg_g2_adoption_revoke_target$$
 CREATE TRIGGER trg_g2_adoption_revoke_target BEFORE INSERT ON t_compliance_external_review_adoption_event
 FOR EACH ROW
 BEGIN
-  IF (NEW.action = 'REVOKED' AND NEW.revoked_adoption_event_id IS NULL)
-     OR (NEW.action <> 'REVOKED' AND NEW.revoked_adoption_event_id IS NOT NULL) THEN
+  IF NEW.action = 'REVOKED' AND NEW.revoked_adoption_event_id IS NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 adoption revoke target is invalid';
+  END IF;
+  IF NEW.action <> 'REVOKED' AND NEW.revoked_adoption_event_id IS NOT NULL THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'G2 adoption revoke target is invalid';
   END IF;
   IF NEW.action = 'APPROVED' THEN
