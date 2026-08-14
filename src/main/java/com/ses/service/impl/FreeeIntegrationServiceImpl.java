@@ -31,6 +31,9 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
@@ -98,6 +101,41 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         if (hrAdapter != null) {
             this.hrAdapter = hrAdapter;
         }
+    }
+
+    /**
+     * REAUTH_REQUIREDを独立REQUIRES_NEW txで永続化するbean（REV-002）。
+     * unit test（proxy無し）ではnullのまま、現在txの更新を直接試みる。
+     */
+    private FreeeReauthMarker reauthMarker;
+
+    @Autowired(required = false)
+    public void setReauthMarker(FreeeReauthMarker reauthMarker) {
+        if (reauthMarker != null) {
+            this.reauthMarker = reauthMarker;
+        }
+    }
+
+    /**
+     * 外部HTTP呼出しをDB transaction外で行い、保存だけをtxで囲むためのseam（REV-005）。
+     * unit test（bean無し）ではnullのまま、txなしで実行する。
+     */
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired(required = false)
+    public void setTransactionTemplate(
+            org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        if (transactionManager != null) {
+            this.transactionTemplate = new TransactionTemplate(transactionManager);
+        }
+    }
+
+    /** DB更新だけをtransactionで囲む（外部HTTPはtx外。REV-005）。 */
+    private <T> T inTransaction(java.util.function.Supplier<T> action) {
+        if (transactionTemplate == null) {
+            return action.get();
+        }
+        return transactionTemplate.execute(status -> action.get());
     }
 
     /** testで実sleepさせないためのseam（design §11）。 */
@@ -200,7 +238,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     @Override
-    @Transactional
     public void handleCallback(String code, String state, Long userId) {
         if (!configured()) {
             throw BusinessException.of("error.payroll.configIncomplete");
@@ -208,7 +245,7 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         if (isBlank(code)) {
             throw BusinessException.of("error.payroll.oauthFailed");
         }
-        // token endpointのPOSTは自動再送しない（認可code二重消費を避ける）。
+        // 外部HTTP（token POST・users/me）はDB transaction外で実行する（REV-005）。
         JsonNode n;
         try {
             n = tokenEndpointPost(OAUTH_TOKEN, grantForm("authorization_code", code), null);
@@ -227,10 +264,8 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         // DB保存前にusers/meで選択事業所の存在・名称・company_adminを検証する。
         UsersMeCompany company = verifyCompanyAdmin(accessToken, companyId);
 
-        FreeeConnection c = latestActiveRow();
-        if (c == null) {
-            c = new FreeeConnection();
-        }
+        FreeeConnection existing = latestActiveRow();
+        FreeeConnection c = existing == null ? new FreeeConnection() : existing;
         c.setCompanyId(companyId);
         c.setCompanyName(company.name());
         c.setAccessTokenEncrypted(encrypt(accessToken));
@@ -238,11 +273,14 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         c.setTokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn));
         c.setConnectedBy(userId);
         c.setConnectionStatus(STATUS_CONNECTED);
-        if (c.getId() == null) {
-            connectionMapper.insert(c);
-        } else {
-            connectionMapper.updateById(c);
-        }
+        inTransaction(() -> {
+            if (existing == null) {
+                connectionMapper.insert(c);
+            } else {
+                connectionMapper.updateById(c);
+            }
+            return null;
+        });
     }
 
     private MultiValueMap<String, String> grantForm(String grantType, String credential) {
@@ -762,7 +800,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     @Override
-    @Transactional
     public void link(Long engineerId, String employeeId, Long userId) {
         FreeeConnection c = latestActiveRow();
         if (c == null || c.getCompanyId() == null) {
@@ -774,7 +811,7 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         if (employeeId == null || employeeId.isBlank()) {
             throw BusinessException.of(400, "error.payroll.invalidEmployeeId");
         }
-        // 現在companyの従業員一覧に存在すること（生ID手入力の通常操作を廃止）
+        // 外部HTTP（従業員一覧の存在検証）はDB transaction外で実行する（REV-005）。
         boolean exists = fetchAllEmployees(c.getCompanyId()).stream()
                 .anyMatch(e -> String.valueOf(e.getId()).equals(employeeId));
         if (!exists) {
@@ -797,8 +834,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             throw BusinessException.of(409, "error.payroll.duplicateEmployeeLink");
         }
 
-        linkMapper.deleteSoftDeletedConflicts(engineerId, employeeId, c.getCompanyId());
-
         // engineerの既存row（他company含む）は明示的な再対応付けで現在companyへ更新する（R04-6）
         FreeeEmployeeLink old = linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
                 .eq(FreeeEmployeeLink::getEngineerId, engineerId));
@@ -811,11 +846,15 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         x.setConfirmedBy(userId);
 
         try {
-            if (old == null) {
-                linkMapper.insert(x);
-            } else {
-                linkMapper.updateById(x);
-            }
+            inTransaction(() -> {
+                linkMapper.deleteSoftDeletedConflicts(engineerId, employeeId, c.getCompanyId());
+                if (old == null) {
+                    linkMapper.insert(x);
+                } else {
+                    linkMapper.updateById(x);
+                }
+                return null;
+            });
         } catch (org.springframework.dao.DuplicateKeyException ex) {
             throw BusinessException.of(409, "error.payroll.duplicateEmployeeLink");
         }
@@ -958,6 +997,9 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         if (path == null || path.isBlank()) {
             throw BusinessException.of(400, "error.payroll.invalidPath");
         }
+        // 内部相関ID: 呼出側が指定しなければ生成し、障害時logとX-Correlation-IDヘッダーに使う（REV-007 / R07-5）
+        String correlation = (correlationId == null || correlationId.isBlank())
+                ? UUID.randomUUID().toString() : correlationId;
         FreeeConnection c = latestActiveRow();
         if (c == null) {
             throw BusinessException.of("error.payroll.notConnected");
@@ -966,7 +1008,7 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             applicationContext.getBean(FreeeIntegrationService.class).refresh();
             c = latestActiveRow();
         }
-        HttpHeaders h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
+        HttpHeaders h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlation);
         // 401はrefresh 1回に限定する（platform-invariants §7: 無限refreshしない）。
         boolean refreshed = false;
         int rateLimitAttempts = 0;
@@ -985,49 +1027,74 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                     throw BusinessException.of(403, "error.payroll.permissionDenied");
                 }
                 if (refreshed) {
+                    log.warn("freee API unauthorized after refresh: status=401 code={} requestId={} correlationId={}",
+                            code == null ? "-" : code, requestId(ex), correlation);
                     throw BusinessException.of(401, "error.payroll.tokenError");
                 }
                 applicationContext.getBean(FreeeIntegrationService.class).refreshForced();
                 c = latestActiveRow();
-                h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
+                h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlation);
                 refreshed = true;
             } catch (org.springframework.web.client.HttpClientErrorException.TooManyRequests ex) {
                 rateLimitAttempts++;
                 if (rateLimitAttempts >= 3) {
+                    log.warn("freee API rate limit exceeded: status=429 requestId={} correlationId={}",
+                            requestId(ex), correlation);
                     throw BusinessException.of(429, "error.payroll.rateLimited");
                 }
-                sleepBackoff(rateLimitAttempts, ex);
+                sleepBackoff(rateLimitAttempts, ex, correlation);
             } catch (HttpServerErrorException ex) {
                 // 5xx
                 if (!retryServerErrors || serverErrorAttempts >= 2) {
+                    log.warn("freee API server error: status={} requestId={} correlationId={}",
+                            ex.getStatusCode().value(), requestId(ex), correlation);
                     throw BusinessException.of(503, "error.payroll.providerUnavailable");
                 }
                 serverErrorAttempts++;
-                sleepRetry(ex);
+                sleepRetry(ex, correlation);
             } catch (ResourceAccessException ex) {
                 // timeout（saasRestTemplate 5s/15s）
                 if (!retryServerErrors || serverErrorAttempts >= 2) {
+                    log.warn("freee API timeout: type={} correlationId={}",
+                            ex.getClass().getSimpleName(), correlation);
                     throw BusinessException.of(503, "error.payroll.providerUnavailable");
                 }
                 serverErrorAttempts++;
-                sleepRetry(ex);
+                sleepRetry(ex, correlation);
             } catch (HttpClientErrorException ex) {
                 // 4xxはretryしない（人手修正待ち）
                 if (ex.getStatusCode().value() == 403) {
+                    log.warn("freee API permission denied: status=403 requestId={} correlationId={}",
+                            requestId(ex), correlation);
                     throw BusinessException.of(403, "error.payroll.permissionDenied");
                 }
                 if (ex.getStatusCode().value() == 404) {
+                    log.warn("freee API not found: status=404 requestId={} correlationId={}",
+                            requestId(ex), correlation);
                     throw BusinessException.of(404, "error.payroll.notFound");
                 }
+                log.warn("freee API rejected: status={} requestId={} correlationId={}",
+                        ex.getStatusCode().value(), requestId(ex), correlation);
                 throw BusinessException.of(400, "error.payroll.providerRejected");
             } catch (Exception ex) {
+                log.warn("freee API failure: type={} correlationId={}",
+                        ex.getClass().getSimpleName(), correlation);
                 throw BusinessException.of(503, "error.payroll.providerUnavailable");
             }
         }
     }
 
+    /** 公式X-Request-Id（障害調査用の非秘密識別子）。無ければ「-」。 */
+    private String requestId(org.springframework.web.client.HttpStatusCodeException ex) {
+        if (ex.getResponseHeaders() == null) {
+            return "-";
+        }
+        String rid = ex.getResponseHeaders().getFirst("X-Request-Id");
+        return rid == null || rid.isBlank() ? "-" : rid;
+    }
+
     /** 429時のexponential backoff + jitter。Retry-After（秒）があればそれを上限内で尊重する。 */
-    private void sleepBackoff(int attempt, HttpClientErrorException ex) {
+    private void sleepBackoff(int attempt, HttpClientErrorException ex, String correlationId) {
         long base = 500L * (1L << (attempt - 1));
         long jitter = new SecureRandom().nextLong(0, base);
         long wait = Math.min(MAX_BACKOFF_MS, base + jitter);
@@ -1041,15 +1108,15 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                 // headerがRFC準拠でない場合はbackoffのまま
             }
         }
-        log.warn("freee API rate limited (429), retrying in {}ms: status={}", wait,
-                ex.getStatusCode().value());
+        log.warn("freee API rate limited (429), retrying in {}ms: status={} requestId={} correlationId={}",
+                wait, ex.getStatusCode().value(), requestId(ex), correlationId);
         sleepInterruptibly(wait);
     }
 
     /** 5xx/timeout retryの待機。上限付き。 */
-    private void sleepRetry(Exception ex) {
+    private void sleepRetry(Exception ex, String correlationId) {
         long wait = Math.min(MAX_BACKOFF_MS, 1000L);
-        log.warn("freee API server error, retrying in {}ms", wait);
+        log.warn("freee API server error, retrying in {}ms: correlationId={}", wait, correlationId);
         sleepInterruptibly(wait);
     }
 
@@ -1097,6 +1164,10 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         } catch (ResourceAccessException ex) {
             throw BusinessException.of(503, "error.payroll.providerUnavailable");
         } catch (Exception ex) {
+            // 障害調査用に例外型だけを記録する（form/tokenは出さない。REV-007）
+            log.warn("freee OAuth token endpoint POST failed: type={} correlationId={}",
+                    ex.getClass().getSimpleName(),
+                    correlationId == null || correlationId.isBlank() ? "-" : correlationId);
             throw BusinessException.of("error.payroll.oauthFailed");
         }
     }
@@ -1136,8 +1207,10 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             } catch (HttpClientErrorException ex) {
                 String code = errorCode(ex.getResponseBodyAsByteArray());
                 if ("invalid_grant".equals(code) || "re_authorization_required".equals(code)) {
-                    // 失効はREAUTH_REQUIREDへ記録し、無限refreshしない（R03-4）。呼出側は再認可messageで停止する。
-                    markReauthRequired(c);
+                    // 失効はREAUTH_REQUIREDへ記録し、無限refreshしない（R03-4）。
+                    // このREQUIRES_NEW txは続けて投げる例外でrollbackされるため、
+                    // REAUTH_REQUIREDはtx完了後（afterCompletion）に独立txで永続化する（REV-002）。
+                    persistReauthAfterCompletion(c);
                     throw BusinessException.of("error.payroll.reauthRequired");
                 }
                 throw BusinessException.of("error.payroll.oauthFailed");
@@ -1160,6 +1233,30 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         } catch (Exception e) {
             throw BusinessException.of("error.payroll.tokenError");
         }
+    }
+
+    /**
+     * REAUTH_REQUIREDの永続化（REV-002）。
+     * 現在のREQUIRES_NEW txがrollbackされた後（afterCompletion）に、
+     * {@link FreeeReauthMarker}の独立REQUIRES_NEW txでコミットする。
+     * unit test（proxy無し・reauthMarker null）では現在txの更新を直接試みる（mock環境では検証対象外）。
+     */
+    private void persistReauthAfterCompletion(FreeeConnection c) {
+        if (reauthMarker == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            markReauthRequired(c);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    reauthMarker.markReauthRequired(c);
+                } catch (RuntimeException ex) {
+                    // 状態記録の失敗は次回アクセスで再検出される。秘密はログへ出さない。
+                    log.warn("failed to persist REAUTH_REQUIRED: {}", ex.getMessage());
+                }
+            }
+        });
     }
 
     private void markReauthRequired(FreeeConnection c) {

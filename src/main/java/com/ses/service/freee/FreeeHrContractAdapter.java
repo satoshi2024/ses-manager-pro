@@ -130,7 +130,8 @@ public class FreeeHrContractAdapter {
             if (item == null || item.getName() == null || item.getName().isBlank()) {
                 throw contractError("明細項目のname欠落");
             }
-            strictAmount(item.getAmount(), item.getName());
+            // 項目名・金額値はdetailへ含めない（REV-001: 給与情報の漏洩防止）
+            strictAmount(item.getAmount(), "明細項目の金額");
         }
     }
 
@@ -140,19 +141,21 @@ public class FreeeHrContractAdapter {
         }
     }
 
-    /** nullは保持。空文字・非数値はprovider契約エラー。 */
+    /**
+     * nullは保持。空文字・非数値はprovider契約エラー。
+     * detailにはfield種別だけを載せ、providerの生金額文字列・項目名を含めない（REV-001 / R09-3）。
+     */
     private void strictAmount(String amount, String what) {
         if (amount == null) {
             return;
         }
-        String trimmed = amount.trim();
-        if (trimmed.isEmpty()) {
+        if (amount.trim().isEmpty()) {
             throw contractError(what + "が空文字");
         }
         try {
-            new BigDecimal(trimmed);
+            new BigDecimal(amount.trim());
         } catch (NumberFormatException e) {
-            throw contractError(what + "が数値でない: " + trimmed);
+            throw contractError(what + "が数値でない");
         }
     }
 

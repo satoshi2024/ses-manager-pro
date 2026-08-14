@@ -1,5 +1,5 @@
 -- freee給与連携のH2テスト用スキーマ（給与明細自体は保存しない）
--- HFP-01-002: connection_status / freee_company_id / company+employee複合UNIQUE（V103と同期）
+-- HFP-01-002: connection_status / freee_company_id / company+employee複合UNIQUE（V102_2と同期）
 CREATE TABLE IF NOT EXISTS t_freee_connection (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   company_id BIGINT,

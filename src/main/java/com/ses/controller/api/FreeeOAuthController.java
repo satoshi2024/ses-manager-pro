@@ -102,7 +102,10 @@ public class FreeeOAuthController {
         try {
             service.handleCallback(code, state, uid);
         } catch (BusinessException e) {
-            // token/company検証失敗。provider messageやcodeはredirectへ載せない
+            // token/company検証失敗。provider messageやcodeはredirectへ載せない。
+            // 失敗もFREEE_CONNECTとして1 row監査する（REV-003 / R09-4）。
+            auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 400,
+                    CODE_CONNECT, false);
             return new RedirectView("/payroll?error=oauth");
         }
         auditLogService.recordRequired(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 302,
@@ -113,10 +116,18 @@ public class FreeeOAuthController {
     @DeleteMapping
     public RedirectView disconnect(HttpServletResponse response) {
         noStore(response);
-        service.disconnect();
-        auditLogService.recordRequired(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT, 302,
-                CODE_DISCONNECT, true);
-        return new RedirectView("/payroll");
+        try {
+            service.disconnect();
+            auditLogService.recordRequired(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT, 302,
+                    CODE_DISCONNECT, true);
+            return new RedirectView("/payroll");
+        } catch (BusinessException e) {
+            // 一時障害ではlocal rowを保持し、「解除済み」と表示しない。
+            // 失敗もFREEE_DISCONNECTとして1 row監査する（REV-003 / R09-4）。
+            auditLogService.record(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT,
+                    e.getCode() == 0 ? 400 : e.getCode(), CODE_DISCONNECT, false);
+            return new RedirectView("/payroll?error=disconnect");
+        }
     }
 
     private void noStore(HttpServletResponse response) {

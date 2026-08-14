@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.payroll.FreeeConnectionStatusDto;
@@ -54,9 +55,14 @@ public class FreeePayrollApiController {
     
     @GetMapping("/employees")
     public ResponseEntity<ApiResult<List<FreeeEmployeeDto>>> employees() {
-        List<FreeeEmployeeDto> data = service.employees();
-        audit("GET", CODE_EMPLOYEE_VIEW, URI_EMPLOYEES);
-        return noStore(ApiResult.success(data));
+        try {
+            List<FreeeEmployeeDto> data = service.employees();
+            audit("GET", CODE_EMPLOYEE_VIEW, URI_EMPLOYEES, true, 200);
+            return noStore(ApiResult.success(data));
+        } catch (BusinessException e) {
+            audit("GET", CODE_EMPLOYEE_VIEW, URI_EMPLOYEES, false, e.getCode());
+            throw e;
+        }
     }
 
     @GetMapping("/engineer-candidates")
@@ -68,16 +74,26 @@ public class FreeePayrollApiController {
     public ResponseEntity<ApiResult<Boolean>> link(
             @PathVariable Long engineerId,
             @RequestParam String employeeId) {
-        service.link(engineerId, employeeId, SecurityUtils.currentUserId());
-        audit("PUT", CODE_LINK, URI_LINKS);
-        return noStore(ApiResult.success(true));
+        try {
+            service.link(engineerId, employeeId, SecurityUtils.currentUserId());
+            audit("PUT", CODE_LINK, URI_LINKS, true, 200);
+            return noStore(ApiResult.success(true));
+        } catch (BusinessException e) {
+            audit("PUT", CODE_LINK, URI_LINKS, false, e.getCode());
+            throw e;
+        }
     }
     
     @DeleteMapping("/links/{engineerId}")
     public ResponseEntity<ApiResult<Boolean>> unlink(@PathVariable Long engineerId) {
-        service.unlink(engineerId);
-        audit("DELETE", CODE_UNLINK, URI_LINKS);
-        return noStore(ApiResult.success(true));
+        try {
+            service.unlink(engineerId);
+            audit("DELETE", CODE_UNLINK, URI_LINKS, true, 200);
+            return noStore(ApiResult.success(true));
+        } catch (BusinessException e) {
+            audit("DELETE", CODE_UNLINK, URI_LINKS, false, e.getCode());
+            throw e;
+        }
     }
     
     @GetMapping("/statements")
@@ -85,17 +101,28 @@ public class FreeePayrollApiController {
             @RequestParam int year,
             @RequestParam int month,
             @RequestParam(defaultValue="salary") String type) {
-        List<PayrollStatementDto> data = service.statements(year, month, type);
         // 機微GET: 監査記録が成功した場合だけdataを返す。年月/typeはcodeへ、URIは固定。
         String code = ("bonus".equals(type) ? "PAYROLL_BONUS_VIEW_" : "PAYROLL_SALARY_VIEW_")
                 + String.format("%04d%02d", year, month);
-        audit("GET", code, URI_STATEMENTS);
-        return noStore(ApiResult.success(data));
+        try {
+            List<PayrollStatementDto> data = service.statements(year, month, type);
+            audit("GET", code, URI_STATEMENTS, true, 200);
+            return noStore(ApiResult.success(data));
+        } catch (BusinessException e) {
+            // provider失敗時も固定URI/codeで成功falseを1 row記録する（REV-003 / R09-3）
+            audit("GET", code, URI_STATEMENTS, false, e.getCode());
+            throw e;
+        }
     }
 
-    private void audit(String method, String applicationCode, String fixedUri) {
-        auditLogService.recordRequired(SecurityUtils.currentUsername(), method, fixedUri, 200,
-                applicationCode, true);
+    private void audit(String method, String applicationCode, String fixedUri, boolean success, int status) {
+        String username = SecurityUtils.currentUsername();
+        if (success) {
+            auditLogService.recordRequired(username, method, fixedUri, status, applicationCode, true);
+        } else {
+            // 失敗監査の記録不能は元のBusinessExceptionを隠さない（recordは失敗を飲み込む）
+            auditLogService.record(username, method, fixedUri, status, applicationCode, false);
+        }
     }
 
     private <T> ResponseEntity<ApiResult<T>> noStore(ApiResult<T> body) {

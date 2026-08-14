@@ -441,6 +441,33 @@ class FreeeHrContractTest {
     }
 
     @Test
+    @DisplayName("invalid amountのdetailに生金額・明細項目名が含まれない（REV-001 / R09-3）")
+    void invalidAmountは生値をdetailへ含めない() throws Exception {
+        seedConnection();
+        // 合計金額と明細項目の両方に非数値と架空の機微値（金額文字列・項目名）を混ぜる
+        String body = "{\"employee_payroll_statements\":["
+                + "{\"id\":9001,\"company_id\":123,\"employee_id\":501,\"employee_num\":\"E-501\","
+                + "\"fixed\":true,\"calc_status\":\"calculated\","
+                + "\"gross_payment_amount\":\"250000\",\"total_deduction_amount\":null,\"net_payment_amount\":null,"
+                + "\"payments\":[{\"name\":\"機密手当\",\"amount\":\"abc\"}],"
+                + "\"deductions\":[],\"deductions_employer_share\":[]}],"
+                + "\"total_count\":1}";
+        server.expect(once(), statementQuery(SALARY, 0))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.statements(2026, 7, "salary"));
+        assertEquals("error.payroll.contractError", ex.getMessage());
+        assertTrue(ex.getArgs() != null && ex.getArgs().length >= 1,
+                "detail（args）が必ず存在すること");
+        for (Object arg : ex.getArgs()) {
+            String detail = String.valueOf(arg);
+            assertTrue(!detail.contains("250000"), "生金額文字列がdetailに混入: " + detail);
+            assertTrue(!detail.contains("abc"), "providerの非数値文字列がdetailに混入: " + detail);
+            assertTrue(!detail.contains("機密手当"), "明細項目名がdetailに混入: " + detail);
+        }
+    }
+
+    @Test
     @DisplayName("pagination上限到達はcontract error（AC09/R06-4）")
     void pagination上限はcontractError() throws Exception {
         seedConnection();

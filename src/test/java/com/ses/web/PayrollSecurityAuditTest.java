@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -345,6 +346,70 @@ class PayrollSecurityAuditTest {
                         "監査rowへ禁止値が混入: " + forbidden + " in " + serialized);
             }
         }
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者", username = "audit-admin")
+    @DisplayName("失敗系も各1 rowで監査されsuccess_flag=false・生金額が漏れない（REV-003/REV-001）")
+    void 失敗系も1request1rowで監査される() throws Exception {
+        // MockRestServiceServerはrequest後にexpect追加不可のため、先に全て登録する
+
+        // 1) statements: provider 5xx（hrGetは最大2回retry=計3リクエスト）→ 失敗監査
+        server.expect(org.springframework.test.web.client.ExpectedCount.times(3),
+                requestTo(org.hamcrest.Matchers.startsWith(SALARY_URL)))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY)
+                        .body("{\"status_code\":500}").contentType(MediaType.APPLICATION_JSON));
+
+        // 2) link: BP要員への対応付け（employee存在検証でemployees 1回）→ 失敗監査
+        expectEmployeesPage();
+
+        // 3) disconnect: revokeが5xx → 解除せず失敗監査
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(),
+                requestTo(org.hamcrest.Matchers.startsWith(REVOKE_URL)))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY));
+
+        // 1) statements
+        long before = auditMaxId();
+        org.springframework.test.web.servlet.MvcResult failureResult = mockMvc.perform(
+                        get("/api/payroll/statements").param("year", "2026").param("month", "7"))
+                // BusinessException(503)は既存GlobalExceptionHandlerがHTTP 500へ変換する
+                .andExpect(status().isInternalServerError())
+                .andReturn();
+        List<java.util.Map<String, Object>> rows = auditRowsAfter(before);
+        assertEquals(1, rows.size(), "失敗時も1 request = 1 audit row");
+        assertEquals("PAYROLL_SALARY_VIEW_202607", rows.get(0).get("application_code"));
+        assertEquals(Boolean.FALSE, rows.get(0).get("success_flag"), "失敗はsuccess_flag=false");
+        assertEquals(503, ((Number) rows.get(0).get("status")).intValue(), "provider障害statusを記録");
+        String responseBody = failureResult.getResponse().getContentAsString();
+        assertTrue(!responseBody.contains("250000") && !responseBody.contains("200000"),
+                "APIエラーresponseに生金額を返さない（REV-001）: " + responseBody);
+
+        // 2) link: BP拒否
+        jdbcTemplate.update("UPDATE t_engineer SET employment_type = 'BP' WHERE id = 90001");
+        before = auditMaxId();
+        mockMvc.perform(put("/api/payroll/links/90001").param("employeeId", "501").with(csrf()))
+                .andExpect(status().isBadRequest());
+        rows = auditRowsAfter(before);
+        assertEquals(1, rows.size(), "BP拒否時も1 row");
+        assertEquals("PAYROLL_LINK", rows.get(0).get("application_code"));
+        assertEquals(Boolean.FALSE, rows.get(0).get("success_flag"));
+        jdbcTemplate.update("UPDATE t_engineer SET employment_type = '正社員' WHERE id = 90001");
+
+        // 3) disconnect: revoke 5xx
+        before = auditMaxId();
+        mockMvc.perform(delete("/integrations/freee").with(csrf()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/payroll?error=disconnect"));
+        rows = auditRowsAfter(before);
+        assertEquals(1, rows.size(), "解除失敗時も1 row");
+        assertEquals("FREEE_DISCONNECT", rows.get(0).get("application_code"));
+        assertEquals(Boolean.FALSE, rows.get(0).get("success_flag"));
+        Long remaining = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_freee_connection WHERE company_id = 123", Long.class);
+        assertEquals(1L, remaining, "一時障害ではlocal rowを削除しない（R03-5）");
+        server.verify();
     }
 
 }
