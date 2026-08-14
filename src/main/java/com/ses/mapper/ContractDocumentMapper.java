@@ -169,4 +169,24 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
                       @Param("from") String from,
                       @Param("errorCode") String errorCode,
                       @Param("nextAttemptAt") java.time.LocalDateTime nextAttemptAt);
+
+    /**
+     * artifact（締結済みPDF/証明書）のarchive IDとhashのCAS保存（HFP-02-AC-07-04/05）。
+     * 同一hashの再取得はno-op（呼び出し側が判定）、相違hashは上書きせずfindingのみ。
+     */
+    @Update("UPDATE t_contract_document SET "
+            + "signed_pdf_sha256 = COALESCE(#{signedHash}, signed_pdf_sha256), "
+            + "signed_archive_document_id = COALESCE(#{signedArchiveId}, signed_archive_document_id), "
+            + "certificate_sha256 = COALESCE(#{certHash}, certificate_sha256), "
+            + "certificate_archive_document_id = COALESCE(#{certArchiveId}, certificate_archive_document_id), "
+            + "last_provider_error_code = NULL, version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casArtifactSave(@Param("id") Long id,
+                        @Param("expectedVersion") int expectedVersion,
+                        @Param("from") String from,
+                        @Param("signedHash") String signedHash,
+                        @Param("signedArchiveId") Long signedArchiveId,
+                        @Param("certHash") String certHash,
+                        @Param("certArchiveId") Long certArchiveId);
 }

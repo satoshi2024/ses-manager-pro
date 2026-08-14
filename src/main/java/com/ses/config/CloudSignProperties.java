@@ -80,6 +80,9 @@ public class CloudSignProperties {
     /** worker識別子（複数instance分離用。未設定時はホスト名+ランダム）。 */
     private String instanceId = "";
 
+    /** legacy artifact（signed/certificate path）の読み取りroot。既定はアプリupload base。 */
+    private String legacyReadBasePath = "./uploads";
+
     @PostConstruct
     public void validate() {
         CloudSignEnvironment env = resolveEnvironment();

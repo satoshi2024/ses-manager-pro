@@ -9,6 +9,5 @@ public interface ContractDocumentService extends IService<ContractDocument> {
      * 二重クリック・並列request・worker再実行は同じoperationとして扱い、同一payloadの再queueは既存operationを返す。
      */
     ContractDocument queueSend(Long id, ConfirmedSendRequest request);
-    void sync(Long id);
     byte[] download(Long id);
 }

@@ -81,7 +81,7 @@ public class CloudSignReconciliationService {
                 fail(working, effectiveFrom, "VERIFY_STILL_DRAFT");
             }
             case 1 -> advance(working, effectiveFrom, DispatchState.SENT.name(), 1, "先方確認中");
-            case 2 -> advance(working, effectiveFrom, DispatchState.SENT.name(), 2, "締結済");
+            case 2 -> advance(working, effectiveFrom, DispatchState.COMPLETED.name(), 2, "締結済");
             case 3 -> advance(working, effectiveFrom, DispatchState.CANCELED.name(), 3, "取消・却下");
             case 4 -> fail(working, effectiveFrom, "VERIFY_TEMPLATE");
             default -> fail(working, effectiveFrom, "VERIFY_UNKNOWN_STATUS:" + remote.status());

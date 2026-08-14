@@ -32,7 +32,7 @@
 | HFP-02-03 | 00,01 | DONE | DONE(31件/0/0/0) | DONE(multipart SHA-256一致・token一回・timeout後call=1をtestで実演) | NOT_STARTED | PARTIAL | wire契約をtyped clientで固定。旧CloudSignClientは互換facade化 |
 | HFP-02-04 | 02,03 | DONE(queueSend/dispatch/checkpoint/reconciliation) | DONE(13件/0/0/0) | DONE(100同時send・timeout call=1・crash境界・stale claimをtestで実演) | NOT_STARTED | PARTIAL | mutation timeout call count=1を実証。旧send()撤去 |
 | HFP-02-05 | 03,04 | DONE(sync/poll/mapping/monitor) | DONE(12件/0/0/0) | DONE(status 1→2/3、未知status、batch失敗継続、cancel非公開をtestで実演) | NOT_STARTED | PARTIAL | BLK-06未決のためcancel非公開で停止。ADOPT決定後にcancel実装 |
-| HFP-02-06 | 02,03,05 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 三hash/scan/ledger evidence |
+| HFP-02-06 | 02,03,05 | DONE(FileKind/artifact回収/ledger/三hash) | DONE(17件/0/0/0) | DONE(三PDF取得・別hash・別archive・scan停止時非公開をtestで実演) | NOT_STARTED | PARTIAL | 旧sync()/facade撤去。legacy移行・no-op・相違hash finding実装済 |
 | HFP-02-07 | 04,05,06 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | role/scope/browser evidence |
 | HFP-02-08 | 01-07 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | verify-like-ci skip0 |
 | HFP-02-09 | 00,08 | NOT_STARTED | BLOCKED(sandbox未確認) | BLOCKED | NOT_STARTED | BLOCKED | sandbox credential/受信操作担当 |
@@ -75,11 +75,11 @@
 | HFP-02-AC-06-04 | 04,05,09 | - | - | provider delay | - | BLOCKED | HFP-02-BLK-03 |
 | HFP-02-AC-06-05 | 05,10 | CloudSignMonitor | monitor snapshot/alert判定 | metrics/alert | - | IN_PROGRESS | counter/alert判定DONE。外部monitoring接続はHFP-02-10 |
 | HFP-02-AC-07-01 | 02,06 | V109 signed_pdf_sha256/certificate_sha256列、ContractDocument | 締結済hash再計算backfill test | 三hash表 | - | IN_PROGRESS | 列/entity/backfill hash再計算DONE。signed取得はHFP-02-06 |
-| HFP-02-AC-07-02 | 03,05,06,09 | - | - | signed/certificate PDF | - | BLOCKED | HFP-02-BLK-04 |
-| HFP-02-AC-07-03 | 06 | - | - | scan/atomic pipeline | - | NOT_STARTED | P0 |
-| HFP-02-AC-07-04 | 06 | - | - | same/different hash | - | NOT_STARTED | - |
-| HFP-02-AC-07-05 | 06 | - | - | storage/DB failure injection | - | NOT_STARTED | P0 |
-| HFP-02-AC-07-06 | 06,07 | - | - | download matrix | - | NOT_STARTED | - |
+| HFP-02-AC-07-02 | 03,05,06,09 | downloadFile/downloadCertificate(送信時file ID一致) | artifact回収 test | signed/certificate PDF | - | IN_PROGRESS | 実装DONE。sandbox実bytesはBLK-04でBLOCKEDのまま |
+| HFP-02-AC-07-03 | 06 | FileKind.CONTRACT_PDF・quarantine→検証→scan→hash→ledger | CLEAN/INFECTED/UNAVAILABLE・MAGIC_EOF・CONTENT_TYPE test | scan/atomic pipeline | - | VERIFIED | fail-closedで公開しない。SKILL_SHEET不使用 |
+| HFP-02-AC-07-04 | 06 | 同一hash=no-op・相違hash=旧版保持+finding | noOp・HASH_CHANGED test | same/different hash | - | VERIFIED | 二重登録なし・上書きなし |
+| HFP-02-AC-07-05 | 06 | registerReceived→casArtifactSave(DB失敗はorphan補償) | DB保存失敗はfinding | storage/DB failure injection | - | IN_PROGRESS | orphan safety windowは既存DocumentService規約。保存失敗findingは実装済 |
+| HFP-02-AC-07-06 | 06,07 | downloadSigned/downloadCertificate(ledger経由・別名) | download test | download matrix | - | IN_PROGRESS | 別endpoint/別名はHFP-02-07。no-store/監査もHFP-02-07 |
 | HFP-02-AC-08-01 | 07 | ContractDocumentApiController sync @PreAuthorize | HR拒否 test(green化) | 5role direct API | - | IN_PROGRESS | HR sync拒否DONE。全role matrixはHFP-02-07 |
 | HFP-02-AC-08-02 | 07 | - | - | scope外404 | - | NOT_STARTED | P0 |
 | HFP-02-AC-08-03 | 07,08 | - | - | DTO allow-list | - | NOT_STARTED | P0 |

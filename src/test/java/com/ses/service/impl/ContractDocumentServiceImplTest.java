@@ -9,7 +9,6 @@ import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractTemplateMapper;
 import com.ses.mapper.FileSecurityMetadataMapper;
-import com.ses.service.CloudSignClient;
 import com.ses.service.DocumentService;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
@@ -32,7 +31,6 @@ class ContractDocumentServiceImplTest {
 
     private ContractTemplateMapper templateMapper;
     private ContractMapper contractMapper;
-    private CloudSignClient cloudSignClient;
     private com.ses.common.util.PdfFontUtils pdfFontUtils;
     private FileSecurityMetadataMapper metadataMapper;
     private FileScanner fileScanner;
@@ -45,7 +43,6 @@ class ContractDocumentServiceImplTest {
     void setUp() {
         templateMapper = mock(ContractTemplateMapper.class);
         contractMapper = mock(ContractMapper.class);
-        cloudSignClient = mock(CloudSignClient.class);
         pdfFontUtils = mock(com.ses.common.util.PdfFontUtils.class);
         metadataMapper = mock(FileSecurityMetadataMapper.class);
         when(metadataMapper.insert(any(FileSecurityMetadata.class))).thenReturn(1);
@@ -62,7 +59,7 @@ class ContractDocumentServiceImplTest {
 
         ContractDocumentMapper baseMapper = mock(ContractDocumentMapper.class);
 
-        service = new ContractDocumentServiceImpl(templateMapper, contractMapper, cloudSignClient,
+        service = new ContractDocumentServiceImpl(templateMapper, contractMapper,
                 pdfFontUtils, metadataMapperProvider, fileScannerProvider, documentServiceProvider);
         ReflectionTestUtils.setField(service, "baseMapper", baseMapper);
         ReflectionTestUtils.setField(service, "uploadBase", tempDir.toString());
@@ -102,35 +99,13 @@ class ContractDocumentServiceImplTest {
     }
 
     @Test
-    void 外部からの署名PDF同期時にClean判定で登録されDownload可能になる() throws Exception {
+    void Metadataが未登録またはCleanでない場合は送信原本Downloadを拒否する() throws Exception {
         ContractDocument doc = new ContractDocument();
         doc.setId(10L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-1");
-        
-        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(10L)).thenReturn(doc);
-
-        byte[] pdfBytes = "dummy pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-1", "file-1", "完了", pdfBytes, null);
-        when(cloudSignClient.status("cs-doc-1")).thenReturn(result);
-        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
-
-        service.sync(10L);
-
-        verify(fileScanner).scan(any(), any());
-        verify(metadataMapper).insert(argThat((FileSecurityMetadata m) ->
-                "PUBLISHED".equals(m.getStorageState()) && "CLEAN".equals(m.getScanStatus())));
-    }
-
-    @Test
-    void Metadataが未登録またはCleanでない場合はDownloadを拒否する() throws Exception {
-        ContractDocument doc = new ContractDocument();
-        doc.setId(10L);
-        Path pdfFile = tempDir.resolve("contracts").resolve("10").resolve("signed-10.pdf");
+        Path pdfFile = tempDir.resolve("contracts").resolve("10").resolve("document-10.pdf");
         Files.createDirectories(pdfFile.getParent());
         Files.write(pdfFile, "pdf data".getBytes());
-        doc.setSignedPdfPath(pdfFile.toString());
+        doc.setPdfPath(pdfFile.toString());
 
         ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
         when(baseMapper.selectById(10L)).thenReturn(doc);
@@ -148,29 +123,27 @@ class ContractDocumentServiceImplTest {
     }
 
     @Test
-    void scannerBean不在時は外部署名PDF同期でscanRejectedとなりQUARANTINED登録される() throws Exception {
+    void downloadは送信原本のみを返し署名PDFパスを返さない() throws Exception {
+        // 三artifact分離: source downloadはpdfPathだけを対象にする（signed/certificateはartifact service）
         ContractDocument doc = new ContractDocument();
-        doc.setId(20L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-20");
+        doc.setId(11L);
+        Path dir = tempDir.resolve("contracts").resolve("11");
+        Files.createDirectories(dir);
+        Path source = dir.resolve("document-11.pdf");
+        Files.write(source, "source pdf".getBytes());
+        doc.setPdfPath(source.toString());
+        doc.setSignedPdfPath(dir.resolve("signed-11.pdf").toString());
 
         ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(20L)).thenReturn(doc);
+        when(baseMapper.selectById(11L)).thenReturn(doc);
 
-        // scannerProvider returns null (scanner disabled)
-        ObjectProvider<FileScanner> nullScannerProvider = mock(ObjectProvider.class);
-        when(nullScannerProvider.getIfAvailable()).thenReturn(null);
-        ReflectionTestUtils.setField(service, "fileScannerProvider", nullScannerProvider);
+        FileSecurityMetadata ok = new FileSecurityMetadata();
+        ok.setStorageState("PUBLISHED");
+        ok.setScanStatus("CLEAN");
+        when(metadataMapper.selectByStoredName(eq("default"), any())).thenReturn(ok);
 
-        byte[] pdfBytes = "suspicious pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-20", "file-20", "完了", pdfBytes, null);
-        when(cloudSignClient.status("cs-doc-20")).thenReturn(result);
-
-        BusinessException ex = assertThrows(BusinessException.class, () -> service.sync(20L));
-        assertEquals("error.file.scanRejected", ex.getMessageKey());
-
-        verify(metadataMapper).insert(argThat((FileSecurityMetadata m) ->
-                "QUARANTINED".equals(m.getStorageState()) && "UNAVAILABLE".equals(m.getScanStatus())));
+        byte[] result = service.download(11L);
+        assertArrayEquals("source pdf".getBytes(), result);
     }
 
     @Test
@@ -201,104 +174,9 @@ class ContractDocumentServiceImplTest {
                         && Long.valueOf(99L).equals(m.getOwnerId())));
     }
 
-    // ===== HFP-02-01 characterization: 現行defectをredで再現する =====
-
-    @Test
-    void syncは締結済PDFのhashで送信原本pdfSha256を上書きする() throws Exception {
-        ContractDocument doc = new ContractDocument();
-        doc.setId(30L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-30");
-        doc.setPdfSha256("a".repeat(64));
-
-        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(30L)).thenReturn(doc);
-
-        byte[] signedPdf = "signed pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-30", "file-30", "完了", signedPdf, null);
-        when(cloudSignClient.status("cs-doc-30")).thenReturn(result);
-        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
-
-        service.sync(30L);
-
-        // red: 現行はpdfSha256をsigned hashで上書きするため、送信原本の同一性が証明不能になる
-        assertEquals("a".repeat(64), doc.getPdfSha256(), "送信原本hash(pdfSha256)は不変でなければならない");
-    }
-
-    @Test
-    void syncは証明書がnullでも締結完了として成功しartifact欠落を記録しない() throws Exception {
-        ContractDocument doc = new ContractDocument();
-        doc.setId(31L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-31");
-        doc.setPdfSha256("a".repeat(64));
-
-        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(31L)).thenReturn(doc);
-
-        byte[] signedPdf = "signed pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-31", "file-31", "完了", signedPdf, null);
-        when(cloudSignClient.status("cs-doc-31")).thenReturn(result);
-        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
-
-        service.sync(31L);
-
-        // red: 締結済みなのに証明書が取得できていないことを成功扱いせず、
-        // artifact欠落がerrorMessage等で記録されるべきだが現行は無視する
-        assertNotNull(doc.getErrorMessage(), "証明書未取得の状態を記録しなければならない");
-    }
-
-    @Test
-    void syncは外部PDFのscanにFileKind_CONTRACT_PDFを使わない() throws Exception {
-        ContractDocument doc = new ContractDocument();
-        doc.setId(32L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-32");
-
-        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(32L)).thenReturn(doc);
-
-        byte[] signedPdf = "signed pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-32", "file-32", "完了", signedPdf, null);
-        when(cloudSignClient.status("cs-doc-32")).thenReturn(result);
-        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
-
-        service.sync(32L);
-
-        // red: 現行はFileKind.SKILL_SHEETを誤用するため、PDF専用の許可種別(CONTRACT_PDF)でscanされるべき
-        verify(fileScanner).scan(any(), argThat(k -> "CONTRACT_PDF".equals(k.name())));
-    }
-
-    @Test
-    void syncはprovider呼出しを含むmethodにTransactionアノテーションを張らない() throws Exception {
-        // red: 現行は@Transactionalのままprovider GET/downloadを呼ぶ（長時間transactionと外部副作用混在）
-        var annotation = org.springframework.transaction.annotation.Transactional.class;
-        var method = ContractDocumentServiceImpl.class.getMethod("sync", Long.class);
-        assertNull(method.getAnnotation(annotation), "外部呼出しを含むsyncはtransaction外でなければならない");
-    }
-
-    @Test
-    void syncは証明書をpdf拡張子とapplicationPdfで保存しない() throws Exception {
-        ContractDocument doc = new ContractDocument();
-        doc.setId(33L);
-        doc.setContractId(1L);
-        doc.setCloudsignDocumentId("cs-doc-33");
-
-        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(33L)).thenReturn(doc);
-
-        byte[] signedPdf = "signed pdf content".getBytes();
-        byte[] certPdf = "certificate pdf content".getBytes();
-        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-33", "file-33", "完了", signedPdf, certPdf);
-        when(cloudSignClient.status("cs-doc-33")).thenReturn(result);
-        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
-
-        service.sync(33L);
-
-        // red: 現行はcertificate-33.dat として保存しPDF扱いしない
-        assertTrue(doc.getCertificatePath().endsWith(".pdf"),
-                "証明書はPDFとして保存されるべきだが現行は " + doc.getCertificatePath());
-    }
+    // ===== HFP-02-01/06: sync(旧実装)撤去後の三hash不変性 =====
+    // 旧sync()はCloudSignArtifactService(締結後回収)とCloudSignSyncService(状態同期)へ置き換え済み。
+    // pdfSha256は送信原本hashとして不変であり、signed/certificateは別hash列・別archive idで管理される。
 
     @Test
     void 二重queueSendは同じoperationとして扱いproviderを呼ばない() throws Exception {
@@ -352,7 +230,6 @@ class ContractDocumentServiceImplTest {
         ContractDocument again = service.queueSend(40L, request);
         assertEquals(queued.getOperationId(), again.getOperationId());
         verify(baseMapper, times(1)).casQueue(anyLong(), anyInt(), anyString(), anyString());
-        verifyNoInteractions(cloudSignClient);
     }
 
     @Test
@@ -394,6 +271,5 @@ class ContractDocumentServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.queueSend(41L, wrong));
         assertEquals("error.contract.document.payloadChanged", ex.getMessageKey());
-        verifyNoInteractions(cloudSignClient);
     }
 }

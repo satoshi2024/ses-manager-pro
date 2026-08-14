@@ -91,13 +91,13 @@ public class ContractDocumentBackfillRunner implements ApplicationRunner {
                 metadata.setCreatedAt(LocalDateTime.now());
                 metadata.setUpdatedAt(LocalDateTime.now());
 
-                if (result.status() == FileScanResult.Status.CLEAN) {
+                if (result != null && result.status() == FileScanResult.Status.CLEAN) {
                     metadata.setStorageState("PUBLISHED");
                     metadata.setScanStatus("CLEAN");
                 } else {
                     metadata.setStorageState("QUARANTINED");
-                    metadata.setScanStatus(result.status().name());
-                    metadata.setRejectionReason(result.reason());
+                    metadata.setScanStatus(result != null ? result.status().name() : "UNAVAILABLE");
+                    metadata.setRejectionReason(result != null ? result.reason() : "scanner returned no result");
                 }
                 mapper.insert(metadata);
             }
