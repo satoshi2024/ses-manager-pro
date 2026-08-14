@@ -29,7 +29,7 @@
 | HFP-02-00 | - | DONE(production変更なし) | DONE(11/0/0/0) | BLOCKED(sandbox未確認) | NOT_STARTED | PARTIAL | 公式schema不変を確認、fixture schema test 11件PASS。Demoはsandbox credential入手後に再実施 |
 | HFP-02-01 | 00 | DONE(red testのみ) | DONE(13/13意図どおりred) | DONE(二重send重複riskをtest logで実演) | NOT_STARTED | PARTIAL | baseline defectを13件redで固定。green化はHFP-02-02〜08 |
 | HFP-02-02 | 01 | DONE(V109/entity/CAS/backfill) | DONE(46件/0/0/0) | DONE(MySQL fresh+legacy, H2 CAS/backfill) | NOT_STARTED | PARTIAL | 採番: S12〜S17予約(V103〜V108)と衝突したためV109へ。予約表をV110〜V115へ繰り上げ(文書のみ) |
-| HFP-02-03 | 00,01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | fixed wire fixture |
+| HFP-02-03 | 00,01 | DONE | DONE(31件/0/0/0) | DONE(multipart SHA-256一致・token一回・timeout後call=1をtestで実演) | NOT_STARTED | PARTIAL | wire契約をtyped clientで固定。旧CloudSignClientは互換facade化 |
 | HFP-02-04 | 02,03 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | result-unknown/call-count evidence |
 | HFP-02-05 | 03,04 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | polling/status evidence |
 | HFP-02-06 | 02,03,05 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 三hash/scan/ledger evidence |
@@ -45,16 +45,16 @@
 | Requirement / AC | Task | 実装 file/method | 自動test class/method | Demo / external evidence | Reviewer | 判定 | 備考/rollback |
 |---|---|---|---|---|---|---|---|
 | HFP-02-AC-01-01 | 00 | research.md §2.1/§2.2 | CloudSignOpenApiFixtureSchemaTest#fixtureMetaは固定OpenAPIのpinと一致する | OpenAPI version/SHA 再取得(2026-08-14, 不変) | - | VERIFIED | curl生bytes固定、gzip展開を除外 |
-| HFP-02-AC-01-02 | 00,03,08 | fixture + schema test | CloudSignOpenApiFixtureSchemaTest（token/create/upload/participant/send/get/certificate/decline） | wire契約 | - | IN_PROGRESS | fixture契約成立。client実装はHFP-02-03 |
-| HFP-02-AC-01-03 | 03,05,07 | - | - | malformed/unknown fixture | - | NOT_STARTED | - |
+| HFP-02-AC-01-02 | 00,03,08 | CloudSignApiClient(create/upload/participant/get/send/download)・DTO・CloudSignTokenProvider | CloudSignClientContractTest(12) | wire契約 | - | VERIFIED | request captureでform/multipart/Bearer/順序/binary hash/call countを検証 |
+| HFP-02-AC-01-03 | 03,05,07 | requireDocumentFields、CloudSignErrorClassifier | 必須field欠落schemaError test・未知status fixture | malformed/unknown fixture | - | IN_PROGRESS | schema error/error分類DONE。未知statusの業務mappingはHFP-02-05 |
 | HFP-02-AC-01-04 | 00 | research.md §2.2 | fixtureMetaは固定OpenAPIのpinと一致する | version diff review(差分なし) | - | VERIFIED | 更新時はfixture/pin同時更新まで停止 |
-| HFP-02-AC-02-01 | 03 | - | - | host matrix | - | NOT_STARTED | - |
-| HFP-02-AC-02-02 | 03,08 | - | - | log/API redaction | - | NOT_STARTED | P0 |
-| HFP-02-AC-02-03 | 03 | - | - | token concurrency/401 | - | NOT_STARTED | - |
-| HFP-02-AC-02-04 | 03,10 | - | - | readiness fail-closed | - | NOT_STARTED | - |
+| HFP-02-AC-02-01 | 03 | CloudSignProperties.resolveBaseUri | CloudSignPropertiesTest(6) | host matrix | - | VERIFIED | prod/sandbox公式hostのみ。HTTP/userinfo/query/fragment/path付きを拒否 |
+| HFP-02-AC-02-02 | 03,08 | CloudSignTokenProvider(メモリのみ) | token test・log captureはHFP-02-08 | log/API redaction | - | IN_PROGRESS | token値はmemoryのみ・例外に含めない。log captureはHFP-02-08 |
+| HFP-02-AC-02-03 | 03 | CloudSignTokenProvider | tokenSingleFlight・status401一回再取得 test | token concurrency/401 | - | VERIFIED | single-flight 1回・401再取得は一操作一回 |
+| HFP-02-AC-02-04 | 03,10 | CloudSignProperties.validate(@PostConstruct) | enabled=trueでclientId欠落failClosed test | readiness fail-closed | - | IN_PROGRESS | config fail-closedDONE。scanner/storage/ledger readinessはHFP-02-10 |
 | HFP-02-AC-02-05 | 00,09,10 | - | - | sandbox/preflight | - | BLOCKED | HFP-02-BLK-01 |
 | HFP-02-AC-03-01 | 01,04 | - | - | source preflight | - | NOT_STARTED | P0 |
-| HFP-02-AC-03-02 | 03,04 | - | - | source PDF wire hash | - | NOT_STARTED | mutation直列 |
+| HFP-02-AC-03-02 | 03,04 | CloudSignApiClientImpl(4工程直列) | 公式4工程を厳密な順序で直列実行する test | source PDF wire hash | - | VERIFIED | multipartの送信原本SHA-256一致をrequest captureで証明 |
 | HFP-02-AC-03-03 | 04 | - | - | provider IDs/preflight | - | NOT_STARTED | - |
 | HFP-02-AC-03-04 | 07 | - | - | browser確認modal | - | NOT_STARTED | - |
 | HFP-02-AC-03-05 | 04,07 | - | - | payload mismatch | - | NOT_STARTED | - |
@@ -86,9 +86,9 @@
 | HFP-02-AC-08-04 | 06,07 | - | - | no-store/audit | - | NOT_STARTED | - |
 | HFP-02-AC-08-05 | 03,07,08 | - | - | log capture | - | NOT_STARTED | P0 |
 | HFP-02-AC-08-06 | 07 | - | - | CSRF | - | NOT_STARTED | - |
-| HFP-02-AC-09-01 | 03,04,05 | - | - | error/result-unknown matrix | - | NOT_STARTED | P0 |
-| HFP-02-AC-09-02 | 03,05 | - | - | token/rate/retry | - | NOT_STARTED | - |
-| HFP-02-AC-09-03 | 03,06 | - | - | body/file limits | - | NOT_STARTED | - |
+| HFP-02-AC-09-01 | 03,04,05 | CloudSignErrorClassifier・CloudSignApiException(uncertain) | error分類/504/timeout test | error/result-unknown matrix | - | IN_PROGRESS | client分類DONE。dispatchへの接続はHFP-02-04 |
+| HFP-02-AC-09-02 | 03,05 | CloudSignRateLimiter | CloudSignRateLimiterTest(4) | token/rate/retry | - | IN_PROGRESS | budget≤800DONE。poll/syncへの接続はHFP-02-05 |
+| HFP-02-AC-09-03 | 03,06 | CloudSignProperties.maxPdfBytes・streamToTempFile | download size上限 test | body/file limits | - | IN_PROGRESS | download上限DONE。upload側・binary非展開はHFP-02-04/06 |
 | HFP-02-AC-09-04 | 05,06,10 | - | - | alert matrix | - | NOT_STARTED | - |
 | HFP-02-AC-10-01 | 05,07 | - | - | state/role UI/API | - | NOT_STARTED | - |
 | HFP-02-AC-10-02 | 04,07 | - | - | queue≠sent UI | - | NOT_STARTED | - |
@@ -154,6 +154,7 @@
 | 2026-08-14 | 00 | `mvn -B test -Dtest=CloudSignOpenApiFixtureSchemaTest` | 11 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | `target/surefire-reports/TEST-com.ses.cloudsign.CloudSignOpenApiFixtureSchemaTest.xml`。OpenAPI再取得はcurl生bytes(147111 bytes)でSHA一致を確認 |
 | 2026-08-14 | 01 | `mvn -B test -Dtest=CloudSignClientContractTest,ContractDocumentServiceImplTest,ContractDocumentApiControllerTest` | 19 | 13 | 0 | 0 | Mock(0実) | RED(意図どおり) | 新規13件が全部defect再現でred。既存6件(ContractDocumentServiceImplTest)はgreen。surefire XML: `TEST-com.ses.cloudsign.CloudSignClientContractTest.xml` / `TEST-com.ses.service.impl.ContractDocumentServiceImplTest.xml` / `TEST-com.ses.controller.api.ContractDocumentApiControllerTest.xml`。二重send test: provider create call=2を観測 |
 | 2026-08-14 | 02 | `mvn -B clean test -Dtest=FlywayContractDocumentDispatchSchemaSmokeTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest,ContractDocumentDispatchStateTest` | 46 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | MySQL fresh/legacy(V102実形状→V109)・H2 CAS/backfill 8件・採番整合9件・migration整合27件。採番調整: S12予約V103と衝突 → HFP-02はV109、S12〜S17予約表をV110〜V115へ繰り上げ(customer-product-expansion-2026文書一式、SpecDispatchConsistencyTestが検証) |
+| 2026-08-14 | 03 | `mvn -B test -Dtest=CloudSignClientContractTest,CloudSignPropertiesTest,CloudSignRateLimiterTest,CloudSignOpenApiFixtureSchemaTest,ContractDocumentDispatchStateTest,MessageBundleConsistencyTest` | 45 | 0 | 0 | 0 | MockWebServer(0実) | PASS | typed client wire契約12件(request captureでmultipart SHA-256一致)、host allow-list 6件、rate limiter 4件。旧CloudSignClientは互換facade化(service red test 6件はHFP-02-04/06の対象のままred) |
 
 ## 9. Sandbox / production operation ledger
 

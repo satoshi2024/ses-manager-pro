@@ -47,6 +47,19 @@ public class AppConfig {
     }
 
     /**
+     * CloudSign専用のRestTemplate。
+     * HFP-02-AC-02-04: cloudsign.read-timeout-ms は公式の「最大180秒接続維持」より短い既定15秒を使い、
+     * タイムアウト時に provider が処理継続中の可能性があることを「結果不明」として扱う。
+     */
+    @Bean("cloudsignRestTemplate")
+    public RestTemplate cloudsignRestTemplate(RestTemplateBuilder builder, CloudSignProperties properties) {
+        return builder
+                .setConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
+                .setReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()))
+                .build();
+    }
+
+    /**
      * AI API（Gemini等）用のRestTemplate。
      * 生成モデルの応答は遅い場合があるため、読取タイムアウトを長めに設定する。
      */
