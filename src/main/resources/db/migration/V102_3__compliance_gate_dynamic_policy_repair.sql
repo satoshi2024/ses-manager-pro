@@ -12,7 +12,22 @@
 --     （qualification_verification_required_snapshot /
 --      active_status_verification_required_snapshot: TINYINT NOT NULL・freeze時確定）
 --  5) t_compliance_reviewer_qualification（subject×qualification association・§9）
+--  6) internal approval event へ exact evidence snapshot 列を追加（P0-5）
+--  7) 並行first adoptionのDB一意化（P1-5・生成列+UNIQUE）
+--  8) subject masterのUPDATE拒否trigger（P1-4・immutable契約）
+-- 注: mysql CLIは複数回のDELIMITER切り替えを処理できないため、triggerブロックを先頭に置く。
 -- ============================================================
+
+-- ---- 8) subject masterのUPDATE拒否trigger（P1-4・immutable契約） ----
+-- V102_1でDELETE拒否済み。person-stable正本はimmutable（§9・G2-VERIFY-10）。
+DELIMITER $$
+DROP TRIGGER IF EXISTS trg_g2_subject_no_update$$
+CREATE TRIGGER trg_g2_subject_no_update BEFORE UPDATE ON t_compliance_external_reviewer_subject
+FOR EACH ROW
+BEGIN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'reviewer subject is immutable';
+END$$
+DELIMITER ;
 
 -- ---- 1) dynamic official source master（§3.8） ----
 CREATE TABLE IF NOT EXISTS m_compliance_verification_source (
@@ -157,31 +172,17 @@ EXECUTE g2_v103_ev_stmt;
 DEALLOCATE PREPARE g2_v103_ev_stmt;
 
 -- ---- 7) 同一SUBMITTED chainの並行first adoptionをDBで一意化（P1-5） ----
--- 初回adoption（APPROVED/REJECTED）は1 chainにつき1件のみ。
--- MySQLは部分一意インデックス不可のため、actionが初回種別のとき submitted_review_event_id と等しくなる
--- 生成列（first_adoption_key）へUNIQUE制約を張る。REVOKED行はNULL（制約対象外）。
-SET @g2_v103_has_fak := NULL;
-SELECT COUNT(*) INTO @g2_v103_has_fak FROM information_schema.COLUMNS
+-- UNIQUE(tenant_id, submitted_review_event_id, action) により、
+-- 同一chainのAPPROVED/REJECTED/REVOKEDは各1件のみ（REVOKEDはAPPROVEDのみtarget・§3.2）。
+-- 生成列はMySQL 8.4のALTER再構築で既存FKが "Cannot add foreign key constraint" になるため使用しない。
+SET @g2_v103_has_uk := NULL;
+SELECT COUNT(*) INTO @g2_v103_has_uk FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
-    AND COLUMN_NAME = 'first_adoption_key';
-SET @g2_v103_fak_sql := IF(@g2_v103_has_fak = 0,
+    AND INDEX_NAME = 'uk_g2_adoption_first';
+SET @g2_v103_uk_sql := IF(@g2_v103_has_uk = 0,
   'ALTER TABLE t_compliance_external_review_adoption_event
-     ADD COLUMN first_adoption_key BIGINT
-       GENERATED ALWAYS AS (CASE WHEN action IN (''APPROVED'',''REJECTED'') THEN submitted_review_event_id ELSE NULL END) STORED
-       COMMENT ''初回adoption一意化（P1-5・APPROVED/REJECTEDのみ）'' AFTER submitted_review_event_id,
-   ADD UNIQUE KEY uk_g2_adoption_first (tenant_id, first_adoption_key)',
+     ADD UNIQUE KEY uk_g2_adoption_first (tenant_id, submitted_review_event_id, action)',
   'SELECT 1');
-PREPARE g2_v103_fak_stmt FROM @g2_v103_fak_sql;
-EXECUTE g2_v103_fak_stmt;
-DEALLOCATE PREPARE g2_v103_fak_stmt;
-
--- ---- 8) subject masterのUPDATE拒否trigger（P1-4・immutable契約） ----
--- V102_1でDELETE拒否済み。person-stable正本はimmutable（§9・G2-VERIFY-10）。
-DELIMITER $$
-DROP TRIGGER IF EXISTS trg_g2_subject_no_update$$
-CREATE TRIGGER trg_g2_subject_no_update BEFORE UPDATE ON t_compliance_external_reviewer_subject
-FOR EACH ROW
-BEGIN
-  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'reviewer subject is immutable';
-END$$
-DELIMITER ;
+PREPARE g2_v103_uk_stmt FROM @g2_v103_uk_sql;
+EXECUTE g2_v103_uk_stmt;
+DEALLOCATE PREPARE g2_v103_uk_stmt;

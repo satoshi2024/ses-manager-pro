@@ -971,9 +971,8 @@ CREATE TABLE IF NOT EXISTS t_compliance_external_review_adoption_event (
   adopted_at TIMESTAMP(6) NOT NULL, adopted_by BIGINT NOT NULL,
   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
   created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-  -- V102_3 P1-5: 初回adoption（APPROVED/REJECTED）のDB一意化（生成列）
-  first_adoption_key BIGINT GENERATED ALWAYS AS (CASE WHEN action IN ('APPROVED','REJECTED') THEN submitted_review_event_id ELSE NULL END),
-  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), UNIQUE(tenant_id, first_adoption_key),
+  -- V102_3 P1-5: 同一chainのAPPROVED/REJECTED/REVOKED各1件（DB一意化）
+  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), UNIQUE(tenant_id, submitted_review_event_id, action),
   CHECK(action IN ('SUBMITTED','APPROVED','REJECTED','REVOKED')),
   CHECK((action = 'APPROVED'
       AND identity_verification_event_id IS NOT NULL AND authorship_verification_event_id IS NOT NULL
