@@ -176,22 +176,8 @@ DEALLOCATE PREPARE g2_v103_ev_stmt;
 -- nullable生成列 first_slot = submitted_review_event_id（actionがAPPROVED/REJECTEDのときのみ非NULL）
 -- ＋UNIQUE(tenant_id, first_slot)。MySQLのUNIQUEはNULL重複を許容するため、
 -- REVOKED行（first_slot NULL）は制約対象外・APPROVEDとREJECTEDの併存はUNIQUE違反で拒否される。
--- VIRTUAL生成列のADDはINPLACE（テーブル再構築なし）のため、既存FKの再検証
--- "Cannot add foreign key constraint" を引き起こさない（STOREDでは再構築が発生するため使用しない）。
-SET @g2_v103_has_first_slot := NULL;
-SELECT COUNT(*) INTO @g2_v103_has_first_slot FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
-    AND COLUMN_NAME = 'first_slot';
-SET @g2_v103_first_slot_sql := IF(@g2_v103_has_first_slot = 0,
-  'ALTER TABLE t_compliance_external_review_adoption_event
-     ADD COLUMN first_slot BIGINT
-       GENERATED ALWAYS AS (IF(action IN (''APPROVED'',''REJECTED''), submitted_review_event_id, NULL)) VIRTUAL
-       COMMENT ''初回adoption一意化（R23-R1-P1-01・APPROVED/REJECTEDのみ非NULL）'' AFTER submitted_review_event_id',
-  'SELECT 1');
-PREPARE g2_v103_first_slot_stmt FROM @g2_v103_first_slot_sql;
-EXECUTE g2_v103_first_slot_stmt;
-DEALLOCATE PREPARE g2_v103_first_slot_stmt;
-
+-- first_slot列自体はV1（consolidated baseline）のCREATE TABLEで定義済みのため、
+-- ここではUNIQUE制約の追加のみ行う（V1と後続migrationの列重複をMigrationScriptIntegrityTestが検出するため）。
 SET @g2_v103_has_uk := NULL;
 SELECT COUNT(*) INTO @g2_v103_has_uk FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
