@@ -327,4 +327,145 @@ class CashFlowForecastServiceTest {
         // 1,000,000 + 15% = 1,150,000
         assertEquals(new BigDecimal("1150000"), result.getMonths().get(0).getPayrollTotal());
     }
+
+    // ============ HFP-01-009: 給与推定の優先順位（design §14） ============
+
+    private void setUpCashFlowBase() {
+        when(systemConfigService.getDecimal("cashflow.opening-balance", BigDecimal.ZERO)).thenReturn(BigDecimal.ZERO);
+        when(systemConfigService.getDecimal("cashflow.fixed-cost", BigDecimal.ZERO)).thenReturn(BigDecimal.ZERO);
+        when(systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO)).thenReturn(new BigDecimal("-99999999"));
+        when(systemConfigService.getInt("cashflow.bp-payment-site-months", 1)).thenReturn(1);
+        when(invoiceMapper.selectList(any())).thenReturn(List.of());
+        when(bpPaymentMapper.selectListWithDetails(any(), any())).thenReturn(List.of());
+        when(freeeIntegrationService.connected()).thenReturn(true);
+    }
+
+    private PayrollStatementDto statement(BigDecimal gross, BigDecimal employerShare) {
+        PayrollStatementDto s = new PayrollStatementDto();
+        s.setGrossAmount(gross);
+        s.setEmployerShareAmount(employerShare);
+        return s;
+    }
+
+    private YearMonth lastMonth() {
+        return YearMonth.now().minusMonths(1);
+    }
+
+    /** 会社負担実額がその月全体で完全な場合だけ実額を使う（design §14-2）。 */
+    @Test
+    void 会社負担実額が全件揃う月は実額を使う() {
+        setUpCashFlowBase();
+        YearMonth ym = lastMonth();
+        when(freeeIntegrationService.statements(eq(ym.getYear()), eq(ym.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(
+                        statement(new BigDecimal("1000000"), new BigDecimal("80000")),
+                        statement(new BigDecimal("2000000"), new BigDecimal("160000"))));
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        // 3,000,000 + 240,000 = 3,240,000（率15%は使われない）
+        assertEquals(new BigDecimal("3240000"), result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 会社負担実額が一部でも欠ける月は実額を使わず設定率で推定する（design §14-3）。 */
+    @Test
+    void 会社負担実額が不完全なら設定率で推定する() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-employer-burden-rate", BigDecimal.ZERO))
+                .thenReturn(new BigDecimal("10"));
+        YearMonth ym = lastMonth();
+        when(freeeIntegrationService.statements(eq(ym.getYear()), eq(ym.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(
+                        statement(new BigDecimal("1000000"), new BigDecimal("80000")),
+                        statement(new BigDecimal("2000000"), null))); // 会社負担欠落
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        // 3,000,000 + 10% = 3,300,000
+        assertEquals(new BigDecimal("3300000"), result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 直近月が全件計算中（gross null）なら2か月前の確定値を試す（design §14-4）。 */
+    @Test
+    void 直近月が計算中なら2か月前を試す() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-employer-burden-rate", BigDecimal.ZERO))
+                .thenReturn(BigDecimal.ZERO);
+        YearMonth ym1 = lastMonth();
+        YearMonth ym2 = ym1.minusMonths(1);
+        when(freeeIntegrationService.statements(eq(ym1.getYear()), eq(ym1.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(statement(null, null)));
+        when(freeeIntegrationService.statements(eq(ym2.getYear()), eq(ym2.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(statement(new BigDecimal("500000"), null)));
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        assertEquals(new BigDecimal("500000"), result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 直近月・2か月前とも計算中なら設定値へfallback（design §14-5）。 */
+    @Test
+    void 両月とも計算中なら設定値へfallbackする() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO))
+                .thenReturn(new BigDecimal("700000"));
+        YearMonth ym1 = lastMonth();
+        YearMonth ym2 = ym1.minusMonths(1);
+        when(freeeIntegrationService.statements(eq(ym1.getYear()), eq(ym1.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(statement(null, null)));
+        when(freeeIntegrationService.statements(eq(ym2.getYear()), eq(ym2.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(statement(null, null)));
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        assertEquals(new BigDecimal("700000"), result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 直近月0件なら2か月前を試し、それも0件なら設定値（design §14-4/5）。 */
+    @Test
+    void 直近月0件なら2か月前を試し0件なら設定値() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO))
+                .thenReturn(new BigDecimal("800000"));
+        YearMonth ym1 = lastMonth();
+        YearMonth ym2 = ym1.minusMonths(1);
+        when(freeeIntegrationService.statements(eq(ym1.getYear()), eq(ym1.getMonthValue()), eq("salary")))
+                .thenReturn(List.of());
+        when(freeeIntegrationService.statements(eq(ym2.getYear()), eq(ym2.getMonthValue()), eq("salary")))
+                .thenReturn(List.of());
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        assertEquals(new BigDecimal("800000"), result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 給与0円が正式値である月は0円のまま返し、設定値へfallbackしない。 */
+    @Test
+    void 給与0円は正式値として0円を返す() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-employer-burden-rate", BigDecimal.ZERO))
+                .thenReturn(BigDecimal.ZERO);
+        YearMonth ym = lastMonth();
+        when(freeeIntegrationService.statements(eq(ym.getYear()), eq(ym.getMonthValue()), eq("salary")))
+                .thenReturn(List.of(statement(BigDecimal.ZERO, null)));
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        assertEquals(BigDecimal.ZERO, result.getMonths().get(0).getPayrollTotal());
+    }
+
+    /** 外部障害はこれ以上試行せず設定値へfallbackし、前月→2か月前の順に試行が終わる。 */
+    @Test
+    void 外部障害は設定値へfallbackする() {
+        setUpCashFlowBase();
+        when(systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO))
+                .thenReturn(new BigDecimal("650000"));
+        YearMonth ym1 = lastMonth();
+        when(freeeIntegrationService.statements(eq(ym1.getYear()), eq(ym1.getMonthValue()), eq("salary")))
+                .thenThrow(new com.ses.common.exception.BusinessException(503, "error.payroll.providerUnavailable"));
+
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1, null);
+
+        assertEquals(new BigDecimal("650000"), result.getMonths().get(0).getPayrollTotal());
+    }
 }

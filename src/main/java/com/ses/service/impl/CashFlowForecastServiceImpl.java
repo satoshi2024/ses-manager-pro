@@ -190,30 +190,57 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         return dto;
     }
 
+    /**
+     * 給与キャッシュアウト推定（design §14の優先順位）。
+     * <ol>
+     *   <li>直近月の対応付け済み内部要員の利用可能なgrossAmount合計（計算中nullは0へ変換しない）</li>
+     *   <li>会社負担はその月全体で公式実額（employerShareAmount）が完全な場合だけ実額を使う</li>
+     *   <li>実額が不完全なら既存設定率（cashflow.payroll-employer-burden-rate）をgrossへ適用</li>
+     *   <li>直近月0件/利用不可なら2か月前を試す。それも不可/外部障害なら設定値（payroll-estimate）へfallback</li>
+     * </ol>
+     * 給与0円が正式値である月は0円のまま返す（fallbackしない）。
+     */
     private BigDecimal getEstimatedPayroll() {
         if (!freeeIntegrationService.connected()) {
             return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
         }
-        try {
-            // Get last month's payroll as an estimate
-            YearMonth lastMonth = YearMonth.now().minusMonths(1);
-            List<PayrollStatementDto> statements = freeeIntegrationService.statements(lastMonth.getYear(), lastMonth.getMonthValue(), "salary");
-            if (statements == null || statements.isEmpty()) {
-                // fallback to 2 months ago if last month isn't available yet
-                lastMonth = lastMonth.minusMonths(1);
-                statements = freeeIntegrationService.statements(lastMonth.getYear(), lastMonth.getMonthValue(), "salary");
-            }
-            if (statements != null && !statements.isEmpty()) {
-                // キャッシュアウトは総支給ベース(源泉税・社会保険の本人負担分も会社が納付するため)。
-                // grossAmount を返さないプロバイダ実装では netAmount にフォールバックする。
-                BigDecimal gross = statements.stream()
-                        .map(s -> s.getGrossAmount() != null ? s.getGrossAmount() : s.getNetAmount())
-                        .filter(java.util.Objects::nonNull)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        YearMonth lastMonth = YearMonth.now().minusMonths(1);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            YearMonth ym = lastMonth.minusMonths(attempt);
+            try {
+                List<PayrollStatementDto> statements = freeeIntegrationService.statements(
+                        ym.getYear(), ym.getMonthValue(), "salary");
+                if (statements == null || statements.isEmpty()) {
+                    continue; // 利用可能金額0件 → 前月→2か月前の順に試す
+                }
+                // その月全体でgrossが利用可能な場合だけ実額を使う（計算中nullの混在は月単位で除外）
+                boolean allGrossAvailable = true;
+                BigDecimal gross = BigDecimal.ZERO;
+                for (PayrollStatementDto s : statements) {
+                    if (s.getGrossAmount() == null) {
+                        allGrossAvailable = false;
+                        break;
+                    }
+                    gross = gross.add(s.getGrossAmount());
+                }
+                if (!allGrossAvailable) {
+                    continue; // 計算中（または混在）の月は次の候補月を試す
+                }
+                // 会社負担実額が全件揃う月だけ実額を使い、不完全なら既存率で推定する（design §14-2/3）
+                boolean employerShareComplete = statements.stream()
+                        .allMatch(s -> s.getEmployerShareAmount() != null);
+                if (employerShareComplete) {
+                    BigDecimal employerShare = statements.stream()
+                            .map(PayrollStatementDto::getEmployerShareAmount)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    return gross.add(employerShare);
+                }
                 return gross.add(employerBurden(gross));
+            } catch (Exception e) {
+                // 外部障害はこれ以上試行せず、既存設定値へfallback（design §14-5）
+                log.warn("Failed to fetch freee payroll for cashflow forecast ({}): {}", ym, e.getMessage());
+                return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
             }
-        } catch (Exception e) {
-            log.warn("Failed to fetch freee payroll for cashflow forecast", e);
         }
         return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
     }

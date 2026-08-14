@@ -266,6 +266,56 @@
 
 ---
 
+### HFP-01-RUN-20260814-06
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当・引き継ぎ） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `3f5f1d7a`（HFP-01-007完了時） / `2c2d1386`（007回帰修正）+ 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-14 12:30` / `2026-08-14 13:45` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（確認済み・hr tree差分なし） |
+| freee test事業所 | BLOCKED（継続。FREEE_*環境変数未設定） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | 開始時dirtyなし。既存実装（001〜007）を引き継ぎ、007の回帰2件を修正 |
+
+#### 引き継ぎ時の回帰修正（HFP-01-007のfix）
+
+| Task | 状態 | 変更file / method | Test command・結果 | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| 007回帰fix | PASS | `FreeeOAuthCallbackWebTest`（AuditLogServiceの@MockBean追加）、`PayrollSecurityAuditTest.csrfなし403あり成功`（CSRFなし403時はprovider呼出なしのため余剰expect削除） | 対象13 class 127 test: 0/0/0 | — | 既存test修正のみ。実装変更なし |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-008 | PASS | `templates/payroll/index.html`（全書換え: 接続状態4状態・選択式対応付け・給与/賞与select・明細modal・a11y属性）、`static/js/modules/payroll.js`（新規: inline JS分離、SES.api/CSRF/Toast、null=計算中と0円の区別、二重送信防止、解除確認dialog、明細区分表示、XSS escape）、`PayrollLandmarkA11yTest`（5 testへ拡張: label/for・role別button・モバイルcol-12） | `mvn test -Dtest=PayrollLandmarkA11yTest,PayrollSecurityAuditTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` → 22/0/0/0 code 0 | MockMvc描画: 管理者に接続3button・HRには無し・単一main・label/for・aria-live・390px用col-12/table-responsive。JS syntax node --check PASS | 生ID入力廃止。consoleへ金額/氏名を出さない実装。テンプレ/JSのみでbackend変更なし |
+| HFP-01-009 | PASS | `CashFlowForecastServiceImpl.getEstimatedPayroll`（design §14優先順位: 直近月→2か月前→設定値、gross null混在月は除外、会社負担実額が全件揃う月だけ実額、それ以外は率、正式0円は0円のまま）、`CashFlowForecastServiceTest`（新規7 test: 実額/率fallback/計算中→2か月前/両月計算中fallback/0件fallback/正式0円/外部障害） | `mvn test -Dtest=CashFlowForecastServiceTest,FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PaymentReconciliationServiceImplTest` → 37/0/0/0 code 0 | freee未接続・計算中・確定の3caseを単体testで確認（実接続はsandbox BLOCKED） | S11/S15のpublic contract変更なし（apiGet/apiPost/bankDeposits未変更）。旧実装のnetAmount fallbackは削除（design §14に合わせgross null月は除外） |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| UI/a11y/security | `mvn test -Dtest=PayrollLandmarkA11yTest,PayrollSecurityAuditTest,MessageBundleConsistencyTest,JsSyntaxCheckTest` | 22 | 0 | 0 | 0 | PASS | surefire-reports |
+| CashFlow/S11/S15 | `mvn test -Dtest=CashFlowForecastServiceTest,FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PaymentReconciliationServiceImplTest` | 37 | 0 | 0 | 0 | PASS | surefire-reports |
+| freee関連全回帰 | 13 class（Baseline/OAuth×2/HrContract/Mapping/ReadModel/S11×2/Reconciliation/CashFlow/A11y/SecurityAudit/H2Schema） | 127 | 0 | 0 | 0 | PASS | surefire-reports |
+
+#### Demo / sandbox E2E
+
+| Scenario | Desktop | 390px | Sandbox | 状態 | 非機微証跡 / 観測結果 |
+|---|---|---|---|---|---|
+| 画面描画・a11y・role別button | MockMvc PASS | MockMvc PASS（col-12/table-responsive） | BLOCKED | PASS（自動） | MockMvc描画HTML + node --check |
+| 接続→link→給与→賞与→解除の実操作 | 未実施 | 未実施 | BLOCKED | BLOCKED | sandbox credential未提供のためHFP-01-011で実施 |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。E2E Demo・desktop/390px実操作はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
+| HFP-01-RUN-ISSUE-04 | AC13 | OPEN | 実ブラウザでのdesktop/390px Demo未実施（sandbox接続が必要な操作を含む）。自動test（MockMvc描画+JS syntax）は完了 | 発注者 / freee sandbox | HFP-01-011実施時に合わせて実行 |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
