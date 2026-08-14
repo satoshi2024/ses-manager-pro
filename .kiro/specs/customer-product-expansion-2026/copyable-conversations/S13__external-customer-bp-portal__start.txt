@@ -13,7 +13,7 @@
 【開始条件】
 - 採番規則: 衝突時は後発を繰り上げ、前の欠番は埋めない。
 - Wave: Wave 3
-- Migration: V104（S10 G2 follow-up V102、S12 V103を反映。common V99永久欠番、migration-dev V100実在、common V101既存用途維持。着手時に全Flyway locationを再確認する）
+- Migration: V111（S10 G2 follow-up V102、S12 V110を反映。common V99永久欠番、migration-dev V100実在、common V101既存用途維持。着手時に全Flyway locationを再確認する）
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。

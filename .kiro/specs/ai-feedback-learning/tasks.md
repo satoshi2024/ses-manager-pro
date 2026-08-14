@@ -7,7 +7,7 @@
 > AI固有のPII規約は `CLAUDE.md`「AI機能開発時の注意事項（A8-01/A8-02関連）」も併せて正とする。
 > 時間/scope/状態/PII境界の判断は `design.md` §5「決定表」を正とする。
 >
-> **Migration**: 本specの予約番号は **V108**。Wave 2と先行outcome source完了後に着手する。
+> **Migration**: 本specの予約番号は **V115**。Wave 2と先行outcome source完了後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [ ] 0. G10/use case/PII/metric確定
@@ -27,7 +27,7 @@
 - [ ] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: AIのmodel/prompt/rule versionが登録でき、推薦の実行・候補・採否・成果が
     同一traceで追跡できる。use case×tenantでactive versionが常に1つに保たれる。
-  - **実装ガイダンス**: **V108**/V1/H2(`sql/schema-ai-feedback-h2.sql`)/MySQL smoke、legacy移行方針。
+  - **実装ガイダンス**: **V115**/V1/H2(`sql/schema-ai-feedback-h2.sql`)/MySQL smoke、legacy移行方針。
     **active versionは部分UNIQUE制約で1つに保証**（design §5.3）。
     アプリ側の「既存ACTIVEをRETIREDにしてから新規をACTIVE」は競合で2件ACTIVEになる。同一transaction＋CASで行う。
     `UNIQUE(item_id, outcome_type, source_type, source_id)`でoutcomeを冪等化。

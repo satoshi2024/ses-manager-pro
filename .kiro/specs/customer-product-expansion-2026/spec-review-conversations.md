@@ -745,7 +745,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V84/V85実在＋V102 G2 follow-up候補。common V99永久欠番、migration-dev V100実在、common V101既存用途維持。S12〜S17=V103〜V108。
+- Migration: V84/V85実在＋V102 G2 follow-up候補。common V99永久欠番、migration-dev V100実在、common V101既存用途維持。S12〜S17=V110〜V115。
 - 先行条件: order-acceptance-workflow完了・merge済み。
 - Decision gate: G2-DEV-GATE確定済み。T060は公式mapping+L0+独立Reviewで`PROVISIONAL_REVIEWED`へ進める。
   特定自然人の事前指名と実actor承認eventはT060 Review条件ではなく、`ACTIVE`化/M/本番gateとする。
@@ -771,7 +771,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 【Review観点】
 - R21 canonical payload sync docs-only再Reviewではproduction/DDL/test code変更0、T066未完了、S10 IN PROGRESS、S12 NOT READYを確認し、
   tenant ACTIVE/workplace delivery分離、dynamic policy、9 domain table + operation ledger、複数hash/reducer、ACTIVE 21-step、
-  stable delivery business key、recipient/display/company/config render hash、legacy NULL download、R8.5/R8.6 trace、future candidate slot lifecycle、worker NULL契約、credential crypto/source freeze、security/G0/HISTORY/V102〜V108/122 direct regression/Phase A-Bを逐項照合する。
+  stable delivery business key、recipient/display/company/config render hash、legacy NULL download、R8.5/R8.6 trace、future candidate slot lifecycle、worker NULL契約、credential crypto/source freeze、security/G0/HISTORY/V102〜V115/122 direct regression/Phase A-Bを逐項照合する。
 - 各requirements IDについて実装箇所、自動test、Demo、未検証を対応付ける。
 - 未実装、過剰実装、範囲外変更、認可漏れ、状態競合、二重登録、rollback不備を確認する。
 - CSRF、監査、楽観ロック、4言語i18n、tenant/data/organization/file scopeを確認する。
@@ -944,7 +944,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 2
-- Migration: V103
+- Migration: V110
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 - 期待するtask順: F1→F2→(A1 || B1 || B2)→M
@@ -1032,7 +1032,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V104
+- Migration: V111
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 - 期待するtask順: 0→F1→F2→(A1 || A2 || B1)→M
@@ -1123,7 +1123,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V105
+- Migration: V112
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 - 期待するtask順: F1→(A1 || A2 || B1 || B2)→M
@@ -1212,7 +1212,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V106
+- Migration: V113
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 - 期待するtask順: 0→F1→F2→(A1 || B1 || B2)→B3→M
@@ -1300,7 +1300,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 3
-- Migration: V107
+- Migration: V114
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 - 期待するtask順: 0→F1→F2→(B1 || A1)→B2→M
@@ -1388,7 +1388,7 @@ commitが未指定ならreview-ledger.md、git status、git logから対象範�
 
 【前提】
 - Wave: Wave 4
-- Migration: V108
+- Migration: V115
 - 先行条件: CRM、proposal、staffing、outcome sourceが完了・merge済み。
 - Decision gate: G10はmock/rule継続または実provider/DPA/PII許可を記録。
 - 期待するtask順: 0→F1→F2→(B1 || B2)→A1→M

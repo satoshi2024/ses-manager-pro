@@ -28,7 +28,7 @@
 |---|---|---|---|---|---|---|---|
 | HFP-02-00 | - | DONE(production変更なし) | DONE(11/0/0/0) | BLOCKED(sandbox未確認) | NOT_STARTED | PARTIAL | 公式schema不変を確認、fixture schema test 11件PASS。Demoはsandbox credential入手後に再実施 |
 | HFP-02-01 | 00 | DONE(red testのみ) | DONE(13/13意図どおりred) | DONE(二重send重複riskをtest logで実演) | NOT_STARTED | PARTIAL | baseline defectを13件redで固定。green化はHFP-02-02〜08 |
-| HFP-02-02 | 01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | migration latest/legacy fixture確認 |
+| HFP-02-02 | 01 | DONE(V109/entity/CAS/backfill) | DONE(46件/0/0/0) | DONE(MySQL fresh+legacy, H2 CAS/backfill) | NOT_STARTED | PARTIAL | 採番: S12〜S17予約(V103〜V108)と衝突したためV109へ。予約表をV110〜V115へ繰り上げ(文書のみ) |
 | HFP-02-03 | 00,01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | fixed wire fixture |
 | HFP-02-04 | 02,03 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | result-unknown/call-count evidence |
 | HFP-02-05 | 03,04 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | polling/status evidence |
@@ -58,14 +58,14 @@
 | HFP-02-AC-03-03 | 04 | - | - | provider IDs/preflight | - | NOT_STARTED | - |
 | HFP-02-AC-03-04 | 07 | - | - | browser確認modal | - | NOT_STARTED | - |
 | HFP-02-AC-03-05 | 04,07 | - | - | payload mismatch | - | NOT_STARTED | - |
-| HFP-02-AC-04-01 | 02,04 | - | - | 100 concurrent send | - | NOT_STARTED | P0 |
+| HFP-02-AC-04-01 | 02,04 | ContractDocumentMapper.casTransition/casClaim/casCheckpoint、ContractDocumentDispatchStateTest | 100 concurrent sendはHFP-02-04 | 状態CAS(version+state)を実DBで検証済 | - | IN_PROGRESS | CAS実装DONE。sendのqueue化はHFP-02-04 |
 | HFP-02-AC-04-02 | 04 | - | - | transaction inactive | - | NOT_STARTED | P0 |
 | HFP-02-AC-04-03 | 04 | - | - | accepted-timeout call count=1 | - | NOT_STARTED | P0 |
 | HFP-02-AC-04-04 | 04,09 | - | - | GET/marker reconciliation | - | BLOCKED | HFP-02-BLK-02/03 |
 | HFP-02-AC-04-05 | 04 | - | - | crash/stale claim | - | NOT_STARTED | P0 |
 | HFP-02-AC-04-06 | 04,07,10 | - | - | orphan/duplicate runbook | - | NOT_STARTED | - |
 | HFP-02-AC-05-01 | 05 | - | - | status mapping | - | NOT_STARTED | - |
-| HFP-02-AC-05-02 | 02,04,05 | - | - | state machine | - | NOT_STARTED | - |
+| HFP-02-AC-05-02 | 02,04,05 | DispatchState enum、V109 dispatch_state列 | ContractDocumentDispatchStateTest | 状態機械 | - | IN_PROGRESS | 工程enum/列はDONE。遷移実装はHFP-02-04/05 |
 | HFP-02-AC-05-03 | 04,05 | - | - | terminal/reminder rejection | - | NOT_STARTED | P0 |
 | HFP-02-AC-05-04 | 05,06 | - | - | completed/artifact split | - | NOT_STARTED | - |
 | HFP-02-AC-05-05 | 05,07,09 | - | - | `ADOPT`: cancel sandbox / `NOT_ADOPT`: route非公開＋status=3 mapping | - | BLOCKED | HFP-02-BLK-06 の相互排他decision待ち |
@@ -74,7 +74,7 @@
 | HFP-02-AC-06-03 | 03,05 | - | - | retry matrix | - | NOT_STARTED | - |
 | HFP-02-AC-06-04 | 04,05,09 | - | - | provider delay | - | BLOCKED | HFP-02-BLK-03 |
 | HFP-02-AC-06-05 | 05,10 | - | - | metrics/alert | - | NOT_STARTED | - |
-| HFP-02-AC-07-01 | 02,06 | - | - | 三hash表 | - | NOT_STARTED | P0 |
+| HFP-02-AC-07-01 | 02,06 | V109 signed_pdf_sha256/certificate_sha256列、ContractDocument | 締結済hash再計算backfill test | 三hash表 | - | IN_PROGRESS | 列/entity/backfill hash再計算DONE。signed取得はHFP-02-06 |
 | HFP-02-AC-07-02 | 03,05,06,09 | - | - | signed/certificate PDF | - | BLOCKED | HFP-02-BLK-04 |
 | HFP-02-AC-07-03 | 06 | - | - | scan/atomic pipeline | - | NOT_STARTED | P0 |
 | HFP-02-AC-07-04 | 06 | - | - | same/different hash | - | NOT_STARTED | - |
@@ -100,8 +100,8 @@
 | HFP-02-AC-11-04 | 09 | - | - | sandbox E2E | - | BLOCKED | sandbox未確認 |
 | HFP-02-AC-11-05 | 02,08 | - | - | verify-like-ci skip0 | - | NOT_STARTED | - |
 | HFP-02-AC-11-06 | 10 | - | - | 運用承認 | - | BLOCKED | operator未設定 |
-| HFP-02-AC-12-01 | 02 | - | - | migration 5形状 | - | NOT_STARTED | - |
-| HFP-02-AC-12-02 | 02,06 | - | - | legacy/backfill reconciliation | - | NOT_STARTED | - |
+| HFP-02-AC-12-01 | 02 | V109、schema-contract-document-h2.sql、ContractDocument | FlywayContractDocumentDispatchSchemaSmokeTest(2) | fresh/legacy MySQL | - | VERIFIED | V1/V20無編集。V109はS12予約衝突により繰り上げ採番 |
+| HFP-02-AC-12-02 | 02,06 | ContractDocumentDispatchBackfill | ContractDocumentDispatchStateTest#backfill系(5) | legacy分類 | - | IN_PROGRESS | 分類5形状DONE。archive移行候補化の履行はHFP-02-06 |
 | HFP-02-AC-12-03 | 04,05,10 | - | - | kill switch | - | NOT_STARTED | - |
 | HFP-02-AC-12-04 | 04,10 | - | - | rollback drill/export | - | BLOCKED | operator未設定 |
 
@@ -153,6 +153,7 @@
 |---|---|---|---:|---:|---:|---:|---|---|---|
 | 2026-08-14 | 00 | `mvn -B test -Dtest=CloudSignOpenApiFixtureSchemaTest` | 11 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | `target/surefire-reports/TEST-com.ses.cloudsign.CloudSignOpenApiFixtureSchemaTest.xml`。OpenAPI再取得はcurl生bytes(147111 bytes)でSHA一致を確認 |
 | 2026-08-14 | 01 | `mvn -B test -Dtest=CloudSignClientContractTest,ContractDocumentServiceImplTest,ContractDocumentApiControllerTest` | 19 | 13 | 0 | 0 | Mock(0実) | RED(意図どおり) | 新規13件が全部defect再現でred。既存6件(ContractDocumentServiceImplTest)はgreen。surefire XML: `TEST-com.ses.cloudsign.CloudSignClientContractTest.xml` / `TEST-com.ses.service.impl.ContractDocumentServiceImplTest.xml` / `TEST-com.ses.controller.api.ContractDocumentApiControllerTest.xml`。二重send test: provider create call=2を観測 |
+| 2026-08-14 | 02 | `mvn -B clean test -Dtest=FlywayContractDocumentDispatchSchemaSmokeTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest,ContractDocumentDispatchStateTest` | 46 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | MySQL fresh/legacy(V102実形状→V109)・H2 CAS/backfill 8件・採番整合9件・migration整合27件。採番調整: S12予約V103と衝突 → HFP-02はV109、S12〜S17予約表をV110〜V115へ繰り上げ(customer-product-expansion-2026文書一式、SpecDispatchConsistencyTestが検証) |
 
 ## 9. Sandbox / production operation ledger
 

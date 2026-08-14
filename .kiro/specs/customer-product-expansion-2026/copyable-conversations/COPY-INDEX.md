@@ -29,4 +29,4 @@
 - T001は完了済みで、再実行・再Reviewしない。
 - G1〜G6は決定済み。最初に使う実装対話はS02。
 - 現行S10はT066/R19-P1-01のR21 canonical payload sync docs-only decision delta再Review（authoritative canonical payloadへのrecipient/display/company/config hash同期）とR10 acceptance待ち。R21-P2-02およびP1-02/P1-03/P1-04/P2-01はVERIFIED_CLOSED、P1-01はOPENを維持し、S12はS10/S11双方PASSまでNOT READY。
-- 現行migration予約はS10 follow-up V102、S12〜S17 V103〜V108。common V99は永久欠番、V100はmigration-dev実在、common V101は既存用途維持。
+- 現行migration予約はS10 follow-up V102、S12〜S17 V110〜V115。common V99は永久欠番、V100はmigration-dev実在、common V101は既存用途維持。
