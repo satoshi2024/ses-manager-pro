@@ -115,7 +115,7 @@
   - **Evidence:** validation JSON、Flyway/count/reference/hash summary、read-only smoke result、app build SHA。
   - **失敗/rollback:** production pointer は変更しない。FAILED staging は調査用 read-only、期限後に承認付き cleanup。
 
-- [ ] **HFP-03-009 — production cutover/rollback と二者承認を実装する**
+- [x] **HFP-03-009 — production cutover/rollback と二者承認を実装する**
 
   - **依存:** HFP-03-006、HFP-03-008
   - **対応要求:** HFP-03-RQ-006、HFP-03-RQ-007、HFP-03-RQ-012
