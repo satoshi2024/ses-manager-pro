@@ -39,6 +39,7 @@ import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import org.springframework.test.web.client.match.MockRestRequestMatchers;
 
 /**
  * HFP-01-001 baseline: 現行実装が公式契約から逸脱していることを証明する失敗test。
@@ -176,9 +177,14 @@ class FreeeContractBaselineTest {
     @DisplayName("employeesは公式company pathをcompany_id/limit/offset付きでGETする（AC06）")
     void employeesは公式companyPathを使う() throws Exception {
         seedConnection();
-        String official = HR_BASE + "/api/v1/companies/123/employees"
-                + "?with_no_payroll_calculation=true&limit=100&offset=0";
-        server.expect(once(), requestTo(official))
+        org.springframework.test.web.client.RequestMatcher matcher = request -> {
+            MockRestRequestMatchers.requestTo(org.hamcrest.Matchers.startsWith(
+                    HR_BASE + "/api/v1/companies/123/employees?")).match(request);
+            MockRestRequestMatchers.queryParam("with_no_payroll_calculation", "true").match(request);
+            MockRestRequestMatchers.queryParam("limit", "100").match(request);
+            MockRestRequestMatchers.queryParam("offset", "0").match(request);
+        };
+        server.expect(once(), matcher)
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(fixture("employees-page1.json").toString(), MediaType.APPLICATION_JSON));
 
@@ -202,12 +208,14 @@ class FreeeContractBaselineTest {
     @DisplayName("BP判定はfreeeのemployment_typeに依存しない（R04-5）")
     void employeesはfreeeのemploymentTypeでBP除外しない() throws Exception {
         seedConnection();
+        // 公式raw配列。3件目は公式schemaに存在しない未知property employment_type=BPを持つが、
+        // 未知propertyは無視され、この従業員も一覧へ含まれる（R01-3）。BP判定は本システム側のみ。
         server.expect(once(), requestTo(org.hamcrest.Matchers.anything()))
-                .andRespond(withSuccess(fixture("employees-legacy-wrapped.json").toString(), MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(fixture("employees-page1.json").toString(), MediaType.APPLICATION_JSON));
 
         java.util.List<FreeeEmployeeDto> employees = service.employees();
         assertEquals(3, employees.size(),
-                "公式enumに存在しないemployment_type=BPは未知propertyとして無視されるべき（現行は除外して2件になる）");
+                "公式enumに存在しないemployment_type=BPは未知propertyとして無視されるべき");
     }
 
     // ============ statements ============
@@ -216,9 +224,16 @@ class FreeeContractBaselineTest {
     @DisplayName("statementsは公式salary endpointへcompany_id/year/month/limit/offsetでGETする（AC01/AC07）")
     void statementsは公式salaryEndpointを使う() throws Exception {
         seedConnection();
-        String official = HR_BASE + "/api/v1/salaries/employee_payroll_statements"
-                + "?company_id=123&year=2026&month=7&limit=100&offset=0";
-        server.expect(once(), requestTo(official))
+        org.springframework.test.web.client.RequestMatcher matcher = request -> {
+            MockRestRequestMatchers.requestTo(org.hamcrest.Matchers.startsWith(
+                    HR_BASE + "/api/v1/salaries/employee_payroll_statements?")).match(request);
+            MockRestRequestMatchers.queryParam("company_id", "123").match(request);
+            MockRestRequestMatchers.queryParam("year", "2026").match(request);
+            MockRestRequestMatchers.queryParam("month", "7").match(request);
+            MockRestRequestMatchers.queryParam("limit", "100").match(request);
+            MockRestRequestMatchers.queryParam("offset", "0").match(request);
+        };
+        server.expect(once(), matcher)
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(fixture("salary-calculated.json").toString(), MediaType.APPLICATION_JSON));
 
@@ -245,26 +260,27 @@ class FreeeContractBaselineTest {
     void statementsは計算中nullを0へ変換しない() throws Exception {
         seedConnection();
         server.expect(once(), requestTo(org.hamcrest.Matchers.anything()))
-                .andRespond(withSuccess(fixture("statements-legacy-null.json").toString(), MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(fixture("salary-calculating-null.json").toString(), MediaType.APPLICATION_JSON));
 
         java.util.List<PayrollStatementDto> statements = service.statements(2026, 7, "salary");
         assertEquals(1, statements.size());
         assertNull(statements.get(0).getGrossAmount(),
-                "null金額はnullのまま保持されるべき（現行はBigDecimal.ZEROへ変換する）");
+                "計算中のnull金額はnullのまま保持されるべき");
         assertNull(statements.get(0).getDeductions(),
-                "null控除はnullのまま保持されるべき");
+                "計算中のnull控除はnullのまま保持されるべき");
     }
 
     @Test
     @DisplayName("区分付き明細itemsを返す（AC07/R05-5）")
     void statementsは区分付きitemsを返す() throws Exception {
         seedConnection();
+        // 公式fixture（payments/deductions/deductions_employer_shareを含む）。HFP-01-006までred継続。
         server.expect(once(), requestTo(org.hamcrest.Matchers.anything()))
-                .andRespond(withSuccess(fixture("statements-legacy-items.json").toString(), MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(fixture("salary-calculated.json").toString(), MediaType.APPLICATION_JSON));
 
         java.util.List<PayrollStatementDto> statements = service.statements(2026, 7, "salary");
         assertEquals(1, statements.size());
         org.junit.jupiter.api.Assertions.assertNotNull(statements.get(0).getItems(),
-                "支給・控除・会社負担の区分付き明細を返すべき（現行はitemsを一切設定しない）");
+                "支給・控除・会社負担の区分付き明細を返すべき（HFP-01-006でgreen化予定）");
     }
 }

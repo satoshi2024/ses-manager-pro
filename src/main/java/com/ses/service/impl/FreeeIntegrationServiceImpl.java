@@ -4,6 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.freee.hr.FreeeBonusStatement;
+import com.ses.dto.freee.hr.FreeeHrEmployee;
+import com.ses.dto.freee.hr.FreeeSalaryStatement;
+import com.ses.dto.freee.hr.FreeeStatementPage;
 import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollStatementDto;
@@ -15,7 +19,9 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.FreeeConnectionMapper;
 import com.ses.mapper.FreeeEmployeeLinkMapper;
 import com.ses.service.FreeeIntegrationService;
+import com.ses.service.freee.FreeeHrContractAdapter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -25,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -64,12 +71,39 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     private static final String OAUTH_TOKEN = "/token";
     private static final String OAUTH_REVOKE = "/revoke";
     private static final String USERS_ME_PATH = "/api/v1/users/me";
+    /** paginationの最大page数（design §8）。上限到達は空データとして扱わない。 */
+    private static final int MAX_PAGES = 1000;
+    /** freee APIの1page上限。 */
+    private static final int PAGE_SIZE = 100;
+    /** 外部待機の総上限（ms）。 */
+    private static final long MAX_BACKOFF_MS = 30_000L;
+
+    /** pagination上限（testで縮小可能なseam。上限到達は空データとして扱わない）。 */
+    private int maxPages = MAX_PAGES;
 
     private final FreeeConnectionMapper connectionMapper;
     private final FreeeEmployeeLinkMapper linkMapper;
     private final EngineerMapper engineerMapper;
     private final RestTemplate restTemplate;
     private final org.springframework.context.ApplicationContext applicationContext;
+
+    /** HR responseのtyped parse adapter（productionはSpring bean、unit testは既定インスタンス）。 */
+    private FreeeHrContractAdapter hrAdapter = new FreeeHrContractAdapter();
+
+    @Autowired(required = false)
+    public void setHrAdapter(FreeeHrContractAdapter hrAdapter) {
+        if (hrAdapter != null) {
+            this.hrAdapter = hrAdapter;
+        }
+    }
+
+    /** testで実sleepさせないためのseam（design §11）。 */
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
+
+    private Sleeper sleeper = millis -> Thread.sleep(millis);
 
     @Value("${freee.client-id:}")
     private String clientId;
@@ -362,12 +396,14 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             if (n == null) {
                 return null;
             }
-            String error = n.path("error").asText(null);
-            if (error != null && !error.isBlank()) {
-                return error;
+            // 人事労務API系401の識別子は code フィールド（error は常に access_denied）。
+            // token endpointは error フィールド（invalid_grant 等）を使う。code優先で両対応する。
+            String code = n.path("code").asText(null);
+            if (code != null && !code.isBlank()) {
+                return code;
             }
-            // 人事労務API系の401応答は code フィールドを持つ（expired_access_token 等）
-            return n.path("code").asText(null);
+            String error = n.path("error").asText(null);
+            return error != null && !error.isBlank() ? error : null;
         } catch (Exception e) {
             return null;
         }
@@ -375,8 +411,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     @Override
     public List<FreeeEmployeeDto> employees() {
-        JsonNode arr = get("/hr/api/v1/employees");
-        List<FreeeEmployeeDto> out = new ArrayList<>();
+        FreeeConnection c = latestActiveRow();
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        List<FreeeHrEmployee> all = fetchAllEmployees(c.getCompanyId());
 
         List<FreeeEmployeeLink> links = linkMapper.selectList(new LambdaQueryWrapper<>());
         Map<String, FreeeEmployeeLink> linkMap = links.stream()
@@ -386,25 +425,196 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         Map<Long, String> engineerMap = engineers.stream()
                 .collect(Collectors.toMap(Engineer::getId, Engineer::getFullName, (a, b) -> a));
 
-        if (arr != null) {
-            for (JsonNode n : arr.path("employees")) {
-                if ("BP".equalsIgnoreCase(n.path("employment_type").asText())) {
-                    continue;
-                }
-                FreeeEmployeeDto d = new FreeeEmployeeDto();
-                d.setId(n.path("id").asText());
-                d.setDisplayName(n.path("display_name").asText(n.path("name").asText()));
-                d.setEmploymentType(n.path("employment_type").asText());
-
-                FreeeEmployeeLink link = linkMap.get(d.getId());
-                if (link != null) {
-                    d.setLinkedEngineerId(link.getEngineerId());
-                    d.setLinkedEngineerName(engineerMap.get(link.getEngineerId()));
-                }
-                out.add(d);
+        List<FreeeEmployeeDto> out = new ArrayList<>();
+        for (FreeeHrEmployee e : all) {
+            FreeeEmployeeDto d = new FreeeEmployeeDto();
+            d.setId(String.valueOf(e.getId()));
+            d.setDisplayName(e.getDisplayName());
+            // freeeのemployment_typeにはBPは存在しない。BP判定は本システム側（t_engineer）で行う。
+            FreeeEmployeeLink link = linkMap.get(d.getId());
+            if (link != null) {
+                d.setLinkedEngineerId(link.getEngineerId());
+                d.setLinkedEngineerName(engineerMap.get(link.getEngineerId()));
             }
+            out.add(d);
         }
         return out;
+    }
+
+    /**
+     * 全期間従業員を公式pagination契約（raw配列、limit 100、件数<100で終了）で取得する（design §8.1）。
+     */
+    private List<FreeeHrEmployee> fetchAllEmployees(long companyId) {
+        List<FreeeHrEmployee> all = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        int offset = 0;
+        for (int pageNo = 0; pageNo < maxPages; pageNo++) {
+            JsonNode raw = hrGet("/api/v1/companies/" + companyId + "/employees",
+                    Map.of("with_no_payroll_calculation", "true",
+                            "limit", String.valueOf(PAGE_SIZE),
+                            "offset", String.valueOf(offset)));
+            List<FreeeHrEmployee> page = hrAdapter.companyEmployees(raw);
+            for (FreeeHrEmployee e : page) {
+                if (!seen.add(String.valueOf(e.getId()))) {
+                    throw contractError("従業員IDの反復");
+                }
+            }
+            all.addAll(page);
+            if (page.size() < PAGE_SIZE) {
+                return all;
+            }
+            offset += page.size();
+        }
+        throw contractError("従業員pagination上限到達");
+    }
+
+    @Override
+    public List<PayrollStatementDto> statements(int year, int month, String type) {
+        if (year < 2000 || month < 1 || month > 12) {
+            throw BusinessException.of("error.payroll.invalidPeriod");
+        }
+        // A7-18: type の検証を追加
+        if (!"salary".equals(type) && !"bonus".equals(type)) {
+            throw BusinessException.of(400, "error.payroll.invalidType");
+        }
+        FreeeConnection c = latestActiveRow();
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        return "salary".equals(type)
+                ? fetchSalaryStatements(c.getCompanyId(), year, month)
+                : fetchBonusStatements(c.getCompanyId(), year, month);
+    }
+
+    /**
+     * 給与一覧を公式root/field・total_count paginationで取得する（design §8.2）。
+     */
+    private List<PayrollStatementDto> fetchSalaryStatements(long companyId, int year, int month) {
+        List<PayrollStatementDto> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        Integer expectedTotal = null;
+        int offset = 0;
+        for (int pageNo = 0; pageNo < maxPages; pageNo++) {
+            JsonNode raw = hrGet("/api/v1/salaries/employee_payroll_statements",
+                    statementQuery(companyId, year, month, offset));
+            FreeeStatementPage<FreeeSalaryStatement> page = hrAdapter.salaryPage(raw);
+            expectedTotal = validatePageTotal(expectedTotal, page.getTotalCount(), page.getItems().size(),
+                    "給与");
+            for (FreeeSalaryStatement s : page.getItems()) {
+                if (!seen.add(String.valueOf(s.getId()))) {
+                    throw contractError("給与明細IDの反復");
+                }
+                out.add(toDto(s, year, month, "salary"));
+                if (out.size() == expectedTotal) {
+                    return out;
+                }
+                if (out.size() > expectedTotal) {
+                    throw contractError("給与total_count超過");
+                }
+            }
+            if (out.size() == expectedTotal) {
+                // 0件（total_count=0かつ空配列）が正常な唯一の空ケース
+                return out;
+            }
+            if (page.getItems().isEmpty()) {
+                throw contractError("給与page途中の空配列");
+            }
+            offset += page.getItems().size();
+        }
+        throw contractError("給与pagination上限到達");
+    }
+
+    /**
+     * 賞与一覧を公式root/field・total_count paginationで取得する（design §8.2）。
+     */
+    private List<PayrollStatementDto> fetchBonusStatements(long companyId, int year, int month) {
+        List<PayrollStatementDto> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        Integer expectedTotal = null;
+        int offset = 0;
+        for (int pageNo = 0; pageNo < maxPages; pageNo++) {
+            JsonNode raw = hrGet("/api/v1/bonuses/employee_payroll_statements",
+                    statementQuery(companyId, year, month, offset));
+            FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(raw);
+            expectedTotal = validatePageTotal(expectedTotal, page.getTotalCount(), page.getItems().size(),
+                    "賞与");
+            for (FreeeBonusStatement s : page.getItems()) {
+                if (!seen.add(String.valueOf(s.getId()))) {
+                    throw contractError("賞与明細IDの反復");
+                }
+                out.add(toDto(s, year, month, "bonus"));
+                if (out.size() == expectedTotal) {
+                    return out;
+                }
+                if (out.size() > expectedTotal) {
+                    throw contractError("賞与total_count超過");
+                }
+            }
+            if (out.size() == expectedTotal) {
+                // 0件（total_count=0かつ空配列）が正常な唯一の空ケース
+                return out;
+            }
+            if (page.getItems().isEmpty()) {
+                throw contractError("賞与page途中の空配列");
+            }
+            offset += page.getItems().size();
+        }
+        throw contractError("賞与pagination上限到達");
+    }
+
+    private int validatePageTotal(Integer expectedTotal, int pageTotal, int pageSize, String what) {
+        if (expectedTotal == null) {
+            if (pageSize > pageTotal) {
+                throw contractError(what + "total_count不整合");
+            }
+            return pageTotal;
+        }
+        if (pageTotal != expectedTotal) {
+            throw contractError(what + "total_count変化");
+        }
+        return expectedTotal;
+    }
+
+    private Map<String, String> statementQuery(long companyId, int year, int month, int offset) {
+        return Map.of("company_id", String.valueOf(companyId),
+                "year", String.valueOf(year),
+                "month", String.valueOf(month),
+                "limit", String.valueOf(PAGE_SIZE),
+                "offset", String.valueOf(offset));
+    }
+
+    /** HFP-01-006でPayrollStatementDtoを正式化するまでの最小変換。nullは保持する。 */
+    private PayrollStatementDto toDto(FreeeSalaryStatement s, int year, int month, String type) {
+        PayrollStatementDto d = new PayrollStatementDto();
+        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+        d.setYear(year);
+        d.setMonth(month);
+        d.setType(type);
+        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+        d.setDeductions(amountOrNull(s.getTotalDeductionAmount()));
+        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+        return d;
+    }
+
+    private PayrollStatementDto toDto(FreeeBonusStatement s, int year, int month, String type) {
+        PayrollStatementDto d = new PayrollStatementDto();
+        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+        d.setYear(year);
+        d.setMonth(month);
+        d.setType(type);
+        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+        d.setDeductions(amountOrNull(s.getTotalDeductionAmount()));
+        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+        return d;
+    }
+
+    private BigDecimal amountOrNull(String value) {
+        // adapterが厳密検証済みなので安全。nullは計算中を意味し0へ変換しない。
+        return value == null ? null : new BigDecimal(value.trim());
+    }
+
+    private BusinessException contractError(String detail) {
+        return BusinessException.of(502, "error.payroll.contractError", detail);
     }
 
     @Override
@@ -454,40 +664,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     @Override
-    public List<PayrollStatementDto> statements(int year, int month, String type) {
-        if (year < 2000 || month < 1 || month > 12) {
-            throw BusinessException.of("error.payroll.invalidPeriod");
-        }
-
-        // A7-18: type の検証を追加
-        if (!"salary".equals(type) && !"bonus".equals(type)) {
-            throw BusinessException.of(400, "error.payroll.invalidType");
-        }
-
-        JsonNode arr = get("/hr/api/v1/payroll-statements?year=" + year + "&month=" + month + "&type=" + type);
-        List<PayrollStatementDto> out = new ArrayList<>();
-
-        if (arr != null) {
-            for (JsonNode n : arr.path("statements")) {
-                PayrollStatementDto d = new PayrollStatementDto();
-                d.setEmployeeId(n.path("employee_id").asText());
-                d.setYear(year);
-                d.setMonth(month);
-                d.setType(type);
-                d.setGrossAmount(decimal(n, "gross_amount"));
-                d.setDeductions(decimal(n, "deductions"));
-                d.setNetAmount(decimal(n, "net_amount"));
-                out.add(d);
-            }
-        }
-        return out;
-    }
-
-    private BigDecimal decimal(JsonNode n, String k) {
-        return n.has(k) ? n.path(k).decimalValue() : BigDecimal.ZERO;
-    }
-
-    @Override
     public List<BankDepositDto> bankDeposits(java.time.LocalDate from, java.time.LocalDate to) {
         if (from == null || to == null || from.isAfter(to)) {
             throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
@@ -515,6 +691,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             }
         }
         return out;
+    }
+
+    /** S15会計APIの金額変換（既存挙動を維持: 欠落は0）。HFP-01の給与経路では使わない。 */
+    private BigDecimal decimal(JsonNode n, String k) {
+        return n.has(k) ? n.path(k).decimalValue() : BigDecimal.ZERO;
     }
 
     private JsonNode get(String path) {
@@ -549,12 +730,25 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     /**
+     * HR API（HFP-01）用の認証付きGET。base URLはhrApiBase。
+     * queryはUriComponentsBuilderで組み立て、company/year/month/limit/offsetを文字列連結しない。
+     */
+    private JsonNode hrGet(String path, Map<String, String> queryParams) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(path);
+        if (queryParams != null) {
+            queryParams.forEach(builder::queryParam);
+        }
+        String uri = builder.build().toUriString();
+        return executeWithRetry(hrApiBase, uri, HttpMethod.GET, null, null, null, true);
+    }
+
+    /**
      * S11 T072共通基盤: 認証付きGET。401はrefresh 1回＋再試行、429はbackoff、
      * timeout/5xxは503へ変換する。tokenはログへ出力しない。
      */
     @Override
     public JsonNode apiGet(String path) {
-        return executeWithRetry(path, HttpMethod.GET, null, null, null);
+        return executeWithRetry(apiBase, path, HttpMethod.GET, null, null, null, false);
     }
 
     /**
@@ -563,11 +757,28 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
      */
     @Override
     public JsonNode apiPost(String path, Object body, String idempotencyKey, String correlationId) {
-        return executeWithRetry(path, HttpMethod.POST, body, idempotencyKey, correlationId);
+        return executeWithRetry(apiBase, path, HttpMethod.POST, body, idempotencyKey, correlationId, false);
     }
 
-    private JsonNode executeWithRetry(String path, HttpMethod method, Object body,
+    private JsonNode executeWithRetry(String baseUrl, String path, HttpMethod method, Object body,
                                       String idempotencyKey, String correlationId) {
+        return executeWithRetry(baseUrl, path, method, body, idempotencyKey, correlationId, false);
+    }
+
+    /**
+     * 認証付きHTTPの共通実行（design §11 error matrix）。
+     * <ul>
+     *   <li>401はerror codeを分類: expired_access_token等→refresh 1回＋元GET 1回、
+     *       re_authorization_required→REAUTH_REQUIRED、user_do_not_have_permission→403（retryなし）、
+     *       未知codeはrefresh 1回の後に失敗（無限refreshしない）</li>
+     *   <li>429はRetry-After/backoffで最大3回</li>
+     *   <li>GETの5xx/timeoutはretryServerErrors時のみ最大2回（S11のapiGet/apiPostは従来どおり即503）</li>
+     *   <li>403/404/400等はretryしない</li>
+     * </ul>
+     */
+    private JsonNode executeWithRetry(String baseUrl, String path, HttpMethod method, Object body,
+                                      String idempotencyKey, String correlationId,
+                                      boolean retryServerErrors) {
         if (path == null || path.isBlank()) {
             throw BusinessException.of(400, "error.payroll.invalidPath");
         }
@@ -582,12 +793,21 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         HttpHeaders h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
         // 401はrefresh 1回に限定する（platform-invariants §7: 無限refreshしない）。
         boolean refreshed = false;
-        int attempt = 0;
+        int rateLimitAttempts = 0;
+        int serverErrorAttempts = 0;
         while (true) {
             try {
                 HttpEntity<?> entity = body == null ? new HttpEntity<>(h) : new HttpEntity<>(body, h);
-                return restTemplate.exchange(apiBase + path, method, entity, JsonNode.class).getBody();
+                return restTemplate.exchange(baseUrl + path, method, entity, JsonNode.class).getBody();
             } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized ex) {
+                String code = errorCode(ex.getResponseBodyAsByteArray());
+                if ("re_authorization_required".equals(code)) {
+                    markReauthRequired(c);
+                    throw BusinessException.of("error.payroll.reauthRequired");
+                }
+                if ("user_do_not_have_permission".equals(code)) {
+                    throw BusinessException.of(403, "error.payroll.permissionDenied");
+                }
                 if (refreshed) {
                     throw BusinessException.of(401, "error.payroll.tokenError");
                 }
@@ -596,17 +816,33 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                 h = headers(method, decrypt(c.getAccessTokenEncrypted()), idempotencyKey, correlationId);
                 refreshed = true;
             } catch (org.springframework.web.client.HttpClientErrorException.TooManyRequests ex) {
-                attempt++;
-                int maxAttempts = 3;
-                if (attempt >= maxAttempts) {
+                rateLimitAttempts++;
+                if (rateLimitAttempts >= 3) {
                     throw BusinessException.of(429, "error.payroll.rateLimited");
                 }
-                sleepBackoff(attempt, ex);
+                sleepBackoff(rateLimitAttempts, ex);
+            } catch (HttpServerErrorException ex) {
+                // 5xx
+                if (!retryServerErrors || serverErrorAttempts >= 2) {
+                    throw BusinessException.of(503, "error.payroll.providerUnavailable");
+                }
+                serverErrorAttempts++;
+                sleepRetry(ex);
             } catch (ResourceAccessException ex) {
-                // timeout（saasRestTemplate 5s/15s）はretryしないで503
-                throw BusinessException.of(503, "error.payroll.providerUnavailable");
+                // timeout（saasRestTemplate 5s/15s）
+                if (!retryServerErrors || serverErrorAttempts >= 2) {
+                    throw BusinessException.of(503, "error.payroll.providerUnavailable");
+                }
+                serverErrorAttempts++;
+                sleepRetry(ex);
             } catch (HttpClientErrorException ex) {
-                // 4xx validationはretryしない（人手修正待ち）
+                // 4xxはretryしない（人手修正待ち）
+                if (ex.getStatusCode().value() == 403) {
+                    throw BusinessException.of(403, "error.payroll.permissionDenied");
+                }
+                if (ex.getStatusCode().value() == 404) {
+                    throw BusinessException.of(404, "error.payroll.notFound");
+                }
                 throw BusinessException.of(400, "error.payroll.providerRejected");
             } catch (Exception ex) {
                 throw BusinessException.of(503, "error.payroll.providerUnavailable");
@@ -614,14 +850,36 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         }
     }
 
-    /** 429時のexponential backoff + jitter。秘密情報はログへ出さない。 */
+    /** 429時のexponential backoff + jitter。Retry-After（秒）があればそれを上限内で尊重する。 */
     private void sleepBackoff(int attempt, HttpClientErrorException ex) {
         long base = 500L * (1L << (attempt - 1));
         long jitter = new SecureRandom().nextLong(0, base);
-        log.warn("freee API rate limited (429), retrying in {}ms: status={}", base + jitter,
+        long wait = Math.min(MAX_BACKOFF_MS, base + jitter);
+        String retryAfter = ex.getResponseHeaders() == null ? null
+                : ex.getResponseHeaders().getFirst("Retry-After");
+        if (retryAfter != null) {
+            try {
+                long seconds = Long.parseLong(retryAfter.trim());
+                wait = Math.min(MAX_BACKOFF_MS, Math.max(0, seconds * 1000L));
+            } catch (NumberFormatException ignored) {
+                // headerがRFC準拠でない場合はbackoffのまま
+            }
+        }
+        log.warn("freee API rate limited (429), retrying in {}ms: status={}", wait,
                 ex.getStatusCode().value());
+        sleepInterruptibly(wait);
+    }
+
+    /** 5xx/timeout retryの待機。上限付き。 */
+    private void sleepRetry(Exception ex) {
+        long wait = Math.min(MAX_BACKOFF_MS, 1000L);
+        log.warn("freee API server error, retrying in {}ms", wait);
+        sleepInterruptibly(wait);
+    }
+
+    private void sleepInterruptibly(long wait) {
         try {
-            Thread.sleep(base + jitter);
+            sleeper.sleep(wait);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw BusinessException.of(503, "error.payroll.providerUnavailable");

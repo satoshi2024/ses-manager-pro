@@ -165,6 +165,55 @@
 
 ---
 
+### HFP-01-RUN-20260814-04
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | 実装AI（opencode） |
+| worktree / branch | `C:\Users\pc\Documents\ses-manager-pro-hfp-01` / `codex/hfp-01-payroll-freee` |
+| base / head | 前Run末commit / 本Run末commit（HFP-01-004） |
+| 開始 / 終了（JST） | 2026-08-14 09:00 / 2026-08-14 12:30 |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（確認済み） |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | 開始時dirtyなし |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-004 | **PASS** | `service/freee/FreeeHrContractAdapter`（新規: companyEmployees/salaryPage/bonusPage、root/ID/total_count必須検証、null保持、strict金額変換、未知field許容）、`dto/freee/hr/*`（新規5件: snake_case命名戦略）、`FreeeIntegrationServiceImpl`（hrGet、executeWithRetryにbase URL/retryServerErrors追加、401 code分類・429 Retry-After・5xx/timeout bounded retry・Sleeper seam、fetchAllEmployees/fetchSalaryStatements/fetchBonusStatements（pagination）、employees/statementsを公式契約へ）、`FreeeHrContractTest`（26）、messages 4bundle（permissionDenied/notFound/contractError追加） | `mvn test -Dtest=FreeeHrContractTest` → 26/0/0/0。全freee関連8class 75 test: 74 pass、**1件のみ意図通りred**（items＝HFP-01-006予定） | 下表 | adapterとHR private経路のみ変更。public apiGet/apiPost signature不変。旧不正URLへ戻さない |
+
+**Demo（HFP-01-004）: pagination/error matrix（mock、実sleepなし）**
+
+| シナリオ | 観測 |
+|---|---|
+| employees 0/1/100/101/200件 | 0件=空、100件ちょうど=追加空page 1回、101/200件=欠落・重複なし |
+| salary/bonus 101件 | 2page（offset 0/100）でtotal_count到達。page requestはoffset 0/100の2回 |
+| 反復ID / 途中空page / total変化 / root欠落 / invalid amount / pagination上限 | いずれも502 `error.payroll.contractError` で**有限時間内に失敗**（空結果にしない） |
+| 401 expired_access_token | refresh 1回＋元GET 1回で回復 |
+| 401 re_authorization_required | REAUTH_REQUIRED記録＋再認可message。token endpointへPOSTなし |
+| 401 user_do_not_have_permission / 403 / 404 | retryなし・分類message |
+| 429 | Retry-After尊重・最大3回 |
+| 5xx / timeout | HR: 最大2回retry後503。S11 apiGet: 従来どおり即503（retry混入なし） |
+| 計算中null / 未知field | null保持（0へ変換しない）、未知property無視 |
+
+#### 自動gate集計（HFP-01-004時点）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---:|---:|---:|---:|---|---|
+| HR contract/pagination/error | `mvn test -Dtest=FreeeHrContractTest` | 26 | 0 | 0 | 0 | PASS | surefire-reports |
+| freee関連全回帰 | 8class（HrContract/Baseline/OAuth/OAuthWeb/S11Api/S11Attendance/A11y/i18n） | 75 | 1（意図通りred: items） | 0 | 1 | 進行中 | itemsはHFP-01-006でgreen化 |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+| HFP-01-RUN-ISSUE-03 | AC07/R05-5 | OPEN | 区分付き明細items（baseline test）はHFP-01-006でgreen化予定 | 実装AI | HFP-01-006対象test |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
