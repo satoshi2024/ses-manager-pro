@@ -419,4 +419,80 @@ class ComplianceGateAdminServiceTest {
         input.setEffectiveTo(LocalDate.of(2026, 9, 30));
         return input;
     }
+
+    // ===== R23-P1-01 §8 dynamic policy（V102_3・P0-3） =====
+
+    @Test
+    void updateReviewerTypeDynamicはflagsとsourceMethodを設定できる() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR", true);
+        com.ses.entity.ComplianceVerificationSource source =
+                complianceGateAdminService.createVerificationSource("PUBLIC_REGISTRY", "公的登録簿",
+                        "https://example/registry", true, null, null);
+        com.ses.entity.ComplianceVerificationMethod method =
+                complianceGateAdminService.createVerificationMethod("MANUAL_PUBLIC_SOURCE", "手動・公的source",
+                        "手動確認", true, null, null);
+
+        ComplianceExternalReviewerType updated = complianceGateAdminService.updateReviewerTypeDynamic(
+                typeId, 1, 1, source.getId(), method.getId(), 365, null, null);
+
+        assertEquals(1, updated.getQualificationVerificationRequired());
+        assertEquals(1, updated.getActiveStatusVerificationRequired());
+        assertEquals(source.getId(), updated.getVerificationSourceId());
+        assertEquals(method.getId(), updated.getVerificationMethodId());
+        assertEquals(365, updated.getMaxAgeDays());
+    }
+
+    @Test
+    void updateReviewerTypeDynamicはflags未指定を拒否する() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR2", true);
+        // §8: NULL=UNCONFIGUREDはAPI経由では設定不可（明示選択必須）
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, null, 1, null, null, null, null, null));
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, 1, null, null, null, null, null, null));
+    }
+
+    @Test
+    void updateReviewerTypeDynamicは不正maxAgeを拒否する() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR3", true);
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, 1, 1, null, null, 0, null, null));
+    }
+
+    @Test
+    void createVerificationSourceは重複codeを拒否する() {
+        complianceGateAdminService.createVerificationSource("SRC_DUP", "重複source", null, true, null, null);
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createVerificationSource("SRC_DUP", "重複source2", null, true, null, null));
+    }
+
+    // ===== R23-P1-01 P0-4 subject create path =====
+
+    @Test
+    void createSubjectはfingerprint付きでsubjectを作成する() {
+        com.ses.entity.ComplianceExternalReviewerSubject subject =
+                complianceGateAdminService.createSubject("SUBJ-CREATE-1", "新規 山田", "新規 組織");
+        assertNotNull(subject.getId());
+        assertEquals(64, subject.getPersonFingerprintSnapshot().length());
+        assertNotNull(subject.getFingerprintKeyVersion());
+    }
+
+    @Test
+    void createSubjectは重複codeを拒否する() {
+        complianceGateAdminService.createSubject("SUBJ-CREATE-2", "重複 山田", "組織");
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createSubject("SUBJ-CREATE-2", "重複 山田2", "組織2"));
+    }
+
+    @Test
+    void addQualificationはsubjectとtypeを結び付ける() {
+        com.ses.entity.ComplianceExternalReviewerSubject subject =
+                complianceGateAdminService.createSubject("SUBJ-QUAL-1", "資格 山田", "組織");
+        Long typeId = insertReviewerType("QUAL_TYPE", true);
+        com.ses.entity.ComplianceReviewerQualification qualification =
+                complianceGateAdminService.addQualification(subject.getId(), typeId, "****1234", "登録番号");
+        assertNotNull(qualification.getId());
+        assertEquals(subject.getId(), qualification.getReviewerSubjectId());
+        assertEquals(1, complianceGateAdminService.listQualifications(subject.getId()).size());
+    }
 }

@@ -20,6 +20,7 @@ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.http.HttpMethod;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -160,12 +161,14 @@ public class SecurityConfig {
                     // page/APIのapproval・read系を管理者・HR・マネージャーへ開放。
                     "/api/compliance-gate/approvals",
                     "/api/compliance-gate/capabilities",
-                    "/api/compliance-gate/subjects",
                     "/api/compliance-gate/mappings/*/external-reviews",
                     "/api/compliance-gate/mappings/*/verifications",
                     "/api/compliance-gate/submitted-reviews/*/verifications",
                     "/api/compliance-gate/submitted-reviews/*/adoptions"
                 ).hasAnyRole("管理者", "HR", "マネージャー")
+                // subjectsのGET（閲覧）はHR/マネージャー可・POST（作成・P0-4）は管理者のみ
+                .requestMatchers(HttpMethod.GET, "/api/compliance-gate/subjects")
+                .hasAnyRole("管理者", "HR", "マネージャー")
                 // G2 gate（Phase A step 3・R23-P1-01）: type/policy/assignment/external review/verification/adoption管理は管理者のみ
                 .requestMatchers(
                     "/compliance-gate/**",

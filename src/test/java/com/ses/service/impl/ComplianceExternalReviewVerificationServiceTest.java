@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -93,8 +94,12 @@ class ComplianceExternalReviewVerificationServiceTest {
     }
 
     private ComplianceMappingVersion setupMapping() {
+        return setupMapping("VER-MAP", "VER-V1");
+    }
+
+    private ComplianceMappingVersion setupMapping(String code, String versionName) {
         ComplianceMappingVersion v = complianceMappingService.create(
-                "VER-MAP", "VER-V1", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30),
+                code, versionName, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30),
                 List.of(source("SRC-C"), source("SRC-E"), source("SRC-N"),
                         source("SRC-L"), source("SRC-INDEX")));
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
@@ -247,5 +252,94 @@ class ComplianceExternalReviewVerificationServiceTest {
         assertNotNull(event.getRegistrationIdentifierMaskedSnapshot());
         // maskedは末尾4桁のみ露出（full値を含まない）
         assertEquals("****ER-1", event.getRegistrationIdentifierMaskedSnapshot());
+    }
+
+    // ===== R23-P1-01 P0-6: cross境界拒否 =====
+
+    @Test
+    void 別chainのexternalReviewIdを渡すとcrossChain混在として拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+        // 別のSUBMITTED review（同一mapping・別chain・別credential）
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.listRequirementGroups(v.getId()).get(0);
+        ComplianceExternalReviewEvent other = complianceGateAdminService.recordExternalReview(
+                v.getId(), group.getId(), reviewerTypeId(),
+                "ver 山田", "ver 組織", "REG-VER-OTHER",
+                "SUBMITTED", LocalDateTime.now(), null, null, null, null);
+        assertNotNull(other.getId());
+        assertNotEquals(review.getReviewChainId(), other.getReviewChainId());
+
+        assertThrows(BusinessException.class, () -> verificationService.record(
+                review.getId(), subjectId(), reviewerTypeId(), "IDENTITY", "VERIFIED",
+                "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
+                "https://example/registry", "REG-VER-1",
+                LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
+                v.getId(), v.getMappingVersion(), v.getMappingHash(),
+                other.getId(), other.getReviewChainId(), "VER-CROSS-1"));
+    }
+
+    @Test
+    void 別mappingIdを渡すと拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+        ComplianceMappingVersion other = setupMapping("VER-MAP-OTHER", "VER-V1B");
+
+        assertThrows(BusinessException.class, () -> verificationService.record(
+                review.getId(), subjectId(), reviewerTypeId(), "IDENTITY", "VERIFIED",
+                "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
+                "https://example/registry", "REG-VER-1",
+                LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
+                1L, evidenceIds()[0], evidenceIds()[1], other.getMappingVersion(), other.getReviewPolicyHash(),
+                other.getId(), other.getMappingVersion(), other.getMappingHash(),
+                review.getId(), review.getReviewChainId(), "VER-CROSS-2"));
+    }
+
+    @Test
+    void 別reviewerTypeを渡すとtype不一致として拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+        Long otherType = complianceGateAdminService.createReviewerType(
+                "VER_OTHER", "別資格", "verification other", "登録番号", true).getId();
+
+        assertThrows(BusinessException.class, () -> verificationService.record(
+                review.getId(), subjectId(), otherType, "IDENTITY", "VERIFIED",
+                "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
+                "https://example/registry", "REG-VER-1",
+                LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
+                v.getId(), v.getMappingVersion(), v.getMappingHash(),
+                review.getId(), review.getReviewChainId(), "VER-CROSS-3"));
+    }
+
+    @Test
+    void AUTHORSHIP以外はmaxAge未設定でfailClosed拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+
+        assertThrows(BusinessException.class, () -> verificationService.record(
+                review.getId(), subjectId(), reviewerTypeId(), "IDENTITY", "VERIFIED",
+                "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
+                "https://example/registry", "REG-VER-1",
+                LocalDateTime.now(), LocalDateTime.now(), null, LocalDateTime.now().plusYears(1),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
+                v.getId(), v.getMappingVersion(), v.getMappingHash(),
+                review.getId(), review.getReviewChainId(), "VER-MAXAGE-1"));
+    }
+
+    @Test
+    void evidenceNULLはfailClosed拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+
+        assertThrows(BusinessException.class, () -> verificationService.record(
+                review.getId(), subjectId(), reviewerTypeId(), "IDENTITY", "VERIFIED",
+                "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
+                "https://example/registry", "REG-VER-1",
+                LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
+                1L, null, null, v.getMappingVersion(), v.getReviewPolicyHash(),
+                v.getId(), v.getMappingVersion(), v.getMappingHash(),
+                review.getId(), review.getReviewChainId(), "VER-EVID-1"));
     }
 }
