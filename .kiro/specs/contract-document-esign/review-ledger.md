@@ -174,6 +174,7 @@
 | 2026-08-14 | Review Round 2（独立Review AI、fix delta `89ff96e6..0afd2af3`） | worktree `%TEMP%\opencode\hfp02`（head `0afd2af3`）で `scripts/verify-like-ci.ps1` を独立実行 | 1981 | 0 | 0 | 0 | test内Mockのみ（sandbox 0実） | PASS（P1×3 VERIFIED_CLOSED・新規P0/P1なし。REV-004 P2残課題追記） | fix test 10件全PASS（25同時・poll非遷移・manual sync 3条件×3・kill switch・download失敗×2・archive未登録・ledger例外）。共有H2干渉なし。§7.2参照 |
 | 2026-08-15 | Review Round 3（独立Review AI、fix delta `0afd2af3..04af6992`） | worktree `%TEMP%\opencode\hfp02`（head `04af6992`）で `mvn -B test -Dtest=CloudSign*系13クラス` を独立実行 | 108 | 0 | 0 | 0 | test内Mockのみ（sandbox 0実） | PASS（REV-004/012 VERIFIED_CLOSED・新規P0/P1なし） | attempt=retry回数分離のSQL・判定変更をコード確認。SENDING起点backoff/上限FAILED_FINAL/マネージャーrole test全PASS。§7.3参照 |
 | 2026-08-15 | Round 3 final（実装者、head  4af6992）| worktree %TEMP%\opencode\hfp02 で scripts/verify-like-ci.ps1 を実行（G1条件: merge前full suite再確認） | 1985 | 0 | 0 | 0 | test内Mockのみ（sandbox 0実） | PASS（BUILD SUCCESS） | Docker/Node実在・Testcontainers実MySQL smoke実行・skip 0。fix delta(REV-004/012)を含む最終headで全suite緑。他spec evidence再生成はrevert済み |
+| 2026-08-15 | Final confirmation（独立Review AI、head `2b1c7eec`） | 最終commit差分検証＋worktree surefire XML独立集計（実行なし） | 1985 | 0 | 0 | 0 | test内Mockのみ（sandbox 0実） | 確認完了（branch作業終了） | `04af6992..2b1c7eec` は review-ledger.md 1ファイルのみ（意味差分 25+/4-、表のwhitespace再整形を含む。CRLF変換なし）。surefire 351レポートを独立集計し totals=1985/0/0/0 がclaimと一致（Round 2独立full 1981＋Round 3新規4 testと整合）。NOTE: ledger末尾に「## 7.2 Round 2 fix delta」という重複番号の節がある（§7.2が2箇所。次回編集時に番号整理を推奨。blockしない） |
 
 ## 9. Sandbox / production operation ledger
 
@@ -264,7 +265,7 @@
 最終 PASS は merge 済み commit で G2/G5/G6 を閉じた後のみ付与する。full suite の最終実行は merge 前（G4）に改めて行う。
 
 
-## 7.2 Round 2 fix delta（REV-004 attempt/version分離・REV-012 マネージャー明示test）
+## 7.4 Round 2 fix delta（REV-004 attempt/version分離・REV-012 マネージャー明示test）
 
 | Finding ID | Severity | Round 2 対応 | 修正file/method | 検証test | 状態 |
 |---|---|---|---|---|---|
