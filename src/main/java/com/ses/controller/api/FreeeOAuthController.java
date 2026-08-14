@@ -1,7 +1,10 @@
 package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
+import com.ses.service.AuditLogService;
 import com.ses.service.FreeeIntegrationService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -22,6 +25,9 @@ import java.util.Base64;
  * <p>HFP-01-003: stateはSecureRandom 24byte、発行時刻付きでsessionへ保存し、callbackで
  * 一定時間内（10分）かつ一回だけ受理する。state欠落・不一致・再送・freee側の認可拒否では
  * token交換しない。redirect先へcode/state/provider messageを載せない。</p>
+ *
+ * <p>HFP-01-007: OAuth応答もno-store。接続/解除はFREEE_CONNECT/FREEE_DISCONNECTで監査する
+ * （成否のみ。company ID・token・codeは記録しない）。</p>
  */
 @Controller
 @RequiredArgsConstructor
@@ -34,10 +40,17 @@ public class FreeeOAuthController {
     /** state有効期限（分）。 */
     public static final long STATE_TTL_SECONDS = 10 * 60L;
 
+    private static final String CODE_CONNECT = "FREEE_CONNECT";
+    private static final String CODE_DISCONNECT = "FREEE_DISCONNECT";
+    private static final String URI_CONNECT = "/integrations/freee";
+    private static final String URI_DISCONNECT = "/integrations/freee";
+
     private final FreeeIntegrationService service;
+    private final AuditLogService auditLogService;
 
     @GetMapping("/authorize")
-    public RedirectView authorize(HttpSession session) {
+    public RedirectView authorize(HttpSession session, HttpServletResponse response) {
+        noStore(response);
         byte[] b = new byte[24];
         new SecureRandom().nextBytes(b);
         String state = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
@@ -57,8 +70,10 @@ public class FreeeOAuthController {
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String error,
             HttpSession session,
+            HttpServletResponse response,
             Authentication auth) {
 
+        noStore(response);
         // sessionのstateは先に除去し、再送・二重callbackでは受理しない
         Object expected = session.getAttribute(SESSION_STATE);
         Object issuedObj = session.getAttribute(SESSION_STATE_ISSUED);
@@ -90,13 +105,24 @@ public class FreeeOAuthController {
             // token/company検証失敗。provider messageやcodeはredirectへ載せない
             return new RedirectView("/payroll?error=oauth");
         }
+        auditLogService.recordRequired(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 302,
+                CODE_CONNECT, true);
         return new RedirectView("/payroll?connected=1");
     }
 
     @DeleteMapping
-    public RedirectView disconnect() {
+    public RedirectView disconnect(HttpServletResponse response) {
+        noStore(response);
         service.disconnect();
+        auditLogService.recordRequired(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT, 302,
+                CODE_DISCONNECT, true);
         return new RedirectView("/payroll");
+    }
+
+    private void noStore(HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Pragma", "no-cache");
+        response.setHeader("Expires", "0");
     }
 
     private boolean issuedAtExpired(Object issuedObj) {
