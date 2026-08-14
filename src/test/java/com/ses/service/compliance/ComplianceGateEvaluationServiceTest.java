@@ -133,12 +133,18 @@ class ComplianceGateEvaluationServiceTest {
     private ComplianceExternalReviewerVerificationEvent verify(ComplianceMappingVersion v,
                                                                ComplianceExternalReviewEvent review,
                                                                String kind, String idemKey) {
+        return verify(v, review, kind, idemKey, reviewerTypeId());
+    }
+
+    private ComplianceExternalReviewerVerificationEvent verify(ComplianceMappingVersion v,
+                                                               ComplianceExternalReviewEvent review,
+                                                               String kind, String idemKey, Long typeId) {
         return verificationService.record(
-                review.getId(), subjectId(), reviewerTypeId(), kind, "VERIFIED",
+                review.getId(), subjectId(), typeId, kind, "VERIFIED",
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-GATE-1",
                 LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
-                1L, null, null, v.getMappingVersion(), v.getReviewPolicyHash(),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), idemKey);
     }
@@ -234,8 +240,8 @@ class ComplianceGateEvaluationServiceTest {
         v = complianceMappingService.getById(v.getId());
 
         ComplianceExternalReviewEvent review = submitOptional(v, optionalType);
-        ComplianceExternalReviewerVerificationEvent identity = verify(v, review, "IDENTITY", "GATE-K6-ID");
-        ComplianceExternalReviewerVerificationEvent authorship = verify(v, review, "REVIEW_AUTHORSHIP", "GATE-K6-AU");
+        ComplianceExternalReviewerVerificationEvent identity = verify(v, review, "IDENTITY", "GATE-K6-ID", optionalType);
+        ComplianceExternalReviewerVerificationEvent authorship = verify(v, review, "REVIEW_AUTHORSHIP", "GATE-K6-AU", optionalType);
         ComplianceExternalReviewAdoptionEvent approved = adoptionService.approve(
                 review.getId(), identity.getId(), null, null, authorship.getId(),
                 evidenceIds()[0], evidenceIds()[1], "GATE-K6-ADOPT");

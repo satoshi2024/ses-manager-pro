@@ -2,9 +2,12 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.compliance.ComplianceAdoptionEventDto;
+import com.ses.dto.compliance.ComplianceApprovalEventDto;
 import com.ses.dto.compliance.ComplianceApprovalRequest;
+import com.ses.dto.compliance.ComplianceAssignmentDto;
 import com.ses.dto.compliance.ComplianceAssignmentRequest;
 import com.ses.dto.compliance.ComplianceCapabilityDto;
+import com.ses.dto.compliance.ComplianceEvidencePickerDto;
 import com.ses.dto.compliance.ComplianceExternalReviewRequest;
 import com.ses.dto.compliance.ComplianceMappingCreateRequest;
 import com.ses.dto.compliance.ComplianceMappingVersionDto;
@@ -82,6 +85,29 @@ public class ComplianceGateApiController {
         return ApiResult.success(ComplianceMappingVersionDto.fromEntity(complianceMappingService.getById(id)));
     }
 
+    // ===== review policy group/type（R23-P1-01 P0-1: Policy tab操作） =====
+
+    @GetMapping("/mappings/{id}/requirement-groups")
+    public ApiResult<List<com.ses.entity.ComplianceMappingReviewRequirementGroup>> listRequirementGroups(@PathVariable Long id) {
+        return ApiResult.success(complianceGateAdminService.listRequirementGroups(id));
+    }
+
+    @PostMapping("/mappings/{id}/requirement-groups")
+    public ApiResult<com.ses.entity.ComplianceMappingReviewRequirementGroup> createRequirementGroup(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceRequirementGroupRequest request) {
+        return ApiResult.success(complianceGateAdminService.createRequirementGroup(
+                id, request.getGroupCode(), request.getDisplayName(),
+                request.getMinimumDistinctReviewers() == null ? 1 : request.getMinimumDistinctReviewers()));
+    }
+
+    @PostMapping("/requirement-groups/{groupId}/requirement-types")
+    public ApiResult<com.ses.entity.ComplianceMappingReviewRequirementType> addRequirementType(
+            @PathVariable Long groupId,
+            @RequestBody com.ses.dto.compliance.ComplianceRequirementTypeRequest request) {
+        return ApiResult.success(complianceGateAdminService.addRequirementType(groupId, request.getReviewerTypeId()));
+    }
+
     @PutMapping("/mappings/{id}/transition")
     public ApiResult<ComplianceMappingVersionDto> transition(@PathVariable Long id,
                                                              @RequestParam String toStatus,
@@ -133,22 +159,26 @@ public class ComplianceGateApiController {
     }
 
     @PostMapping("/assignments")
-    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> createAssignment(
+    public ApiResult<ComplianceAssignmentDto> createAssignment(
             @RequestBody ComplianceAssignmentRequest request) {
-        return ApiResult.success(complianceGateAdminService.createAssignment(
-                request.getWorkplaceId(), request.getUserId(), request.getEffectiveFrom()));
+        return ApiResult.success(ComplianceAssignmentDto.fromEntity(
+                complianceGateAdminService.createAssignment(
+                        request.getWorkplaceId(), request.getUserId(), request.getEffectiveFrom())));
     }
 
     @PutMapping("/assignments/{id}/end")
-    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> endAssignment(@PathVariable Long id,
-                                                                                   @RequestParam String reason) {
-        return ApiResult.success(complianceGateAdminService.endAssignment(id, reason));
+    public ApiResult<ComplianceAssignmentDto> endAssignment(@PathVariable Long id,
+                                                            @RequestParam String reason) {
+        return ApiResult.success(ComplianceAssignmentDto.fromEntity(
+                complianceGateAdminService.endAssignment(id, reason)));
     }
 
     @PostMapping("/approvals")
-    public ApiResult<com.ses.entity.ComplianceMappingApprovalEvent> approve(@RequestBody ComplianceApprovalRequest request) {
-        return ApiResult.success(complianceApprovalService.approve(
-                request.getMappingId(), request.getWorkplaceId(), request.getReason(), request.getEvidenceDocumentId()));
+    public ApiResult<ComplianceApprovalEventDto> approve(@RequestBody ComplianceApprovalRequest request) {
+        return ApiResult.success(ComplianceApprovalEventDto.fromEntity(
+                complianceApprovalService.approve(
+                        request.getMappingId(), request.getWorkplaceId(), request.getReason(),
+                        request.getEvidenceDocumentId(), request.getEvidenceDocumentVersionId())));
     }
 
     // ===== external review（SUBMITTED・K1） =====
@@ -186,6 +216,97 @@ public class ComplianceGateApiController {
         return ApiResult.success(complianceGateAdminService.listSubjects().stream()
                 .map(ComplianceReviewerSubjectDto::fromEntity)
                 .toList());
+    }
+
+    // R23-P1-01 P0-4: subject create path（person-stable正本・fingerprint計算）
+    @PostMapping("/subjects")
+    public ApiResult<ComplianceReviewerSubjectDto> createSubject(
+            @RequestBody com.ses.dto.compliance.ComplianceSubjectRequest request) {
+        return ApiResult.success(ComplianceReviewerSubjectDto.fromEntity(
+                complianceGateAdminService.createSubject(
+                        request.getSubjectCode(), request.getDisplayName(), request.getOrganizationName())));
+    }
+
+    // R23-P1-01 P0-4: subject×資格association
+    @PostMapping("/subjects/{id}/qualifications")
+    public ApiResult<com.ses.entity.ComplianceReviewerQualification> addQualification(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceQualificationRequest request) {
+        return ApiResult.success(complianceGateAdminService.addQualification(
+                id, request.getReviewerTypeId(),
+                request.getRegistrationIdentifierMaskedSnapshot(), request.getRegistrationIdentifierLabel()));
+    }
+
+    @GetMapping("/subjects/{id}/qualifications")
+    public ApiResult<List<com.ses.entity.ComplianceReviewerQualification>> listQualifications(@PathVariable Long id) {
+        return ApiResult.success(complianceGateAdminService.listQualifications(id));
+    }
+
+    // ===== dynamic policy master（R23-P1-01 §3.8・P0-3） =====
+
+    @GetMapping("/verification-sources")
+    public ApiResult<List<com.ses.entity.ComplianceVerificationSource>> listVerificationSources() {
+        return ApiResult.success(complianceGateAdminService.listVerificationSources());
+    }
+
+    @PostMapping("/verification-sources")
+    public ApiResult<com.ses.entity.ComplianceVerificationSource> createVerificationSource(
+            @RequestBody com.ses.dto.compliance.ComplianceVerificationSourceRequest request) {
+        return ApiResult.success(complianceGateAdminService.createVerificationSource(
+                request.getSourceCode(), request.getSourceName(), request.getOfficialUrl(),
+                Boolean.TRUE.equals(request.getEnabled()), request.getEffectiveFrom(), request.getEffectiveTo()));
+    }
+
+    @PutMapping("/verification-sources/{id}")
+    public ApiResult<com.ses.entity.ComplianceVerificationSource> updateVerificationSource(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceVerificationSourceRequest request) {
+        return ApiResult.success(complianceGateAdminService.updateVerificationSource(
+                id, request.getSourceName(), request.getOfficialUrl(),
+                Boolean.TRUE.equals(request.getEnabled()), request.getEffectiveFrom(), request.getEffectiveTo()));
+    }
+
+    @GetMapping("/verification-methods")
+    public ApiResult<List<com.ses.entity.ComplianceVerificationMethod>> listVerificationMethods() {
+        return ApiResult.success(complianceGateAdminService.listVerificationMethods());
+    }
+
+    @PostMapping("/verification-methods")
+    public ApiResult<com.ses.entity.ComplianceVerificationMethod> createVerificationMethod(
+            @RequestBody com.ses.dto.compliance.ComplianceVerificationMethodRequest request) {
+        return ApiResult.success(complianceGateAdminService.createVerificationMethod(
+                request.getMethodCode(), request.getMethodName(), request.getDescription(),
+                Boolean.TRUE.equals(request.getEnabled()), request.getEffectiveFrom(), request.getEffectiveTo()));
+    }
+
+    @PutMapping("/verification-methods/{id}")
+    public ApiResult<com.ses.entity.ComplianceVerificationMethod> updateVerificationMethod(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceVerificationMethodRequest request) {
+        return ApiResult.success(complianceGateAdminService.updateVerificationMethod(
+                id, request.getMethodName(), request.getDescription(),
+                Boolean.TRUE.equals(request.getEnabled()), request.getEffectiveFrom(), request.getEffectiveTo()));
+    }
+
+    // R23-P1-01 P0-3: reviewer type dynamic設定（flags・source/method・max_age・effective period・§8）
+    @PutMapping("/reviewer-types/{id}/dynamic")
+    public ApiResult<ComplianceReviewerTypeDto> updateReviewerTypeDynamic(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceReviewerTypeDynamicRequest request) {
+        return ApiResult.success(ComplianceReviewerTypeDto.fromEntity(
+                complianceGateAdminService.updateReviewerTypeDynamic(
+                        id, request.getQualificationVerificationRequired(),
+                        request.getActiveStatusVerificationRequired(),
+                        request.getVerificationSourceId(), request.getVerificationMethodId(),
+                        request.getMaxAgeDays(), request.getEffectiveFrom(), request.getEffectiveTo())));
+    }
+
+    // ===== exact CLEAN evidence picker（R23-P1-01 P0-5・allow-list） =====
+
+    @GetMapping("/evidence-picker")
+    public ApiResult<List<ComplianceEvidencePickerDto>> evidencePicker(
+            @RequestParam(required = false) String query) {
+        return ApiResult.success(complianceGateAdminService.searchEvidence(query));
     }
 
     // ===== verification（R23-P1-01 §3.3） =====
@@ -289,5 +410,17 @@ public class ComplianceGateApiController {
         return ApiResult.success(adoptionService.listBySubmittedReview(id).stream()
                 .map(ComplianceAdoptionEventDto::fromEntity)
                 .toList());
+    }
+
+    // ===== Phase B manifest（R23-P1-01 P1-7・allow-list） =====
+
+    /**
+     * Phase B manifest用の完全hash/ID一覧（allow-list）。
+     * mapping・sources・policy groups/types・approval・external reviews・verification・adoption・evidenceの
+     * 完全ID/hashを返す（§4-11 gate snapshot・Phase B manifest）。
+     */
+    @GetMapping("/mappings/{id}/manifest")
+    public ApiResult<com.ses.dto.compliance.ComplianceManifestDto> manifest(@PathVariable Long id) {
+        return ApiResult.success(complianceGateAdminService.buildManifest(id));
     }
 }

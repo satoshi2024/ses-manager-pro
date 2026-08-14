@@ -134,7 +134,7 @@ class ComplianceMappingServiceImplTest {
 
         // 実actor（指名者=1）が承認
         ComplianceMappingApprovalEvent approval = complianceApprovalService.approve(
-                version.getId(), workplaceId, "一次source確認済み", null);
+                version.getId(), workplaceId, "一次source確認済み", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         assertEquals(64, approval.getMappingHash().length());
 
         // §3.2 event順序: SUBMITTED review → verification（IDENTITY/AUTHORSHIP）→ APPROVED adoption
@@ -172,7 +172,7 @@ class ComplianceMappingServiceImplTest {
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent approval = complianceApprovalService.approve(
-                version.getId(), workplaceId, "一次source確認済み", null);
+                version.getId(), workplaceId, "一次source確認済み", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
 
         // approvalEventId未指定は拒否
         assertThrows(com.ses.common.exception.BusinessException.class,
@@ -213,7 +213,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
@@ -223,7 +223,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v2.getId());
         ComplianceMappingVersion v2Active = complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
         assertEquals("PROVISIONAL_REVIEWED", v2Active.getStatus(), "active_slotがNULLのためstatus=PROVISIONAL_REVIEWEDを維持");
@@ -269,7 +269,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
@@ -279,7 +279,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v2.getId());
         complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
 
@@ -349,7 +349,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", null);
+        ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v1.getId());
         complianceMappingService.transition(v1.getId(), "ACTIVE", app1.getId());
 
@@ -359,7 +359,7 @@ class ComplianceMappingServiceImplTest {
                 LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
-        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", null);
+        ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         setupExternalReviewGate(v2.getId());
         complianceMappingService.transition(v2.getId(), "ACTIVE", app2.getId());
 
@@ -526,13 +526,31 @@ class ComplianceMappingServiceImplTest {
                 "op-adopt-" + mappingId, "corr-adopt-" + mappingId, "adopt-" + mappingId);
     }
 
+    /** P0-5: exact CLEAN evidence versionを作成し{documentId, versionId}を返す（既存なら再利用）。 */
+    private Long[] insertEvidenceVersion() {
+        Long existing = jdbcTemplate.query(
+                "SELECT id FROM t_document_version WHERE business_key = 'mapping-approval-ev'",
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            return new Long[]{910002L, existing};
+        }
+        String sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        jdbcTemplate.update("INSERT INTO t_document_version "
+                + "(tenant_id, document_id, version_no, storage_key, original_name, content_type, "
+                + "size_bytes, sha256, source_type, business_key, version_discriminator, scan_status, created_by) "
+                + "VALUES ('default', 910002, 1, 'ev/k', 'mapping-ev.pdf', 'application/pdf', 10, ?, "
+                + "'UPLOAD', 'mapping-approval-ev', '1', 'CLEAN', 1)", sha);
+        Long versionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_document_version WHERE business_key = 'mapping-approval-ev'", Long.class);
+        return new Long[]{910002L, versionId};
+    }
+
     private ComplianceMappingSourceInput source(String code, String url, String version) {
         ComplianceMappingSourceInput input = new ComplianceMappingSourceInput();
         input.setSourceCode(code);
         input.setSourceUrl(url);
         input.setSourceVersion(version);
-        input.setConfirmedOn(LocalDate.of(2026, 8, 9));
-        input.setEffectiveFrom(LocalDate.of(2026, 7, 1));
+        input.setConfirmedOn(LocalDate.of(2026, 8, 9));        input.setEffectiveFrom(LocalDate.of(2026, 7, 1));
         input.setEffectiveTo(LocalDate.of(2026, 9, 30));
         return input;
     }

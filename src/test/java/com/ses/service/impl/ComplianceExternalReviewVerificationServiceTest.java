@@ -47,6 +47,27 @@ class ComplianceExternalReviewVerificationServiceTest {
 
     private Long reviewerTypeId;
     private Long subjectId;
+    private Long[] evidenceIds = new Long[2];
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    /** P0-5: exact CLEAN evidence versionを作成し{documentId, versionId}を返す。 */
+    private Long[] evidenceIds() {
+        if (evidenceIds[0] != null) {
+            return evidenceIds;
+        }
+        String sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        jdbcTemplate.update("INSERT INTO t_document_version "
+                + "(tenant_id, document_id, version_no, storage_key, original_name, content_type, "
+                + "size_bytes, sha256, source_type, business_key, version_discriminator, scan_status, created_by) "
+                + "VALUES ('default', 920001, 1, 'ev/k', 'ver-ev.pdf', 'application/pdf', 10, ?, "
+                + "'UPLOAD', 'verification-ev', '1', 'CLEAN', 1)", sha);
+        Long versionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_document_version WHERE business_key = 'verification-ev'", Long.class);
+        evidenceIds[0] = 920001L;
+        evidenceIds[1] = versionId;
+        return evidenceIds;
+    }
 
     private Long reviewerTypeId() {
         if (reviewerTypeId == null) {
@@ -113,7 +134,7 @@ class ComplianceExternalReviewVerificationServiceTest {
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-VER-1",
                 LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
-                1L, null, null, v.getMappingVersion(), v.getReviewPolicyHash(),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), idemKey);
     }
@@ -150,7 +171,7 @@ class ComplianceExternalReviewVerificationServiceTest {
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-VER-1",
                 LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
-                1L, null, null, v.getMappingVersion(), v.getReviewPolicyHash(),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), "00" + v.getMappingHash().substring(2),
                 review.getId(), review.getReviewChainId(), "VER-IDEM-2"));
     }
@@ -165,7 +186,7 @@ class ComplianceExternalReviewVerificationServiceTest {
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-VER-1",
                 LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
-                1L, null, null, null, null, null, null, null,
+                1L, evidenceIds()[0], evidenceIds()[1], null, null, null, null, null,
                 null, null, "VER-IDEM-3"));
     }
 

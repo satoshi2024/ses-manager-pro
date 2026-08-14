@@ -9,6 +9,7 @@ import com.ses.entity.ComplianceMappingReviewRequirementType;
 import com.ses.entity.ComplianceMappingSource;
 import com.ses.entity.ComplianceMappingVersion;
 import com.ses.entity.ComplianceResponsibleAssignment;
+import com.ses.entity.DocumentVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ComplianceMappingApprovalEventMapper;
 import com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper;
@@ -47,10 +48,12 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
     private final ComplianceMappingApprovalEventMapper approvalEventMapper;
     private final ComplianceMappingCanonicalizer canonicalizer;
     private final SysUserMapper sysUserMapper;
+    private final com.ses.service.compliance.ComplianceGateEvidenceResolver evidenceResolver;
 
     @Override
     @Transactional
-    public ComplianceMappingApprovalEvent approve(Long mappingId, Long workplaceId, String reason, Long evidenceDocumentId) {
+    public ComplianceMappingApprovalEvent approve(Long mappingId, Long workplaceId, String reason,
+                                                  Long evidenceDocumentId, Long evidenceDocumentVersionId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -61,6 +64,8 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         if (!StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "compliance.gate.findingNoteRequired");
         }
+        // P0-5: exact CLEAN evidence（§4-5/6・evidence NULL/不存在/non-CLEAN/hash不正は拒否）
+        DocumentVersion evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
         Long actorId = SecurityUtils.currentUserId();
         if (actorId == null) {
             throw BusinessException.of(403, "error.accessDenied");
@@ -109,7 +114,12 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         event.setEventChainId(UUID.randomUUID().toString());
         event.setOccurredAt(LocalDateTime.now());
         event.setReason(reason);
-        event.setEvidenceDocumentId(evidenceDocumentId);
+        // P0-5: exact evidence snapshot（document id・exact version id・version・SHA-256・scan）
+        event.setEvidenceDocumentId(evidence.getDocumentId());
+        event.setEvidenceDocumentVersionId(evidence.getId());
+        event.setEvidenceDocumentVersion(String.valueOf(evidence.getVersionNo()));
+        event.setEvidenceDocumentHash(evidence.getSha256());
+        event.setEvidenceScanStatus(evidence.getScanStatus());
         event.setOperationId(UUID.randomUUID().toString());
         event.setCorrelationId(UUID.randomUUID().toString());
         event.setIdempotencyKey("MAPPING:APPROVE:" + mappingId + ":" + actorId + ":" + mappingHash + ":" + reviewPolicyHash);

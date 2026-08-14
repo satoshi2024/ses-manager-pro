@@ -1,3 +1,20 @@
+## Step 7: P0/P1 repair実装（V102_3含む・2026-08-14）
+
+R10 repair delta受理後の実装:
+- **V102_3**: m_compliance_verification_source/method（dynamic master・§3.8）・t_compliance_reviewer_qualification（§9）・reviewer typeへqualification/active_status required（NULL=UNCONFIGURED・§8）・source/method/max_age/effective period・requirement typeへfrozen snapshot・approval eventへexact evidence+scan列・並行adoptionのDB一意化（first_adoption_key生成列・P1-5）・subject UPDATE拒否trigger（P1-4）
+- **P0-1**: 6 tabs実装（Assignment/Approval/External Review/Verification/ACTIVE/Event History）＋Policy tabのgroup/type/freeze操作・requirement group/type API
+- **P0-2**: SecurityConfig matcher順序修正（approvals等を先にマッチ・HR/マネージャー到達可能化）
+- **P0-3**: dynamic policy API（sources/methods CRUD・type dynamic設定・flags明示選択必須）
+- **P0-4**: subject create path（POST /subjects・fingerprint計算）＋資格association API
+- **P0-5**: evidence picker API（CLEANのみ・allow-list）・internal approval exact evidence必須化（version/hash/scan snapshot）
+- **P0-6**: verification binding強化（evidence必須・maxAge必須・type一致・chain/mapping一致・cross-chain拒否）
+- **P1-1**: assignment/approval typed DTO（ComplianceAssignmentDto/ComplianceApprovalEventDto）
+- **P1-7**: manifest API（GET /mappings/{id}/manifest・完全hash/ID allow-list）
+- 回帰: compliance 16クラス 88/0/0/0 PASS
+- 未実装: P1-2（tenant/DataScope SQL境界の全面適用）・P1-3（idempotency replay 200/409のcanonical hash保存）・P1-6（contract画面watermark preview）
+## R10判定（repair delta PR #74・2026-08-14）: ACCEPTED
+
+R10 R23-P1-01 repair delta（PR #74・c7c5c332・docs-only・+258/-27・non-md 0・diff-check PASS）: ACCEPTED。V102_3（S10 repair）確定・V103（S12予約）維持・V102/V102_1/V102_2 published不変。Docs修正5件（GATE-T066-HISTORY=TRACKED P2/production release gateへ分離・FM-C-28非blocker・registration identifier optional・evidence templates改訂＋R23新規）受理。P0 6件/P1 7件の実装設計・必須回帰・停止条件受理。P2 note: branchにPR #72非取込の旧specファイル残存（PR merge set外）。V102_3は本受理後にのみ作成、修正PR merge前に固定HeadをR10へ提出。人間証跡12-step・T066 M PASS・S10 PASS・S12解放は後続。production authorizationなし
 ## Step 6: docs-only repair delta提出（2026-08-14・V102_3確定）
 
 R10 CHANGES_REQUIRED対応としてdocs-only repair deltaを作成・提出:

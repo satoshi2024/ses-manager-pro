@@ -162,7 +162,7 @@ class ComplianceExternalReviewAdoptionServiceTest {
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-12345",
                 LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
-                1L, null, null, v.getMappingVersion(), v.getReviewPolicyHash(),
+                1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), "ADOPT-VERIFY-" + kind + "-" + System.nanoTime());
     }

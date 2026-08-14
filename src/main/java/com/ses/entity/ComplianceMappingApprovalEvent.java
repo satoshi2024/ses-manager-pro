@@ -32,6 +32,7 @@ public class ComplianceMappingApprovalEvent {
     private Long evidenceDocumentVersionId;
     private String evidenceDocumentVersion;
     private String evidenceDocumentHash;
+    private String evidenceScanStatus;
     private String operationId;
     private String correlationId;
     private String idempotencyKey;

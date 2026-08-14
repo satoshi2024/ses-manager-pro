@@ -96,22 +96,38 @@ public class ComplianceExternalReviewVerificationServiceImpl
         if (submitted == null || !"SUBMITTED".equalsIgnoreCase(submitted.getAction())) {
             throw BusinessException.of(400, "compliance.gate.verificationTargetInvalid");
         }
-        // reviewer subjectが存在すること（person-stable）
+        // P0-6: reviewer subjectが存在すること（person-stable）
         ComplianceExternalReviewerSubject subject = subjectMapper.selectById(reviewerSubjectId);
         if (subject == null) {
             throw BusinessException.of(400, "compliance.gate.reviewerSubjectNotFound");
         }
-        // exact evidence（§4-5/6）: server-side解決しCLEAN/SHA-256を検証
-        DocumentVersion evidence = null;
-        if (evidenceDocumentId != null || evidenceDocumentVersionId != null) {
-            evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        // P0-6: reviewer typeはsubmitted reviewのtypeと一致すること（cross-type混在拒否）
+        if (!submitted.getReviewerTypeId().equals(reviewerTypeId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationTypeMismatch");
+        }
+        // P0-6: exact evidenceは必須（§4-5/6: evidence NULL/non-CLEAN/不存在/hash不一致は全て拒否）
+        DocumentVersion evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        // P0-6: AUTHORSHIP以外はmax_age_days必須（§3.7: 未設定/不正値はfail-closed）
+        boolean authorship = "REVIEW_AUTHORSHIP".equals(verificationKind);
+        if (!authorship && (maxAgeDays == null || maxAgeDays < 1)) {
+            throw BusinessException.of(400, "compliance.gate.verificationMaxAgeRequired");
         }
         // AUTHORSHIP kindはmapping/policy/review binding必須（DB triggerでも担保）
-        boolean authorship = "REVIEW_AUTHORSHIP".equals(verificationKind);
         if (authorship && (mappingId == null || !StringUtils.hasText(mappingVersion)
                 || !StringUtils.hasText(mappingHash) || externalReviewEventId == null
                 || !StringUtils.hasText(externalReviewChainId))) {
             throw BusinessException.of(400, "compliance.gate.authorshipBindingRequired");
+        }
+        // P0-6: cross-chain混在拒否 — 全kindでexternal review chainがsubmittedと一致すること（§G2-VERIFY-11/12）
+        if (externalReviewEventId != null && !submitted.getId().equals(externalReviewEventId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationChainMismatch");
+        }
+        if (StringUtils.hasText(externalReviewChainId)
+                && !submitted.getReviewChainId().equals(externalReviewChainId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationChainMismatch");
+        }
+        if (mappingId != null && !submitted.getMappingId().equals(mappingId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationMappingMismatch");
         }
         // REVIEW_AUTHORSHIPのmapping一致検証（§G2-VERIFY-12）
         if (authorship && mappingId != null) {
