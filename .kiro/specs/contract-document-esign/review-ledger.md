@@ -34,7 +34,7 @@
 | HFP-02-05 | 03,04 | DONE(sync/poll/mapping/monitor) | DONE(12件/0/0/0) | DONE(status 1→2/3、未知status、batch失敗継続、cancel非公開をtestで実演) | NOT_STARTED | PARTIAL | BLK-06未決のためcancel非公開で停止。ADOPT決定後にcancel実装 |
 | HFP-02-06 | 02,03,05 | DONE(FileKind/artifact回収/ledger/三hash) | DONE(17件/0/0/0) | DONE(三PDF取得・別hash・別archive・scan停止時非公開をtestで実演) | NOT_STARTED | PARTIAL | 旧sync()/facade撤去。legacy移行・no-op・相違hash finding実装済 |
 | HFP-02-07 | 04,05,06 | DONE(DTO/role/no-store/監査/UI) | DONE(controller 8件・JS syntax・page render) | DONE(role matrix・queue≠sent・結果不明runbook・三artifact UIをtestで実演) | NOT_STARTED | PARTIAL | 390px実機browser Demoはsandbox/環境なしのためHFP-02-09/10対象 |
-| HFP-02-08 | 01-07 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | verify-like-ci skip0 |
+| HFP-02-08 | 01-07 | DONE(全AC test締め・log redaction) | DONE(1968/0/0/0 + redaction 3件) | DONE(二重send/malformed/unknown/scope外/token漏洩注入を安全側失敗で実演) | NOT_STARTED | PARTIAL | verify-like-ci: 1968 tests failure 0 error 0 skip 0(BUILD SUCCESS)。実browser(390px)はHFP-02-09/10対象 |
 | HFP-02-09 | 00,08 | NOT_STARTED | BLOCKED(sandbox未確認) | BLOCKED | NOT_STARTED | BLOCKED | sandbox credential/受信操作担当 |
 | HFP-02-10 | 08,09 | NOT_STARTED | NOT_STARTED | BLOCKED | NOT_STARTED | BLOCKED | P0/P1=0、運用承認 |
 
@@ -49,7 +49,7 @@
 | HFP-02-AC-01-03 | 03,05,07 | requireDocumentFields、CloudSignErrorClassifier | 必須field欠落schemaError test・未知status fixture | malformed/unknown fixture | - | IN_PROGRESS | schema error/error分類DONE。未知statusの業務mappingはHFP-02-05 |
 | HFP-02-AC-01-04 | 00 | research.md §2.2 | fixtureMetaは固定OpenAPIのpinと一致する | version diff review(差分なし) | - | VERIFIED | 更新時はfixture/pin同時更新まで停止 |
 | HFP-02-AC-02-01 | 03 | CloudSignProperties.resolveBaseUri | CloudSignPropertiesTest(6) | host matrix | - | VERIFIED | prod/sandbox公式hostのみ。HTTP/userinfo/query/fragment/path付きを拒否 |
-| HFP-02-AC-02-02 | 03,08 | CloudSignTokenProvider(メモリのみ) | token test・log captureはHFP-02-08 | log/API redaction | - | IN_PROGRESS | token値はmemoryのみ・例外に含めない。log captureはHFP-02-08 |
+| HFP-02-AC-02-02 | 03,08 | CloudSignTokenProvider(メモリのみ) | CloudSignLogRedactionTest | log/API redaction | - | VERIFIED | log captureでtoken/clientId/email/PDF本文0件を検証 |
 | HFP-02-AC-02-03 | 03 | CloudSignTokenProvider | tokenSingleFlight・status401一回再取得 test | token concurrency/401 | - | VERIFIED | single-flight 1回・401再取得は一操作一回 |
 | HFP-02-AC-02-04 | 03,10 | CloudSignProperties.validate(@PostConstruct) | enabled=trueでclientId欠落failClosed test | readiness fail-closed | - | IN_PROGRESS | config fail-closedDONE。scanner/storage/ledger readinessはHFP-02-10 |
 | HFP-02-AC-02-05 | 00,09,10 | - | - | sandbox/preflight | - | BLOCKED | HFP-02-BLK-01 |
@@ -85,21 +85,21 @@
 | HFP-02-AC-08-02 | 07 | assertDocumentAllowed/assertContractVisible | scope外404 test | scope外404 | - | VERIFIED | 親契約DataScope/組織scopeで404秘匿 |
 | HFP-02-AC-08-03 | 07,08 | ContractDocumentListDto/DetailDto/OperationDto | DTO allow-list test | DTO allow-list | - | VERIFIED | path/renderedHtml/errorを非公開 |
 | HFP-02-AC-08-04 | 06,07 | CacheControl.noStore・ApiAuditFilter isDownloadUri | no-store/attachment test | no-store/audit | - | VERIFIED | list/detail/artifactはno-store、download成功/拒否は監査対象 |
-| HFP-02-AC-08-05 | 03,07,08 | - | - | log capture | - | NOT_STARTED | P0 |
+| HFP-02-AC-08-05 | 03,07,08 | log redaction | CloudSignLogRedactionTest | log capture | - | VERIFIED | 文書ID/操作ID/safe codeのみ。raw body非保存 |
 | HFP-02-AC-08-06 | 07 | 既存Cookie CSRF維持 | csrf付きrequestのみ成功 | CSRF | - | VERIFIED | send/sync/cancel(非公開)は更新系としてCSRF対象 |
 | HFP-02-AC-09-01 | 03,04,05 | CloudSignErrorClassifier・CloudSignApiException(uncertain) | error分類/504/timeout test | error/result-unknown matrix | - | IN_PROGRESS | client分類DONE。dispatchへの接続はHFP-02-04 |
 | HFP-02-AC-09-02 | 03,05 | CloudSignRateLimiter | CloudSignRateLimiterTest(4) | token/rate/retry | - | IN_PROGRESS | budget≤800DONE。poll/syncへの接続はHFP-02-05 |
-| HFP-02-AC-09-03 | 03,06 | CloudSignProperties.maxPdfBytes・streamToTempFile | download size上限 test | body/file limits | - | IN_PROGRESS | download上限DONE。upload側・binary非展開はHFP-02-04/06 |
+| HFP-02-AC-09-03 | 03,06 | CloudSignProperties.maxPdfBytes・streamToTempFile | download size上限 test・CloudSignLogRedactionTest | body/file limits | - | VERIFIED | 上限DONE・PDF本文をlog/error messageへ展開しない |
 | HFP-02-AC-09-04 | 05,06,10 | - | - | alert matrix | - | NOT_STARTED | - |
 | HFP-02-AC-10-01 | 05,07 | 状態別button・sec:authorize + API PreAuthorize | 5role direct API test | state/role UI/API | - | VERIFIED | 下書き以外send不可・terminal再送不可・HR更新不可 |
 | HFP-02-AC-10-02 | 04,07 | - | - | queue≠sent UI | - | NOT_STARTED | - |
 | HFP-02-AC-10-03 | 04,07,10 | runbook表示・operation ID表示 | result-unknown UI test | reconciliation UI/runbook | - | IN_PROGRESS | 再送button非表示+runbookDONE。運用実行はHFP-02-10 |
 | HFP-02-AC-10-04 | 07 | table-responsive・text+icon併用 | PageRenderingTest・JS syntax | desktop/390px | - | PARTIAL | 実機browser DemoはHFP-02-09/10(環境) |
-| HFP-02-AC-11-01 | 01,03,04,05,08 | - | - | contract/concurrency suite | - | NOT_STARTED | - |
-| HFP-02-AC-11-02 | 07,08 | - | - | controller security suite | - | NOT_STARTED | - |
-| HFP-02-AC-11-03 | 06,08 | - | - | file failure matrix | - | NOT_STARTED | - |
+| HFP-02-AC-11-01 | 01,03,04,05,08 | 全cloudsign test群 | 138件(wire+token+dispatch+sync+artifact+redaction) | contract/concurrency suite | - | VERIFIED | timeout call=1・100同時・crash境界・transaction境界を自動化 |
+| HFP-02-AC-11-02 | 07,08 | Controller role/scope/CSRF/DTO test | ContractDocumentApiControllerTest(8) | controller security suite | - | VERIFIED | 5role・scope404・CSRF・no-store・download監査 |
+| HFP-02-AC-11-03 | 06,08 | artifact failure matrix | CloudSignArtifactIntegrationTest(11) | file failure matrix | - | VERIFIED | 三hash・magic/EOF・scan 3種・atomicity・再取得 |
 | HFP-02-AC-11-04 | 09 | - | - | sandbox E2E | - | BLOCKED | sandbox未確認 |
-| HFP-02-AC-11-05 | 02,08 | - | - | verify-like-ci skip0 | - | NOT_STARTED | - |
+| HFP-02-AC-11-05 | 02,08 | verify-like-ci.ps1 | 1968 tests / failure 0 / error 0 / skip 0 | verify-like-ci skip0 | - | VERIFIED | Docker有・Node有でCI相当実行。worktreeパス長によるPS5.1折り返しで1回FAIL後、短パスで全緑(既存testの環境依存) |
 | HFP-02-AC-11-06 | 10 | - | - | 運用承認 | - | BLOCKED | operator未設定 |
 | HFP-02-AC-12-01 | 02 | V109、schema-contract-document-h2.sql、ContractDocument | FlywayContractDocumentDispatchSchemaSmokeTest(2) | fresh/legacy MySQL | - | VERIFIED | V1/V20無編集。V109はS12予約衝突により繰り上げ採番 |
 | HFP-02-AC-12-02 | 02,06 | ContractDocumentDispatchBackfill | ContractDocumentDispatchStateTest#backfill系(5) | legacy分類 | - | IN_PROGRESS | 分類5形状DONE。archive移行候補化の履行はHFP-02-06 |
