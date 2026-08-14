@@ -176,4 +176,28 @@ class FreeeOAuthCallbackWebTest {
         mockMvc.perform(get("/integrations/freee/authorize"))
                 .andExpect(redirectedUrl("/payroll?error=config"));
     }
+
+    @Test
+    @WithMockUser(roles = "管理者", username = "audit-admin")
+    @DisplayName("handleCallbackの非業務例外（DB障害等）でもFREEE_CONNECT失敗監査を記録する（REV-008）")
+    void handleCallbackのDB障害でも失敗監査する() throws Exception {
+        String state = startOAuth();
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(service).handleCallback(org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        mockMvc.perform(get("/integrations/freee/callback")
+                        .param("code", "fixture-code")
+                        .param("state", state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE, state)
+                        .sessionAttr(FreeeOAuthController.SESSION_STATE_ISSUED,
+                                java.time.Instant.now().getEpochSecond()))
+                .andExpect(status().is5xxServerError());
+        verify(auditLogService).record(
+                org.mockito.ArgumentMatchers.eq("audit-admin"),
+                org.mockito.ArgumentMatchers.eq("GET"),
+                org.mockito.ArgumentMatchers.eq("/integrations/freee"),
+                org.mockito.ArgumentMatchers.eq(500),
+                org.mockito.ArgumentMatchers.eq("FREEE_CONNECT"),
+                org.mockito.ArgumentMatchers.eq(false));
+    }
 }

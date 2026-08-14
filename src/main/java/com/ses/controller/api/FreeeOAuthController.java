@@ -107,6 +107,11 @@ public class FreeeOAuthController {
             auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 400,
                     CODE_CONNECT, false);
             return new RedirectView("/payroll?error=oauth");
+        } catch (Exception e) {
+            // DB障害等の非業務例外でも失敗を監査する（REV-008）。元例外はerror dispatchへ
+            auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 500,
+                    CODE_CONNECT, false);
+            throw e;
         }
         auditLogService.recordRequired(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 302,
                 CODE_CONNECT, true);
@@ -127,6 +132,11 @@ public class FreeeOAuthController {
             auditLogService.record(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT,
                     e.getCode() == 0 ? 400 : e.getCode(), CODE_DISCONNECT, false);
             return new RedirectView("/payroll?error=disconnect");
+        } catch (Exception e) {
+            // DB障害等の非業務例外でも失敗を監査する（REV-008）。元例外はerror dispatchへ
+            auditLogService.record(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT,
+                    500, CODE_DISCONNECT, false);
+            throw e;
         }
     }
 

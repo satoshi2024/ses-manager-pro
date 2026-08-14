@@ -62,6 +62,9 @@ public class FreeePayrollApiController {
         } catch (BusinessException e) {
             audit("GET", CODE_EMPLOYEE_VIEW, URI_EMPLOYEES, false, e.getCode());
             throw e;
+        } catch (Exception e) {
+            audit("GET", CODE_EMPLOYEE_VIEW, URI_EMPLOYEES, false, 500);
+            throw e;
         }
     }
 
@@ -81,6 +84,9 @@ public class FreeePayrollApiController {
         } catch (BusinessException e) {
             audit("PUT", CODE_LINK, URI_LINKS, false, e.getCode());
             throw e;
+        } catch (Exception e) {
+            audit("PUT", CODE_LINK, URI_LINKS, false, 500);
+            throw e;
         }
     }
     
@@ -92,6 +98,9 @@ public class FreeePayrollApiController {
             return noStore(ApiResult.success(true));
         } catch (BusinessException e) {
             audit("DELETE", CODE_UNLINK, URI_LINKS, false, e.getCode());
+            throw e;
+        } catch (Exception e) {
+            audit("DELETE", CODE_UNLINK, URI_LINKS, false, 500);
             throw e;
         }
     }
@@ -111,6 +120,10 @@ public class FreeePayrollApiController {
         } catch (BusinessException e) {
             // provider失敗時も固定URI/codeで成功falseを1 row記録する（REV-003 / R09-3）
             audit("GET", code, URI_STATEMENTS, false, e.getCode());
+            throw e;
+        } catch (Exception e) {
+            // DB障害等の非業務例外でも失敗を監査する（REV-008）
+            audit("GET", code, URI_STATEMENTS, false, 500);
             throw e;
         }
     }

@@ -25,9 +25,13 @@ public class FreeeReauthMarker {
         this.connectionMapper = connectionMapper;
     }
 
+    /**
+     * connection_statusだけをtargeted UPDATEする（REV-008）。
+     * エンティティ全体のupdateByIdは、afterCompletion経路で別threadの成功refresh/再接続が
+     * 保存したtoken等をstale値で上書きする余地があるため使わない。
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markReauthRequired(FreeeConnection connection) {
-        connection.setConnectionStatus(STATUS_REAUTH_REQUIRED);
-        connectionMapper.updateById(connection);
+        connectionMapper.updateConnectionStatus(connection.getId(), STATUS_REAUTH_REQUIRED);
     }
 }

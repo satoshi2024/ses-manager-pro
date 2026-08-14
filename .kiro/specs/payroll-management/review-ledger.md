@@ -759,3 +759,102 @@ Findingがない場合は上の例示行を削除し、`Findingなし（Reviewer
 - rollback/feature disable手順の検証: design §16.3（menu権限外し・token revoke・forward fix）の記述を確認。実行検証はsandbox取得後
 - 最小の次アクション: 実装AIがREV-001（detailから生値除去）とREV-002（REAUTH_REQUIREDを独立txで永続化＋実proxy再現test正規化）を修正し、REV-003（失敗系監査）とREV-004（並行refresh test）を実装。修正後にRound 2（OPEN issue・fix delta・direct regressionのみ）を実施。AC13/AC15はFREEE_*環境変数提供後にHFP-01-011を実行
 - 最終Verdict: **FAIL**（PRE_MERGE。PASS/REVIEWABLEではない）
+
+---
+
+## HFP-01-REVIEW-20260814-02（独立Review Round 2）
+
+| 項目 | 値 |
+|---|---|
+| Reviewer | 独立Review AI（実装担当とは別。Round 1と同一Reviewer） |
+| 対象Run | HFP-01-RUN-20260814-10/11（REV修正） |
+| base / reviewed head | `a7b7c59c`（Round 1対象head） / `586f495f`（fix delta後のhead） |
+| merge状態 / merge commit | PRE_MERGE / N/A |
+| 開始 / 終了（JST） | 2026-08-14 22:20 / 2026-08-14 23:40 |
+| 独立再実行環境 | Windows / Temurin 17.0.20 / bundled Maven 3.9.6 / Node v24.18.0 / Docker 29.6.2（MySQL 8.0 container） |
+| Verdict | **BLOCKED**（fix deltaのP0/P1=0・AC01〜12 PASS。AC13/AC15はfreee sandbox credential未提供のため実行不能） |
+
+### Round 2スコープ（handbook §10）
+
+fix delta `a7b7c59c..586f495f`（12 file、+746/−90）、REV-001〜007の判定、変更contractのconsumer回帰、新規P0/P1のみを対象。
+
+#### Finding判定（Reviewer再実行ベース）
+
+| ID | Severity | Round 1 | Round 2判定 | 根拠（Reviewer自身の再実行） |
+|---|---|---|---|---|
+| HFP-01-REV-001 | P0 | OPEN | **VERIFIED_CLOSED** | `strictAmount`/`validateItems`のdetailから生値（金額文字列・項目名）を除去したことをdiffで確認。`FreeeHrContractTest.invalidAmountは生値をdetailへ含めない`追加（27/0/0/0再実行PASS）。`PayrollSecurityAuditTest`がerror responseに生金額が無いことをassert（13/0/0/0再実行PASS） |
+| HFP-01-REV-002 | P1 | OPEN | **VERIFIED_CLOSED** | `FreeeReauthMarker`（REQUIRES_NEW）＋`persistReauthAfterCompletion`（afterCompletionで外側tx完了後に独立コミット）をdiffで確認。Round 1の再現testを正規化した`FreeeReauthPersistenceTest`（実proxy+H2）を再実行し**DBにREAUTH_REQUIREDが残ることを確認**（1/0/0/0 PASS）。executeWithRetry側の直接mark呼出しのcaller（statements/employees/link/S11 sync）は全経路tx外であることを確認 |
+| HFP-01-REV-003 | P2 | OPEN | **VERIFIED_CLOSED** | 失敗経路（statements 503/502・employees・link BP拒否・unlink・FREEE_CONNECT/DISCONNECT失敗）で固定URI/code・success_flag=falseの1 rowをdiffで確認。`AuditLogServiceImpl`の6引数recordがapplicationCode/successFlagを永続化することを確認。`PayrollSecurityAuditTest.失敗系も1request1rowで監査される`（13/0/0/0再実行PASS。503失敗・BP拒否・revoke 5xxで各1 row false、生金額0、local row保持） |
+| HFP-01-REV-004 | P2 | OPEN | **VERIFIED_CLOSED** | `FreeeConcurrentRefreshTest`（Testcontainers実MySQL＋実HTTPサーバ、2 thread・REQUIRES_NEW・FOR UPDATE）を**ReviewerがDocker環境で再実行**：外部POST 1回・rotation保存・CONNECTED維持をassert（1/0/0/0 PASS、実MySQL container） |
+| HFP-01-REV-005 | P2 | OPEN | **VERIFIED_CLOSED** | `handleCallback`/`link`の@Transactional撤去と`TransactionTemplate`による保存のみのtx化をdiffで確認。外部HTTPはtx外。回帰`FreeeOAuthContractTest` 17/0/0/0・`FreeeEmployeeMappingTest` 12/0/0/0を再実行PASS |
+| HFP-01-REV-006 | NOTE | OPEN | **OPEN（部分修正）** | RUN-10でRUN-09の「3984=1992×2」訂正は記載済み・H2コメント修正済み（`FreeeCompanyBoundarySchemaH2Test` 5/0/0/0）。**ただしRUN-11が「単独run実測3992」と記載**。Reviewerの再実行では単独runのsurefire集計は**1996**（testcase要素1996・aggregate行「Tests run: 1996」・BUILD SUCCESS・skip 0・exit 0）。RUN-11でも2倍計上が続いている。NOTEのためblockerではない |
+| HFP-01-REV-007 | NOTE | OPEN | **VERIFIED_CLOSED** | `executeWithRetry`/`sleepBackoff`/`sleepRetry`/`tokenEndpointPost`にX-Request-Id（存在時）と相関IDのlog追加をdiffで確認。raw body/tokenは非出力のまま。既存の秘密log test（FreeeIntegrationServiceApiTest 7/0/0/0）greenを再実行確認 |
+| HFP-01-REV-008 | NOTE | 新規 | OPEN | `FreeeReauthMarker.markReauthRequired`が`updateById`でentity全体（token暗号文含む）を書くため、極めて稀な競合（afterCompletion実行前に別threadの成功refresh/再接続がcommitした場合）にstale値で上書きし得る。実害は「不必要な再認可」の方向でfail-safeだが、`UPDATE t_freee_connection SET connection_status='REAUTH_REQUIRED' WHERE id=?`のtargeted更新を推奨。あわせて`handleCallback`の保存が非BusinessException（DB障害）で失敗した場合、FREEE_CONNECT失敗監査が記録されない（controllerのcatchはBusinessExceptionのみ） |
+
+#### Acceptance trace（Round 2差分のみ）
+
+| Acceptance | 状態 | 証跡 |
+|---|---|---|
+| HFP-01-AC01〜AC11 | PASS（維持） | Round 1判定＋REV修正後のfreee回帰17 classで再確認 |
+| HFP-01-AC04 | **PASS（Round 1: FAIL→修正）** | `FreeeReauthPersistenceTest`（実proxy+H2、DB永続化）+ `FreeeConcurrentRefreshTest`（実MySQL、外部POST 1回）をReviewer再実行 |
+| HFP-01-AC12 | **PASS（Round 1: FAIL→修正）** | `PayrollSecurityAuditTest`失敗系1 row・禁止値0・no-store + REV-001の生値除去をReviewer再実行 |
+| HFP-01-AC13 | BLOCKED | 実ブラウザdesktop/390px Demoはsandbox credential必要（未提供） |
+| HFP-01-AC14 | PASS | `scripts/verify-like-ci.ps1` をReviewer再実行: BUILD SUCCESS・testcase 1996・failure/error/skip 0・exit 0。MySQL smoke 4/0/0/0再実行 |
+| HFP-01-AC15 | BLOCKED | sandbox E2E未実施。HFP-01-011/HFP-G01 OPENのまま |
+
+#### 再実行したgate（Round 2）
+
+| Gate | Command | 結果 |
+|---|---|---|
+| freee関連全回帰 | 16 class（ConcurrentRefresh除く） | 146 / 0 / 0 / 0 PASS |
+| 並行refresh（実MySQL） | `FreeeConcurrentRefreshTest` | 1 / 0 / 0 / 0 PASS |
+| MySQL migration smoke | `FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 4 / 0 / 0 / 0 PASS |
+| verify-like-ci（単独run） | `scripts/verify-like-ci.ps1` | BUILD SUCCESS・testcase 1996・skip 0・exit 0 |
+
+#### Verdict根拠
+
+- 未解決P0/P1: **0**（REV-001/002はVERIFIED_CLOSED）
+- 未管理Acceptance: 0
+- 未達/未実行Acceptance: HFP-01-AC13（BLOCKED）、HFP-01-AC15（BLOCKED）— いずれもfreee sandbox credential未提供が唯一の原因
+- OPEN Finding: HFP-01-REV-006（NOTE・RUN-11の件数2倍計上）、HFP-01-REV-008（NOTE・targeted UPDATE推奨）
+- 未実施/skip必須gate: 実ブラウザdesktop/390px Demo、sandbox E2E（BLOCKED）
+- 最小の次アクション: (1) `FREEE_*`環境変数提供→HFP-01-011（sandbox E2E＋AC13 desktop/390px Demo）実行。(2) REV-006は次回RUN記録で単独run件数をsurefire集計値（1996）に。(3) REV-008は次回差分でconnection_statusのみのtargeted UPDATEへ（任意）。(4) その後Round 3（AC13/AC15の証跡とREV-006/008のみ）→ REVIEWABLE判定候補 → merge後にmerge delta/共有consumer/main回帰のReviewで最終PASS
+- 最終Verdict: **BLOCKED**（PRE_MERGE。PASS/REVIEWABLEではない。fix deltaのP0/P1は0で、残gateは外部credential依存のみ）
+
+---
+
+### HFP-01-RUN-20260814-12（Round 2のNOTE対応）
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `586f495f` / 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-14 23:50` / `2026-08-15 00:20` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | Round 2のledger追記（既存行は不変）を引き継ぎ |
+
+#### REV-006 / REV-008対応
+
+| Finding | Severity | 状態 | 対応 |
+|---|---|---|---|
+| HFP-01-REV-006 | NOTE | FIXED（記録方法の訂正） | verify-like-ciの件数は**surefireの集計値（単独run 1996）**を正とする。RUN-11の「3992」はクラス別行の合算誤り（2倍計上）だったため、本Run以降はsurefire aggregate行を採用する。既存RUN行は不変 |
+| HFP-01-REV-008 | NOTE | FIXED_BY_IMPLEMENTER | ①`FreeeConnectionMapper.updateConnectionStatus`（@Update・`connection_status`と`updated_at`のみのtargeted UPDATE）を追加し、`FreeeReauthMarker.markReauthRequired`を`updateById`（entity全体）から置換（stale上書き余地の排除）。②`FreeeOAuthController`/`FreeePayrollApiController`の各失敗経路を`catch (Exception)`まで拡張し、DB障害等の非業務例外でも固定URI/code・success_flag=falseの監査1 row（status 500）を記録 |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| freee関連全回帰（REV-008後） | 17 class（Baseline/OAuth×2/HrContract/Mapping/ReadModel/S11×2/Reconciliation/CashFlow×2/A11y/SecurityAudit/H2Schema/i18n/JS/ReauthPersistence/ConcurrentRefresh） | 148 | 0 | 0 | 0 | PASS | surefire-reports |
+| REAUTH永続化（targeted UPDATE化後） | `FreeeReauthPersistenceTest` | 1 | 0 | 0 | 0 | PASS | DBにREAUTH_REQUIRED永続化 |
+| 非業務例外の失敗監査 | `FreeeOAuthCallbackWebTest.handleCallbackのDB障害でも失敗監査する`（新規） | 8 | 0 | 0 | 0 | PASS | FREEE_CONNECT 500 falseをverify |
+| verify-like-ci | `scripts/verify-like-ci.ps1` | 未実行 | - | - | - | 実行予定（集計はsurefire aggregate値で記録） | — |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。AC13/AC15はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
+| HFP-01-REV-008 | NOTE | FIXED_BY_IMPLEMENTER | ReviewerのVERIFIED_CLOSED待ち | Reviewer | Round 3 |
