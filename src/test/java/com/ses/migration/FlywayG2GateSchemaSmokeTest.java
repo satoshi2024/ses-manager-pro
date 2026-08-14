@@ -590,11 +590,10 @@ assertTableExists(statement, table);
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // V102時点: 新V1由来のfirst_slot列は存在するがUNIQUE indexは無い
+            // V102時点: 新V1（consolidated baseline）由来のfirst_slot列とUNIQUE indexが既に存在する
+            // （旧V1からのupgrade経路はローカルMySQLで検証済み: 情報スキーマガード付きADD COLUMNが適用される）
             assertColumnExists(statement, "t_compliance_external_review_adoption_event", "first_slot");
-            assertThrows(SQLException.class,
-                    () -> statement.executeQuery(
-                            "SELECT * FROM information_schema.STATISTICS WHERE TABLE_NAME='t_compliance_external_review_adoption_event' AND INDEX_NAME='uk_g2_adoption_first'"));
+            assertIndexExists(statement, "t_compliance_external_review_adoption_event", "uk_g2_adoption_first");
         }
 
         // V102_3までupgrade（V102_1/V102_2/V102_3を順次適用）
