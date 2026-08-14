@@ -33,7 +33,7 @@
 | HFP-02-04 | 02,03 | DONE(queueSend/dispatch/checkpoint/reconciliation) | DONE(13件/0/0/0) | DONE(100同時send・timeout call=1・crash境界・stale claimをtestで実演) | NOT_STARTED | PARTIAL | mutation timeout call count=1を実証。旧send()撤去 |
 | HFP-02-05 | 03,04 | DONE(sync/poll/mapping/monitor) | DONE(12件/0/0/0) | DONE(status 1→2/3、未知status、batch失敗継続、cancel非公開をtestで実演) | NOT_STARTED | PARTIAL | BLK-06未決のためcancel非公開で停止。ADOPT決定後にcancel実装 |
 | HFP-02-06 | 02,03,05 | DONE(FileKind/artifact回収/ledger/三hash) | DONE(17件/0/0/0) | DONE(三PDF取得・別hash・別archive・scan停止時非公開をtestで実演) | NOT_STARTED | PARTIAL | 旧sync()/facade撤去。legacy移行・no-op・相違hash finding実装済 |
-| HFP-02-07 | 04,05,06 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | role/scope/browser evidence |
+| HFP-02-07 | 04,05,06 | DONE(DTO/role/no-store/監査/UI) | DONE(controller 8件・JS syntax・page render) | DONE(role matrix・queue≠sent・結果不明runbook・三artifact UIをtestで実演) | NOT_STARTED | PARTIAL | 390px実機browser Demoはsandbox/環境なしのためHFP-02-09/10対象 |
 | HFP-02-08 | 01-07 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | verify-like-ci skip0 |
 | HFP-02-09 | 00,08 | NOT_STARTED | BLOCKED(sandbox未確認) | BLOCKED | NOT_STARTED | BLOCKED | sandbox credential/受信操作担当 |
 | HFP-02-10 | 08,09 | NOT_STARTED | NOT_STARTED | BLOCKED | NOT_STARTED | BLOCKED | P0/P1=0、運用承認 |
@@ -56,7 +56,8 @@
 | HFP-02-AC-03-01 | 01,04 | ContractDocumentServiceImpl.verifySourcePdf | queueSend系test・SOURCE_HASH_CHANGED test | source preflight | - | VERIFIED | 存在/正規化path/magic/EOF/size/hash一致をqueue時とworker時に検査 |
 | HFP-02-AC-03-02 | 03,04 | CloudSignApiClientImpl(4工程直列) | 公式4工程を厳密な順序で直列実行する test | source PDF wire hash | - | VERIFIED | multipartの送信原本SHA-256一致をrequest captureで証明 |
 | HFP-02-AC-03-03 | 04 | doPreflightAndSend(preflight GET) | PREFLIGHT_MISMATCH test | provider IDs/preflight | - | VERIFIED | file/participant/statusを送信前にGETで再確認 |
-| HFP-02-AC-03-04 | 07 | - | - | browser確認modal | - | NOT_STARTED | - |
+| HFP-02-AC-03-04 | 07 | sendConfirmModal・contract-document.js | queue≠sent test | browser確認modal | - | VERIFIED | 契約番号/hash prefix/宛先/言語を確認後にJSON payloadでqueue |
+| HFP-02-AC-10-02 | 04,07 | queueSendレスポンス(CloudSignOperationDto) | queue≠sent test・UI文言 | queue≠sent UI | - | VERIFIED | 「送信処理を受け付けました」で送信完了を偽装しない |
 | HFP-02-AC-03-05 | 04,07 | CloudSignPayloadHasher・send_payload_sha256 | payload不一致拒否 test・SOURCE_HASH_CHANGED test | payload mismatch | - | IN_PROGRESS | queue/worker両方のhash検証DONE。UI再確認はHFP-02-07 |
 | HFP-02-AC-04-01 | 02,04 | ContractDocumentMapper.casTransition/casClaim/casCheckpoint、ContractDocumentDispatchStateTest | 100 concurrent sendはHFP-02-04 | 状態CAS(version+state)を実DBで検証済 | - | IN_PROGRESS | CAS実装DONE。sendのqueue化はHFP-02-04 |
 | HFP-02-AC-04-02 | 04 | TransactionTemplate checkpoint・assertNoTransaction | transaction active test | transaction inactive | - | VERIFIED | provider呼出しはtx外、checkpointは短いtx |
@@ -81,19 +82,19 @@
 | HFP-02-AC-07-05 | 06 | registerReceived→casArtifactSave(DB失敗はorphan補償) | DB保存失敗はfinding | storage/DB failure injection | - | IN_PROGRESS | orphan safety windowは既存DocumentService規約。保存失敗findingは実装済 |
 | HFP-02-AC-07-06 | 06,07 | downloadSigned/downloadCertificate(ledger経由・別名) | download test | download matrix | - | IN_PROGRESS | 別endpoint/別名はHFP-02-07。no-store/監査もHFP-02-07 |
 | HFP-02-AC-08-01 | 07 | ContractDocumentApiController sync @PreAuthorize | HR拒否 test(green化) | 5role direct API | - | IN_PROGRESS | HR sync拒否DONE。全role matrixはHFP-02-07 |
-| HFP-02-AC-08-02 | 07 | - | - | scope外404 | - | NOT_STARTED | P0 |
-| HFP-02-AC-08-03 | 07,08 | - | - | DTO allow-list | - | NOT_STARTED | P0 |
-| HFP-02-AC-08-04 | 06,07 | - | - | no-store/audit | - | NOT_STARTED | - |
+| HFP-02-AC-08-02 | 07 | assertDocumentAllowed/assertContractVisible | scope外404 test | scope外404 | - | VERIFIED | 親契約DataScope/組織scopeで404秘匿 |
+| HFP-02-AC-08-03 | 07,08 | ContractDocumentListDto/DetailDto/OperationDto | DTO allow-list test | DTO allow-list | - | VERIFIED | path/renderedHtml/errorを非公開 |
+| HFP-02-AC-08-04 | 06,07 | CacheControl.noStore・ApiAuditFilter isDownloadUri | no-store/attachment test | no-store/audit | - | VERIFIED | list/detail/artifactはno-store、download成功/拒否は監査対象 |
 | HFP-02-AC-08-05 | 03,07,08 | - | - | log capture | - | NOT_STARTED | P0 |
-| HFP-02-AC-08-06 | 07 | - | - | CSRF | - | NOT_STARTED | - |
+| HFP-02-AC-08-06 | 07 | 既存Cookie CSRF維持 | csrf付きrequestのみ成功 | CSRF | - | VERIFIED | send/sync/cancel(非公開)は更新系としてCSRF対象 |
 | HFP-02-AC-09-01 | 03,04,05 | CloudSignErrorClassifier・CloudSignApiException(uncertain) | error分類/504/timeout test | error/result-unknown matrix | - | IN_PROGRESS | client分類DONE。dispatchへの接続はHFP-02-04 |
 | HFP-02-AC-09-02 | 03,05 | CloudSignRateLimiter | CloudSignRateLimiterTest(4) | token/rate/retry | - | IN_PROGRESS | budget≤800DONE。poll/syncへの接続はHFP-02-05 |
 | HFP-02-AC-09-03 | 03,06 | CloudSignProperties.maxPdfBytes・streamToTempFile | download size上限 test | body/file limits | - | IN_PROGRESS | download上限DONE。upload側・binary非展開はHFP-02-04/06 |
 | HFP-02-AC-09-04 | 05,06,10 | - | - | alert matrix | - | NOT_STARTED | - |
-| HFP-02-AC-10-01 | 05,07 | - | - | state/role UI/API | - | NOT_STARTED | - |
+| HFP-02-AC-10-01 | 05,07 | 状態別button・sec:authorize + API PreAuthorize | 5role direct API test | state/role UI/API | - | VERIFIED | 下書き以外send不可・terminal再送不可・HR更新不可 |
 | HFP-02-AC-10-02 | 04,07 | - | - | queue≠sent UI | - | NOT_STARTED | - |
-| HFP-02-AC-10-03 | 04,07,10 | - | - | reconciliation UI/runbook | - | NOT_STARTED | - |
-| HFP-02-AC-10-04 | 07 | - | - | desktop/390px | - | NOT_STARTED | - |
+| HFP-02-AC-10-03 | 04,07,10 | runbook表示・operation ID表示 | result-unknown UI test | reconciliation UI/runbook | - | IN_PROGRESS | 再送button非表示+runbookDONE。運用実行はHFP-02-10 |
+| HFP-02-AC-10-04 | 07 | table-responsive・text+icon併用 | PageRenderingTest・JS syntax | desktop/390px | - | PARTIAL | 実機browser DemoはHFP-02-09/10(環境) |
 | HFP-02-AC-11-01 | 01,03,04,05,08 | - | - | contract/concurrency suite | - | NOT_STARTED | - |
 | HFP-02-AC-11-02 | 07,08 | - | - | controller security suite | - | NOT_STARTED | - |
 | HFP-02-AC-11-03 | 06,08 | - | - | file failure matrix | - | NOT_STARTED | - |

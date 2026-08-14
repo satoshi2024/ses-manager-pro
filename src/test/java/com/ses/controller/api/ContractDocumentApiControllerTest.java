@@ -22,6 +22,9 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -50,6 +53,8 @@ class ContractDocumentApiControllerTest {
     private OrganizationScopeService organizationScopeService;
     @MockBean
     private com.ses.service.cloudsign.CloudSignSyncService cloudSignSyncService;
+    @MockBean
+    private com.ses.service.cloudsign.CloudSignArtifactService cloudSignArtifactService;
 
     @BeforeEach
     void allowFullScope() {
@@ -97,9 +102,8 @@ class ContractDocumentApiControllerTest {
     void downloadにnoStoreとContentDispositionのattachmentがない() throws Exception {
         when(service.download(10L)).thenReturn("%PDF-1.4 dummy".getBytes());
 
-        mockMvc.perform(get("/api/contract-documents/10/download"))
+        mockMvc.perform(get("/api/contract-documents/10/artifacts/source"))
                 .andExpect(status().isOk())
-                // red: 現行はno-storeもContent-Dispositionも付けない
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().string("Content-Disposition",
                         org.hamcrest.Matchers.startsWith("attachment; filename=")));
@@ -108,8 +112,83 @@ class ContractDocumentApiControllerTest {
     @Test
     @WithMockUser(roles = {"HR"})
     void HRはmanualSyncを実行できてしまう() throws Exception {
-        // red: HRは参照のみでありsync更新APIは403になるべきだが、現行は@PreAuthorizeで許可している
+        // HFP-02-05でHRを拒否済み: 参照のみ（HFP-02-AC-08-01）
         mockMvc.perform(post("/api/contract-documents/10/sync").with(csrf()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = {"HR"})
+    void HRは送信queueを受け付けられない() throws Exception {
+        mockMvc.perform(post("/api/contract-documents/10/send")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractNo\":\"C-1\",\"templateVersion\":1,\"recipientName\":\"x\","
+                                + "\"recipientEmail\":\"x@example.invalid\",\"title\":\"t\",\"languageCode\":\"ja\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = {"要員"})
+    void 要員は契約書APIへアクセスできない() throws Exception {
+        mockMvc.perform(get("/api/contract-documents/contract/100"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/contract-documents/10/sync").with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = {"営業"})
+    void 営業は送信queueとsyncを実行できる() throws Exception {
+        com.ses.entity.ContractDocument queued = new com.ses.entity.ContractDocument();
+        queued.setId(10L);
+        queued.setOperationId("op-1");
+        queued.setDispatchState("QUEUED");
+        when(service.queueSend(eq(10L), any())).thenReturn(queued);
+
+        mockMvc.perform(post("/api/contract-documents/10/send")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractNo\":\"C-1\",\"templateVersion\":1,\"recipientName\":\"x\","
+                                + "\"recipientEmail\":\"x@example.invalid\",\"title\":\"t\",\"languageCode\":\"ja\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dispatchState").value("QUEUED"));
+
+        mockMvc.perform(post("/api/contract-documents/10/sync").with(csrf()))
+                .andExpect(status().isOk());
+        verify(cloudSignSyncService).syncDocument(10L);
+    }
+
+    @Test
+    @WithMockUser(roles = {"管理者"})
+    void scope外の契約は404で存在を漏らさない() throws Exception {
+        when(dataScopeService.isScoped()).thenReturn(true);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(dataScopeService.allowedContractIds()).thenReturn(java.util.Set.of(999L));
+
+        mockMvc.perform(get("/api/contract-documents/contract/100"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @WithMockUser(roles = {"管理者"})
+    void sendはqueue受付であり送信完了と偽装しない() throws Exception {
+        com.ses.entity.ContractDocument queued = new com.ses.entity.ContractDocument();
+        queued.setId(10L);
+        queued.setOperationId("op-2");
+        queued.setDispatchState("QUEUED");
+        when(service.queueSend(eq(10L), any())).thenReturn(queued);
+
+        mockMvc.perform(post("/api/contract-documents/10/send")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractNo\":\"C-1\",\"templateVersion\":1,\"recipientName\":\"x\","
+                                + "\"recipientEmail\":\"x@example.invalid\",\"title\":\"t\",\"languageCode\":\"ja\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dispatchState").value("QUEUED"))
+                .andExpect(jsonPath("$.data.operationId").value("op-2"));
+        // queue受付であり、provider送信（artifact回収等の同期処理）は行われない
+        verify(cloudSignSyncService, never()).syncDocument(any());
+        verifyNoInteractions(cloudSignArtifactService);
     }
 }
