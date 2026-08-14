@@ -56,6 +56,34 @@ case "$query" in
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
     exit 0
     ;;
+  *MAX*version*FROM*flyway_schema_history*)
+    printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+    exit 0
+    ;;
+  *flyway_schema_history*success*)
+    printf '%s\n' "${FAKE_FLYWAY_FAILED:-0}"
+    exit 0
+    ;;
+  *marker-after*)
+    printf '%s\n' "${FAKE_MARKER_AFTER:-0}"
+    exit 0
+    ;;
+  *marker-before*)
+    printf '%s\n' "${FAKE_MARKER_BEFORE:-1}"
+    exit 0
+    ;;
+  *CHECK*TABLE*)
+    printf '%s\n' "${FAKE_CHECK_TABLE:-OK}"
+    exit 0
+    ;;
+  *storage_key*|*stored_name*|*pdf_path*|*signed_pdf_path*|*certificate_path*|*skill_sheet_path*)
+    printf '%s\n' "${FAKE_REF_KEYS:-}"
+    exit 0
+    ;;
+  *COUNT*)
+    printf '%s\n' "${FAKE_COUNT:-0}"
+    exit 0
+    ;;
   *SELECT*@@version*)
     printf '%s\n' "${FAKE_MYSQL_STATUS_ROW:-8.0.36	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
     exit 0

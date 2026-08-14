@@ -103,7 +103,7 @@
   - **Evidence:** target fingerprint、guard report、restic/manifest result、replay start-stop、mysql connection count、source before/after SHA。接続秘密は除外。
   - **失敗/rollback:** target を `FAILED_RESTORE` として隔離し公開しない。再試行は別の空 target/DB で行い、途中 DB を再利用しない。
 
-- [ ] **HFP-03-008 — DB/uploads/application validation を実装する**
+- [x] **HFP-03-008 — DB/uploads/application validation を実装する**
 
   - **依存:** HFP-03-007
   - **対応要求:** HFP-03-RQ-007、HFP-03-RQ-011
