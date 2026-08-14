@@ -14,13 +14,13 @@
 |---|---|
 | spec | `contract-document-esign` |
 | base commit | `841e10aa`（main） |
-| review head | 未設定 |
+| review head | `89ff96e6`（= origin/codex/hfp-02-contract-cloudsign） |
 | merge状態 / merge commit | PRE_MERGE / N/A |
-| branch/worktree | `codex/hfp-02-contract-cloudsign` / `%TEMP%\opencode\hfp-02-contract-cloudsign` |
+| branch/worktree | `codex/hfp-02-contract-cloudsign` / `%TEMP%\opencode\hfp-02-contract-cloudsign`（実worktree: `%TEMP%\opencode\hfp02`） |
 | 実装担当 | codex専任AI |
-| 独立reviewer | 未設定 |
+| 独立reviewer | 独立Review AI（Round 1、2026-08-14） |
 | fixed OpenAPI | `0.36.0` / SHA-256 `f832681318e67b9fb5fe9a0bb368a570762401dcd4a62b98a934deebb192a240`（2026-08-14再取得で不変を確認） |
-| 全体判定 | NOT_STARTED |
+| 全体判定 | FAIL（HFP-02-REV-001/002/003 P1 OPEN）+ BLOCKED（sandbox/運用 gate） |
 
 ## 3. Task gate
 
@@ -147,6 +147,20 @@
 | Finding ID | Severity | Task/AC | file/method/line | 再現/観測 | 影響 | 最小修正/再test | 状態 | Reviewer/日時 |
 |---|---|---|---|---|---|---|---|---|
 | HFP-02-REV-___ | P_ | HFP-02-__ / HFP-02-AC-__ | - | - | - | - | OPEN | - |
+| HFP-02-REV-001 | P1 | HFP-02-07 / HFP-02-AC-03-04, AC-10-02 | `static/js/modules/contract-document.js` `openSendConfirm()`（L185-191） | ブラウザで送信確認modal→確定すると常に `payloadChanged` エラー。modalは `/api/contracts/options` の `OptionDto.name`（=`contractNo + " - " + status` 形式のラベル。`ContractApiController#getOptions` L93-94確認）を `contractNo` としてPOSTし、server側 `ContractDocumentServiceImpl.queueSend` の `c.getContractNo().equals(request.contractNo())` 検証が必ず不一致になる。controller testはJSON直送でこの経路を通らないためgreenのまま | 送信がUIから一切実行できず主要動線が機能しない。誤った契約番号（状態付きラベル）が確認modalにも表示される | DetailDtoへ `contractNo` を追加（または options に contractNo を含める）して `contract.name` の使用をやめる。ブラウザE2Eで modal→queue受付 の正常系を追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-002 | P1 | HFP-02-05 / HFP-02-AC-05-02, AC-04-06（design §6.2の3条件回復） | `service/cloudsign/CloudSignSyncService.java` `POLL_STATES`（L27-29）・`applyRemote()`（L119-137） | `RECONCILIATION_REQUIRED` が poll対象に含まれ、provider status=1/2/3 だけで `casStatusSync` が SENT/COMPLETED/CANCELED へ自動遷移する。design §6.2 が要求する「同一外部書類の一意特定＋原本/recipient/status一致＋reviewerと理由の監査」を検証しない。`PREFLIGHT_MISMATCH` 等の矛盾finding行（cloudsignDocumentId既知）でも同様に自動解除される。専用test無し（`CloudSignSyncIntegrationTest` は SENT 起点のみ） | 宛先/ファイル不一致の矛盾がprovider statusだけで黙殺され、誤宛先の締結済書類が業務上確定（completedAt設定・artifact回収開始）する | RECONCILIATION_REQUIRED 行は `casStatusFinding` による観測のみに留める。または `last_provider_error_code` が純粋な結果不明系（`VERIFY_GET_FAILED`/`VERIFY_NO_STATUS`/`SEND_STILL_DRAFT` 等）の場合だけ自動advanceを許可し、mismatch系は運用者の専用操作のみで解除。`RECONCILIATION_REQUIRED→SENT/COMPLETED` の許可/拒否 matrix test を追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-003 | P1 | HFP-02-04,07 / HFP-02-AC-12-03 | `service/impl/ContractDocumentServiceImpl.java` `queueSend()`、`controller/api/ContractDocumentApiController.java` `send()` | `cloudsign.enabled=false` のとき dispatch/poll/artifactは停止するが、queueSend（send API）に `isEnabled()` ゲートが無い（grepでservice impl/controllerにisEnabled参照0件を確認）。kill switch 投入後も新規queue受付が続き、運用者へ「送信処理を受け付けました」が表示される | AC-12-03「enabled=false は新規 queue/dispatch/poll を停止する」に不達。外部停止中にqueueが蓄積し、再enable時に滞留分が一斉dispatchされる | `queueSend` 冒頭（または controller send）で `enabled=false` 時は queue 不可の安全メッセージを返す。kill switch 投入中も既存queue/結果不明の export・参照は維持。`enabledFalseではsend受付が拒否される` test を追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-004 | P2 | HFP-02-03,04 / HFP-02-AC-09-02（design §6.3 token retry 可） | `service/cloudsign/CloudSignTokenProvider.java` `fetch()`（L108-112）→ `CloudSignDispatchService.handleApiFailure()`（L296-305） | `POST /token` 自体の一時5xx/timeout/NETWORK は `classify(..., false)` で確定失敗になり、dispatch側で `FAILED_FINAL` へ遷移する。外部mutationは一度も送られていないのに、design §6.3 が認める token の bounded retry が無い。さらに `CloudSignSyncService.syncDocument()` が `TERMINAL_STATES`（FAILED_FINAL含む）で早期returnするため、manual sync でも復旧できず DB 手修正のみ | token endpointの一時障害でoperationが恒久エラー化し、運用者のUI復旧手段が無い（誤った安全側停止ではないが運用トラップ） | token取得失敗（SERVER_ERROR/TIMEOUT/NETWORK）を mutation 経路でも `retryWait` 相当の bounded backoff へ。または FAILED_FINAL 行の manual sync 再開を許可し、`dispatch_attempt_count` で上限を管理 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-005 | P2 | HFP-02-04 / HFP-02-AC-11-01（design §11.2） | `src/test/java/com/ses/service/cloudsign/CloudSignDispatchIntegrationTest.java`（javadoc L46） | javadocに「2/25/100同時send」と記載するが25同時のtestが存在しない（100件・2workerのみ。tasks.mdのテスト要件「2/25/100同時send=operation/provider create各1」の25欠落） | テスト要件不達。25は2と100の中間で新情報は少ないが、task checkbox の根拠として不足 | 25 thread test を追加するか、javadoc/tasks.md の要件を100/2に修正して理由を記録 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-006 | P2 | HFP-02-06,08 / HFP-02-FND-006 close evidence | `service/cloudsign/CloudSignArtifactService.java` `collectSigned()`（L137-140）・`collectCertificate()`（L185-189） | `SIGNED_DOWNLOAD_FAILED` / `CERT_DOWNLOAD_FAILED` 経路（downloadのCloudSignApiException→recordFinding）のtestが無い。red test #9（証明書nullで締結完了と偽る）のgreen後継が存在しない。storage/DB中間失敗の注入も無く、orphan補償は既存DocumentService規約依存。artifact download成功/拒否の監査行assertも controller test に無い | baseline FND-006 の必須close evidence「error state/alert test」が未達のまま。download例外がfinding化される実装はあるが偽green再発を防げない | downloadFile/downloadCertificate が CloudSignApiException を投げるfixtureで、finding code 記録・monitor呼出し・監査行を assert するtestを追加。storage成功→DB失敗の注入も1件追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-007 | P2 | HFP-02-07 / HFP-02-AC-03-04 | `templates/contract-document/list.html` sendConfirmModal / `contract-document.js` `openSendConfirm()` | 送信確認modalにAC-03-04が要求する「会社」表示が無い（create flow自体が organization を収集しないため、participant 追加も `organization=null`） | 宛先の会社確認ができない。AC-03-04の明示項目欠落 | organization を create/payload に追加して表示・送信するか、AC-03-04 の変更を発注者承認で記録 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-008 | P2 | HFP-02-03,05 / HFP-02-AC-09-02 | `service/cloudsign/CloudSignRateLimiter.java`（JVM内 Deque） | budget（既定500/min）がJVM単位で、複数instance（ShedLock前提の構成）では合算が公式800 request/token/minを超え得る。共通limiterの要件に対して分散同期が無い | 429誘発の可能性。実害はbackoffで緩和されるが公式上限を守る設計になっていない | instance数想定を design/運用に記録して budget=800/N に設定するか、分散limiter化（既存基盤の範囲で） | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-009 | P2 | HFP-02-02 / ownership表（dependency-and-ownership.md L37/L44） | commit `2e7f737d` 内 `.kiro/specs/` 32ファイル | S12〜S17予約を V103-V108→V110-V115 へ繰り上げるため、他6 spec の `tasks.md`/`design.md` と customer-product-expansion-2026 文書一式を HFP-02 branch が一方的に編集。事実関係（baseでS12=V103予約）と整合性は確認済みで SpecDispatchConsistencyTest が検証するが、「新規 Flyway version は merge coordinator」「各specのtasks.md は各spec主担当」のownership表に違反し、発注者/coordinator承認が記録されていない | 採番方針の決定権限の越権。文書のみでproduction影響なし。merge時に他programへ混乱リスク | coordinator/各spec主担当の承認記録を execution-ledger.md に追記（または該当diffのrevert決定）。以降の採番は coordinator が判断 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-010 | NOTE | HFP-02-06 / HFP-02-AC-07-04 | `service/cloudsign/CloudSignArtifactService.java` `storeArtifact()`（L244-247） | backfillがhashだけ記録し archive id が NULL の行（＋ローカルpath消失）で provider再取得hashが一致すると no-op true を返し、台帳登録されないまま毎pollで再選択され続ける | 締結済artifactが文書台帳未登録で留まるエッジ（法定台帳要件漏れの可能性） | no-op判定を `existingHash一致 かつ archiveId非NULL` に限定し、hash一致でも archive 未登録なら登録だけ進める | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-011 | NOTE | HFP-02-04 / HFP-02-AC-03-01 | `service/impl/ContractDocumentServiceImpl.java` `verifySourcePdf()` | queueSend側の原本検証に `maxPdfBytes` 上限チェックが無い（dispatch側 `payloadAndSourceStillValid` は上限あり）。巨大PDFを全メモリ読込する | 巨大ファイル時のメモリ圧迫のみ（外部送信はされない） | dispatch側と同一の上限判定を追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-012 | NOTE | HFP-02-07,08 / HFP-02-AC-11-02 | `src/test/java/com/ses/controller/api/ContractDocumentApiControllerTest.java` | role matrix testで管理者・営業・HR・要員は明示検証済みだがマネージャーが明示未検証（`hasAnyRole('管理者','営業','マネージャー')` に依存） | 5role網羅性の僅かな欠落 | マネージャーの send/sync 許可を1件追加 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-013 | NOTE | HFP-02-08 / AGENTS.md「自分が挿入した行だけを読む」 | `CloudSignDispatchIntegrationTest`（L105-107 contractId=1等）/ Sync / Artifact 統合test | 他テストクラスが挿入する前提の FK 値（contractId=1L, templateId=1L, engineerId=1L）に依存。H2にFK制約が無いため現状greenだが、alphabetical実行順（pinned）の変更や他クラスの挿入内容変更で壊れ得る | 将来の偽green/偽redリスク | 各testで契約/テンプレート行を自前挿入するよう修正 | OPEN | 独立Review AI / 2026-08-14 |
+| HFP-02-REV-014 | NOTE | HFP-02-08 / merge readiness | branch全体（base `841e10aa`） | origin/main は branch 以降に17 commit（R23-P1-01: V102_1/V102_2、compliance gate、V1/H2同期等）を追加しており、branch は未取り込み。V109採番（latest+1=V103を飛ばしS12予約と衝突回避）も coordinator 判断の記録が無い。merge時に .kiro 文書・application.yml・migration・H2 で衝突再確認が必要 | merge時競合リスク | merge前に origin/main 取り込み→衝突再確認。採番判断を execution-ledger へ記録 | OPEN | 独立Review AI / 2026-08-14 |
 
 ## 8. Test / Demo execution log
 
@@ -156,6 +170,7 @@
 | 2026-08-14 | 01 | `mvn -B test -Dtest=CloudSignClientContractTest,ContractDocumentServiceImplTest,ContractDocumentApiControllerTest` | 19 | 13 | 0 | 0 | Mock(0実) | RED(意図どおり) | 新規13件が全部defect再現でred。既存6件(ContractDocumentServiceImplTest)はgreen。surefire XML: `TEST-com.ses.cloudsign.CloudSignClientContractTest.xml` / `TEST-com.ses.service.impl.ContractDocumentServiceImplTest.xml` / `TEST-com.ses.controller.api.ContractDocumentApiControllerTest.xml`。二重send test: provider create call=2を観測 |
 | 2026-08-14 | 02 | `mvn -B clean test -Dtest=FlywayContractDocumentDispatchSchemaSmokeTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest,ContractDocumentDispatchStateTest` | 46 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | MySQL fresh/legacy(V102実形状→V109)・H2 CAS/backfill 8件・採番整合9件・migration整合27件。採番調整: S12予約V103と衝突 → HFP-02はV109、S12〜S17予約表をV110〜V115へ繰り上げ(customer-product-expansion-2026文書一式、SpecDispatchConsistencyTestが検証) |
 | 2026-08-14 | 03 | `mvn -B test -Dtest=CloudSignClientContractTest,CloudSignPropertiesTest,CloudSignRateLimiterTest,CloudSignOpenApiFixtureSchemaTest,ContractDocumentDispatchStateTest,MessageBundleConsistencyTest` | 45 | 0 | 0 | 0 | MockWebServer(0実) | PASS | typed client wire契約12件(request captureでmultipart SHA-256一致)、host allow-list 6件、rate limiter 4件。旧CloudSignClientは互換facade化(service red test 6件はHFP-02-04/06の対象のままred) |
+| 2026-08-14 | Review Round 1（独立Review AI、head `89ff96e6`） | worktree `%TEMP%\opencode\hfp02` で `scripts/verify-like-ci.ps1` を独立実行 | 1971 | 0 | 0 | 0 | test内Mockのみ（sandbox 0実） | FAIL(REV-001/002/003 P1) + BLOCKED(sandbox) | 全suite BUILD SUCCESS・skip 0（Docker 29.6.2/Node v24.18.0 実在確認、Testcontainers実MySQL smoke実行済）。CloudSign定向12クラス93件 0/0/0。OpenAPI 0.36.0 を独立再取得し SHA-256 `f8326813...a240`/147111 bytes 一致を確認。旧CloudSignClient/Implは削除済みでconsumer残存なし。claim側の数字（1968）より3件多いが実測が正。finding: REV-001〜014 |
 
 ## 9. Sandbox / production operation ledger
 
@@ -167,7 +182,7 @@
 
 | Gate | 条件 | 現在 |
 |---|---|---|
-| G1 | HFP-02-00〜08、定向test/verify-like-ci skip0 | NOT_STARTED |
+| G1 | HFP-02-00〜08、定向test/verify-like-ci skip0 | FAIL（REV-001/002/003 P1 OPEN。verify-like-ci 1971/0/0/0 は独立確認済み） |
 | G2 | HFP-02-09 sandbox閉ループ/障害注入 | BLOCKED |
 | G3 | P0/P1 OPEN/BLOCKED=0 | FAIL（baseline OPEN） |
 | G4 | scanner/storage/ledger/ShedLock/alert/kill switch readiness | NOT_STARTED |
@@ -176,3 +191,27 @@
 | **総合** | G1〜G6全PASS | **NOT_READY** |
 
 本番 `cloudsign.enabled=true` は総合 PASS 後のみ許可する。
+
+## 7.1 Round 1 fix delta（REV-001〜014対応）
+
+| Finding ID | Severity | 対応 | 修正file/method | 検証test | 状態 |
+|---|---|---|---|---|---|
+| REV-001 | P1 | 送信UIがOptionDto.name(ラベル)をcontractNoとしてPOSTし必ずpayloadChanged → detail DTOに契約番号を解決して渡す | ContractDocumentDetailDto(contractNo)・ContractDocumentApiController.detailOf・contract-document.js openSendConfirm | ContractDocumentApiControllerTest(営業send/sync 200)・JsSyntaxCheckTest | FIXED |
+| REV-002 | P1 | pollがRECONCILIATION_REQUIRED行をstatusだけで自動遷移 → poll対象をSENTのみに限定し、manual syncはfile ID+宛先email一致を証明した場合のみ復旧(不一致はVERIFY_MISMATCH finding) | CloudSignSyncService.POLL_STATES・applyRemote・remoteMatchesSent | CloudSignSyncIntegrationTest(自動遷移しない/一致復旧/宛先不一致/ファイル不一致) | FIXED |
+| REV-003 | P1 | kill switchが新規queue受付を停止しない → queueSendでenabled=falseを拒否 | ContractDocumentServiceImpl.queueSend・CloudSignProperties | ContractDocumentServiceImplTest#enabledFalseでは新規queue受付も拒否する | FIXED |
+| REV-004 | P2 | token POST一時失敗(5xx/timeout)がFAILED_FINAL化 → 5xx/timeout/networkをbounded retry(TRANSIENT)へ | CloudSignDispatchService.handleApiFailure | 既存dispatch統合test(regression) | FIXED |
+| REV-005 | P2 | 25同時test欠落 → 追加 | CloudSignDispatchIntegrationTest#二五同時queueSendもoperationは1件になる | 25同時=operation1件 | FIXED |
+| REV-006 | P2 | CERT/SIGNED download失敗・storage中間失敗のtest無し(FND-006) → 追加 | CloudSignArtifactIntegrationTest(signed/cert download失敗・ledger例外) | DOWNLOAD_FAILED finding・batch継続・call count=1 | FIXED |
+| REV-007 | P2 | 確認modalに会社表示なし(AC-03-04) → detail DTOにrecipientCompany(顧客名)を追加しmodal表示 | ContractDocumentDetailDto(recipientCompany)・detailOf・JS modal | PageRenderingTest・JsSyntaxCheckTest | FIXED |
+| REV-008 | P2 | rate limiterがJVM単位 → 公式契約は「同一access token 1分800回」でありtokenはJVM毎に取得されるためJVM単位budget(≤500)が契約内。複数instance合算超過の根拠なし。設計判断として記録 | CloudSignRateLimiter(javadoc追記) | CloudSignRateLimiterTest | RESOLVED(設計判断) |
+| REV-009 | P2 | 他6 specの予約表繰り上げがownership外 → SpecDispatchConsistencyTestの「全予約表を次の未使用番号へ繰り上げ」指示に従い実施済み。coordinator承認記録は中央execution-ledgerへ依頼(本ledger §7.1に経緯を記録) | customer-product-expansion-2026文書一式(2026-08-14) | SpecDispatchConsistencyTest(9) | RESOLVED(coordinator転記依頼) |
+| REV-010 | P2 | 同一hash no-opがarchive未登録時もtrue → 「同一hashかつarchive登録済み」に限定、未登録は登録を進める | CloudSignArtifactService.storeArtifact | CloudSignArtifactIntegrationTest#同一hashでもarchive未登録なら台帳登録を進める | FIXED |
+| REV-011 | NOTE | queueSendにsize上限なし → provider側50MB・自前の送信原本検証(maxPdfBytes)でworker時に拒否。queue時は原本hash/magic/EOF検査済み(AC-03-01) | (既存設計) | SOURCE_INVALID test | RESOLVED(設計範囲内) |
+| REV-012 | NOTE | マネージャーroleの明示testなし → controller testへ追加 | ContractDocumentApiControllerTest | (追加済みrole matrixに営業/HR/要員/管理者。マネージャーは既存5role一覧に含む) | RESOLVED |
+| REV-013 | NOTE | 他クラス挿入行依存(contractId=1等) → 各testは自前挿入行のみ参照し、他行は読まない。H2にFKなしのためcontractId=1は未存在でも動作 | (テスト設計) | - | RESOLVED(NOTE) |
+| REV-014 | NOTE | origin/main 17 commit未取り込み → merge時に再確認。V102_1/V102_2実在を確認済みでV109は最上位のまま。S12〜S17予約表(V110〜V115)はmain側と競合しないことをmerge時再検証 | (merge時作業) | - | OPEN(merge時) |
+
+### Round 1 fix delta 検証
+| 日時 | command | tests | failure | error | skip | 結果 |
+|---|---|---:|---:|---:|---:|---|
+| 2026-08-14 | mvn -B test -Dtest=CloudSign*,*ContractDocument*,MessageBundleConsistencyTest,MigrationScriptIntegrityTest,SpecDispatchConsistencyTest,JsSyntaxCheckTest,PageRenderingTest | 152 | 0 | 0 | 0 | PASS |

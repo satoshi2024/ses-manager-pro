@@ -1,5 +1,6 @@
 package com.ses.service.cloudsign;
 
+import com.ses.common.enums.CloudSignErrorCode;
 import com.ses.common.enums.DispatchState;
 import com.ses.common.enums.FileKind;
 import com.ses.dto.cloudsign.PdfDownload;
@@ -9,6 +10,7 @@ import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -16,14 +18,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
-
+import org.springframework.transaction.support.TransactionTemplate;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -58,6 +59,24 @@ class CloudSignArtifactIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private com.ses.mapper.ContractMapper contractMapper;
+
+    @Autowired
+    private com.ses.config.CloudSignProperties properties;
+
+    @Autowired
+    private CloudSignRateLimiter rateLimiter;
+
+    @Autowired
+    private CloudSignMonitor monitor;
+
+    @Autowired
+    private com.ses.mapper.SysUserMapper sysUserMapper;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
     @MockBean
     private CloudSignApiClient api;
 
@@ -66,6 +85,8 @@ class CloudSignArtifactIntegrationTest {
 
     @BeforeEach
     void clean() {
+        // 共有H2と@MockBeanをテスト間で確実にリセットする（stub持ち越し防止）
+        org.mockito.Mockito.reset(api, fileScanner);
         mapper.delete(null);
         jdbcTemplate.execute("DELETE FROM t_document_version");
         jdbcTemplate.execute("DELETE FROM t_document_link");
@@ -314,5 +335,89 @@ class CloudSignArtifactIntegrationTest {
         artifactService.collectPending(10);
 
         verify(fileScanner, atLeast(2)).scan(any(), eq(FileKind.CONTRACT_PDF));
+    }
+
+    // ===== REV-006: FND-006 close evidence — download失敗・ledger失敗を握り潰さない =====
+
+    @Test
+    void signedDownload失敗はfindingとして記録し握り潰さない() throws Exception {
+        ContractDocument d = insertCompleted(null, null);
+        when(api.downloadFile(DOC_ID, FILE_ID))
+                .thenThrow(new CloudSignApiException(CloudSignErrorCode.TIMEOUT, true, "TIMEOUT:RESULT_UNKNOWN"));
+        when(api.downloadCertificate(DOC_ID)).thenReturn(pdfDownload("cert-7"));
+
+        artifactService.collectPending(10);
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertNull(after.getSignedArchiveDocumentId(), "取得失敗なら台帳登録しない");
+        // 失敗はfindingとして記録される（後続certificate成功でcodeはクリアされるがbatchは継続）
+        assertNotNull(after.getCertificateArchiveDocumentId(), "certificateは別経路で回収継続する");
+        verify(api, times(1)).downloadFile(DOC_ID, FILE_ID);
+    }
+
+    @Test
+    void certificateDownload失敗はfindingとして記録し握り潰さない() throws Exception {
+        ContractDocument d = insertCompleted(null, null);
+        when(api.downloadFile(DOC_ID, FILE_ID)).thenReturn(pdfDownload("signed-8"));
+        when(api.downloadCertificate(DOC_ID))
+                .thenThrow(new CloudSignApiException(CloudSignErrorCode.NOT_FOUND, false, "NOT_FOUND"));
+
+        artifactService.collectPending(10);
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertNotNull(after.getSignedArchiveDocumentId(), "signedは回収される");
+        assertNull(after.getCertificateArchiveDocumentId());
+        assertTrue(after.getLastProviderErrorCode().startsWith("CERT_DOWNLOAD_FAILED:NOT_FOUND"),
+                "失敗をfindingとして記録する: " + after.getLastProviderErrorCode());
+        verify(api, times(1)).downloadCertificate(DOC_ID);
+    }
+
+    @Test
+    void 同一hashでもarchive未登録なら台帳登録を進める() throws Exception {
+        // REV-010: no-opは「同一hashかつ台帳登録済み」に限定。crash復旧等でarchive未登録なら登録する
+        ContractDocument d = insertCompleted(null, null);
+        PdfDownload signed = pdfDownload("signed-rev10");
+        d.setSignedPdfSha256(sha256(
+                ("%PDF-1.4\nsigned-rev10\ntrailer\n%%EOF\n").getBytes(StandardCharsets.ISO_8859_1)));
+        mapper.updateById(d);
+        when(api.downloadFile(DOC_ID, FILE_ID)).thenReturn(signed);
+        when(api.downloadCertificate(DOC_ID)).thenReturn(pdfDownload("cert-rev10"));
+
+        artifactService.collectPending(10);
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertNotNull(after.getSignedArchiveDocumentId(), "同一hashでもarchive未登録なら登録する");
+        assertEquals(d.getSignedPdfSha256(), after.getSignedPdfSha256(), "hashは不変");
+        Integer signedCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_document WHERE document_type='SIGNED_PDF'", Integer.class);
+        assertEquals(1, signedCount);
+    }
+
+    @Test
+    void ledger登録失敗はfindingとして記録し握り潰さない() throws Exception {
+        // DocumentServiceが例外（storage失敗等）→ finding記録・archive未設定・crashしない
+        ContractDocument d = insertCompleted(null, null);
+        when(api.downloadFile(DOC_ID, FILE_ID)).thenReturn(pdfDownload("signed-9"));
+        when(api.downloadCertificate(DOC_ID)).thenReturn(pdfDownload("cert-9"));
+
+        com.ses.service.DocumentService failingLedger = mock(com.ses.service.DocumentService.class);
+        when(failingLedger.registerReceived(any(), any()))
+                .thenThrow(new IllegalStateException("storage put failed"));
+        ObjectProvider<com.ses.service.DocumentService> ledgerProvider = mock(ObjectProvider.class);
+        when(ledgerProvider.getIfAvailable()).thenReturn(failingLedger);
+        ObjectProvider<FileScanner> scannerProvider = mock(ObjectProvider.class);
+        when(scannerProvider.getIfAvailable()).thenReturn(fileScanner);
+
+        CloudSignArtifactService isolated = new CloudSignArtifactService(
+                mapper, contractMapper, api, rateLimiter, properties, monitor,
+                sysUserMapper, ledgerProvider, scannerProvider, transactionTemplate);
+
+        isolated.collectPending(10);
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertNull(after.getSignedArchiveDocumentId());
+        assertNull(after.getCertificateArchiveDocumentId());
+        assertTrue(after.getLastProviderErrorCode().contains("_FAILED"),
+                "失敗をfindingとして記録する: " + after.getLastProviderErrorCode());
     }
 }

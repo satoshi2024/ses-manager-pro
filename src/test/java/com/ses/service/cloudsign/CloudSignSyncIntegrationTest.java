@@ -251,4 +251,67 @@ class CloudSignSyncIntegrationTest {
                     "decline client methodを実装してはならない（BLK-06未決）");
         }
     }
+
+    // ===== REV-002: RECONCILIATION_REQUIREDは専用操作（manual sync）でのみ3条件検証後に復旧 =====
+
+    @Test
+    void pollはRECONCILIATION_REQUIRED行を自動遷移しない() {
+        ContractDocument d = insert(DispatchState.RECONCILIATION_REQUIRED, DOC_ID, null);
+        when(api.getDocument(DOC_ID)).thenReturn(remote(2));
+
+        syncService.pollDue(10);
+
+        verify(api, never()).getDocument(any());
+        assertEquals(DispatchState.RECONCILIATION_REQUIRED.name(),
+                mapper.selectById(d.getId()).getDispatchState(),
+                "pollが結果不明行を自動遷移してはならない");
+    }
+
+    @Test
+    void manualSyncはfileIDと宛先が一致するときだけ結果不明行を復旧する() {
+        // 一致ケース: remoteに送信時file IDと宛先emailが存在 → 締結済へ
+        ContractDocument ok = insert(DispatchState.RECONCILIATION_REQUIRED, DOC_ID, null);
+        when(api.getDocument(DOC_ID)).thenReturn(remote(2));
+
+        syncService.syncDocument(ok.getId());
+
+        ContractDocument after = mapper.selectById(ok.getId());
+        assertEquals(DispatchState.COMPLETED.name(), after.getDispatchState());
+    }
+
+    @Test
+    void manualSyncは宛先不一致なら結果不明のまま締結済へ確定しない() {
+        // 不一致ケース: remoteの宛先emailが送信時と異なる（誤宛先書類の締結確定を防ぐ）
+        ContractDocument d = insert(DispatchState.RECONCILIATION_REQUIRED, DOC_ID, null);
+        CloudSignDocument wrongRecipient = new CloudSignDocument(DOC_ID, "SES契約書", 2, null, null, null,
+                List.of(new CloudSignFile(FILE_ID, "document-1.pdf", 0L, 1L)),
+                List.of(new CloudSignParticipant("p9", "wrong-recipient@example.invalid",
+                        "別人", null, 0L, 8)));
+        when(api.getDocument(DOC_ID)).thenReturn(wrongRecipient);
+
+        syncService.syncDocument(d.getId());
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertEquals(DispatchState.RECONCILIATION_REQUIRED.name(), after.getDispatchState(),
+                "宛先不一致なら自動復旧しない");
+        assertEquals("要確認", after.getStatus());
+        assertTrue(after.getLastProviderErrorCode().startsWith("VERIFY_MISMATCH"),
+                "矛盾をfindingとして記録: " + after.getLastProviderErrorCode());
+    }
+
+    @Test
+    void manualSyncはfileID不一致なら結果不明のまま締結済へ確定しない() {
+        ContractDocument d = insert(DispatchState.RECONCILIATION_REQUIRED, DOC_ID, null);
+        CloudSignDocument wrongFile = new CloudSignDocument(DOC_ID, "SES契約書", 2, null, null, null,
+                List.of(new CloudSignFile("different-file-id", "other.pdf", 0L, 1L)),
+                List.of(new CloudSignParticipant("p9", "sync-masked@example.invalid",
+                        "マスク宛先", null, 0L, 8)));
+        when(api.getDocument(DOC_ID)).thenReturn(wrongFile);
+
+        syncService.syncDocument(d.getId());
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertEquals(DispatchState.RECONCILIATION_REQUIRED.name(), after.getDispatchState());
+        assertTrue(after.getLastProviderErrorCode().startsWith("VERIFY_MISMATCH"));
+    }
 }

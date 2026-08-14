@@ -225,6 +225,51 @@ class CloudSignDispatchIntegrationTest {
         verify(api, never()).createDocument(any());
     }
 
+    @Test
+    void 二五同時queueSendもoperationは1件になる() throws Exception {
+        // REV-005: 2/25/100の境界を揃える
+        Path pdf = writeSourcePdf("doc-25.pdf", "content-25");
+        ContractDocument d = insertDocument(DispatchState.NONE, pdf, 0);
+
+        ConfirmedSendRequest request = new ConfirmedSendRequest(contractNo(), 1, "マスク宛先",
+                "recipient-masked@example.invalid", "SES契約書 " + contractId, "ja");
+        AtomicInteger accepted = new AtomicInteger();
+        CountDownLatch start = new CountDownLatch(1);
+        Thread[] workers = new Thread[25];
+        for (int i = 0; i < 25; i++) {
+            workers[i] = new Thread(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                try {
+                    ContractDocument result = documentService.queueSend(d.getId(), request);
+                    if (result != null && result.getOperationId() != null) {
+                        accepted.incrementAndGet();
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            });
+            workers[i].start();
+        }
+        start.countDown();
+        for (Thread t : workers) {
+            t.join(30000);
+        }
+
+        assertEquals(25, accepted.get(), "全requestがqueue受付される");
+        ContractDocument after = documentMapper.selectById(d.getId());
+        assertEquals(DispatchState.QUEUED.name(), after.getDispatchState());
+        assertEquals(1, documentMapper.selectList(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ContractDocument>()
+                                .eq(ContractDocument::getId, d.getId())
+                                .eq(ContractDocument::getOperationId, after.getOperationId())).size(),
+                "同一operationは1件");
+        verify(api, never()).createDocument(any());
+    }
+
     // ---------- mutation timeout: call count = 1 ----------
 
     @Test

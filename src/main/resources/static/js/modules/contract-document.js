@@ -179,16 +179,14 @@ function createDocument() {
     });
 }
 
-/** 送信確認modal: 契約番号/原本SHA-256 prefix/宛先/言語を表示し、確認後durable queueへ。 */
+/** 送信確認modal: 契約番号/原本SHA-256 prefix/宛先名・会社/言語を表示し、確認後durable queueへ。 */
 function openSendConfirm(id) {
-    const contractId = $('#contractIdSelect').val();
-    const contract = allContracts.find(c => String(c.id) === String(contractId));
     $.get(`/api/contract-documents/${id}`, function(res) {
         if (res.code === 200) {
             const d = res.data;
             sendTarget = {
                 id: d.id,
-                contractNo: contract ? contract.name : String(d.contractId),
+                contractNo: d.contractNo || String(d.contractId),
                 templateVersion: d.templateVersion,
                 recipientName: d.recipientName,
                 recipientEmail: d.recipientEmail,
@@ -196,10 +194,12 @@ function openSendConfirm(id) {
                 languageCode: 'ja'
             };
             const hashPrefix = d.sourcePdfSha256 ? d.sourcePdfSha256.substring(0, 8) : '-';
+            const company = d.recipientCompany || '-';
             $('#sendConfirmBody').html(`
                 <tr><th class="px-3 py-2 text-muted small">契約番号</th><td class="px-3 py-2">${SES.escapeHtml(sendTarget.contractNo)}</td></tr>
                 <tr><th class="px-3 py-2 text-muted small">原本SHA-256</th><td class="px-3 py-2"><code>${SES.escapeHtml(hashPrefix)}...</code></td></tr>
                 <tr><th class="px-3 py-2 text-muted small">宛先名</th><td class="px-3 py-2">${SES.escapeHtml(d.recipientName)}</td></tr>
+                <tr><th class="px-3 py-2 text-muted small">宛先会社</th><td class="px-3 py-2">${SES.escapeHtml(company)}</td></tr>
                 <tr><th class="px-3 py-2 text-muted small">宛先メール</th><td class="px-3 py-2">${SES.escapeHtml(d.recipientEmail)}</td></tr>
                 <tr><th class="px-3 py-2 text-muted small">送信言語</th><td class="px-3 py-2">日本語（ja）</td></tr>
             `);

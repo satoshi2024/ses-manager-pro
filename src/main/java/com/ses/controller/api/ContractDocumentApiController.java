@@ -36,6 +36,8 @@ public class ContractDocumentApiController {
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final CloudSignSyncService cloudSignSyncService;
     private final CloudSignArtifactService cloudSignArtifactService;
+    private final com.ses.mapper.ContractMapper contractMapper;
+    private final com.ses.mapper.CustomerMapper customerMapper;
 
     /** 書類IDから契約IDを解決し、親契約のスコープを検証する（R3R-31/32）。 */
     private void assertDocumentAllowed(Long documentId) {
@@ -77,6 +79,24 @@ public class ContractDocumentApiController {
         return ApiResult.success(template);
     }
 
+    /** detail DTOへ親契約の契約番号と宛先会社（顧客名）を解決して付与する。 */
+    private ContractDocumentDetailDto detailOf(ContractDocument doc) {
+        String contractNo = null;
+        String company = null;
+        com.ses.entity.Contract contract = doc.getContractId() == null ? null
+                : contractMapper.selectById(doc.getContractId());
+        if (contract != null) {
+            contractNo = contract.getContractNo();
+            if (contract.getCustomerId() != null) {
+                com.ses.entity.Customer customer = customerMapper.selectById(contract.getCustomerId());
+                if (customer != null) {
+                    company = customer.getCompanyName();
+                }
+            }
+        }
+        return ContractDocumentDetailDto.of(doc, contractNo, company);
+    }
+
     @GetMapping("/contract/{contractId}")
     @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
     public ResponseEntity<ApiResult<List<ContractDocumentListDto>>> list(@PathVariable Long contractId) {
@@ -99,7 +119,7 @@ public class ContractDocumentApiController {
         ContractDocument doc = service.getById(id);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(ApiResult.success(ContractDocumentDetailDto.of(doc)));
+                .body(ApiResult.success(detailOf(doc)));
     }
 
     @PostMapping
@@ -110,7 +130,7 @@ public class ContractDocumentApiController {
                                                        @RequestParam String recipientEmail) {
         assertContractVisible(contractId);
         ContractDocument created = service.create(contractId, templateId, recipientName, recipientEmail);
-        return ApiResult.success(ContractDocumentDetailDto.of(created));
+        return ApiResult.success(detailOf(created));
     }
 
     @PostMapping("/{id}/send")
@@ -133,7 +153,7 @@ public class ContractDocumentApiController {
         ContractDocument doc = service.getById(id);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(ApiResult.success(ContractDocumentDetailDto.of(doc)));
+                .body(ApiResult.success(detailOf(doc)));
     }
 
     /** 三artifact別download（source/signed/certificate）。no-store・attachment・scope検証済み。 */

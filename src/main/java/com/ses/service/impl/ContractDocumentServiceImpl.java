@@ -24,6 +24,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     private final ContractTemplateMapper templates;
     private final com.ses.mapper.ContractMapper contracts;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final com.ses.config.CloudSignProperties cloudSignProperties;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.FileSecurityMetadataMapper> metadataMapperProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.FileScanner> fileScannerProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
@@ -125,6 +126,10 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     @Override
     @org.springframework.transaction.annotation.Transactional
     public ContractDocument queueSend(Long id, com.ses.dto.cloudsign.ConfirmedSendRequest request) {
+        // kill switch: enabled=falseの間は新規queue受付も停止する（HFP-02-AC-12-03）
+        if (!cloudSignProperties.isEnabled()) {
+            throw BusinessException.of("error.contract.document.cloudsignNotConfigured");
+        }
         ContractDocument d = getById(id);
         if (d == null) {
             throw BusinessException.of("error.contract.document.notFound");

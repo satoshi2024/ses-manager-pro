@@ -15,6 +15,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -38,10 +39,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Sql("/sql/engineer-schema-h2.sql")
 class ContractDocumentApiControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @MockBean
     private ContractDocumentService service;
@@ -61,6 +66,17 @@ class ContractDocumentApiControllerTest {
         when(dataScopeService.isScoped()).thenReturn(false);
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(service.getById(10L)).thenReturn(document());
+        // 共有H2は先行@Sqlクラスがm_menuを再作成しcontract-document seedを失う場合があるため、
+        // MenuPermissionFilter用のmenu/role_menuを明示的に復元する（実本番はV20 seedが存在）
+        jdbcTemplate.update("DELETE FROM t_role_menu WHERE menu_id IN "
+                + "(SELECT id FROM m_menu WHERE menu_key='contract-document')");
+        jdbcTemplate.update("DELETE FROM m_menu WHERE menu_key='contract-document'");
+        jdbcTemplate.update("INSERT INTO m_menu(menu_key, menu_name, path_prefix, api_prefix, sort_order) "
+                + "VALUES('contract-document','契約書・電子署名','/contract','/api/contract-documents',67)");
+        for (String role : new String[]{"管理者", "営業", "HR", "マネージャー"}) {
+            jdbcTemplate.update("INSERT INTO t_role_menu(role, menu_id) "
+                    + "SELECT ?, id FROM m_menu WHERE menu_key='contract-document'", role);
+        }
     }
 
     private ContractDocument document() {

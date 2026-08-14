@@ -241,7 +241,8 @@ public class CloudSignArtifactService {
                 return false;
             }
             String hash = sha256Hex(Files.readAllBytes(temp));
-            if (existingHash != null && existingHash.equals(hash)) {
+            if (existingHash != null && existingHash.equals(hash) && existingArchiveId != null) {
+                // 同一hashかつ台帳登録済み: no-op（再取得しない・二重登録しない）
                 log.info("[契約書artifact] 同一hashの再取得はno-op: docId={} kind={}", doc.getId(), kind.code);
                 return true;
             }
@@ -250,6 +251,7 @@ public class CloudSignArtifactService {
                 recordFinding(doc, "ARTIFACT_HASH_CHANGED:" + kind.code);
                 return false;
             }
+            // 同一hashでもarchive未登録（crash復旧等）は台帳登録を進める（REV-010）
             DocumentService ledger = documentServiceProvider.getIfAvailable();
             if (ledger == null) {
                 recordFinding(doc, kind.code + "_LEDGER_UNAVAILABLE");

@@ -23,10 +23,13 @@ import java.util.Set;
 @Service
 public class CloudSignSyncService {
 
-    /** poll対象: 送信済みまたは結果不明（known document IDあり）。 */
+    /**
+     * poll対象: 送信済み(SENT)のみ。
+     * RECONCILIATION_REQUIREDはdesign §6.2の3条件（一意特定＋原本/recipient一致＋reviewer監査）を
+     * 満たす専用操作（manual sync）だけで復旧する。pollが自動遷移してはならない（HFP-02-AC-04-05）。
+     */
     private static final Set<String> POLL_STATES = Set.of(
-            DispatchState.SENT.name(),
-            DispatchState.RECONCILIATION_REQUIRED.name());
+            DispatchState.SENT.name());
 
     private static final Set<String> TERMINAL_STATES = Set.of(
             DispatchState.COMPLETED.name(),
@@ -123,6 +126,16 @@ public class CloudSignSyncService {
             return;
         }
         String business = statusMapper.businessStatus(status);
+        if (DispatchState.RECONCILIATION_REQUIRED.name().equals(doc.getDispatchState())) {
+            // 専用操作（manual sync）: 同一外部書類の一意特定＋原本/recipient一致を証明できた場合のみ復旧。
+            // 一致を証明できない場合は状態を維持し、誤宛先書類を締結済へ確定しない（REV-002）。
+            if (remoteStatusIsTerminal(status) && remoteMatchesSent(doc, remote)) {
+                syncTo(doc, terminalStateOf(status), status, business);
+            } else {
+                recordFinding(doc, "VERIFY_MISMATCH:" + status);
+            }
+            return;
+        }
         switch (status) {
             case 1 -> syncTo(doc, DispatchState.SENT.name(), 1, business);
             case 2 -> syncTo(doc, DispatchState.COMPLETED.name(), 2, business);
@@ -134,6 +147,36 @@ public class CloudSignSyncService {
                 recordFinding(doc, "POLL_UNKNOWN_STATUS:" + status);
             }
         }
+    }
+
+    private static boolean remoteStatusIsTerminal(Integer status) {
+        return status != null && (status == 1 || status == 2 || status == 3);
+    }
+
+    private static String terminalStateOf(Integer status) {
+        return switch (status) {
+            case 2 -> DispatchState.COMPLETED.name();
+            case 3 -> DispatchState.CANCELED.name();
+            default -> DispatchState.SENT.name();
+        };
+    }
+
+    /**
+     * 送信時file IDと宛先（email）がremoteに存在することを証明する。
+     * これが揃わない限り「同一外部書類を一件に特定・原本/recipient一致」とはみなさない。
+     */
+    private static boolean remoteMatchesSent(ContractDocument doc, CloudSignDocument remote) {
+        if (doc.getCloudsignFileId() == null || doc.getCloudsignFileId().isBlank()) {
+            return false;
+        }
+        if (!remote.hasFileId(doc.getCloudsignFileId())) {
+            return false;
+        }
+        if (doc.getRecipientEmail() == null || doc.getRecipientEmail().isBlank()) {
+            return false;
+        }
+        return remote.participants() != null && remote.participants().stream()
+                .anyMatch(p -> doc.getRecipientEmail().equalsIgnoreCase(p.email()));
     }
 
     private void syncTo(ContractDocument doc, String to, Integer providerStatus, String businessStatus) {

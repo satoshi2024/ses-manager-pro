@@ -59,8 +59,12 @@ class ContractDocumentServiceImplTest {
 
         ContractDocumentMapper baseMapper = mock(ContractDocumentMapper.class);
 
+        com.ses.config.CloudSignProperties cloudSignProperties = new com.ses.config.CloudSignProperties();
+        cloudSignProperties.setEnabled(true);
+        cloudSignProperties.setEnvironment("SANDBOX");
+
         service = new ContractDocumentServiceImpl(templateMapper, contractMapper,
-                pdfFontUtils, metadataMapperProvider, fileScannerProvider, documentServiceProvider);
+                pdfFontUtils, cloudSignProperties, metadataMapperProvider, fileScannerProvider, documentServiceProvider);
         ReflectionTestUtils.setField(service, "baseMapper", baseMapper);
         ReflectionTestUtils.setField(service, "uploadBase", tempDir.toString());
 
@@ -271,5 +275,42 @@ class ContractDocumentServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.queueSend(41L, wrong));
         assertEquals("error.contract.document.payloadChanged", ex.getMessageKey());
+    }
+
+    @Test
+    void enabledFalseでは新規queue受付も拒否する() throws Exception {
+        // HFP-02-AC-12-03: kill switchは新規queue/dispatch/pollを停止する（REV-003）
+        com.ses.config.CloudSignProperties props =
+                (com.ses.config.CloudSignProperties) ReflectionTestUtils.getField(service, "cloudSignProperties");
+        props.setEnabled(false);
+        try {
+            ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+            ContractDocument doc = new ContractDocument();
+            doc.setId(42L);
+            doc.setContractId(1L);
+            doc.setTemplateId(100L);
+            doc.setTemplateVersion(1);
+            doc.setStatus("下書き");
+            doc.setDispatchState(com.ses.common.enums.DispatchState.NONE.name());
+            doc.setVersion(0);
+            doc.setRecipientName("マスク宛先");
+            doc.setRecipientEmail("recipient-masked@example.invalid");
+            when(baseMapper.selectById(42L)).thenReturn(doc);
+
+            Contract contract = new Contract();
+            contract.setId(1L);
+            contract.setContractNo("C-2026-001");
+            when(contractMapper.selectById(1L)).thenReturn(contract);
+
+            com.ses.dto.cloudsign.ConfirmedSendRequest request =
+                    new com.ses.dto.cloudsign.ConfirmedSendRequest("C-2026-001", 1, "マスク宛先",
+                            "recipient-masked@example.invalid", "SES契約書 1", "ja");
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> service.queueSend(42L, request));
+            assertEquals("error.contract.document.cloudsignNotConfigured", ex.getMessageKey());
+            verify(baseMapper, never()).casQueue(anyLong(), anyInt(), anyString(), anyString());
+        } finally {
+            props.setEnabled(true);
+        }
     }
 }

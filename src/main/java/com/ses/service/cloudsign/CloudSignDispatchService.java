@@ -293,6 +293,14 @@ public class CloudSignDispatchService {
             retryWait(working, e.getCode().name());
             return;
         }
+        // token取得・GET等の一時的障害（5xx/timeout/network）はbounded retry（REV-004）:
+        // 確定失敗(4xx)だけを恒久エラーにする。token POSTの一時失敗をFAILED_FINAL化しない。
+        if (e.getCode() == CloudSignErrorCode.SERVER_ERROR
+                || e.getCode() == CloudSignErrorCode.TIMEOUT
+                || e.getCode() == CloudSignErrorCode.NETWORK) {
+            retryWait(working, "TRANSIENT:" + e.getCode().name());
+            return;
+        }
         if (e.getCode() == CloudSignErrorCode.UNAUTHORIZED
                 || e.getCode() == CloudSignErrorCode.INVALID_CLIENT) {
             fail(working, working.getDispatchState(), DispatchState.FAILED_FINAL.name(),
