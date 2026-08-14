@@ -161,12 +161,15 @@ quiesce_local::ddl_lock_acquire() { # state_dir timeout_seconds
   fi
   local tmpout=""
   tmpout=$(mktemp)
+  # producer の stderr と呼び出し元の lock fd(9) は握り続けない
   {
     printf "SELECT GET_LOCK('%s', %s);\n" "$DDL_LOCK_NAME" "$timeout"
     while :; do printf 'DO 0;\n'; sleep 1; done
-  } | "$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" -N -B --unbuffered \
-        > "$tmpout" 2>&1 &
+  } 2>/dev/null 9>&- | "$MYSQL_CLIENT_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" -N -B --unbuffered \
+        > "$tmpout" 2>&1 9>&- &
   DDL_SESSION_PID=$!
+  # job table から外す（script 終了時に wait されないようにする）
+  disown 2>/dev/null || true
 
   local first=""
   for _ in $(seq 1 40); do

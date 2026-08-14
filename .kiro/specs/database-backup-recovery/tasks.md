@@ -43,7 +43,7 @@
   - **Evidence:** lock timeline、quiesce acknowledgement、negative test exit code、role grant redacted report。
   - **失敗/rollback:** 静止解除失敗は重大 incident として traffic を勝手に再開しない。snapshot は INVALID 隔離。既存 production data は変更しない。
 
-- [ ] **HFP-03-003 — 一貫 full backup と完全 manifest を実装する**
+- [x] **HFP-03-003 — 一貫 full backup と完全 manifest を実装する**
 
   - **依存:** HFP-03-001、HFP-03-002
   - **対応要求:** HFP-03-RQ-002、HFP-03-RQ-003

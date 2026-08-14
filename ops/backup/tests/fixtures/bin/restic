@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# HFP-03 unit test 用の restic wrapper。
+# argv を RESTIC_ARGV_LOG へ記録し、実 restic（RESTIC_REAL_BIN）へ委譲する。
+set -uo pipefail
+
+if [[ -n "${RESTIC_ARGV_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$RESTIC_ARGV_LOG"
+fi
+
+exec "${RESTIC_REAL_BIN:-/usr/local/bin/restic}" "$@"

@@ -25,7 +25,7 @@
 |---|---|---|---|---|---|---|
 | HFP-03-001 | REVIEWABLE | NOT_REVIEWED | `ops/backup/Dockerfile`, `docker-compose.yml`, `preflight.sh`, `lib/common.sh`, `lib/mysql-options.sh`, `tests/{lib/test-framework.sh, fixtures/bin/{mysql,mysqlbinlog,mysqldump}, preflight-test.sh, run-unit-tests.sh, run-all-unit-tests.sh}`, `.gitattributes`, `README.md`, `baseline.md`, `research.md` | preflight-test.sh 59 assert 全 PASS（tool image 内）。shellcheck -S error exit 0。隔離 Demo: synthetic MySQL 8.0.36 + pinned image で preflight exit 0 / MariaDB fixture exit 10 / secret scan 0 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/`（preflight-ok.json=`3ac86a35...` preflight-mariadb.json=`dc84b598...` client-versions.txt=`048387d2...` server-image-digest.txt=`10a3a2e4...` tool-image-digest.txt=`8264f2e0...`） | production 固有値 HFP-03-PROD-001〜008 は BLOCKED（baseline.md §4 に追記）。MySQL 8.0.46 client の `--ssl-ca`+VERIFY_* 不具合は hashed capath で回避（research.md §4 実測） |
 | HFP-03-002 | REVIEWABLE | NOT_REVIEWED | `ops/backup/lib/repository-lock.sh`, `lib/quiesce.sh`, `providers/quiesce-local.sh`, `providers/uploads-local.sh`, `tests/quiesce-lock-test.sh`, `tests/fixtures/bin/mysql`（GET_LOCK/RELEASE_LOCK/stdin 対応）, `Dockerfile`（providers COPY）, `docker-compose.yml`, `README.md`（権限分離） | quiesce-lock-test.sh 45 assert 全 PASS。shellcheck exit 0。隔離 Demo: ①stale replica で acquire 失敗 ②全 fresh で acquire/release 成功 ③静止中 GET_LOCK=0・解放後=1（実 MySQL で検証）secret scan 0 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-002/`（demo-A=`44b6ec54...` demo-B=`78e696b3...` demo-C=`772d874c...`） | DDL 凍結は app 側も同一 GET_LOCK 名を尊重する規約が必要（README 記載）。PROD-004（replica/scheduler 実運用手段）は BLOCKED 継続 |
-| HFP-03-003 | NOT_STARTED | NOT_REVIEWED | | | | |
+| HFP-03-003 | REVIEWABLE | NOT_REVIEWED | `ops/backup/backup-full.sh`（legacy 置換）, `lib/manifest.sh`, `lib/metadata.sh`, `tests/full-backup-test.sh`, `tests/fixtures/bin/{mysqldump,restic}`（fixture）, `README.md` | full-backup-test.sh 32 assert 全 PASS（coordinate parse、quiesce/restic 失敗、symlink、1byte 破損、extra file、metadata 後書き、forget 呼出 0）。shellcheck exit 0。隔離 Demo: 実 MySQL+restic で full→restore verify→marker/table count/uploads hash 照合→metadata 改変で verify 失敗 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/`（backup-full-result.json=`7b3119d0...` restore-verify.txt=`c7c28518...` tamper-verify.txt=`e6d26ae5...` manifest-sha.txt=`d63c13d4...` engineer-count-before.txt=`53c234e5...`） | 発見: 背景 DDL session が lock fd/pipe を握る問題を fd 固定化+閉鎖で解決（review 対象）。metadata 内 status は PENDING で upload し、restic tag status=valid 昇格を selector が参照する |
 | HFP-03-004 | NOT_STARTED | NOT_REVIEWED | | | | |
 | HFP-03-005 | NOT_STARTED | NOT_REVIEWED | | | | |
 | HFP-03-006 | NOT_STARTED | NOT_REVIEWED | | | | |
@@ -48,9 +48,9 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 | HFP-03-RQ-002 | HFP-03-AC-002-01 | HFP-03-002,003,004 | `lib/quiesce.sh` + `providers/quiesce-local.sh`（静止 protocol: replicas/scheduler/DDL lock） | quiesce-lock-test.sh: all_fresh / one_replica_stale / scheduler_no_ack / scheduler_dir_missing / ddl_lock_conflict | Demo B: quiesce.json に started/released/replicas/ddl_lock | NOT_REVIEWED |
 | HFP-03-RQ-002 | HFP-03-AC-002-02 | HFP-03-002,003,004 | 静止確認に失敗したら snapshot 発行不可（acquire 非 0） | quiesce-lock-test.sh: stale/ack 欠如で非 0 | Demo A: stale replica で acquire 失敗 | NOT_REVIEWED |
 | HFP-03-RQ-002 | HFP-03-AC-002-03 | HFP-03-002,003 | provider 失敗で不完全 snapshot を valid にしない（acquire 非 0 → 呼び出し元で中断） | 同上 | Demo A/C | NOT_REVIEWED |
-| HFP-03-RQ-003 | HFP-03-AC-003-01 | HFP-03-003 | | | | NOT_REVIEWED |
-| HFP-03-RQ-003 | HFP-03-AC-003-02 | HFP-03-003,007 | | | | NOT_REVIEWED |
-| HFP-03-RQ-003 | HFP-03-AC-003-03 | HFP-03-003,008 | | | | NOT_REVIEWED |
+| HFP-03-RQ-003 | HFP-03-AC-003-01 | HFP-03-003 | `lib/manifest.sh`（manifest.json → manifest.sha256 の順で固定、read-only 化） | full-backup-test.sh: metadata_late_write / corrupt_one_byte / extra_file / absolute_path | Demo: metadata 改変 → size 不一致で verify 失敗 | NOT_REVIEWED |
+| HFP-03-RQ-003 | HFP-03-AC-003-02 | HFP-03-003,007 | manifest::verify（size/sha256 照合）+ restic restore --verify | full-backup-test.sh: corrupt_one_byte / restore_verify_content | Demo: restore --verify + MANIFEST_VERIFY_OK | NOT_REVIEWED |
+| HFP-03-RQ-003 | HFP-03-AC-003-03 | HFP-03-003,008 | manifest::verify の extra file / 絶対 path / traversal 拒否 | full-backup-test.sh: extra_file / absolute_path | — | NOT_REVIEWED |
 | HFP-03-RQ-004 | HFP-03-AC-004-01 | HFP-03-004 | | | | NOT_REVIEWED |
 | HFP-03-RQ-004 | HFP-03-AC-004-02 | HFP-03-004,006,007 | | | | NOT_REVIEWED |
 | HFP-03-RQ-004 | HFP-03-AC-004-03 | HFP-03-004,005 | | | | NOT_REVIEWED |
@@ -136,6 +136,11 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-002/demo-A-stale-replica.txt` | `44b6ec543a1a7c1fc8603701541f2e4306e378a07a43b9882e5ce21350fcb644` | HFP-03-002 Demo | password 値 grep 0 | gitignore 対象 |
 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-002/demo-B-quiesce-ok.txt` | `78e696b3612536cbfce73dee33b5ccff4e608751158d0c9b9bad812258c84e28` | HFP-03-002 Demo | 同上 | 同上 |
 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-002/demo-C-ddl-lock.txt` | `772d874cd993032ce59a4fabb0fde0088b5b92962c1710c3554166a1e13c90f7` | HFP-03-002 Demo | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/backup-full-result.json` | `7b3119d03aefc5aab898a4636b3a3c9250ec69844cdfe826f965569c83c6f4f5` | HFP-03-003 Demo | password 値 grep 0 | gitignore 対象 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/restore-verify.txt` | `c7c2851848cb122c932b1db6f50a3a7633419d71a12940e39ce37f986d119693` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/tamper-verify.txt` | `e6d26ae58015e073ff9f3cad8917da2ef7d65483575c63cf31432eac1fd34c06` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/manifest-sha.txt` | `d63c13d46ac92b6c27b965f48172a1fcbc1e5f70e25dacb516ab0c7dbc194a42` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-003/engineer-count-before.txt` | `53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3` | 同上 | 同上 | 同上 |
 
 ## 8. Final decision history（追記）
 

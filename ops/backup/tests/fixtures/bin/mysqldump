@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # HFP-03 unit test 用の fake mysqldump。
+# FAKE_DUMP_FILE の内容を stdout へ流す（実 DB には接続しない）。
 set -uo pipefail
 
 if [[ -n "${FAKE_ARGV_LOG:-}" ]]; then
@@ -8,9 +9,27 @@ fi
 
 for arg in "$@"; do
   if [[ "$arg" == "--version" ]]; then
-    printf '%s\n' "${FAKE_MYSQLDUMP_VERSION_LINE:-mysqldump  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)}"
+    printf '%s\n' "${FAKE_MYSQLDUMP_VERSION_LINE:-mysqldump  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)}"
     exit 0
   fi
 done
 
+if [[ -n "${FAKE_DUMP_FILE:-}" && -f "$FAKE_DUMP_FILE" ]]; then
+  cat "$FAKE_DUMP_FILE"
+  exit 0
+fi
+
+# 既定の fixture dump（--source-data=2 相当）
+cat <<'EOF'
+-- MySQL dump 10.13  Distrib 8.0.46, for Linux (x86_64)
+--
+-- Host: source    Database: ses_manager_db
+-- ------------------------------------------------------
+-- Server version	8.0.36
+
+-- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000010', MASTER_LOG_POS=154;
+-- GTID state at the beginning of the backup 11111111-2222-3333-4444-555555555555:1-42
+
+-- Dump completed on 2026-08-14  1:00:00
+EOF
 exit 0

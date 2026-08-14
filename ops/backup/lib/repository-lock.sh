@@ -10,6 +10,8 @@
 # ============================================================
 
 REPOSITORY_LOCK_DIR=${REPOSITORY_LOCK_DIR:-/var/lib/ses-backup/locks}
+# lock は fd 9 で保持する（固定番号。background job が握り続けないよう
+# 子プロセス側で 9>&- を明示できるようにするため）
 REPO_LOCK_FD=9
 
 repository_lock::acquire() { # mode timeout_seconds owner
@@ -23,7 +25,7 @@ repository_lock::acquire() { # mode timeout_seconds owner
 
   mkdir -p "$REPOSITORY_LOCK_DIR"
   local lockfile="$REPOSITORY_LOCK_DIR/repository.lock"
-  if ! exec {REPO_LOCK_FD}>"$lockfile"; then
+  if ! exec 9>"$lockfile"; then
     echo "lock: lock file を開けません: $lockfile" >&2
     return 1
   fi
@@ -31,10 +33,9 @@ repository_lock::acquire() { # mode timeout_seconds owner
   local flock_opts=(-w "$timeout")
   [[ "$mode" == "shared" ]] && flock_opts+=(-s)
 
-  if ! flock "${flock_opts[@]}" "$REPO_LOCK_FD"; then
+  if ! flock "${flock_opts[@]}" 9; then
     echo "lock: 取得できませんでした mode=$mode timeout=${timeout}s owner=$owner" >&2
-    exec {REPO_LOCK_FD}>&-
-    REPO_LOCK_FD=9
+    exec 9>&-
     return 1
   fi
 
@@ -51,10 +52,7 @@ repository_lock::acquire() { # mode timeout_seconds owner
 }
 
 repository_lock::release() {
-  if [[ -n "${REPO_LOCK_FD:-}" && "$REPO_LOCK_FD" != "9" ]]; then
-    exec {REPO_LOCK_FD}>&-
-  fi
-  REPO_LOCK_FD=9
+  exec 9>&- 2>/dev/null || true
   return 0
 }
 
