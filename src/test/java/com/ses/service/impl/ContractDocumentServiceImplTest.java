@@ -301,31 +301,99 @@ class ContractDocumentServiceImplTest {
     }
 
     @Test
-    void 二重sendは同じ書類でproviderを2回呼び重複リスクがある() throws Exception {
+    void 二重queueSendは同じoperationとして扱いproviderを呼ばない() throws Exception {
         ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
-        when(baseMapper.selectById(40L)).thenAnswer(inv -> {
-            ContractDocument d = new ContractDocument();
-            d.setId(40L);
-            d.setStatus("下書き");
-            return d;
+        ContractDocument doc = new ContractDocument();
+        doc.setId(40L);
+        doc.setContractId(1L);
+        doc.setTemplateId(100L);
+        doc.setTemplateVersion(1);
+        doc.setStatus("下書き");
+        doc.setDispatchState(com.ses.common.enums.DispatchState.NONE.name());
+        doc.setVersion(0);
+        doc.setRecipientName("マスク宛先");
+        doc.setRecipientEmail("recipient-masked@example.invalid");
+        when(baseMapper.selectById(40L)).thenReturn(doc);
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setContractNo("C-2026-001");
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+
+        // 実在するPDFを作成し、保存hashをdocへ設定する
+        Path dir = tempDir.resolve("contracts").resolve("1");
+        Files.createDirectories(dir);
+        Path pdf = dir.resolve("document-40.pdf");
+        Files.write(pdf, "%PDF-1.4\n1 0 obj\nendobj\ntrailer\n%%EOF\n".getBytes());
+        doc.setPdfPath(pdf.toString());
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        StringBuilder sb = new StringBuilder();
+        for (byte v : md.digest(Files.readAllBytes(pdf))) {
+            sb.append(String.format("%02x", v));
+        }
+        doc.setPdfSha256(sb.toString());
+
+        when(baseMapper.casQueue(eq(40L), eq(0), any(), any())).thenAnswer(inv -> {
+            doc.setDispatchState(com.ses.common.enums.DispatchState.QUEUED.name());
+            doc.setOperationId(inv.getArgument(2));
+            doc.setSendPayloadSha256(inv.getArgument(3));
+            return 1;
         });
 
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
-        when(cloudSignClient.send(any())).thenAnswer(inv -> {
-            calls.incrementAndGet();
-            barrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
-            return new CloudSignClient.Result("cs-doc-40", "f-40", "送信中", null, null);
-        });
+        com.ses.dto.cloudsign.ConfirmedSendRequest request =
+                new com.ses.dto.cloudsign.ConfirmedSendRequest("C-2026-001", 1, "マスク宛先",
+                        "recipient-masked@example.invalid", "SES契約書 1", "ja");
 
-        Thread t1 = new Thread(() -> { try { service.send(40L); } catch (Exception ignored) { } });
-        Thread t2 = new Thread(() -> { try { service.send(40L); } catch (Exception ignored) { } });
-        t1.start();
-        t2.start();
-        t1.join(5000);
-        t2.join(5000);
+        ContractDocument queued = service.queueSend(40L, request);
+        assertEquals(com.ses.common.enums.DispatchState.QUEUED.name(), queued.getDispatchState());
+        assertNotNull(queued.getOperationId());
 
-        // red: 両threadがstatus=下書きを読んでからproviderを呼ぶため、外部書類が2件作られる
-        assertEquals(1, calls.get(), "同一書類のsendでprovider createは1回でなければならない");
+        // 二重クリック: 同一payloadの再queueは既存operationを返し、casQueueを再実行しない
+        ContractDocument again = service.queueSend(40L, request);
+        assertEquals(queued.getOperationId(), again.getOperationId());
+        verify(baseMapper, times(1)).casQueue(anyLong(), anyInt(), anyString(), anyString());
+        verifyNoInteractions(cloudSignClient);
+    }
+
+    @Test
+    void queueSendはpayload不一致を拒否し外部APIを呼ばない() throws Exception {
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        ContractDocument doc = new ContractDocument();
+        doc.setId(41L);
+        doc.setContractId(1L);
+        doc.setTemplateId(100L);
+        doc.setTemplateVersion(1);
+        doc.setStatus("下書き");
+        doc.setDispatchState(com.ses.common.enums.DispatchState.NONE.name());
+        doc.setVersion(0);
+        doc.setRecipientName("マスク宛先");
+        doc.setRecipientEmail("recipient-masked@example.invalid");
+        when(baseMapper.selectById(41L)).thenReturn(doc);
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setContractNo("C-2026-001");
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+
+        Path dir = tempDir.resolve("contracts").resolve("1");
+        Files.createDirectories(dir);
+        Path pdf = dir.resolve("document-41.pdf");
+        Files.write(pdf, "%PDF-1.4\n1 0 obj\nendobj\ntrailer\n%%EOF\n".getBytes());
+        doc.setPdfPath(pdf.toString());
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        StringBuilder sb = new StringBuilder();
+        for (byte v : md.digest(Files.readAllBytes(pdf))) {
+            sb.append(String.format("%02x", v));
+        }
+        doc.setPdfSha256(sb.toString());
+
+        // 確認時の契約番号と現在の契約番号が不一致 → payloadChanged
+        com.ses.dto.cloudsign.ConfirmedSendRequest wrong =
+                new com.ses.dto.cloudsign.ConfirmedSendRequest("C-OLD-001", 1, "マスク宛先",
+                        "recipient-masked@example.invalid", "SES契約書 1", "ja");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.queueSend(41L, wrong));
+        assertEquals("error.contract.document.payloadChanged", ex.getMessageKey());
+        verifyNoInteractions(cloudSignClient);
     }
 }

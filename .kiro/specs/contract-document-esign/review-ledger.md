@@ -30,7 +30,7 @@
 | HFP-02-01 | 00 | DONE(red testのみ) | DONE(13/13意図どおりred) | DONE(二重send重複riskをtest logで実演) | NOT_STARTED | PARTIAL | baseline defectを13件redで固定。green化はHFP-02-02〜08 |
 | HFP-02-02 | 01 | DONE(V109/entity/CAS/backfill) | DONE(46件/0/0/0) | DONE(MySQL fresh+legacy, H2 CAS/backfill) | NOT_STARTED | PARTIAL | 採番: S12〜S17予約(V103〜V108)と衝突したためV109へ。予約表をV110〜V115へ繰り上げ(文書のみ) |
 | HFP-02-03 | 00,01 | DONE | DONE(31件/0/0/0) | DONE(multipart SHA-256一致・token一回・timeout後call=1をtestで実演) | NOT_STARTED | PARTIAL | wire契約をtyped clientで固定。旧CloudSignClientは互換facade化 |
-| HFP-02-04 | 02,03 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | result-unknown/call-count evidence |
+| HFP-02-04 | 02,03 | DONE(queueSend/dispatch/checkpoint/reconciliation) | DONE(13件/0/0/0) | DONE(100同時send・timeout call=1・crash境界・stale claimをtestで実演) | NOT_STARTED | PARTIAL | mutation timeout call count=1を実証。旧send()撤去 |
 | HFP-02-05 | 03,04 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | polling/status evidence |
 | HFP-02-06 | 02,03,05 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 三hash/scan/ledger evidence |
 | HFP-02-07 | 04,05,06 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | role/scope/browser evidence |
@@ -53,20 +53,20 @@
 | HFP-02-AC-02-03 | 03 | CloudSignTokenProvider | tokenSingleFlight・status401一回再取得 test | token concurrency/401 | - | VERIFIED | single-flight 1回・401再取得は一操作一回 |
 | HFP-02-AC-02-04 | 03,10 | CloudSignProperties.validate(@PostConstruct) | enabled=trueでclientId欠落failClosed test | readiness fail-closed | - | IN_PROGRESS | config fail-closedDONE。scanner/storage/ledger readinessはHFP-02-10 |
 | HFP-02-AC-02-05 | 00,09,10 | - | - | sandbox/preflight | - | BLOCKED | HFP-02-BLK-01 |
-| HFP-02-AC-03-01 | 01,04 | - | - | source preflight | - | NOT_STARTED | P0 |
+| HFP-02-AC-03-01 | 01,04 | ContractDocumentServiceImpl.verifySourcePdf | queueSend系test・SOURCE_HASH_CHANGED test | source preflight | - | VERIFIED | 存在/正規化path/magic/EOF/size/hash一致をqueue時とworker時に検査 |
 | HFP-02-AC-03-02 | 03,04 | CloudSignApiClientImpl(4工程直列) | 公式4工程を厳密な順序で直列実行する test | source PDF wire hash | - | VERIFIED | multipartの送信原本SHA-256一致をrequest captureで証明 |
-| HFP-02-AC-03-03 | 04 | - | - | provider IDs/preflight | - | NOT_STARTED | - |
+| HFP-02-AC-03-03 | 04 | doPreflightAndSend(preflight GET) | PREFLIGHT_MISMATCH test | provider IDs/preflight | - | VERIFIED | file/participant/statusを送信前にGETで再確認 |
 | HFP-02-AC-03-04 | 07 | - | - | browser確認modal | - | NOT_STARTED | - |
-| HFP-02-AC-03-05 | 04,07 | - | - | payload mismatch | - | NOT_STARTED | - |
+| HFP-02-AC-03-05 | 04,07 | CloudSignPayloadHasher・send_payload_sha256 | payload不一致拒否 test・SOURCE_HASH_CHANGED test | payload mismatch | - | IN_PROGRESS | queue/worker両方のhash検証DONE。UI再確認はHFP-02-07 |
 | HFP-02-AC-04-01 | 02,04 | ContractDocumentMapper.casTransition/casClaim/casCheckpoint、ContractDocumentDispatchStateTest | 100 concurrent sendはHFP-02-04 | 状態CAS(version+state)を実DBで検証済 | - | IN_PROGRESS | CAS実装DONE。sendのqueue化はHFP-02-04 |
-| HFP-02-AC-04-02 | 04 | - | - | transaction inactive | - | NOT_STARTED | P0 |
-| HFP-02-AC-04-03 | 04 | - | - | accepted-timeout call count=1 | - | NOT_STARTED | P0 |
-| HFP-02-AC-04-04 | 04,09 | - | - | GET/marker reconciliation | - | BLOCKED | HFP-02-BLK-02/03 |
-| HFP-02-AC-04-05 | 04 | - | - | crash/stale claim | - | NOT_STARTED | P0 |
+| HFP-02-AC-04-02 | 04 | TransactionTemplate checkpoint・assertNoTransaction | transaction active test | transaction inactive | - | VERIFIED | provider呼出しはtx外、checkpointは短いtx |
+| HFP-02-AC-04-03 | 04 | handleApiFailure(uncertain)・verifyThenAdvance | timeout call count=1・accepted-then-timeout test | accepted-timeout call-count=1 | - | VERIFIED | mutation再実行なし。GET照合のみ |
+| HFP-02-AC-04-04 | 04,09 | CloudSignReconciliationService | 2worker race test | GET/marker reconciliation | - | BLOCKED | BLK-02未PASSのためCREATE ID不明は人手照合のみ |
+| HFP-02-AC-04-05 | 04 | reconcileStaleClaims | stale claim test | crash/stale claim | - | VERIFIED | 自動未実行へ戻さず結果不明へ |
 | HFP-02-AC-04-06 | 04,07,10 | - | - | orphan/duplicate runbook | - | NOT_STARTED | - |
 | HFP-02-AC-05-01 | 05 | - | - | status mapping | - | NOT_STARTED | - |
 | HFP-02-AC-05-02 | 02,04,05 | DispatchState enum、V109 dispatch_state列 | ContractDocumentDispatchStateTest | 状態機械 | - | IN_PROGRESS | 工程enum/列はDONE。遷移実装はHFP-02-04/05 |
-| HFP-02-AC-05-03 | 04,05 | - | - | terminal/reminder rejection | - | NOT_STARTED | P0 |
+| HFP-02-AC-05-03 | 04,05 | SENDING→GET照合（再POST禁止） | SEND_STILL_DRAFT test | terminal/reminder rejection | - | IN_PROGRESS | send再実行禁止DONE。pollでのterminal逆戻り防止はHFP-02-05 |
 | HFP-02-AC-05-04 | 05,06 | - | - | completed/artifact split | - | NOT_STARTED | - |
 | HFP-02-AC-05-05 | 05,07,09 | - | - | `ADOPT`: cancel sandbox / `NOT_ADOPT`: route非公開＋status=3 mapping | - | BLOCKED | HFP-02-BLK-06 の相互排他decision待ち |
 | HFP-02-AC-06-01 | 05 | - | - | ShedLock/batch | - | NOT_STARTED | - |
@@ -102,7 +102,7 @@
 | HFP-02-AC-11-06 | 10 | - | - | 運用承認 | - | BLOCKED | operator未設定 |
 | HFP-02-AC-12-01 | 02 | V109、schema-contract-document-h2.sql、ContractDocument | FlywayContractDocumentDispatchSchemaSmokeTest(2) | fresh/legacy MySQL | - | VERIFIED | V1/V20無編集。V109はS12予約衝突により繰り上げ採番 |
 | HFP-02-AC-12-02 | 02,06 | ContractDocumentDispatchBackfill | ContractDocumentDispatchStateTest#backfill系(5) | legacy分類 | - | IN_PROGRESS | 分類5形状DONE。archive移行候補化の履行はHFP-02-06 |
-| HFP-02-AC-12-03 | 04,05,10 | - | - | kill switch | - | NOT_STARTED | - |
+| HFP-02-AC-12-03 | 04,05,10 | CloudSignDispatchScheduler/dispatchDueのenabled判定 | kill switch test | kill switch | - | IN_PROGRESS | dispatch/queue停止DONE。poll停止はHFP-02-05 |
 | HFP-02-AC-12-04 | 04,10 | - | - | rollback drill/export | - | BLOCKED | operator未設定 |
 
 ## 5. Blocking decisions

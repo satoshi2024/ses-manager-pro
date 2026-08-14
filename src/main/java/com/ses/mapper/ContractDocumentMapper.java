@@ -72,4 +72,71 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
                       @Param("fileId") String fileId,
                       @Param("participantId") String participantId,
                       @Param("status") Integer status);
+
+    /**
+     * 送信queue受付CAS: NONE→QUEUED と同時に operation ID / payload hash を永続化する。
+     * 二重クリック・並列request・worker再実行を同じoperationとして扱う（HFP-02-AC-04-01）。
+     *
+     * @return 更新行数（0=他requestが先にqueue済み/状態不一致）
+     */
+    @Update("UPDATE t_contract_document SET dispatch_state = 'QUEUED', "
+            + "operation_id = #{operationId}, send_payload_sha256 = #{payloadHash}, "
+            + "last_provider_error_code = NULL, claimed_at = NULL, claim_owner = NULL, "
+            + "version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = 'NONE' "
+            + "AND version = #{expectedVersion}")
+    int casQueue(@Param("id") Long id,
+                 @Param("expectedVersion") int expectedVersion,
+                 @Param("operationId") String operationId,
+                 @Param("payloadHash") String payloadHash);
+
+    /**
+     * 結果不明/恒久エラーへの遷移CAS。error code(PIIなし)を記録し、claimを解放する。
+     */
+    @Update("UPDATE t_contract_document SET dispatch_state = #{to}, "
+            + "last_provider_error_code = #{errorCode}, claimed_at = NULL, claim_owner = NULL, "
+            + "version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casFail(@Param("id") Long id,
+                @Param("expectedVersion") int expectedVersion,
+                @Param("from") String from,
+                @Param("to") String to,
+                @Param("errorCode") String errorCode);
+
+    /**
+     * 429等のbounded retry待機CAS: 状態を親工程へ戻し、next_attempt_at を設定する。
+     * mutationの再実行は429等「受理されなかった」場合だけ（結果不明は自動再実行しない）。
+     */
+    @Update("UPDATE t_contract_document SET dispatch_state = #{to}, "
+            + "last_provider_error_code = #{errorCode}, next_attempt_at = #{nextAttemptAt}, "
+            + "claimed_at = NULL, claim_owner = NULL, version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casRetryWait(@Param("id") Long id,
+                     @Param("expectedVersion") int expectedVersion,
+                     @Param("from") String from,
+                     @Param("to") String to,
+                     @Param("errorCode") String errorCode,
+                     @Param("nextAttemptAt") java.time.LocalDateTime nextAttemptAt);
+
+    /**
+     * provider GETで確定した状態の保存CAS（polling/manual sync/reconciliation共用）。
+     * terminalへの逆戻りはfrom状態CASで排除する。
+     */
+    @Update("UPDATE t_contract_document SET dispatch_state = #{to}, "
+            + "cloudsign_status = #{status}, status = #{businessStatus}, "
+            + "sent_at = COALESCE(sent_at, #{sentAt}), "
+            + "completed_at = CASE WHEN #{to} = 'COMPLETED' THEN COALESCE(completed_at, NOW()) ELSE completed_at END, "
+            + "last_synced_at = NOW(), last_provider_error_code = NULL, "
+            + "claimed_at = NULL, claim_owner = NULL, version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casStatusSync(@Param("id") Long id,
+                      @Param("expectedVersion") int expectedVersion,
+                      @Param("from") String from,
+                      @Param("to") String to,
+                      @Param("status") Integer status,
+                      @Param("businessStatus") String businessStatus,
+                      @Param("sentAt") java.time.LocalDateTime sentAt);
 }

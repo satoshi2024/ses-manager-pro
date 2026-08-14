@@ -80,10 +80,11 @@ public class ContractDocumentApiController {
 
     @PostMapping("/{id}/send")
     @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
-    public ApiResult<Boolean> send(@PathVariable Long id) {
+    public ApiResult<com.ses.entity.ContractDocument> send(@PathVariable Long id,
+                                                           @RequestBody com.ses.dto.cloudsign.ConfirmedSendRequest request) {
         assertDocumentAllowed(id);
-        service.send(id);
-        return ApiResult.success(true);
+        // durable queue受付であり、provider送信完了ではない（HFP-02-AC-10-02）
+        return ApiResult.success("送信処理を受け付けました", service.queueSend(id, request));
     }
 
     @PostMapping("/{id}/sync")

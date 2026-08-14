@@ -253,6 +253,8 @@ cloudsign:
   stale-claim-minutes: ${CLOUDSIGN_STALE_CLAIM_MINUTES:15}
   max-attempts: ${CLOUDSIGN_MAX_ATTEMPTS:5}
   instance-id: ${CLOUDSIGN_INSTANCE_ID:}
+  # dispatch workerの実行cron（ShedLock付き）
+  dispatch-cron: ${CLOUDSIGN_DISPATCH_CRON:*/5 * * * * *}
 
 # ===== G2外部Review資格credential暗号化（§6.5） =====
 # 値はdeployment secret storeから注入すること。prodプロファイルでは未設定・不正な鍵で起動時にfail-fastする。
