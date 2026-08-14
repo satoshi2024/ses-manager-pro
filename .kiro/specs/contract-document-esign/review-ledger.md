@@ -31,7 +31,7 @@
 | HFP-02-02 | 01 | DONE(V109/entity/CAS/backfill) | DONE(46件/0/0/0) | DONE(MySQL fresh+legacy, H2 CAS/backfill) | NOT_STARTED | PARTIAL | 採番: S12〜S17予約(V103〜V108)と衝突したためV109へ。予約表をV110〜V115へ繰り上げ(文書のみ) |
 | HFP-02-03 | 00,01 | DONE | DONE(31件/0/0/0) | DONE(multipart SHA-256一致・token一回・timeout後call=1をtestで実演) | NOT_STARTED | PARTIAL | wire契約をtyped clientで固定。旧CloudSignClientは互換facade化 |
 | HFP-02-04 | 02,03 | DONE(queueSend/dispatch/checkpoint/reconciliation) | DONE(13件/0/0/0) | DONE(100同時send・timeout call=1・crash境界・stale claimをtestで実演) | NOT_STARTED | PARTIAL | mutation timeout call count=1を実証。旧send()撤去 |
-| HFP-02-05 | 03,04 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | polling/status evidence |
+| HFP-02-05 | 03,04 | DONE(sync/poll/mapping/monitor) | DONE(12件/0/0/0) | DONE(status 1→2/3、未知status、batch失敗継続、cancel非公開をtestで実演) | NOT_STARTED | PARTIAL | BLK-06未決のためcancel非公開で停止。ADOPT決定後にcancel実装 |
 | HFP-02-06 | 02,03,05 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | 三hash/scan/ledger evidence |
 | HFP-02-07 | 04,05,06 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | role/scope/browser evidence |
 | HFP-02-08 | 01-07 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | verify-like-ci skip0 |
@@ -64,23 +64,23 @@
 | HFP-02-AC-04-04 | 04,09 | CloudSignReconciliationService | 2worker race test | GET/marker reconciliation | - | BLOCKED | BLK-02未PASSのためCREATE ID不明は人手照合のみ |
 | HFP-02-AC-04-05 | 04 | reconcileStaleClaims | stale claim test | crash/stale claim | - | VERIFIED | 自動未実行へ戻さず結果不明へ |
 | HFP-02-AC-04-06 | 04,07,10 | - | - | orphan/duplicate runbook | - | NOT_STARTED | - |
-| HFP-02-AC-05-01 | 05 | - | - | status mapping | - | NOT_STARTED | - |
+| HFP-02-AC-05-01 | 05 | CloudSignStatusMapper | status全値/未知 test | status mapping | - | VERIFIED | 0/1/2/3/4/未知を明示mapping、4は送信対象外 |
 | HFP-02-AC-05-02 | 02,04,05 | DispatchState enum、V109 dispatch_state列 | ContractDocumentDispatchStateTest | 状態機械 | - | IN_PROGRESS | 工程enum/列はDONE。遷移実装はHFP-02-04/05 |
 | HFP-02-AC-05-03 | 04,05 | SENDING→GET照合（再POST禁止） | SEND_STILL_DRAFT test | terminal/reminder rejection | - | IN_PROGRESS | send再実行禁止DONE。pollでのterminal逆戻り防止はHFP-02-05 |
 | HFP-02-AC-05-04 | 05,06 | - | - | completed/artifact split | - | NOT_STARTED | - |
 | HFP-02-AC-05-05 | 05,07,09 | - | - | `ADOPT`: cancel sandbox / `NOT_ADOPT`: route非公開＋status=3 mapping | - | BLOCKED | HFP-02-BLK-06 の相互排他decision待ち |
-| HFP-02-AC-06-01 | 05 | - | - | ShedLock/batch | - | NOT_STARTED | - |
-| HFP-02-AC-06-02 | 05 | - | - | manual/poll commit reversal | - | NOT_STARTED | - |
-| HFP-02-AC-06-03 | 03,05 | - | - | retry matrix | - | NOT_STARTED | - |
+| HFP-02-AC-06-01 | 05 | CloudSignPollingScheduler | ShedLock annotation test | ShedLock/batch | - | VERIFIED | active行のみbatch・古い順・request scope非依存 |
+| HFP-02-AC-06-02 | 05 | CloudSignSyncService・casStatusSync | commit順反転 test | manual/poll commit reversal | - | VERIFIED | GETはtx外、保存はversion CAS。逆戻りをCASで拒否 |
+| HFP-02-AC-06-03 | 03,05 | handleGetFailure(backoff/failFinal) | GET429 backoff・GET4xx恒久 test | retry matrix | - | VERIFIED | 429/5xxはbounded backoff、4xxは恒久 |
 | HFP-02-AC-06-04 | 04,05,09 | - | - | provider delay | - | BLOCKED | HFP-02-BLK-03 |
-| HFP-02-AC-06-05 | 05,10 | - | - | metrics/alert | - | NOT_STARTED | - |
+| HFP-02-AC-06-05 | 05,10 | CloudSignMonitor | monitor snapshot/alert判定 | metrics/alert | - | IN_PROGRESS | counter/alert判定DONE。外部monitoring接続はHFP-02-10 |
 | HFP-02-AC-07-01 | 02,06 | V109 signed_pdf_sha256/certificate_sha256列、ContractDocument | 締結済hash再計算backfill test | 三hash表 | - | IN_PROGRESS | 列/entity/backfill hash再計算DONE。signed取得はHFP-02-06 |
 | HFP-02-AC-07-02 | 03,05,06,09 | - | - | signed/certificate PDF | - | BLOCKED | HFP-02-BLK-04 |
 | HFP-02-AC-07-03 | 06 | - | - | scan/atomic pipeline | - | NOT_STARTED | P0 |
 | HFP-02-AC-07-04 | 06 | - | - | same/different hash | - | NOT_STARTED | - |
 | HFP-02-AC-07-05 | 06 | - | - | storage/DB failure injection | - | NOT_STARTED | P0 |
 | HFP-02-AC-07-06 | 06,07 | - | - | download matrix | - | NOT_STARTED | - |
-| HFP-02-AC-08-01 | 07 | - | - | 5role direct API | - | NOT_STARTED | - |
+| HFP-02-AC-08-01 | 07 | ContractDocumentApiController sync @PreAuthorize | HR拒否 test(green化) | 5role direct API | - | IN_PROGRESS | HR sync拒否DONE。全role matrixはHFP-02-07 |
 | HFP-02-AC-08-02 | 07 | - | - | scope外404 | - | NOT_STARTED | P0 |
 | HFP-02-AC-08-03 | 07,08 | - | - | DTO allow-list | - | NOT_STARTED | P0 |
 | HFP-02-AC-08-04 | 06,07 | - | - | no-store/audit | - | NOT_STARTED | - |

@@ -139,4 +139,34 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
                       @Param("status") Integer status,
                       @Param("businessStatus") String businessStatus,
                       @Param("sentAt") java.time.LocalDateTime sentAt);
+
+    /**
+     * 安全側の要確認記録CAS: dispatch状態は維持したまま、provider raw status・業務status・
+     * finding code を更新する（未知status/逆戻り疑い。自動送信・自動遷移しない）。
+     */
+    @Update("UPDATE t_contract_document SET cloudsign_status = #{status}, status = #{businessStatus}, "
+            + "last_synced_at = NOW(), last_provider_error_code = #{errorCode}, "
+            + "version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casStatusFinding(@Param("id") Long id,
+                         @Param("expectedVersion") int expectedVersion,
+                         @Param("from") String from,
+                         @Param("status") Integer status,
+                         @Param("businessStatus") String businessStatus,
+                         @Param("errorCode") String errorCode);
+
+    /**
+     * GET系のbounded backoff CAS: attemptを増やし、next_attempt_at を設定する（状態は維持）。
+     */
+    @Update("UPDATE t_contract_document SET last_provider_error_code = #{errorCode}, "
+            + "next_attempt_at = #{nextAttemptAt}, dispatch_attempt_count = dispatch_attempt_count + 1, "
+            + "version = version + 1, updated_at = NOW() "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
+            + "AND version = #{expectedVersion}")
+    int casGetBackoff(@Param("id") Long id,
+                      @Param("expectedVersion") int expectedVersion,
+                      @Param("from") String from,
+                      @Param("errorCode") String errorCode,
+                      @Param("nextAttemptAt") java.time.LocalDateTime nextAttemptAt);
 }

@@ -20,6 +20,7 @@ public class ContractDocumentApiController {
     private final ContractTemplateMapper templates;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.cloudsign.CloudSignSyncService cloudSignSyncService;
 
     /** 書類IDから契約IDを解決し、親契約のスコープを検証する（R3R-31/32）。 */
     private void assertDocumentAllowed(Long documentId) {
@@ -88,10 +89,11 @@ public class ContractDocumentApiController {
     }
 
     @PostMapping("/{id}/sync")
-    @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
+    @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
     public ApiResult<Boolean> sync(@PathVariable Long id) {
         assertDocumentAllowed(id);
-        service.sync(id);
+        // HRは参照のみ（HFP-02-AC-08-01）。manual syncも更新系のためHRは拒否。
+        cloudSignSyncService.syncDocument(id);
         return ApiResult.success(true);
     }
     @GetMapping("/{id}/download")

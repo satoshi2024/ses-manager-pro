@@ -255,6 +255,8 @@ cloudsign:
   instance-id: ${CLOUDSIGN_INSTANCE_ID:}
   # dispatch workerの実行cron（ShedLock付き）
   dispatch-cron: ${CLOUDSIGN_DISPATCH_CRON:*/5 * * * * *}
+  # 状態pollingの実行cron（ShedLock付き）
+  poll-cron: ${CLOUDSIGN_POLL_CRON:0 */2 * * * *}
 
 # ===== G2外部Review資格credential暗号化（§6.5） =====
 # 値はdeployment secret storeから注入すること。prodプロファイルでは未設定・不正な鍵で起動時にfail-fastする。

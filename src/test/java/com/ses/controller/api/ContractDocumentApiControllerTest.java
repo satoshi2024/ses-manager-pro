@@ -9,10 +9,12 @@ import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -27,10 +29,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * 現行 ContractDocumentApiController のAPI契約違反を固定する characterization test（HFP-02-01）。
- * entity露出・download header欠落・HRのmanual sync許容をredで再現する。
+ * ContractDocumentApiController のAPI契約・認可test（HFP-02-01〜07）。
+ * 認可境界はfull context（method security有効）で検証する。
  */
-@WebMvcTest(ContractDocumentApiController.class)
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
 class ContractDocumentApiControllerTest {
 
     @Autowired
@@ -44,6 +48,8 @@ class ContractDocumentApiControllerTest {
     private DataScopeService dataScopeService;
     @MockBean
     private OrganizationScopeService organizationScopeService;
+    @MockBean
+    private com.ses.service.cloudsign.CloudSignSyncService cloudSignSyncService;
 
     @BeforeEach
     void allowFullScope() {
