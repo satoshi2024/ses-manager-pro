@@ -11,7 +11,7 @@
 
 ## Task 一覧
 
-- [ ] **HFP-03-001 — production baseline と toolchain contract を固定する**
+- [x] **HFP-03-001 — production baseline と toolchain contract を固定する**
 
   - **依存:** なし
   - **対応要求:** HFP-03-RQ-001、HFP-03-RQ-008

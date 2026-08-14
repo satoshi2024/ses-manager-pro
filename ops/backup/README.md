@@ -1,5 +1,69 @@
-# バックアップ運用手順
+# バックアップ運用手順（HFP-03）
 
-`.env.backup` に `BACKUP_REPOSITORY`、`MYSQL_HOST`、`MYSQL_DATABASE`、`MYSQL_USER`、`UPLOADS_DIR` を設定し、`secrets/` に restic パスワードとDBパスワードを配置する（リポジトリへコミットしない）。cron等で毎日02:00に `backup-full.sh`、`archive-binlog.sh` を常駐させ、15分ごとに `snapshot-binlog.sh` を実行する。`check-backup.sh` は監視から実行する。
+## 概要
 
-復元は必ずアプリを停止し、`restore.sh --target ...` の検証結果を確認後、保守承認を得て `CONFIRM_RESTORE=YES ... --apply` を実行する。復元後は Flyway履歴、主要テーブル件数、uploadsハッシュ、ログインと主要画面を確認してから再開する。四半期ごとに `restore-drill.sh` を隔離環境で実施し、RPO15分・RTO4時間を記録する。
+MySQL 8 の業務データと uploads を restic repository へ退避し、指定 UTC 時刻以前の
+**検証済み整合 checkpoint** へ復元する。RPO 15 分 / RTO 4 時間（HFP-03-012 の隔離演習で実測するまで未達成扱い）。
+
+**現状の注意:** production 固有値（HFP-03-PROD-001〜008）は未確定のため
+`baseline.md` で BLOCKED。production 環境への接続・復元は行わないこと。
+
+## 前提
+
+- Docker でビルドしたツールイメージ（`ops/backup/Dockerfile`）:
+  Oracle MySQL 8.0.46 client + mysqlbinlog + mysqldump + restic 0.17.3
+- `.env.backup` に接続情報（secret 値は含めない）:
+  `BACKUP_REPOSITORY`、`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`
+- `secrets/mysql-password`（0600）: MySQL パスワード
+- `secrets/restic-password`（0600）: restic repository パスワード
+- `secrets/mysql-capath/` : hashed CA ディレクトリ（`openssl rehash` / `c_rehash` 済み）
+  ※ MySQL 8.0.46 client は `--ssl-ca` + VERIFY_* が使えない（research.md §4 実測）。
+  CA は hashed capath で提供し、`MYSQL_SSL_CAPATH` で指定する。
+
+## 実行
+
+```bash
+# 1. 環境契約検査（read-only）: 0 でなければ先へ進まない
+docker compose run --rm preflight
+
+# 2. 日次 full（02:00 Asia/Tokyo 想定）
+docker compose run --rm backup
+
+# 3. 継続 binlog archive（常駐）・15 分 checkpoint・閉じた binlog snapshot
+docker compose up -d binlog
+docker compose run --rm checkpoint     # cron 等で 15 分ごと
+docker compose run --rm snapshot-binlog
+
+# 4. 監視（watermark 基準。alert は外部へ routing）
+docker compose run --rm check --json
+```
+
+`MYSQL_PWD` 環境変数は使わない。秘密は 0600 の一時 option file 経由で渡す。
+
+## 復元
+
+復元は **production source とは別の recovery target** へ行う。手順は `runbooks/restore-cutover.md`。
+
+```bash
+# plan（read-only）: 要求時刻は RFC3339 UTC（末尾 Z）
+./plan-restore.sh --target 2026-08-14T02:30:00Z
+
+# apply は target guard と二者承認を通過した plan だけ
+./restore.sh   --plan <plan-id> --approval <file1> --approval <file2>
+./validate-restore.sh --plan <plan-id>
+./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
+```
+
+**禁止:** 稼働中 DB への in-place import、`CONFIRM_RESTORE=YES` 固定文字列での実行、
+`--target` 表示のみの検証完了扱い。
+
+## 監視
+
+`check-backup.sh --json` は最新 watermark（full/checkpoint/closed binlog の repository 到達点）と
+source 現行 coordinate の差で判定する。古い file の存在だけでは FAIL にしない。
+
+## 演習
+
+四半期ごと、および tool/image/restore 変更時に `restore-drill.sh` を隔離環境で実施する。
+source/target は別 container/network/credential とし、本番 repository/secret を mount しない。
+RPO ≤ 15 分、RTO ≤ 4 時間を実測し、`review-ledger.md` へ証跡 SHA を記録する。

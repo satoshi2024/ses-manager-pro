@@ -1,0 +1,19 @@
+# ============================================================
+# 行末統一: shell script は LF 固定（CRLF は shellcheck SC1017 で
+# error になるため。Windows checkout でも正しく動く）
+# ============================================================
+*.sh text eol=lf
+# 拡張子なしの fixture 実行ファイルも LF 固定
+ops/backup/tests/fixtures/bin/* text eol=lf
+*.ps1 text eol=crlf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.java text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.sql text eol=lf
+*.properties text eol=lf
+Dockerfile text eol=lf

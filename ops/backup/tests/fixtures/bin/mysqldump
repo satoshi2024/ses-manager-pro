@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# HFP-03 unit test 用の fake mysqldump。
+set -uo pipefail
+
+if [[ -n "${FAKE_ARGV_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_ARGV_LOG"
+fi
+
+for arg in "$@"; do
+  if [[ "$arg" == "--version" ]]; then
+    printf '%s\n' "${FAKE_MYSQLDUMP_VERSION_LINE:-mysqldump  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)}"
+    exit 0
+  fi
+done
+
+exit 0

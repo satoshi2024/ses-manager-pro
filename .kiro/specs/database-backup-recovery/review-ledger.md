@@ -6,24 +6,24 @@
 
 | 項目 | 値 |
 |---|---|
-| Run ID | NOT_SET |
-| Base commit | NOT_SET |
-| Reviewed commit/diff | NOT_SET |
+| Run ID | 20260814-hfp03 |
+| Base commit | 841e10aaf67deb295d5b3397321f30e9d08c0fce（origin/main） |
+| Reviewed commit/diff | 実装中（HFP-03-001〜逐次追記） |
 | Merge status / merge commit | PRE_MERGE / N/A |
-| Implementation actor | NOT_SET |
+| Implementation actor | HFP-03 実装 AI（codex/hfp-03-backup-pitr） |
 | Independent reviewer | NOT_SET |
-| Started/finished UTC | NOT_SET / NOT_SET |
-| MySQL source/target image digest | NOT_SET / NOT_SET |
-| Backup tool image digest | NOT_SET |
-| Representative profile ID / SHA-256 | NOT_SET / NOT_SET |
+| Started/finished UTC | 2026-08-14T03:00Z / NOT_SET |
+| MySQL source/target image digest | `mysql:8.0.36@sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964` / NOT_SET |
+| Backup tool image digest | `ses-backup-tool@sha256:13b3510035cd1092c70b97e20451c48df25c1d8811cb146be2fe3e199bd63811`（build 毎に更新） |
+| Representative profile ID / SHA-256 | NOT_SET / NOT_SET（HFP-03-PROD-007 BLOCKED） |
 | Docker/CI URL | NOT_SET |
-| Evidence root | `target/backup-recovery-evidence/<run-id>/` |
+| Evidence root | `target/backup-recovery-evidence/20260814-hfp03/` |
 
 ## 2. Task ledger
 
 | Task ID | Impl status | Review status | Changed files | Test/Demo | Evidence path + SHA-256 | Finding/Blocker |
 |---|---|---|---|---|---|---|
-| HFP-03-001 | NOT_STARTED | NOT_REVIEWED | | | | |
+| HFP-03-001 | REVIEWABLE | NOT_REVIEWED | `ops/backup/Dockerfile`, `docker-compose.yml`, `preflight.sh`, `lib/common.sh`, `lib/mysql-options.sh`, `tests/{lib/test-framework.sh, fixtures/bin/{mysql,mysqlbinlog,mysqldump}, preflight-test.sh, run-unit-tests.sh, run-all-unit-tests.sh}`, `.gitattributes`, `README.md`, `baseline.md`, `research.md` | preflight-test.sh 59 assert 全 PASS（tool image 内）。shellcheck -S error exit 0。隔離 Demo: synthetic MySQL 8.0.36 + pinned image で preflight exit 0 / MariaDB fixture exit 10 / secret scan 0 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/`（preflight-ok.json=`3ac86a35...` preflight-mariadb.json=`dc84b598...` client-versions.txt=`048387d2...` server-image-digest.txt=`10a3a2e4...` tool-image-digest.txt=`8264f2e0...`） | production 固有値 HFP-03-PROD-001〜008 は BLOCKED（baseline.md §4 に追記）。MySQL 8.0.46 client の `--ssl-ca`+VERIFY_* 不具合は hashed capath で回避（research.md §4 実測） |
 | HFP-03-002 | NOT_STARTED | NOT_REVIEWED | | | | |
 | HFP-03-003 | NOT_STARTED | NOT_REVIEWED | | | | |
 | HFP-03-004 | NOT_STARTED | NOT_REVIEWED | | | | |
@@ -42,9 +42,9 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 
 | RQ | AC | Owner task | 実装箇所 | 自動 test class/script + case | 隔離 Demo | Review 判定 |
 |---|---|---|---|---|---|---|
-| HFP-03-RQ-001 | HFP-03-AC-001-01 | HFP-03-001 | | | | NOT_REVIEWED |
-| HFP-03-RQ-001 | HFP-03-AC-001-02 | HFP-03-001 | | | | NOT_REVIEWED |
-| HFP-03-RQ-001 | HFP-03-AC-001-03 | HFP-03-001 | | | | NOT_REVIEWED |
+| HFP-03-RQ-001 | HFP-03-AC-001-01 | HFP-03-001 | `preflight.sh --json`（client/server UUID/version/binlog/engine/TLS/容量/uploads を JSON 化） | preflight-test.sh: normal / mariadb / 5.7 / 8.4 / log_bin off / checksum off / non-innodb / tls off / uploads missing / disk / help | preflight exit 0、JSON に server_uuid/version 出力 | NOT_REVIEWED |
+| HFP-03-RQ-001 | HFP-03-AC-001-02 | HFP-03-001 | `preflight.sh` の exit 10〜18 / Dockerfile の Oracle MySQL 8.0.46 pin | preflight-test.sh: mariadb(10), 5.7(10), 8.4(11), log_bin(12), checksum(13), engine(14), tls(15), uploads(16), disk(17), MYSQL_PWD(18) | MariaDB fixture で exit 10 | NOT_REVIEWED |
+| HFP-03-RQ-001 | HFP-03-AC-001-03 | HFP-03-001 | `baseline.md` §4: PROD-001〜008 を BLOCKED 化 | 対象: 推測値を production に書かない | — | NOT_REVIEWED |
 | HFP-03-RQ-002 | HFP-03-AC-002-01 | HFP-03-002,003,004 | | | | NOT_REVIEWED |
 | HFP-03-RQ-002 | HFP-03-AC-002-02 | HFP-03-002,003,004 | | | | NOT_REVIEWED |
 | HFP-03-RQ-002 | HFP-03-AC-002-03 | HFP-03-002,003 | | | | NOT_REVIEWED |
@@ -63,9 +63,9 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 | HFP-03-RQ-007 | HFP-03-AC-007-01 | HFP-03-007 | | | | NOT_REVIEWED |
 | HFP-03-RQ-007 | HFP-03-AC-007-02 | HFP-03-008 | | | | NOT_REVIEWED |
 | HFP-03-RQ-007 | HFP-03-AC-007-03 | HFP-03-009 | | | | NOT_REVIEWED |
-| HFP-03-RQ-008 | HFP-03-AC-008-01 | HFP-03-001,002,007 | | | | NOT_REVIEWED |
+| HFP-03-RQ-008 | HFP-03-AC-008-01 | HFP-03-001,002,007 | `lib/mysql-options.sh`（0600 option file、MYSQL_PWD 拒否、argv 先頭 defaults-extra-file） | preflight-test.sh: mysql_pwd_env(18), argv 先頭, option file mode 600, 全 case の secret grep 0 | evidence に secret 0 件（Demo 内 grep） | NOT_REVIEWED |
 | HFP-03-RQ-008 | HFP-03-AC-008-02 | HFP-03-002,010 | | | | NOT_REVIEWED |
-| HFP-03-RQ-008 | HFP-03-AC-008-03 | HFP-03-001,010,011 | | | | NOT_REVIEWED |
+| HFP-03-RQ-008 | HFP-03-AC-008-03 | HFP-03-001,010,011 | Dockerfile 鍵更新（RPM-GPG-KEY-mysql-2025 import） | shellcheck / image build 成功 | tool image digest 記録 | NOT_REVIEWED |
 | HFP-03-RQ-009 | HFP-03-AC-009-01 | HFP-03-006,010 | | | | NOT_REVIEWED |
 | HFP-03-RQ-009 | HFP-03-AC-009-02 | HFP-03-002,010 | | | | NOT_REVIEWED |
 | HFP-03-RQ-009 | HFP-03-AC-009-03 | HFP-03-010 | | | | NOT_REVIEWED |
@@ -128,7 +128,11 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 
 | Evidence file | SHA-256 | Producer | Redaction/secret scan | Retention/CI artifact |
 |---|---|---|---|---|
-| | | | | |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/preflight-ok.json` | `3ac86a350e2a9ade62e8530c2277c6c09b0c6dc6d020db3b75e258dcb7e798f7` | HFP-03-001 Demo | host/user/DB 名なし、password 値 grep 0 | gitignore 対象（target/） |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/preflight-mariadb.json` | `dc84b5981911d5869beab050637dce797f11667a2791fa8ff2bcc8ab1cafdec7` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/client-versions.txt` | `048387d2639ada52b80c813a52312f954a4dac11ac935df1abde71015090f0e7` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/server-image-digest.txt` | `10a3a2e45ceca34a5436e36c76067fbbe1e817d4e1da98521416d4db982aa79b` | 同上 | 同上 | 同上 |
+| `target/backup-recovery-evidence/20260814-hfp03/HFP-03-001/tool-image-digest.txt` | `8264f2e0e30140f4b134a8b751f7f39cd0dc95bde73d8034d092f859bc88fa4f` | 同上 | 同上 | 同上 |
 
 ## 8. Final decision history（追記）
 

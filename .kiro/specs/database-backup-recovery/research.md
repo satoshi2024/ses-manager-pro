@@ -35,8 +35,22 @@
 | HFP-03-DEC-005 | restic prune は専用 task/role/lock。 | full 成功直後の無条件 prune は binlog snapshot 競合と依存 chain 破壊を招く。 |
 | HFP-03-DEC-006 | production client は MySQL 8 exact version/digest pin。 | Alpine の `mysql-client` は MariaDB 系になり得て、MySQL 8 binlog/compression/options の保証にならない。 |
 | HFP-03-DEC-007 | write-enable 前 read-only smoke だけ単純 rollback 可。 | write-enable 後に旧 DB へ戻すと新規 transaction を失う。 |
+| HFP-03-DEC-008 | client の CA 提供は hashed `ssl-capath` を推奨。 | 2026-08-14 実測: MySQL 8.0.46 client は `--ssl-ca` + `VERIFY_CA/VERIFY_IDENTITY` で `SSL_CTX_set_default_verify_paths failed`（`mysql:8.0.36` 公式イメージの client でも再現）。hashed capath では VERIFY_CA/VERIFY_IDENTITY が動作する。 |
 
-## 4. 既知の trade-off
+## 4. 実測記録（2026-08-14、隔離 Docker 環境）
+
+| 項目 | 実測結果 |
+|---|---|
+| `mysql:8.0.36` 公式イメージ | digest `a5327240...b4964`。`mysql`/`mysqldump` は有るが `mysqlbinlog` は無い。 |
+| Oracle MySQL apt（bookworm, 8.0.46） | `mysql-community-client` / `-core` に `mysqlbinlog` 無し。`mysql-community-server-core` に含まれる（dpkg -L で確認）。 |
+| mysql-apt-config 0.8.33 同梱鍵 | `B7B3B788A8D3785C` が期限切れ（EXPKEYSIG）。`RPM-GPG-KEY-mysql-2025`（同一 fingerprint、2027-10-23 まで有効）の import で解決。 |
+| client `--ssl-ca` + VERIFY_* | 8.0.46（Debian apt）・8.0.36（OEL 公式 image）双方で `SSL_CTX_set_default_verify_paths failed`。 |
+| client hashed `ssl-capath` + VERIFY_CA | 動作。source の自動生成 CA を `<subject_hash>.0` で配置して成功。 |
+| client hashed `ssl-capath` + VERIFY_IDENTITY | CA 検証は動作。server cert の CN/SAN が host 名と一致しない環境では identity 検証が失敗する（想定どおり）。 |
+| MySQL 8.0.36 起動 | `--log-bin --server-id --binlog-format=ROW --binlog-checksum=CRC32 --gtid-mode=ON --enforce-gtid-consistency=ON` で binlog ON を確認。socket ping 成功後も TCP 受付まで ~10s の遅延あり（readiness は TCP connect で判定する）。 |
+| `caching_sha2_password` | root は TLS 必須。`--ssl-mode=DISABLED` の接続は ERROR 2061 で拒否される（TLS 前提は本仕様と整合）。 |
+
+## 5. 既知の trade-off（元 §4）
 
 - 15 分 checkpoint の書込み静止は可用性コストを持つ。atomic volume/object snapshot provider がない場合は、RPO と無停止性のどちらかを曖昧にせず production owner が選ぶ。静止なし tar を整合 backup と表示しない。
 - `mysqldump` は大規模 DB で RTO 4 時間を超える可能性がある。HFP-03-012 の実測で超える場合は physical backup/managed snapshot を別 task として採用し、目標未達のまま本 spec を PASS にしない。
