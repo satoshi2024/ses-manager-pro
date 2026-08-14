@@ -51,6 +51,13 @@ public interface ComplianceExternalReviewAdoptionEventMapper {
     List<ComplianceExternalReviewAdoptionEvent> selectChainBySubmittedReview(
             @Param("tenantId") String tenantId, @Param("submittedReviewEventId") Long submittedReviewEventId);
 
+    /** P1-3: idempotency replay用（同一keyの既存eventを取得）。 */
+    @Select("SELECT * FROM t_compliance_external_review_adoption_event "
+            + "WHERE tenant_id = #{tenantId} AND idempotency_key = #{idempotencyKey} "
+            + "ORDER BY id DESC LIMIT 1")
+    ComplianceExternalReviewAdoptionEvent selectByIdempotencyKey(
+            @Param("tenantId") String tenantId, @Param("idempotencyKey") String idempotencyKey);
+
     /** 指定mappingのSUBMITTED review chain（adoptionの正本）を探索する。 */
     @Select("SELECT a.* FROM t_compliance_external_review_adoption_event a "
             + "JOIN t_compliance_external_review_event r ON r.tenant_id = a.tenant_id AND r.id = a.submitted_review_event_id "

@@ -16,14 +16,14 @@ public interface ComplianceMappingApprovalEventMapper {
             + "(tenant_id, mapping_id, mapping_version, mapping_hash, review_policy_hash, assignment_id, "
             + "workplace_id_snapshot, actor_id, actor_display_name_snapshot, actor_role_snapshot, action, "
             + "event_chain_id, target_event_id, supersedes_event_id, occurred_at, reason, evidence_document_id, "
-            + "evidence_document_version_id, evidence_document_version, evidence_document_hash, operation_id, "
+            + "evidence_document_version_id, evidence_document_version, evidence_document_hash, evidence_scan_status, operation_id, "
             + "correlation_id, idempotency_key) VALUES "
             + "(#{event.tenantId}, #{event.mappingId}, #{event.mappingVersion}, #{event.mappingHash}, "
             + "#{event.reviewPolicyHash}, #{event.assignmentId}, #{event.workplaceIdSnapshot}, #{event.actorId}, "
             + "#{event.actorDisplayNameSnapshot}, #{event.actorRoleSnapshot}, #{event.action}, #{event.eventChainId}, "
             + "#{event.targetEventId}, #{event.supersedesEventId}, #{event.occurredAt}, #{event.reason}, "
             + "#{event.evidenceDocumentId}, #{event.evidenceDocumentVersionId}, #{event.evidenceDocumentVersion}, "
-            + "#{event.evidenceDocumentHash}, #{event.operationId}, #{event.correlationId}, #{event.idempotencyKey})")
+            + "#{event.evidenceDocumentHash}, #{event.evidenceScanStatus}, #{event.operationId}, #{event.correlationId}, #{event.idempotencyKey})")
     @Options(useGeneratedKeys = true, keyProperty = "event.id")
     int insertEvent(@Param("event") ComplianceMappingApprovalEvent event);
 

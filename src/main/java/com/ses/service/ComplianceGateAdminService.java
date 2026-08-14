@@ -25,6 +25,50 @@ public interface ComplianceGateAdminService {
 
     ComplianceExternalReviewerType setReviewerTypeEnabled(Long typeId, boolean enabled);
 
+    // ===== R23-P1-01 §3.8/§8 dynamic policy（V102_3・P0-3） =====
+
+    /** reviewer typeのdynamic設定を更新する（flags・source/method・max_age・effective period・§8 NULL=UNCONFIGURED）。 */
+    ComplianceExternalReviewerType updateReviewerTypeDynamic(Long typeId, Integer qualificationVerificationRequired,
+                                                             Integer activeStatusVerificationRequired,
+                                                             Long verificationSourceId, Long verificationMethodId,
+                                                             Integer maxAgeDays, java.time.LocalDate effectiveFrom,
+                                                             java.time.LocalDate effectiveTo);
+
+    List<com.ses.entity.ComplianceVerificationSource> listVerificationSources();
+
+    com.ses.entity.ComplianceVerificationSource createVerificationSource(String sourceCode, String sourceName,
+                                                                         String officialUrl, boolean enabled,
+                                                                         java.time.LocalDate effectiveFrom,
+                                                                         java.time.LocalDate effectiveTo);
+
+    com.ses.entity.ComplianceVerificationSource updateVerificationSource(Long sourceId, String sourceName,
+                                                                         String officialUrl, boolean enabled,
+                                                                         java.time.LocalDate effectiveFrom,
+                                                                         java.time.LocalDate effectiveTo);
+
+    List<com.ses.entity.ComplianceVerificationMethod> listVerificationMethods();
+
+    com.ses.entity.ComplianceVerificationMethod createVerificationMethod(String methodCode, String methodName,
+                                                                         String description, boolean enabled,
+                                                                         java.time.LocalDate effectiveFrom,
+                                                                         java.time.LocalDate effectiveTo);
+
+    com.ses.entity.ComplianceVerificationMethod updateVerificationMethod(Long methodId, String methodName,
+                                                                         String description, boolean enabled,
+                                                                         java.time.LocalDate effectiveFrom,
+                                                                         java.time.LocalDate effectiveTo);
+
+    /** R23-P1-01 §9（P0-4）: reviewer subject作成（person-stable正本・fingerprint計算）。 */
+    com.ses.entity.ComplianceExternalReviewerSubject createSubject(String subjectCode, String displayName,
+                                                                   String organizationName);
+
+    /** R23-P1-01 §9（P0-4）: subject×資格association登録。 */
+    com.ses.entity.ComplianceReviewerQualification addQualification(Long reviewerSubjectId, Long reviewerTypeId,
+                                                                    String registrationIdentifierMaskedSnapshot,
+                                                                    String registrationIdentifierLabel);
+
+    List<com.ses.entity.ComplianceReviewerQualification> listQualifications(Long reviewerSubjectId);
+
     /** 現行open（active_slot=1）を終了し、新assignmentを開始する（同一workplaceのactive_slotは常に1つ）。 */
     ComplianceResponsibleAssignment createAssignment(Long workplaceId, Long userId, LocalDateTime effectiveFrom);
 
@@ -53,4 +97,10 @@ public interface ComplianceGateAdminService {
 
     /** R23-P1-01 §5: 指定mappingに属するverification event一覧（external review経由）。 */
     List<com.ses.entity.ComplianceExternalReviewerVerificationEvent> listVerificationsByMapping(Long mappingId);
+
+    /** R23-P1-01 P0-5: exact CLEAN evidence picker（document/version allow-list・CLEANのみ）。 */
+    List<com.ses.dto.compliance.ComplianceEvidencePickerDto> searchEvidence(String query);
+
+    /** R23-P1-01 P1-7: Phase B manifest用の完全hash/ID一覧（allow-list）。 */
+    com.ses.dto.compliance.ComplianceManifestDto buildManifest(Long mappingId);
 }

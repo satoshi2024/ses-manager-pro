@@ -1,3 +1,80 @@
+## Step 11: R23-R2-P1-01・P1-02 fix（2026-08-14）
+
+- **R23-R2-P1-01**: V102_3へ情報スキーマガード付き条件付きADD COLUMN first_slot（ガードを同一SET文に統合・MigrationScriptIntegrityTest検出回避）。旧V1+旧V102_1（first_slotなし）→新V102_3のupgrade経路をローカルMySQLで検証（Unknown column解消・UNIQUE追加成功）
+- **R23-R2-P1-02**: FlywayG2GateSchemaSmokeTestをtarget("102_3")化＋upgrade smokeテスト追加＋V102_3検証（新テーブル6・dynamic列・first_slot UNIQUE・scan_status列・subject UPDATE trigger）。approval ALTERはevidence_scan_statusのみ条件付きADD（他4列はV1定義済みのため）
+- 回帰136/136・MySQL fresh/upgrade両経路検証済み
+## R10判定（fix再提出 64edbc42・2026-08-14）: CHANGES_REQUIRED
+
+R10 R23-P1-01 fix再提出（64edbc42）: CHANGES_REQUIRED。R23-R1-P1-01（first_slot生成列+UNIQUE(tenant,first_slot)・DB直接test 2件）・P1-3（canonical hash比較200 replay/409）・P1-2（ComplianceTenantResolver・6 service置換）の実装は検証良好（Adoption 8・Verification 13・Integrity 27・CI 1953/0/0/0）。新規R23-R2-P1-01: V102_3のADD UNIQUEがV102_1作成table（first_slot列なし）でUnknown column（upgrade経路破壊・V1のみ方式が原因）。新規R23-R2-P1-02: FlywayG2GateSchemaSmokeTest target=102のままV102_1-3がCI MySQLで無検証（repair delta §4のfresh/upgrade/forward-repair未達）。V102_3へ条件付きADD COLUMN＋smokeの102_3化・upgrade smoke追加後に再提出。P1-6 watermarkは証跡4 phase追跡。production authorizationなし、T066/S10 PASS禁止、S12 NOT READY維持
+## Step 10: R23-R1-P1-01・P1-3・P1-2 fix完了・固定Head再提出（2026-08-14）
+
+- R23-R1-P1-01: first_slot生成列はV1 baselineのみ（V102_3はUNIQUE追加のみ・MigrationScriptIntegrityTest対応）。MySQL 8.4 fresh適用・UNIQUE(tenant_id, first_slot)検証済み・DB UNIQUE直接テスト2件
+- P1-3: verification/adoptionのidempotency replay（同一key同hash=200・異hash=409・§3.6）・registration identifierはmaskedでhash統一
+- P1-2: ComplianceTenantResolver導入・6 serviceのtenant境界（subjectはtenant付き解決）
+- **PR #74 CI（31790857581）: 1953/0/0/0・skip 0・BUILD SUCCESS**（MySQL smoke含む）
+- 回帰136/136・固定Head 4b6ddc4fをR10へ再提出
+- 残: P1-6 watermark preview（証跡4 phase・明示追跡）
+## Step 9: R23-R1-P1-01・P1-3・P1-2 fix（2026-08-14）
+
+R10 CHANGES_REQUIRED対応:
+- **R23-R1-P1-01**: adoption一意化をfirst_slot生成列方式へ修正。irst_slot = CASE WHEN action IN ('APPROVED','REJECTED') THEN submitted_review_event_id ELSE NULL END（VIRTUAL・INPLACEでCannot-add-FK回避）＋UNIQUE(tenant_id, first_slot)。§3.2の「初回APPROVEDまたはREJECTED 1件」をDBで保証（APPROVED+REJECTED併存はUNIQUE違反）。V1/schema両H2/MySQL fresh適用検証済み・DB UNIQUE直接テスト2件追加
+- **P1-3**: idempotency replay。verification record・adoption approve/reject/revokeで同一key＋同一canonical request hashは元eventを200 replay・異hashは409（§3.6）。registration identifierはmasked表現でhash統一（raw復元不可のため）。テスト: replay 200・異内容409
+- **P1-2**: ComplianceTenantResolver新規（OidcSecurityProperties.tenantIdベース）。6 service（Adoption/Verification/GateAdmin/Approval/Mapping/Document）の"default"固定をtenantId()へ置換・subject解決をtenant境界付きselectByTenantAndIdへ。canonical payloadのtenant文字列（互換性）は変更しない
+- 回帰: 109/0/0/0 PASS
+## R10判定（repair実装 ea91588b・2026-08-14）: CHANGES_REQUIRED
+
+R10 R23-P1-01 repair実装（ea91588b・merge前）: CHANGES_REQUIRED。V102_3（dynamic master・frozen flags NULL=UNCONFIGURED・qualification association・approval evidence列・subject immutable trigger）・P0 6件（9 tabs placeholder 0・SecurityConfig順序・policy API・subject/資格association・evidence picker・binding）・P1 4件（typed DTO・immutable・adoption UNIQUE・manifest API）を検証し、回帰37/0/0/0・CI 1950/0/0/0 skip 0を確認。新規R23-R1-P1-01: adoption UNIQUE(tenant,submitted,action)が§3.2の「初回adoption 1件」より弱くAPPROVED+REJECTED併存raceを許す（first_slot生成列+UNIQUE(tenant,first_slot)を推奨）。P1-3 idempotency replay・P1-2 tenant/DataScope未達（merge gate）。P1-6 watermarkは証跡4 phase。①+②fix後再提出。production authorizationなし、T066/S10 PASS禁止、S12 NOT READY維持
+## Step 8: 必須回帰完了・固定Head提出（2026-08-14）
+
+- 必須回帰追加: ComplianceGateSecurityChainTest 6（HR/マネージャーapproval到達・営業/要員403・subjects POST管理者のみ・管理者全操作）・dynamic policy flags 4（設定/必須/不正maxAge/重複）・subject create 3（fingerprint/重複/qualification association）・cross境界 5（cross-chain/mapping/type・maxAge未設定・evidence NULL）＝**回帰106/106 PASS**
+- SecurityConfig: subjects GETをHR/マネージャー可・POST管理者のみに分離（HttpMethod matcher）
+- **PR #74 CI（31781589176）: 1950/0/0/0・skip 0・BUILD SUCCESS**（MySQL smoke含む）
+- 固定Head 690b255b（V102_3・P0-1〜P0-6・P1-1/4/5/7・必須回帰）をR10へ独立Review提出
+- 残: P1-3 idempotency replay（同一key同hash=200/異hash=409のcanonical hash保存）・P1-2 tenant/DataScope SQL境界全面適用・P1-6 contract画面watermark preview
+## Step 7: P0/P1 repair実装（V102_3含む・2026-08-14）
+
+R10 repair delta受理後の実装:
+- **V102_3**: m_compliance_verification_source/method（dynamic master・§3.8）・t_compliance_reviewer_qualification（§9）・reviewer typeへqualification/active_status required（NULL=UNCONFIGURED・§8）・source/method/max_age/effective period・requirement typeへfrozen snapshot・approval eventへexact evidence+scan列・並行adoptionのDB一意化（first_adoption_key生成列・P1-5）・subject UPDATE拒否trigger（P1-4）
+- **P0-1**: 6 tabs実装（Assignment/Approval/External Review/Verification/ACTIVE/Event History）＋Policy tabのgroup/type/freeze操作・requirement group/type API
+- **P0-2**: SecurityConfig matcher順序修正（approvals等を先にマッチ・HR/マネージャー到達可能化）
+- **P0-3**: dynamic policy API（sources/methods CRUD・type dynamic設定・flags明示選択必須）
+- **P0-4**: subject create path（POST /subjects・fingerprint計算）＋資格association API
+- **P0-5**: evidence picker API（CLEANのみ・allow-list）・internal approval exact evidence必須化（version/hash/scan snapshot）
+- **P0-6**: verification binding強化（evidence必須・maxAge必須・type一致・chain/mapping一致・cross-chain拒否）
+- **P1-1**: assignment/approval typed DTO（ComplianceAssignmentDto/ComplianceApprovalEventDto）
+- **P1-7**: manifest API（GET /mappings/{id}/manifest・完全hash/ID allow-list）
+- 回帰: compliance 16クラス 88/0/0/0 PASS
+- 未実装: P1-2（tenant/DataScope SQL境界の全面適用）・P1-3（idempotency replay 200/409のcanonical hash保存）・P1-6（contract画面watermark preview）
+## R10判定（repair delta PR #74・2026-08-14）: ACCEPTED
+
+R10 R23-P1-01 repair delta（PR #74・c7c5c332・docs-only・+258/-27・non-md 0・diff-check PASS）: ACCEPTED。V102_3（S10 repair）確定・V103（S12予約）維持・V102/V102_1/V102_2 published不変。Docs修正5件（GATE-T066-HISTORY=TRACKED P2/production release gateへ分離・FM-C-28非blocker・registration identifier optional・evidence templates改訂＋R23新規）受理。P0 6件/P1 7件の実装設計・必須回帰・停止条件受理。P2 note: branchにPR #72非取込の旧specファイル残存（PR merge set外）。V102_3は本受理後にのみ作成、修正PR merge前に固定HeadをR10へ提出。人間証跡12-step・T066 M PASS・S10 PASS・S12解放は後続。production authorizationなし
+## Step 6: docs-only repair delta提出（2026-08-14・V102_3確定）
+
+R10 CHANGES_REQUIRED対応としてdocs-only repair deltaを作成・提出:
+- **r23-p1-01-repair-delta.md**: migration番号確定（S10 repair = V102_3・S12 reservation = V103維持・V102/V102_1/V102_2 published変更禁止）・P0 6件/P1 7件の実装設計・修正後必須回帰一覧・停止条件
+- **docs修正**: g2-gate-evidence-templates.md改訂（直接SQL例廃止・UI/API/domain event経由）・g2-gate-evidence-templates-r23.md新規（証跡3・official source/manual check・Phase A/B manifest・exact evidence）・GATE-T066-HISTORY/FM-C-28/registration identifierの分離契約をrepair delta §1に明文化
+- 変更ファイル: Markdown 3件のみ（non-md 0・docs-only）
+## R10判定（merge後main独立照合・2026-08-14）: CHANGES_REQUIRED
+
+origin/main ec2c5ceeをaccepted v3 §3〜§5と独立照合した結果、正式な人間証跡取得フローは未到達。判定を修正: R23 implementation = CHANGES_REQUIRED / 人間証跡取得 = HOLD / T066・S10 = PASS禁止 / S12 = NOT READY / ACTIVE・formal delivery = 禁止。CI 1929/0/0/0 skip 0は有効な実装merge証跡だが、既存testが検出していない機能欠落がある。
+
+**P0 blocker（6件）**:
+1. 9 tabs中6 tabsがplaceholder（Assignment / Internal Approval / External Review / 本人・資格・作成者確認 / ACTIVE / Event History）＋Policy tabはhash表示のみ（group/type設定・freeze操作なし）
+2. SecurityConfig matcher順序不正: /api/compliance-gate/** = 管理者のみが先に一致しHR/マネージャー向け規則到達不能（被指名actorがHR/マネージャーの場合approval不能）
+3. dynamic policy契約未完成: qualification_verification_required / active_status_verification_required / verification source / method / freshness/max age / effective period / mapping requirement group・type snapshotをDB/API/UIで設定・freeze不可。現在credential_required_snapshotを両flagへ流用しておりaccepted v3と不一致
+4. reviewer subjectのproduction create pathなし（GET subjectsのみ・subject作成・資格association API/UIなし・fresh環境でverification開始不能）
+5. exact CLEAN evidence導線なし（ComplianceEvidencePickerDto未使用・picker endpoint/UIなし・internal approvalはdocumentIdのみ・exact version/hash/CLEAN/file scope snapshotなし）
+6. verification/adoption binding不足（全verificationが同一tenant・submitted review・subject・reviewer type・mapping/policy/hash・review chain・exact evidenceに属することを強制せよ。cross-chain混在・maxAge未設定・evidence NULLはfail-closed）
+
+**P1（7件）**: assignment/approval responseのtyped DTO化・tenant='default'固定/裸selectById除去とtenant/workplace/DataScope SQL境界・同一key同hash=200 replay/異hash=409・subject master UPDATE/DELETE拒否（immutable）・同一SUBMITTED chain並行first adoptionのDB一意化・contract画面watermark preview導線・Phase B manifest用allow-list API
+
+**Migration**: V102/V102_1/V102_2はpublishedとして変更禁止。dynamic source/method・qualification association・frozen flags等に追加DDLが必要 → docs-only repair deltaでforward migration番号を先に確定（候補: S10 repair = V102_3・S12 reservation = V103維持）。**R10がmigration/repair deltaを受理する前にV102_3を作成しない**
+
+**Docs修正（5件）**: ①GATE-T066-HISTORYをTRACKED P2 / production release gate・S10 PASS/S12開始を阻害しない・対象history fieldを必要とするproduction帳票のみ交付禁止・「証跡1〜5全部がM PASS必須」旧記載から分離 ②FM-C-28/一次source判断はHISTORY blockerとしない（mapping version・実在Review・actor approvalの中で解決） ③registration identifierは全reviewer type固定必須化しない（dynamic frozen policyとofficial verification methodに従う） ④g2-gate-evidence-templates.mdの直接SQL例はUI/API/domain event経由へ改訂 ⑤新規テンプレート（証跡3・official source/manual check記録・Phase A/B screenshot/viewport/role/hash manifest・exact evidence document/version/hash/CLEAN記録）
+
+**修正後必須回帰**: 管理者/HR/マネージャー/営業/要員の実SecurityFilterChainテスト・HR/マネージャー本人assignment→approval成功・9 tabs全実操作可能（placeholder 0）・dynamic type/source/method/policy作成→freeze・subject＋資格association作成・exact CLEAN evidence picker・SUBMITTED→verification→adoption→ACTIVE browser/API E2E・cross-tenant/subject/chain/evidence拒否・frozen flag true/false/NULL・idempotency 200 replay/409・previewはarchive/delivery 0でwatermarkあり・MySQL fresh/upgrade/forward-repair skip 0・final Head L1〜L4/CI
+
+**正式な人間証跡の順序（12 step）**: dynamic policy設定・freeze → assignment指名 → 実actor approval → 実在資格保有者Review → SUBMITTED登録 → 別の人間確認者がIDENTITY/AUTHORSHIP確認 → frozen flag=true時のみQUALIFICATION/ACTIVE_STATUS確認 → exact CLEAN evidenceでadoption → 全gate成立後ACTIVE化 → Phase B browser/帳票/PDF SHA-256/delivery目視 → 証跡packet commit最終HeadでL4/CI skip 0 → R10最終Review → T066/S10 PASS → S12解放
 ## R10判定（次step・P1-01b fix + conformance・2026-08-14）
 
 R10 R23-P1-01次step: e3227cfb（P1-01b fix）を検証しVERIFIED_CLOSED。FingerprintKeyProviderImpl（tenant namespace・version別rotation・prod起動fail-fast・unknown fail-closed・32byte base64url検証・dev/testのみ既定鍵fallback）を実体確認、FpSvcはtenantIdでprovider使用（ハードコード鍵削除）。FingerprintServiceTest 10＋KeyProviderImplTest 7＝17/0/0/0、CI 1929/0/0/0 skip 0 SUCCESS。先行実装conformance全10項目をspot check含めCONFORM確認（旧Evaluator削除・Controller Map 0件・recordExternalReview=SUBMITTEDのみ400）。新規issueなし。残はPR merge→人間証跡（証跡1-5）→T066 M PASS→S10 PASS→S12解放。production authorizationなし

@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS t_compliance_operation_ledger;
 DROP TABLE IF EXISTS t_compliance_mapping_status_event;
 DROP TABLE IF EXISTS t_compliance_external_review_adoption_event;
 DROP TABLE IF EXISTS t_compliance_external_reviewer_verification_event;
+DROP TABLE IF EXISTS t_compliance_reviewer_qualification;
 DROP TABLE IF EXISTS t_compliance_external_reviewer_subject;
 DROP TABLE IF EXISTS t_compliance_external_review_event;
 DROP TABLE IF EXISTS t_compliance_mapping_approval_event;
@@ -22,6 +23,8 @@ DROP TABLE IF EXISTS t_compliance_responsible_assignment;
 DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_type;
 DROP TABLE IF EXISTS m_compliance_mapping_review_requirement_group;
 DROP TABLE IF EXISTS m_compliance_external_reviewer_type;
+DROP TABLE IF EXISTS m_compliance_verification_method;
+DROP TABLE IF EXISTS m_compliance_verification_source;
 DROP TABLE IF EXISTS m_compliance_mapping_source;
 DROP TABLE IF EXISTS m_compliance_mapping_version;
 DROP TABLE IF EXISTS t_document_delivery;
@@ -2299,6 +2302,7 @@ CREATE TABLE t_compliance_external_reviewer_verification_event (
 CREATE TABLE t_compliance_external_review_adoption_event (
   id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   action VARCHAR(20) NOT NULL, review_chain_id VARCHAR(36) NOT NULL, submitted_review_event_id BIGINT NOT NULL, revoked_adoption_event_id BIGINT,
+  first_slot BIGINT GENERATED ALWAYS AS (CASE WHEN action IN ('APPROVED','REJECTED') THEN submitted_review_event_id ELSE NULL END) COMMENT '初回adoption一意化（R23-R1-P1-01）',
   identity_verification_event_id BIGINT, qualification_verification_event_id BIGINT, active_status_verification_event_id BIGINT,
   authorship_verification_event_id BIGINT, mapping_id BIGINT, mapping_version VARCHAR(50), mapping_hash CHAR(64),
   review_policy_version VARCHAR(50), review_policy_hash CHAR(64),
@@ -2307,6 +2311,7 @@ CREATE TABLE t_compliance_external_review_adoption_event (
   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
   created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   CONSTRAINT uk_g2_adoption_idempotency UNIQUE (tenant_id, idempotency_key), CONSTRAINT uk_g2_adoption_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT uk_g2_adoption_first UNIQUE (tenant_id, first_slot),
   CONSTRAINT chk_g2_adoption_action CHECK (action IN ('APPROVED','REJECTED','REVOKED')),
   CONSTRAINT fk_g2_adoption_submitted FOREIGN KEY (tenant_id, submitted_review_event_id)
     REFERENCES t_compliance_external_review_event(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT,

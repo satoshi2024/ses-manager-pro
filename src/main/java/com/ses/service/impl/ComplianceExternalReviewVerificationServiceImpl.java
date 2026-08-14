@@ -38,6 +38,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
     private final com.ses.service.compliance.ComplianceReviewerFingerprintService fingerprintService;
     private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
     private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
 
     public ComplianceExternalReviewVerificationServiceImpl(
             ComplianceExternalReviewEventMapper reviewEventMapper,
@@ -47,7 +48,8 @@ public class ComplianceExternalReviewVerificationServiceImpl
             ComplianceGateEvidenceResolver evidenceResolver,
             com.ses.service.compliance.ComplianceReviewerFingerprintService fingerprintService,
             com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService,
-            com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider) {
+            com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider,
+            com.ses.service.compliance.ComplianceTenantResolver tenantResolver) {
         this.reviewEventMapper = reviewEventMapper;
         this.subjectMapper = subjectMapper;
         this.verificationEventMapper = verificationEventMapper;
@@ -56,6 +58,11 @@ public class ComplianceExternalReviewVerificationServiceImpl
         this.fingerprintService = fingerprintService;
         this.credentialCryptoService = credentialCryptoService;
         this.keyProvider = keyProvider;
+        this.tenantResolver = tenantResolver;
+    }
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
     }
 
     @Override
@@ -92,26 +99,42 @@ public class ComplianceExternalReviewVerificationServiceImpl
             throw BusinessException.of(400, "compliance.gate.invalidVerification");
         }
         // SUBMITTED review eventが存在し、同一tenant・SUBMITTED actionであること
-        ComplianceExternalReviewEvent submitted = reviewEventMapper.selectByTenantAndId("default", submittedReviewEventId);
+        ComplianceExternalReviewEvent submitted = reviewEventMapper.selectByTenantAndId(tenantId(), submittedReviewEventId);
         if (submitted == null || !"SUBMITTED".equalsIgnoreCase(submitted.getAction())) {
             throw BusinessException.of(400, "compliance.gate.verificationTargetInvalid");
         }
-        // reviewer subjectが存在すること（person-stable）
-        ComplianceExternalReviewerSubject subject = subjectMapper.selectById(reviewerSubjectId);
+        // P0-6/P1-2: reviewer subjectが存在すること（person-stable・tenant境界付き解決）
+        ComplianceExternalReviewerSubject subject = subjectMapper.selectByTenantAndId(tenantId(), reviewerSubjectId);
         if (subject == null) {
             throw BusinessException.of(400, "compliance.gate.reviewerSubjectNotFound");
         }
-        // exact evidence（§4-5/6）: server-side解決しCLEAN/SHA-256を検証
-        DocumentVersion evidence = null;
-        if (evidenceDocumentId != null || evidenceDocumentVersionId != null) {
-            evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        // P0-6: reviewer typeはsubmitted reviewのtypeと一致すること（cross-type混在拒否）
+        if (!submitted.getReviewerTypeId().equals(reviewerTypeId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationTypeMismatch");
+        }
+        // P0-6: exact evidenceは必須（§4-5/6: evidence NULL/non-CLEAN/不存在/hash不一致は全て拒否）
+        DocumentVersion evidence = evidenceResolver.resolve(tenantId(), evidenceDocumentId, evidenceDocumentVersionId);
+        // P0-6: AUTHORSHIP以外はmax_age_days必須（§3.7: 未設定/不正値はfail-closed）
+        boolean authorship = "REVIEW_AUTHORSHIP".equals(verificationKind);
+        if (!authorship && (maxAgeDays == null || maxAgeDays < 1)) {
+            throw BusinessException.of(400, "compliance.gate.verificationMaxAgeRequired");
         }
         // AUTHORSHIP kindはmapping/policy/review binding必須（DB triggerでも担保）
-        boolean authorship = "REVIEW_AUTHORSHIP".equals(verificationKind);
         if (authorship && (mappingId == null || !StringUtils.hasText(mappingVersion)
                 || !StringUtils.hasText(mappingHash) || externalReviewEventId == null
                 || !StringUtils.hasText(externalReviewChainId))) {
             throw BusinessException.of(400, "compliance.gate.authorshipBindingRequired");
+        }
+        // P0-6: cross-chain混在拒否 — 全kindでexternal review chainがsubmittedと一致すること（§G2-VERIFY-11/12）
+        if (externalReviewEventId != null && !submitted.getId().equals(externalReviewEventId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationChainMismatch");
+        }
+        if (StringUtils.hasText(externalReviewChainId)
+                && !submitted.getReviewChainId().equals(externalReviewChainId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationChainMismatch");
+        }
+        if (mappingId != null && !submitted.getMappingId().equals(mappingId)) {
+            throw BusinessException.of(400, "compliance.gate.verificationMappingMismatch");
         }
         // REVIEW_AUTHORSHIPのmapping一致検証（§G2-VERIFY-12）
         if (authorship && mappingId != null) {
@@ -127,16 +150,34 @@ public class ComplianceExternalReviewVerificationServiceImpl
         String key = StringUtils.hasText(idempotencyKey) ? idempotencyKey
                 : "MAPPING-VERIFY:" + submittedReviewEventId + ":" + reviewerSubjectId + ":" + verificationKind + ":" + UUID.randomUUID();
 
+        // P1-3: idempotency replay — 同一key＋同一canonical request hashは元eventを200 replay（§3.6）
+        // registration identifierはAES-GCM暗号化されraw値が復元不可のため、hash比較はmasked表現で統一する。
+        String requestHash = canonicalRequestHash(submittedReviewEventId, reviewerSubjectId, reviewerTypeId,
+                verificationKind, result, methodCode, authoritySourceCode, authoritySourceName,
+                officialUrlReference, maskRegistrationIdentifier(registrationIdentifier), checkedAt,
+                sourceDataAsOf, maxAgeDays, validUntil, evidenceDocumentId, evidenceDocumentVersionId,
+                mappingId, mappingVersion, mappingHash, externalReviewEventId, externalReviewChainId);
+        ComplianceExternalReviewerVerificationEvent existing =
+                verificationEventMapper.selectByIdempotencyKey(tenantId(), key);
+        if (existing != null) {
+            String existingHash = existing.getIdempotencyKey() == null ? null
+                    : existingIdempotencyRequestHash(existing);
+            if (existingHash != null && existingHash.equals(requestHash)) {
+                return existing; // 200 replay
+            }
+            throw BusinessException.of(409, "contract.compliance.versionConflict");
+        }
+
         ComplianceExternalReviewerVerificationEvent event = new ComplianceExternalReviewerVerificationEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setReviewerTypeId(reviewerTypeId);
         event.setReviewerTypeCodeSnapshot(submitted.getReviewerTypeCodeSnapshot());
         event.setReviewerTypeNameSnapshot(submitted.getReviewerTypeNameSnapshot());
         event.setReviewerSubjectId(reviewerSubjectId);
         // §9 fingerprint domain分離（R23-S3-P1-01）: personとqualificationは別domainのtenant-HMAC。
-        event.setPersonFingerprintSnapshot(fingerprintService.personFingerprint("default", subject));
+        event.setPersonFingerprintSnapshot(fingerprintService.personFingerprint(tenantId(), subject));
         event.setQualificationFingerprintSnapshot(fingerprintService.qualificationFingerprint(
-                "default", subject, submitted.getReviewerTypeCodeSnapshot(), registrationIdentifier));
+                tenantId(), subject, submitted.getReviewerTypeCodeSnapshot(), registrationIdentifier));
         event.setFingerprintKeyVersion(subject.getFingerprintKeyVersion() != null
                 ? subject.getFingerprintKeyVersion() : keyProvider.getCurrentKeyVersion());
         event.setVerificationKind(verificationKind);
@@ -172,7 +213,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
         if (StringUtils.hasText(registrationIdentifier)) {
             String raw = registrationIdentifier.trim();
             String envelope = credentialCryptoService.encrypt(
-                    "default", mappingId, mappingVersion, opId, raw);
+                    tenantId(), mappingId, mappingVersion, opId, raw);
             event.setRegistrationIdentifierEncrypted(envelope);
             event.setRegistrationIdentifierKeyVersion(keyProvider.getCurrentKeyVersion());
             event.setRegistrationIdentifierCipherFormat(
@@ -196,7 +237,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
             throw BusinessException.of(400, "compliance.gate.invalidVerificationRevoke");
         }
         ComplianceExternalReviewerVerificationEvent target =
-                verificationEventMapper.selectByTenantAndId("default", targetVerificationEventId);
+                verificationEventMapper.selectByTenantAndId(tenantId(), targetVerificationEventId);
         if (target == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -204,7 +245,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
             throw BusinessException.of(400, "compliance.gate.verificationAlreadyRevoked");
         }
         ComplianceExternalReviewerVerificationEvent event = new ComplianceExternalReviewerVerificationEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setReviewerTypeId(target.getReviewerTypeId());
         event.setReviewerTypeCodeSnapshot(target.getReviewerTypeCodeSnapshot());
         event.setReviewerTypeNameSnapshot(target.getReviewerTypeNameSnapshot());
@@ -238,6 +279,73 @@ public class ComplianceExternalReviewVerificationServiceImpl
         if (submittedReviewEventId == null) {
             return List.of();
         }
-        return verificationEventMapper.selectBySubmittedReview("default", submittedReviewEventId);
+        return verificationEventMapper.selectBySubmittedReview(tenantId(), submittedReviewEventId);
+    }
+
+    // ===== P1-3: idempotency replay用canonical request hash =====
+
+    private String canonicalRequestHash(Long submittedReviewEventId, Long reviewerSubjectId, Long reviewerTypeId,
+                                        String verificationKind, String result, String methodCode,
+                                        String authoritySourceCode, String authoritySourceName,
+                                        String officialUrlReference, String registrationIdentifier,
+                                        LocalDateTime checkedAt, LocalDateTime sourceDataAsOf, Integer maxAgeDays,
+                                        LocalDateTime validUntil, Long evidenceDocumentId, Long evidenceDocumentVersionId,
+                                        Long mappingId, String mappingVersion, String mappingHash,
+                                        Long externalReviewEventId, String externalReviewChainId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("VERIFY|").append(submittedReviewEventId).append('|').append(reviewerSubjectId)
+                .append('|').append(reviewerTypeId).append('|').append(nullSafe(verificationKind))
+                .append('|').append(nullSafe(result)).append('|').append(nullSafe(methodCode))
+                .append('|').append(nullSafe(authoritySourceCode)).append('|').append(nullSafe(authoritySourceName))
+                .append('|').append(nullSafe(officialUrlReference)).append('|').append(nullSafe(registrationIdentifier))
+                .append('|').append(checkedAt).append('|').append(sourceDataAsOf).append('|').append(maxAgeDays)
+                .append('|').append(validUntil).append('|').append(evidenceDocumentId)
+                .append('|').append(evidenceDocumentVersionId).append('|').append(mappingId)
+                .append('|').append(nullSafe(mappingVersion)).append('|').append(nullSafe(mappingHash))
+                .append('|').append(externalReviewEventId).append('|').append(nullSafe(externalReviewChainId));
+        return sha256Hex(sb.toString());
+    }
+
+    /** 既存eventのidempotency request hash（eventフィールドから再構成）。 */
+    private String existingIdempotencyRequestHash(ComplianceExternalReviewerVerificationEvent e) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("VERIFY|").append(e.getSubmittedReviewEventId()).append('|').append(e.getReviewerSubjectId())
+                .append('|').append(e.getReviewerTypeId()).append('|').append(nullSafe(e.getVerificationKind()))
+                .append('|').append(nullSafe(e.getResult())).append('|').append(nullSafe(e.getMethodCode()))
+                .append('|').append(nullSafe(e.getAuthoritySourceCode())).append('|').append(nullSafe(e.getAuthoritySourceName()))
+                .append('|').append(nullSafe(e.getOfficialUrlReferenceSnapshot())).append('|').append(nullSafe(e.getRegistrationIdentifierMaskedSnapshot()))
+                .append('|').append(e.getCheckedAt()).append('|').append(e.getSourceDataAsOf()).append('|').append(e.getMaxAgeDaysSnapshot())
+                .append('|').append(e.getValidUntil()).append('|').append(e.getEvidenceDocumentId())
+                .append('|').append(e.getEvidenceDocumentVersionId()).append('|').append(e.getMappingId())
+                .append('|').append(nullSafe(e.getMappingVersion())).append('|').append(nullSafe(e.getMappingHash()))
+                .append('|').append(e.getExternalReviewEventId()).append('|').append(nullSafe(e.getExternalReviewChainId()));
+        return sha256Hex(sb.toString());
+    }
+
+    private String nullSafe(String value) {
+        return value == null ? "" : value;
+    }
+
+    /** 暗号化時のmasked表現と同一の変換（§3.3: 末尾4桁のみ露出）。 */
+    private String maskRegistrationIdentifier(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String trimmed = raw.trim();
+        return trimmed.length() > 4 ? "****" + trimmed.substring(trimmed.length() - 4) : "VALIDATED";
+    }
+
+    private String sha256Hex(String text) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception ex) {
+            throw new IllegalStateException("SHA-256計算に失敗しました", ex);
+        }
     }
 }

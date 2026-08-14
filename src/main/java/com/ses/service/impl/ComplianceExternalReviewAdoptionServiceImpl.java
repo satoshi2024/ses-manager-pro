@@ -37,6 +37,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
     private final com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper;
     private final ComplianceGateEvidenceResolver evidenceResolver;
     private final ComplianceGateEvaluationService gateEvaluationService;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
 
     public ComplianceExternalReviewAdoptionServiceImpl(
             ComplianceExternalReviewEventMapper reviewEventMapper,
@@ -45,7 +46,8 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             ComplianceMappingVersionMapper versionMapper,
             com.ses.mapper.ComplianceMappingReviewRequirementTypeMapper requirementTypeMapper,
             ComplianceGateEvidenceResolver evidenceResolver,
-            ComplianceGateEvaluationService gateEvaluationService) {
+            ComplianceGateEvaluationService gateEvaluationService,
+            com.ses.service.compliance.ComplianceTenantResolver tenantResolver) {
         this.reviewEventMapper = reviewEventMapper;
         this.verificationEventMapper = verificationEventMapper;
         this.adoptionEventMapper = adoptionEventMapper;
@@ -53,6 +55,11 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
         this.requirementTypeMapper = requirementTypeMapper;
         this.evidenceResolver = evidenceResolver;
         this.gateEvaluationService = gateEvaluationService;
+        this.tenantResolver = tenantResolver;
+    }
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
     }
 
     @Override
@@ -70,7 +77,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             throw BusinessException.of(400, "compliance.gate.invalidAdoption");
         }
         ComplianceExternalReviewEvent submitted =
-                reviewEventMapper.selectByTenantAndId("default", submittedReviewEventId);
+                reviewEventMapper.selectByTenantAndId(tenantId(), submittedReviewEventId);
         if (submitted == null || !"SUBMITTED".equalsIgnoreCase(submitted.getAction())) {
             throw BusinessException.of(400, "compliance.gate.verificationTargetInvalid");
         }
@@ -88,16 +95,16 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
         LocalDate asOf = LocalDate.now();
 
         // 当該frozen policyが要求するverification setの検証（§3.2 K3・§G2-VERIFY-03）
-        gateEvaluationService.verifyRequired("IDENTITY", identityVerificationEventId, "default", asOf);
-        gateEvaluationService.verifyRequired("REVIEW_AUTHORSHIP", authorshipVerificationEventId, "default", asOf);
+        gateEvaluationService.verifyRequired("IDENTITY", identityVerificationEventId, tenantId(), asOf);
+        gateEvaluationService.verifyRequired("REVIEW_AUTHORSHIP", authorshipVerificationEventId, tenantId(), asOf);
         boolean qualificationRequired = false;
         boolean activeStatusRequired = false;
         ComplianceExternalReviewerVerificationEvent authorship =
-                verificationEventMapper.selectByTenantAndId("default", authorshipVerificationEventId);
+                verificationEventMapper.selectByTenantAndId(tenantId(), authorshipVerificationEventId);
         if (authorship != null) {
             List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
                     new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                             .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId,
                                     authorship.getReviewerTypeId()));
             for (com.ses.entity.ComplianceMappingReviewRequirementType frozen : frozenTypes) {
@@ -108,16 +115,16 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             }
         }
         if (qualificationRequired) {
-            gateEvaluationService.verifyRequired("QUALIFICATION", qualificationVerificationEventId, "default", asOf);
+            gateEvaluationService.verifyRequired("QUALIFICATION", qualificationVerificationEventId, tenantId(), asOf);
         }
         if (activeStatusRequired) {
-            gateEvaluationService.verifyRequired("ACTIVE_STATUS", activeStatusVerificationEventId, "default", asOf);
+            gateEvaluationService.verifyRequired("ACTIVE_STATUS", activeStatusVerificationEventId, tenantId(), asOf);
         }
         // exact evidence（§4-5/6/7）
-        DocumentVersion evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        DocumentVersion evidence = evidenceResolver.resolve(tenantId(), evidenceDocumentId, evidenceDocumentVersionId);
 
         ComplianceExternalReviewAdoptionEvent event = new ComplianceExternalReviewAdoptionEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setAction("APPROVED");
         event.setReviewChainId(submitted.getReviewChainId());
         event.setSubmittedReviewEventId(submittedReviewEventId);
@@ -140,6 +147,12 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
         event.setCorrelationId(UUID.randomUUID().toString());
         event.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey
                 : "ADOPT:" + submittedReviewEventId + ":" + UUID.randomUUID());
+        // P1-3: idempotency replay — 同一key＋同一内容は元eventを返す（§3.6）
+        try {
+            assertReplayOrThrow(event);
+        } catch (IdempotentReplay replay) {
+            return replay.existing;
+        }
         try {
             adoptionEventMapper.insertEvent(event);
         } catch (org.springframework.dao.DuplicateKeyException e) {
@@ -155,13 +168,13 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             throw BusinessException.of(400, "compliance.gate.invalidAdoption");
         }
         ComplianceExternalReviewEvent submitted =
-                reviewEventMapper.selectByTenantAndId("default", submittedReviewEventId);
+                reviewEventMapper.selectByTenantAndId(tenantId(), submittedReviewEventId);
         if (submitted == null || !"SUBMITTED".equalsIgnoreCase(submitted.getAction())) {
             throw BusinessException.of(400, "compliance.gate.verificationTargetInvalid");
         }
         assertNoPriorAdoption(submittedReviewEventId);
         ComplianceExternalReviewAdoptionEvent event = new ComplianceExternalReviewAdoptionEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setAction("REJECTED");
         event.setReviewChainId(submitted.getReviewChainId());
         event.setSubmittedReviewEventId(submittedReviewEventId);
@@ -171,6 +184,12 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
         event.setCorrelationId(UUID.randomUUID().toString());
         event.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey
                 : "REJECT:" + submittedReviewEventId + ":" + UUID.randomUUID());
+        // P1-3: idempotency replay
+        try {
+            assertReplayOrThrow(event);
+        } catch (IdempotentReplay replay) {
+            return replay.existing;
+        }
         try {
             adoptionEventMapper.insertEvent(event);
         } catch (org.springframework.dao.DuplicateKeyException e) {
@@ -186,7 +205,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             throw BusinessException.of(400, "compliance.gate.invalidAdoption");
         }
         ComplianceExternalReviewAdoptionEvent target =
-                adoptionEventMapper.selectByTenantAndId("default", targetAdoptionEventId);
+                adoptionEventMapper.selectByTenantAndId(tenantId(), targetAdoptionEventId);
         if (target == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -194,7 +213,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
             throw BusinessException.of(400, "compliance.gate.adoptionRevokeTargetInvalid");
         }
         ComplianceExternalReviewAdoptionEvent event = new ComplianceExternalReviewAdoptionEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setAction("REVOKED");
         event.setReviewChainId(target.getReviewChainId());
         event.setSubmittedReviewEventId(target.getSubmittedReviewEventId());
@@ -205,6 +224,12 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
         event.setCorrelationId(UUID.randomUUID().toString());
         event.setIdempotencyKey(StringUtils.hasText(idempotencyKey) ? idempotencyKey
                 : "ADOPT-REVOKE:" + target.getId() + ":" + UUID.randomUUID());
+        // P1-3: idempotency replay
+        try {
+            assertReplayOrThrow(event);
+        } catch (IdempotentReplay replay) {
+            return replay.existing;
+        }
         try {
             adoptionEventMapper.insertEvent(event);
         } catch (org.springframework.dao.DuplicateKeyException e) {
@@ -215,14 +240,71 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
 
     @Override
     public List<ComplianceExternalReviewAdoptionEvent> listBySubmittedReview(Long submittedReviewEventId) {
-        return adoptionEventMapper.selectChainBySubmittedReview("default", submittedReviewEventId);
+        return adoptionEventMapper.selectChainBySubmittedReview(tenantId(), submittedReviewEventId);
     }
 
     private void assertNoPriorAdoption(Long submittedReviewEventId) {
         List<ComplianceExternalReviewAdoptionEvent> chain =
-                adoptionEventMapper.selectChainBySubmittedReview("default", submittedReviewEventId);
+                adoptionEventMapper.selectChainBySubmittedReview(tenantId(), submittedReviewEventId);
         if (!chain.isEmpty()) {
             throw BusinessException.of(409, "compliance.gate.adoptionAlreadyExists");
+        }
+    }
+
+    /**
+     * P1-3: idempotency replay — 同一keyの既存eventがあればcanonical hashを比較する。
+     * 同一hashは元eventを返す（200 replay）・異なるhashは409。
+     */
+    private void assertReplayOrThrow(ComplianceExternalReviewAdoptionEvent event) {
+        ComplianceExternalReviewAdoptionEvent existing =
+                adoptionEventMapper.selectByIdempotencyKey(tenantId(), event.getIdempotencyKey());
+        if (existing == null) {
+            return;
+        }
+        if (canonicalHash(existing).equals(canonicalHash(event))) {
+            throw new IdempotentReplay(existing);
+        }
+        throw BusinessException.of(409, "contract.compliance.versionConflict");
+    }
+
+    private String canonicalHash(ComplianceExternalReviewAdoptionEvent e) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(e.getAction()).append('|').append(e.getSubmittedReviewEventId())
+                .append('|').append(e.getRevokedAdoptionEventId()).append('|')
+                .append(e.getIdentityVerificationEventId()).append('|')
+                .append(e.getQualificationVerificationEventId()).append('|')
+                .append(e.getActiveStatusVerificationEventId()).append('|')
+                .append(e.getAuthorshipVerificationEventId()).append('|')
+                .append(e.getEvidenceDocumentVersionId()).append('|').append(nullSafe(e.getEvidenceDocumentHash()))
+                .append('|').append(nullSafe(e.getReviewChainId()));
+        return sha256Hex(sb.toString());
+    }
+
+    private String nullSafe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String sha256Hex(String text) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception ex) {
+            throw new IllegalStateException("SHA-256計算に失敗しました", ex);
+        }
+    }
+
+    /** replay時は既存eventを返すための制御例外（INSERTしない）。 */
+    private static class IdempotentReplay extends RuntimeException {
+        private final ComplianceExternalReviewAdoptionEvent existing;
+
+        IdempotentReplay(ComplianceExternalReviewAdoptionEvent existing) {
+            super("idempotent replay");
+            this.existing = existing;
         }
     }
 }

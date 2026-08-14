@@ -48,6 +48,11 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private final com.ses.mapper.ComplianceExternalReviewAdoptionEventMapper adoptionEventMapper;
     private final com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
+    }
 
     @Override
     @Transactional
@@ -59,7 +64,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.invalidMapping");
         }
         ComplianceMappingVersion version = new ComplianceMappingVersion();
-        version.setTenantId("default");
+        version.setTenantId(tenantId());
         version.setMappingCode(mappingCode);
         version.setMappingVersion(mappingVersion);
         version.setEffectiveFrom(effectiveFrom);
@@ -71,7 +76,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (asOf.isBefore(effectiveFrom)) {
             List<ComplianceMappingVersion> futureList = versionMapper.selectList(
                     new LambdaQueryWrapper<ComplianceMappingVersion>()
-                            .eq(ComplianceMappingVersion::getTenantId, "default")
+                            .eq(ComplianceMappingVersion::getTenantId, tenantId())
                             .eq(ComplianceMappingVersion::getMappingCode, mappingCode)
                             .eq(ComplianceMappingVersion::getFutureSlot, 1));
             if (!futureList.isEmpty()) {
@@ -86,7 +91,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                 throw BusinessException.of(400, "compliance.gate.invalidSource");
             }
             ComplianceMappingSource source = new ComplianceMappingSource();
-            source.setTenantId("default");
+            source.setTenantId(tenantId());
             source.setSourceCode(input.getSourceCode());
             source.setSourceUrl(input.getSourceUrl());
             source.setSourceVersion(input.getSourceVersion());
@@ -191,11 +196,11 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         if (approvalEventId == null) {
             throw BusinessException.of(400, "compliance.gate.approvalRequired");
         }
-        com.ses.entity.ComplianceMappingApprovalEvent approval = approvalEventMapper.selectByTenantAndId("default", approvalEventId);
+        com.ses.entity.ComplianceMappingApprovalEvent approval = approvalEventMapper.selectByTenantAndId(tenantId(), approvalEventId);
         if (approval == null || !version.getId().equals(approval.getMappingId()) || !"APPROVE".equals(approval.getAction())) {
             throw BusinessException.of(400, "compliance.gate.approvalRequired");
         }
-        if (approvalEventMapper.countSubsequentRevokes("default", version.getId(), approvalEventId) > 0) {
+        if (approvalEventMapper.countSubsequentRevokes(tenantId(), version.getId(), approvalEventId) > 0) {
             throw BusinessException.of(400, "compliance.gate.approvalRevoked");
         }
 
@@ -211,13 +216,13 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         // canonical review policy hash再解決（§6.3: DBから再計算し保存hashおよび承認hashと比較）
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(
                         new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                                 .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String currentPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
         if (!currentPolicyHash.equals(version.getReviewPolicyHash()) || !currentPolicyHash.equals(approval.getReviewPolicyHash())) {
@@ -228,7 +233,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         // 旧ComplianceExternalReviewEvaluator（self-declared hash・latest evidence・旧APPROVED直接採用）は
         // gate正本から除外される。gateはAPPROVED adoption event（adopted_at, id reducer）のみ採用（§3.2）。
         com.ses.entity.ComplianceExternalReviewAdoptionEvent latestAdoption =
-                adoptionEventMapper.selectLatestAdoptionByMapping("default", version.getId());
+                adoptionEventMapper.selectLatestAdoptionByMapping(tenantId(), version.getId());
         if (latestAdoption == null) {
             throw BusinessException.of(400, "compliance.gate.externalReviewIncomplete");
         }
@@ -237,12 +242,12 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         // frozen policyのflag（§G2-VERIFY-14・§8）: 採用typeのsnapshot flagがtrueなら該当verification必須。
         // 実装ではadoptionが参照するAUTHORSHIP verificationのreviewer type snapshotに従う。
         com.ses.entity.ComplianceExternalReviewerVerificationEvent authorshipVerification =
-                verificationEventMapper.selectByTenantAndId("default", latestAdoption.getAuthorshipVerificationEventId());
+                verificationEventMapper.selectByTenantAndId(tenantId(), latestAdoption.getAuthorshipVerificationEventId());
         if (authorshipVerification != null) {
             Long reviewerTypeId = authorshipVerification.getReviewerTypeId();
             List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
                     new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                             .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
             for (com.ses.entity.ComplianceMappingReviewRequirementType frozen : frozenTypes) {
                 if (Integer.valueOf(1).equals(frozen.getCredentialRequiredSnapshot())) {
@@ -252,7 +257,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
                 }
             }
         }
-        gateEvaluationService.adopt("default", latestAdoption.getReviewChainId(), version, asOf,
+        gateEvaluationService.adopt(tenantId(), latestAdoption.getReviewChainId(), version, asOf,
                 qualificationRequired, activeStatusRequired);
 
         // assignment再解決（openかつworkplaceId一致）
@@ -269,7 +274,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         // slot管理: tenant + mappingCode単位（uk_g2_mapping_active_slot/future_slot一致）でopen ACTIVEが無ければactive_slot=1、あればfuture_slot=1
         List<ComplianceMappingVersion> activeList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
-                        .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getTenantId, tenantId())
                         .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
@@ -284,7 +289,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         } else {
             List<ComplianceMappingVersion> futureList = versionMapper.selectList(
                     new LambdaQueryWrapper<ComplianceMappingVersion>()
-                            .eq(ComplianceMappingVersion::getTenantId, "default")
+                            .eq(ComplianceMappingVersion::getTenantId, tenantId())
                             .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                             .eq(ComplianceMappingVersion::getFutureSlot, 1)
                             .ne(ComplianceMappingVersion::getId, version.getId()));
@@ -326,13 +331,13 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
 
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(
                         new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                                 .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String currentPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
         if (!currentPolicyHash.equals(version.getReviewPolicyHash())) {
@@ -341,9 +346,9 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
 
         // P3-N1: 昇格前に既存承認のREVOKE再検証
         List<com.ses.entity.ComplianceMappingApprovalEvent> approvals =
-                approvalEventMapper.selectByMapping("default", version.getId(), "APPROVE");
+                approvalEventMapper.selectByMapping(tenantId(), version.getId(), "APPROVE");
         for (com.ses.entity.ComplianceMappingApprovalEvent app : approvals) {
-            if (approvalEventMapper.countSubsequentRevokes("default", version.getId(), app.getId()) > 0) {
+            if (approvalEventMapper.countSubsequentRevokes(tenantId(), version.getId(), app.getId()) > 0) {
                 throw BusinessException.of(400, "compliance.gate.approvalRevoked");
             }
         }
@@ -354,7 +359,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
 
         List<ComplianceMappingVersion> currentActiveList = versionMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingVersion>()
-                        .eq(ComplianceMappingVersion::getTenantId, "default")
+                        .eq(ComplianceMappingVersion::getTenantId, tenantId())
                         .eq(ComplianceMappingVersion::getMappingCode, version.getMappingCode())
                         .eq(ComplianceMappingVersion::getStatus, STATUS_ACTIVE)
                         .eq(ComplianceMappingVersion::getActiveSlot, 1));
@@ -401,7 +406,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private void assertPolicyNotEmpty(ComplianceMappingVersion version) {
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
         if (groups.isEmpty()) {
             throw BusinessException.of(400, "compliance.gate.policyInvalid");
@@ -412,7 +417,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             }
             Long typeCount = requirementTypeMapper.selectCount(
                     new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                             .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, group.getId()));
             if (typeCount == null || typeCount == 0) {
                 throw BusinessException.of(400, "compliance.gate.policyInvalid");
@@ -421,7 +426,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = requirementTypeMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                         .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String recomputed = canonicalizer.computeReviewPolicyHash(groups, types);
         if (!recomputed.equals(version.getReviewPolicyHash())) {
@@ -437,7 +442,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private void recordStatusEvent(ComplianceMappingVersion version, String before, String after, Integer expectedVersion, String operationId, String correlationId) {
         com.ses.entity.SysUser actor = sysUserMapper.selectById(com.ses.common.util.SecurityUtils.currentUserId());
         com.ses.entity.ComplianceMappingStatusEvent event = new com.ses.entity.ComplianceMappingStatusEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setMappingId(version.getId());
         event.setMappingVersion(version.getMappingVersion());
         event.setMappingHash(version.getMappingHash());
@@ -457,7 +462,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     @Override
     public List<ComplianceMappingVersion> list() {
         return versionMapper.selectList(new LambdaQueryWrapper<ComplianceMappingVersion>()
-                .eq(ComplianceMappingVersion::getTenantId, "default")
+                .eq(ComplianceMappingVersion::getTenantId, tenantId())
                 .orderByDesc(ComplianceMappingVersion::getId));
     }
 
