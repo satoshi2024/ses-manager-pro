@@ -1,3 +1,30 @@
+## Step 6: docs-only repair delta提出（2026-08-14・V102_3確定）
+
+R10 CHANGES_REQUIRED対応としてdocs-only repair deltaを作成・提出:
+- **r23-p1-01-repair-delta.md**: migration番号確定（S10 repair = V102_3・S12 reservation = V103維持・V102/V102_1/V102_2 published変更禁止）・P0 6件/P1 7件の実装設計・修正後必須回帰一覧・停止条件
+- **docs修正**: g2-gate-evidence-templates.md改訂（直接SQL例廃止・UI/API/domain event経由）・g2-gate-evidence-templates-r23.md新規（証跡3・official source/manual check・Phase A/B manifest・exact evidence）・GATE-T066-HISTORY/FM-C-28/registration identifierの分離契約をrepair delta §1に明文化
+- 変更ファイル: Markdown 3件のみ（non-md 0・docs-only）
+## R10判定（merge後main独立照合・2026-08-14）: CHANGES_REQUIRED
+
+origin/main ec2c5ceeをaccepted v3 §3〜§5と独立照合した結果、正式な人間証跡取得フローは未到達。判定を修正: R23 implementation = CHANGES_REQUIRED / 人間証跡取得 = HOLD / T066・S10 = PASS禁止 / S12 = NOT READY / ACTIVE・formal delivery = 禁止。CI 1929/0/0/0 skip 0は有効な実装merge証跡だが、既存testが検出していない機能欠落がある。
+
+**P0 blocker（6件）**:
+1. 9 tabs中6 tabsがplaceholder（Assignment / Internal Approval / External Review / 本人・資格・作成者確認 / ACTIVE / Event History）＋Policy tabはhash表示のみ（group/type設定・freeze操作なし）
+2. SecurityConfig matcher順序不正: /api/compliance-gate/** = 管理者のみが先に一致しHR/マネージャー向け規則到達不能（被指名actorがHR/マネージャーの場合approval不能）
+3. dynamic policy契約未完成: qualification_verification_required / active_status_verification_required / verification source / method / freshness/max age / effective period / mapping requirement group・type snapshotをDB/API/UIで設定・freeze不可。現在credential_required_snapshotを両flagへ流用しておりaccepted v3と不一致
+4. reviewer subjectのproduction create pathなし（GET subjectsのみ・subject作成・資格association API/UIなし・fresh環境でverification開始不能）
+5. exact CLEAN evidence導線なし（ComplianceEvidencePickerDto未使用・picker endpoint/UIなし・internal approvalはdocumentIdのみ・exact version/hash/CLEAN/file scope snapshotなし）
+6. verification/adoption binding不足（全verificationが同一tenant・submitted review・subject・reviewer type・mapping/policy/hash・review chain・exact evidenceに属することを強制せよ。cross-chain混在・maxAge未設定・evidence NULLはfail-closed）
+
+**P1（7件）**: assignment/approval responseのtyped DTO化・tenant='default'固定/裸selectById除去とtenant/workplace/DataScope SQL境界・同一key同hash=200 replay/異hash=409・subject master UPDATE/DELETE拒否（immutable）・同一SUBMITTED chain並行first adoptionのDB一意化・contract画面watermark preview導線・Phase B manifest用allow-list API
+
+**Migration**: V102/V102_1/V102_2はpublishedとして変更禁止。dynamic source/method・qualification association・frozen flags等に追加DDLが必要 → docs-only repair deltaでforward migration番号を先に確定（候補: S10 repair = V102_3・S12 reservation = V103維持）。**R10がmigration/repair deltaを受理する前にV102_3を作成しない**
+
+**Docs修正（5件）**: ①GATE-T066-HISTORYをTRACKED P2 / production release gate・S10 PASS/S12開始を阻害しない・対象history fieldを必要とするproduction帳票のみ交付禁止・「証跡1〜5全部がM PASS必須」旧記載から分離 ②FM-C-28/一次source判断はHISTORY blockerとしない（mapping version・実在Review・actor approvalの中で解決） ③registration identifierは全reviewer type固定必須化しない（dynamic frozen policyとofficial verification methodに従う） ④g2-gate-evidence-templates.mdの直接SQL例はUI/API/domain event経由へ改訂 ⑤新規テンプレート（証跡3・official source/manual check記録・Phase A/B screenshot/viewport/role/hash manifest・exact evidence document/version/hash/CLEAN記録）
+
+**修正後必須回帰**: 管理者/HR/マネージャー/営業/要員の実SecurityFilterChainテスト・HR/マネージャー本人assignment→approval成功・9 tabs全実操作可能（placeholder 0）・dynamic type/source/method/policy作成→freeze・subject＋資格association作成・exact CLEAN evidence picker・SUBMITTED→verification→adoption→ACTIVE browser/API E2E・cross-tenant/subject/chain/evidence拒否・frozen flag true/false/NULL・idempotency 200 replay/409・previewはarchive/delivery 0でwatermarkあり・MySQL fresh/upgrade/forward-repair skip 0・final Head L1〜L4/CI
+
+**正式な人間証跡の順序（12 step）**: dynamic policy設定・freeze → assignment指名 → 実actor approval → 実在資格保有者Review → SUBMITTED登録 → 別の人間確認者がIDENTITY/AUTHORSHIP確認 → frozen flag=true時のみQUALIFICATION/ACTIVE_STATUS確認 → exact CLEAN evidenceでadoption → 全gate成立後ACTIVE化 → Phase B browser/帳票/PDF SHA-256/delivery目視 → 証跡packet commit最終HeadでL4/CI skip 0 → R10最終Review → T066/S10 PASS → S12解放
 ## R10判定（次step・P1-01b fix + conformance・2026-08-14）
 
 R10 R23-P1-01次step: e3227cfb（P1-01b fix）を検証しVERIFIED_CLOSED。FingerprintKeyProviderImpl（tenant namespace・version別rotation・prod起動fail-fast・unknown fail-closed・32byte base64url検証・dev/testのみ既定鍵fallback）を実体確認、FpSvcはtenantIdでprovider使用（ハードコード鍵削除）。FingerprintServiceTest 10＋KeyProviderImplTest 7＝17/0/0/0、CI 1929/0/0/0 skip 0 SUCCESS。先行実装conformance全10項目をspot check含めCONFORM確認（旧Evaluator削除・Controller Map 0件・recordExternalReview=SUBMITTEDのみ400）。新規issueなし。残はPR merge→人間証跡（証跡1-5）→T066 M PASS→S10 PASS→S12解放。production authorizationなし
