@@ -44,6 +44,13 @@ public interface ComplianceExternalReviewAdoptionEventMapper {
     List<ComplianceExternalReviewAdoptionEvent> selectChain(@Param("tenantId") String tenantId,
                                                             @Param("reviewChainId") String reviewChainId);
 
+    /** 指定submitted review eventを参照するadoption event一覧（初回adoption判定用）。 */
+    @Select("SELECT * FROM t_compliance_external_review_adoption_event "
+            + "WHERE tenant_id = #{tenantId} AND submitted_review_event_id = #{submittedReviewEventId} "
+            + "ORDER BY adopted_at, id")
+    List<ComplianceExternalReviewAdoptionEvent> selectChainBySubmittedReview(
+            @Param("tenantId") String tenantId, @Param("submittedReviewEventId") Long submittedReviewEventId);
+
     /** 指定mappingのSUBMITTED review chain（adoptionの正本）を探索する。 */
     @Select("SELECT a.* FROM t_compliance_external_review_adoption_event a "
             + "JOIN t_compliance_external_review_event r ON r.tenant_id = a.tenant_id AND r.id = a.submitted_review_event_id "

@@ -1,3 +1,20 @@
+## Step 4（§5 API/UI/security）完了記録（2026-08-14）
+
+- typed DTO群: ComplianceMappingVersionDto・ReviewerTypeDto・SubjectDto・VerificationEventDto・AdoptionEventDto・CapabilityDto・EvidencePickerDto・request DTO 6種（Map/entity API契約の全面置換）
+- ComplianceGateApiController: typed化＋verification record/revoke/list・adoption approve/reject/revoke/list・subjects・capabilities API追加
+- ComplianceExternalReviewAdoptionService（新規）: APPROVED/REJECTED/REVOKE・初回adoption限定・frozen policy verification set検証・exact CLEAN evidence・reducer=adopted_at,id
+- ComplianceGateEvaluationService.verifyRequired: REVOKE検出追加（countRevokesOf・§4-12）→ REVOKE後gate拒否を実装
+- ComplianceCapabilityService（server計算・JS role判定不使用・管理者=全/HR・マネージャー=approval+historyのみ）
+- /compliance-gateページ（9 tabs）＋compliance-gate.js＋V102_2（m_menu/t_role_menu/permission group seed・管理者/HR/マネージャー・営業/要員403）
+- SecurityConfig: /compliance-gate/**・approval/verification/adoption GET系を管理者・HR・マネージャーへ・管理操作は管理者限定
+- ActionPermissionResolver: compliance-gate root登録
+- テスト: adoption 6・verification L2-L3 7・gate評価 6（REVOKE後拒否含む）・capability 4・MenuPermission 3・CSRF拡張 2・回帰76/76 PASS
+- 未着手: 残tab（policy group/type編集UI・assignment/approval/external review/verification UI操作）は画面の段階実装として継続
+## R23-S3-P1-01b登録（2026-08-14・R10再Review指摘・production gate前必須）
+
+**R23-S3-P1-01b（P1・§9契約未達）**: ComplianceReviewerFingerprintService.resolveKey()がtenantId/keyVersion引数を無視し、全profileで単一ハードコード鍵（DEFAULT_KEY_B64）を使用。空key version時はDEFAULT_KEY_VERSIONへfail-open fallback。
+→ ①tenant別key namespace（compliance.gate.fingerprint.{tenantId}）未実装 ②key rotation不可 ③required key欠損時のfail-closed契約違反 ④prodにもソース内蔵secret。
+gate判定の決定性・subject_id distinctは成立するためStep 4開発は可。**key resolution（secret store注入・tenant namespace・versioned key・fail-closed）はACTIVE/gate証跡・production前に実装必須**。
 ## R23-S3指摘対応記録（2026-08-14・P1-01/P2-01/P2-02/P2-03）
 
 **R23-S3-P1-01（fingerprint domain分離）**: ComplianceReviewerFingerprintService新規実装（§9 HMAC契約）。

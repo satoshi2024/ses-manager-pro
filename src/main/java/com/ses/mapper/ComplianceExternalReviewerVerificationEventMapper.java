@@ -62,4 +62,10 @@ public interface ComplianceExternalReviewerVerificationEventMapper {
     List<ComplianceExternalReviewerVerificationEvent> selectLatestBySubjectAndKind(
             @Param("tenantId") String tenantId, @Param("reviewerSubjectId") Long reviewerSubjectId,
             @Param("verificationKind") String verificationKind);
+
+    /** 指定verification eventをrevokeしたeventの存在確認（REVOKE後gate拒否・§4-12）。 */
+    @Select("SELECT COUNT(*) FROM t_compliance_external_reviewer_verification_event "
+            + "WHERE tenant_id = #{tenantId} AND revoked_verification_event_id = #{targetVerificationEventId}")
+    int countRevokesOf(@Param("tenantId") String tenantId,
+                       @Param("targetVerificationEventId") Long targetVerificationEventId);
 }

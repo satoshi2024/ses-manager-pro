@@ -34,6 +34,8 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     private final com.ses.mapper.WorkplaceMapper workplaceMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
     private final com.ses.mapper.ComplianceExternalReviewEventMapper externalReviewEventMapper;
+    private final com.ses.mapper.ComplianceExternalReviewerSubjectMapper reviewerSubjectMapper;
+    private final com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final com.ses.service.compliance.ComplianceGateCredentialCryptoService credentialCryptoService;
     private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
 
@@ -427,6 +429,32 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             return List.of();
         }
         return externalReviewEventMapper.selectByMapping("default", mappingId);
+    }
+
+    @Override
+    public List<com.ses.entity.ComplianceExternalReviewerSubject> listSubjects() {
+        return reviewerSubjectMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceExternalReviewerSubject>()
+                .eq(com.ses.entity.ComplianceExternalReviewerSubject::getTenantId, "default")
+                .orderByAsc(com.ses.entity.ComplianceExternalReviewerSubject::getId));
+    }
+
+    @Override
+    public List<com.ses.entity.ComplianceExternalReviewerVerificationEvent> listVerificationsByMapping(Long mappingId) {
+        if (mappingId == null) {
+            return List.of();
+        }
+        // mappingに属するSUBMITTED review event配下のverification eventを結合で取得する
+        List<com.ses.entity.ComplianceExternalReviewEvent> reviews =
+                externalReviewEventMapper.selectByMapping("default", mappingId);
+        if (reviews.isEmpty()) {
+            return List.of();
+        }
+        java.util.List<com.ses.entity.ComplianceExternalReviewerVerificationEvent> result = new java.util.ArrayList<>();
+        for (com.ses.entity.ComplianceExternalReviewEvent review : reviews) {
+            result.addAll(verificationEventMapper.selectBySubmittedReview("default", review.getId()));
+        }
+        result.sort(java.util.Comparator.comparing(com.ses.entity.ComplianceExternalReviewerVerificationEvent::getCreatedAt));
+        return result;
     }
 
     private String sha256Hex(String text) {

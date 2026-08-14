@@ -86,7 +86,11 @@ public class ComplianceGateEvaluationService {
         return latest;
     }
 
-    private void verifyRequired(String kind, Long verificationEventId, String tenantId, LocalDate asOf) {
+    /**
+     * 必要verification（当該frozen policyが要求するset）の検証。adoption record serviceからも再利用する。
+     * 同一tenant・同一kind・VERIFIED・REVOKEDされていない（§4-12）・asOf時点で有効（§3.7）。
+     */
+    public void verifyRequired(String kind, Long verificationEventId, String tenantId, LocalDate asOf) {
         if (verificationEventId == null) {
             throw BusinessException.of(400, "compliance.gate.verificationRequired");
         }
@@ -97,6 +101,11 @@ public class ComplianceGateEvaluationService {
         }
         if (!"VERIFIED".equals(event.getResult())) {
             throw BusinessException.of(400, "compliance.gate.verificationNotVerified");
+        }
+        // §4-12: verificationがREVOKEされた後は新規gate採用を拒否する
+        // （revokeはappend-onlyのREVOKED rowとして記録され、元rowはVERIFIEDのまま残るため明示検出が必要）。
+        if (verificationEventMapper.countRevokesOf(tenantId, verificationEventId) > 0) {
+            throw BusinessException.of(400, "compliance.gate.verificationRevoked");
         }
         // asOf有効（§3.7: checked_at <= asOf・effective expiry）
         if (event.getCheckedAt() != null && event.getCheckedAt().toLocalDate().isAfter(asOf)) {

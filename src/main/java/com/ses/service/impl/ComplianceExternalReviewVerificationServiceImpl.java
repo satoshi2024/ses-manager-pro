@@ -232,4 +232,12 @@ public class ComplianceExternalReviewVerificationServiceImpl
         }
         return event;
     }
+
+    @Override
+    public List<ComplianceExternalReviewerVerificationEvent> listBySubmittedReview(Long submittedReviewEventId) {
+        if (submittedReviewEventId == null) {
+            return List.of();
+        }
+        return verificationEventMapper.selectBySubmittedReview("default", submittedReviewEventId);
+    }
 }

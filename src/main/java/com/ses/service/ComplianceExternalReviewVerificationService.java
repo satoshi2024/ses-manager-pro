@@ -55,4 +55,7 @@ public interface ComplianceExternalReviewVerificationService {
             String reason,
             Long revokedBy,
             String idempotencyKey);
+
+    /** 指定submitted review eventに属するverification event一覧（checked_at, id順）。 */
+    java.util.List<ComplianceExternalReviewerVerificationEvent> listBySubmittedReview(Long submittedReviewEventId);
 }

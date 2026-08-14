@@ -606,7 +606,8 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VA
   ('contract',  '契約管理',       '/contract',  '/api/contracts', 6),
   ('ai',        'AI機能',         '/ai',        '/api/ai', 7),
   ('email',     'メールテンプレート', '/email/template', '/api/email-templates', 8),
-  ('user',      'ユーザー管理',   '/user',       '/api/users', 9);
+  ('user',      'ユーザー管理',   '/user',       '/api/users', 9),
+  ('compliance-gate', '派遣コンプライアンスG2', '/compliance-gate', '/api/compliance-gate', 73);
 
 DROP TABLE IF EXISTS t_role_menu CASCADE;
 CREATE TABLE t_role_menu (
