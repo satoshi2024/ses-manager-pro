@@ -65,4 +65,3 @@
 
 - 「T066 M PASS」→「**T066 technical PASS**」への名称変更を本deltaで確定し、ledger・中央ledgerへ一貫適用する。
 - A gate達成時は「T066 technical PASS」・B gate達成時は「T066 M PASS（production）」として区別して記録する。
-
