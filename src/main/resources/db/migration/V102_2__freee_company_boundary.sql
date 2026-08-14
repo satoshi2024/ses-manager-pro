@@ -1,5 +1,7 @@
--- V103__freee_company_boundary.sql
+-- V102_2__freee_company_boundary.sql
 -- HFP-01-002: freee接続の事業所境界と接続状態。
+-- 採番の経緯: V103〜V108はS12〜S17の予約番号のため、既存のV66_1/V74_1/V79_1と同じ
+-- V102系サブ番号（Flyway表記 V102.2）を採番した（SpecDispatchConsistencyTest参照）。
 --   - t_freee_connection.connection_status: CONNECTED / REAUTH_REQUIRED を永続化（DISCONNECTEDは行なし、MISCONFIGUREDは設定から導出）
 --   - t_freee_employee_link.freee_company_id: 事業所内employee IDであることをDB境界で表現
 --     （接続companyが一意に確定できるlegacy行だけbackfill。NULLは「要再確認」）

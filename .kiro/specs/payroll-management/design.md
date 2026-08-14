@@ -91,6 +91,9 @@ freee従業員IDは事業所内のIDであり、接続先変更時の誤対応�
 
 - 適用済み`V21__freee_payroll_integration.sql`は編集しない。
 - 着手時に`db/migration`のlatestを再確認し、その+1を使用する。本設計はversion番号を予約しない。
+  - **実装時の確定（2026-08-14）**: latestは`V102`。`V103`〜`V108`はS12〜S17の予約番号のため使えない
+    （`SpecDispatchConsistencyTest`が実在を禁止）。HFP-01は既存の`V66_1`/`V74_1`/`V79_1`と同じ
+    **`V102_2`（Flyway表記 V102.2）**を採番した。`V102_1`もS10のR10受理契約で禁止のため使用しない。
 - 現在のbaselineではfreee tableはV1に含まれないため、V1へ重複追加しない。着手時に構成が変わっていた場合はroot `AGENTS.md`を優先する。
 - `schema-freee-payroll-h2.sql`と`engineer-schema-h2.sql`を同時更新し、MySQL smokeでindex名、backfill、NULL legacy、soft deleteを確認する。
 - 本番rollbackはmigration downではなく、menu無効化・token revoke・forward fixとする。

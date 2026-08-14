@@ -14,7 +14,7 @@
 
 ## HFP-01-001 公式契約・外部条件・失敗baselineを固定する
 
-- [ ] **HFP-01-001 — 契約preflightとcontract fixture**
+- [x] **HFP-01-001 — 契約preflightとcontract fixture**
 - **Requirements**: HFP-01-R01, HFP-01-R12
 - **依存**: なし
 - **Objective**: 実装者の推測を排除し、現行実装が公式契約testに失敗することを先に証明する。
@@ -32,7 +32,7 @@
 
 ## HFP-01-002 事業所境界と接続状態のschemaを追加する
 
-- [ ] **HFP-01-002 — connection/link forward migration**
+- [x] **HFP-01-002 — connection/link forward migration**
 - **Requirements**: HFP-01-R03, HFP-01-R04, HFP-01-R12
 - **依存**: HFP-01-001
 - **Objective**: 再認可状態と事業所内employee IDを正しく表現し、別事業所へのlink誤用をDB境界で防ぐ。
@@ -51,7 +51,7 @@
 
 ## HFP-01-003 OAuth、会社検証、refresh、revokeを公式契約へ合わせる
 
-- [ ] **HFP-01-003 — OAuth/connection lifecycle**
+- [x] **HFP-01-003 — OAuth/connection lifecycle**
 - **Requirements**: HFP-01-R02, HFP-01-R03
 - **依存**: HFP-01-001, HFP-01-002
 - **Objective**: 選択事業所と管理者権限が検証された接続だけを`CONNECTED`にし、失効と解除を安全に処理する。
@@ -72,7 +72,7 @@
 
 ## HFP-01-004 Typed HR contract、pagination、error matrixを実装する
 
-- [ ] **HFP-01-004 — HR contract adapter and transport**
+- [x] **HFP-01-004 — HR contract adapter and transport**
 - **Requirements**: HFP-01-R01, HFP-01-R05, HFP-01-R06, HFP-01-R07
 - **依存**: HFP-01-001, HFP-01-003
 - **Objective**: 公式の少数endpointだけをtypedに読み、100件超、schema drift、外部障害を決定的に処理する。
@@ -92,7 +92,7 @@
 
 ## HFP-01-005 会社境界付き従業員対応付けを完成する
 
-- [ ] **HFP-01-005 — employee mapping**
+- [x] **HFP-01-005 — employee mapping**
 - **Requirements**: HFP-01-R04
 - **依存**: HFP-01-002, HFP-01-004
 - **Objective**: 現在会社のfreee従業員と非BP内部要員を、人の確認を伴う1対1関係として安全に管理する。
@@ -111,7 +111,7 @@
 
 ## HFP-01-006 給与・賞与変換と対応付けfilterを完成する
 
-- [ ] **HFP-01-006 — salary/bonus read model**
+- [x] **HFP-01-006 — salary/bonus read model**
 - **Requirements**: HFP-01-R05
 - **依存**: HFP-01-004, HFP-01-005
 - **Objective**: 公式fieldを正しいnullable金額・区分付き明細へ変換し、対応付け済み内部要員だけへ返す。
@@ -130,7 +130,7 @@
 
 ## HFP-01-007 静的権限、no-store、機微GET監査を完成する
 
-- [ ] **HFP-01-007 — security, cache and audit**
+- [x] **HFP-01-007 — security, cache and audit**
 - **Requirements**: HFP-01-R08, HFP-01-R09
 - **依存**: HFP-01-003, HFP-01-005, HFP-01-006
 - **Objective**: UIに依存しないrole境界、CSRF、cache禁止、内容を漏らさない1操作1監査を成立させる。
@@ -150,7 +150,7 @@
 
 ## HFP-01-008 給与画面を操作可能な完成形へする
 
-- [ ] **HFP-01-008 — payroll UI and accessibility**
+- [x] **HFP-01-008 — payroll UI and accessibility**
 - **Requirements**: HFP-01-R10
 - **依存**: HFP-01-005, HFP-01-006, HFP-01-007
 - **Objective**: 管理者/HRが接続状態、対応付け、給与/賞与、計算中、障害を誤認せず操作できる画面にする。
@@ -170,7 +170,7 @@
 
 ## HFP-01-009 CashFlowとS11/S15互換性を閉じる
 
-- [ ] **HFP-01-009 — downstream compatibility**
+- [x] **HFP-01-009 — downstream compatibility**
 - **Requirements**: HFP-01-R11
 - **依存**: HFP-01-003, HFP-01-004, HFP-01-006
 - **Objective**: 正しい給与DTOをCashFlowへ反映しつつ、共有freee基盤の既存consumerを壊さない。

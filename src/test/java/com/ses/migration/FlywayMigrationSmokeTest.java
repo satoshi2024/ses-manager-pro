@@ -84,7 +84,7 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_freee_employee_link");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='payroll'");
 
-            // HFP-01-002 (V103): 事業所境界と接続状態
+            // HFP-01-002 (V102_2): 事業所境界と接続状態
             assertColumnExists(st, "t_freee_connection", "connection_status");
             assertColumnExists(st, "t_freee_employee_link", "freee_company_id");
             assertIndexExists(st, "t_freee_employee_link", "uk_freee_link_company_employee");
@@ -94,7 +94,7 @@ class FlywayMigrationSmokeTest {
                             + " WHERE table_schema=DATABASE() AND table_name='t_freee_employee_link'"
                             + " AND index_name='uk_freee_link_employee'")) {
                 org.junit.jupiter.api.Assertions.assertTrue(rs.next() && rs.getLong(1) == 0,
-                        "旧 uk_freee_link_employee はV103で削除されているはず");
+                        "旧 uk_freee_link_employee はV102_2で削除されているはず");
             }
 
             // 契約書テンプレート・電子署名(V20)

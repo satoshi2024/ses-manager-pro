@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * HFP-01-002: V103と同期したH2 schema（schema-freee-payroll-h2.sql）のDB境界test。
+ * HFP-01-002: V102_2と同期したH2 schema（schema-freee-payroll-h2.sql）のDB境界test。
  *
  * <ul>
  *   <li>connection_statusのdefaultはCONNECTED</li>
@@ -21,13 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  *   <li>legacy NULL link（freee_company_id NULL）の共存可（要再確認）</li>
  * </ul>
  *
- * Docker不要で実行できる（MySQL実DBのupgrade経路はFlywayV103FreeeCompanyBoundarySmokeTest）。
+ * Docker不要で実行できる（MySQL実DBのupgrade経路はFlywayV102_2FreeeCompanyBoundarySmokeTest）。
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/schema-freee-payroll-h2.sql",
         executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
-@DisplayName("HFP-01-002 H2 schema: freee事業所境界（V103同期）")
+@DisplayName("HFP-01-002 H2 schema: freee事業所境界（V102_2同期）")
 class FreeeCompanyBoundarySchemaH2Test {
 
     @Autowired

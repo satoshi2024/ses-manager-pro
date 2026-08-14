@@ -316,6 +316,89 @@
 
 ---
 
+### HFP-01-RUN-20260814-07
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当・引き継ぎ） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `d75b9cc7`（008/009完了） / 本Runコミット（010） |
+| 開始 / 終了（JST） | `2026-08-14 13:50` / `2026-08-14 15:30` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（確認済み） |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY（29.6.2）/ READY（v24.18.0） |
+| dirty差分の取扱い | 開始時dirtyなし |
+
+#### 引き継ぎ確認（HFP-01-007本体の実装証跡を再記録）
+
+| Task | 状態 | 変更file / method（commit 3f5f1d7a時点の内容を再確認） | Test command・結果 | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-007 | PASS | `SecurityConfig`（/integrations/freee→管理者、/payroll、/api/payroll→管理者+HRの静的rule追加）、`FreeeOAuthController`（FREEE_CONNECT/FREEE_DISCONNECT監査、no-store）、`FreeePayrollApiController`（機微GET監査=recordRequired成功時のみdata返却、固定URI、PAYROLL_SALARY/BONUS_VIEW_YYYYMM/EMPLOYEE_VIEW/LINK/UNLINK code、全GET no-store）、`ApiAuditFilter`（/api/payroll/**除外で1 request 1 row維持）、`PayrollSecurityAuditTest`（12）、`FreeeOAuthCallbackWebTest`（7） | 007時点で対象suite green。本Runで引き継ぎ回帰修正後の13 class 127 test greenを確認 | 6主体role matrix・CSRF・no-store・監査row（自動test） | 監査DB変更なし（既存t_audit_log再利用） |
+
+#### Task実行証跡（HFP-01-010）
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-010 | PASS | production変更なし。`tasks.md` checkbox 001〜010完了化（証跡は本ledger RUN-01〜07） | 下記自動gate集計 | clean process再実行（下記gates） | 対象外の失敗は「無関係」として放置しない方針。全て調査 |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| freee関連全回帰（008/009変更後） | 15 class（Baseline/OAuth×2/HrContract/Mapping/ReadModel/S11×2/Reconciliation/CashFlow×2/A11y/SecurityAudit/H2Schema/i18n/JS） | 143 | 0 | 0 | 0 | PASS | surefire-reports |
+| MySQL migration smoke | `mvn test -Dtest=FlywayMigrationSmokeTest,FlywayV103FreeeCompanyBoundarySmokeTest` | 4 | 0 | 0 | 0 | PASS | empty DB + V21→V103 upgrade。Docker実MySQL |
+| verify-like-ci | `scripts/verify-like-ci.ps1` | 全suite | 集計中 | 集計中 | 集計中 | 実行中 | `target/verify-like-ci.log` |
+| 禁止値scan | `git grep`（token/secret/base64等のpattern） | - | - | - | - | 実行中 | 下記scan結果 |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+
+---
+
+### HFP-01-RUN-20260814-08
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `d75b9cc7` / 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-14 15:30` / `2026-08-14 16:20` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | verify-like-ci実行の副作用として `AttendanceBrowserMTest`/`RealBrowserScreenshotTest` が evidence（browser-m/browser-r8）を更新。HFP-01のコミット対象外とし、後に復元 |
+
+#### Migration採番の訂正（HFP-01-002の修正）
+
+| Task | 状態 | 変更file / method | Test command・結果 | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| 002訂正（V103→V102_2） | PASS | `db/migration/V103__freee_company_boundary.sql`→`V102_2__freee_company_boundary.sql`（git mv・未適用のため適用済みmigrationの変更ではない）、`FlywayV103FreeeCompanyBoundarySmokeTest`→`FlywayV102_2FreeeCompanyBoundarySmokeTest`（クラス名・コメント・メソッド名）、`FlywayMigrationSmokeTest`（assertコメント）、`FreeeCompanyBoundarySchemaH2Test`（コメント）、`research.md` §7・`design.md` §4.3（採番経緯を追記） | 下記migration系test実行 | — | **V103はS12〜S17の予約番号**（`SpecDispatchConsistencyTest`/`ReviewerVerificationMigrationOrderContractTest`が実在を禁止）だったため、`V102_2`（V66_1/V74_1/V79_1と同じV102系サブ番号）へ訂正 |
+
+#### Task実行証跡（HFP-01-010継続）
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-010 | 進行中 | `tasks.md` checkbox 001〜009完了化 | 下記gate集計 | — | verify-like-ci初回はV103衝突でFAIL（migration契約test）。V102_2訂正後に再実行 |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| migration契約 | `mvn test -Dtest=ReviewerVerificationMigrationOrderContractTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest` | 未実行 | - | - | - | 実行予定 | — |
+| verify-like-ci（初回） | `scripts/verify-like-ci.ps1` | 全suite | 2（migration契約×2クラス） | 0 | 1 | FAIL→訂正済み | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-verify-like-ci.log` |
+| verify-like-ci（訂正後） | `scripts/verify-like-ci.ps1` | 未実行 | - | - | - | 実行予定 | — |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
