@@ -1,8 +1,10 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.SecurityUtils;
 import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
+import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.service.FreeeIntegrationService;
 import lombok.RequiredArgsConstructor;
@@ -34,12 +36,17 @@ public class FreeePayrollApiController {
     public ApiResult<List<FreeeEmployeeDto>> employees() {
         return ApiResult.success(service.employees());
     }
+
+    @GetMapping("/engineer-candidates")
+    public ApiResult<List<PayrollEngineerCandidateDto>> engineerCandidates() {
+        return ApiResult.success(service.engineerCandidates());
+    }
     
     @PutMapping("/links/{engineerId}")
     public ApiResult<Boolean> link(
             @PathVariable Long engineerId,
             @RequestParam String employeeId) {
-        service.link(engineerId, employeeId, null);
+        service.link(engineerId, employeeId, SecurityUtils.currentUserId());
         return ApiResult.success(true);
     }
     

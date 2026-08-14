@@ -2,6 +2,7 @@ package com.ses.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
+import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.dto.reconciliation.BankDepositDto;
 import java.time.LocalDate;
@@ -25,6 +26,8 @@ public interface FreeeIntegrationService {
      */
     void disconnect();
     List<FreeeEmployeeDto> employees();
+    /** 給与対応付けの内部要員候補（非BP・未削除）。給与専用API。 */
+    List<PayrollEngineerCandidateDto> engineerCandidates();
     void link(Long engineerId, String employeeId, Long userId);
     void unlink(Long engineerId);
     List<PayrollStatementDto> statements(int year, int month, String type);

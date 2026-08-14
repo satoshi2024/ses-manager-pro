@@ -97,8 +97,26 @@ class FreeeHrContractTest {
         });
         when(applicationContext.getBean(FreeeIntegrationService.class)).thenReturn(service);
 
-        when(linkMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(linkMapper.selectList(any())).thenReturn(seedLink());
+        when(engineerMapper.selectList(any())).thenReturn(seedEngineers());
+    }
+
+    /** 現在companyの有効link（employee 501 → engineer 7）。 */
+    private java.util.List<com.ses.entity.FreeeEmployeeLink> seedLink() {
+        com.ses.entity.FreeeEmployeeLink link = new com.ses.entity.FreeeEmployeeLink();
+        link.setEngineerId(7L);
+        link.setFreeeEmployeeId("501");
+        link.setFreeeCompanyId(123L);
+        return java.util.List.of(link);
+    }
+
+    /** 非BPの内部要員。 */
+    private java.util.List<com.ses.entity.Engineer> seedEngineers() {
+        com.ses.entity.Engineer e = new com.ses.entity.Engineer();
+        e.setId(7L);
+        e.setFullName("テスト要員7");
+        e.setEmploymentType("正社員");
+        return java.util.List.of(e);
     }
 
     private void seedConnection() throws Exception {
@@ -145,8 +163,8 @@ class FreeeHrContractTest {
             ObjectNode n = objectMapper.createObjectNode();
             n.put("id", id);
             n.put("company_id", 123);
-            n.put("employee_id", id);
-            n.put("employee_num", "E-" + id);
+            n.put("employee_id", 501);
+            n.put("employee_num", "E-501");
             n.put("pay_date", "2026-07-25");
             n.put("fixed", true);
             n.put("calc_status", "calculated");
@@ -167,8 +185,8 @@ class FreeeHrContractTest {
             ObjectNode n = objectMapper.createObjectNode();
             n.put("id", id);
             n.put("company_id", 123);
-            n.put("employee_id", id);
-            n.put("employee_num", "E-" + id);
+            n.put("employee_id", 501);
+            n.put("employee_num", "E-501");
             n.put("pay_date", "2026-07-10");
             n.put("fixed", true);
             n.put("calc_status", "calculated");
@@ -301,7 +319,7 @@ class FreeeHrContractTest {
         List<PayrollStatementDto> all = service.statements(2026, 7, "salary");
         assertEquals(101, all.size());
         assertEquals(new BigDecimal("250000"), all.get(0).getGrossAmount());
-        assertEquals(new BigDecimal("50000"), all.get(0).getDeductions());
+        assertEquals(new BigDecimal("50000"), all.get(0).getDeductionAmount());
         assertEquals(new BigDecimal("200000"), all.get(0).getNetAmount());
     }
 
@@ -402,7 +420,7 @@ class FreeeHrContractTest {
         List<PayrollStatementDto> all = service.statements(2026, 7, "salary");
         assertEquals(1, all.size());
         assertNull(all.get(0).getGrossAmount(), "計算中のnull金額は0へ変換しない");
-        assertNull(all.get(0).getDeductions());
+        assertNull(all.get(0).getDeductionAmount());
         assertNull(all.get(0).getNetAmount());
     }
 

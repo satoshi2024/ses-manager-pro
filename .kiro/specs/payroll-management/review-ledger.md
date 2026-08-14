@@ -214,6 +214,58 @@
 
 ---
 
+### HFP-01-RUN-20260814-05
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | 実装AI（opencode） |
+| worktree / branch | `C:\Users\pc\Documents\ses-manager-pro-hfp-01` / `codex/hfp-01-payroll-freee` |
+| base / head | 前Run末commit / 本Run末commit（HFP-01-005/006） |
+| 開始 / 終了（JST） | 2026-08-14 13:00 / 2026-08-14 16:20 |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（確認済み） |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | 開始時dirtyなし |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-005 | **PASS** | `FreeeEmployeeDto`（num/entry/retire/payrollCalculation/linkState追加、employmentType削除）、`PayrollEngineerCandidateDto`（新規）、`FreeeIntegrationService.engineerCandidates`、`FreeeIntegrationServiceImpl`（engineerCandidates=非BP・未削除、link/unlink=現在company境界・confirmedByは引数一貫・deleteSoftDeletedConflictsをcompanyスコープ化、employeesのLINKED/RECONFIRM_REQUIRED/UNLINKED表示）、`FreeeEmployeeLinkMapper.deleteSoftDeletedConflicts`（company引数追加）、`FreeePayrollApiController`（engineer-candidates追加、linkでSecurityUtils.currentUserId渡し）、messages 4bundle（invalidEngineer/companyMismatchLink追加）、`FreeeEmployeeMappingTest`（12） | `mvn test -Dtest=FreeeEmployeeMappingTest` → 12/0/0/0 | 下表 | linkは自動一括削除せず誤rowだけ明示解除。別company link転用なし |
+| HFP-01-006 | **PASS** | `PayrollStatementDto`（再設計: engineerId/Name、employeeNumber、payDate/fixed/calculationStatus、nullable 3合計、employerShareAmount、`items List<PayrollItemDto>`。`deductions`→`deductionAmount`）、`PayrollItemDto`（新規）、`FreeeIntegrationServiceImpl`（mapSalary/BonusStatements: 現在company有効link＋非BP・未削除engineer inner join、PAYMENT/DEDUCTION/EMPLOYER_SHARE/ALLOWANCE変換、安定sort、null保持）、`PayrollReadModelTest`（7）、baseline items testがgreen化 | `mvn test -Dtest=PayrollReadModelTest` → 7/0/0/0。全freee関連10class 94 test: **0 failure/0 error/0 skip** | 下表 | 旧`statements/gross_amount/deductions/net_amount`残存なし。給与永続table追加なし |
+
+**Demo（HFP-01-005/006）: 対応付けとread model（架空data）**
+
+| シナリオ | 観測 |
+|---|---|
+| link成功 | 現在company・非BP・一覧存在employeeで`freee_company_id`付き保存、confirmedBy=認証主体 |
+| BP/削除済み/未存在employee/未接続/REAUTH | 各々bpExcluded/invalidEngineer/invalidEmployeeId/notConnected/reauthRequiredで拒否 |
+| unique競合 | 同一company×同一employeeは409 |
+| 別company link | 再対応付けで現在companyへ更新（自動転用なし）。unlinkは他company拒否 |
+| employees表示 | 有効link=LINKED（要員名付き）、legacy NULL=RECONFIRM_REQUIRED、未対応=UNLINKED。num/入退職/給与対象を表示、銀行・住所・家族・生年月日等はJSONに無い |
+| salary変換 | 公式field→nullable 3合計＋会社負担＋PAYMENT/DEDUCTION/EMPLOYER_SHARE全6項目。同名itemはlist別要素 |
+| bonus変換 | ALLOWANCE/DEDUCTION。employerShareはnull |
+| 計算中null/正式0円 | null保持と0円を区別 |
+| 対応付けfilter | 未対応/BP変更済み/削除済み/別company/legacy NULLの明細を除外し、有効要員だけ返却 |
+| sort | 内部要員氏名→employee IDの安定順 |
+
+#### 自動gate集計（HFP-01-005/006時点）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---:|---:|---:|---:|---|---|
+| mapping | `mvn test -Dtest=FreeeEmployeeMappingTest` | 12 | 0 | 0 | 0 | PASS | surefire-reports |
+| read model | `mvn test -Dtest=PayrollReadModelTest` | 7 | 0 | 0 | 0 | PASS | surefire-reports |
+| freee関連全回帰 | 10class（ReadModel/Mapping/HrContract/Baseline/OAuth/OAuthWeb/S11Api/S11Attendance/A11y/i18n） | 94 | 0 | 0 | 0 | **PASS** | baseline 10件含め全てgreen |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+| HFP-01-RUN-ISSUE-03 | AC07/R05-5 | VERIFIED | items testがHFP-01-006でgreen化（実装AI確認） | — | — |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN

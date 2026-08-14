@@ -93,9 +93,26 @@ class FreeeContractBaselineTest {
         ReflectionTestUtils.setField(service, "activeProfile", "test");
         when(applicationContext.getBean(FreeeIntegrationService.class)).thenReturn(service);
 
-        when(linkMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(linkMapper.selectList(any())).thenReturn(seedLink());
+        when(engineerMapper.selectList(any())).thenReturn(seedEngineers());
         when(engineerMapper.selectById(any())).thenReturn(new Engineer());
+    }
+
+    /** 現在companyの有効link（employee 501 → engineer 7）。 */
+    private java.util.List<FreeeEmployeeLink> seedLink() {
+        FreeeEmployeeLink link = new FreeeEmployeeLink();
+        link.setEngineerId(7L);
+        link.setFreeeEmployeeId("501");
+        link.setFreeeCompanyId(123L);
+        return java.util.List.of(link);
+    }
+
+    private java.util.List<Engineer> seedEngineers() {
+        Engineer e = new Engineer();
+        e.setId(7L);
+        e.setFullName("テスト要員7");
+        e.setEmploymentType("正社員");
+        return java.util.List.of(e);
     }
 
     private void seedConnection() throws Exception {
@@ -266,7 +283,7 @@ class FreeeContractBaselineTest {
         assertEquals(1, statements.size());
         assertNull(statements.get(0).getGrossAmount(),
                 "計算中のnull金額はnullのまま保持されるべき");
-        assertNull(statements.get(0).getDeductions(),
+        assertNull(statements.get(0).getDeductionAmount(),
                 "計算中のnull控除はnullのまま保持されるべき");
     }
 

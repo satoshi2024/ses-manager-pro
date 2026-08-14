@@ -6,10 +6,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.freee.hr.FreeeBonusStatement;
 import com.ses.dto.freee.hr.FreeeHrEmployee;
+import com.ses.dto.freee.hr.FreeePayrollItem;
 import com.ses.dto.freee.hr.FreeeSalaryStatement;
 import com.ses.dto.freee.hr.FreeeStatementPage;
 import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
+import com.ses.dto.payroll.PayrollEngineerCandidateDto;
+import com.ses.dto.payroll.PayrollItemDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.Engineer;
@@ -415,11 +418,21 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         if (c == null || c.getCompanyId() == null) {
             throw BusinessException.of("error.payroll.notConnected");
         }
-        List<FreeeHrEmployee> all = fetchAllEmployees(c.getCompanyId());
+        long companyId = c.getCompanyId();
+        List<FreeeHrEmployee> all = fetchAllEmployees(companyId);
 
+        // linkは現在companyのものだけを有効とし、NULL/別companyは要再確認（R04-5/6）
         List<FreeeEmployeeLink> links = linkMapper.selectList(new LambdaQueryWrapper<>());
-        Map<String, FreeeEmployeeLink> linkMap = links.stream()
-                .collect(Collectors.toMap(FreeeEmployeeLink::getFreeeEmployeeId, l -> l, (a, b) -> a));
+        Map<String, FreeeEmployeeLink> currentLinks = new HashMap<>();
+        Map<String, FreeeEmployeeLink> staleLinks = new HashMap<>();
+        for (FreeeEmployeeLink l : links) {
+            String key = l.getFreeeEmployeeId();
+            if (l.getFreeeCompanyId() != null && l.getFreeeCompanyId() == companyId) {
+                currentLinks.put(key, l);
+            } else {
+                staleLinks.putIfAbsent(key, l);
+            }
+        }
 
         List<Engineer> engineers = engineerMapper.selectList(new LambdaQueryWrapper<>());
         Map<Long, String> engineerMap = engineers.stream()
@@ -429,16 +442,45 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         for (FreeeHrEmployee e : all) {
             FreeeEmployeeDto d = new FreeeEmployeeDto();
             d.setId(String.valueOf(e.getId()));
+            d.setNum(e.getNum());
             d.setDisplayName(e.getDisplayName());
+            d.setEntryDate(e.getEntryDate());
+            d.setRetireDate(e.getRetireDate());
+            d.setPayrollCalculation(e.getPayrollCalculation());
             // freeeのemployment_typeにはBPは存在しない。BP判定は本システム側（t_engineer）で行う。
-            FreeeEmployeeLink link = linkMap.get(d.getId());
+            FreeeEmployeeLink link = currentLinks.get(d.getId());
             if (link != null) {
+                d.setLinkState("LINKED");
                 d.setLinkedEngineerId(link.getEngineerId());
                 d.setLinkedEngineerName(engineerMap.get(link.getEngineerId()));
+            } else if (staleLinks.containsKey(d.getId())) {
+                d.setLinkState("RECONFIRM_REQUIRED");
+            } else {
+                d.setLinkState("UNLINKED");
             }
             out.add(d);
         }
         return out;
+    }
+
+    @Override
+    public List<PayrollEngineerCandidateDto> engineerCandidates() {
+        // 給与対応付けの候補は非BP・未削除の内部要員だけ（/api/engineers?size=1000依存を廃止）。
+        // DB queryの絞り込みに加えてJava側でも防御的に除外する（BP判定は本システム側）。
+        List<Engineer> engineers = engineerMapper.selectList(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getDeletedFlag, 0)
+                .ne(Engineer::getEmploymentType, "BP")
+                .orderByAsc(Engineer::getFullName));
+        return engineers.stream()
+                .filter(e -> e.getDeletedFlag() == null || e.getDeletedFlag() == 0)
+                .filter(e -> !"BP".equalsIgnoreCase(e.getEmploymentType()))
+                .map(e -> {
+                    PayrollEngineerCandidateDto d = new PayrollEngineerCandidateDto();
+                    d.setId(e.getId());
+                    d.setFullName(e.getFullName());
+                    d.setEmploymentType(e.getEmploymentType());
+                    return d;
+                }).collect(Collectors.toList());
     }
 
     /**
@@ -487,34 +529,35 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     /**
-     * 給与一覧を公式root/field・total_count paginationで取得する（design §8.2）。
+     * 給与一覧を公式root/field・total_count paginationで取得し（design §8.2）、
+     * 現在companyの有効link＋非BP・未削除engineerでinner joinする（design §10.2）。
      */
     private List<PayrollStatementDto> fetchSalaryStatements(long companyId, int year, int month) {
-        List<PayrollStatementDto> out = new ArrayList<>();
+        List<FreeeSalaryStatement> raw = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         Integer expectedTotal = null;
         int offset = 0;
         for (int pageNo = 0; pageNo < maxPages; pageNo++) {
-            JsonNode raw = hrGet("/api/v1/salaries/employee_payroll_statements",
+            JsonNode rawJson = hrGet("/api/v1/salaries/employee_payroll_statements",
                     statementQuery(companyId, year, month, offset));
-            FreeeStatementPage<FreeeSalaryStatement> page = hrAdapter.salaryPage(raw);
+            FreeeStatementPage<FreeeSalaryStatement> page = hrAdapter.salaryPage(rawJson);
             expectedTotal = validatePageTotal(expectedTotal, page.getTotalCount(), page.getItems().size(),
                     "給与");
             for (FreeeSalaryStatement s : page.getItems()) {
                 if (!seen.add(String.valueOf(s.getId()))) {
                     throw contractError("給与明細IDの反復");
                 }
-                out.add(toDto(s, year, month, "salary"));
-                if (out.size() == expectedTotal) {
-                    return out;
+                raw.add(s);
+                if (raw.size() == expectedTotal) {
+                    return mapSalaryStatements(raw, companyId, year, month);
                 }
-                if (out.size() > expectedTotal) {
+                if (raw.size() > expectedTotal) {
                     throw contractError("給与total_count超過");
                 }
             }
-            if (out.size() == expectedTotal) {
+            if (raw.size() == expectedTotal) {
                 // 0件（total_count=0かつ空配列）が正常な唯一の空ケース
-                return out;
+                return mapSalaryStatements(raw, companyId, year, month);
             }
             if (page.getItems().isEmpty()) {
                 throw contractError("給与page途中の空配列");
@@ -525,34 +568,35 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     /**
-     * 賞与一覧を公式root/field・total_count paginationで取得する（design §8.2）。
+     * 賞与一覧を公式root/field・total_count paginationで取得し（design §8.2）、
+     * 現在companyの有効link＋非BP・未削除engineerでinner joinする（design §10.2）。
      */
     private List<PayrollStatementDto> fetchBonusStatements(long companyId, int year, int month) {
-        List<PayrollStatementDto> out = new ArrayList<>();
+        List<FreeeBonusStatement> raw = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         Integer expectedTotal = null;
         int offset = 0;
         for (int pageNo = 0; pageNo < maxPages; pageNo++) {
-            JsonNode raw = hrGet("/api/v1/bonuses/employee_payroll_statements",
+            JsonNode rawJson = hrGet("/api/v1/bonuses/employee_payroll_statements",
                     statementQuery(companyId, year, month, offset));
-            FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(raw);
+            FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(rawJson);
             expectedTotal = validatePageTotal(expectedTotal, page.getTotalCount(), page.getItems().size(),
                     "賞与");
             for (FreeeBonusStatement s : page.getItems()) {
                 if (!seen.add(String.valueOf(s.getId()))) {
                     throw contractError("賞与明細IDの反復");
                 }
-                out.add(toDto(s, year, month, "bonus"));
-                if (out.size() == expectedTotal) {
-                    return out;
+                raw.add(s);
+                if (raw.size() == expectedTotal) {
+                    return mapBonusStatements(raw, companyId, year, month);
                 }
-                if (out.size() > expectedTotal) {
+                if (raw.size() > expectedTotal) {
                     throw contractError("賞与total_count超過");
                 }
             }
-            if (out.size() == expectedTotal) {
+            if (raw.size() == expectedTotal) {
                 // 0件（total_count=0かつ空配列）が正常な唯一の空ケース
-                return out;
+                return mapBonusStatements(raw, companyId, year, month);
             }
             if (page.getItems().isEmpty()) {
                 throw contractError("賞与page途中の空配列");
@@ -583,29 +627,129 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                 "offset", String.valueOf(offset));
     }
 
-    /** HFP-01-006でPayrollStatementDtoを正式化するまでの最小変換。nullは保持する。 */
-    private PayrollStatementDto toDto(FreeeSalaryStatement s, int year, int month, String type) {
-        PayrollStatementDto d = new PayrollStatementDto();
-        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
-        d.setYear(year);
-        d.setMonth(month);
-        d.setType(type);
-        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
-        d.setDeductions(amountOrNull(s.getTotalDeductionAmount()));
-        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+    /**
+     * 現在companyの有効link（freee_company_id=現在company）だけを使い、
+     * 非BP・未削除engineerとinner joinする。employee ID→{link, engineer}のmapを返す。
+     */
+    private Map<String, JoinedEngineer> buildLinkedEngineers(long companyId) {
+        List<Engineer> engineers = engineerMapper.selectList(new LambdaQueryWrapper<>());
+        Map<Long, Engineer> engineerMap = engineers.stream()
+                .filter(e -> e.getDeletedFlag() == null || e.getDeletedFlag() == 0)
+                .collect(Collectors.toMap(Engineer::getId, e -> e, (a, b) -> a));
+
+        List<FreeeEmployeeLink> links = linkMapper.selectList(new LambdaQueryWrapper<>());
+        Map<String, JoinedEngineer> out = new HashMap<>();
+        for (FreeeEmployeeLink l : links) {
+            if (l.getFreeeCompanyId() == null || l.getFreeeCompanyId() != companyId) {
+                continue; // NULL/別companyのlegacy linkは給与に使わない（R04-6）
+            }
+            Engineer e = engineerMap.get(l.getEngineerId());
+            if (e == null) {
+                continue; // 削除済みengineerは除外
+            }
+            if ("BP".equalsIgnoreCase(e.getEmploymentType())) {
+                continue; // BPへ変更済みは除外（R04-5）
+            }
+            out.put(l.getFreeeEmployeeId(), new JoinedEngineer(e, l));
+        }
+        return out;
+    }
+
+    private record JoinedEngineer(Engineer engineer, FreeeEmployeeLink link) {
+    }
+
+    private List<PayrollStatementDto> mapSalaryStatements(List<FreeeSalaryStatement> raw, long companyId,
+                                                          int year, int month) {
+        Map<String, JoinedEngineer> joined = buildLinkedEngineers(companyId);
+        List<PayrollStatementDto> out = new ArrayList<>();
+        for (FreeeSalaryStatement s : raw) {
+            JoinedEngineer je = joined.get(String.valueOf(s.getEmployeeId()));
+            if (je == null) {
+                continue; // 未対応freee従業員の金額は返さない（AC08）
+            }
+            PayrollStatementDto d = new PayrollStatementDto();
+            d.setEngineerId(je.engineer().getId());
+            d.setEngineerName(je.engineer().getFullName());
+            d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+            d.setEmployeeNumber(s.getEmployeeNum());
+            d.setYear(year);
+            d.setMonth(month);
+            d.setType("salary");
+            d.setPayDate(s.getPayDate());
+            d.setFixed(s.getFixed());
+            d.setCalculationStatus(s.getCalcStatus());
+            d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+            d.setDeductionAmount(amountOrNull(s.getTotalDeductionAmount()));
+            d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+            d.setEmployerShareAmount(amountOrNull(s.getTotalDeductionEmployerShare()));
+            List<PayrollItemDto> items = new ArrayList<>();
+            for (FreeePayrollItem p : s.getPayments()) {
+                items.add(item("PAYMENT", p));
+            }
+            for (FreeePayrollItem p : s.getDeductions()) {
+                items.add(item("DEDUCTION", p));
+            }
+            for (FreeePayrollItem p : s.getDeductionsEmployerShare()) {
+                items.add(item("EMPLOYER_SHARE", p));
+            }
+            d.setItems(items);
+            out.add(d);
+        }
+        sortStatements(out);
+        return out;
+    }
+
+    private List<PayrollStatementDto> mapBonusStatements(List<FreeeBonusStatement> raw, long companyId,
+                                                         int year, int month) {
+        Map<String, JoinedEngineer> joined = buildLinkedEngineers(companyId);
+        List<PayrollStatementDto> out = new ArrayList<>();
+        for (FreeeBonusStatement s : raw) {
+            JoinedEngineer je = joined.get(String.valueOf(s.getEmployeeId()));
+            if (je == null) {
+                continue; // 未対応freee従業員の金額は返さない（AC08）
+            }
+            PayrollStatementDto d = new PayrollStatementDto();
+            d.setEngineerId(je.engineer().getId());
+            d.setEngineerName(je.engineer().getFullName());
+            d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+            d.setEmployeeNumber(s.getEmployeeNum());
+            d.setYear(year);
+            d.setMonth(month);
+            d.setType("bonus");
+            d.setPayDate(s.getPayDate());
+            d.setFixed(s.getFixed());
+            d.setCalculationStatus(s.getCalcStatus());
+            d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+            d.setDeductionAmount(amountOrNull(s.getTotalDeductionAmount()));
+            d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+            List<PayrollItemDto> items = new ArrayList<>();
+            for (FreeePayrollItem p : s.getAllowances()) {
+                items.add(item("ALLOWANCE", p));
+            }
+            for (FreeePayrollItem p : s.getDeductions()) {
+                items.add(item("DEDUCTION", p));
+            }
+            d.setItems(items);
+            out.add(d);
+        }
+        sortStatements(out);
+        return out;
+    }
+
+    private PayrollItemDto item(String category, FreeePayrollItem p) {
+        PayrollItemDto d = new PayrollItemDto();
+        d.setCategory(category);
+        d.setName(p.getName());
+        d.setAmount(amountOrNull(p.getAmount()));
         return d;
     }
 
-    private PayrollStatementDto toDto(FreeeBonusStatement s, int year, int month, String type) {
-        PayrollStatementDto d = new PayrollStatementDto();
-        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
-        d.setYear(year);
-        d.setMonth(month);
-        d.setType(type);
-        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
-        d.setDeductions(amountOrNull(s.getTotalDeductionAmount()));
-        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
-        return d;
+    /** 返却順は内部要員氏名、employee IDの安定sort（design §10.2）。 */
+    private void sortStatements(List<PayrollStatementDto> out) {
+        out.sort(java.util.Comparator
+                .comparing(PayrollStatementDto::getEngineerName, java.util.Comparator.nullsLast(String::compareTo))
+                .thenComparing(PayrollStatementDto::getEmployeeId,
+                        java.util.Comparator.nullsLast(String::compareTo)));
     }
 
     private BigDecimal amountOrNull(String value) {
@@ -618,34 +762,53 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     @Override
+    @Transactional
     public void link(Long engineerId, String employeeId, Long userId) {
+        FreeeConnection c = latestActiveRow();
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        if (!STATUS_CONNECTED.equals(c.getConnectionStatus())) {
+            throw BusinessException.of("error.payroll.reauthRequired");
+        }
         if (employeeId == null || employeeId.isBlank()) {
             throw BusinessException.of(400, "error.payroll.invalidEmployeeId");
         }
-        if (employees().stream().noneMatch(e -> e.getId().equals(employeeId))) {
+        // 現在companyの従業員一覧に存在すること（生ID手入力の通常操作を廃止）
+        boolean exists = fetchAllEmployees(c.getCompanyId()).stream()
+                .anyMatch(e -> String.valueOf(e.getId()).equals(employeeId));
+        if (!exists) {
             throw BusinessException.of(400, "error.payroll.invalidEmployeeId");
         }
 
         Engineer e = engineerMapper.selectById(engineerId);
-        if (e == null || "BP".equalsIgnoreCase(e.getEmploymentType())) {
+        if (e == null) {
+            throw BusinessException.of(400, "error.payroll.invalidEngineer");
+        }
+        if ("BP".equalsIgnoreCase(e.getEmploymentType())) {
             throw BusinessException.of("error.payroll.bpExcluded");
         }
 
+        // 同一company×同一employeeの既存linkとの競合は409（unique constraintでも防御）
         FreeeEmployeeLink conflict = linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
+                .eq(FreeeEmployeeLink::getFreeeCompanyId, c.getCompanyId())
                 .eq(FreeeEmployeeLink::getFreeeEmployeeId, employeeId));
         if (conflict != null && !conflict.getEngineerId().equals(engineerId)) {
             throw BusinessException.of(409, "error.payroll.duplicateEmployeeLink");
         }
 
-        linkMapper.deleteSoftDeletedConflicts(engineerId, employeeId);
+        linkMapper.deleteSoftDeletedConflicts(engineerId, employeeId, c.getCompanyId());
 
+        // engineerの既存row（他company含む）は明示的な再対応付けで現在companyへ更新する（R04-6）
         FreeeEmployeeLink old = linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
                 .eq(FreeeEmployeeLink::getEngineerId, engineerId));
         FreeeEmployeeLink x = old == null ? new FreeeEmployeeLink() : old;
         x.setEngineerId(engineerId);
         x.setFreeeEmployeeId(employeeId);
+        x.setFreeeCompanyId(c.getCompanyId());
         x.setConfirmedAt(LocalDateTime.now());
-        x.setConfirmedBy(com.ses.common.util.SecurityUtils.currentUserId());
+        // 認証主体はcontrollerから一貫して渡す（SecurityUtilsをservice内で二重取得しない）
+        x.setConfirmedBy(userId);
 
         try {
             if (old == null) {
@@ -660,6 +823,19 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
 
     @Override
     public void unlink(Long engineerId) {
+        FreeeConnection c = latestActiveRow();
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        FreeeEmployeeLink x = linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
+                .eq(FreeeEmployeeLink::getEngineerId, engineerId));
+        if (x == null) {
+            return;
+        }
+        // 他companyのlinkは解除対象にしない（IDOR防止）。NULL legacy linkは解除可。
+        if (x.getFreeeCompanyId() != null && !x.getFreeeCompanyId().equals(c.getCompanyId())) {
+            throw BusinessException.of(400, "error.payroll.companyMismatchLink");
+        }
         linkMapper.deleteByEngineerIdHard(engineerId);
     }
 
