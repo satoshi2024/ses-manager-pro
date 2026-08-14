@@ -1,3 +1,6 @@
+## R10判定（次step・P1-01b fix + conformance・2026-08-14）
+
+R10 R23-P1-01次step: e3227cfb（P1-01b fix）を検証しVERIFIED_CLOSED。FingerprintKeyProviderImpl（tenant namespace・version別rotation・prod起動fail-fast・unknown fail-closed・32byte base64url検証・dev/testのみ既定鍵fallback）を実体確認、FpSvcはtenantIdでprovider使用（ハードコード鍵削除）。FingerprintServiceTest 10＋KeyProviderImplTest 7＝17/0/0/0、CI 1929/0/0/0 skip 0 SUCCESS。先行実装conformance全10項目をspot check含めCONFORM確認（旧Evaluator削除・Controller Map 0件・recordExternalReview=SUBMITTEDのみ400）。新規issueなし。残はPR merge→人間証跡（証跡1-5）→T066 M PASS→S10 PASS→S12解放。production authorizationなし
 ## Step 5-2: R23-S3-P1-01b fix完了（fingerprint key resolution・2026-08-14）
 
 R10再Review指摘P1-01b（§9契約未達: tenantId/keyVersion引数を無視した単一ハードコード鍵・fail-open fallback）を解消:
