@@ -858,3 +858,45 @@ fix delta `a7b7c59c..586f495f`（12 file、+746/−90）、REV-001〜007の判�
 |---|---|---|---|---|---|
 | HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。AC13/AC15はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
 | HFP-01-REV-008 | NOTE | FIXED_BY_IMPLEMENTER | ReviewerのVERIFIED_CLOSED待ち | Reviewer | Round 3 |
+
+---
+
+### HFP-01-RUN-20260814-13（最終gateの確定）
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `535ddb24` / 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-15 00:50` / `2026-08-15 02:20` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | verify-like-ci実行の副作用（browser-m/browser-r8 evidence）を復元。HFP-01の変更のみ残す |
+
+#### Task実行証跡（HFP-01-010最終・Round 3準備）
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-010（最終） | PASS | production変更なし（REV-008対応はRUN-12で実施済み） | **`scripts/verify-like-ci.ps1` → surefire aggregate: Tests run 1997 / Failures 0 / Errors 0 / Skipped 0 / BUILD SUCCESS（単独run・exit 0）** | clean process再実行で再現 | 対象外のfailureなし。Assumptions追加なし |
+
+#### 自動gate集計（最終・surefire集計値で記録）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| verify-like-ci（REV-008後・単独run） | `scripts/verify-like-ci.ps1` | **1997** | 0 | 0 | 0 | **PASS** | `%TEMP%\opencode\hfp-01-verify-like-ci.log`（surefire aggregate行・BUILD SUCCESS） |
+| freee関連全回帰 | 17 class | 148 | 0 | 0 | 0 | PASS | surefire-reports |
+| MySQL migration smoke | `FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 4 | 0 | 0 | 0 | PASS | 実MySQL |
+| 禁止値scan | git grep（token/secret pattern） | - | 0 | - | - | PASS | 環境変数参照のみ |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。AC13/AC15はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
+
+#### Round 3 引き渡し
+
+- head: 本Runコミット。fix delta: `a7b7c59c..本Run`。
+- REV-001〜005/007: VERIFIED_CLOSED（Round 2）。REV-006: 記録方法訂正済み（surefire aggregate値1997で記録）。REV-008: FIXED_BY_IMPLEMENTER（targeted UPDATE・非業務例外監査）。
+- 未解決P0/P1: 0。AC01〜AC12 PASS。残る必須gateは AC13/AC15（freee sandbox credential未提供）のみ。
