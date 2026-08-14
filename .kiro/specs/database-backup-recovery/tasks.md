@@ -27,7 +27,7 @@
   - **Evidence:** `target/backup-recovery-evidence/<run-id>/HFP-03-001/` に version、digest、preflight JSON、test log、secret scan を保存。
   - **失敗/rollback:** production topology 未確定、互換 client 未固定、secret 漏洩が 1 件でもあれば BLOCKED/FAIL。既存 image へ自動 fallback しない。
 
-- [ ] **HFP-03-002 — 排他 lock、権限分離、書込み静止 provider を実装する**
+- [x] **HFP-03-002 — 排他 lock、権限分離、書込み静止 provider を実装する**
 
   - **依存:** HFP-03-001
   - **対応要求:** HFP-03-RQ-002、HFP-03-RQ-006、HFP-03-RQ-008、HFP-03-RQ-009

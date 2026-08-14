@@ -47,7 +47,8 @@ RUN apt-get update \
  && restic version
 
 COPY lib/ /usr/local/lib/ses-backup/
+COPY providers/ /usr/local/lib/ses-backup/providers/
 COPY *.sh /usr/local/bin/
-RUN chmod 700 /usr/local/bin/*.sh
+RUN chmod 700 /usr/local/bin/*.sh /usr/local/lib/ses-backup/providers/*.sh
 
 WORKDIR /var/lib/ses-backup

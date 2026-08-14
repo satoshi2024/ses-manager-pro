@@ -40,6 +40,19 @@ docker compose run --rm check --json
 
 `MYSQL_PWD` 環境変数は使わない。秘密は 0600 の一時 option file 経由で渡す。
 
+## 権限分離（RQ-008）
+
+| role | DB 権限 | repository 権限 | 用途 |
+|---|---|---|---|
+| dump role | 対象 DB read、view/trigger/event/routine の最小権限 | writer（backup 可・delete 不可） | full/checkpoint |
+| binlog role | `REPLICATION CLIENT`（+ checkpoint 用 rotation 権限は別 account） | writer | archive/snapshot |
+| retention role | なし | **唯一** forget/prune 可（専用 maintenance 時のみ） | retention |
+| restore target role | recovery target 新規 DB のみ（source 権限なし） | read | restore/validate |
+
+- repository の S3 versioning/immutability を有効化し、通常 backup credential だけで全世代を削除できないようにする。
+- 書込み静止（quiesce）は `providers/quiesce-local.sh`（version 管理された executable）のみ。任意 `bash -c` の `APP_STOP_COMMAND` は受け付けない。
+- 静止 protocol: 全 replica の heartbeat fresh / scheduler ack / MySQL `GET_LOCK('ses_backup_ddl_freeze')` の三者を bounded deadline 内に確認。app の DDL/deploy は同じ lock 名を尊重する規約。
+
 ## 復元
 
 復元は **production source とは別の recovery target** へ行う。手順は `runbooks/restore-cutover.md`。

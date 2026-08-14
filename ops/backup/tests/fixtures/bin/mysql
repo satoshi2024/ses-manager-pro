@@ -37,6 +37,11 @@ for arg in "$@"; do
   prev=$arg
 done
 
+# stdin 経由の query（lock 保持 session 等）
+if [[ -z "${query:-}" ]]; then
+  IFS= read -r query || true
+fi
+
 case "$query" in
   *information_schema.tables*)
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
@@ -44,6 +49,18 @@ case "$query" in
     ;;
   *@@server_uuid*)
     printf '%s\n' "${FAKE_MYSQL_STATUS_ROW:-8.0.36	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
+    exit 0
+    ;;
+  *GET_LOCK*)
+    printf '%s\n' "${FAKE_GET_LOCK:-1}"
+    # lock 保持 session を模す（release まで接続維持）
+    if [[ "${FAKE_GET_LOCK_HOLD:-0}" == "1" && "${FAKE_GET_LOCK:-1}" == "1" ]]; then
+      while :; do sleep 1; done
+    fi
+    exit 0
+    ;;
+  *RELEASE_LOCK*)
+    printf '%s\n' "${FAKE_RELEASE_LOCK:-1}"
     exit 0
     ;;
   "")

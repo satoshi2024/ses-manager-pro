@@ -99,8 +99,8 @@ capture_exit() { # var_name cmd...
   local var=$1
   shift
   "$@" > /dev/null 2>&1
-  local code=$?
-  eval "$var=$code"
+  local rc=$?
+  eval "$var=$rc"
 }
 
 # case 関数を実行する。失敗しても全体は続行する。
