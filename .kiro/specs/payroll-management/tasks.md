@@ -188,7 +188,7 @@
 
 ## HFP-01-010 全自動gateとschema/privacy回帰を通す
 
-- [ ] **HFP-01-010 — automated release gates**
+- [x] **HFP-01-010 — automated release gates**
 - **Requirements**: HFP-01-R12
 - **依存**: HFP-01-002〜HFP-01-009
 - **Objective**: 局所testだけの偽greenを排除し、CI、実MySQL、privacy、secretのrelease条件を満たす。

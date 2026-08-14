@@ -399,6 +399,56 @@
 
 ---
 
+### HFP-01-RUN-20260814-09
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `dc0a8104` / 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-14 16:20` / `2026-08-14 17:10` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続。FREEE_*未設定） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | verify-like-ci再実行の副作用（browser-m/browser-r8 evidence）を復元。HFP-01の変更のみ残す |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-010 | **PASS** | production変更なし。`tasks.md` 001〜010 checkbox完了化、`review-conversation.md`（新規・REVIEW PACKET） | **`scripts/verify-like-ci.ps1` → run 3984 / fail 0 / err 0 / skip 0 / BUILD SUCCESS（1:48h）**。`mvn test -Dtest=FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` → 4/0/0/0。migration契約（ReviewerVerification/SpecDispatch/MigrationScriptIntegrity）44/0/0/0。freee全回帰143/0/0/0 | clean process再実行で同一結果（verify-like-ciを2回実行し、1回目はV103契約違反検出→訂正、2回目greenを確認） | 対象外のfailureなし。Assumptionsによるskip追加なし |
+| HFP-01-011 | **BLOCKED** | 実装なし（credential未提供）。`review-conversation.md` にREVIEW PACKET・Acceptance trace・再実行手順を用意 | 未実行（sandbox必須） | 未実施 | sandbox接続は実施せず。HFP-01全体をPASSとはしない。HFP-01-G01 OPENのまま |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| verify-like-ci | `scripts/verify-like-ci.ps1` | 3984 | 0 | 0 | 0 | **PASS** | `%TEMP%\opencode\hfp-01-verify-like-ci.log`（BUILD SUCCESS 1:48h、skip 0宣言） |
+| MySQL migration smoke | `mvn test -Dtest=FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 4 | 0 | 0 | 0 | PASS | empty DB + V102→V102_2 upgrade |
+| migration契約 | ReviewerVerificationMigrationOrderContractTest, SpecDispatchConsistencyTest, MigrationScriptIntegrityTest, FreeeCompanyBoundarySchemaH2Test | 44 | 0 | 0 | 0 | PASS | V102_2採番が予約と非衝突 |
+| freee全回帰 | 15 class | 143 | 0 | 0 | 0 | PASS | 008/009/V102_2訂正後の最終 |
+| 禁止値scan | `git grep`（token/secret/base64 pattern） | - | 0 | - | - | PASS | ヒットは環境変数参照のみ。fixtureは`fixture-`prefix架空値 |
+
+#### Demo / sandbox E2E
+
+| Scenario | Desktop | 390px | Sandbox | 状態 | 非機微証跡 / 観測結果 |
+|---|---|---|---|---|---|
+| 全自動gate | N/A | N/A | N/A | PASS | 上記gate集計 |
+| 接続→link→給与→賞与→解除 E2E | BLOCKED | BLOCKED | BLOCKED | BLOCKED | freee test事業所 credential未提供。HFP-01-011 |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供。HFP-01-G01（spike）、AC13（desktop/390px実操作）、AC15（E2E・独立Review）は未達のまま | 発注者 / FREEE_CLIENT_ID等の環境変数 | HFP-01-011手順（review-conversation.md §5） |
+
+#### 独立Review引き渡し
+
+- `review-conversation.md`（REVIEW PACKET: base/head、task別変更file、Acceptance trace、外部契約、再実行手順）を追加した。
+- **verdictは本Runでは確定しない**。sandbox BLOCKEDのため `REVIEWABLE` 判定も保留（handbook: 外部環境不足はBLOCKED）。実装AIは自己成果をPASS/REVIEWABLEにしない。
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
