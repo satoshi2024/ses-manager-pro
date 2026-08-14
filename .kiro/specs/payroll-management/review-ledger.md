@@ -492,6 +492,49 @@
 
 ---
 
+### HFP-01-RUN-20260814-11（Round 1修正後の最終gate）
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `8bc46167` / 本Runコミット（head確定予定） |
+| 開始 / 終了（JST） | `2026-08-14 21:00` / `2026-08-14 22:15` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | verify-like-ci実行の副作用（browser-m/browser-r8 evidence）を復元。HFP-01の変更のみ残す |
+
+#### Task実行証跡（HFP-01-010 最終・Round 2準備）
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-010（最終） | PASS | production変更なし（REV修正はRUN-10で実施済み） | **`scripts/verify-like-ci.ps1` → run 3992 / fail 0 / err 0 / skip 0 / BUILD SUCCESS（単独run実測）** | clean process再実行で再現 | 対象外のfailureなし。Assumptions追加なし |
+
+#### 自動gate集計（最終）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| verify-like-ci（REV修正後・単独run） | `scripts/verify-like-ci.ps1` | 3992 | 0 | 0 | 0 | **PASS** | `%TEMP%\opencode\hfp-01-verify-like-ci.log`（BUILD SUCCESS） |
+| freee関連全回帰 | 17 class | 147 | 0 | 0 | 0 | PASS | surefire-reports |
+| MySQL migration smoke | `FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 4 | 0 | 0 | 0 | PASS | 実MySQL |
+| migration契約 | ReviewerVerification/SpecDispatch/MigrationScriptIntegrity/FreeeCompanyBoundarySchemaH2 | 44 | 0 | 0 | 0 | PASS | V102_2非衝突 |
+| 禁止値scan | git grep（token/secret pattern） | - | 0 | - | - | PASS | 環境変数参照のみ |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。AC13/AC15はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
+
+#### Round 2 引き渡し
+
+- head: `8bc46167` 以降の最終コミット。base: `a7b7c59c`（Round 1対象head）〜最終head の fix delta をReview対象とする。
+- REV-001〜007 は全て FIXED_BY_IMPLEMENTER。ReviewerのVERIFIED_CLOSED待ち。
+- 未解決P0/P1: 0。AC04/AC12は修正testでPASS。
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
