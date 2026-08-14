@@ -157,6 +157,17 @@ public class SecurityConfig {
                     // G2 gate（Phase A step 3）: mapping version等の管理は管理者のみ
                     "/api/compliance-gate/**"
                 ).hasRole("管理者")
+                // G2 gate approval（R23-P1-01 §5）: 管理者・HR・マネージャーはapproval画面へ入れる。
+                // ただしserviceでcurrent assignment.user_id == currentUserIdを必須にする（§5）。
+                // page/API両方を管理者・HR・マネージャーへ開放し、assignment管理は上記の管理者限定規則が先に当たる。
+                .requestMatchers("/compliance-gate/**")
+                .hasAnyRole("管理者", "HR", "マネージャー")
+                .requestMatchers("/api/compliance-gate/approvals", "/api/compliance-gate/capabilities",
+                        "/api/compliance-gate/mappings/*/external-reviews",
+                        "/api/compliance-gate/mappings/*/verifications",
+                        "/api/compliance-gate/submitted-reviews/*/verifications",
+                        "/api/compliance-gate/submitted-reviews/*/adoptions")
+                .hasAnyRole("管理者", "HR", "マネージャー")
                 // 新雇用勤怠の管理画面/API。営業には客先工数のwork-record権限があっても見せない。
                 .requestMatchers("/work-record/attendance/**", "/api/work-records/attendance/**")
                 .hasAnyRole("管理者", "HR", "マネージャー")

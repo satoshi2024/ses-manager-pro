@@ -1,9 +1,28 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
-import com.ses.dto.compliance.ComplianceMappingSourceInput;
+import com.ses.dto.compliance.ComplianceAdoptionEventDto;
+import com.ses.dto.compliance.ComplianceApprovalRequest;
+import com.ses.dto.compliance.ComplianceAssignmentRequest;
+import com.ses.dto.compliance.ComplianceCapabilityDto;
+import com.ses.dto.compliance.ComplianceExternalReviewRequest;
+import com.ses.dto.compliance.ComplianceMappingCreateRequest;
+import com.ses.dto.compliance.ComplianceMappingVersionDto;
+import com.ses.dto.compliance.ComplianceReviewerSubjectDto;
+import com.ses.dto.compliance.ComplianceReviewerTypeDto;
+import com.ses.dto.compliance.ComplianceReviewerTypeRequest;
+import com.ses.dto.compliance.ComplianceVerificationEventDto;
+import com.ses.dto.compliance.ComplianceVerificationRecordRequest;
+import com.ses.dto.compliance.ComplianceVerificationRevokeRequest;
+import com.ses.entity.ComplianceExternalReviewAdoptionEvent;
+import com.ses.entity.ComplianceExternalReviewerVerificationEvent;
 import com.ses.entity.ComplianceMappingVersion;
+import com.ses.service.ComplianceApprovalService;
+import com.ses.service.ComplianceExternalReviewAdoptionService;
+import com.ses.service.ComplianceExternalReviewVerificationService;
+import com.ses.service.ComplianceGateAdminService;
 import com.ses.service.ComplianceMappingService;
+import com.ses.service.compliance.ComplianceCapabilityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,12 +33,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
- * G2 mapping version API（Phase A step 3の第一increment）。
+ * G2 mapping version / reviewer verification API（R23-P1-01 §5）。
+ * typed request/response DTOとallow-listを使用し、entityやMapをAPI契約にしない（§5）。
  * 管理者のみ（SecurityConfigで制限）。mapping_hashはcanonicalizerで計算し、client supplied hashは信頼しない。
  */
 @RestController
@@ -28,79 +46,97 @@ import java.util.Map;
 public class ComplianceGateApiController {
 
     private final ComplianceMappingService complianceMappingService;
-    private final com.ses.service.ComplianceGateAdminService complianceGateAdminService;
-    private final com.ses.service.ComplianceApprovalService complianceApprovalService;
+    private final ComplianceGateAdminService complianceGateAdminService;
+    private final ComplianceApprovalService complianceApprovalService;
+    private final ComplianceExternalReviewVerificationService verificationService;
+    private final ComplianceExternalReviewAdoptionService adoptionService;
+    private final ComplianceCapabilityService capabilityService;
+
+    @GetMapping("/capabilities")
+    public ApiResult<ComplianceCapabilityDto> capabilities() {
+        return ApiResult.success(capabilityService.current());
+    }
+
+    // ===== mapping version =====
 
     @PostMapping("/mappings")
-    public ApiResult<ComplianceMappingVersion> create(@RequestBody Map<String, Object> body) {
+    public ApiResult<ComplianceMappingVersionDto> create(@RequestBody ComplianceMappingCreateRequest request) {
         ComplianceMappingVersion version = complianceMappingService.create(
-                (String) body.get("mappingCode"),
-                (String) body.get("mappingVersion"),
-                body.get("effectiveFrom") == null ? null : LocalDate.parse((String) body.get("effectiveFrom")),
-                body.get("effectiveTo") == null ? null : LocalDate.parse((String) body.get("effectiveTo")),
-                castSources(body.get("sources")));
-        return ApiResult.success(version);
+                request.getMappingCode(),
+                request.getMappingVersion(),
+                request.getEffectiveFrom(),
+                request.getEffectiveTo(),
+                request.getSources());
+        return ApiResult.success(ComplianceMappingVersionDto.fromEntity(version));
     }
 
     @GetMapping("/mappings")
-    public ApiResult<List<ComplianceMappingVersion>> list() {
-        return ApiResult.success(complianceMappingService.list());
+    public ApiResult<List<ComplianceMappingVersionDto>> list() {
+        return ApiResult.success(complianceMappingService.list().stream()
+                .map(ComplianceMappingVersionDto::fromEntity)
+                .toList());
     }
 
     @GetMapping("/mappings/{id}")
-    public ApiResult<ComplianceMappingVersion> getById(@PathVariable Long id) {
-        return ApiResult.success(complianceMappingService.getById(id));
+    public ApiResult<ComplianceMappingVersionDto> getById(@PathVariable Long id) {
+        return ApiResult.success(ComplianceMappingVersionDto.fromEntity(complianceMappingService.getById(id)));
     }
 
     @PutMapping("/mappings/{id}/transition")
-    public ApiResult<ComplianceMappingVersion> transition(@PathVariable Long id,
-                                                         @RequestParam String toStatus,
-                                                         @RequestParam(required = false) Long approvalEventId) {
-        return ApiResult.success(complianceMappingService.transition(id, toStatus, approvalEventId));
+    public ApiResult<ComplianceMappingVersionDto> transition(@PathVariable Long id,
+                                                             @RequestParam String toStatus,
+                                                             @RequestParam(required = false) Long approvalEventId) {
+        return ApiResult.success(ComplianceMappingVersionDto.fromEntity(
+                complianceMappingService.transition(id, toStatus, approvalEventId)));
     }
 
     @PutMapping("/mappings/{id}/promote")
-    public ApiResult<ComplianceMappingVersion> promote(@PathVariable Long id) {
-        return ApiResult.success(complianceMappingService.promoteFutureToActive(id));
+    public ApiResult<ComplianceMappingVersionDto> promote(@PathVariable Long id) {
+        return ApiResult.success(ComplianceMappingVersionDto.fromEntity(
+                complianceMappingService.promoteFutureToActive(id)));
     }
 
     // ===== reviewer type / assignment / approval（Phase A step 3） =====
 
     @GetMapping("/reviewer-types")
-    public ApiResult<List<com.ses.entity.ComplianceExternalReviewerType>> reviewerTypes() {
-        return ApiResult.success(complianceGateAdminService.listReviewerTypes());
+    public ApiResult<List<ComplianceReviewerTypeDto>> reviewerTypes() {
+        return ApiResult.success(complianceGateAdminService.listReviewerTypes().stream()
+                .map(ComplianceReviewerTypeDto::fromEntity)
+                .toList());
     }
 
     @PostMapping("/reviewer-types")
-    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> createReviewerType(@RequestBody Map<String, Object> body) {
-        return ApiResult.success(complianceGateAdminService.createReviewerType(
-                (String) body.get("typeCode"),
-                (String) body.get("displayName"),
-                (String) body.get("description"),
-                (String) body.get("credentialLabel"),
-                Boolean.TRUE.equals(body.get("credentialRequired"))));
+    public ApiResult<ComplianceReviewerTypeDto> createReviewerType(@RequestBody ComplianceReviewerTypeRequest request) {
+        return ApiResult.success(ComplianceReviewerTypeDto.fromEntity(
+                complianceGateAdminService.createReviewerType(
+                        request.getTypeCode(),
+                        request.getDisplayName(),
+                        request.getDescription(),
+                        request.getCredentialLabel(),
+                        Boolean.TRUE.equals(request.getCredentialRequired()))));
     }
 
     @PutMapping("/reviewer-types/{id}")
-    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> updateReviewerType(@PathVariable Long id,
-                                                                                       @RequestBody Map<String, Object> body) {
-        return ApiResult.success(complianceGateAdminService.updateReviewerType(
-                id, (String) body.get("displayName"), (String) body.get("description"),
-                (String) body.get("credentialLabel"), Boolean.TRUE.equals(body.get("credentialRequired"))));
+    public ApiResult<ComplianceReviewerTypeDto> updateReviewerType(@PathVariable Long id,
+                                                                   @RequestBody ComplianceReviewerTypeRequest request) {
+        return ApiResult.success(ComplianceReviewerTypeDto.fromEntity(
+                complianceGateAdminService.updateReviewerType(
+                        id, request.getDisplayName(), request.getDescription(),
+                        request.getCredentialLabel(), Boolean.TRUE.equals(request.getCredentialRequired()))));
     }
 
     @PutMapping("/reviewer-types/{id}/enabled")
-    public ApiResult<com.ses.entity.ComplianceExternalReviewerType> setReviewerTypeEnabled(@PathVariable Long id,
-                                                                                           @RequestParam boolean enabled) {
-        return ApiResult.success(complianceGateAdminService.setReviewerTypeEnabled(id, enabled));
+    public ApiResult<ComplianceReviewerTypeDto> setReviewerTypeEnabled(@PathVariable Long id,
+                                                                       @RequestParam boolean enabled) {
+        return ApiResult.success(ComplianceReviewerTypeDto.fromEntity(
+                complianceGateAdminService.setReviewerTypeEnabled(id, enabled)));
     }
 
     @PostMapping("/assignments")
-    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> createAssignment(@RequestBody Map<String, Object> body) {
+    public ApiResult<com.ses.entity.ComplianceResponsibleAssignment> createAssignment(
+            @RequestBody ComplianceAssignmentRequest request) {
         return ApiResult.success(complianceGateAdminService.createAssignment(
-                Long.valueOf(String.valueOf(body.get("workplaceId"))),
-                Long.valueOf(String.valueOf(body.get("userId"))),
-                body.get("effectiveFrom") == null ? null : java.time.LocalDateTime.parse((String) body.get("effectiveFrom"))));
+                request.getWorkplaceId(), request.getUserId(), request.getEffectiveFrom()));
     }
 
     @PutMapping("/assignments/{id}/end")
@@ -110,56 +146,148 @@ public class ComplianceGateApiController {
     }
 
     @PostMapping("/approvals")
-    public ApiResult<com.ses.entity.ComplianceMappingApprovalEvent> approve(@RequestBody Map<String, Object> body) {
+    public ApiResult<com.ses.entity.ComplianceMappingApprovalEvent> approve(@RequestBody ComplianceApprovalRequest request) {
         return ApiResult.success(complianceApprovalService.approve(
-                Long.valueOf(String.valueOf(body.get("mappingId"))),
-                Long.valueOf(String.valueOf(body.get("workplaceId"))),
-                (String) body.get("reason"),
-                body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId")))));
+                request.getMappingId(), request.getWorkplaceId(), request.getReason(), request.getEvidenceDocumentId()));
     }
 
+    // ===== external review（SUBMITTED・K1） =====
+
     @PostMapping("/external-reviews")
-    public ApiResult<com.ses.dto.compliance.ComplianceExternalReviewEventDto> recordExternalReview(@RequestBody Map<String, Object> body) {
+    public ApiResult<com.ses.dto.compliance.ComplianceExternalReviewEventDto> recordExternalReview(
+            @RequestBody ComplianceExternalReviewRequest request) {
         com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
-                Long.valueOf(String.valueOf(body.get("mappingId"))),
-                Long.valueOf(String.valueOf(body.get("requirementGroupId"))),
-                Long.valueOf(String.valueOf(body.get("reviewerTypeId"))),
-                (String) body.get("reviewerName"),
-                (String) body.get("organization"),
-                (String) body.get("credentialRaw"),
-                (String) body.get("action"),
-                body.get("reviewedAt") == null ? null : java.time.LocalDateTime.parse((String) body.get("reviewedAt")),
-                body.get("validUntil") == null ? null : java.time.LocalDateTime.parse((String) body.get("validUntil")),
-                body.get("evidenceDocumentId") == null ? null : Long.valueOf(String.valueOf(body.get("evidenceDocumentId"))),
-                (String) body.get("reason"),
-                body.get("targetEventId") == null ? null : Long.valueOf(String.valueOf(body.get("targetEventId"))));
+                request.getMappingId(),
+                request.getRequirementGroupId(),
+                request.getReviewerTypeId(),
+                request.getReviewerName(),
+                request.getOrganization(),
+                request.getCredentialRaw(),
+                "SUBMITTED",
+                request.getReviewedAt(),
+                request.getValidUntil(),
+                request.getEvidenceDocumentId(),
+                request.getReason(),
+                request.getTargetEventId());
         return ApiResult.success(com.ses.dto.compliance.ComplianceExternalReviewEventDto.fromEntity(event));
     }
 
     @GetMapping("/mappings/{id}/external-reviews")
     public ApiResult<List<com.ses.dto.compliance.ComplianceExternalReviewEventDto>> listExternalReviews(@PathVariable Long id) {
-        List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(id);
-        List<com.ses.dto.compliance.ComplianceExternalReviewEventDto> dtoList = list.stream()
+        return ApiResult.success(complianceGateAdminService.listExternalReviews(id).stream()
                 .map(com.ses.dto.compliance.ComplianceExternalReviewEventDto::fromEntity)
-                .toList();
-        return ApiResult.success(dtoList);
+                .toList());
     }
 
-    @SuppressWarnings("unchecked")
-    private List<ComplianceMappingSourceInput> castSources(Object value) {
-        if (!(value instanceof List<?> raw)) {
-            return List.of();
-        }
-        return raw.stream().map(item -> {
-            Map<String, Object> map = (Map<String, Object>) item;
-            ComplianceMappingSourceInput input = new ComplianceMappingSourceInput();
-            input.setSourceCode((String) map.get("sourceCode"));
-            input.setSourceUrl((String) map.get("sourceUrl"));
-            input.setSourceVersion((String) map.get("sourceVersion"));
-            input.setConfirmedOn(map.get("confirmedOn") == null ? null : LocalDate.parse((String) map.get("confirmedOn")));
-            input.setEffectiveFrom(map.get("effectiveFrom") == null ? null : LocalDate.parse((String) map.get("effectiveFrom")));
-            input.setEffectiveTo(map.get("effectiveTo") == null ? null : LocalDate.parse((String) map.get("effectiveTo")));
-            return input;
-        }).toList();
+    // ===== reviewer subject =====
+
+    @GetMapping("/subjects")
+    public ApiResult<List<ComplianceReviewerSubjectDto>> listSubjects() {
+        return ApiResult.success(complianceGateAdminService.listSubjects().stream()
+                .map(ComplianceReviewerSubjectDto::fromEntity)
+                .toList());
+    }
+
+    // ===== verification（R23-P1-01 §3.3） =====
+
+    @PostMapping("/verifications")
+    public ApiResult<ComplianceVerificationEventDto> recordVerification(
+            @RequestBody ComplianceVerificationRecordRequest request) {
+        ComplianceExternalReviewerVerificationEvent event = verificationService.record(
+                request.getSubmittedReviewEventId(),
+                request.getReviewerSubjectId(),
+                request.getReviewerTypeId(),
+                request.getVerificationKind(),
+                request.getResult(),
+                request.getMethodCode(),
+                request.getAuthoritySourceCode(),
+                request.getAuthoritySourceName(),
+                request.getOfficialUrlReference(),
+                request.getRegistrationIdentifier(),
+                request.getCheckedAt(),
+                request.getSourceDataAsOf(),
+                request.getMaxAgeDays(),
+                request.getValidUntil(),
+                com.ses.common.util.SecurityUtils.currentUserId(),
+                request.getEvidenceDocumentId(),
+                request.getEvidenceDocumentVersionId(),
+                request.getReviewPolicyVersion(),
+                request.getReviewPolicyHash(),
+                request.getMappingId(),
+                request.getMappingVersion(),
+                request.getMappingHash(),
+                request.getExternalReviewEventId(),
+                request.getExternalReviewChainId(),
+                request.getIdempotencyKey());
+        return ApiResult.success(ComplianceVerificationEventDto.fromEntity(event));
+    }
+
+    @PutMapping("/verifications/{id}/revoke")
+    public ApiResult<ComplianceVerificationEventDto> revokeVerification(
+            @PathVariable Long id,
+            @RequestBody ComplianceVerificationRevokeRequest request) {
+        ComplianceExternalReviewerVerificationEvent event = verificationService.revoke(
+                request.getTargetVerificationEventId(),
+                request.getReason(),
+                com.ses.common.util.SecurityUtils.currentUserId(),
+                request.getIdempotencyKey());
+        return ApiResult.success(ComplianceVerificationEventDto.fromEntity(event));
+    }
+
+    @GetMapping("/mappings/{id}/verifications")
+    public ApiResult<List<ComplianceVerificationEventDto>> listVerificationsByMapping(@PathVariable Long id) {
+        return ApiResult.success(complianceGateAdminService.listVerificationsByMapping(id).stream()
+                .map(ComplianceVerificationEventDto::fromEntity)
+                .toList());
+    }
+
+    @GetMapping("/submitted-reviews/{id}/verifications")
+    public ApiResult<List<ComplianceVerificationEventDto>> listVerificationsBySubmittedReview(@PathVariable Long id) {
+        return ApiResult.success(verificationService.listBySubmittedReview(id).stream()
+                .map(ComplianceVerificationEventDto::fromEntity)
+                .toList());
+    }
+
+    // ===== adoption（R23-P1-01 §3.4） =====
+
+    @PostMapping("/submitted-reviews/{id}/adoptions/approve")
+    public ApiResult<ComplianceAdoptionEventDto> approveAdoption(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceAdoptionRequest request) {
+        ComplianceExternalReviewAdoptionEvent event = adoptionService.approve(
+                id,
+                request.getIdentityVerificationEventId(),
+                request.getQualificationVerificationEventId(),
+                request.getActiveStatusVerificationEventId(),
+                request.getAuthorshipVerificationEventId(),
+                request.getEvidenceDocumentId(),
+                request.getEvidenceDocumentVersionId(),
+                request.getIdempotencyKey());
+        return ApiResult.success(ComplianceAdoptionEventDto.fromEntity(event));
+    }
+
+    @PostMapping("/submitted-reviews/{id}/adoptions/reject")
+    public ApiResult<ComplianceAdoptionEventDto> rejectAdoption(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceAdoptionRequest request) {
+        ComplianceExternalReviewAdoptionEvent event = adoptionService.reject(
+                id, request.getReason(), request.getIdempotencyKey());
+        return ApiResult.success(ComplianceAdoptionEventDto.fromEntity(event));
+    }
+
+    @PutMapping("/adoptions/{id}/revoke")
+    public ApiResult<ComplianceAdoptionEventDto> revokeAdoption(
+            @PathVariable Long id,
+            @RequestBody com.ses.dto.compliance.ComplianceAdoptionRequest request) {
+        ComplianceExternalReviewAdoptionEvent event = adoptionService.revoke(
+                id, request.getReason(), request.getIdempotencyKey());
+        return ApiResult.success(ComplianceAdoptionEventDto.fromEntity(event));
+    }
+
+    @GetMapping("/submitted-reviews/{id}/adoptions")
+    public ApiResult<List<ComplianceAdoptionEventDto>> listAdoptionsBySubmittedReview(@PathVariable Long id) {
+        return ApiResult.success(adoptionService.listBySubmittedReview(id).stream()
+                .map(ComplianceAdoptionEventDto::fromEntity)
+                .toList());
     }
 }

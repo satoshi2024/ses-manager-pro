@@ -47,4 +47,10 @@ public interface ComplianceGateAdminService {
                                                                        Long targetEventId);
 
     List<com.ses.entity.ComplianceExternalReviewEvent> listExternalReviews(Long mappingId);
+
+    /** R23-P1-01 §5: external reviewer subject一覧（person-stable正本・fingerprint masked表現）。 */
+    List<com.ses.entity.ComplianceExternalReviewerSubject> listSubjects();
+
+    /** R23-P1-01 §5: 指定mappingに属するverification event一覧（external review経由）。 */
+    List<com.ses.entity.ComplianceExternalReviewerVerificationEvent> listVerificationsByMapping(Long mappingId);
 }

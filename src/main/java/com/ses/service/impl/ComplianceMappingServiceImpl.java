@@ -44,7 +44,9 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     private final com.ses.mapper.ComplianceMappingStatusEventMapper statusEventMapper;
     private final com.ses.mapper.ComplianceResponsibleAssignmentMapper assignmentMapper;
     private final com.ses.service.compliance.ComplianceMappingCanonicalizer canonicalizer;
-    private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
+    private final com.ses.service.compliance.ComplianceGateEvaluationService gateEvaluationService;
+    private final com.ses.mapper.ComplianceExternalReviewAdoptionEventMapper adoptionEventMapper;
+    private final com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
 
     @Override
@@ -222,16 +224,36 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
             throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
         }
 
-        // §3.2 / §7.3 / G2-SEC-12..18 外部レビューポリシー評価 (Group AND)
-        // requirement typeが1つ以上設定されているグループのみ評価対象（type未設定グループは外部レビュー不要）
-        if (externalReviewEvaluator != null && !groups.isEmpty()) {
-            for (com.ses.entity.ComplianceMappingReviewRequirementGroup group : groups) {
-                boolean hasTypes = types.stream().anyMatch(t -> group.getId().equals(t.getRequirementGroupId()));
-                if (hasTypes) {
-                    externalReviewEvaluator.evaluateGroup("default", version, group, asOf);
+        // §4-8: ACTIVE/future promote/formal generateで共通のComplianceGateEvaluationServiceを利用する。
+        // 旧ComplianceExternalReviewEvaluator（self-declared hash・latest evidence・旧APPROVED直接採用）は
+        // gate正本から除外される。gateはAPPROVED adoption event（adopted_at, id reducer）のみ採用（§3.2）。
+        com.ses.entity.ComplianceExternalReviewAdoptionEvent latestAdoption =
+                adoptionEventMapper.selectLatestAdoptionByMapping("default", version.getId());
+        if (latestAdoption == null) {
+            throw BusinessException.of(400, "compliance.gate.externalReviewIncomplete");
+        }
+        boolean qualificationRequired = false;
+        boolean activeStatusRequired = false;
+        // frozen policyのflag（§G2-VERIFY-14・§8）: 採用typeのsnapshot flagがtrueなら該当verification必須。
+        // 実装ではadoptionが参照するAUTHORSHIP verificationのreviewer type snapshotに従う。
+        com.ses.entity.ComplianceExternalReviewerVerificationEvent authorshipVerification =
+                verificationEventMapper.selectByTenantAndId("default", latestAdoption.getAuthorshipVerificationEventId());
+        if (authorshipVerification != null) {
+            Long reviewerTypeId = authorshipVerification.getReviewerTypeId();
+            List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
+            for (com.ses.entity.ComplianceMappingReviewRequirementType frozen : frozenTypes) {
+                if (Integer.valueOf(1).equals(frozen.getCredentialRequiredSnapshot())) {
+                    // credential_requiredは資格必須を表すため、QUALIFICATION/ACTIVE_STATUS必須として扱う
+                    qualificationRequired = true;
+                    activeStatusRequired = true;
                 }
             }
         }
+        gateEvaluationService.adopt("default", latestAdoption.getReviewChainId(), version, asOf,
+                qualificationRequired, activeStatusRequired);
 
         // assignment再解決（openかつworkplaceId一致）
         if (approval.getAssignmentId() == null) {
@@ -369,13 +391,41 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
         return version;
     }
 
+    /**
+     * §4-3（P0-FIX-2/3・G2-POL）: policy整合の単一検証（PROVISIONAL化・ACTIVE化・promote・generateで共用）。
+     * - 最低1group
+     * - 各group最低1type（空group/typeはskipせずinvalid frozen policyとしてfail-closed）
+     * - minimum_distinct_reviewers >= 1
+     * - review_policy_hashが現在のpolicyからの再計算と一致（freeze契約・snapshot/hash一致）
+     */
     private void assertPolicyNotEmpty(ComplianceMappingVersion version) {
-        Long groupCount = requirementGroupMapper.selectCount(
+        List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, version.getId()));
-        if (groupCount == null || groupCount == 0) {
+        if (groups.isEmpty()) {
             throw BusinessException.of(400, "compliance.gate.policyInvalid");
+        }
+        for (com.ses.entity.ComplianceMappingReviewRequirementGroup group : groups) {
+            if (group.getMinimumDistinctReviewers() == null || group.getMinimumDistinctReviewers() < 1) {
+                throw BusinessException.of(400, "compliance.gate.policyInvalid");
+            }
+            Long typeCount = requirementTypeMapper.selectCount(
+                    new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, group.getId()));
+            if (typeCount == null || typeCount == 0) {
+                throw BusinessException.of(400, "compliance.gate.policyInvalid");
+            }
+        }
+        List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
+        List<com.ses.entity.ComplianceMappingReviewRequirementType> types = requirementTypeMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
+        String recomputed = canonicalizer.computeReviewPolicyHash(groups, types);
+        if (!recomputed.equals(version.getReviewPolicyHash())) {
+            throw BusinessException.of(400, "compliance.gate.policyHashMismatch");
         }
     }
 
