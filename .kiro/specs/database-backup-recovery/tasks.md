@@ -91,7 +91,7 @@
   - **Evidence:** requested/effective time、RPO 秒、selected IDs/start-stop coordinate、plan SHA、timezone matrix、approval verifier result。署名秘密は保存しない。
   - **失敗/rollback:** ambiguity/dependency/RPO/approval 不正では plan を APPLYABLE にしない。既存 plan を書換えず新 plan ID を作る。
 
-- [ ] **HFP-03-007 — recovery target guard と staging restore を実装する**
+- [x] **HFP-03-007 — recovery target guard と staging restore を実装する**
 
   - **依存:** HFP-03-006
   - **対応要求:** HFP-03-RQ-003、HFP-03-RQ-006、HFP-03-RQ-007

@@ -163,7 +163,7 @@ main() {
   local dump_file="$work/db/database.sql"
   if ! "$MYSQLDUMP_BIN" "${MYSQL_OPT_ARGS[@]}" -h "$MYSQL_HOST" -P "$MYSQL_PORT" \
       --single-transaction --quick --routines --events --triggers --hex-blob \
-      --source-data=2 "$MYSQL_DATABASE" > "$dump_file" 2> "$work/db/mysqldump.err"; then
+      --source-data=2 --set-gtid-purged=OFF "$MYSQL_DATABASE" > "$dump_file" 2> "$work/db/mysqldump.err"; then
     common::fail "mysqldump が失敗しました: $(common::redact < "$work/db/mysqldump.err")"
   fi
 
@@ -191,9 +191,10 @@ main() {
 
   # staging: uploads staging を work 配下の payload へ移す
   local payload="$work/payload"
-  mkdir -p "$payload/uploads"
+  mkdir -p "$payload/uploads" "$payload/db"
   cp -a "$UPLOADS_STAGING_DIR"/. "$payload/uploads/"
   cp "$uploads_snap" "$payload/uploads-snapshot.json"
+  cp "$dump_file" "$payload/db/database.sql"
 
   # metadata（dump と同じ静止区間の整合時刻）
   DATABASE_FINGERPRINT=$(metadata::db_fingerprint "${ENVIRONMENT:-unknown}" "$MYSQL_DATABASE")
@@ -235,12 +236,20 @@ main() {
 
   # restic backup（status は verify 前なので pending で登録）
   local snap=""
-  if ! snap=$("$RESTIC_BIN" backup "$payload" --tag "kind=full" --tag "date=$stamp" \
-      --tag "status=pending" --json 2>> "$work/restic.log" \
-      | jq -rs 'map(select(.message_type == "summary"))[0].snapshot_id // empty'); then
-    common::fail "restic backup に失敗しました: $(common::redact < "$work/restic.log")"
+  if [[ -n "${DEBUG_RESTIC_RAW:-}" ]]; then
+    snap=$("$RESTIC_BIN" backup "$payload" --tag "kind=full" --tag "date=$stamp" \
+        --tag "status=pending" --json 2>> "$work/restic.log" | tee "$BACKUP_WORK_DIR/restic-raw-debug.log" \
+        | jq -rs 'map(select(.message_type == "summary"))[0].snapshot_id // empty')
+    echo "DEBUG: extracted snap=$snap" >&2
+    echo "DEBUG: raw tail: $(tail -n1 "$BACKUP_WORK_DIR/restic-raw-debug.log" 2>/dev/null)" >&2
+  else
+    if ! snap=$("$RESTIC_BIN" backup "$payload" --tag "kind=full" --tag "date=$stamp" \
+        --tag "status=pending" --json 2>> "$work/restic.log" \
+        | jq -rs 'map(select(.message_type == "summary"))[0].snapshot_id // empty'); then
+      common::fail "restic backup に失敗しました: $(common::redact < "$work/restic.log")"
+    fi
+    [[ -n "$snap" ]] || common::fail "restic snapshot ID を取得できません"
   fi
-  [[ -n "$snap" ]] || common::fail "restic snapshot ID を取得できません"
 
   # restore verify + manifest hash 照合（verify 済みだけ status=valid に昇格）
   local verify_dir="$work/verify"
@@ -260,6 +269,9 @@ main() {
   if ! "$RESTIC_BIN" tag --add "status=valid" --remove "status=pending" "$snap" >> "$work/restic.log" 2>&1; then
     common::fail "snapshot の status タグ更新に失敗しました"
   fi
+  # restic 0.17 の tag は新 id の snapshot を作るため、id を再解決する
+  snap=$(restic::resolve_snapshot_by_tag "$RESTIC_BIN" "date=$stamp")
+  [[ -n "$snap" ]] || common::fail "tag 更新後の snapshot ID を解決できません"
 
   # index 登録（補助。正は restic snapshot の status=valid タグ + 内部 metadata）
   local index_dir="$BACKUP_WORK_DIR/index"

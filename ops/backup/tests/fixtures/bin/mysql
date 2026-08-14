@@ -8,6 +8,7 @@ if [[ -n "${FAKE_ARGV_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$FAKE_ARGV_LOG"
 fi
 
+query=""
 for arg in "$@"; do
   case "$arg" in
     --version)
@@ -24,10 +25,8 @@ for arg in "$@"; do
       elif [[ "$arg" == -e=* ]]; then
         query=${arg#-e=}
       elif [[ "$arg" == -e && "${#@}" -gt 0 ]]; then
-        # 次の引数が query。ここでは処理せず次のループで拾う
         continue
       else
-        # 直前が --execute/-e なら query
         if [[ "${prev:-}" == "--execute" || "${prev:-}" == "-e" ]]; then
           query=$arg
         fi
@@ -43,6 +42,16 @@ if [[ -z "${query:-}" ]]; then
 fi
 
 case "$query" in
+  # target guard の table 数: WHERE table_schema = '...' 形式（スペース付き =）
+  *COUNT*table_schema*equal*)
+    printf '%s\n' "${FAKE_TABLE_COUNT:-0}"
+    exit 0
+    ;;
+  *COUNT*table_schema\ =\ *)
+    printf '%s\n' "${FAKE_TABLE_COUNT:-0}"
+    exit 0
+    ;;
+  # preflight の engine 検査: table_schema='db'（スペースなし）はこちら
   *information_schema.tables*)
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
     exit 0
@@ -85,9 +94,21 @@ case "$query" in
     fi
     exit 0
     ;;
+  *ses_recovery_control.targets*)
+    # 空文字を明示指定できるよう `:-` ではなく `-` を使う
+    printf '%s\n' "${FAKE_CONTROL_MARKER-default	plan-1234}"
+    exit 0
+    ;;
+  *CREATE*DATABASE*)
+    exit 0
+    ;;
+  *MySQL\ dump*|--*)
+    # dump import（stdin の先頭行が SQL コメント）は成功として扱う
+    exit 0
+    ;;
   "")
-    echo "fake-mysql: query なし" >&2
-    exit 9
+    # stdin からの import / replay は成功として扱う（argv は記録済み）
+    exit 0
     ;;
   *)
     echo "fake-mysql: 未知の query: $query" >&2

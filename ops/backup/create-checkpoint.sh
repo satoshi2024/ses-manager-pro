@@ -208,6 +208,9 @@ main() {
 
   "$RESTIC_BIN" tag --add "status=valid" --remove "status=pending" "$snap" >> "$work/restic.log" 2>&1 \
     || common::fail "snapshot の status タグ更新に失敗しました"
+  # restic 0.17 の tag は新 id の snapshot を作るため、id を再解決する
+  snap=$(restic::resolve_snapshot_by_tag "$RESTIC_BIN" "date=$stamp")
+  [[ -n "$snap" ]] || common::fail "tag 更新後の snapshot ID を解決できません"
 
   # checkpoint-index 登録
   local index_dir="$BACKUP_WORK_DIR/index"

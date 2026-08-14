@@ -50,6 +50,11 @@ if (( verify )); then
   exit "${FAKE_BINLOG_VERIFY_RC:-0}"
 fi
 
+# replay（--start-position / --stop-position 付き）
+if [[ -n "${FAKE_REPLAY_RC:-}" ]]; then
+  exit "$FAKE_REPLAY_RC"
+fi
+
 # それ以外（lock 保持 session 等）は stdin から query を読む
 IFS= read -r query || true
 case "$query" in

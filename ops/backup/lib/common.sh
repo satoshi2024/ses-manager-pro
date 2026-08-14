@@ -55,3 +55,13 @@ restic::ensure_repository() { # restic_bin log_file
   fi
   return 0
 }
+
+# snapshot を tag で解決する（restic 0.17 の tag コマンドは新 id の snapshot を
+# 作って旧 id を削除するため、tag 後は必ずこの関数で id を再解決する）
+restic::resolve_snapshot_by_tag() { # restic_bin tag_value
+  local restic_bin=$1 tag=$2
+  local TAG
+  export TAG=$tag
+  "$restic_bin" snapshots --tag "$tag" --json 2>/dev/null \
+    | jq -r 'map(select(.tags | index(env.TAG))) | sort_by(.time) | last | .id // empty'
+}

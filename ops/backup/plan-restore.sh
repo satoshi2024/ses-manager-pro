@@ -91,12 +91,16 @@ main() {
   local binlog_count
   binlog_count=$(printf '%s' "$binlogs" | jq 'length')
 
-  local ckpt_id
+  local ckpt_id full_id uploads_id
   ckpt_id=$(printf '%s' "$ckpt" | jq -r '.index_file // empty' | sed 's/\.json$//')
-  local full_id
   full_id=$(printf '%s' "$full" | jq -r '.index_file // empty' | sed 's/\.json$//')
-  local uploads_id
   uploads_id=$(printf '%s' "$ckpt" | jq -r '.uploads_snapshot_id // empty')
+  local ckpt_snap full_snap
+  ckpt_snap=$(printf '%s' "$ckpt" | jq -r '.restic_snapshot_id // empty')
+  full_snap=$(printf '%s' "$full" | jq -r '.restic_snapshot_id // empty')
+  local start_pos end_pos
+  start_pos=$(printf '%s' "$full" | jq -r '.binlog_start.position // empty')
+  end_pos=$(printf '%s' "$ckpt" | jq -r '.binlog_end.position // empty')
 
   local state="READY"
   if [[ "$rpo_missed" == "true" ]]; then
@@ -115,13 +119,18 @@ main() {
     --arg rpo_seconds "$rpo_seconds" \
     --arg effective_checkpoint "$ckpt_time" \
     --arg effective_checkpoint_id "$ckpt_id" \
+    --arg effective_checkpoint_snap "$ckpt_snap" \
     --arg base_full "$full_time" \
     --arg base_full_id "$full_id" \
+    --arg base_full_snap "$full_snap" \
     --arg start_file "$start_file" \
+    --arg start_position "$start_pos" \
     --arg end_file "$end_file" \
+    --arg end_position "$end_pos" \
     --argjson binlogs "$binlogs" \
     --arg uploads_snapshot_id "$uploads_id" \
     --arg source_lineage "$lineage" \
+    --arg source_server_uuid "$(printf '%s' "$full" | jq -r '.source_server_uuid // empty')" \
     --arg allowlist_ref "${ALLOWLIST_REF:-default}" \
     --arg min_approvals "2" \
     --arg valid_until_utc "$valid_until" \
@@ -131,12 +140,15 @@ main() {
       requested_target: $requested_target,
       state: $state,
       rpo_seconds: ($rpo_seconds|tonumber),
-      effective_checkpoint: {time: $effective_checkpoint, index: $effective_checkpoint_id},
-      base_full: {time: $base_full, index: $base_full_id},
-      binlog_replay: {start_file: $start_file, end_file: $end_file,
+      effective_checkpoint: {time: $effective_checkpoint, index: $effective_checkpoint_id,
+                             restic_snapshot_id: $effective_checkpoint_snap},
+      base_full: {time: $base_full, index: $base_full_id, restic_snapshot_id: $base_full_snap},
+      binlog_replay: {start_file: $start_file, start_position: ($start_position|tonumber?),
+                      end_file: $end_file, end_position: ($end_position|tonumber?),
                       files: $binlogs},
       uploads_snapshot_id: $uploads_snapshot_id,
       source_lineage: $source_lineage,
+      source_server_uuid: $source_server_uuid,
       target: {allowlist_ref: $allowlist_ref, min_approvals: ($min_approvals|tonumber)},
       valid_until_utc: $valid_until_utc}')
 

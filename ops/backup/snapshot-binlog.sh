@@ -124,6 +124,12 @@ main() {
     fi
     "$RESTIC_BIN" tag --add "status=valid" --remove "status=pending" "$snap" \
       >> "$BINLOG_IMMUTABLE_DIR/restic.log" 2>&1 || true
+    # restic 0.17 の tag は新 id の snapshot を作るため、id を再解決する
+    snap=$(restic::resolve_snapshot_by_tag "$RESTIC_BIN" "file=$rel")
+    [[ -n "$snap" ]] || {
+      echo "snapshot-binlog: tag 更新後の snapshot ID を解決できません: $rel" >&2
+      continue
+    }
 
     # binlog-index.json に記録（追記）
     local index="[]"
