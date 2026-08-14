@@ -67,7 +67,7 @@
   - **Evidence:** source/current/closed coordinate、file list/size/SHA、checkpoint ID、lag 秒、negative logs。
   - **失敗/rollback:** gap を検出したら `RPO_UNAVAILABLE` と重大 alert。黙って次 file から再開せず、新しい full 取得の運用判断まで停止する。
 
-- [ ] **HFP-03-005 — watermark 監視と alert contract を実装する**
+- [x] **HFP-03-005 — watermark 監視と alert contract を実装する**
 
   - **依存:** HFP-03-003、HFP-03-004
   - **対応要求:** HFP-03-RQ-010、HFP-03-RQ-012

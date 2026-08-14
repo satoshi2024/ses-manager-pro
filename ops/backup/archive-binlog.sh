@@ -147,6 +147,28 @@ binlog_archive::run() { # start_file mode
     "$start"
 }
 
+# 起動時に raw の不完全 file（source size 未達）を削除して取り直し対象にする
+binlog_archive::prune_incomplete_raw() {
+  local logs
+  logs=$(binlog_archive::source_logs) || return 1
+  local raw_file=""
+  while IFS= read -r -d '' raw_file; do
+    local rel
+    rel=$(basename "$raw_file")
+    [[ "$rel" == binlog.* ]] || continue
+    local want
+    want=$(printf '%s\n' "$logs" | awk -v f="$rel" '$1 == f {print $2; exit}')
+    [[ -n "$want" ]] || continue   # source に無い file は触らない
+    local have
+    have=$(stat -c %s "$raw_file" 2>/dev/null || echo 0)
+    if (( have < want )); then
+      echo "archive-binlog: 不完全 file を取り直し対象にします: $rel (have=$have want=$want)" >&2
+      rm -f "$raw_file"
+    fi
+  done < <(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -name 'binlog.*' -print0 2>/dev/null)
+  return 0
+}
+
 main() {
   common::require_env MYSQL_HOST
   common::require_env MYSQL_USER
@@ -165,6 +187,7 @@ main() {
   if [[ -n "$STATE_UUID" && "$STATE_UUID" != "$SOURCE_UUID" ]]; then
     common::fail "source UUID が state と一致しません（別 lineage への自動継続は禁止）"
   fi
+  binlog_archive::prune_incomplete_raw || common::fail "raw の不完全 file 検査に失敗しました"
   SERVER_ID=$(binlog_archive::server_id) || common::fail "connection-server-id を決定できません"
   if [[ -n "$STATE_SERVER_ID" && "$STATE_SERVER_ID" != "$SERVER_ID" ]]; then
     common::fail "connection-server-id が state と異なります（重複 archive の可能性）"
@@ -175,10 +198,20 @@ main() {
   echo "archive-binlog: start=$start server_id=$SERVER_ID mode=$MODE" >&2
 
   local rc=0
+  # heartbeat（監視用: 30 秒ごとに touch。mysqlbinlog が idle でも生存が分かる）
+  (
+    while :; do
+      touch "$BINLOG_STATE.heartbeat" 2>/dev/null || true
+      sleep 30
+    done
+  ) &
+  local hb_pid=$!
   if ! binlog_archive::run "$start" "$MODE"; then
     rc=$?
     echo "archive-binlog: mysqlbinlog が終了しました (rc=$rc)" >&2
   fi
+  kill "$hb_pid" 2>/dev/null || true
+  touch "$BINLOG_STATE.heartbeat" 2>/dev/null || true
   # state には実際に raw へ落ちた最後の file を記録する（source の current ではない）
   local last_downloaded=""
   last_downloaded=$(find "$BINLOG_RAW_DIR" -maxdepth 1 -name 'binlog.*' -printf '%f\n' 2>/dev/null | sort | tail -n1)
