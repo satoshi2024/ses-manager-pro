@@ -38,7 +38,7 @@ setup_env() {
   export PREFLIGHT_MIN_FREE_BYTES=1
   export TMPDIR="$T/tmp"
   export FAKE_ARGV_LOG="$T/argv.log"
-  unset MYSQL_PWD
+  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK
   reset_fake
 }
 

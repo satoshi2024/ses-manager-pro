@@ -33,3 +33,25 @@ common::sha256_file() { # path
 
 # 整数判定
 common::is_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
+
+# restic repository の存在確認（無ければ初期化。中身があるのに読めない場合は fail-closed）
+restic::ensure_repository() { # restic_bin log_file
+  local restic_bin=$1 log_file=$2
+  if "$restic_bin" cat config > /dev/null 2>&1; then
+    return 0
+  fi
+  local repo_dir=""
+  case "$RESTIC_REPOSITORY" in
+    /*) repo_dir=$RESTIC_REPOSITORY ;;
+    *) echo "restic: repository path を判定できません: $RESTIC_REPOSITORY" >&2; return 1 ;;
+  esac
+  if [[ -d "$repo_dir" ]] && find "$repo_dir" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+    echo "restic: repository を読めません（password 不一致または破損）: $RESTIC_REPOSITORY" >&2
+    return 1
+  fi
+  if ! "$restic_bin" init >> "$log_file" 2>&1; then
+    echo "restic: repository を初期化できません: $(common::redact < "$log_file")" >&2
+    return 1
+  fi
+  return 0
+}

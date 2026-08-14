@@ -46,7 +46,7 @@ setup_full() {
   export BACKUP_TOOL_IMAGE_DIGEST=sha256:unit-test-digest
   export FAKE_GET_LOCK_HOLD=1
   export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
-  unset MYSQL_PWD
+  unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK
 
   # scheduler / replica ack fixture（background）
   (

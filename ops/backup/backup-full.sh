@@ -89,23 +89,7 @@ backup_full::parse_dump_gtid() { # dump_file
 
 # repository の存在確認（無ければ初期化。中身があるのに読めない場合は fail-closed）
 backup_full::ensure_repository() {
-  if "$RESTIC_BIN" cat config > /dev/null 2>&1; then
-    return 0
-  fi
-  local repo_dir=""
-  case "$BACKUP_REPOSITORY" in
-    /*) repo_dir=$BACKUP_REPOSITORY ;;
-    *) return 1 ;;
-  esac
-  if [[ -d "$repo_dir" ]] && find "$repo_dir" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
-    echo "backup-full: repository を読めません（password 不一致または破損）: $BACKUP_REPOSITORY" >&2
-    return 1
-  fi
-  if ! "$RESTIC_BIN" init >> "$work/restic.log" 2>&1; then
-    echo "backup-full: repository を初期化できません: $(common::redact < "$work/restic.log")" >&2
-    return 1
-  fi
-  return 0
+  restic::ensure_repository "$RESTIC_BIN" "$work/restic.log"
 }
 
 usage() {

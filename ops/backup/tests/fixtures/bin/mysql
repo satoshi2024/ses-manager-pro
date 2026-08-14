@@ -47,8 +47,12 @@ case "$query" in
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
     exit 0
     ;;
-  *@@server_uuid*)
+  *SELECT*@@version*)
     printf '%s\n' "${FAKE_MYSQL_STATUS_ROW:-8.0.36	11111111-2222-3333-4444-555555555555	1	ROW	CRC32	0	ON	YES	/var/lib/mysql/binlog.000001	2592000}"
+    exit 0
+    ;;
+  *@@server_uuid*)
+    printf '%s\n' "${FAKE_UUID:-11111111-2222-3333-4444-555555555555}"
     exit 0
     ;;
   *GET_LOCK*)
@@ -61,6 +65,24 @@ case "$query" in
     ;;
   *RELEASE_LOCK*)
     printf '%s\n' "${FAKE_RELEASE_LOCK:-1}"
+    exit 0
+    ;;
+  *FLUSH*BINARY*LOGS*)
+    # rotation: state file に新しい binlog を追記する
+    local_state=${FAKE_BINLOG_STATE:-}
+    if [[ -n "$local_state" && -f "$local_state" ]]; then
+      last=$(tail -n1 "$local_state" | cut -f1)
+      n=$((10#${last##*.} + 1))
+      printf 'binlog.%06d\t157\n' "$n" >> "$local_state"
+    fi
+    exit "${FAKE_FLUSH_RC:-0}"
+    ;;
+  *SHOW*BINARY*LOGS*)
+    if [[ -n "${FAKE_BINLOG_STATE:-}" && -f "$FAKE_BINLOG_STATE" ]]; then
+      cat "$FAKE_BINLOG_STATE"
+    else
+      printf '%b' "${FAKE_SHOW_BINARY_LOGS:-binlog.000001\t180\nbinlog.000002\t200}"
+    fi
     exit 0
     ;;
   "")

@@ -55,7 +55,7 @@
   - **Evidence:** snapshot ID、manifest SHA、coordinate、quiesce window、restore verification、test log。raw dump/個人データは evidence に含めない。
   - **失敗/rollback:** verify 前の snapshot を VALID 登録しない。app write 静止を bounded cleanup で解除し、不完全 staging を隔離する。
 
-- [ ] **HFP-03-004 — 継続 binlog archive と 15 分整合 checkpoint を実装する**
+- [x] **HFP-03-004 — 継続 binlog archive と 15 分整合 checkpoint を実装する**
 
   - **依存:** HFP-03-002、HFP-03-003
   - **対応要求:** HFP-03-RQ-004、HFP-03-RQ-005

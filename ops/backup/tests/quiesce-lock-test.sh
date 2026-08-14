@@ -27,7 +27,7 @@ setup_common() {
   export MYSQL_SSL_CAPATH="$T/capath"
   export MYSQL_CLIENT_BIN="$FIXTURES/mysql" MYSQLBINLOG_BIN="$FIXTURES/mysqlbinlog" MYSQLDUMP_BIN="$FIXTURES/mysqldump"
   export FAKE_ARGV_LOG="$T/argv.log"
-  unset MYSQL_PWD
+  unset MYSQL_PWD FAKE_GET_LOCK FAKE_RELEASE_LOCK FAKE_GET_LOCK_HOLD
 }
 
 setup_quiesce() {
