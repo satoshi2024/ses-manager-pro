@@ -1,3 +1,10 @@
+## Step 8: 必須回帰完了・固定Head提出（2026-08-14）
+
+- 必須回帰追加: ComplianceGateSecurityChainTest 6（HR/マネージャーapproval到達・営業/要員403・subjects POST管理者のみ・管理者全操作）・dynamic policy flags 4（設定/必須/不正maxAge/重複）・subject create 3（fingerprint/重複/qualification association）・cross境界 5（cross-chain/mapping/type・maxAge未設定・evidence NULL）＝**回帰106/106 PASS**
+- SecurityConfig: subjects GETをHR/マネージャー可・POST管理者のみに分離（HttpMethod matcher）
+- **PR #74 CI（31781589176）: 1950/0/0/0・skip 0・BUILD SUCCESS**（MySQL smoke含む）
+- 固定Head 690b255b（V102_3・P0-1〜P0-6・P1-1/4/5/7・必須回帰）をR10へ独立Review提出
+- 残: P1-3 idempotency replay（同一key同hash=200/異hash=409のcanonical hash保存）・P1-2 tenant/DataScope SQL境界全面適用・P1-6 contract画面watermark preview
 ## Step 7: P0/P1 repair実装（V102_3含む・2026-08-14）
 
 R10 repair delta受理後の実装:
