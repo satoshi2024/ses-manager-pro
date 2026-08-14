@@ -85,7 +85,22 @@ class ContractDocumentDispatchStateTest {
 
         ContractDocument after = mapper.selectById(d.getId());
         assertEquals("worker-a", after.getClaimOwner());
-        assertEquals(1, after.getDispatchAttemptCount());
+        // Round 2 REV-004: claimはretry回数(dispatch_attempt_count)を増やさない
+        assertEquals(0, after.getDispatchAttemptCount());
+    }
+
+    @Test
+    void retryWaitはretry回数を増やし次回試行時刻を設定する() {
+        ContractDocument d = insertRow("retry-" + System.nanoTime(), "下書き", null, null);
+        LocalDateTime next = LocalDateTime.now().plusMinutes(1);
+
+        assertEquals(1, mapper.casRetryWait(d.getId(), 0, DispatchState.NONE.name(),
+                DispatchState.QUEUED.name(), "TRANSIENT:SERVER_ERROR", next));
+
+        ContractDocument after = mapper.selectById(d.getId());
+        assertEquals(1, after.getDispatchAttemptCount(), "retry回数を1増やす");
+        assertNotNull(after.getNextAttemptAt(), "次回試行時刻を設定する");
+        assertEquals("TRANSIENT:SERVER_ERROR", after.getLastProviderErrorCode());
     }
 
     @Test

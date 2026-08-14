@@ -312,9 +312,11 @@ public class CloudSignDispatchService {
                 e.getCode().name());
     }
 
-    /** 429等の「受理されなかった」失敗はbounded backoffで親工程へ戻す（attempt上限あり）。 */
+    /** 429/一時障害等の「受理されなかった」失敗はbounded backoffで親工程へ戻す（attempt上限あり）。 */
     private void retryWait(ContractDocument working, String errorCode) {
-        if (safeVersion(working) >= properties.getMaxAttempts()) {
+        // Round 2 REV-004: retry上限はretry回数(dispatch_attempt_count)で判定する。
+        // versionは工程遷移ごとに増えるため上限に使わない（後段工程の最初の一時障害でFAILED_FINAL化しない）。
+        if (safeAttempts(working) >= Math.max(1, properties.getMaxAttempts())) {
             fail(working, working.getDispatchState(), DispatchState.FAILED_FINAL.name(),
                     "ATTEMPT_LIMIT:" + errorCode);
             return;
@@ -331,7 +333,7 @@ public class CloudSignDispatchService {
         if (updated == 0) {
             logFinding(working, "CAS_FAILED_RETRY_WAIT");
         } else {
-            log.info("[契約書dispatch] rate limit待機へ遷移: docId={} error={} nextAttemptAt=1分後",
+            log.info("[契約書dispatch] rate limit/一時障害のbackoffへ遷移: docId={} error={} nextAttemptAt=1分後",
                     working.getId(), errorCode);
         }
     }
@@ -472,6 +474,10 @@ public class CloudSignDispatchService {
 
     private static int safeVersion(ContractDocument doc) {
         return doc.getVersion() == null ? 0 : doc.getVersion();
+    }
+
+    private static int safeAttempts(ContractDocument doc) {
+        return doc.getDispatchAttemptCount() == null ? 0 : doc.getDispatchAttemptCount();
     }
 
     private static String safeError(Throwable t) {

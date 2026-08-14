@@ -32,11 +32,12 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
     /**
      * worker claim CAS: 未claimかつnext_attempt_at経過済みのQUEUED行だけをclaimする。
      * 同時workerは1件しかclaimできず、claim済み行は他workerから見えない（単一writer保証）。
+     * dispatch_attempt_countはretry回数としてretryWait/backoff側で増やす（claimでは増やさない。
+     * Round 2 REV-004: version/claim回数をretry上限に使わない）。
      *
      * @return 更新行数（0=他workerがclaim済み/期限前）
      */
     @Update("UPDATE t_contract_document SET dispatch_state = #{to}, "
-            + "dispatch_attempt_count = dispatch_attempt_count + 1, "
             + "claimed_at = #{claimedAt}, claim_owner = #{owner}, next_attempt_at = NULL, "
             + "version = version + 1, updated_at = NOW() "
             + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
@@ -105,11 +106,13 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
                 @Param("errorCode") String errorCode);
 
     /**
-     * 429等のbounded retry待機CAS: 状態を親工程へ戻し、next_attempt_at を設定する。
+     * 429等のbounded retry待機CAS: 状態を親工程へ戻し、next_attempt_at を設定して
+     * retry回数(dispatch_attempt_count)を増やす。
      * mutationの再実行は429等「受理されなかった」場合だけ（結果不明は自動再実行しない）。
      */
     @Update("UPDATE t_contract_document SET dispatch_state = #{to}, "
             + "last_provider_error_code = #{errorCode}, next_attempt_at = #{nextAttemptAt}, "
+            + "dispatch_attempt_count = dispatch_attempt_count + 1, "
             + "claimed_at = NULL, claim_owner = NULL, version = version + 1, updated_at = NOW() "
             + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
             + "AND version = #{expectedVersion}")

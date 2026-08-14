@@ -176,6 +176,29 @@ class ContractDocumentApiControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = {"マネージャー"})
+    void マネージャーも送信queueとsyncを実行できる() throws Exception {
+        // REV-012: マネージャーroleの明示test
+        com.ses.entity.ContractDocument queued = new com.ses.entity.ContractDocument();
+        queued.setId(10L);
+        queued.setOperationId("op-mgr");
+        queued.setDispatchState("QUEUED");
+        when(service.queueSend(eq(10L), any())).thenReturn(queued);
+
+        mockMvc.perform(post("/api/contract-documents/10/send")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractNo\":\"C-1\",\"templateVersion\":1,\"recipientName\":\"x\","
+                                + "\"recipientEmail\":\"x@example.invalid\",\"title\":\"t\",\"languageCode\":\"ja\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dispatchState").value("QUEUED"));
+
+        mockMvc.perform(post("/api/contract-documents/10/sync").with(csrf()))
+                .andExpect(status().isOk());
+        verify(cloudSignSyncService).syncDocument(10L);
+    }
+
+    @Test
     @WithMockUser(roles = {"管理者"})
     void scope外の契約は404で存在を漏らさない() throws Exception {
         when(dataScopeService.isScoped()).thenReturn(true);

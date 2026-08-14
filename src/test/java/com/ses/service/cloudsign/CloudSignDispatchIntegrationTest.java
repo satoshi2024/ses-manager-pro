@@ -366,6 +366,51 @@ class CloudSignDispatchIntegrationTest {
         verify(api, times(1)).sendDocument(DOC_ID);
     }
 
+    // ===== Round 2 REV-004: retry上限はretry回数で判定し、後段工程の最初の一時障害をFAILED_FINAL化しない =====
+
+    @Test
+    void SENDING起点の一時障害はFAILED_FINALにならずbackoffする() throws Exception {
+        Path pdf = writeSourcePdf("doc-tr1.pdf", "content-tr1");
+        ContractDocument d = insertDocument(DispatchState.READY_TO_SEND, pdf, 0);
+        d.setCloudsignStatus(0);
+        documentMapper.updateById(d);
+
+        // preflight GETが一時障害(5xx確定): 送信前のため結果不明ではない → bounded retry
+        when(api.getDocument(DOC_ID)).thenThrow(
+                new CloudSignApiException(CloudSignErrorCode.SERVER_ERROR, false, "500"));
+        when(api.sendDocument(DOC_ID)).thenReturn(remoteDocument(1));
+
+        dispatchService.dispatchDue(10);
+
+        ContractDocument after = documentMapper.selectById(d.getId());
+        assertEquals(DispatchState.READY_TO_SEND.name(), after.getDispatchState(),
+                "一時障害は親工程へbackoffしFAILED_FINAL化しない");
+        assertEquals(1, after.getDispatchAttemptCount(), "retry回数1");
+        assertNotNull(after.getNextAttemptAt(), "次回試行時刻を設定");
+        assertTrue(after.getLastProviderErrorCode().startsWith("TRANSIENT:SERVER_ERROR"));
+        verify(api, never()).sendDocument(any());
+    }
+
+    @Test
+    void retry上限到達時はFAILED_FINALになる() throws Exception {
+        Path pdf = writeSourcePdf("doc-tr2.pdf", "content-tr2");
+        ContractDocument d = insertDocument(DispatchState.READY_TO_SEND, pdf, 0);
+        d.setCloudsignStatus(0);
+        d.setDispatchAttemptCount(5); // 上限maxAttempts=5到達済み
+        documentMapper.updateById(d);
+
+        when(api.getDocument(DOC_ID)).thenThrow(
+                new CloudSignApiException(CloudSignErrorCode.SERVER_ERROR, false, "500"));
+
+        dispatchService.dispatchDue(10);
+
+        ContractDocument after = documentMapper.selectById(d.getId());
+        assertEquals(DispatchState.FAILED_FINAL.name(), after.getDispatchState());
+        assertTrue(after.getLastProviderErrorCode().startsWith("ATTEMPT_LIMIT:TRANSIENT"),
+                "retry上限で恒久エラー: " + after.getLastProviderErrorCode());
+        verify(api, never()).sendDocument(any());
+    }
+
     // ---------- payload hash / source hash変化 ----------
 
     @Test
