@@ -49,6 +49,11 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
     private final ComplianceMappingCanonicalizer canonicalizer;
     private final SysUserMapper sysUserMapper;
     private final com.ses.service.compliance.ComplianceGateEvidenceResolver evidenceResolver;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
+    }
 
     @Override
     @Transactional
@@ -65,7 +70,7 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
             throw BusinessException.of(400, "compliance.gate.findingNoteRequired");
         }
         // P0-5: exact CLEAN evidence（§4-5/6・evidence NULL/不存在/non-CLEAN/hash不正は拒否）
-        DocumentVersion evidence = evidenceResolver.resolve("default", evidenceDocumentId, evidenceDocumentVersionId);
+        DocumentVersion evidence = evidenceResolver.resolve(tenantId(), evidenceDocumentId, evidenceDocumentVersionId);
         Long actorId = SecurityUtils.currentUserId();
         if (actorId == null) {
             throw BusinessException.of(403, "error.accessDenied");
@@ -73,7 +78,7 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         // 実actor=現行open assignmentの指名者（同一workplace）
         List<ComplianceResponsibleAssignment> open = assignmentMapper.selectList(
                 new LambdaQueryWrapper<ComplianceResponsibleAssignment>()
-                        .eq(ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(ComplianceResponsibleAssignment::getTenantId, tenantId())
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(ComplianceResponsibleAssignment::getActiveSlot, 1));
         if (open.isEmpty() || !actorId.equals(open.get(0).getUserId())) {
@@ -88,19 +93,19 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         String mappingHash = canonicalizer.computeMappingHash(version, sources);
         List<ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingReviewRequirementGroup>()
-                        .eq(ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
         List<Long> groupIds = groups.stream().map(ComplianceMappingReviewRequirementGroup::getId).toList();
         List<ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(
                         new LambdaQueryWrapper<ComplianceMappingReviewRequirementType>()
-                                .eq(ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                                 .in(ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String reviewPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
 
         SysUser actor = sysUserMapper.selectById(actorId);
         ComplianceMappingApprovalEvent event = new ComplianceMappingApprovalEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setMappingId(mappingId);
         event.setMappingVersion(version.getMappingVersion());
         event.setMappingHash(mappingHash);
@@ -131,3 +136,5 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         return event;
     }
 }
+
+// P1-2 tenant resolver追加

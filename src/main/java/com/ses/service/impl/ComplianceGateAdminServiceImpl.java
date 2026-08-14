@@ -47,11 +47,16 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     private final com.ses.service.compliance.ComplianceGateCredentialKeyProvider keyProvider;
     private final com.ses.service.compliance.ComplianceReviewerFingerprintService fingerprintService;
     private final com.ses.service.compliance.ComplianceReviewerFingerprintKeyProvider fingerprintKeyProvider;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
+    }
 
     @Override
     public List<ComplianceExternalReviewerType> listReviewerTypes() {
         return reviewerTypeMapper.selectList(new LambdaQueryWrapper<ComplianceExternalReviewerType>()
-                .eq(ComplianceExternalReviewerType::getTenantId, "default")
+                .eq(ComplianceExternalReviewerType::getTenantId, tenantId())
                 .orderByAsc(ComplianceExternalReviewerType::getSortOrder));
     }
 
@@ -63,13 +68,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidReviewerType");
         }
         Long existing = reviewerTypeMapper.selectCount(new LambdaQueryWrapper<ComplianceExternalReviewerType>()
-                .eq(ComplianceExternalReviewerType::getTenantId, "default")
+                .eq(ComplianceExternalReviewerType::getTenantId, tenantId())
                 .eq(ComplianceExternalReviewerType::getTypeCode, typeCode));
         if (existing != null && existing > 0) {
             throw BusinessException.of(400, "compliance.gate.duplicateReviewerType");
         }
         ComplianceExternalReviewerType type = new ComplianceExternalReviewerType();
-        type.setTenantId("default");
+        type.setTenantId(tenantId());
         type.setTypeCode(typeCode);
         type.setDisplayName(displayName);
         type.setDescription(description);
@@ -129,7 +134,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidAssignment");
         }
         // P6・§2.2（G2-ASG）: anchor lockで同一workplaceの並行createAssignmentを直列化する
-        Long locked = workplaceMapper.selectIdForUpdate("default", workplaceId);
+        Long locked = workplaceMapper.selectIdForUpdate(tenantId(), workplaceId);
         if (locked == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -139,7 +144,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         // 現行open（active_slot=1・effective_to NULL）は交代として終了されるため対象外。
         Long overlapping = assignmentMapper.selectCount(
                 new LambdaQueryWrapper<ComplianceResponsibleAssignment>()
-                        .eq(ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(ComplianceResponsibleAssignment::getTenantId, tenantId())
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .isNotNull(ComplianceResponsibleAssignment::getEffectiveTo)
                         .gt(ComplianceResponsibleAssignment::getEffectiveTo, effectiveFrom));
@@ -149,7 +154,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         // 既存open（active_slot=1・effective_to NULL）を終了する
         List<ComplianceResponsibleAssignment> open = assignmentMapper.selectList(
                 new LambdaQueryWrapper<ComplianceResponsibleAssignment>()
-                        .eq(ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(ComplianceResponsibleAssignment::getTenantId, tenantId())
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(ComplianceResponsibleAssignment::getActiveSlot, 1));
         for (ComplianceResponsibleAssignment current : open) {
@@ -170,7 +175,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             }
         }
         ComplianceResponsibleAssignment assignment = new ComplianceResponsibleAssignment();
-        assignment.setTenantId("default");
+        assignment.setTenantId(tenantId());
         assignment.setWorkplaceId(workplaceId);
         assignment.setUserId(userId);
         assignment.setRoleCode("COMPLIANCE_RESPONSIBLE");
@@ -215,7 +220,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     @Override
     public List<com.ses.entity.ComplianceMappingReviewRequirementGroup> listRequirementGroups(Long mappingId) {
         return requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId)
                 .orderByAsc(com.ses.entity.ComplianceMappingReviewRequirementGroup::getRequirementGroupCode));
     }
@@ -237,7 +242,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
                 new com.ses.entity.ComplianceMappingReviewRequirementGroup();
-        group.setTenantId("default");
+        group.setTenantId(tenantId());
         group.setMappingId(mappingId);
         group.setRequirementGroupCode(groupCode);
         group.setDisplayName(displayName);
@@ -270,7 +275,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         com.ses.entity.ComplianceMappingReviewRequirementType requirementType =
                 new com.ses.entity.ComplianceMappingReviewRequirementType();
-        requirementType.setTenantId("default");
+        requirementType.setTenantId(tenantId());
         requirementType.setRequirementGroupId(group.getId());
         requirementType.setReviewerTypeId(type.getId());
         requirementType.setReviewerTypeCodeSnapshot(type.getTypeCode());
@@ -291,12 +296,12 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups =
                 requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                         .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         version.setReviewPolicyHash(canonicalizer.computeReviewPolicyHash(groups, types));
         versionMapper.updateById(version);
@@ -335,7 +340,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
         // Verify reviewerType is assigned to requirementGroupId
         Long reqTypeCount = requirementTypeMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, requirementGroupId)
                 .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
         if (reqTypeCount == null || reqTypeCount == 0) {
@@ -346,7 +351,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         // （mapping policyはmapping versionへfreezeされ、master変更の影響を受けない）。
         List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, requirementGroupId)
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId, reviewerTypeId));
         boolean credentialRequired = !frozenTypes.isEmpty()
@@ -364,7 +369,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
         if (hasCredential) {
             String rawTrim = credentialRaw.trim();
-            encrypted = credentialCryptoService.encrypt("default", mappingId, version.getMappingVersion(), opId, rawTrim);
+            encrypted = credentialCryptoService.encrypt(tenantId(), mappingId, version.getMappingVersion(), opId, rawTrim);
             keyVer = keyProvider.getCurrentKeyVersion();
             cipherFormat = com.ses.service.compliance.ComplianceGateCredentialCryptoServiceImpl.CIPHER_FORMAT_CGC1;
             masked = rawTrim.length() > 4 ? "****" + rawTrim.substring(rawTrim.length() - 4) : "VALIDATED";
@@ -377,7 +382,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         Long targetId = null;
 
         if (targetEventId != null) {
-            com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId("default", targetEventId);
+            com.ses.entity.ComplianceExternalReviewEvent targetEvent = externalReviewEventMapper.selectByTenantAndId(tenantId(), targetEventId);
             if (targetEvent != null && mappingId.equals(targetEvent.getMappingId()) && requirementGroupId.equals(targetEvent.getRequirementGroupId())) {
                 reviewChainId = targetEvent.getReviewChainId();
                 supersedesId = targetEvent.getId();
@@ -388,7 +393,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
 
         com.ses.entity.ComplianceExternalReviewEvent event = new com.ses.entity.ComplianceExternalReviewEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setMappingId(mappingId);
         event.setMappingVersion(version.getMappingVersion());
         event.setMappingHash(version.getMappingHash());
@@ -437,13 +442,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         if (externalReviewEventMapper == null) {
             return List.of();
         }
-        return externalReviewEventMapper.selectByMapping("default", mappingId);
+        return externalReviewEventMapper.selectByMapping(tenantId(), mappingId);
     }
 
     @Override
     public List<com.ses.entity.ComplianceExternalReviewerSubject> listSubjects() {
         return reviewerSubjectMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceExternalReviewerSubject>()
-                .eq(com.ses.entity.ComplianceExternalReviewerSubject::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceExternalReviewerSubject::getTenantId, tenantId())
                 .orderByAsc(com.ses.entity.ComplianceExternalReviewerSubject::getId));
     }
 
@@ -454,13 +459,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         // mappingに属するSUBMITTED review event配下のverification eventを結合で取得する
         List<com.ses.entity.ComplianceExternalReviewEvent> reviews =
-                externalReviewEventMapper.selectByMapping("default", mappingId);
+                externalReviewEventMapper.selectByMapping(tenantId(), mappingId);
         if (reviews.isEmpty()) {
             return List.of();
         }
         java.util.List<com.ses.entity.ComplianceExternalReviewerVerificationEvent> result = new java.util.ArrayList<>();
         for (com.ses.entity.ComplianceExternalReviewEvent review : reviews) {
-            result.addAll(verificationEventMapper.selectBySubmittedReview("default", review.getId()));
+            result.addAll(verificationEventMapper.selectBySubmittedReview(tenantId(), review.getId()));
         }
         result.sort(java.util.Comparator.comparing(com.ses.entity.ComplianceExternalReviewerVerificationEvent::getCreatedAt));
         return result;
@@ -517,7 +522,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     @Override
     public List<com.ses.entity.ComplianceVerificationSource> listVerificationSources() {
         return verificationSourceMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceVerificationSource>()
-                .eq(com.ses.entity.ComplianceVerificationSource::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceVerificationSource::getTenantId, tenantId())
                 .orderByAsc(com.ses.entity.ComplianceVerificationSource::getSortOrder));
     }
 
@@ -530,13 +535,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidSource");
         }
         Long existing = verificationSourceMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceVerificationSource>()
-                .eq(com.ses.entity.ComplianceVerificationSource::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceVerificationSource::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceVerificationSource::getSourceCode, sourceCode));
         if (existing != null && existing > 0) {
             throw BusinessException.of(400, "compliance.gate.duplicateSource");
         }
         com.ses.entity.ComplianceVerificationSource source = new com.ses.entity.ComplianceVerificationSource();
-        source.setTenantId("default");
+        source.setTenantId(tenantId());
         source.setSourceCode(sourceCode);
         source.setSourceName(sourceName);
         source.setOfficialUrl(officialUrl);
@@ -577,7 +582,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     @Override
     public List<com.ses.entity.ComplianceVerificationMethod> listVerificationMethods() {
         return verificationMethodMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceVerificationMethod>()
-                .eq(com.ses.entity.ComplianceVerificationMethod::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceVerificationMethod::getTenantId, tenantId())
                 .orderByAsc(com.ses.entity.ComplianceVerificationMethod::getSortOrder));
     }
 
@@ -590,13 +595,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidMethod");
         }
         Long existing = verificationMethodMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceVerificationMethod>()
-                .eq(com.ses.entity.ComplianceVerificationMethod::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceVerificationMethod::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceVerificationMethod::getMethodCode, methodCode));
         if (existing != null && existing > 0) {
             throw BusinessException.of(400, "compliance.gate.duplicateMethod");
         }
         com.ses.entity.ComplianceVerificationMethod method = new com.ses.entity.ComplianceVerificationMethod();
-        method.setTenantId("default");
+        method.setTenantId(tenantId());
         method.setMethodCode(methodCode);
         method.setMethodName(methodName);
         method.setDescription(description);
@@ -644,20 +649,20 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidSubject");
         }
         Long existing = reviewerSubjectMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceExternalReviewerSubject>()
-                .eq(com.ses.entity.ComplianceExternalReviewerSubject::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceExternalReviewerSubject::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceExternalReviewerSubject::getSubjectCode, subjectCode));
         if (existing != null && existing > 0) {
             throw BusinessException.of(400, "compliance.gate.duplicateSubject");
         }
         com.ses.entity.ComplianceExternalReviewerSubject subject = new com.ses.entity.ComplianceExternalReviewerSubject();
-        subject.setTenantId("default");
+        subject.setTenantId(tenantId());
         subject.setSubjectCode(subjectCode);
         subject.setDisplayName(displayName);
         subject.setOrganizationName(organizationName);
         subject.setFingerprintKeyVersion(
-                fingerprintKeyProvider.getCurrentKeyVersion("default"));
+                fingerprintKeyProvider.getCurrentKeyVersion(tenantId()));
         subject.setPersonFingerprintSnapshot(
-                fingerprintService.personFingerprint("default", subject));
+                fingerprintService.personFingerprint(tenantId(), subject));
         subject.setCreatedBy(SecurityUtils.currentUserId());
         reviewerSubjectMapper.insert(subject);
         return subject;
@@ -678,7 +683,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
             throw BusinessException.of(400, "compliance.gate.invalidReviewerType");
         }
         Long existing = qualificationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ComplianceReviewerQualification>()
-                .eq(com.ses.entity.ComplianceReviewerQualification::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceReviewerQualification::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceReviewerQualification::getReviewerSubjectId, reviewerSubjectId)
                 .eq(com.ses.entity.ComplianceReviewerQualification::getReviewerTypeId, reviewerTypeId));
         if (existing != null && existing > 0) {
@@ -686,7 +691,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         }
         com.ses.entity.ComplianceReviewerQualification qualification =
                 new com.ses.entity.ComplianceReviewerQualification();
-        qualification.setTenantId("default");
+        qualification.setTenantId(tenantId());
         qualification.setReviewerSubjectId(reviewerSubjectId);
         qualification.setReviewerTypeId(reviewerTypeId);
         qualification.setRegistrationIdentifierMaskedSnapshot(registrationIdentifierMaskedSnapshot);
@@ -700,7 +705,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     @Override
     public List<com.ses.entity.ComplianceReviewerQualification> listQualifications(Long reviewerSubjectId) {
         return qualificationMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceReviewerQualification>()
-                .eq(com.ses.entity.ComplianceReviewerQualification::getTenantId, "default")
+                .eq(com.ses.entity.ComplianceReviewerQualification::getTenantId, tenantId())
                 .eq(com.ses.entity.ComplianceReviewerQualification::getReviewerSubjectId, reviewerSubjectId)
                 .orderByAsc(com.ses.entity.ComplianceReviewerQualification::getId));
     }
@@ -712,7 +717,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         java.util.List<com.ses.entity.DocumentVersion> versions;
         if (StringUtils.hasText(query)) {
             versions = documentVersionMapper.selectList(new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()
-                    .eq(com.ses.entity.DocumentVersion::getTenantId, "default")
+                    .eq(com.ses.entity.DocumentVersion::getTenantId, tenantId())
                     .eq(com.ses.entity.DocumentVersion::getScanStatus, "CLEAN")
                     .eq(com.ses.entity.DocumentVersion::getDeletedFlag, 0)
                     .and(w -> w.like(com.ses.entity.DocumentVersion::getOriginalName, query)
@@ -721,7 +726,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                     .last("LIMIT 50"));
         } else {
             versions = documentVersionMapper.selectList(new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()
-                    .eq(com.ses.entity.DocumentVersion::getTenantId, "default")
+                    .eq(com.ses.entity.DocumentVersion::getTenantId, tenantId())
                     .eq(com.ses.entity.DocumentVersion::getScanStatus, "CLEAN")
                     .eq(com.ses.entity.DocumentVersion::getDeletedFlag, 0)
                     .orderByDesc(com.ses.entity.DocumentVersion::getCreatedAt)
@@ -774,13 +779,13 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         // policy groups/types
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups =
                 requirementGroupMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, mappingId)
                         .orderByAsc(com.ses.entity.ComplianceMappingReviewRequirementGroup::getSortOrder));
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                         .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         java.util.List<com.ses.dto.compliance.ComplianceManifestDto.PolicyEntry> policy = new java.util.ArrayList<>();
         for (com.ses.entity.ComplianceMappingReviewRequirementGroup g : groups) {
@@ -803,7 +808,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
         dto.setPolicy(policy);
 
         // approvals
-        dto.setApprovals(complianceApprovalEventMapper.selectByMapping("default", mappingId, "APPROVE")
+        dto.setApprovals(complianceApprovalEventMapper.selectByMapping(tenantId(), mappingId, "APPROVE")
                 .stream().map(a -> {
             com.ses.dto.compliance.ComplianceManifestDto.ApprovalEntry e =
                     new com.ses.dto.compliance.ComplianceManifestDto.ApprovalEntry();
@@ -820,7 +825,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
         // external reviews（SUBMITTED）・verification・adoption
         List<com.ses.entity.ComplianceExternalReviewEvent> reviews =
-                externalReviewEventMapper.selectByMapping("default", mappingId);
+                externalReviewEventMapper.selectByMapping(tenantId(), mappingId);
         dto.setExternalReviews(reviews.stream().map(r -> {
             com.ses.dto.compliance.ComplianceManifestDto.ExternalReviewEntry e =
                     new com.ses.dto.compliance.ComplianceManifestDto.ExternalReviewEntry();
@@ -840,7 +845,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                 new java.util.ArrayList<>();
         for (com.ses.entity.ComplianceExternalReviewEvent r : reviews) {
             for (com.ses.entity.ComplianceExternalReviewerVerificationEvent v :
-                    verificationEventMapper.selectBySubmittedReview("default", r.getId())) {
+                    verificationEventMapper.selectBySubmittedReview(tenantId(), r.getId())) {
                 com.ses.dto.compliance.ComplianceManifestDto.VerificationEntry e =
                         new com.ses.dto.compliance.ComplianceManifestDto.VerificationEntry();
                 e.setEventId(v.getId());
@@ -857,7 +862,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
                 verifications.add(e);
             }
             for (com.ses.entity.ComplianceExternalReviewAdoptionEvent a :
-                    complianceAdoptionEventMapper.selectChainBySubmittedReview("default", r.getId())) {
+                    complianceAdoptionEventMapper.selectChainBySubmittedReview(tenantId(), r.getId())) {
                 com.ses.dto.compliance.ComplianceManifestDto.AdoptionEntry e =
                         new com.ses.dto.compliance.ComplianceManifestDto.AdoptionEntry();
                 e.setEventId(a.getId());

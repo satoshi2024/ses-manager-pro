@@ -1,3 +1,13 @@
+## Step 9: R23-R1-P1-01・P1-3・P1-2 fix（2026-08-14）
+
+R10 CHANGES_REQUIRED対応:
+- **R23-R1-P1-01**: adoption一意化をfirst_slot生成列方式へ修正。irst_slot = CASE WHEN action IN ('APPROVED','REJECTED') THEN submitted_review_event_id ELSE NULL END（VIRTUAL・INPLACEでCannot-add-FK回避）＋UNIQUE(tenant_id, first_slot)。§3.2の「初回APPROVEDまたはREJECTED 1件」をDBで保証（APPROVED+REJECTED併存はUNIQUE違反）。V1/schema両H2/MySQL fresh適用検証済み・DB UNIQUE直接テスト2件追加
+- **P1-3**: idempotency replay。verification record・adoption approve/reject/revokeで同一key＋同一canonical request hashは元eventを200 replay・異hashは409（§3.6）。registration identifierはmasked表現でhash統一（raw復元不可のため）。テスト: replay 200・異内容409
+- **P1-2**: ComplianceTenantResolver新規（OidcSecurityProperties.tenantIdベース）。6 service（Adoption/Verification/GateAdmin/Approval/Mapping/Document）の"default"固定をtenantId()へ置換・subject解決をtenant境界付きselectByTenantAndIdへ。canonical payloadのtenant文字列（互換性）は変更しない
+- 回帰: 109/0/0/0 PASS
+## R10判定（repair実装 ea91588b・2026-08-14）: CHANGES_REQUIRED
+
+R10 R23-P1-01 repair実装（ea91588b・merge前）: CHANGES_REQUIRED。V102_3（dynamic master・frozen flags NULL=UNCONFIGURED・qualification association・approval evidence列・subject immutable trigger）・P0 6件（9 tabs placeholder 0・SecurityConfig順序・policy API・subject/資格association・evidence picker・binding）・P1 4件（typed DTO・immutable・adoption UNIQUE・manifest API）を検証し、回帰37/0/0/0・CI 1950/0/0/0 skip 0を確認。新規R23-R1-P1-01: adoption UNIQUE(tenant,submitted,action)が§3.2の「初回adoption 1件」より弱くAPPROVED+REJECTED併存raceを許す（first_slot生成列+UNIQUE(tenant,first_slot)を推奨）。P1-3 idempotency replay・P1-2 tenant/DataScope未達（merge gate）。P1-6 watermarkは証跡4 phase。①+②fix後再提出。production authorizationなし、T066/S10 PASS禁止、S12 NOT READY維持
 ## Step 8: 必須回帰完了・固定Head提出（2026-08-14）
 
 - 必須回帰追加: ComplianceGateSecurityChainTest 6（HR/マネージャーapproval到達・営業/要員403・subjects POST管理者のみ・管理者全操作）・dynamic policy flags 4（設定/必須/不正maxAge/重複）・subject create 3（fingerprint/重複/qualification association）・cross境界 5（cross-chain/mapping/type・maxAge未設定・evidence NULL）＝**回帰106/106 PASS**

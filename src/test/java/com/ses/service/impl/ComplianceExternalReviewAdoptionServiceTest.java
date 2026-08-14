@@ -281,4 +281,58 @@ class ComplianceExternalReviewAdoptionServiceTest {
         assertEquals("APPROVED", chain.get(0).getAction());
         assertEquals("REVOKED", chain.get(1).getAction());
     }
+
+    // ===== R23-R1-P1-01: DB UNIQUE（first_slot生成列）による並行first adoption拒否 =====
+
+    @Test
+    void DBのfirstSlotUniqueはAPPROVEDとREJECTEDの併存を拒否する() {
+        ComplianceMappingVersion v = setupMappingWithPolicy("ADOPT-MAP7", "ADOPT-V7");
+        ComplianceExternalReviewEvent review = submitReview(v);
+        // service層をバイパスしてAPPROVEDを直接INSERT（並行writerの再現）
+        jdbcTemplate.update("INSERT INTO t_compliance_external_review_adoption_event "
+                + "(tenant_id, action, review_chain_id, submitted_review_event_id, adopted_at, adopted_by, "
+                + "operation_id, correlation_id, idempotency_key) "
+                + "VALUES ('default', 'APPROVED', ?, ?, CURRENT_TIMESTAMP, 1, 'op-db-1', 'corr-db-1', 'idem-db-1')",
+                review.getReviewChainId(), review.getId());
+        java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT action, first_slot FROM t_compliance_external_review_adoption_event");
+        org.junit.jupiter.api.Assertions.assertEquals("APPROVED", rows.get(0).get("ACTION"));
+        org.junit.jupiter.api.Assertions.assertEquals(review.getId(), rows.get(0).get("FIRST_SLOT"),
+                "first_slot生成列はAPPROVEDでsubmitted idを保持する");
+        // REJECTEDの直接INSERTはfirst_slot UNIQUE違反で拒否される（§3.2: 初回adoption 1件）
+        org.springframework.dao.DuplicateKeyException ex =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        org.springframework.dao.DuplicateKeyException.class,
+                        () -> jdbcTemplate.update("INSERT INTO t_compliance_external_review_adoption_event "
+                                + "(tenant_id, action, review_chain_id, submitted_review_event_id, adopted_at, adopted_by, "
+                                + "operation_id, correlation_id, idempotency_key) "
+                                + "VALUES ('default', 'REJECTED', ?, ?, CURRENT_TIMESTAMP, 1, 'op-db-2', 'corr-db-2', 'idem-db-2')",
+                                review.getReviewChainId(), review.getId()));
+        assertNotNull(ex);
+    }
+
+    @Test
+    void DBのfirstSlotUniqueは同一chainのREVOKED併存を許容する() {
+        ComplianceMappingVersion v = setupMappingWithPolicy("ADOPT-MAP8", "ADOPT-V8");
+        ComplianceExternalReviewEvent review = submitReview(v);
+        org.springframework.jdbc.core.JdbcTemplate jdbc = this.jdbcTemplate;
+        jdbc.update("INSERT INTO t_compliance_external_review_adoption_event "
+                + "(tenant_id, action, review_chain_id, submitted_review_event_id, adopted_at, adopted_by, "
+                + "operation_id, correlation_id, idempotency_key) "
+                + "VALUES ('default', 'APPROVED', ?, ?, CURRENT_TIMESTAMP, 1, 'op-db-3', 'corr-db-3', 'idem-db-3')",
+                review.getReviewChainId(), review.getId());
+        Long approvedId = jdbc.queryForObject(
+                "SELECT id FROM t_compliance_external_review_adoption_event WHERE idempotency_key = 'idem-db-3'",
+                Long.class);
+        // REVOKEDはfirst_slot NULL（制約対象外）なので同一chainに追加可能
+        jdbc.update("INSERT INTO t_compliance_external_review_adoption_event "
+                + "(tenant_id, action, review_chain_id, submitted_review_event_id, revoked_adoption_event_id, "
+                + "adopted_at, adopted_by, operation_id, correlation_id, idempotency_key) "
+                + "VALUES ('default', 'REVOKED', ?, ?, ?, CURRENT_TIMESTAMP, 1, 'op-db-4', 'corr-db-4', 'idem-db-4')",
+                review.getReviewChainId(), review.getId(), approvedId);
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM t_compliance_external_review_adoption_event "
+                        + "WHERE submitted_review_event_id = ?", Integer.class, review.getId());
+        assertEquals(2, count);
+    }
 }

@@ -134,11 +134,20 @@ class ComplianceExternalReviewVerificationServiceTest {
                                                                ComplianceExternalReviewEvent review,
                                                                String kind, String result,
                                                                String idemKey) {
+        return record(v, review, kind, result, idemKey, java.time.LocalDateTime.of(2026, 8, 14, 10, 0, 0));
+    }
+
+    /** P1-3 replay検証用: 固定時刻でrecord（同一key同hashの再送を再現）。 */
+    private ComplianceExternalReviewerVerificationEvent record(ComplianceMappingVersion v,
+                                                               ComplianceExternalReviewEvent review,
+                                                               String kind, String result,
+                                                               String idemKey,
+                                                               java.time.LocalDateTime checkedAt) {
         return verificationService.record(
                 review.getId(), subjectId(), reviewerTypeId(), kind, result,
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-VER-1",
-                LocalDateTime.now(), LocalDateTime.now(), 365, LocalDateTime.now().plusYears(1),
+                checkedAt, checkedAt, 365, checkedAt.plusYears(1),
                 1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), idemKey);
@@ -196,13 +205,28 @@ class ComplianceExternalReviewVerificationServiceTest {
     }
 
     @Test
-    void 同一idempotencyKeyの同一内容は重複記録されず409になる() {
+    void 同一idempotencyKeyの同一内容は200replayされる() {
         ComplianceMappingVersion v = setupMapping();
         ComplianceExternalReviewEvent review = submit(v);
-        record(v, review, "IDENTITY", "VERIFIED", "VER-IDEM-4");
+        ComplianceExternalReviewerVerificationEvent first =
+                record(v, review, "IDENTITY", "VERIFIED", "VER-IDEM-4");
 
-        assertThrows(BusinessException.class,
-                () -> record(v, review, "IDENTITY", "VERIFIED", "VER-IDEM-4"));
+        // P1-3: 同一key＋同一内容 → 元eventをreplay（200相当）
+        ComplianceExternalReviewerVerificationEvent replay =
+                record(v, review, "IDENTITY", "VERIFIED", "VER-IDEM-4");
+        assertEquals(first.getId(), replay.getId());
+    }
+
+    @Test
+    void 同一idempotencyKeyの異なる内容は409で拒否される() {
+        ComplianceMappingVersion v = setupMapping();
+        ComplianceExternalReviewEvent review = submit(v);
+        record(v, review, "IDENTITY", "VERIFIED", "VER-IDEM-4B");
+
+        // P1-3: 同一key＋異なる内容（result=FAILED）→ 409
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> record(v, review, "IDENTITY", "FAILED", "VER-IDEM-4B"));
+        assertEquals(409, error.getCode());
     }
 
     @Test
