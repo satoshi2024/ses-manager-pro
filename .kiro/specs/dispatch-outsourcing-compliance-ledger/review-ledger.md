@@ -1,3 +1,11 @@
+## Step 10: R23-R1-P1-01・P1-3・P1-2 fix完了・固定Head再提出（2026-08-14）
+
+- R23-R1-P1-01: first_slot生成列はV1 baselineのみ（V102_3はUNIQUE追加のみ・MigrationScriptIntegrityTest対応）。MySQL 8.4 fresh適用・UNIQUE(tenant_id, first_slot)検証済み・DB UNIQUE直接テスト2件
+- P1-3: verification/adoptionのidempotency replay（同一key同hash=200・異hash=409・§3.6）・registration identifierはmaskedでhash統一
+- P1-2: ComplianceTenantResolver導入・6 serviceのtenant境界（subjectはtenant付き解決）
+- **PR #74 CI（31790857581）: 1953/0/0/0・skip 0・BUILD SUCCESS**（MySQL smoke含む）
+- 回帰136/136・固定Head 4b6ddc4fをR10へ再提出
+- 残: P1-6 watermark preview（証跡4 phase・明示追跡）
 ## Step 9: R23-R1-P1-01・P1-3・P1-2 fix（2026-08-14）
 
 R10 CHANGES_REQUIRED対応:
