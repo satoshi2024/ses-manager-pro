@@ -197,11 +197,10 @@ class PayrollSecurityAuditTest {
     void csrfなし403あり成功() throws Exception {
         seedLink();
         // CSRFなし: controllerへ到達しないためprovider呼出しも発生しない
-        expectEmployeesPage();
         mockMvc.perform(put("/api/payroll/links/90001").param("employeeId", "501"))
                 .andExpect(status().isForbidden());
 
-        // CSRF付きでlink成功（provider: employees page）
+        // CSRF付きでlink成功（provider: employees page 1回）
         expectEmployeesPage();
         mockMvc.perform(put("/api/payroll/links/90001").param("employeeId", "501").with(csrf()))
                 .andExpect(status().isOk());

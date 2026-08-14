@@ -1,6 +1,7 @@
 package com.ses.web;
 
 import com.ses.controller.api.FreeeOAuthController;
+import com.ses.service.AuditLogService;
 import com.ses.service.FreeeIntegrationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,9 @@ class FreeeOAuthCallbackWebTest {
 
     @MockBean
     private FreeeIntegrationService service;
+
+    @MockBean
+    private AuditLogService auditLogService;
 
     private static final String CALLBACK =
             "https://accounts.secure.freee.co.jp/public_api/authorize?response_type=code"
