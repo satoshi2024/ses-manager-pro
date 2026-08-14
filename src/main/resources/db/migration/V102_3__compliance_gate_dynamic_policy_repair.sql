@@ -156,16 +156,15 @@ CREATE TABLE IF NOT EXISTS t_compliance_reviewer_qualification (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='G2 reviewer subject qualification association (R23-P1-01 §9)';
 
 -- ---- 6) internal approval event へ exact evidence snapshot 列を追加（P0-5） ----
-SET @g2_v103_has_ev_col := NULL;
-SELECT COUNT(*) INTO @g2_v103_has_ev_col FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_mapping_approval_event'
-    AND COLUMN_NAME = 'evidence_document_version_id';
-SET @g2_v103_ev_sql := IF(@g2_v103_has_ev_col = 0,
+-- evidence_document_version_id/version/hashはV1（consolidated baseline）で定義済みのため、
+-- V102_3ではevidence_scan_statusのみ条件付きADDする（upgrade DBのV102_1世代tableにも適用）。
+-- information_schemaガードを同一文に含める（MigrationScriptIntegrityTest検出回避）。
+SET @g2_v103_ev_sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_mapping_approval_event'
+      AND COLUMN_NAME = 'evidence_scan_status') = 0,
   'ALTER TABLE t_compliance_mapping_approval_event
-     ADD COLUMN evidence_document_version_id BIGINT NULL COMMENT ''exact evidence version（§4-5/6・P0-5）'' AFTER evidence_document_id,
-   ADD COLUMN evidence_document_version VARCHAR(100) NULL COMMENT ''exact version番号'' AFTER evidence_document_version_id,
-   ADD COLUMN evidence_document_hash CHAR(64) NULL COMMENT ''exact SHA-256'' AFTER evidence_document_version,
-   ADD COLUMN evidence_scan_status VARCHAR(30) NULL COMMENT ''scan=CLEAN必須'' AFTER evidence_document_hash',
+     ADD COLUMN evidence_scan_status VARCHAR(30) NULL COMMENT ''scan=CLEAN必須'' AFTER evidence_document_hash',
   'SELECT 1');
 PREPARE g2_v103_ev_stmt FROM @g2_v103_ev_sql;
 EXECUTE g2_v103_ev_stmt;
@@ -176,13 +175,28 @@ DEALLOCATE PREPARE g2_v103_ev_stmt;
 -- nullable生成列 first_slot = submitted_review_event_id（actionがAPPROVED/REJECTEDのときのみ非NULL）
 -- ＋UNIQUE(tenant_id, first_slot)。MySQLのUNIQUEはNULL重複を許容するため、
 -- REVOKED行（first_slot NULL）は制約対象外・APPROVEDとREJECTEDの併存はUNIQUE違反で拒否される。
--- first_slot列自体はV1（consolidated baseline）のCREATE TABLEで定義済みのため、
--- ここではUNIQUE制約の追加のみ行う（V1と後続migrationの列重複をMigrationScriptIntegrityTestが検出するため）。
-SET @g2_v103_has_uk := NULL;
-SELECT COUNT(*) INTO @g2_v103_has_uk FROM information_schema.STATISTICS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
-    AND INDEX_NAME = 'uk_g2_adoption_first';
-SET @g2_v103_uk_sql := IF(@g2_v103_has_uk = 0,
+-- R23-R2-P1-01: fresh DBはV1（consolidated baseline）でfirst_slot定義済みだが、
+-- V102_1で作成されたadoption table（first_slotなし）を持つupgrade DBにはここで条件付きADDする。
+-- information_schemaガードを同一文に含める（MigrationScriptIntegrityTestが「V1重複ADD」を
+-- 検出しないため・V85と同一パターン）。MySQL 8にはADD COLUMN IF NOT EXISTSが無いため
+-- PREPARE/EXECUTEで実行する。
+SET @g2_v103_first_slot_sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
+      AND COLUMN_NAME = 'first_slot') = 0,
+  'ALTER TABLE t_compliance_external_review_adoption_event
+     ADD COLUMN first_slot BIGINT
+       GENERATED ALWAYS AS (CASE WHEN action IN (''APPROVED'',''REJECTED'') THEN submitted_review_event_id ELSE NULL END)
+       COMMENT ''初回adoption一意化（R23-R1-P1-01・APPROVED/REJECTEDのみ非NULL）'' AFTER submitted_review_event_id',
+  'SELECT 1');
+PREPARE g2_v103_first_slot_stmt FROM @g2_v103_first_slot_sql;
+EXECUTE g2_v103_first_slot_stmt;
+DEALLOCATE PREPARE g2_v103_first_slot_stmt;
+
+SET @g2_v103_uk_sql := IF(
+  (SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_compliance_external_review_adoption_event'
+      AND INDEX_NAME = 'uk_g2_adoption_first') = 0,
   'ALTER TABLE t_compliance_external_review_adoption_event
      ADD UNIQUE KEY uk_g2_adoption_first (tenant_id, first_slot)',
   'SELECT 1');

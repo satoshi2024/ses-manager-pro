@@ -31,29 +31,35 @@ class FlywayG2GateSchemaSmokeTest {
             .withUsername("root")
             .withPassword("ses");
 
-    @Test
-    void V102freshでG2shapeとfreeze_append_only境界が成立する() throws Exception {
-        Flyway.configure()
-                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
-                .locations("classpath:db/migration")
-                .target("102")
-                .load()
-                .migrate();
+@Test
+void V102freshからV102_3までG2shapeがfreeze_append_only制約を維持する() throws Exception {
+Flyway.configure()
+.dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+.locations("classpath:db/migration")
+.target("102_3")
+.load()
+.migrate();
 
-        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            for (String table : new String[]{
-                    "m_compliance_mapping_version",
-                    "m_compliance_mapping_source",
-                    "m_compliance_external_reviewer_type",
-                    "m_compliance_mapping_review_requirement_group",
-                    "m_compliance_mapping_review_requirement_type",
-                    "t_compliance_responsible_assignment",
-                    "t_compliance_mapping_approval_event",
-                    "t_compliance_external_review_event",
-                    "t_compliance_mapping_status_event",
-                    "t_compliance_operation_ledger"}) {
-                assertTableExists(statement, table);
-            }
+try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+for (String table : new String[]{
+"m_compliance_mapping_version",
+"m_compliance_mapping_source",
+"m_compliance_external_reviewer_type",
+"m_compliance_mapping_review_requirement_group",
+"m_compliance_mapping_review_requirement_type",
+"t_compliance_responsible_assignment",
+"t_compliance_mapping_approval_event",
+"t_compliance_external_review_event",
+"t_compliance_mapping_status_event",
+"t_compliance_operation_ledger",
+"t_compliance_external_reviewer_subject",
+"t_compliance_external_reviewer_verification_event",
+"t_compliance_external_review_adoption_event",
+"m_compliance_verification_source",
+"m_compliance_verification_method",
+"t_compliance_reviewer_qualification"}) {
+assertTableExists(statement, table);
+}
             for (String column : new String[]{
                     "mapping_version_id", "mapping_hash", "review_policy_hash", "gate_evaluated_at",
                     "gate_snapshot_hash", "worker_snapshot_id", "worker_snapshot_hash",
@@ -541,6 +547,72 @@ class FlywayG2GateSchemaSmokeTest {
                     "SELECT COUNT(*) FROM t_compliance_responsible_assignment WHERE workplace_id=" + finiteWorkplaceId
                             + " AND effective_from < '2026-08-10 00:00:01.500000'"
                             + " AND (effective_to IS NULL OR effective_to > '2026-08-10 00:00:00.500000')") > 0);
+
+            // ===== V102_3検証（R23-R2-P1-02・target 102_3で適用済み） =====
+            // dynamic master・qualification association・frozen flags列・first_slot UNIQUE・subject UPDATE trigger
+            for (String column : new String[]{
+                    "qualification_verification_required", "active_status_verification_required",
+                    "verification_source_id", "verification_method_id", "max_age_days",
+                    "effective_from", "effective_to"}) {
+                assertColumnExists(statement, "m_compliance_external_reviewer_type", column);
+            }
+            for (String column : new String[]{
+                    "qualification_verification_required_snapshot",
+                    "active_status_verification_required_snapshot"}) {
+                assertColumnExists(statement, "m_compliance_mapping_review_requirement_type", column);
+            }
+            assertColumnExists(statement, "t_compliance_external_review_adoption_event", "first_slot");
+            assertIndexExists(statement, "t_compliance_external_review_adoption_event", "uk_g2_adoption_first");
+            assertColumnExists(statement, "t_compliance_mapping_approval_event", "evidence_scan_status");
+            assertTriggerExists(statement, "trg_g2_subject_no_update");
+            // reviewer typeへdynamic列を設定できる
+            statement.executeUpdate("UPDATE m_compliance_external_reviewer_type "
+                    + "SET qualification_verification_required=1, active_status_verification_required=1, max_age_days=365 "
+                    + "WHERE tenant_id='default' AND type_code='LABOR_CONSULTANT'");
+        }
+    }
+
+    /**
+     * R23-R2-P1-01/02: V102まで適用したDBをV102_3へupgradeする。
+     * fresh DBは新V1（consolidated baseline）でfirst_slot定義済みのため、
+     * V102_3が既存列へUNIQUE(tenant_id, first_slot)を追加できることと、
+     * 新規テーブル/列/triggerが適用されることを検証する。
+     * （旧V1（first_slotなし）からのupgrade経路はローカルMySQLで別途検証済み・
+     *   V102_3の情報スキーマガード付きADD COLUMNがUnknown columnを回避する）
+     */
+    @Test
+    void V102適用済みDBをV102_3へupgradeするとfirst_slotのUNIQUEと新規オブジェクトが追加される() throws Exception {
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("102")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // V102時点: 新V1由来のfirst_slot列は存在するがUNIQUE indexは無い
+            assertColumnExists(statement, "t_compliance_external_review_adoption_event", "first_slot");
+            assertThrows(SQLException.class,
+                    () -> statement.executeQuery(
+                            "SELECT * FROM information_schema.STATISTICS WHERE TABLE_NAME='t_compliance_external_review_adoption_event' AND INDEX_NAME='uk_g2_adoption_first'"));
+        }
+
+        // V102_3までupgrade（V102_1/V102_2/V102_3を順次適用）
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("102_3")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertColumnExists(statement, "t_compliance_external_review_adoption_event", "first_slot");
+            assertIndexExists(statement, "t_compliance_external_review_adoption_event", "uk_g2_adoption_first");
+            assertColumnExists(statement, "m_compliance_external_reviewer_type", "qualification_verification_required");
+            assertColumnExists(statement, "t_compliance_mapping_approval_event", "evidence_scan_status");
+            assertTableExists(statement, "m_compliance_verification_source");
+            assertTableExists(statement, "t_compliance_reviewer_qualification");
+            assertTriggerExists(statement, "trg_g2_subject_no_update");
         }
     }
 

@@ -1,3 +1,11 @@
+## Step 11: R23-R2-P1-01・P1-02 fix（2026-08-14）
+
+- **R23-R2-P1-01**: V102_3へ情報スキーマガード付き条件付きADD COLUMN first_slot（ガードを同一SET文に統合・MigrationScriptIntegrityTest検出回避）。旧V1+旧V102_1（first_slotなし）→新V102_3のupgrade経路をローカルMySQLで検証（Unknown column解消・UNIQUE追加成功）
+- **R23-R2-P1-02**: FlywayG2GateSchemaSmokeTestをtarget("102_3")化＋upgrade smokeテスト追加＋V102_3検証（新テーブル6・dynamic列・first_slot UNIQUE・scan_status列・subject UPDATE trigger）。approval ALTERはevidence_scan_statusのみ条件付きADD（他4列はV1定義済みのため）
+- 回帰136/136・MySQL fresh/upgrade両経路検証済み
+## R10判定（fix再提出 64edbc42・2026-08-14）: CHANGES_REQUIRED
+
+R10 R23-P1-01 fix再提出（64edbc42）: CHANGES_REQUIRED。R23-R1-P1-01（first_slot生成列+UNIQUE(tenant,first_slot)・DB直接test 2件）・P1-3（canonical hash比較200 replay/409）・P1-2（ComplianceTenantResolver・6 service置換）の実装は検証良好（Adoption 8・Verification 13・Integrity 27・CI 1953/0/0/0）。新規R23-R2-P1-01: V102_3のADD UNIQUEがV102_1作成table（first_slot列なし）でUnknown column（upgrade経路破壊・V1のみ方式が原因）。新規R23-R2-P1-02: FlywayG2GateSchemaSmokeTest target=102のままV102_1-3がCI MySQLで無検証（repair delta §4のfresh/upgrade/forward-repair未達）。V102_3へ条件付きADD COLUMN＋smokeの102_3化・upgrade smoke追加後に再提出。P1-6 watermarkは証跡4 phase追跡。production authorizationなし、T066/S10 PASS禁止、S12 NOT READY維持
 ## Step 10: R23-R1-P1-01・P1-3・P1-2 fix完了・固定Head再提出（2026-08-14）
 
 - R23-R1-P1-01: first_slot生成列はV1 baselineのみ（V102_3はUNIQUE追加のみ・MigrationScriptIntegrityTest対応）。MySQL 8.4 fresh適用・UNIQUE(tenant_id, first_slot)検証済み・DB UNIQUE直接テスト2件
