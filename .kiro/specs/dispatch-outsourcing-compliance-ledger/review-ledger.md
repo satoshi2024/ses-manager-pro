@@ -1,3 +1,9 @@
+## R10判定（R25 stratification delta v2 311720fc・2026-08-14）: ACCEPTED
+
+R10 R25-P1-01 stratification delta v2（311720fc・docs-only・+67・non-md 0・diff-check PASS）: ACCEPTED。CHANGES_REQUIRED 3点（§0 supersession: accepted v3 §7 item 1-5→B移管・6-8→A読み替え・S10 PASS条件一意化／§3.1 FM-C-28 divergence記録＋gate B引き継ぎ／§5 technical PASS名称区分）を確認し解消。A（S10_TECHNICAL_ACCEPTANCE）達成でT066 technical PASS・S10 PASS・S12 READY、B（G2_PRODUCTION_AUTHORIZATION）は人間証跡12-step別gate・ACTIVE/formal delivery fail-closed維持。新規issueなし。次: PR #75 merge → Phase A → 最終Review Packet → T066 technical PASS/S10 PASS/S12 READY → B gate（production authorization）。production authorizationなし
+## R10判定（R25 stratification delta 6d0f480c・2026-08-14）: CHANGES_REQUIRED（docs最小修正3点）
+
+R10 R25-P1-01 stratification delta（6d0f480c・docs-only・+48/-0・non-md 0・diff-check PASS）: CHANGES_REQUIRED。A（S10_TECHNICAL_ACCEPTANCE）とB（G2_PRODUCTION_AUTHORIZATION）のstratification設計・AI権限（TEST/DEVELOPMENT限定）・法務mapping暫定決定（2026-10分離・法34条の2維持）は受理。R25-P1-P1-01: accepted v3 §7の「人間証跡が揃うまでT066/S10 PASS禁止」との矛盾を解消する明示supersession記録（§7 item 1-5→B移管）が欠如。R25-P2-P1-01: FM-C-28 business-optionalはqps.mdの(a)推奨と異なるためdivergence明記＋gate B引き継ぎ。R25-P2-P1-02: technical PASS名称の一貫適用記録。追記後に再提出。main CI（PR #74 merge後）green確認済み。production authorizationなし
 ## Step 11: R23-R2-P1-01・P1-02 fix（2026-08-14）
 
 - **R23-R2-P1-01**: V102_3へ情報スキーマガード付き条件付きADD COLUMN first_slot（ガードを同一SET文に統合・MigrationScriptIntegrityTest検出回避）。旧V1+旧V102_1（first_slotなし）→新V102_3のupgrade経路をローカルMySQLで検証（Unknown column解消・UNIQUE追加成功）
