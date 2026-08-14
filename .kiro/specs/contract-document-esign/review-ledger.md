@@ -13,20 +13,20 @@
 | 項目 | 値 |
 |---|---|
 | spec | `contract-document-esign` |
-| base commit | 未設定 |
+| base commit | `841e10aa`（main） |
 | review head | 未設定 |
 | merge状態 / merge commit | PRE_MERGE / N/A |
-| branch/worktree | 未設定 |
-| 実装担当 | 未設定 |
+| branch/worktree | `codex/hfp-02-contract-cloudsign` / `%TEMP%\opencode\hfp-02-contract-cloudsign` |
+| 実装担当 | codex専任AI |
 | 独立reviewer | 未設定 |
-| fixed OpenAPI | `0.36.0` / SHA-256 `f832681318e67b9fb5fe9a0bb368a570762401dcd4a62b98a934deebb192a240` |
+| fixed OpenAPI | `0.36.0` / SHA-256 `f832681318e67b9fb5fe9a0bb368a570762401dcd4a62b98a934deebb192a240`（2026-08-14再取得で不変を確認） |
 | 全体判定 | NOT_STARTED |
 
 ## 3. Task gate
 
 | Task ID | 依存 | 実装 | 定向test | Demo | 独立Review | 判定 | 証跡/再開条件 |
 |---|---|---|---|---|---|---|---|
-| HFP-02-00 | - | NOT_STARTED | NOT_STARTED | BLOCKED(sandbox未確認) | NOT_STARTED | NOT_STARTED | 公式schema再取得、sandbox申請/権限 |
+| HFP-02-00 | - | DONE(production変更なし) | DONE(11/0/0/0) | BLOCKED(sandbox未確認) | NOT_STARTED | PARTIAL | 公式schema不変を確認、fixture schema test 11件PASS。Demoはsandbox credential入手後に再実施 |
 | HFP-02-01 | 00 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | baseline red test |
 | HFP-02-02 | 01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | migration latest/legacy fixture確認 |
 | HFP-02-03 | 00,01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | fixed wire fixture |
@@ -44,10 +44,10 @@
 
 | Requirement / AC | Task | 実装 file/method | 自動test class/method | Demo / external evidence | Reviewer | 判定 | 備考/rollback |
 |---|---|---|---|---|---|---|---|
-| HFP-02-AC-01-01 | 00 | - | - | OpenAPI version/SHA | - | NOT_STARTED | - |
-| HFP-02-AC-01-02 | 00,03,08 | - | - | wire契約 | - | NOT_STARTED | - |
+| HFP-02-AC-01-01 | 00 | research.md §2.1/§2.2 | CloudSignOpenApiFixtureSchemaTest#fixtureMetaは固定OpenAPIのpinと一致する | OpenAPI version/SHA 再取得(2026-08-14, 不変) | - | VERIFIED | curl生bytes固定、gzip展開を除外 |
+| HFP-02-AC-01-02 | 00,03,08 | fixture + schema test | CloudSignOpenApiFixtureSchemaTest（token/create/upload/participant/send/get/certificate/decline） | wire契約 | - | IN_PROGRESS | fixture契約成立。client実装はHFP-02-03 |
 | HFP-02-AC-01-03 | 03,05,07 | - | - | malformed/unknown fixture | - | NOT_STARTED | - |
-| HFP-02-AC-01-04 | 00 | - | - | version diff review | - | NOT_STARTED | - |
+| HFP-02-AC-01-04 | 00 | research.md §2.2 | fixtureMetaは固定OpenAPIのpinと一致する | version diff review(差分なし) | - | VERIFIED | 更新時はfixture/pin同時更新まで停止 |
 | HFP-02-AC-02-01 | 03 | - | - | host matrix | - | NOT_STARTED | - |
 | HFP-02-AC-02-02 | 03,08 | - | - | log/API redaction | - | NOT_STARTED | P0 |
 | HFP-02-AC-02-03 | 03 | - | - | token concurrency/401 | - | NOT_STARTED | - |
@@ -109,12 +109,12 @@
 
 | Blocker ID | Decision / 実測 | Owner | 期限 | Evidence | 判定 | 未決時の安全動作 |
 |---|---|---|---|---|---|---|
-| HFP-02-BLK-01 | sandbox/plan/client ID owner | 未設定 | 未設定 | - | OPEN | 本番enable禁止 |
+| HFP-02-BLK-01 | sandbox/plan/client ID owner | 未設定（sandbox申請依頼済み: 2026-08-14） | 未設定 | - | OPEN | 本番enable禁止 |
 | HFP-02-BLK-02 | CREATE timeout後のmarker一意照合 | 未設定 | 未設定 | - | OPEN | 自動再CREATE禁止、人手照合 |
 | HFP-02-BLK-03 | mutation反映遅延/GET照合 | 未設定 | 未設定 | - | OPEN | mutation自動retry禁止 |
 | HFP-02-BLK-04 | signed/certificate bytes/content-type | 未設定 | 未設定 | - | OPEN | artifact完了扱い禁止 |
 | HFP-02-BLK-05 | scanner/storage/ledger readiness | 未設定 | 未設定 | - | OPEN | 本番enable禁止 |
-| HFP-02-BLK-06 | 取消UI/APIの業務採用（`ADOPT/NOT_ADOPT`） | 未設定 | 未設定 | - | OPEN | 未決時はcancel非公開。決定後は該当する一方の証拠だけを要求 |
+| HFP-02-BLK-06 | 取消UI/APIの業務採用（`ADOPT/NOT_ADOPT`） | 未設定（業務責任者） | 未設定 | - | OPEN | 未決時はcancel非公開。決定後は該当する一方の証拠だけを要求 |
 
 ## 6. Baseline finding closure
 
@@ -151,7 +151,7 @@
 
 | 日時 | Task | command / 手順 | tests | failure | error | skip | provider call count | 結果 | Evidence path/注記 |
 |---|---|---|---:|---:|---:|---:|---|---|---|
-| - | - | - | - | - | - | - | - | NOT_STARTED | - |
+| 2026-08-14 | 00 | `mvn -B test -Dtest=CloudSignOpenApiFixtureSchemaTest` | 11 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | `target/surefire-reports/TEST-com.ses.cloudsign.CloudSignOpenApiFixtureSchemaTest.xml`。OpenAPI再取得はcurl生bytes(147111 bytes)でSHA一致を確認 |
 
 ## 9. Sandbox / production operation ledger
 

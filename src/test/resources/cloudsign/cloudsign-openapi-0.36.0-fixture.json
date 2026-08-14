@@ -1,0 +1,269 @@
+{
+  "meta": {
+    "source": "https://api.swaggerhub.com/apis/CloudSign/cloudsign-web_api/0.36.0/swagger.json",
+    "version": "0.36.0",
+    "lastModified": "2026-08-04 09:40:39 UTC",
+    "sha256": "f832681318e67b9fb5fe9a0bb368a570762401dcd4a62b98a934deebb192a240",
+    "fetchedAt": "2026-08-14",
+    "note": "固定OpenAPI 0.36.0の公式fixture。実値は不可逆マスキング済み。token/PDF本文/実メールは含まない。"
+  },
+  "token": {
+    "request": {
+      "method": "POST",
+      "path": "/token",
+      "contentType": "application/x-www-form-urlencoded",
+      "requiredFields": ["client_id"],
+      "optionalFields": []
+    },
+    "success200": {
+      "contentType": "application/json",
+      "body": {
+        "access_token": "01234567-89ab-cdef-0123-456789abcdef",
+        "expires_in": 3600,
+        "token_type": "Bearer"
+      }
+    },
+    "error400": {
+      "contentType": "application/json",
+      "body": { "error": "invalid_client", "message": "invalid client" }
+    },
+    "error403": {
+      "contentType": "application/json",
+      "body": { "error": "forbidden", "message": "forbidden" }
+    },
+    "error500": {
+      "contentType": "application/json",
+      "body": { "error": "internal_server_error", "message": "internal server error" }
+    }
+  },
+  "createDocument": {
+    "request": {
+      "method": "POST",
+      "path": "/documents",
+      "contentType": "application/x-www-form-urlencoded",
+      "requiredFields": [],
+      "optionalFields": ["title", "note", "message", "template_id", "can_transfer", "private"]
+    },
+    "success200": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "user_id": "00000000000000000000000000000000",
+        "title": "SES契約書 サンプル",
+        "note": "op-marker-00000000-0000-0000-0000-000000000000",
+        "status": 0,
+        "can_transfer": false,
+        "private": false,
+        "created_at": "2026-08-14T00:00:00+09:00",
+        "participants": [],
+        "files": []
+      }
+    },
+    "error400": { "contentType": "application/json", "body": { "error": "bad_request", "message": "bad request" } },
+    "error401": { "contentType": "application/json", "body": { "error": "unauthorized", "message": "unauthorized" } },
+    "error403": { "contentType": "application/json", "body": { "error": "forbidden", "message": "forbidden" } },
+    "error500": { "contentType": "application/json", "body": { "error": "internal_server_error", "message": "internal server error" } }
+  },
+  "uploadFile": {
+    "request": {
+      "method": "POST",
+      "path": "/documents/{documentID}/files",
+      "contentType": "multipart/form-data",
+      "parts": ["name", "uploadfile"],
+      "binaryPart": "uploadfile",
+      "limits": { "bodyMaxBytes": 52428800, "totalFilesMaxBytes": 209715200, "maxFiles": 100 }
+    },
+    "success200": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "user_id": "00000000000000000000000000000000",
+        "title": "SES契約書 サンプル",
+        "status": 0,
+        "participants": [],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1, "widgets": [] }
+        ]
+      }
+    },
+    "error400": { "contentType": "application/json", "body": { "error": "bad_request", "message": "file must start with %PDF- and end with %%EOF" } },
+    "error401": { "contentType": "application/json", "body": { "error": "unauthorized", "message": "unauthorized" } },
+    "error404": { "contentType": "application/json", "body": { "error": "not_found", "message": "not found" } },
+    "error413": { "contentType": "application/json", "body": { "error": "too_large_request", "message": "request body too large" } },
+    "error415": { "contentType": "application/json", "body": { "error": "unsupported_media_type", "message": "pdf or multipart required" } }
+  },
+  "addParticipant": {
+    "request": {
+      "method": "POST",
+      "path": "/documents/{documentID}/participants",
+      "contentType": "application/x-www-form-urlencoded",
+      "requiredFields": ["name"],
+      "optionalFields": ["email", "organization", "access_code", "language_code", "advanced_authn_request", "tel", "recipient_id", "callback", "group_type", "group_id"],
+      "defaults": { "language_code": "ja" }
+    },
+    "success200": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "user_id": "00000000000000000000000000000000",
+        "title": "SES契約書 サンプル",
+        "status": 0,
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "organization": "マスク会社", "order": 0, "status": 2, "language_code": "ja" }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1, "widgets": [] }
+        ]
+      }
+    },
+    "error400": { "contentType": "application/json", "body": { "error": "bad_request", "message": "email or name invalid" } },
+    "error409": { "contentType": "application/json", "body": { "error": "conflict", "message": "recipient limit reached" } }
+  },
+  "sendDocument": {
+    "request": {
+      "method": "POST",
+      "path": "/documents/{documentID}",
+      "contentType": "application/x-www-form-urlencoded",
+      "requiredFields": [],
+      "optionalFields": []
+    },
+    "success200": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "user_id": "00000000000000000000000000000000",
+        "title": "SES契約書 サンプル",
+        "status": 1,
+        "sent_at": "2026-08-14T00:00:00.000000+09:00",
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "order": 0, "status": 4, "language_code": "ja" }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1 }
+        ]
+      }
+    },
+    "error400": { "contentType": "application/json", "body": { "error": "bad_request", "message": "participants or files missing" } },
+    "error403": { "contentType": "application/json", "body": { "error": "not_acceptable", "message": "document not in draft state" } }
+  },
+  "getDocument": {
+    "request": { "method": "GET", "path": "/documents/{documentID}" },
+    "draft0": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "title": "SES契約書 サンプル",
+        "status": 0,
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "order": 0, "status": 2 }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1 }
+        ]
+      }
+    },
+    "confirming1": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "title": "SES契約書 サンプル",
+        "status": 1,
+        "sent_at": "2026-08-14T00:00:00.000000+09:00",
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "order": 0, "status": 4 }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1 }
+        ]
+      }
+    },
+    "completed2": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "title": "SES契約書 サンプル",
+        "status": 2,
+        "sent_at": "2026-08-14T00:00:00.000000+09:00",
+        "last_processed_at": "2026-08-14T12:00:00.000000+09:00",
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "order": 0, "status": 8, "processed_at": "2026-08-14T12:00:00.000000+09:00" }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1 }
+        ]
+      }
+    },
+    "canceled3": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "title": "SES契約書 サンプル",
+        "status": 3,
+        "decline_comment": "マスク却下理由",
+        "participants": [
+          { "id": "fedcba9876543210fedcba9876543210", "email": "recipient-masked@example.invalid", "name": "マスク宛先", "order": 0, "status": 9 }
+        ],
+        "files": [
+          { "id": "abcdef0123456789abcdef012345678901", "name": "document-1.pdf", "order": 0, "total_pages": 1 }
+        ]
+      }
+    },
+    "template4": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef02",
+        "title": "テンプレート",
+        "status": 4,
+        "participants": [],
+        "files": []
+      }
+    },
+    "unknown99": {
+      "contentType": "application/json",
+      "body": {
+        "id": "0123456789abcdef0123456789abcdef01",
+        "title": "SES契約書 サンプル",
+        "status": 99,
+        "participants": [],
+        "files": []
+      }
+    },
+    "error404": { "contentType": "application/json", "body": { "error": "not_found", "message": "not found" } },
+    "error429": { "contentType": "application/json", "body": { "error": "too_many_requests", "message": "rate limit exceeded" } },
+    "error500": { "contentType": "application/json", "body": { "error": "internal_server_error", "message": "internal server error" } }
+  },
+  "downloadFile": {
+    "request": { "method": "GET", "path": "/documents/{documentID}/files/{fileID}", "successContentType": "application/pdf" },
+    "error404": { "contentType": "application/json", "body": { "error": "not_found", "message": "not found" } }
+  },
+  "downloadCertificate": {
+    "request": { "method": "GET", "path": "/documents/{documentID}/certificate", "successContentType": "application/pdf" },
+    "error404": { "contentType": "application/json", "body": { "error": "not_found", "message": "document not completed" } },
+    "error429": { "contentType": "application/json", "body": { "error": "too_many_requests", "message": "rate limit exceeded" } }
+  },
+  "decline": {
+    "request": {
+      "method": "PUT",
+      "path": "/documents/{documentID}/decline",
+      "contentType": "application/x-www-form-urlencoded",
+      "requiredFields": [],
+      "optionalFields": ["comment"],
+      "limits": { "commentMaxLength": 1000 }
+    },
+    "success200": { "contentType": "application/json", "body": { "id": "0123456789abcdef0123456789abcdef01", "title": "SES契約書 サンプル", "status": 3 } },
+    "error400": { "contentType": "application/json", "body": { "error": "bad_request", "message": "comment too long or document not confirming" } }
+  },
+  "errorModel": {
+    "fields": ["error", "message"],
+    "errorValues": ["bad_request", "invalid_request", "invalid_client", "unauthorized", "forbidden", "webapi_option_required", "not_acceptable", "method_not_allowed", "not_found", "conflict", "too_large_request", "unsupported_media_type", "too_many_requests", "internal_server_error"]
+  },
+  "statusMapping": {
+    "0": "下書き",
+    "1": "先方確認中",
+    "2": "締結済",
+    "3": "取消・却下",
+    "4": "テンプレート",
+    "other": "要確認"
+  },
+  "rateLimit": { "maxRequestsPerTokenPerMinute": 800, "blockSeconds": 60 }
+}
