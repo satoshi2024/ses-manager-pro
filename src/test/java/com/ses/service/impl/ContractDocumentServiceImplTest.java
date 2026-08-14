@@ -200,4 +200,132 @@ class ContractDocumentServiceImplTest {
                         && "UNAVAILABLE".equals(m.getScanStatus())
                         && Long.valueOf(99L).equals(m.getOwnerId())));
     }
+
+    // ===== HFP-02-01 characterization: 現行defectをredで再現する =====
+
+    @Test
+    void syncは締結済PDFのhashで送信原本pdfSha256を上書きする() throws Exception {
+        ContractDocument doc = new ContractDocument();
+        doc.setId(30L);
+        doc.setContractId(1L);
+        doc.setCloudsignDocumentId("cs-doc-30");
+        doc.setPdfSha256("a".repeat(64));
+
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        when(baseMapper.selectById(30L)).thenReturn(doc);
+
+        byte[] signedPdf = "signed pdf content".getBytes();
+        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-30", "file-30", "完了", signedPdf, null);
+        when(cloudSignClient.status("cs-doc-30")).thenReturn(result);
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+
+        service.sync(30L);
+
+        // red: 現行はpdfSha256をsigned hashで上書きするため、送信原本の同一性が証明不能になる
+        assertEquals("a".repeat(64), doc.getPdfSha256(), "送信原本hash(pdfSha256)は不変でなければならない");
+    }
+
+    @Test
+    void syncは証明書がnullでも締結完了として成功しartifact欠落を記録しない() throws Exception {
+        ContractDocument doc = new ContractDocument();
+        doc.setId(31L);
+        doc.setContractId(1L);
+        doc.setCloudsignDocumentId("cs-doc-31");
+        doc.setPdfSha256("a".repeat(64));
+
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        when(baseMapper.selectById(31L)).thenReturn(doc);
+
+        byte[] signedPdf = "signed pdf content".getBytes();
+        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-31", "file-31", "完了", signedPdf, null);
+        when(cloudSignClient.status("cs-doc-31")).thenReturn(result);
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+
+        service.sync(31L);
+
+        // red: 締結済みなのに証明書が取得できていないことを成功扱いせず、
+        // artifact欠落がerrorMessage等で記録されるべきだが現行は無視する
+        assertNotNull(doc.getErrorMessage(), "証明書未取得の状態を記録しなければならない");
+    }
+
+    @Test
+    void syncは外部PDFのscanにFileKind_CONTRACT_PDFを使わない() throws Exception {
+        ContractDocument doc = new ContractDocument();
+        doc.setId(32L);
+        doc.setContractId(1L);
+        doc.setCloudsignDocumentId("cs-doc-32");
+
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        when(baseMapper.selectById(32L)).thenReturn(doc);
+
+        byte[] signedPdf = "signed pdf content".getBytes();
+        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-32", "file-32", "完了", signedPdf, null);
+        when(cloudSignClient.status("cs-doc-32")).thenReturn(result);
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+
+        service.sync(32L);
+
+        // red: 現行はFileKind.SKILL_SHEETを誤用するため、PDF専用の許可種別(CONTRACT_PDF)でscanされるべき
+        verify(fileScanner).scan(any(), argThat(k -> "CONTRACT_PDF".equals(k.name())));
+    }
+
+    @Test
+    void syncはprovider呼出しを含むmethodにTransactionアノテーションを張らない() throws Exception {
+        // red: 現行は@Transactionalのままprovider GET/downloadを呼ぶ（長時間transactionと外部副作用混在）
+        var annotation = org.springframework.transaction.annotation.Transactional.class;
+        var method = ContractDocumentServiceImpl.class.getMethod("sync", Long.class);
+        assertNull(method.getAnnotation(annotation), "外部呼出しを含むsyncはtransaction外でなければならない");
+    }
+
+    @Test
+    void syncは証明書をpdf拡張子とapplicationPdfで保存しない() throws Exception {
+        ContractDocument doc = new ContractDocument();
+        doc.setId(33L);
+        doc.setContractId(1L);
+        doc.setCloudsignDocumentId("cs-doc-33");
+
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        when(baseMapper.selectById(33L)).thenReturn(doc);
+
+        byte[] signedPdf = "signed pdf content".getBytes();
+        byte[] certPdf = "certificate pdf content".getBytes();
+        CloudSignClient.Result result = new CloudSignClient.Result("cs-doc-33", "file-33", "完了", signedPdf, certPdf);
+        when(cloudSignClient.status("cs-doc-33")).thenReturn(result);
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+
+        service.sync(33L);
+
+        // red: 現行はcertificate-33.dat として保存しPDF扱いしない
+        assertTrue(doc.getCertificatePath().endsWith(".pdf"),
+                "証明書はPDFとして保存されるべきだが現行は " + doc.getCertificatePath());
+    }
+
+    @Test
+    void 二重sendは同じ書類でproviderを2回呼び重複リスクがある() throws Exception {
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        when(baseMapper.selectById(40L)).thenAnswer(inv -> {
+            ContractDocument d = new ContractDocument();
+            d.setId(40L);
+            d.setStatus("下書き");
+            return d;
+        });
+
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+        when(cloudSignClient.send(any())).thenAnswer(inv -> {
+            calls.incrementAndGet();
+            barrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return new CloudSignClient.Result("cs-doc-40", "f-40", "送信中", null, null);
+        });
+
+        Thread t1 = new Thread(() -> { try { service.send(40L); } catch (Exception ignored) { } });
+        Thread t2 = new Thread(() -> { try { service.send(40L); } catch (Exception ignored) { } });
+        t1.start();
+        t2.start();
+        t1.join(5000);
+        t2.join(5000);
+
+        // red: 両threadがstatus=下書きを読んでからproviderを呼ぶため、外部書類が2件作られる
+        assertEquals(1, calls.get(), "同一書類のsendでprovider createは1回でなければならない");
+    }
 }

@@ -27,7 +27,7 @@
 | Task ID | 依存 | 実装 | 定向test | Demo | 独立Review | 判定 | 証跡/再開条件 |
 |---|---|---|---|---|---|---|---|
 | HFP-02-00 | - | DONE(production変更なし) | DONE(11/0/0/0) | BLOCKED(sandbox未確認) | NOT_STARTED | PARTIAL | 公式schema不変を確認、fixture schema test 11件PASS。Demoはsandbox credential入手後に再実施 |
-| HFP-02-01 | 00 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | baseline red test |
+| HFP-02-01 | 00 | DONE(red testのみ) | DONE(13/13意図どおりred) | DONE(二重send重複riskをtest logで実演) | NOT_STARTED | PARTIAL | baseline defectを13件redで固定。green化はHFP-02-02〜08 |
 | HFP-02-02 | 01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | migration latest/legacy fixture確認 |
 | HFP-02-03 | 00,01 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | fixed wire fixture |
 | HFP-02-04 | 02,03 | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | NOT_STARTED | result-unknown/call-count evidence |
@@ -152,6 +152,7 @@
 | 日時 | Task | command / 手順 | tests | failure | error | skip | provider call count | 結果 | Evidence path/注記 |
 |---|---|---|---:|---:|---:|---:|---|---|---|
 | 2026-08-14 | 00 | `mvn -B test -Dtest=CloudSignOpenApiFixtureSchemaTest` | 11 | 0 | 0 | 0 | 0(外部呼出なし) | PASS | `target/surefire-reports/TEST-com.ses.cloudsign.CloudSignOpenApiFixtureSchemaTest.xml`。OpenAPI再取得はcurl生bytes(147111 bytes)でSHA一致を確認 |
+| 2026-08-14 | 01 | `mvn -B test -Dtest=CloudSignClientContractTest,ContractDocumentServiceImplTest,ContractDocumentApiControllerTest` | 19 | 13 | 0 | 0 | Mock(0実) | RED(意図どおり) | 新規13件が全部defect再現でred。既存6件(ContractDocumentServiceImplTest)はgreen。surefire XML: `TEST-com.ses.cloudsign.CloudSignClientContractTest.xml` / `TEST-com.ses.service.impl.ContractDocumentServiceImplTest.xml` / `TEST-com.ses.controller.api.ContractDocumentApiControllerTest.xml`。二重send test: provider create call=2を観測 |
 
 ## 9. Sandbox / production operation ledger
 
