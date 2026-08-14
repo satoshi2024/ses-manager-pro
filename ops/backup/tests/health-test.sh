@@ -31,7 +31,7 @@ setup_health() {
   export BACKUP_WORK_DIR="$T" BINLOG_INDEX="$T/binlog/binlog-index.json"
   export BINLOG_STATE="$T/archive-state.json" REPO_CHECK_TS="$T/last-repo-check" DRILL_TS="$T/last-drill"
   export FAKE_BINLOG_STATE="$T/source-binlogs"
-  unset MYSQL_PWD
+  unset MYSQL_PWD MYSQL_CLIENT_BIN   # 前 case の MYSQL_CLIENT_BIN 変更をリセット
 }
 
 write_index() { # kind name age_seconds

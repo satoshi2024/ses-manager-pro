@@ -79,7 +79,7 @@
   - **Evidence:** 各状態の JSON/exit code、alert receipt/redacted routing、recovery timestamp。
   - **失敗/rollback:** monitor 自体が repository/source を読めない場合も OK を返さず UNKNOWN/CRITICAL。alert routing 未接続は BLOCKED。
 
-- [ ] **HFP-03-006 — UTC target から不変 restore plan を生成する**
+- [x] **HFP-03-006 — UTC target から不変 restore plan を生成する**
 
   - **依存:** HFP-03-003、HFP-03-004
   - **対応要求:** HFP-03-RQ-005、HFP-03-RQ-006
