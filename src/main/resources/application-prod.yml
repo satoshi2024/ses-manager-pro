@@ -53,3 +53,10 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+
+# ===== freee連携（HFP-01） =====
+# 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。
+# redirect-uri はHTTPS固定。URLのHTTPS・公式host検証とclient-id有時の一式検証はコード側(FreeeIntegrationServiceImpl)で実施。
+# client-id未設定でも起動は可能（接続状態はMISCONFIGURED、認可開始時に日本語で拒否）。
+freee:
+  redirect-uri: ${FREEE_REDIRECT_URI:}

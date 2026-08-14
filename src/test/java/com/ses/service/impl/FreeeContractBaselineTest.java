@@ -57,8 +57,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @DisplayName("HFP-01-001 baseline: 現行実装の公式契約逸脱の再現（redが正しい）")
 class FreeeContractBaselineTest {
 
-    private static final String OFFICIAL_OAUTH_AUTHORIZE = "https://accounts.secure.freee.co.jp/public_api/authorize";
-    private static final String OFFICIAL_OAUTH_TOKEN = "https://accounts.secure.freee.co.jp/public_api/token";
+    private static final String OFFICIAL_OAUTH_HOST = "https://accounts.secure.freee.co.jp/public_api";
+    private static final String OFFICIAL_OAUTH_AUTHORIZE = OFFICIAL_OAUTH_HOST + "/authorize";
+    private static final String OFFICIAL_OAUTH_TOKEN = OFFICIAL_OAUTH_HOST + "/token";
     private static final String HR_BASE = "https://api.freee.co.jp/hr";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -82,6 +83,11 @@ class FreeeContractBaselineTest {
                 restTemplate, applicationContext);
         // 現行実装の既定config（api-base-url がOAuth/HR/会計を兼用している状態）
         ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
+        ReflectionTestUtils.setField(service, "oauthBase", OFFICIAL_OAUTH_HOST);
+        ReflectionTestUtils.setField(service, "hrApiBase", HR_BASE);
+        ReflectionTestUtils.setField(service, "clientId", "fixture-client-id");
+        ReflectionTestUtils.setField(service, "clientSecret", "fixture-client-secret");
+        ReflectionTestUtils.setField(service, "redirectUri", "http://localhost:8080/integrations/freee/callback");
         ReflectionTestUtils.setField(service, "encryptionKey", "change-me-change-me-change-me-1234");
         ReflectionTestUtils.setField(service, "activeProfile", "test");
         when(applicationContext.getBean(FreeeIntegrationService.class)).thenReturn(service);
@@ -137,6 +143,10 @@ class FreeeContractBaselineTest {
         server.expect(once(), requestTo(OFFICIAL_OAUTH_TOKEN))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(fixture("token-success.json").toString(), MediaType.APPLICATION_JSON));
+        // users/me検証（R02-4）
+        server.expect(once(), requestTo(HR_BASE + "/api/v1/users/me"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fixture("users-me-company-admin.json").toString(), MediaType.APPLICATION_JSON));
 
         service.handleCallback("fixture-code", "fixture-state", 1L);
         server.verify();
@@ -145,8 +155,12 @@ class FreeeContractBaselineTest {
     @Test
     @DisplayName("handleCallbackはtoken responseのcompany_idを保存する（AC03）")
     void handleCallbackはcompany_idを保存する() throws Exception {
-        server.expect(once(), requestTo(org.hamcrest.Matchers.anything()))
+        server.expect(once(), requestTo(OFFICIAL_OAUTH_TOKEN))
+                .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(fixture("token-success.json").toString(), MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(HR_BASE + "/api/v1/users/me"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fixture("users-me-company-admin.json").toString(), MediaType.APPLICATION_JSON));
 
         service.handleCallback("fixture-code", "fixture-state", 1L);
 

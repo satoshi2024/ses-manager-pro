@@ -66,6 +66,7 @@ class FreeeIntegrationServiceApiTest {
         service = new FreeeIntegrationServiceImpl(connectionMapper, linkMapper, engineerMapper,
                 restTemplate, applicationContext);
         ReflectionTestUtils.setField(service, "apiBase", "https://api.freee.co.jp");
+        ReflectionTestUtils.setField(service, "oauthBase", "https://accounts.secure.freee.co.jp/public_api");
         ReflectionTestUtils.setField(service, "encryptionKey", "change-me-change-me-change-me-1234");
         ReflectionTestUtils.setField(service, "activeProfile", "test");
         when(applicationContext.getBean(FreeeIntegrationService.class)).thenReturn(service);
@@ -92,7 +93,7 @@ class FreeeIntegrationServiceApiTest {
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("Authorization", "Bearer access-token-1"))
                 .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED));
-        server.expect(once(), requestTo("https://api.freee.co.jp/oauth/token"))
+        server.expect(once(), requestTo("https://accounts.secure.freee.co.jp/public_api/token"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{\"access_token\":\"access-token-2\",\"refresh_token\":\"refresh-token-2\",\"expires_in\":3600}",
                         MediaType.APPLICATION_JSON));

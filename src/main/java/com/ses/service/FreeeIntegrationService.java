@@ -1,5 +1,6 @@
 package com.ses.service;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.dto.reconciliation.BankDepositDto;
@@ -8,13 +9,35 @@ import java.util.List;
 public interface FreeeIntegrationService {
     String authorizationUrl(String state);
     void handleCallback(String code, String state, Long userId);
+    /**
+     * 接続状態を返す。statusは DISCONNECTED / CONNECTED / REAUTH_REQUIRED / MISCONFIGURED のいずれかで、
+     * 日本語の次アクション（message key）をactionへ載せる。company ID・token・期限は返さない。
+     */
+    FreeeConnectionStatusDto connectionStatus();
+    /**
+     * status == CONNECTED のときだけtrue（単なる接続rowの存在ではない）。
+     * S11/S15/CashFlowのboolean contract。
+     */
     boolean connected();
+    /**
+     * freee公式revoke endpointへの失効要求（access/refresh双方）が成功、または既に無効と確認できた
+     * 場合だけローカル接続を削除する。一時的なprovider障害では削除せずBusinessExceptionを投げる。
+     */
     void disconnect();
     List<FreeeEmployeeDto> employees();
     void link(Long engineerId, String employeeId, Long userId);
     void unlink(Long engineerId);
     List<PayrollStatementDto> statements(int year, int month, String type);
+    /**
+     * 期限ベースのrefresh。row-lock後に再読込し、別threadが既に更新して有効期限に余裕がある場合は
+     * 外部refreshせずreturnする（HFP-01-R03-3）。
+     */
     void refresh();
+    /**
+     * 401でaccess tokenが拒否された場合のrefresh。ローカル期限に依らず必ず外部refreshを1回行う。
+     * row-lock＋再読込により、同一refresh tokenを並行・再試行で二度使わない（HFP-01-R03-3/AC04）。
+     */
+    void refreshForced();
     /** 銀行入金明細（freee会計の入金取引）を期間指定で取得する（入金消込 / FR-09）。 */
     List<BankDepositDto> bankDeposits(LocalDate from, LocalDate to);
     /**

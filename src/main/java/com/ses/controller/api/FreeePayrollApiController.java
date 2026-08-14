@@ -1,14 +1,17 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
+import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.service.FreeeIntegrationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.MessageSource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import java.util.Locale;
 import java.util.List;
 
 @RestController
@@ -18,10 +21,13 @@ import java.util.List;
 public class FreeePayrollApiController {
 
     private final FreeeIntegrationService service;
-    
+    private final MessageSource messageSource;
+
     @GetMapping("/status")
-    public ApiResult<Boolean> status() {
-        return ApiResult.success(service.connected());
+    public ApiResult<FreeeConnectionStatusDto> status(Locale locale) {
+        FreeeConnectionStatusDto dto = service.connectionStatus();
+        dto.setAction(messageSource.getMessage(dto.getAction(), null, dto.getAction(), locale));
+        return ApiResult.success(dto);
     }
     
     @GetMapping("/employees")

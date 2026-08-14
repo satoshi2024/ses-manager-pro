@@ -118,6 +118,53 @@
 
 ---
 
+### HFP-01-RUN-20260814-03
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | 実装AI（opencode） |
+| worktree / branch | `C:\Users\pc\Documents\ses-manager-pro-hfp-01` / `codex/hfp-01-payroll-freee` |
+| base / head | 前Run末commit / 本Run末commit（HFP-01-003） |
+| 開始 / 終了（JST） | 2026-08-14 04:30 / 2026-08-14 08:10 |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742`（確認済み） |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | 開始時dirtyなし |
+
+#### Task実行証跡
+
+| Task | 状態 | 変更file / method | Test command・結果（run/fail/skip/code） | Demo | Rollback/失敗判定 |
+|---|---|---|---|---|---|
+| HFP-01-003 | **PASS** | `application.yml`/`application-prod.yml`（freee設定: oauth-base/hr-api-base分離）、`FreeeIntegrationService`（`connectionStatus`/`refreshForced`追加）、`FreeeIntegrationServiceImpl`（authorizationUrl公式host・prompt=select_company・scope削除、handleCallbackでcompany_id保存+users/me company_admin検証、状態機械、refresh lock後再確認・rotation必須・invalid_grant→REAUTH_REQUIRED、revoke成功/既失効のみ削除）、`FreeeConnectionMapper.selectLatestForUpdate`（deleted_flag=0限定）、`FreeeOAuthController`（state TTL10分・一回性・constant-time比較・認可拒否callback・redirectにcode/state非載せ）、`FreeePayrollApiController.status`（DTO化・MessageSource解決）、`FreeeConnectionStatusDto`（新規）、messages 4bundle（新key 11件）、`FreeeOAuthContractTest`（17）、`FreeeOAuthCallbackWebTest`（7）、`FreeeContractBaselineTest`（OAuth系3件green化）、`FreeeIntegrationServiceApiTest`（refresh URLを公式hostへ更新=design§3の正当範囲） | `mvn test -Dtest=FreeeOAuthContractTest,FreeeOAuthCallbackWebTest,FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PayrollLandmarkA11yTest,MessageBundleConsistencyTest` → 32/0/0/0。Baseline OAuth系3件green、employees/statements系7件は**意図通りred継続**（HFP-01-004/006でgreen化予定） | 下表 | 旧不正OAuth URLへ戻すrollback禁止。component単位で差分判断 |
+
+**Demo（HFP-01-003）: Mock serverでOAuth lifecycle（秘密なし）**
+
+| 操作 | 観測 |
+|---|---|
+| authorize | 公式host `.../public_api/authorize`へ`response_type=code&client_id&redirect_uri&state&prompt=select_company`（scopeなし）をredirect。sessionへstate+発行時刻保存 |
+| callback正常 | token POST 1回 → users/me GET 1回 → company一致+company_admin確認 → company_id/name/CONNECTED保存 → `/payroll?connected=1` |
+| callback異常 | state不一致/欠落/期限切れ/再送/認可拒否はtoken交換0回（service未呼出）。固定error codeへredirect |
+| status遷移 | rowなし=DISCONNECTED / company_id欠落・設定不足=MISCONFIGURED / invalid_grant後=REAUTH_REQUIRED / 正常=CONNECTED |
+| refresh | 期限余裕あり=外部呼出し0回（lock後再確認）/ 401経路=必ず1回（refreshForced）/ rotation新token保存 / invalid_grant=REAUTH_REQUIRED記録+例外 |
+| revoke | access+refresh双方revoke成功→削除 / 既失効(400 invalid_grant)=成功扱い→削除 / timeout・5xx=削除せずrevokeFailed |
+
+#### 自動gate集計（HFP-01-003時点）
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---:|---:|---:|---:|---|---|
+| OAuth/status/refresh/revoke | `mvn test -Dtest=FreeeOAuthContractTest` | 17 | 0 | 0 | 0 | PASS | surefire-reports |
+| callback state検証 | `mvn test -Dtest=FreeeOAuthCallbackWebTest` | 7 | 0 | 0 | 0 | PASS | surefire-reports |
+| S11共通基盤回帰 | `mvn test -Dtest=FreeeIntegrationServiceApiTest` | 7 | 0 | 0 | 0 | PASS | surefire-reports |
+| baseline OAuth系 | `mvn test -Dtest=FreeeContractBaselineTest` | 10 | 7（意図通りred） | 0 | 1 | 進行中 | employees/statements系は004/006でgreen化 |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続） | 発注者 | HFP-01-011手順 |
+
+---
+
 ## 独立Review Roundテンプレート（この区切りから複製して末尾へ追記）
 
 ### HFP-01-RUN-YYYYMMDD-NN
