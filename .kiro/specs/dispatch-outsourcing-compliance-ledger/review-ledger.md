@@ -1,3 +1,34 @@
+## Step 5-2: R23-S3-P1-01b fix完了（fingerprint key resolution・2026-08-14）
+
+R10再Review指摘P1-01b（§9契約未達: tenantId/keyVersion引数を無視した単一ハードコード鍵・fail-open fallback）を解消:
+
+- **ComplianceReviewerFingerprintKeyProvider（新規interface+Impl）**: tenant別key namespace（compliance.gate.fingerprint-keys.{tenantId}）・version別key解決・
+  prod profile起動時fail-fast（設定欠損・不正で起動しない・ソース内蔵secretなし）・dev/testはtenant未設定時のみ既定テスト鍵fallback・
+  未知key version/tenantはfail-closed（nullを返さず例外）・key rotation対応（旧versionも参照可能）
+- **ComplianceReviewerFingerprintService**: resolveKey()を削除しfingerprintKeyProviderへ接続。hmac()はtenantId引数を実際に使用。
+  key versionはproviderがtenant別に解決（unknown tenant/key versionはfail-closed）
+- **application.yml**: compliance.gate.fingerprint-keys設定を追記（secret store注入コメント・prod fail-fast）
+- テスト: ComplianceReviewerFingerprintServiceTest 10（rotation・tenant namespace・fail-closed×2・tenant引数実使用）＋
+  ComplianceReviewerFingerprintKeyProviderImplTest 7（dev fallback・tenant別解決・rotation・unknown fail-closed・prod fail-fast×2・完全設定）＝17/17 PASS
+## Step 5-1: 先行実装conformance Review（固定Head ad296572・2026-08-14）
+
+R10次step指示1に対応。Step 1 inventory（8ffbcddb..31d29305の先行実装・REWORK 6件）を固定Headで再検証:
+
+| inventory分類 | 対象 | 現Headでの対応 | 判定 |
+|---|---|---|---|
+| REWORK | ComplianceExternalReviewEvaluator.evaluateGroup | ファイル削除済み・gate正本から除外（§4-8） | **CONFORM** |
+| REWORK | recordExternalReview（APPROVED直接記録） | SUBMITTEDのみ許可・他actionはinvalidAction(400)（K1） | **CONFORM** |
+| REWORK | ComplianceGateApiController（Map/entity/tenant固定） | typed DTO全面置換・Map 0件・capability server計算 | **CONFORM** |
+| REWORK | ComplianceMappingServiceImpl.activate | hasTypes空group skip削除・GateEvaluationService共用（§4-1/4-8） | **CONFORM** |
+| REWORK | ComplianceDocumentServiceImpl.generate | GateEvaluationService経路・assignment一致・snapshot反映（§4-9/11） | **CONFORM** |
+| REWORK→置換 | ReviewerVerificationMigrationOrderContractTest | V102 blob golden e8a61520…・V102_1存在・102<102.1<103検証へ置換 | **CONFORM** |
+| KEEP（再検証） | CredentialCryptoService/KeyProvider | CGC1・key version・AAD・decrypt fail-closed維持（§3.3） | **CONFORM** |
+| KEEP（拡張） | ComplianceExternalReviewEventDto | typed DTO維持＋verification/adoption/subject/capability DTO追加（§5） | **CONFORM** |
+| KEEP | application.yml credential-crypto | config維持（fingerprint HMAC keyは別・P1-01bでproduction前fix予定） | **CONFORM** |
+| NEWLY REQUIRED | subject master・verification/adoption event・trigger・UI | V102_1/V102_2・entity/mapper×3・service・UI・security実装済み | **CONFORM** |
+
+**conformance判定: 全10項目 CONFORM**（先行実装の非conformanceは全て解消・accepted v3 §3〜§5に収束済み）。
+検証手段: ファイル存在/コード検索/git ls-tree・テスト76/76・PR #73 CI 1917/0/0/0 skip 0。
 ## Step 4（§5 API/UI/security）完了記録（2026-08-14）
 
 - typed DTO群: ComplianceMappingVersionDto・ReviewerTypeDto・SubjectDto・VerificationEventDto・AdoptionEventDto・CapabilityDto・EvidencePickerDto・request DTO 6種（Map/entity API契約の全面置換）

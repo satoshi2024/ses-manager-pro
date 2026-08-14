@@ -8,7 +8,6 @@ import org.springframework.util.StringUtils;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.text.Normalizer;
 
 /**
@@ -28,8 +27,8 @@ import java.text.Normalizer;
  *   <li>My Numberは保存・fingerprint入力とも使用しない</li>
  * </ul>
  *
- * <p>keyはdeployment secret store相当のconfig（`compliance.gate.fingerprint-keys`）から
- * key versionごとに解決する。key欠損時はfail-closed（nullを返さず例外）。
+ * <p>keyはdeployment secret store相当のconfig（`compliance.gate.fingerprint-keys.{tenantId}`）から
+ * key versionごとに解決する（P1-01b対応）。key欠損・未知versionはfail-closed（nullを返さず例外）。
  */
 @Component
 public class ComplianceReviewerFingerprintService {
@@ -42,14 +41,10 @@ public class ComplianceReviewerFingerprintService {
     /** qualification domain separator。 */
     public static final String DOMAIN_QUALIFICATION = "qualification";
 
-    /** テスト/非prod用の既定key version（prodではsecret storeから注入）。 */
-    private static final String DEFAULT_KEY_VERSION = "v1";
-    private static final String DEFAULT_KEY_B64 = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+    private final ComplianceReviewerFingerprintKeyProvider fingerprintKeyProvider;
 
-    private final ComplianceGateCredentialKeyProvider keyProvider;
-
-    public ComplianceReviewerFingerprintService(ComplianceGateCredentialKeyProvider keyProvider) {
-        this.keyProvider = keyProvider;
+    public ComplianceReviewerFingerprintService(ComplianceReviewerFingerprintKeyProvider fingerprintKeyProvider) {
+        this.fingerprintKeyProvider = fingerprintKeyProvider;
     }
 
     /**
@@ -110,15 +105,12 @@ public class ComplianceReviewerFingerprintService {
     }
 
     /**
-     * tenant別key namespaceでHMAC-SHA-256を計算する。
-     * key versionはsubjectのfingerprint_key_version（=providerのcurrent）を使用。
+     * tenant別key namespaceでHMAC-SHA-256を計算する（P1-01b: tenantId引数を実際に使用）。
+     * key versionはproviderがtenant別に解決（unknown tenant/key versionはfail-closed）。
      */
     private String hmac(String tenantId, String payload) {
-        String keyVersion = keyProvider.getCurrentKeyVersion();
-        if (!StringUtils.hasText(keyVersion)) {
-            keyVersion = DEFAULT_KEY_VERSION;
-        }
-        byte[] keyBytes = resolveKey(tenantId, keyVersion);
+        String keyVersion = fingerprintKeyProvider.getCurrentKeyVersion(tenantId);
+        byte[] keyBytes = fingerprintKeyProvider.getKey(tenantId, keyVersion);
         try {
             Mac mac = Mac.getInstance(HMAC_ALGO);
             mac.init(new SecretKeySpec(keyBytes, HMAC_ALGO));
@@ -130,17 +122,6 @@ public class ComplianceReviewerFingerprintService {
             return sb.toString();
         } catch (Exception e) {
             throw new IllegalStateException("fingerprint HMAC計算に失敗しました", e);
-        }
-    }
-
-    /** tenant別key namespaceからkey versionの鍵を解決する。未解決はfail-closed。 */
-    private byte[] resolveKey(String tenantId, String keyVersion) {
-        // 実運用ではdeployment secret storeからtenant別keyを解決する（§9 HMAC契約）。
-        // 現行実装は既定鍵をbase64 decodeで使用し、prod profileではProviderがfail-fastする。
-        try {
-            return java.util.Base64.getDecoder().decode(DEFAULT_KEY_B64);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("fingerprint keyが不正です", e);
         }
     }
 }
