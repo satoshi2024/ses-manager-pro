@@ -100,5 +100,6 @@ credentialが用意できない場合は値を対話やrepositoryへ貼らず、
 - 固定commitのtree（`a9f4f050...`）と、`hr/open-api-3` を最後に変更したcommit（2026-07-09 `eb31780d...`、tree `09475783...`）の `hr` ディレクトリSHAはいずれも `dabfbf4a...` で一致。**固定commit以降、hr schemaに差分なし**（差分が発生したのは `sm/open-api-3` のみで、本specの契約に影響しない）。
 - 公式実装参考commit `freee/freee-mcp@826e22555a9befe5a672e9bdfc23070676f41969` も存在確認（v0.32.3 release）。
 - 実装正本は固定commitのまま。fixture/実装を更新する必要は無い。
-- **Flyway採番**: 最新は `V102`。`V103`〜`V108` は S12〜S17（`staffing-capacity-planning` 等）の予約番号であり、`SpecDispatchConsistencyTest` / `ReviewerVerificationMigrationOrderContractTest` が実在を禁止する。HFP-01-002のmigrationは既存の `V66_1`/`V74_1`/`V79_1` と同じ **`V102_2`（Flyway表記 V102.2）** を採番した。初回実装（`V103`）は契約testで検出され、未適用のまま `V102_2` へリネームした（適用済みmigrationの変更ではない）。
+- **Flyway採番**: 実装時は最新 `V102`。`V103`〜`V108` は S12〜S17（`staffing-capacity-planning` 等）の予約番号であり、`SpecDispatchConsistencyTest` / `ReviewerVerificationMigrationOrderContractTest` が実在を禁止する。HFP-01-002のmigrationは既存の `V66_1`/`V74_1`/`V79_1` と同じ V102系サブ番号を採番した。初回実装（`V103`）は契約testで検出され、未適用のまま `V102_2` へリネームした（適用済みmigrationの変更ではない）。
+- **merge-prep訂正（2026-08-16, coordinator）**: main 側に R23-P1-01 の `V102_1`/`V102_2`/`V102_3` が追加され `V102_2` が衝突したため、HFP-01-002 の migration を **`V102_4`（Flyway表記 V102.4）** へ再リネームした（未適用のため安全）。順序は 102 < 102_1 < 102_2 < 102_3 < 102_4 < 103 で契約testと両立する。
 - freee table（`t_freee_connection` / `t_freee_employee_link`）は V21 導入のpost-baseline tableであり、V1 へ追加しない。

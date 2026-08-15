@@ -1087,3 +1087,34 @@ fix delta `203960a9..c3400aa0`（3 file、+146/−3）。REV-009の判定のみ�
 - 未達/未実行Acceptance: HFP-01-AC13（BLOCKED）、HFP-01-AC15（BLOCKED）— 唯一の原因は`FREEE_*` credential未提供
 - 最小の次アクション: (1) `FREEE_*`提供 → HFP-01-011（sandbox E2E＋AC13 desktop/390px実ブラウザDemo）実行 → Round 5でその証跡のみReview → `REVIEWABLE`判定候補。(2) merge後はmerge済みcommitでmerge delta・共有consumer・main回帰を直接Reviewして最終PASS
 - 最終Verdict: **BLOCKED**（PRE_MERGE。全Finding CLOSED・AC01〜12/14 PASS・自動gate全green。残gateは外部credential依存のみ）
+
+---
+
+### HFP-01-RUN-20260816-01（merge-prep: coordinator）
+
+| 項目 | 値 |
+|---|---|
+| 実施者 | merge coordinator（統括対話。production実装の変更なし） |
+| worktree / branch | `C:/Users/satos/AppData/Local/Temp/opencode/hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | base `841e10aa` → main `5246783a` をmerge（git merge main、auto-merge） / 本Runコミット |
+| 開始 / 終了（JST） | 2026-08-16 / 2026-08-16 |
+
+#### 変更内容（採番訂正のみ。production意味の変更なし）
+
+- main 側に R23-P1-01 の `V102_1`/`V102_2`/`V102_3` が追加され、HFP-01 の `V102_2__freee_company_boundary.sql` が同名衝突した。
+- 未適用migrationのため安全に `V102_4__freee_company_boundary.sql` へリネーム（git mv）。順序 102 < 102_1 < 102_2 < 102_3 < 102_4 < 103。
+- `FlywayV102_2FreeeCompanyBoundarySmokeTest` → `FlywayV102_4FreeeCompanyBoundarySmokeTest`（クラス名・コメント・メソッド名）。
+- `FlywayMigrationSmokeTest`/`FreeeCompanyBoundarySchemaH2Test`/`schema-freee-payroll-h2.sql` のコメント、`research.md` §7、`design.md` §4.3、`review-conversation.md` を同期。
+- main mergeにより `SecurityConfig`/`application.yml`/`messages×4`/`engineer-schema-h2.sql` は auto-merge。freee差分は維持。
+
+#### 検証gate（本Runで実施）
+
+| Gate | Command | 結果 |
+|---|---|---|
+| migration契約 | `ReviewerVerificationMigrationOrderContractTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest` | 実行して記録 |
+| freee smoke | `FreeeCompanyBoundarySchemaH2Test,FlywayMigrationSmokeTest,FlywayV102_4FreeeCompanyBoundarySmokeTest` | 実行して記録 |
+| 全suite | `scripts/verify-like-ci.ps1` | 実行して記録 |
+
+#### 残件
+
+- AC13/AC15・HFP-01-011・HFP-G01 は従来どおり BLOCKED（freee sandbox credential未提供）。

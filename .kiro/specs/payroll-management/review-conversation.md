@@ -16,7 +16,7 @@
 | Task | 主要変更file |
 |---|---|
 | 001 | `src/test/resources/freee/*`（fixture 26件）、`FreeeContractBaselineTest`（10）、`research.md` §7 |
-| 002 | `db/migration/V102_2__freee_company_boundary.sql`、`FreeeConnection.connectionStatus`、`FreeeEmployeeLink.freeeCompanyId`、`schema-freee-payroll-h2.sql`、`engineer-schema-h2.sql`、`FlywayV102_2FreeeCompanyBoundarySmokeTest`、`FreeeCompanyBoundarySchemaH2Test`、`FlywayMigrationSmokeTest` |
+| 002 | `db/migration/V102_4__freee_company_boundary.sql`、`FreeeConnection.connectionStatus`、`FreeeEmployeeLink.freeeCompanyId`、`schema-freee-payroll-h2.sql`、`engineer-schema-h2.sql`、`FlywayV102_4FreeeCompanyBoundarySmokeTest`、`FreeeCompanyBoundarySchemaH2Test`、`FlywayMigrationSmokeTest` |
 | 003 | `application.yml`/`application-prod.yml`（freee設定分離）、`FreeeIntegrationService`/`Impl`（OAuth公式host・company検証・状態機械・refresh rotation・revoke）、`FreeeOAuthController`（state TTL/一回性）、`FreeeOAuthContractTest`（17）、`FreeeOAuthCallbackWebTest`（7）、`FreeeConnectionStatusDto`、messages 4bundle |
 | 004 | `service/freee/FreeeHrContractAdapter`、`dto/freee/hr/*`（5）、`hrGet`/`executeWithRetry`（base URL・401 code分類・429 Retry-After・5xx bounded retry・Sleeper）、`fetchAllEmployees/fetchSalaryStatements/fetchBonusStatements`、`FreeeHrContractTest`（27） |
 | 005 | `FreeeEmployeeDto`、`PayrollEngineerCandidateDto`、`engineerCandidates`、link/unlink company境界、`FreeeEmployeeMappingTest`（12） |
@@ -24,13 +24,13 @@
 | 007 | `SecurityConfig`（静的rule）、`FreeeOAuthController`（監査）、`FreeePayrollApiController`（機微GET監査・no-store）、`ApiAuditFilter`（payroll除外）、`PayrollSecurityAuditTest`（13） |
 | 008 | `templates/payroll/index.html`、`static/js/modules/payroll.js`、`PayrollLandmarkA11yTest`（5） |
 | 009 | `CashFlowForecastServiceImpl.getEstimatedPayroll`（design §14）、`CashFlowForecastServiceTest`（13） |
-| 010 | `tasks.md` checkbox、`review-ledger.md` RUN-01〜10、V102_2採番訂正 |
+| 010 | `tasks.md` checkbox、`review-ledger.md` RUN-01〜10、V102_2採番訂正（後日merge-prepでV102_4へ再訂正） |
 | Round1修正 | `FreeeHrContractAdapter.strictAmount`（REV-001）、`FreeeReauthMarker`＋`persistReauthAfterCompletion`＋`FreeeReauthPersistenceTest`（REV-002）、`FreeePayrollApiController`/`FreeeOAuthController`失敗系監査＋`PayrollSecurityAuditTest`（REV-003）、`FreeeConcurrentRefreshTest`（REV-004）、`handleCallback`/`link` tx分離（REV-005）、ledger訂正/H2コメント（REV-006）、X-Request-Id/相関ID log（REV-007） |
 | 011 | BLOCKED（sandbox credential未提供） |
 
 - requirements/acceptance → code → test → Demo trace: 下記§2
 - official contract: `freee/freee-api-schema@52c69a6819ef14979a31b342123df816cb72c742`（hr/open-api-3、schema version 2022-02-01）。固定commit以降 hr に差分なし（`hr` tree SHA一致確認済み）
-- migration latest: `V102`（実在）。HFP-01は `V102_2`（V103〜V108はS12〜S17予約）。`ReviewerVerificationMigrationOrderContractTest`/`SpecDispatchConsistencyTest`/`MigrationScriptIntegrityTest` green
+- migration latest: `V103`（実在、S12 staffing）。main側に `V102_1`/`V102_2`/`V102_3`（R23-P1-01）が追加されたため、HFP-01は `V102_4` を採番（merge-prep訂正。V103〜V108はS12〜S17予約）。`ReviewerVerificationMigrationOrderContractTest`/`SpecDispatchConsistencyTest`/`MigrationScriptIntegrityTest` green
 - test/Demo evidence: `review-ledger.md` RUN-01〜10 + surefire-reports
 - skipped/unverified: HFP-01-011（sandbox E2E、desktop/390px実操作）。HFP-01-G01（freee test事業所spike）OPEN
 - known issue: なし（OPEN P0/P1 0。Round 1のP0/P1は修正済み・FIXED_BY_IMPLEMENTER）
@@ -55,7 +55,7 @@
 | AC11 role matrix・CSRF | PASS | `PayrollSecurityAuditTest`（6主体×page/API/OAuth、CSRFあり/なし） |
 | AC12 no-store・1 request 1 row・禁止値0 | PASS（REV-003修正後） | `PayrollSecurityAuditTest`（成功/失敗系とも1 row、success_flag、禁止値0、生金額0） |
 | AC13 desktop/390px Demo | BLOCKED | MockMvc描画+`PayrollLandmarkA11yTest`（5）はPASS。実ブラウザ操作はsandbox接続が必要（HFP-01-011） |
-| AC14 S11/S15・CashFlow・MySQL smoke・全test | PASS | 17 class 147/0/0/0、`FlywayMigrationSmokeTest`+`FlywayV102_2FreeeCompanyBoundarySmokeTest` 4/0/0/0（実MySQL）、verify-like-ci（Round1修正後に再実行中） |
+| AC14 S11/S15・CashFlow・MySQL smoke・全test | PASS | 17 class 147/0/0/0、`FlywayMigrationSmokeTest`+`FlywayV102_4FreeeCompanyBoundarySmokeTest` 4/0/0/0（実MySQL）、verify-like-ci（Round1修正後に再実行中） |
 | AC15 E2E・独立Review | BLOCKED | sandbox credential未提供。merge前独立Review（本パケット）・merge後Reviewは未実施 |
 
 ## 7. Round 1修正（REV-001〜007）の対応
@@ -67,7 +67,7 @@
 | REV-003 | P2 | 機微GET/link/unlink/connect/disconnectの失敗系監査（success_flag=false） | `PayrollSecurityAuditTest.失敗系も1request1rowで監査される` |
 | REV-004 | P2 | 並行refresh自動test（実MySQL+実HTTP） | `FreeeConcurrentRefreshTest`（外部POST 1回） |
 | REV-005 | P2 | handleCallback/linkの外部HTTPをtx外へ（保存のみTransactionTemplate） | `FreeeOAuthContractTest` 17/0/0/0、`FreeeEmployeeMappingTest` 12/0/0/0 |
-| REV-006 | NOTE | ledger件数訂正（単独run 1992×2）、H2コメントV102_2化 | `FreeeCompanyBoundarySchemaH2Test` 5/0/0/0 |
+| REV-006 | NOTE | ledger件数訂正（単独run 1992×2）、H2コメント採番訂正（V102_4） | `FreeeCompanyBoundarySchemaH2Test` 5/0/0/0 |
 | REV-007 | NOTE | X-Request-Id/内部相関IDを障害時logへ（秘密なし） | 秘密log test green維持 |
 
 ## 5. 再実行手順（Reviewer用）
@@ -78,7 +78,7 @@
 # freee関連のみ（17 class、並行refreshは実MySQL）
 .\apache-maven-3.9.6\bin\mvn test -Dtest='FreeeContractBaselineTest,FreeeOAuthContractTest,FreeeOAuthCallbackWebTest,FreeeHrContractTest,FreeeEmployeeMappingTest,PayrollReadModelTest,PayrollSecurityAuditTest,PayrollLandmarkA11yTest,FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PaymentReconciliationServiceImplTest,CashFlowForecastServiceTest,FreeeCompanyBoundarySchemaH2Test,MessageBundleConsistencyTest,JsSyntaxCheckTest,FreeeReauthPersistenceTest,FreeeConcurrentRefreshTest'
 # MySQL migration smoke
-.\apache-maven-3.9.6\bin\mvn test -Dtest='FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest'
+.\apache-maven-3.9.6\bin\mvn test -Dtest='FlywayMigrationSmokeTest,FlywayV102_4FreeeCompanyBoundarySmokeTest'
 ```
 
 ## 6. BLOCKED残件（HFP-01-011）

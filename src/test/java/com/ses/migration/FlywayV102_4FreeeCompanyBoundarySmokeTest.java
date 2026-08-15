@@ -16,10 +16,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * HFP-01-002: V102_2（freee事業所境界）のupgrade経路を実MySQLで検証するスモークテスト。
+ * HFP-01-002: V102_4（freee事業所境界）のupgrade経路を実MySQLで検証するスモークテスト。
+ * （merge-prepで main 側の V102_2/V102_3 と衝突したため V102_2→V102_4 へ採番訂正済み）
  *
  * <ul>
- *   <li>V102適用済み（=V21適用済み相当を含む）legacy DBへV102_2を適用</li>
+ *   <li>V102適用済み（=V21適用済み相当を含む）legacy DBへV102_4を適用</li>
  *   <li>接続companyが一意な場合のbackfill、NULLのまま残る場合（複数company）</li>
  *   <li>旧employee単独UNIQUE → company+employee複合UNIQUE の置換</li>
  *   <li>3つのunique case:
@@ -29,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Dockerが利用できない環境では自動skip（CIで実行）。
  */
 @Testcontainers(disabledWithoutDocker = true)
-class FlywayV102_2FreeeCompanyBoundarySmokeTest {
+class FlywayV102_4FreeeCompanyBoundarySmokeTest {
 
     @Container
     @SuppressWarnings("resource")
@@ -51,8 +52,8 @@ class FlywayV102_2FreeeCompanyBoundarySmokeTest {
             .withStartupAttempts(3);
 
     @Test
-    void V102相当からV102_2へupgradeし会社境界のunique制約が効く() throws Exception {
-        // V102まで適用（V102_2を含まないlegacy状態）
+    void V102相当からV102_4へupgradeし会社境界のunique制約が効く() throws Exception {
+        // V102まで適用（V102_4を含まないlegacy状態）
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -71,7 +72,7 @@ class FlywayV102_2FreeeCompanyBoundarySmokeTest {
                     + "VALUES (9001, 'E-501', 1)");
         }
 
-        // V102_2を適用（全migration）
+        // V102_4を適用（全migration）
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -141,7 +142,7 @@ class FlywayV102_2FreeeCompanyBoundarySmokeTest {
 
     @Test
     void 複数接続companyがある場合はlegacyLinkをbackfillしない() throws Exception {
-        // V102まで適用（V102_2を含まないlegacy状態）
+        // V102まで適用（V102_4を含まないlegacy状態）
         Flyway.configure()
                 .dataSource(MYSQL_MULTI_COMPANY.getJdbcUrl(), MYSQL_MULTI_COMPANY.getUsername(),
                         MYSQL_MULTI_COMPANY.getPassword())
@@ -164,7 +165,7 @@ class FlywayV102_2FreeeCompanyBoundarySmokeTest {
                     + "VALUES (9101, 'E-601', 1)");
         }
 
-        // V102_2を適用（backfill条件は「有効なconnectionのcompany_idが1件のみ」なので0件）
+        // V102_4を適用（backfill条件は「有効なconnectionのcompany_idが1件のみ」なので0件）
         Flyway.configure()
                 .dataSource(MYSQL_MULTI_COMPANY.getJdbcUrl(), MYSQL_MULTI_COMPANY.getUsername(),
                         MYSQL_MULTI_COMPANY.getPassword())
