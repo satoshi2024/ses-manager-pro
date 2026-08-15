@@ -56,7 +56,7 @@
     HRからbench costがmaskされること、大量データでheapが増えないこと。
   - **Demo**: Java需要不足をdrilldown。全社合計と内訳合計が一致することを提示。
 
-- [ ] B2. scenario compare
+- [x] B2. scenario compare
   - **Objective**: 仮配置のscenarioを作って2案の稼働率・粗利を比較でき、
     scenario操作が実契約・実提案・実配置計画を一切変更しない。
   - **実装ガイダンス**: clone/仮配置/比較/共有、**本データ非更新**。

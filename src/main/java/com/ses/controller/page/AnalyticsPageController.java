@@ -22,4 +22,9 @@ public class AnalyticsPageController {
     public String staffingHeatmap() {
         return "analytics/staffing-heatmap";
     }
+
+    @GetMapping("/staffing-scenario-compare")
+    public String staffingScenarioCompare() {
+        return "analytics/staffing-scenario-compare";
+    }
 }

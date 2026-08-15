@@ -5,8 +5,9 @@
 - **T075 F1: 完了**（commit `a691f77e`）
 - **T076 F2: 完了**（commit `ec880114`）
 - **T077 A1: 完了**（commit `6e0ddfc9`）
-- **T078 B1: 完了（REVIEW待ち）** 2026-08-16
-- T079〜T080: 未着手
+- **T078 B1: 完了**（commit `f0e7a222`）
+- **T079 B2: 完了（REVIEW待ち）** 2026-08-16
+- T080: 未着手
 
 ## READINESS（着手時）
 
@@ -88,7 +89,69 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 - T075: `a691f77e` feat(staffing): T075 F1 position/allocation/scenario DDL（V103・過配賦日単位判定・例外承認・scenario isolation）
 - T076: `ec880114` feat(staffing): T076 F2 proposal/contract/availability統合（actual同期・需給集計・更新/退職/休暇反映）
 - T077: `6e0ddfc9` feat(staffing): T077 A1 position board/allocation timeline（D&D・UI rollback・同時配置CAS）
-- T078: （本ledger更新と同じcommitに含める）
+- T078: `f0e7a222` feat(staffing): T078 B1 需給heatmap/KPI（server aggregate・全社=内訳合計・HR mask）
+- T079: （本ledger更新と同じcommitに含める）
+
+---
+
+## TASK CONTRACT T079（B2. scenario compare）
+
+- requirements/AC: R3.2（仮配置scenarioで2案の稼働率・粗利を比較）、R3.3（保存者と共有範囲・契約/提案を自動作成しない）、R5
+- 決定表はdesign.md §5の確定済み3表をそのまま実装（読み替えなし）
+
+### 実装内容
+
+- **比較**（`StaffingScenarioCompareService`）:
+  - シナリオ別・月別（24か月）の供給FTE・稼働率・要員数・粗利を返す
+  - 供給FTE = percent × 対象月内の日数/月内稼働日数（日単位のFTE換算・design §5.2と同一口径）
+  - 稼働率 = 供給FTE / シナリオ内要員数 × 100
+  - 粗利 = （position単価下限 − 要員希望単価）× FTE。**HRでmask（null）**（design §5.3）
+  - 共有scenarioの閲覧時は**閲覧者のscope（DataScope/組織scope）で要員をfilter**
+    （scenario経由のscope迂回を防ぐ。design §5.3）
+- **API**: `/api/analytics/staffing-scenarios`（CRUD・仮配置upsert/delete・visibleAllocations・compare）
+- **UI**: `/analytics/staffing-scenario-compare`（scenario作成/共有/比較テーブル）
+- **isolation**: 本serviceはt_staffing_scenario系のみ読み書きし、実データへ書き込む経路を持たない
+  （T075のStaffingScenarioServiceImplと同一契約・R3.3）
+
+### 実装の具体化（判定・根拠）
+
+1. 粗利の単価はposition.unit_price_min（下限保守）を採用し、原価は要員expected_unit_price。
+2. scenarioの比較windowは基準日から24か月（heatmapと同一のhorizon）。
+3. visibleAllocationsはscenario内の要員を閲覧者scopeでfilterして返す（管理画面の漏洩防止）。
+
+## 変更file（T079）
+
+| 種別 | file |
+|---|---|
+| service | `service/staffing/StaffingScenarioCompareService`(+Impl) |
+| controller | `StaffingScenarioApiController`（/api/analytics配下）、`AnalyticsPageController`（page追加） |
+| UI | `templates/analytics/staffing-scenario-compare.html`、`static/js/modules/staffing-scenario.js`、analytics/index.htmlにリンク |
+| message | 4バンドルへ staffing.scenario.* 追加 |
+| test | `StaffingScenarioCompareTest`（4件）、`StaffingScenarioApiControllerTest`（3件） |
+
+## Test evidence（T079）
+
+| 実行 | 結果 |
+|---|---|
+| 直接回帰: staffing 12クラス（67件）＋Contract/Proposal(56)＋AllMappers(133)＋MigrationIntegrity(27)＋MessageBundle(4)＋JsSyntaxCheck(1) | 286/0/0/0 PASS |
+| `git diff --check` | exit 0（コミット前に実施） |
+
+受入条件の実測:
+- scenario操作（作成/仮配置/比較/削除）の前後でt_allocation_plan・契約・提案のハッシュが不変（R3.3）
+- 供給FTE（3日/22営業日×100%=0.14）・稼働率（14.0%）・粗利（(80万-60万)×0.14=28000）の実測一致
+- 共有scenarioは参照可・編集はownerのみ、非共有は他ユーザー不可視（scenarioForbidden）
+- CSRFなしの更新系は403、HRの比較に粗利がmask
+- API経由の作成一覧比較削除が一気通貫で動作
+
+## Demo（T079）
+
+- 2scenarioの稼働率/粗利差と実データ不変（ハッシュ比較）はtestで実証済み。
+- 実ブラウザDemoはM task（T080）で実施する。
+
+## Risk
+
+- 粗利の単価はpositionの下限（保守）基準であり、実契約の売上単価とは別物
+  （シナリオは仮定ベースの比較ツールである旨をledgerで管理）。
 
 ---
 
