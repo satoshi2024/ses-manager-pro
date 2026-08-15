@@ -171,7 +171,7 @@ retention::apply() { # report_file claim1 claim2
   done <<< "$(printf '%s' "$targets" | jq -r '.[]')"
   if ((${#targs[@]})); then
     local log
-    log="$TMPDIR/retention-restic.log"
+    log="${TMPDIR:-/tmp}/retention-restic.log"
     if ! "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" forget "${targs[@]}" --prune > "$log" 2>&1; then
       retention::fail "restic forget に失敗しました: $(common::redact < "$log")"
     fi

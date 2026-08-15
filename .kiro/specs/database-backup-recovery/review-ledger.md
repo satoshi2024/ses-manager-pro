@@ -142,6 +142,8 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 | HFP-03-R2-P2-04 | P2 | RQ-008 | 旧 evidence の合成 `restore-svc-pw` | evidence 3 件に残存（review 実測） | 秘密の混在 | 既存 evidence から除去 + demo の後処理（restore-svc-pw/target-password/mysql-password 削除）を追加 | FIXED_BY_IMPLEMENTER |
 | HFP-03-R2-P2-05 | P2 | RQ-011 | `backup-full.sh`（counts が静止解除後に採取） | — | counts が dump と不一致になり得る | counts 採取を静止解除前に移動（dump と同じ静止区間の値） | FIXED_BY_IMPLEMENTER |
 | HFP-03-R2-P2-06 | P2 | RQ-012 | `restore-drill.sh`（`.base_full_snap` key 名誤り） | — | integrity の base verify が常にスキップ | `.base_full.restic_snapshot_id` に修正 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R3-P2-01 | P2 | RQ-008 | `rotate-key.sh:65`（`$TMPDIR` が `set -u` 下で未設定 → rc=1） | production compose 既定（TMPDIR 未設定）で実測 rc=1 | 新キー切替が運用環境で失敗 | `${TMPDIR:-/tmp}` に修正（`retention.sh` の同種箇所も）。TMPDIR 未設定での rotation 回帰テスト追加 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-04（残存分） | P2 | RQ-008 | 旧 evidence の合成 `mysql-password`×8 / `target-password`×3 / `repo-password` | evidence root に残存（review 実測） | 秘密の混在 | 既存 evidence から全 password file を除去 + demo 後処理（010 含む）で削除を追加 | FIXED_BY_IMPLEMENTER |
 
 Severity は P0（production 破壊/復元不能）、P1（RPO/RTO/security/整合性）、P2（限定的な運用性/監視）、NOTE（要件を破らない非必須改善）とする。P0/P1 または未管理 acceptance が残る場合は全体 PASS にしない。P2/NOTEを延期する場合は発注者承認、owner、期限、release影響を記録する。
 
@@ -227,5 +229,7 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | 2026-08-15T17:30Z | 実装担当（AI） | R1 findings 修正完了（FIXED_BY_IMPLEMENTER のみ。VERIFIED_CLOSED は Reviewer のみ） | なし（修正待ちは Reviewer の Round 2） | unit 446 assert 全 PASS + shellcheck 0 + integration（mid_dml_replayed=1 / drill RPO 60s）成功。§6 の各 finding に修正内容と回帰テストを追記。Round 2 では OPEN issue + fix delta + direct regression を依頼 |
 | 2026-08-15T18:00Z | 独立 Reviewer（Round 2） | REVIEWABLE（PRE_MERGE） | 残る OPEN は P2（P2-03 順序 / P2-04 trap / P2-02 evidence / P2-06・P2-07 DEFERRED 提案 / 新規 R2-P2-01） | P0/P1 全 VERIFIED_CLOSED。unit 426 assert 全 PASS、GATE-01〜05/07/08 PASS。PROD-001〜008 未確定のため production-ready とは判定しない |
 | 2026-08-15T19:00Z | 実装担当（AI） | R2 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 後の独立 Review） | R2-P2-01（RESET MASTER を承認後に移動）/ P2-02（rotate-key 順序）/ P2-03（trap_add dispatcher + option file 回帰）/ P2-04（evidence の restore-svc-pw 除去 + demo 後処理）/ P2-05（counts 静止区間内採取）/ P2-06（drill base_full 修正）。unit 428 assert 全 PASS + shellcheck 0 + integration SUCCESS（mid_dml_replayed=1） |
+| 2026-08-15T20:00Z | 独立 Reviewer（Round 3） | REVIEWABLE（PRE_MERGE）維持 | OPEN は P2×2（R3-P2-01 TMPDIR / R2-P2-04 evidence password 残存） | R2 残 P2 を実測検証（rotate-key 実 repo で ROTATED 完走 / trap 連結 / counts 静止区間 / RESET MASTER 順序 / 主要 attack 再回帰）。VERIFIED_CLOSED 21 件。GATE-06 は PROD-007 未確定で BLOCKED 継続 |
+| 2026-08-15T20:30Z | 実装担当（AI） | R3 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 済み commit + merge delta + main 上の回帰の独立 Review 後） | R3-P2-01（`${TMPDIR:-/tmp}` 化、retention.sh の同種箇所も。TMPDIR 未設定 rotation の回帰テスト追加）/ R2-P2-04 残存分（evidence の全 password file 除去 + demo 後処理に repo-password 追加）。unit 430 assert 全 PASS + shellcheck 0 |
 
 Decisionは`REVIEWABLE / PASS / FAIL / BLOCKED`のいずれかとする。`REVIEWABLE`はmerge前、`PASS`はmerge済みcommitとmerge deltaを独立Reviewした場合だけ使用する。

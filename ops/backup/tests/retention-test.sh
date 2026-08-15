@@ -423,6 +423,15 @@ EOF
   assert_zero "$?" "rotation 成功"
   assert_eq "new-key-value" "$(cat "$T/pw-file")" "キーが切替わる"
   assert_contains "$OUT" '"state": "ROTATED"' "ROTATED を返す"
+
+  # R3 P2-01: TMPDIR 未設定（production compose 既定）でも動作すること
+  unset TMPDIR
+  printf 'old-key-value\n' > "$T/pw-file2"
+  printf 'new-key-value2\n' > "$T/new-key2"
+  export RESTIC_PASSWORD_FILE="$T/pw-file2"
+  OUT=$("$ROTATE" --new-key-file "$T/new-key2" 2>&1)
+  assert_zero "$?" "TMPDIR 未設定でも rotation 成功"
+  assert_eq "new-key-value2" "$(cat "$T/pw-file2")" "TMPDIR 未設定でもキーが切替わる"
 }
 
 run_case case_retention_window_all_kept

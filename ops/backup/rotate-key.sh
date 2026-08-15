@@ -62,7 +62,7 @@ main() {
   # 2) R2 P2-03: 新キーを repository に追加してから verify する
   #    （key add 前の新キー verify は実 restic repo では必ず失敗するため）
   local add_log
-  add_log="$TMPDIR/key-add.log"
+  add_log="${TMPDIR:-/tmp}/key-add.log"
   if ! RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
     "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key add \
       --new-password-file "$NEW_KEY_FILE" > "$add_log" 2>&1; then
