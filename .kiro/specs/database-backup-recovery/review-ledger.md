@@ -34,7 +34,7 @@
 | HFP-03-009 | REVIEWABLE | NOT_REVIEWED | `ops/backup/cutover.sh`（新規）, `rollback-cutover.sh`（新規）, `lib/cutover-state.sh`（新規）, `providers/write-enable-local.sh`（新規）, `runbooks/restore-cutover.md`（新規）, `tests/cutover-test.sh`（新規） | cutover-test.sh 25 assert 全 PASS（正常 write-enabled / smoke 失敗 → rolled-back exit 3 / validation 未 READY / 同一 actor 承認拒否 / write-enable 失敗 → single-writer 維持 / 既 write-enabled / smoke 未設定 / write-enabled 後 rollback 禁止 / rollback 正常 / single-writer から rollback / 旧環境 smoke 失敗 → rollback 拒否）。shellcheck exit 0。隔離 Demo: validate READY → cutover（実 target UUID・実 write-enable provider → control schema 反映 count=1）→ write-enabled 後 rollback 拒否 → smoke 失敗で rolled-back | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-009/`（cutover-result.json=`335acdfc...` cutover-state.txt=`95aafa1d...` rollback-refused.txt=`e4bc79c5...` cutover-smoke-fail.txt=`ff84db91...` cutover-state2.txt=`b8f26210...` validate-result.json=`d3a932fe...` write-enabled-count.txt=`4355a46b...`） | 実装中発見: EXIT trap から local 変数参照で set -u に違反（rc=1）→ グローバル経由に修正（review 対象）。write-enable provider は隔離環境向けで、production は HFP-03-PROD-004 の write 再開手順を実装する |
 | HFP-03-010 | REVIEWABLE | NOT_REVIEWED | `ops/backup/retention.sh`（新規）, `rollback-cutover.sh` 修正なし, `lib/dependency-graph.sh`（新規）, `rotate-key.sh`（新規）, `runbooks/key-rotation.md`（新規）, `tests/retention-test.sh`（新規）, `tests/health-test.sh`（flaky assert 修正） | retention-test.sh 48 assert 全 PASS（PITR window 全保持 / daily・weekly 代表 / 旧 chain 削除候補 / 最新 full 常時保持 / full-only weekly・monthly / 孤立 snapshot / 依存欠損 → PITR_AVAILABLE=false / writer role 拒否 / role 未設定 / dry-run は restic に触れない / NO_OP / apply 実行（実在 id のみ forget）/ report 不一致拒否 / 同一 actor 拒否 / prune 競合（lock timeout → alert）/ key rotation old/new）。shellcheck exit 0。隔離 Demo: 実 restic repo（4 snapshot）→ synthetic index → dry-run（FULL-OLD/D 検出）→ 二者承認 apply → D のみ prune（A/B/C 保持）→ plan 生成 + restore verify（payload 一致）→ writer role で delete 拒否 | `target/backup-recovery-evidence/20260814-hfp03/HFP-03-010/`（dry-run.json=`aafbb76d...` apply-result.json=`1cd96ee9...` snapshots-after.txt=`a79cf728...` plan-result.txt=`3ce87833...` restore-verify.txt=`8c1561a6...` writer-denied.txt=`8169bd4a...`） | 実装中発見: restic 0.17 は `forget --keep-snapshot` 廃止 → 位置引数 + `snapshots --json` との intersection 方式へ（review 対象）。`show config` は 0.17 で廃止 → `cat config`。apply の forget は repository に実在する id のみを渡す（不存在 id は skipped_absent_count に計上） |
 | HFP-03-011 | REVIEWABLE | NOT_REVIEWED | `ops/backup/tests/docker-compose.integration.yml`（新規）, `tests/integration-pitr.sh`（新規）, `tests/run-integration.sh`（新規）, `Dockerfile`（integration-pitr.sh COPY）, `.github/workflows/ci.yml`（backup-integration job 追加）, `scripts/verify-like-ci.sh`/`.ps1`（integration suite 実行）, `.gitignore` | integration suite: 実 MySQL 8.0.36（source/target 別コンテナ・internal network・host port なし）で preflight → full → checkpoint → after marker 注入 → plan → restore → validate（before=1/after=0 を DB/uploads 両方で照合）→ READY_FOR_CUTOVER → secret scan 0 → evidence SHA 記録。全ステップ非 0 で失敗（skip/BLOCKED は CI で失敗扱い）。unit suite は 389 assert 全 PASS + shellcheck exit 0 | `ops/backup/tests/.integration-work/evidence/`（integration-summary.json=`76b90909...` validate.json=`354d90f6...` target-markers.txt=`b4eedf85...` uploads-markers.txt=`f483a044...` restore.log=`8ae802a7...`） | CI の backup-integration job は Docker 必須（無ければ job 失敗）。ローカルの verify-like-ci は Docker なしで integration 部分を失敗扱いとし、CI と同一契約にする |
-| HFP-03-012 | NOT_STARTED | NOT_REVIEWED | | | | |
+| HFP-03-012 | REVIEWABLE | NOT_REVIEWED | `ops/backup/restore-drill.sh`（新規）, `runbooks/restore-drill.md`（新規）, `runbooks/restore-failure-modes.md`（新規）, `tests/drill-test.sh`（新規）, `README.md`（retention/drill/テスト節追加）, `tests/run-integration.sh`（drill 実行を追加） | drill-test.sh 16 assert 全 PASS（正常 SUCCESS + 5 segments / plan 失敗 / validate 未 READY / evidence 欠如 / ping のみの代替拒否 / RTO 超過 / ドリルでの write-enable 拒否）。unit 全 405 assert + shellcheck exit 0。integration suite + drill: 実 MySQL で plan → integrity → restore → validate（READY）→ cutover リハーサル（rolled-back）→ RPO 60s / RTO OK を記録 | `ops/backup/tests/.integration-work/evidence/`（integration-summary.json=`9df7b655...` drill-report.json=`86e877ae...` validate.json=`255f659c...` target-markers.txt=`b4eedf85...` uploads-markers.txt=`f483a044...`） | 実装中発見: validate の report に stderr が混入するため drill は `sed -n '/^{/,$p'` で JSON 抽出（review 対象）。drill は write-enable を実施しない（write-enabled になったら drill 失敗）。HFP-03-PROD-007（representative profile）は BLOCKED 継続 |
 
 task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED` のみ。必須 task/acceptance を免除して PASS にしない。P2/NOTE の延期は findings へ `DEFERRED` として発注者承認、期限、risk owner、release 影響、代替 control を記録する。
 
@@ -80,9 +80,9 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 | HFP-03-RQ-011 | HFP-03-AC-011-02 | HFP-03-008,011 | `lib/validate-uploads.sh`（inventory の SHA 照合 / DB→uploads 参照 / orphan report） | restore-validation-test.sh: hash_mismatch / missing_reference / orphan_reported。integration: uploads staging の marker-before のみ | Demo: staging 1 件削除 → uploads_hash=FAIL | NOT_REVIEWED |
 | HFP-03-RQ-011 | HFP-03-AC-011-03 | HFP-03-008,009,011 | read-only app smoke（APP_SMOKE_SCRIPT）→ 全 PASS のみ READY_FOR_CUTOVER | restore-validation-test.sh: smoke_failure / no_smoke_script | Demo: smoke PASS を含む全 PASS | NOT_REVIEWED |
 | HFP-03-RQ-011 | HFP-03-AC-011-03 | HFP-03-011 | CI artifact: テスト数/failure/skip=0 契約（ci.yml の Ensure no tests were skipped）+ backup-integration job（Docker 必須）+ evidence SHA 記録 + secret grep 0 | ci.yml: backup-integration job / verify-like-ci.sh: 同一契約 | integration suite の evidence SHA を ledger に記録 | NOT_REVIEWED |
-| HFP-03-RQ-012 | HFP-03-AC-012-01 | HFP-03-005,012 | | | | NOT_REVIEWED |
-| HFP-03-RQ-012 | HFP-03-AC-012-02 | HFP-03-012 | | | | NOT_REVIEWED |
-| HFP-03-RQ-012 | HFP-03-AC-012-03 | HFP-03-009,012 | `cutover.sh` + `rollback-cutover.sh`（CUTOVER_STATE_FILE で単一の真実、write-enable 前のみ rollback） | cutover-test.sh: 状態遷移 guard 一式 | Demo: write-enabled → rollback 拒否 | NOT_REVIEWED |
+| HFP-03-RQ-012 | HFP-03-AC-012-01 | HFP-03-005,012 | `check-backup.sh`（drill overdue 検出）+ `restore-drill.sh`（実 script での定期リハーサル） | health-test.sh: drill_overdue / drill-test.sh: 全 case | integration: drill 実行で RPO/RTO 記録 | NOT_REVIEWED |
+| HFP-03-RQ-012 | HFP-03-AC-012-02 | HFP-03-012 | drill report（RPO/RTO segment 時間・markers・plan/manifest SHA・evidence 欠如は非 0） | drill-test.sh: evidence_missing / rto_exceeded / plan_fail | integration: drill-report.json に segments 記録 | NOT_REVIEWED |
+| HFP-03-RQ-012 | HFP-03-AC-012-03 | HFP-03-009,012 | `cutover.sh` + `rollback-cutover.sh`（CUTOVER_STATE_FILE で単一の真実、write-enable 前のみ rollback） | cutover-test.sh: 状態遷移 guard 一式。drill-test.sh: write_enable_refused | Demo: write-enabled → rollback 拒否 / drill: write-enable せず rolled-back | NOT_REVIEWED |
 
 ## 4. Safety/quality gates
 
@@ -101,23 +101,23 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 
 | Segment | Start UTC | End UTC | Duration | Result | Evidence |
 |---|---|---|---:|---|---|
-| incident/request | | | | NOT_RUN | |
-| plan + approval | | | | NOT_RUN | |
-| download + integrity | | | | NOT_RUN | |
-| DB full + binlog replay | | | | NOT_RUN | |
-| uploads staging | | | | NOT_RUN | |
-| validation + read-only smoke | | | | NOT_RUN | |
-| cutover/read-write approval | | | | NOT_RUN | |
+| incident/request | 2026-08-15T07:00:00Z | 2026-08-15T07:00:09Z | 9s | PASS（plan 検証 + RPO 60s 記録） | drill-report.json |
+| plan + approval | 2026-08-15T07:00:09Z | 2026-08-15T07:00:09Z | 0s | PASS（既存 plan を verify） | drill-report.json segments[0] |
+| download + integrity | 2026-08-15T07:00:09Z | 2026-08-15T07:00:10Z | 1s | PASS（restic check + restore verify） | drill-report.json segments[1] |
+| DB full + binlog replay | 2026-08-15T07:00:10Z | 2026-08-15T07:00:14Z | 4s | PASS（dump import + replay + uploads staging） | drill-report.json segments[2] |
+| uploads staging | 同上 | 同上 | 同上 | PASS（marker-before のみ） | target-markers.txt / uploads-markers.txt |
+| validation + read-only smoke | 2026-08-15T07:00:14Z | 2026-08-15T07:00:14Z | 0s | PASS（READY_FOR_CUTOVER） | drill-report.json segments[3] |
+| cutover/read-write approval | 2026-08-15T07:00:14Z | 2026-08-15T07:00:14Z | 0s | PASS（write-enable せず rolled-back） | drill-report.json segments[4] |
 
-- Requested target UTC: NOT_SET
-- Effective checkpoint UTC: NOT_SET
-- RPO: NOT_SET
-- Base full ID / uploads ID / binlog start-stop: NOT_SET
-- Plan SHA / manifest SHA: NOT_SET
-- Representative profile ID / SHA / tolerance result: NOT_SET / NOT_SET / NOT_RUN
-- Marker before DB/file: NOT_RUN / NOT_RUN
-- Marker after DB/file absent: NOT_RUN / NOT_RUN
-- Source before/after SHA equal: NOT_RUN
+- Requested target UTC: 2026-08-15T07:00:09Z（checkpoint + 60s）
+- Effective checkpoint UTC: 2026-08-15T06:59:09Z
+- RPO: 60s（<= 900s 目標）
+- Base full ID / uploads ID / binlog start-stop: drill-report.json（plan_id=`d754c4384092e1a0`）
+- Plan SHA / manifest SHA: drill-report.json の plan_sha256
+- Representative profile ID / SHA / tolerance result: NOT_SET / NOT_SET / NOT_RUN（HFP-03-PROD-007 BLOCKED）
+- Marker before DB/file: 1 / 1（target-markers.txt / uploads-markers.txt）
+- Marker after DB/file absent: 0 / 0（同上）
+- Source before/after SHA equal: PASS（source-state.txt、integration-pitr.sh step 12）
 
 ## 6. Findings
 
@@ -191,6 +191,8 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | `ops/backup/tests/.integration-work/evidence/target-markers.txt` | `b4eedf8532ab64c4906f5ef86070330c775cdcc60b478c71f29291f8bd99fa54` | 同上 | 同上 | 同上 |
 | `ops/backup/tests/.integration-work/evidence/uploads-markers.txt` | `f483a04448d97b84bb9d194f21dd97632896ed411a68302fdfd18ed44747dbbe` | 同上 | 同上 | 同上 |
 | `ops/backup/tests/.integration-work/evidence/restore.log` | `8ae802a77ec48604bc69b6664f10a786f66735ea6f0629e96bb2f223ffbd0aa5` | 同上 | 同上 | 同上 |
+| `ops/backup/tests/.integration-work/evidence/integration-summary.json` | `9df7b655a8609ede38b326c3d5d923fe8c8d08e0a6dc5b8f462acea3cfccdaa6` | HFP-03-012 integration + drill | secret grep 0 | gitignore 対象 |
+| `ops/backup/tests/.integration-work/evidence/drill-report.json` | `86e877ae08db563d148e77c118d27dd01dc76b6b2969f7bbe4fdfa0ebe67e30c` | 同上（drill の RPO/RTO segment 記録） | 同上 | 同上 |
 
 ## 8. Final decision history（追記）
 

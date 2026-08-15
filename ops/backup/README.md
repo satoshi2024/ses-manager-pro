@@ -37,7 +37,6 @@ docker compose run --rm snapshot-binlog
 # 4. 監視（watermark 基準。alert は外部へ routing）
 docker compose run --rm check --json
 ```
-
 `MYSQL_PWD` 環境変数は使わない。秘密は 0600 の一時 option file 経由で渡す。
 
 ## 権限分離（RQ-008）
@@ -63,8 +62,10 @@ docker compose run --rm check --json
 
 # apply は target guard と二者承認を通過した plan だけ
 ./restore.sh   --plan <plan-id> --approval <file1> --approval <file2>
-./validate-restore.sh --plan <plan-id>
+./validate-restore.sh --plan <plan-id> --uploads-dir <staging> --smoke <script>
 ./cutover.sh   --plan <plan-id> --approval <file1> --approval <file2>
+# rollback（write-enable 前のみ。旧環境の read-only smoke が PASS した場合だけ）
+./rollback-cutover.sh --plan <plan-id>
 ```
 
 **禁止:** 稼働中 DB への in-place import、`CONFIRM_RESTORE=YES` 固定文字列での実行、
@@ -75,8 +76,20 @@ docker compose run --rm check --json
 `check-backup.sh --json` は最新 watermark（full/checkpoint/closed binlog の repository 到達点）と
 source 現行 coordinate の差で判定する。古い file の存在だけでは FAIL にしない。
 
-## 演習
+## retention（依存グラフに基づく削除）
 
-四半期ごと、および tool/image/restore 変更時に `restore-drill.sh` を隔離環境で実施する。
-source/target は別 container/network/credential とし、本番 repository/secret を mount しない。
-RPO ≤ 15 分、RTO ≤ 4 時間を実測し、`review-ledger.md` へ証跡 SHA を記録する。
+- `retention.sh --dry-run`（変更なし。PITR 30 日 + 日次/週次/月次代表 + full-only）
+- `retention.sh --apply --report <report> --approval <c1> --approval <c2>`
+  （report 再計算で一致確認 → 二者承認 → maintenance lock → forget --prune）
+- `RETENTION_ROLE=retention|admin` 以外では実行不可（writer は削除できない）
+- key rotation は `rotate-key.sh --new-key-file <file>`（旧・新の両キーで restore verify 成功時のみ切替え）。手順は `runbooks/key-rotation.md`
+
+## 演習（restore drill）
+
+四半期ごと、および tool/image/restore 変更時に `restore-drill.sh` を隔離環境で実施する。source/target は別 container/network/credential とし、host port を公開しない。drill は plan → integrity → restore → validate（read-only smoke）→ cutover リハーサル（write-enable せず rollback）まで実 script で実行し、RPO/RTO segment 時間と evidence SHA を記録する。`mysqladmin ping` のみの代替確認は受け付けない。手順は `runbooks/restore-drill.md`、障害モード別対応は `runbooks/restore-failure-modes.md`。
+
+## テスト
+
+- unit: `tests/run-unit-tests.sh`（fake CLI に対する全 script の検証、Docker 必須）
+- integration: `tests/run-integration.sh`（実 MySQL 8.0.36 ×2 コンテナで実 PITR、before/after marker 照合。CI の `backup-integration` job と同一）
+- ローカルで CI と同じ範囲を確認する場合は `scripts/verify-like-ci.sh`

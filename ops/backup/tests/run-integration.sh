@@ -104,6 +104,47 @@ if [[ "$PITR_RC" -ne 0 ]]; then
   exit 1
 fi
 
+echo "== restore-drill 実行（実環境に対する drill。RPO/RTO segment 記録） =="
+PLAN_ID=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
+  jq -r '.plan_id' /work/integration-summary.json)
+printf '#!/usr/bin/env bash\nexit 1\n' > "$WORK/drill-cutover-smoke.sh"
+chmod +x "$WORK/drill-cutover-smoke.sh"
+# drill の restore 用に target を初期化（target guard の空チェックを通す）
+docker exec ses-bkup-int-target mysql -uroot -p"$INTEGRATION_TGT_PW" \
+  -e "DROP DATABASE IF EXISTS ses_manager_db; CREATE DATABASE ses_manager_db;" > /dev/null 2>&1
+docker run --rm --network "$NET" \
+  -e TARGET_HOST=ses-bkup-int-target -e TARGET_PORT=3306 -e TARGET_USER=restore-svc \
+  -e TARGET_PASSWORD_FILE=/work/restore-svc-pw -e TARGET_DATABASE=ses_manager_db \
+  -e TARGET_ALLOWLIST_FILE=/work/target-allowlist.txt \
+  -e APPROVAL_PUBKEY_DIR=/work/pubkeys \
+  -e INDEX_DIR=/work/work/index -e BINLOG_INDEX=/work/immutable/binlog-index.json \
+  -e PLANS_DIR=/work/plans -e BACKUP_WORK_DIR=/work/work \
+  -e SOURCE_HOST=ses-bkup-int-source -e SOURCE_PORT=3306 \
+  -e RESTIC_PASSWORD_FILE=/work/repo-password -e RESTIC_REPOSITORY=/work/repo \
+  -e BACKUP_REPOSITORY=/work/repo \
+  -e TARGET_SSL_CAPATH=/work/capath-tgt -e TARGET_TLS_MODE=VERIFY_CA \
+  -e APP_SMOKE_SCRIPT=/work/drill-cutover-smoke.sh \
+  -e DRILL_SMOKE_SCRIPT=/work/smoke.sh \
+  -e RTO_SECONDS=14400 -e RPO_MAX_SECONDS=900 \
+  -v "$WWORK:/work:rw" \
+  ses-backup-tool:integration /usr/local/bin/restore-drill.sh \
+  --plan "$PLAN_ID" \
+  --approval /work/claim-alice.json --approval /work/claim-bob.json \
+  --report-dir /work/drill-evidence
+DRILL_RC=$?
+if [[ "$DRILL_RC" -ne 0 ]]; then
+  echo "FAIL: restore-drill（rc=$DRILL_RC）" >&2
+  exit 1
+fi
+docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
+  jq '{state, rpo_seconds, rto_seconds, total_seconds, rto_ok, rpo_ok, segments}' \
+  /work/drill-evidence/drill-report.json | tee "$WORK/evidence/drill-report.json"
+if ! docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
+  jq -e '.rto_ok == true and .rpo_ok == true' /work/drill-evidence/drill-report.json > /dev/null; then
+  echo "FAIL: drill の RPO/RTO が目標内にない" >&2
+  exit 1
+fi
+
 echo "== 結果検証 =="
 SUMMARY="$WORK/integration-summary.json"
 [[ -f "$SUMMARY" ]] || { echo "FAIL: summary がありません" >&2; exit 1; }

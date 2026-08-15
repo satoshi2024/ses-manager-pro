@@ -151,7 +151,7 @@
   - **Evidence:** CI URL/artifact SHA、test report、skip count、secret scan、source invariance report。
   - **失敗/rollback:** CI job を optional/allow-failure にしない。既存 CI を壊す場合は原因を直し、test を削除/skip して green にしない。
 
-- [ ] **HFP-03-012 — 実 restore drill、RPO/RTO、runbook を完了する**
+- [x] **HFP-03-012 — 実 restore drill、RPO/RTO、runbook を完了する**
 
   - **依存:** HFP-03-001〜HFP-03-011
   - **対応要求:** HFP-03-RQ-010、HFP-03-RQ-011、HFP-03-RQ-012
