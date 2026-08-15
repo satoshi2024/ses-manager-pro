@@ -1,0 +1,10 @@
+{
+  "statements": [
+    {
+      "employee_id": "501",
+      "gross_amount": null,
+      "deductions": null,
+      "net_amount": null
+    }
+  ]
+}

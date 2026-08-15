@@ -11,6 +11,8 @@ import java.time.LocalDateTime;
 public class FreeeEmployeeLink extends BaseEntity {
     private Long engineerId;
     private String freeeEmployeeId;
+    /** freee事業所ID。NULLは接続companyが確定できないlegacy行（要再確認）で、給与表示には使用しない。 */
+    private Long freeeCompanyId;
     private LocalDateTime confirmedAt;
     private Long confirmedBy;
 }

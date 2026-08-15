@@ -183,6 +183,11 @@ public class SecurityConfig {
                 .hasAnyRole("管理者", "HR", "マネージャー")
                 // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
                 .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
+                // ===== HFP-01: freee給与連携の静的境界（menu権限は第三層。UI非表示だけを境界にしない） =====
+                // OAuth認可・callback・解除は管理者のみ（callbackも有効な管理者sessionを要求）
+                .requestMatchers("/integrations/freee/**").hasRole("管理者")
+                // 給与page/APIは管理者・HRのみ
+                .requestMatchers("/payroll/**", "/api/payroll/**").hasAnyRole("管理者", "HR")
                 // ===== 要員を含む全認証ユーザーが利用できる共通経路 =====
                 // 新たに認証ユーザー全体向け機能を追加する場合は必ずここへ追記すること。
                 //   /                    ← ロール別振り分けルーター（LoginSuccessHandler が全ロールを / へ送る）

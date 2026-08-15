@@ -9,6 +9,19 @@
 
 実装開始時に上記commitと公式release noteの差分を確認する。新しいcommitがあるだけでは自動更新せず、本specの契約に影響する差分を記録してからfixtureと実装を同時に更新する。
 
+### 実装開始時再確認（2026-08-14実施）
+
+- `52c69a6819ef14979a31b342123df816cb72c742`（freee-api-schema）: **存在確認PASS**（2026-08-07 "Update schema files"）。このcommit自体の変更は`sm/open-api-3/api-schema.yml`のみで、`hr/open-api-3/api-schema.json`には触れていない。
+- `hr/open-api-3/api-schema.json`の最終更新commitは`eb31780dd...`（2026-07-09、Revert/Revert後）であり、固定commit（2026-08-07）時点の内容は調査日時点と同一。固定commit以後に同fileへ触れたcommitはない（2026-08-14確認）。**契約差分なし**。
+- `826e22555a9befe5a672e9bdfc23070676f41969`（freee-mcp）: **存在確認PASS**（v0.32.3 release、参照のみ）。
+- 固定OpenAPIの該当endpoint/fieldを直接確認済み（2026-08-14、`hr/open-api-3/api-schema.json`）:
+  - `GET /api/v1/users/me` → `{id, companies:[{id, name, role, external_cid, employee_id, display_name}]}`。role enumに`company_admin`/`self_only`/`attendance_manager`/`physician`/`shift_admin`/`time_clock_device_setter`（`BP`は存在しない）。
+  - `GET /api/v1/companies/{company_id}/employees` → **raw配列**。query: `limit`(1-100, default 50), `offset`(default 0), `with_no_payroll_calculation`。要素: `id`, `num`, `display_name`, `entry_date`, `retire_date`(nullable), `payroll_calculation`, 等。
+  - `GET /api/v1/salaries/employee_payroll_statements` → **必須query: `company_id`/`year`/`month`**、`limit`/`offset`。root: `employee_payroll_statements` + `total_count`。合計: `gross_payment_amount`/`total_deduction_amount`/`net_payment_amount`/`total_deduction_employer_share`（全てJSON string、nullable）。明細配列: `payments`/`deductions`/`deductions_employer_share`（要素は`{name, amount}`、amountはstring）。
+  - `GET /api/v1/bonuses/employee_payroll_statements` → root/queryは給与と同様。明細配列: `allowances`/`deductions`。
+  - `calc_status`: `calculating`/`calculated`/`overwritten`/`imported`/`error`。計算中は金額null・配列空。
+- 外部条件（freee test事業所）: 環境変数`FREEE_CLIENT_ID`等は**未設定**。HFP-01-011のsandbox E2Eは`BLOCKED`。
+
 ## 2. 公式資料と確定事項
 
 | ID | 公式資料 | このspecで確定した事項 |
@@ -80,3 +93,13 @@
 6. 実装着手時の最新Flyway version。既存V21や適用済みmigrationを編集せず、必要なforward migration番号をここで確定する。
 
 credentialが用意できない場合は値を対話やrepositoryへ貼らず、環境変数提供を依頼する。自動testの実装は継続できるがsandbox E2Eと全体完了は`BLOCKED`のままとする。
+
+## 7. 実装開始時（2026-08-14）の再確認結果
+
+- 固定OpenAPI commit `52c69a6819ef14979a31b342123df816cb72c742` は公式 `freee/freee-api-schema` に存在することを確認（GitHub API）。
+- 固定commitのtree（`a9f4f050...`）と、`hr/open-api-3` を最後に変更したcommit（2026-07-09 `eb31780d...`、tree `09475783...`）の `hr` ディレクトリSHAはいずれも `dabfbf4a...` で一致。**固定commit以降、hr schemaに差分なし**（差分が発生したのは `sm/open-api-3` のみで、本specの契約に影響しない）。
+- 公式実装参考commit `freee/freee-mcp@826e22555a9befe5a672e9bdfc23070676f41969` も存在確認（v0.32.3 release）。
+- 実装正本は固定commitのまま。fixture/実装を更新する必要は無い。
+- **Flyway採番**: 実装時は最新 `V102`。`V103`〜`V108` は S12〜S17（`staffing-capacity-planning` 等）の予約番号であり、`SpecDispatchConsistencyTest` / `ReviewerVerificationMigrationOrderContractTest` が実在を禁止する。HFP-01-002のmigrationは既存の `V66_1`/`V74_1`/`V79_1` と同じ V102系サブ番号を採番した。初回実装（`V103`）は契約testで検出され、未適用のまま `V102_2` へリネームした（適用済みmigrationの変更ではない）。
+- **merge-prep訂正（2026-08-16, coordinator）**: main 側に R23-P1-01 の `V102_1`/`V102_2`/`V102_3` が追加され `V102_2` が衝突したため、HFP-01-002 の migration を **`V102_4`（Flyway表記 V102.4）** へ再リネームした（未適用のため安全）。順序は 102 < 102_1 < 102_2 < 102_3 < 102_4 < 103 で契約testと両立する。
+- freee table（`t_freee_connection` / `t_freee_employee_link`）は V21 導入のpost-baseline tableであり、V1 へ追加しない。
