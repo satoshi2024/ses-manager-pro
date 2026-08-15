@@ -62,6 +62,12 @@ class ContractServiceImplTest {
     @Mock
     private com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
 
+    @Mock
+    private com.ses.mapper.ProjectPositionMapper positionMapper;
+
+    @Mock
+    private com.ses.service.staffing.StaffingContractSyncService staffingSync;
+
     @InjectMocks
     private ContractServiceImpl contractService;
 

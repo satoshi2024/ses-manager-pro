@@ -2,6 +2,10 @@
 -- MySQL固有DDL(ENGINE/COLLATE/COMMENT)はH2方言へ読み替える（platform-invariants §4.3）。
 -- 共有H2は複数contextでschema-locationsを再実行するため、冪等に再構築する。
 
+-- 共有H2のt_contractはV12(renewed_from_contract_id)をreplayしていないため、
+-- Contract entityの全列SELECT（staffingの契約同期/集計）に備えて補完する。
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS renewed_from_contract_id BIGINT;
+
 -- ---- proposal/contractへposition_id ----
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS position_id BIGINT;
 ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS position_id BIGINT;

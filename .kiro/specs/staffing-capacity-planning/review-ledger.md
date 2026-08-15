@@ -2,8 +2,9 @@
 
 ## 現行判定
 
-- **T075 F1: 完了（REVIEW待ち）** 2026-08-15
-- T076〜T080: 未着手
+- **T075 F1: 完了**（commit `a691f77e`）
+- **T076 F2: 完了（REVIEW待ち）** 2026-08-16
+- T077〜T080: 未着手
 
 ## READINESS（着手時）
 
@@ -82,4 +83,82 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 
 ## Commit
 
-- T075: （本ledger更新と同じcommitに含める）
+- T075: `a691f77e` feat(staffing): T075 F1 position/allocation/scenario DDL（V103・過配賦日単位判定・例外承認・scenario isolation）
+- T076: （本ledger更新と同じcommitに含める）
+
+---
+
+## TASK CONTRACT T076（F2. proposal/contract/availability統合）
+
+- requirements/AC: R1.3（position充足自動更新＝actualで導出）、R2.3（実契約をactual allocationとして表示）、
+  R2.4（退職/休暇/契約終了/更新decisionをcapacityへ反映）、R5（plan/actual二重計上0）
+- 決定表はdesign.md §5の確定済み3表をそのまま実装（読み替えなし）
+
+### 実装内容
+
+- **proposal/contractのposition link**: ProposalServiceImpl.save/updateByIdでポジションは案件配下の
+  実在ポジションに限定（`error.staffing.positionProjectMismatch`）。ContractServiceImpl.validateでも
+  同様に検証。createDraftFromProposalは提案のposition_idをドラフトへ引き継ぐ。
+- **actual allocation同期**（`StaffingContractSyncService`）: 契約の変更経路（saveWithBusinessRules/
+  updateWithBusinessRules/changeStatus/removeById）から呼び、準備中/稼動中→actual行をupsert
+  （配賦率100・status=確定）、終了/解約/ポジション解除/削除→破棄。冪等（同一契約1行）。
+  同一engineer+positionの確定planはactual成立でsupersede（破棄・FOR UPDATE付き）。
+- **需給集計**（`StaffingCapacityService`）:
+  - plan/actualの排他はSQLのWHERE句（source_contract_id IS NULL/NOT NULL）で実施（design §5.4）。
+  - 月別FTE = 月内の稼働可能日数（m_work_calendar day_type='通常'・承認済休暇控除後、無い場合は法人既定=平日）
+    に対する在籍日数比 × 配賦率。cap=配賦率（休暇で契約FTEを自動変更しない。design §5.2）。
+  - 更新済契約（autoRenew=1∧assumeRenew∧renewalDecision≠'END'）は終了日以降もactualとして延長
+    （UtilizationCalcService.isActiveInMonthと同一規則）。
+  - 退場予定（engineer.status='退場予定'）は最終契約終了日以降の供給と稼働可能日数を0にする。
+  - 稼働率はUtilizationCalcServiceへ委譲しdashboard KPIと同一値（design §5.1）。
+
+### 実装の具体化（specの文言が曖昧だった箇所、判定・根拠）
+
+1. actual行の配賦率は100%（契約＝フルコミットメント）とし、過配賦の100%判定はplan確定時のみ
+   （actualは事実の反映であり拒否しない。過剰実績は集計にそのまま表れ、plan確定側が抑制される）。
+2. 退職日は明示列が無いため「退場予定＋最終契約終了日」で反映（DashboardServiceImplの退場予定
+   リストと同じ契約終了日ベース）。
+3. 休暇の日割りは LeaveMinutesCalculator と同じ種別振り分け（全日=1/日、半休=0.5/日、時間休=min(1, 分/480)）。
+4. 更新継続の判定は契約単位で行うため、actual行の期間重なり判定をJava側で行う
+   （対象は要員1人分の行のみ。全engineer×全dayの直積にはならない。SQLはactual/planの排他と
+   engineer境界だけを担う）。
+
+## 変更file（T076）
+
+| 種別 | file |
+|---|---|
+| service | `service/staffing/StaffingContractSyncService`(+Impl)、`service/staffing/StaffingCapacityService`(+Impl・EngineerMonthSupply record) |
+| hook | `ContractServiceImpl`（position検証＋syncActual/removeActual hook×4経路＋DraftSource.positionId）、`ProposalServiceImpl`（position検証） |
+| message | 4バンドルへ `error.staffing.positionProjectMismatch` 追加 |
+| H2同期 | `schema-staffing-h2.sql` へ共有H2のt_contract補完（renewed_from_contract_id。V12はH2 replay対象外のため） |
+| test | `StaffingContractSyncTest`（8件）、`StaffingCapacityServiceTest`（6件） |
+
+## Test evidence（T076）
+
+| 実行 | 結果 |
+|---|---|
+| 直接回帰（clean build）: ContractServiceImplTest(48)・ProposalServiceImplTest(8)・LeaveApprovalFlowIntegrationTest(2)・DashboardServiceImplTest(17)・SalesPerformanceServiceImplTest(9)・staffing 4クラス(35)・AllMappersSchemaSweepTest(133)・MigrationScriptIntegrityTest(27)・MessageBundleConsistencyTest(4) | 289/0/0/0 PASS |
+| `git diff --check` | exit 0（コミット前に実施） |
+
+受入条件の実測:
+- 契約作成（準備中）→ actual行1件（確定・100%）。再同期でも1件（冪等）
+- 契約更新でactualの期間/ポジション追従、終了/解約/削除で破棄
+- 同一engineer+positionの確定planはactual成立でsupersede（plan/actual二重計上なし）
+- 更新済契約（CONTINUE）は終了日以降もactual計上、ENDで停止
+- 退場予定は最終契約終了日以降、供給0・稼働可能日数0
+- 承認済休暇2日で稼働可能日数-2、契約FTEは100%のまま
+- 稼働率はUtilizationCalcServiceと同一口径（dashboard KPI一致）
+- 提案のposition_idが契約ドラフトへ引き継がれactualが作られる
+
+## Demo（T076）
+
+F2もservice層のため、Demoは受入条件を直接assertする上記テスト実行を証跡とする。
+UI Demo（提案→契約でposition充足の表示）はT077で実施する。
+
+## Risk
+
+- MyBatisの1次キャッシュ（SqlSession cache）: 同一transaction内で同一パラメータの再実行は
+  キャッシュが返るため、休暇挿入後の再集計testではclearCache()で対応（productionのsupply()は
+  月/要員ごとに異なるパラメータで呼ばれるため影響なし）。
+- 共有H2のt_contractにrenewed_from_contract_idを補完（既存replay対象外のV12相当）。
+  engineer-schema-h2.sqlでは元々定義済みだったためH2形状の収束先は同一。`

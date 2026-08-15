@@ -23,7 +23,7 @@
   - **Demo**: 兼務50%+50%を登録し、60%+50%が拒否されることを確認。
     1日だけ重複する60%+50%も拒否されることを確認。
 
-- [ ] F2. proposal/contract/availability統合
+- [x] F2. proposal/contract/availability統合
   - **Objective**: 提案と契約がpositionへ紐付き、契約成立でpositionの充足人数が自動更新される。
     退職予定・休暇・契約終了・更新decisionがcapacityへ反映され、同一契約がplanとactualで二重計上されない。
   - **実装ガイダンス**: position link、actual allocation、renewal/leave/retirement。
