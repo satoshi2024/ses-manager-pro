@@ -6,7 +6,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V103**。dispatch（V84/V85＋G2 follow-up V102）とattendance（V83/V91/V98）の両方がPASS・merge済み後に着手する。
+> **Migration**: 本specの正式migrationは **V103**（実装済み。V1統合baseline・H2・MySQL smokeに同期済み）。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [x] F1. position/allocation/scenario DDL
@@ -66,7 +66,7 @@
     owner/共有の区別、共有scenario内の要員一覧が閲覧者scopeでfilterされること。
   - **Demo**: 2scenarioの稼働率/粗利差。scenario操作前後で実データのハッシュが変わらないことを提示。
 
-- [ ] M. 回帰/性能
+- [x] M. 回帰/性能
   - **Objective**: position作成から需給更新までが一気通貫で動き、代表データ量でp95とheapが実測される。
     既存のproject/proposal/contract/analytics機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、MySQL、代表データ量でp95/heap実測、

@@ -6,8 +6,9 @@
 - **T076 F2: 完了**（commit `ec880114`）
 - **T077 A1: 完了**（commit `6e0ddfc9`）
 - **T078 B1: 完了**（commit `f0e7a222`）
-- **T079 B2: 完了（REVIEW待ち）** 2026-08-16
-- T080: 未着手
+- **T079 B2: 完了**（commit `f179a891`）
+- **T080 M: 完了（REVIEW待ち）** 2026-08-16
+- **S12 staffing-capacity-planning: 全task完了（T075〜T080 = [x]）**
 
 ## READINESS（着手時）
 
