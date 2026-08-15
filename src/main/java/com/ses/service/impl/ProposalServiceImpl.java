@@ -33,6 +33,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     private final EngineerStatusService engineerStatusService;
     private final ContractService contractService;
     private final NotificationService notificationService;
+    private final com.ses.mapper.ProjectPositionMapper positionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -46,6 +47,27 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         "成約", Set.of(),
         "見送り", Set.of()
     );
+
+    /** staffing-capacity-planning: ポジション紐付けは案件配下の実在ポジションに限定する。 */
+    @Override
+    public boolean updateById(Proposal entity) {
+        validatePosition(entity);
+        return super.updateById(entity);
+    }
+
+    private void validatePosition(Proposal proposal) {
+        if (proposal.getPositionId() == null) {
+            return;
+        }
+        com.ses.entity.ProjectPosition position = positionMapper.selectById(proposal.getPositionId());
+        if (position == null) {
+            throw BusinessException.of(404, "error.staffing.positionNotFound");
+        }
+        if (proposal.getProjectId() != null
+                && !java.util.Objects.equals(position.getProjectId(), proposal.getProjectId())) {
+            throw BusinessException.of(400, "error.staffing.positionProjectMismatch");
+        }
+    }
 
     @Override
     public List<ProposalKanbanDto> getKanbanList() {
@@ -86,6 +108,7 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Proposal proposal) {
+        validatePosition(proposal);
         if (proposal.getStatus() == null || proposal.getStatus().isBlank()) {
             proposal.setStatus("書類選考中");
         } else if (!"書類選考中".equals(proposal.getStatus())) {

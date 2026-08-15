@@ -46,6 +46,7 @@ spring:
         - classpath:sql/schema-order-acceptance-h2.sql
         - classpath:sql/schema-attendance-h2.sql
         - classpath:sql/schema-dispatch-compliance-h2.sql
+        - classpath:sql/schema-staffing-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

@@ -88,9 +88,16 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     private final ComplianceFindingMapper findingMapper;
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
-    private final com.ses.service.compliance.ComplianceExternalReviewEvaluator externalReviewEvaluator;
+    private final com.ses.service.compliance.ComplianceGateEvaluationService gateEvaluationService;
+    private final com.ses.mapper.ComplianceExternalReviewAdoptionEventMapper adoptionEventMapper;
+    private final com.ses.mapper.ComplianceExternalReviewerVerificationEventMapper verificationEventMapper;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
     private final MessageSource messageSource;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
+    }
 
     @Override
     public List<ComplianceDocumentDeliveryDto> list(Long contractId) {
@@ -131,7 +138,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         // 1. ACTIVE mapping version gate evaluation (§5, §6.4, R6.4, R8.1, S4-1)
         com.ses.entity.ComplianceMappingVersion activeMapping = mappingVersionMapper != null ? mappingVersionMapper.selectOne(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingVersion>()
-                        .eq(com.ses.entity.ComplianceMappingVersion::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingVersion::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingVersion::getMappingCode, "G2-MAPPING")
                         .eq(com.ses.entity.ComplianceMappingVersion::getStatus, "ACTIVE")
                         .eq(com.ses.entity.ComplianceMappingVersion::getActiveSlot, 1)
@@ -147,7 +154,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         // 2. Active responsible assignment for target workplace
         com.ses.entity.ComplianceResponsibleAssignment activeAssignment = assignmentMapper != null ? assignmentMapper.selectOne(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceResponsibleAssignment>()
-                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceResponsibleAssignment::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(com.ses.entity.ComplianceResponsibleAssignment::getActiveSlot, 1)
                         .last("LIMIT 1")) : null;
@@ -163,11 +170,11 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         // 3. Valid unrevoked approval event (action = "APPROVE", countSubsequentRevokes == 0)
         com.ses.entity.ComplianceMappingApprovalEvent approvalEvent = null;
         if (approvalEventMapper != null) {
-            List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectByMapping("default", activeMapping.getId(), "APPROVE");
+            List<com.ses.entity.ComplianceMappingApprovalEvent> approvals = approvalEventMapper.selectByMapping(tenantId(), activeMapping.getId(), "APPROVE");
             if (approvals != null) {
                 for (com.ses.entity.ComplianceMappingApprovalEvent app : approvals) {
                     if (workplaceId.equals(app.getWorkplaceIdSnapshot())) {
-                        long revokes = approvalEventMapper.countSubsequentRevokes("default", activeMapping.getId(), app.getId());
+                        long revokes = approvalEventMapper.countSubsequentRevokes(tenantId(), activeMapping.getId(), app.getId());
                         if (revokes == 0) {
                             approvalEvent = app;
                         }
@@ -191,7 +198,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
 
             List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper != null ? requirementGroupMapper.selectList(
                     new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                            .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                            .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                             .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, activeMapping.getId())) : List.of();
             List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).filter(java.util.Objects::nonNull).toList();
             List<com.ses.entity.ComplianceMappingReviewRequirementType> types = (!groupIds.isEmpty() && requirementTypeMapper != null) ? requirementTypeMapper.selectList(
@@ -276,7 +283,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         DocumentVersion limitedVersion = documentVersionMapper.findLatestByDocumentId(limitedDoc.getId());
 
         DocumentDelivery delivery = new DocumentDelivery();
-        delivery.setTenantId("default");
+        delivery.setTenantId(tenantId());
         delivery.setContractId(contractId);
         delivery.setDocumentId(fullDoc.getId());
         delivery.setDocumentType(request.getDocumentType());
@@ -683,36 +690,50 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
 
         List<com.ses.entity.ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementGroup>()
-                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(com.ses.entity.ComplianceMappingReviewRequirementGroup::getMappingId, activeMapping.getId()));
         List<Long> groupIds = groups.stream().map(com.ses.entity.ComplianceMappingReviewRequirementGroup::getId).toList();
         List<com.ses.entity.ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(
                         new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
-                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                                 .in(com.ses.entity.ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
 
-        // E-3: NO_EXTERNAL_REVIEW センチネルは撤去し、freeze済みpolicyを満たす実在external review eventのみを
-        // gate_snapshot_hashへ含める（type未設定グループは外部レビュー不要 — mapping側activateと同一判定）。
-        if (externalReviewEvaluator != null && !groups.isEmpty()) {
-            List<com.ses.entity.ComplianceExternalReviewEvent> allAdopted = new ArrayList<>();
-            for (com.ses.entity.ComplianceMappingReviewRequirementGroup grp : groups) {
-                boolean hasTypes = types.stream().anyMatch(t -> grp.getId().equals(t.getRequirementGroupId()));
-                if (hasTypes) {
-                    allAdopted.addAll(externalReviewEvaluator.evaluateGroup("default", activeMapping, grp, asOf));
+        // §4-8/10/11: gateはComplianceGateEvaluationService（APPROVED adoption event・adopted_at, id reducer）のみ採用。
+        // 旧ComplianceExternalReviewEvaluator（self-declared hash・latest evidence・旧APPROVED直接採用）はgate正本から除外。
+        // gate snapshotへadopted external review IDs・verification event IDs・全evidence version ID/hashを含める（§4-11）。
+        com.ses.entity.ComplianceExternalReviewAdoptionEvent latestAdoption =
+                adoptionEventMapper.selectLatestAdoptionByMapping(tenantId(), activeMapping.getId());
+        if (latestAdoption != null) {
+            boolean qualificationRequired = false;
+            boolean activeStatusRequired = false;
+            com.ses.entity.ComplianceExternalReviewerVerificationEvent authorshipVerification =
+                    verificationEventMapper.selectByTenantAndId(tenantId(), latestAdoption.getAuthorshipVerificationEventId());
+            if (authorshipVerification != null) {
+                List<com.ses.entity.ComplianceMappingReviewRequirementType> frozenTypes = requirementTypeMapper.selectList(
+                        new LambdaQueryWrapper<com.ses.entity.ComplianceMappingReviewRequirementType>()
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getTenantId, tenantId())
+                                .eq(com.ses.entity.ComplianceMappingReviewRequirementType::getReviewerTypeId,
+                                        authorshipVerification.getReviewerTypeId()));
+                for (com.ses.entity.ComplianceMappingReviewRequirementType frozen : frozenTypes) {
+                    if (Integer.valueOf(1).equals(frozen.getCredentialRequiredSnapshot())) {
+                        qualificationRequired = true;
+                        activeStatusRequired = true;
+                    }
                 }
             }
-            allAdopted.sort(Comparator.comparing(com.ses.entity.ComplianceExternalReviewEvent::getRequirementGroupCodeSnapshot, Comparator.nullsFirst(Comparator.naturalOrder()))
-                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getReviewerIdentityHash, Comparator.nullsFirst(Comparator.naturalOrder()))
-                    .thenComparing(com.ses.entity.ComplianceExternalReviewEvent::getId));
-            for (com.ses.entity.ComplianceExternalReviewEvent ev : allAdopted) {
-                payload.append("external_review_event=")
-                        .append(ev.getRequirementGroupCodeSnapshot()).append(':')
-                        .append(ev.getReviewerIdentityHash()).append(':')
-                        .append(ev.getId()).append(':')
-                        .append(ev.getReviewedAt()).append(':')
-                        .append(ev.getValidUntil()).append('\n');
-            }
+            gateEvaluationService.adopt(tenantId(), latestAdoption.getReviewChainId(), activeMapping, asOf,
+                    qualificationRequired, activeStatusRequired);
+
+            payload.append("adoption_event_id=").append(latestAdoption.getId()).append('\n');
+            payload.append("adoption_action=").append(latestAdoption.getAction()).append('\n');
+            payload.append("adoption_review_chain_id=").append(latestAdoption.getReviewChainId()).append('\n');
+            payload.append("adoption_identity_verification_id=").append(latestAdoption.getIdentityVerificationEventId()).append('\n');
+            payload.append("adoption_qualification_verification_id=").append(latestAdoption.getQualificationVerificationEventId()).append('\n');
+            payload.append("adoption_active_status_verification_id=").append(latestAdoption.getActiveStatusVerificationEventId()).append('\n');
+            payload.append("adoption_authorship_verification_id=").append(latestAdoption.getAuthorshipVerificationEventId()).append('\n');
+            payload.append("adoption_evidence_version_id=").append(latestAdoption.getEvidenceDocumentVersionId()).append('\n');
+            payload.append("adoption_evidence_hash=").append(latestAdoption.getEvidenceDocumentHash()).append('\n');
         }
 
         payload.append("gate_evaluated_at=").append(gateEvaluatedAt).append('\n');

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{compliance.gate.title} + ' - ' + #{app.name}">派遣コンプライアンスG2 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light">
+            <i class="bi bi-shield-check me-2 text-warning"></i>
+            <th:block th:text="#{compliance.gate.title}">派遣コンプライアンスG2</th:block>
+        </h2>
+        <div class="text-muted small" id="gateCapabilityNote">
+            <span class="badge bg-secondary" th:text="#{compliance.gate.capabilityLoading}">capability読み込み中...</span>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs nav-dark mb-3" id="gateTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-mapping" data-bs-toggle="tab" data-bs-target="#pane-mapping" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.mapping}">Mapping</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-reviewer-type" data-bs-toggle="tab" data-bs-target="#pane-reviewer-type" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.reviewerType}">Reviewer Type</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-policy" data-bs-toggle="tab" data-bs-target="#pane-policy" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.policy}">Review Policy</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-assignment" data-bs-toggle="tab" data-bs-target="#pane-assignment" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.assignment}">Assignment</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-approval" data-bs-toggle="tab" data-bs-target="#pane-approval" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.approval}">Internal Approval</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-external-review" data-bs-toggle="tab" data-bs-target="#pane-external-review" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.externalReview}">External Review</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-verification" data-bs-toggle="tab" data-bs-target="#pane-verification" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.verification}">本人・資格・作成者確認</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-active" data-bs-toggle="tab" data-bs-target="#pane-active" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.active}">ACTIVE</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-event-history" data-bs-toggle="tab" data-bs-target="#pane-event-history" type="button" role="tab"
+                    th:text="#{compliance.gate.tab.eventHistory}">Event History</button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="gateTabContent">
+        <!-- Mapping -->
+        <div class="tab-pane fade show active" id="pane-mapping" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="text-light"><i class="bi bi-diagram-3 me-1"></i><th:block th:text="#{compliance.gate.tab.mapping}">Mapping</th:block></span>
+                    <button class="btn btn-sm btn-primary" id="btnCreateMapping" th:text="#{compliance.gate.newMapping}">新規Mapping</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0 align-middle">
+                        <thead>
+                        <tr>
+                            <th th:text="#{compliance.gate.mapping.code}">mappingCode</th>
+                            <th th:text="#{compliance.gate.mapping.version}">version</th>
+                            <th th:text="#{compliance.gate.mapping.status}">status</th>
+                            <th th:text="#{compliance.gate.mapping.effective}">有効期間</th>
+                            <th th:text="#{compliance.gate.mapping.hash}">mappingHash</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody id="mappingTableBody">
+                            <tr><td colspan="6" class="text-center text-muted py-4" th:text="#{js.common.loading}">読み込み中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reviewer Type -->
+        <div class="tab-pane fade" id="pane-reviewer-type" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="text-light"><i class="bi bi-person-badge me-1"></i><th:block th:text="#{compliance.gate.tab.reviewerType}">Reviewer Type</th:block></span>
+                    <button class="btn btn-sm btn-primary" id="btnCreateReviewerType" th:text="#{compliance.gate.newReviewerType}">新規Reviewer Type</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0 align-middle">
+                        <thead>
+                        <tr>
+                            <th>typeCode</th>
+                            <th th:text="#{compliance.gate.reviewerType.display}">表示名</th>
+                            <th th:text="#{compliance.gate.reviewerType.credential}">資格label</th>
+                            <th th:text="#{compliance.gate.reviewerType.required}">credential必須</th>
+                            <th>enabled</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody id="reviewerTypeTableBody">
+                            <tr><td colspan="6" class="text-center text-muted py-4" th:text="#{js.common.loading}">読み込み中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Review Policy -->
+        <div class="tab-pane fade" id="pane-policy" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-list-check me-1"></i><th:block th:text="#{compliance.gate.tab.policy}">Review Policy</th:block></span>
+                </div>
+                <div class="card-body">
+                    <select id="policyMappingSelect" class="form-select bg-dark text-light mb-3"></select>
+                    <div id="policyContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">mappingを選択してください</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Assignment -->
+        <div class="tab-pane fade" id="pane-assignment" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-person-lines-fill me-1"></i><th:block th:text="#{compliance.gate.tab.assignment}">Assignment</th:block></span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small" th:text="#{compliance.gate.assignment.note}">workplace単位の担当assignment（active_slot=1・半開区間）</p>
+                    <div id="assignmentContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">読み込み中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Internal Approval -->
+        <div class="tab-pane fade" id="pane-approval" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-check2-square me-1"></i><th:block th:text="#{compliance.gate.tab.approval}">Internal Approval</th:block></span>
+                </div>
+                <div class="card-body">
+                    <div id="approvalContent">
+                        <p class="text-muted small" th:text="#{js.common.loading}">読み込み中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- External Review -->
+        <div class="tab-pane fade" id="pane-external-review" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-file-earmark-check me-1"></i><th:block th:text="#{compliance.gate.tab.externalReview}">External Review</th:block></span>
+                </div>
+                <div class="card-body">
+                    <div id="externalReviewContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">mappingを選択してください</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 本人・資格・作成者確認 -->
+        <div class="tab-pane fade" id="pane-verification" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-patch-check me-1"></i><th:block th:text="#{compliance.gate.tab.verification}">本人・資格・作成者確認</th:block></span>
+                </div>
+                <div class="card-body">
+                    <div id="verificationContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">mappingを選択してください</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ACTIVE -->
+        <div class="tab-pane fade" id="pane-active" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-lightning-charge me-1"></i><th:block th:text="#{compliance.gate.tab.active}">ACTIVE</th:block></span>
+                </div>
+                <div class="card-body">
+                    <div id="activeContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">mappingを選択してください</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Event History -->
+        <div class="tab-pane fade" id="pane-event-history" role="tabpanel">
+            <div class="card bg-secondary border-dark shadow-sm">
+                <div class="card-header">
+                    <span class="text-light"><i class="bi bi-clock-history me-1"></i><th:block th:text="#{compliance.gate.tab.eventHistory}">Event History</th:block></span>
+                </div>
+                <div class="card-body">
+                    <div id="eventHistoryContent">
+                        <p class="text-muted small" th:text="#{compliance.gate.policy.selectHint}">mappingを選択してください</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mapping作成modal -->
+<div class="modal fade" id="mappingModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-secondary text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" th:text="#{compliance.gate.newMapping}">新規Mapping</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label small" th:text="#{compliance.gate.mapping.code}">mappingCode</label>
+                    <input id="mappingCodeInput" class="form-control bg-dark text-light" type="text">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small" th:text="#{compliance.gate.mapping.version}">version</label>
+                    <input id="mappingVersionInput" class="form-control bg-dark text-light" type="text">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small" th:text="#{compliance.gate.mapping.effectiveFrom}">開始日</label>
+                    <input id="mappingEffectiveFromInput" class="form-control bg-dark text-light" type="date">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small" th:text="#{compliance.gate.mapping.effectiveTo}">終了日</label>
+                    <input id="mappingEffectiveToInput" class="form-control bg-dark text-light" type="date">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="btnSaveMapping" th:text="#{common.btn.save}">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/compliance-gate.js}"></script>
+</th:block>
+</body>
+</html>

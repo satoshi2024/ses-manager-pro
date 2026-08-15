@@ -111,12 +111,12 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         // 指名者本人が承認 → event記録（canonical hash・64 hex）
         ComplianceMappingApprovalEvent event = complianceApprovalService.approve(
-                version.getId(), workplaceId, "公式source確認済み", null);
+                version.getId(), workplaceId, "公式source確認済み", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         assertNotNull(event.getId());
         assertEquals("APPROVE", event.getAction());
         assertEquals(64, event.getMappingHash().length());
@@ -136,10 +136,10 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-APPROVAL-3",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         assertThrows(BusinessException.class,
-                () -> complianceApprovalService.approve(version.getId(), workplaceId, "他人の承認", null),
+                () -> complianceApprovalService.approve(version.getId(), workplaceId, "他人の承認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]),
                 "actor不一致は403相当のBusinessException");
     }
 
@@ -153,7 +153,7 @@ class ComplianceGateAdminServiceTest {
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
         // DRAFTのまま承認 → 拒否
         assertThrows(BusinessException.class,
-                () -> complianceApprovalService.approve(version.getId(), workplaceId, "早期承認", null));
+                () -> complianceApprovalService.approve(version.getId(), workplaceId, "早期承認", null, null));
     }
 
     @Test
@@ -161,10 +161,12 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-FREEZE",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        // DRAFT状態ではgroup作成可能
+        // DRAFT状態ではgroup作成可能（§4-3: 各group最低1type必須のためtypeも追加）
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
                 complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
         assertNotNull(group.getId());
+        Long reviewerTypeId = insertReviewerType("LABOR_CONSULTANT", true);
+        complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId);
 
         // PROVISIONAL_REVIEWEDへ遷移
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
@@ -173,7 +175,7 @@ class ComplianceGateAdminServiceTest {
         assertThrows(BusinessException.class,
                 () -> complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-2", "グループ2", 1));
         assertThrows(BusinessException.class,
-                () -> complianceGateAdminService.addRequirementType(group.getId(), 1L));
+                () -> complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId));
     }
 
     @Test
@@ -183,16 +185,16 @@ class ComplianceGateAdminServiceTest {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-IDEM",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
-        complianceGateAdminService.createRequirementGroup(version.getId(), "GRP-1", "グループ1", 1);
+        setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
         ComplianceMappingApprovalEvent event1 = complianceApprovalService.approve(
-                version.getId(), workplaceId, "確認1", null);
+                version.getId(), workplaceId, "確認1", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
         assertNotNull(event1.getId());
 
         // 同一actor・同一mappingへの重複承認は決定的なidempotencyKeyにより409 Conflictで拒否される
         assertThrows(BusinessException.class,
-                () -> complianceApprovalService.approve(version.getId(), workplaceId, "確認2", null));
+                () -> complianceApprovalService.approve(version.getId(), workplaceId, "確認2", insertEvidenceVersion()[0], insertEvidenceVersion()[1]));
     }
 
     @Test
@@ -208,7 +210,7 @@ class ComplianceGateAdminServiceTest {
     }
 
     @Test
-    void externalReviewをCGC1暗号化とidentityHash付きで登録できる() {
+    void externalReviewをCGC1暗号化とidentityHash付きでSUBMITTED登録できる() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-EXT",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
@@ -218,13 +220,14 @@ class ComplianceGateAdminServiceTest {
                 "LABOR_ATTORNEY", "弁護士", "労働法専門弁護士", "弁護士登録番号", true);
         complianceGateAdminService.addRequirementType(group.getId(), type.getId());
 
+        // K1: 新規write pathはSUBMITTEDのみ（旧APPROVED直接記録は廃止・legacy rowは新gate不採用）
         com.ses.entity.ComplianceExternalReviewEvent event = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "山田弁護士", "山田法律事務所", "REG-123456",
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null);
 
         assertNotNull(event.getId());
-        assertEquals("APPROVED", event.getAction());
+        assertEquals("SUBMITTED", event.getAction());
         assertEquals("v1", event.getCredentialKeyVersion());
         assertEquals("CGC1", event.getCredentialCipherFormat());
         assertEquals("****3456", event.getCredentialMaskedSnapshot());
@@ -241,6 +244,12 @@ class ComplianceGateAdminServiceTest {
         List<com.ses.entity.ComplianceExternalReviewEvent> list = complianceGateAdminService.listExternalReviews(version.getId());
         assertEquals(1, list.size());
         assertEquals(event.getId(), list.get(0).getId());
+
+        // K1: SUBMITTED以外のaction（旧APPROVED/REJECTED/REVOKED）は直接記録不可
+        assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "山田弁護士", "山田法律事務所", "REG-123456",
+                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "外部確認OK", null));
     }
 
     @Test
@@ -256,11 +265,11 @@ class ComplianceGateAdminServiceTest {
                 "OTHER_REVIEWER", "その他専門家", "備考", "登録番号", false);
         complianceGateAdminService.addRequirementType(group.getId(), optType.getId());
 
-        // credential未入力で登録 → 4列全NULL
+        // credential未入力で登録 → 4列全NULL（SUBMITTED）
         com.ses.entity.ComplianceExternalReviewEvent eventOpt = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), optType.getId(),
                 "佐藤専門家", "佐藤事務所", null,
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
 
         assertNull(eventOpt.getCredentialSnapshotEncrypted());
         assertNull(eventOpt.getCredentialKeyVersion());
@@ -276,13 +285,13 @@ class ComplianceGateAdminServiceTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), reqType.getId(),
                 "田中税理士", "田中事務所", "",
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null));
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null));
         assertEquals(400, ex.getCode());
         assertEquals("compliance.gate.credentialRequired", ex.getMessageKey());
     }
 
     @Test
-    void REVOKEアクションは対象positiveイベントを無効化し鎖を維持する() {
+    void SUBMITTED登録はchainを採番し同一内容の再送は409で拒否する() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-REV",
                 LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), sources());
@@ -292,22 +301,29 @@ class ComplianceGateAdminServiceTest {
                 "AUDITOR", "監査人", "公認会計士", "登録番号", false);
         complianceGateAdminService.addRequirementType(group.getId(), type.getId());
 
-        // 1. APPROVED 登録
-        com.ses.entity.ComplianceExternalReviewEvent approved = complianceGateAdminService.recordExternalReview(
+        // 1. SUBMITTED 登録（新規chain採番）
+        com.ses.entity.ComplianceExternalReviewEvent submitted1 = complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "鈴木会計士", "監査法人", null,
-                "APPROVED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
+                "SUBMITTED", LocalDateTime.now(), LocalDateTime.now().plusYears(1), null, "確認OK", null);
 
-        // 2. REVOKED 登録
-        com.ses.entity.ComplianceExternalReviewEvent revoked = complianceGateAdminService.recordExternalReview(
+        assertEquals("SUBMITTED", submitted1.getAction());
+        assertNotNull(submitted1.getReviewChainId());
+
+        // 2. 同一内容の再送 → 決定的idempotencyKeyにより409（§3.6・重複INSERT拒否）
+        BusinessException ex = assertThrows(BusinessException.class, () -> complianceGateAdminService.recordExternalReview(
                 version.getId(), group.getId(), type.getId(),
                 "鈴木会計士", "監査法人", null,
-                "REVOKED", LocalDateTime.now(), null, null, "取消", approved.getId());
+                "SUBMITTED", LocalDateTime.now(), null, null, "再確認", null));
+        assertEquals(409, ex.getCode());
 
-        assertEquals("REVOKED", revoked.getAction());
-        assertEquals(approved.getReviewChainId(), revoked.getReviewChainId());
-        assertEquals(approved.getId(), revoked.getTargetEventId());
-        assertEquals(approved.getId(), revoked.getSupersedesEventId());
+        // 3. 別reviewerのSUBMITTEDは別identityHash→新規chain（§3.2: 再Reviewは新しいSUBMITTED chain）
+        com.ses.entity.ComplianceExternalReviewEvent submitted2 = complianceGateAdminService.recordExternalReview(
+                version.getId(), group.getId(), type.getId(),
+                "佐藤会計士", "監査法人", null,
+                "SUBMITTED", LocalDateTime.now(), null, null, "別の確認内容", null);
+        assertNotNull(submitted2.getReviewChainId());
+        assertEquals("SUBMITTED", submitted2.getAction());
     }
 
     @Test
@@ -345,6 +361,45 @@ class ComplianceGateAdminServiceTest {
         return jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username=?", Long.class, username);
     }
 
+    /** reviewer typeを作成してIDを返す（既存なら再利用・§4-3 type必須のfixture用）。 */
+    private Long insertReviewerType(String typeCode, boolean credentialRequired) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_compliance_external_reviewer_type WHERE type_code=?", Integer.class, typeCode);
+        if (count == null || count == 0) {
+            complianceGateAdminService.createReviewerType(
+                    typeCode, "社労士", "社会保険労務士", "社労士登録番号", credentialRequired);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM m_compliance_external_reviewer_type WHERE type_code=?", Long.class, typeCode);
+    }
+
+    /** §4-3（P0-FIX-3）: group＋typeを作成してfreeze可能な状態にする。 */
+    private void setupPolicy(Long mappingId) {
+        com.ses.entity.ComplianceMappingReviewRequirementGroup group =
+                complianceGateAdminService.createRequirementGroup(mappingId, "GRP-1", "グループ1", 1);
+        Long reviewerTypeId = insertReviewerType("LABOR_CONSULTANT", true);
+        complianceGateAdminService.addRequirementType(group.getId(), reviewerTypeId);
+    }
+
+    /** P0-5: exact CLEAN evidence versionを作成し{documentId, versionId}を返す（既存なら再利用）。 */
+    private Long[] insertEvidenceVersion() {
+        Long existing = jdbcTemplate.query(
+                "SELECT id FROM t_document_version WHERE business_key = 'gate-approval-ev'",
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (existing != null) {
+            return new Long[]{910001L, existing};
+        }
+        String sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        jdbcTemplate.update("INSERT INTO t_document_version "
+                + "(tenant_id, document_id, version_no, storage_key, original_name, content_type, "
+                + "size_bytes, sha256, source_type, business_key, version_discriminator, scan_status, created_by) "
+                + "VALUES ('default', 910001, 1, 'ev/k', 'approval-ev.pdf', 'application/pdf', 10, ?, "
+                + "'UPLOAD', 'gate-approval-ev', '1', 'CLEAN', 1)", sha);
+        Long versionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_document_version WHERE business_key = 'gate-approval-ev'", Long.class);
+        return new Long[]{910001L, versionId};
+    }
+
     private List<ComplianceMappingSourceInput> sources() {
         return List.of(
                 source("SRC-C", "https://example/src-c", "2026-07"),
@@ -363,5 +418,81 @@ class ComplianceGateAdminServiceTest {
         input.setEffectiveFrom(LocalDate.of(2026, 7, 1));
         input.setEffectiveTo(LocalDate.of(2026, 9, 30));
         return input;
+    }
+
+    // ===== R23-P1-01 §8 dynamic policy（V102_3・P0-3） =====
+
+    @Test
+    void updateReviewerTypeDynamicはflagsとsourceMethodを設定できる() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR", true);
+        com.ses.entity.ComplianceVerificationSource source =
+                complianceGateAdminService.createVerificationSource("PUBLIC_REGISTRY", "公的登録簿",
+                        "https://example/registry", true, null, null);
+        com.ses.entity.ComplianceVerificationMethod method =
+                complianceGateAdminService.createVerificationMethod("MANUAL_PUBLIC_SOURCE", "手動・公的source",
+                        "手動確認", true, null, null);
+
+        ComplianceExternalReviewerType updated = complianceGateAdminService.updateReviewerTypeDynamic(
+                typeId, 1, 1, source.getId(), method.getId(), 365, null, null);
+
+        assertEquals(1, updated.getQualificationVerificationRequired());
+        assertEquals(1, updated.getActiveStatusVerificationRequired());
+        assertEquals(source.getId(), updated.getVerificationSourceId());
+        assertEquals(method.getId(), updated.getVerificationMethodId());
+        assertEquals(365, updated.getMaxAgeDays());
+    }
+
+    @Test
+    void updateReviewerTypeDynamicはflags未指定を拒否する() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR2", true);
+        // §8: NULL=UNCONFIGUREDはAPI経由では設定不可（明示選択必須）
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, null, 1, null, null, null, null, null));
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, 1, null, null, null, null, null, null));
+    }
+
+    @Test
+    void updateReviewerTypeDynamicは不正maxAgeを拒否する() {
+        Long typeId = insertReviewerType("DYNAMIC_LABOR3", true);
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.updateReviewerTypeDynamic(typeId, 1, 1, null, null, 0, null, null));
+    }
+
+    @Test
+    void createVerificationSourceは重複codeを拒否する() {
+        complianceGateAdminService.createVerificationSource("SRC_DUP", "重複source", null, true, null, null);
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createVerificationSource("SRC_DUP", "重複source2", null, true, null, null));
+    }
+
+    // ===== R23-P1-01 P0-4 subject create path =====
+
+    @Test
+    void createSubjectはfingerprint付きでsubjectを作成する() {
+        com.ses.entity.ComplianceExternalReviewerSubject subject =
+                complianceGateAdminService.createSubject("SUBJ-CREATE-1", "新規 山田", "新規 組織");
+        assertNotNull(subject.getId());
+        assertEquals(64, subject.getPersonFingerprintSnapshot().length());
+        assertNotNull(subject.getFingerprintKeyVersion());
+    }
+
+    @Test
+    void createSubjectは重複codeを拒否する() {
+        complianceGateAdminService.createSubject("SUBJ-CREATE-2", "重複 山田", "組織");
+        assertThrows(BusinessException.class,
+                () -> complianceGateAdminService.createSubject("SUBJ-CREATE-2", "重複 山田2", "組織2"));
+    }
+
+    @Test
+    void addQualificationはsubjectとtypeを結び付ける() {
+        com.ses.entity.ComplianceExternalReviewerSubject subject =
+                complianceGateAdminService.createSubject("SUBJ-QUAL-1", "資格 山田", "組織");
+        Long typeId = insertReviewerType("QUAL_TYPE", true);
+        com.ses.entity.ComplianceReviewerQualification qualification =
+                complianceGateAdminService.addQualification(subject.getId(), typeId, "****1234", "登録番号");
+        assertNotNull(qualification.getId());
+        assertEquals(subject.getId(), qualification.getReviewerSubjectId());
+        assertEquals(1, complianceGateAdminService.listQualifications(subject.getId()).size());
     }
 }

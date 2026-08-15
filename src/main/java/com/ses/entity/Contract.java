@@ -37,6 +37,13 @@ public class Contract extends BaseEntity {
     @NotNull(message = "案件は必須です")
     private Long projectId;
 
+    /**
+     * ポジションID（staffing-capacity-planning。NULL=ポジション未紐付き）
+     * updateStrategy=ALWAYS: 「ポジション未紐付きに戻す」= NULL 更新を反映させるため。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Long positionId;
+
     /** 顧客ID */
     @NotNull(message = "顧客は必須です")
     private Long customerId;

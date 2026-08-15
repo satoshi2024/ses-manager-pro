@@ -252,3 +252,13 @@ compliance:
       # 鍵バージョンごとのAES-256鍵（32バイトをunpadded base64urlで指定。'='padding・空白禁止）
       keys:
         # v1: ${COMPLIANCE_CREDENTIAL_KEY_V1:}
+
+# ===== G2 reviewer fingerprint HMAC鍵（§9・R23-P1-01） =====
+# tenant別専用key namespace: compliance.gate.fingerprint-keys.{tenantId}
+# 値はdeployment secret storeから注入すること。prodプロファイルではtenant設定の欠損・不正で起動時にfail-fastする。
+# dev/testプロファイルはtenant未設定時のみテスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
+    fingerprint-keys:
+      # default:
+      #   current-key-version: ${COMPLIANCE_FINGERPRINT_CURRENT_KEY_VERSION:}
+      #   keys:
+      #     v1: ${COMPLIANCE_FINGERPRINT_KEY_V1:}

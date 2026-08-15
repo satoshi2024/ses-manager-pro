@@ -559,4 +559,58 @@ class ComplianceDocumentApiTest {
         }
         return text.toString();
     }
+
+    // ===== P1-6: watermark preview（Phase A・R25契約A） =====
+
+    @Test
+    void previewはwatermark付きPDFを返しarchiveとdeliveryを作らない() throws Exception {
+        long contractId = insertContractWithProfile();
+        systemConfigService.put("company.name", "SES株式会社", "test");
+        // 共有H2 DBでは他テストの生成物がt_documentに残るため、事前カウントを基準にする
+        int documentsBefore = queryInt("SELECT COUNT(*) FROM t_document WHERE document_type='EMPLOYMENT_CONDITIONS_STATEMENT'");
+        int deliveriesBefore = queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId);
+
+        // preview呼び出し（POST・PDF inline）
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("documentType", "EMPLOYMENT_CONDITIONS_STATEMENT");
+        body.put("deliveryMethod", "NONE");
+        body.put("recipientContactId", null);
+        org.springframework.test.web.servlet.MvcResult result = mockMvc.perform(
+                        post("/api/contracts/" + contractId + "/compliance-documents/preview")
+                                .with(csrf()).contentType("application/json")
+                                .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("X-Compliance-Preview", "true"))
+                .andReturn();
+        byte[] pdf = result.getResponse().getContentAsByteArray();
+        assertThat(pdf).startsWith(new byte[]{'%', 'P', 'D', 'F'});
+
+        // watermarkがPDFテキストに含まれる
+        String text = extractPdfText(pdf);
+        assertThat(text).contains("PREVIEW");
+
+        // archive 0・delivery 0（previewは交付記録・document archiveを作らない）
+        assertEquals(deliveriesBefore,
+                queryInt("SELECT COUNT(*) FROM t_document_delivery WHERE contract_id=" + contractId),
+                "previewはdelivery記録を作らない");
+        assertEquals(documentsBefore,
+                queryInt("SELECT COUNT(*) FROM t_document WHERE document_type='EMPLOYMENT_CONDITIONS_STATEMENT'"),
+                "previewはdocument archive（FULL/MASK/LIMITED）を作らない");
+    }
+
+    @Test
+    void previewは営業roleでは403になる() throws Exception {
+        long contractId = insertContractWithProfile();
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("documentType", "EMPLOYMENT_CONDITIONS_STATEMENT");
+        body.put("deliveryMethod", "NONE");
+        body.put("recipientContactId", null);
+        mockMvc.perform(post("/api/contracts/" + contractId + "/compliance-documents/preview")
+                        .with(csrf()).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(body))
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                                .user("sales").roles("営業")))
+                .andExpect(status().isForbidden());
+    }
 }
