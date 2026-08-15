@@ -35,7 +35,7 @@
     稼働率がdashboard KPIと一致すること。
   - **Demo**: 提案→契約でposition充足。同じ契約がplanとactualで二重に数えられないことを提示。
 
-- [ ] A1. position board/allocation timeline
+- [x] A1. position board/allocation timeline
   - **Objective**: 案件詳細のposition boardと要員timelineで配置を確認・変更でき、
     過配賦になる操作はその場で拒否される。D&Dが失敗したらカードが元に戻る。
   - **実装ガイダンス**: project/engineer画面、**drag操作は失敗時にUI rollback**（design §3）。

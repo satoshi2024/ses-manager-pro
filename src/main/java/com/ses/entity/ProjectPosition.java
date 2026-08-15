@@ -34,8 +34,7 @@ public class ProjectPosition extends BaseEntity {
     public static final String STATUS_HOLD = "保留";
     public static final String STATUS_CANCELLED = "取消";
 
-    /** 案件ID */
-    @NotNull(message = "案件は必須です")
+    /** 案件ID（APIではパスから設定されるためentity側では必須検証しない） */
     private Long projectId;
 
     /** ポジション番号（案件内一意） */
@@ -79,8 +78,7 @@ public class ProjectPosition extends BaseEntity {
     /** 優先度 */
     private String priority;
 
-    /** 状態 */
-    @NotBlank(message = "状態は必須です")
+    /** 状態（serviceの状態機械が管理するためentity側では必須検証しない） */
     private String status;
 
     /** 楽観ロック */

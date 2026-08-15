@@ -46,10 +46,85 @@
         </div>
     </div>
 
+    <!-- 募集ポジションボード（staffing-capacity-planning T077） -->
+    <div class="card bg-card border-dark shadow-sm mt-4" id="position-board-card">
+        <div class="card-header bg-transparent border-dark d-flex justify-content-between align-items-center py-3">
+            <h6 class="mb-0 text-white fw-bold"><i class="bi bi-kanban me-2 text-accent-green"></i><span th:text="#{staffing.board.title}">募集ポジションボード</span></h6>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="SES_staffing.openPositionModal(null)">
+                <i class="bi bi-plus-lg me-1"></i><span th:text="#{staffing.board.addPosition}">ポジション追加</span>
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="position-board-body">
+                <div class="row g-3" id="position-board-columns"></div>
+                <div class="mt-3">
+                    <h6 class="text-muted small fw-bold mb-2"><span th:text="#{staffing.board.benchTitle}">社内/待機</span></h6>
+                    <div class="d-flex flex-wrap gap-2" id="position-board-bench"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ポジションモーダル -->
+    <div class="modal fade" id="staffingPositionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-kanban me-2 text-accent-green"></i><span th:text="#{staffing.board.positionEdit}">ポジション</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="staffing-position-form">
+                        <input type="hidden" id="sp-id">
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small"><span th:text="#{staffing.board.positionNo}">ポジション番号</span> <span class="text-danger">*</span></label>
+                                <input type="text" id="sp-positionNo" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small"><span th:text="#{staffing.board.roleName}">役割名</span> <span class="text-danger">*</span></label>
+                                <input type="text" id="sp-roleName" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.board.requiredCount}">募集人数</label>
+                                <input type="number" id="sp-requiredCount" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" value="1">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.board.startDate}">開始日</label>
+                                <input type="date" id="sp-startDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.board.endDate}">終了日</label>
+                                <input type="date" id="sp-endDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{staffing.board.location}">勤務地</label>
+                                <input type="text" id="sp-location" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small" th:text="#{staffing.board.percent}">稼働率(%)</label>
+                                <input type="number" id="sp-percent" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" max="100" value="100">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="SES_staffing.savePosition()" th:text="#{common.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/project-detail.js}"></script>
+    <script th:src="@{/js/modules/staffing.js}"></script>
 </th:block>
 </body>
 </html>

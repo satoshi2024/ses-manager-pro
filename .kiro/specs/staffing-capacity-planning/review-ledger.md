@@ -3,8 +3,9 @@
 ## 現行判定
 
 - **T075 F1: 完了**（commit `a691f77e`）
-- **T076 F2: 完了（REVIEW待ち）** 2026-08-16
-- T077〜T080: 未着手
+- **T076 F2: 完了**（commit `ec880114`）
+- **T077 A1: 完了（REVIEW待ち）** 2026-08-16
+- T078〜T080: 未着手
 
 ## READINESS（着手時）
 
@@ -84,7 +85,78 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 ## Commit
 
 - T075: `a691f77e` feat(staffing): T075 F1 position/allocation/scenario DDL（V103・過配賦日単位判定・例外承認・scenario isolation）
-- T076: （本ledger更新と同じcommitに含める）
+- T076: `ec880114` feat(staffing): T076 F2 proposal/contract/availability統合（actual同期・需給集計・更新/退職/休暇反映）
+- T077: （本ledger更新と同じcommitに含める）
+
+---
+
+## TASK CONTRACT T077（A1. position board/allocation timeline）
+
+- requirements/AC: R1.1/R1.2（board表示・状態遷移UI）、R2.1/R2.2（timeline表示・過配賦拒否）、R5
+- 決定表はdesign.md §5の確定済み3表をそのまま実装（読み替えなし）
+
+### 実装内容
+
+- **API**（既存menuのapi_prefix配下で新規権限seed不要・ActionPermissionResolver解決済み）:
+  - `ProjectPositionApiController` `/api/projects/{id}/positions`（CRUD・status遷移）＋`/api/projects/{id}/board`
+  - `AllocationApiController` `/api/engineers/{id}/allocations`（saveDraft/confirm/discard/revise）
+  - scope: DataScopeService.assertAllowedProject/assertAllowedEngineer（404変換）
+- **表示**: `StaffingBoardService`（entityを直接公開せず表示名・承認状態付きDTOをserver aggregateで返す。
+  `AllocationCardDto`・`PositionBoardDto`）
+- **UI**: project/detail.htmlにポジションボード（position列＋配置カード＋充足人数＋社内/待機列）、
+  engineer/detail.htmlに「配置計画」タブ（タイムライン＋追加/編集/確定/破棄）。
+  `static/js/modules/staffing.js`（共有モーダル・board D&D・timeline）
+- **D&D**: planカードの列間移動＝配置の上書き保存。API失敗時はカードを元の列へ戻す（UI rollback・design §3）。
+  actual（実契約由来）カードはドラッグ不可。
+- **競合**: 確定はserviceのFOR UPDATE＋再検証＋状態CAS（design §5.4）。同一配置への同時確定は
+  状態CASで片方だけ成功（`AllocationConcurrentConfirmTest`の2スレッドREQUIRES_NEWで実証）
+
+### 実装の具体化（判定・根拠）
+
+1. 新規URI prefixを作らず既存の `/api/engineers`・`/api/projects` 配下に配置
+   （新規prefixはActionPermissionResolver未登録で全role 403になるため・CRM-R2-P1-01と同じ事故の回避）。
+2. `@Valid`はpathから設定されるprojectId/engineerIdと衝突するため、position entityの
+   projectId/statusの必須検証をservice側に移し、allocation APIはservice検証のみ。
+3. H2はSELECT FOR UPDATEの並行ロックを再現しないため、同時配置の決定的testは
+   「同一配置への同時確定（状態CAS競合）」と「後着が先行コミットを読んで過配賦拒否」の2本で構成。
+
+## 変更file（T077）
+
+| 種別 | file |
+|---|---|
+| controller | `ProjectPositionApiController`、`AllocationApiController` |
+| service | `service/staffing/StaffingBoardService`(+Impl) |
+| dto | `dto/staffing/PositionBoardDto`、`dto/staffing/AllocationCardDto` |
+| UI | `templates/project/detail.html`（board＋position modal）、`templates/engineer/detail.html`（配置計画タブ＋allocation modal）、`static/js/modules/staffing.js`（新規）、`project-detail.js`/`engineer-detail.js`（init hook） |
+| entity | `ProjectPosition`（projectId/statusの@Valid必須検証をservice側へ） |
+| message | 4バンドルへ staffing.* UIキー追加 |
+| test | `StaffingApiControllerTest`（4件・CSRF/CRUD/状態遷移/過配賦/scope）、`StaffingApiScopeTest`（2件・DataScope mock 404）、`AllocationConcurrentConfirmTest`（2件・同時確定/後着拒否） |
+
+## Test evidence（T077）
+
+| 実行 | 結果 |
+|---|---|
+| 直接回帰: staffing 7クラス（49件）＋Contract/Proposal(56)＋AllMappers(133)＋MigrationIntegrity(27)＋MessageBundle(4)＋JsSyntaxCheck(1) | 270/0/0/0 PASS |
+| `git diff --check` | exit 0（コミット前に実施） |
+
+受入条件の実測:
+- CSRFトークンなしの更新系POSTは403
+- ポジションCRUD・状態遷移（候補選定）・board表示
+- 配置の保存→確定→破棄、60%+50%の過配賦はAPIで拒否（HTTP 400）
+- 同一配置への同時確定は状態CASで片方だけ成功、後着は先行コミットを読んで過配賦拒否
+- DataScope拒否は404へ変換（営業・mock決定的test）
+
+## Demo（T077）
+
+- 兼務配置（50%+50%許可）と過配賦拒否（60%+50%拒否）はAPI/service testで実証済み。
+- D&DのUI rollbackはstaffing.jsのrollbackCard実装＋API失敗経路をコードで担保し、
+  desktop/390pxの実ブラウザDemoはM task（T080）で実施する（browser evidenceはMで固定）。
+
+## Risk
+
+- H2はSELECT FOR UPDATEの実ロックを再現しない（MySQLで有効）。同時配置の防衛は
+  FOR UPDATE＋再検証＋状態CASの3層で、MySQL smoke（V103）とCIで担保。
+- boardのD&DはHTML5 Drag&Drop API（タッチデバイスでは配置ボタン/モーダル操作を推奨）。
 
 ---
 
