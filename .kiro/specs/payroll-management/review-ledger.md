@@ -861,6 +861,42 @@ fix delta `a7b7c59c..586f495f`（12 file、+746/−90）、REV-001〜007の判�
 
 ---
 
+### HFP-01-RUN-20260815-02（REV-009対応）
+
+| 項目 | 値 |
+|---|---|
+| 実装担当 | opencode（HFP-01実装担当） |
+| worktree / branch | `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee` / `codex/hfp-01-payroll-freee` |
+| base / head | `203960a9` / 本Runコミット |
+| 開始 / 終了（JST） | `2026-08-15 02:40` / `2026-08-15 03:10` |
+| 公式OpenAPI固定commit | `52c69a6819ef14979a31b342123df816cb72c742` |
+| freee test事業所 | BLOCKED（継続） |
+| Docker / Node | READY / READY |
+| dirty差分の取扱い | Round 3のledger追記（既存行は不変）を引き継ぎ |
+
+#### REV-009対応
+
+| Finding | Severity | 状態 | 対応 |
+|---|---|---|---|
+| HFP-01-REV-009 | NOTE | FIXED_BY_IMPLEMENTER | `executeWithRetry`の`re_authorization_required`経路（401）を`markReauthRequired`（entity全体updateById）から`connectionMapper.updateConnectionStatus(id, 'REAUTH_REQUIRED')`のtargeted UPDATEへ置換（REV-008と同一方式へ統一）。private `markReauthRequired`はunit test（proxy無し・reauthMarker null）のフォールバック専用としてコメント明記し維持。`FreeeHrContractTest.seedConnectionWithCaptor`を`updateConnectionStatus`モックへ更新 |
+
+#### 自動gate集計
+
+| Gate | Command | 実行数 | Failure | Skip | Exit | 状態 | 証跡 |
+|---|---|---:|---:|---:|---:|---|---|
+| freee関連全回帰（REV-009後） | 17 class | 148 | 0 | 0 | 0 | PASS | surefire-reports |
+| REV-009対象 | `FreeeHrContractTest,FreeeOAuthContractTest,FreeeReauthPersistenceTest,FreeeIntegrationServiceApiTest` | 52 | 0 | 0 | 0 | PASS | 再認可401経路・refresh経路・S11共有基盤 |
+| verify-like-ci | `scripts/verify-like-ci.ps1` | 未実行 | - | - | - | 実行予定（surefire aggregate値で記録） | — |
+
+#### 実装担当の残件
+
+| ID | Requirement/AC | 状態 | 内容 | Owner / 外部条件 | 再実行command |
+|---|---|---|---|---|---|
+| HFP-01-RUN-ISSUE-01 | AC15 | BLOCKED | sandbox credential未提供（継続）。AC13/AC15はHFP-01-011で実施 | 発注者 | HFP-01-011手順 |
+| HFP-01-REV-009 | NOTE | FIXED_BY_IMPLEMENTER | ReviewerのVERIFIED_CLOSED待ち | Reviewer | Round 4 |
+
+---
+
 ### HFP-01-RUN-20260814-13（最終gateの確定）
 
 | 項目 | 値 |
@@ -900,3 +936,59 @@ fix delta `a7b7c59c..586f495f`（12 file、+746/−90）、REV-001〜007の判�
 - head: 本Runコミット。fix delta: `a7b7c59c..本Run`。
 - REV-001〜005/007: VERIFIED_CLOSED（Round 2）。REV-006: 記録方法訂正済み（surefire aggregate値1997で記録）。REV-008: FIXED_BY_IMPLEMENTER（targeted UPDATE・非業務例外監査）。
 - 未解決P0/P1: 0。AC01〜AC12 PASS。残る必須gateは AC13/AC15（freee sandbox credential未提供）のみ。
+
+---
+
+## HFP-01-REVIEW-20260815-01（独立Review Round 3）
+
+| 項目 | 値 |
+|---|---|
+| Reviewer | 独立Review AI（Round 1/2と同一Reviewer） |
+| 対象Run | HFP-01-RUN-20260814-12/13（REV-006/008対応） |
+| base / reviewed head | `586f495f`（Round 2対象head） / `203960a9`（fix delta後のhead） |
+| merge状態 / merge commit | PRE_MERGE / N/A |
+| 開始 / 終了（JST） | 2026-08-15 04:10 / 2026-08-15 05:10 |
+| 独立再実行環境 | Windows / Temurin 17.0.20 / bundled Maven 3.9.6 / Node v24.18.0 / Docker 29.6.2（MySQL 8.0 container） |
+| Verdict | **BLOCKED**（Round 3スコープ=OPEN NOTEのみ。REV-006/008はVERIFIED_CLOSED、新規P0/P1なし。AC13/AC15はfreee sandbox credential未提供のため実行不能のまま） |
+
+### Round 3スコープ（handbook §10: 残OPENのみ）
+
+fix delta `586f495f..203960a9`（6 file、+205/−2）。AC13/AC15に新規証跡なし（credential未提供の継続）。
+
+#### Finding判定
+
+| ID | Severity | Round 2 | Round 3判定 | 根拠（Reviewer自身の再実行） |
+|---|---|---|---|---|
+| HFP-01-REV-006 | NOTE | OPEN | **VERIFIED_CLOSED** | RUN-12が「surefire aggregate値を正とする」記録方法を明記、RUN-13が**1997**で記録。Reviewerが`verify-like-ci.ps1`を再実行し**aggregate行「Tests run: 1997」・testcase要素1997・skip 0・exit 0・BUILD SUCCESS**を独立確認（Round 2までの2倍計上は解消） |
+| HFP-01-REV-008 | NOTE | OPEN | **VERIFIED_CLOSED** | ①`FreeeConnectionMapper.updateConnectionStatus`（connection_status/updated_atのみの@Update）へ置換したことをdiffで確認。`FreeeReauthPersistenceTest`（実proxy+H2）を再実行し**targeted UPDATE化後もDBにREAUTH_REQUIREDが永続化**（1/0/0/0 PASS）。②`FreeeOAuthController`/`FreeePayrollApiController`の`catch (Exception)`拡張（500 false監査＋rethrow）をdiffで確認。新規test `handleCallbackのDB障害でも失敗監査する`を含む`FreeeOAuthCallbackWebTest` 8/0/0/0再実行PASS（FREEE_CONNECT 500 falseをverify） |
+| HFP-01-REV-009 | NOTE | 新規 | OPEN | `executeWithRetry`（line 1022-1023）の`re_authorization_required`経路がまだprivate `markReauthRequired`（entity全体のupdateById）を使う。callerは全経路tx外のためrollback問題はなく、同期実行のためstale上書き窓は極小・fail-safe方向だが、既存の`updateConnectionStatus`へ1行置換するのが一貫する。非blocker |
+
+#### Acceptance trace（Round 3差分のみ）
+
+| Acceptance | 状態 | 証跡 |
+|---|---|---|
+| HFP-01-AC01〜AC12 | PASS（維持） | Round 1/2判定＋REV-008後のfreee回帰再実行で確認 |
+| HFP-01-AC13 | BLOCKED | 新規証跡なし（sandbox credential未提供の継続） |
+| HFP-01-AC14 | PASS | `verify-like-ci.ps1`再実行: aggregate 1997 / 0 / 0 / 0 / BUILD SUCCESS / exit 0 |
+| HFP-01-AC15 | BLOCKED | 新規証跡なし。HFP-01-011/HFP-G01 OPENのまま |
+
+#### 再実行したgate（Round 3）
+
+| Gate | Command | 結果 |
+|---|---|---|
+| freee関連全回帰 | 16 class（ConcurrentRefresh除く） | 147 / 0 / 0 / 0 PASS |
+| 並行refresh＋MySQL smoke | `FreeeConcurrentRefreshTest,FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 5 / 0 / 0 / 0 PASS（実MySQL） |
+| verify-like-ci（単独run） | `scripts/verify-like-ci.ps1` | aggregate 1997 / 0 / 0 / 0 / BUILD SUCCESS / exit 0 |
+
+#### 環境注記
+
+- Round 3のverify-like-ci初回実行は**Docker daemonの停止**（実行中にTestcontainers系testで30分stall、`HikariPool Thread starvation`検出）で中断した。Docker Desktop再起動・prune後に再実行し上記の結果を得た。testの失敗ではなく環境要因であることを記録する。
+
+#### Verdict根拠
+
+- 未解決P0/P1: **0**
+- 未管理Acceptance: 0
+- OPEN Finding: HFP-01-REV-009（NOTEのみ。targeted UPDATEへの統一を推奨、非blocker）
+- 未達/未実行Acceptance: HFP-01-AC13（BLOCKED）、HFP-01-AC15（BLOCKED）— 唯一の原因は`FREEE_*` credential未提供
+- 最小の次アクション: (1) `FREEE_*`提供 → HFP-01-011（sandbox E2E＋AC13 desktop/390px実ブラウザDemo）実行 → Round 4でその証跡のみReview → `REVIEWABLE`判定候補。(2) REV-009は次回差分で1行置換（任意）。(3) merge後はmerge delta・共有consumer・main回帰を直接Reviewして最終PASS
+- 最終Verdict: **BLOCKED**（PRE_MERGE。P0/P1=0・AC01〜12 PASS・自動gate全green。残gateは外部credential依存のみで、これはPASS/REVIEWABLEではない）

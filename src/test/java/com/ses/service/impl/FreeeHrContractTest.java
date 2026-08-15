@@ -636,10 +636,13 @@ class FreeeHrContractTest {
         c.setConnectionStatus("CONNECTED");
         when(connectionMapper.selectOne(any())).thenReturn(c);
         when(connectionMapper.selectLatestForUpdate()).thenReturn(c);
+        // REV-009: REAUTH_REQUIREDはconnection_statusのみのtargeted UPDATEで永続化される
         org.mockito.Mockito.doAnswer(invocation -> {
-            c.setConnectionStatus("REAUTH_REQUIRED");
+            c.setConnectionStatus(invocation.getArgument(1, String.class));
             return 1;
-        }).when(connectionMapper).updateById(any(FreeeConnection.class));
+        }).when(connectionMapper).updateConnectionStatus(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.anyString());
         return c;
     }
 }

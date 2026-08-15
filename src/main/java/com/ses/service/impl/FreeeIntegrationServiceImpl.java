@@ -1020,7 +1020,8 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized ex) {
                 String code = errorCode(ex.getResponseBodyAsByteArray());
                 if ("re_authorization_required".equals(code)) {
-                    markReauthRequired(c);
+                    // REV-009: entity全体ではなくconnection_statusだけをtargeted UPDATEする
+                    connectionMapper.updateConnectionStatus(c.getId(), STATUS_REAUTH_REQUIRED);
                     throw BusinessException.of("error.payroll.reauthRequired");
                 }
                 if ("user_do_not_have_permission".equals(code)) {
@@ -1259,6 +1260,11 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         });
     }
 
+    /**
+     * unit test（proxy無し・reauthMarker null）のフォールバック専用の状態更新。
+     * production経路は{@link #persistReauthAfterCompletion(FreeeConnection)}か
+     * {@code updateConnectionStatus}のtargeted UPDATEを使う（REV-008/009）。
+     */
     private void markReauthRequired(FreeeConnection c) {
         c.setConnectionStatus(STATUS_REAUTH_REQUIRED);
         connectionMapper.updateById(c);
