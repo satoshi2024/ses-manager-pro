@@ -45,6 +45,7 @@ main() {
   common::require_env RESTIC_PASSWORD_FILE
   common::require_env INDEX_DIR
   [[ -f "$NEW_KEY_FILE" ]] || rotate::fail "new key file がありません: $NEW_KEY_FILE"
+  [[ -n "${RESTIC_REPOSITORY:-}" ]] || rotate::fail "RESTIC_REPOSITORY が未設定です"
 
   local target=""
   target=$(find "$INDEX_DIR" -name 'checkpoint-*.json' -o -name 'full-*.json' 2>/dev/null \
@@ -62,19 +63,42 @@ main() {
   rotate::restore_verify "$NEW_KEY_FILE" "$snap" new \
     || rotate::fail "新キーでの restore verify に失敗しました（切替えません）"
 
-  # 3) 切替（atomic。新キーを一時 file に書いて rename）
+  # 3) R1 P2: repository に新キーを追加（restic key add。旧キーは残したまま）
+  local add_log
+  add_log="$TMPDIR/key-add.log"
+  if ! RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+    "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key add \
+      --new-password-file "$NEW_KEY_FILE" > "$add_log" 2>&1; then
+    rotate::fail "restic key add に失敗しました（切替えません）: $(common::redact < "$add_log")"
+  fi
+
+  # 4) 切替（atomic。新キーを一時 file に書いて rename）
   local tmp
   tmp="$RESTIC_PASSWORD_FILE.tmp-$$"
   cp "$NEW_KEY_FILE" "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$RESTIC_PASSWORD_FILE"
 
-  # 4) 切替後に新キーで再 verify
+  # 5) 切替後に新キーで再 verify
   rotate::restore_verify "$RESTIC_PASSWORD_FILE" "$snap" post \
     || rotate::fail "切替後の restore verify に失敗しました"
 
+  # 6) 旧キーを repository から除去（best-effort。失敗は alert 対象）
+  local keys
+  keys=$(RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+    "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key list --json 2>/dev/null || echo "[]")
+  local old_id
+  old_id=$(printf '%s' "$keys" | jq -r '.[] | select(.current == false) | .id' 2>/dev/null | head -1)
+  if [[ -n "$old_id" ]]; then
+    if ! RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
+      "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" key remove "$old_id" > /dev/null 2>&1; then
+      echo "[rotate-key] WARNING: 旧キーの除去に失敗しました（id=$old_id）。次回 rotation 時に再試行してください" >&2
+    fi
+  fi
+
   jq -n --arg snap "$snap" --arg rotated_at_utc "$(common::now_utc)" \
-    '{state:"ROTATED", target_snapshot: $snap, rotated_at_utc: $rotated_at_utc}'
+    --arg removed_key_id "${old_id:-}" \
+    '{state:"ROTATED", target_snapshot: $snap, removed_key_id: $removed_key_id, rotated_at_utc: $rotated_at_utc}'
   return 0
 }
 

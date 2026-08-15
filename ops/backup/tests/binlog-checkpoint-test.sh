@@ -83,10 +83,21 @@ run_archive_once() {
   ARCHIVE_CODE=$?
 }
 
+case_archive_first_run_without_coordinate_fails() {
+  # R1 P1-06: 初回起動に FULL_COORDINATE_FILE が無い場合は黙って現行から
+  # 開始せず失敗する（先行 binlog の未アーカイブ化を防ぐ）
+  setup_binlog_env
+  unset FULL_COORDINATE_FILE
+  run_archive_once
+  assert_nonzero "$ARCHIVE_CODE" "初回起動で coordinate 欠如は非 0"
+  assert_contains "$ARCHIVE_OUT" "FULL_COORDINATE_FILE" "理由"
+}
+
 case_archive_normal_once() {
   setup_binlog_env
   export FAKE_ARCHIVE_FILES="binlog.000001 binlog.000002"
-  export FULL_COORDINATE_FILE=binlog.000001
+  export FULL_COORDINATE_FILE="$T/full-coordinate"
+  printf 'binlog.000001\n' > "$FULL_COORDINATE_FILE"
   run_archive_once
   assert_zero "$ARCHIVE_CODE" "archive --once 成功"
   assert_file "$BINLOG_RAW_DIR/binlog.000001" "raw file 1 あり"
@@ -267,6 +278,7 @@ case_checkpoint_rotation_twice() {
 }
 
 run_case case_archive_normal_once
+run_case case_archive_first_run_without_coordinate_fails
 run_case case_archive_restart_resume
 run_case case_archive_restart_incomplete
 run_case case_archive_uuid_mismatch

@@ -181,6 +181,25 @@ case_plan_expiry() {
   assert_eq "EXPIRED" "$st" "期限切れは EXPIRED"
 }
 
+case_plan_tamper_valid_until_detected() {
+  setup_standard_fixture
+  run_plan 2026-08-14T10:20:00Z
+  local pid
+  pid=$(plan_id_from_dir)
+  # shellcheck disable=SC1091
+  . "$LIB/plan.sh"
+  # R1 P1-02: valid_until_utc / plan_id の改変は、SHA を再計算しない限り検出される
+  jq -S -c '.valid_until_utc = "2099-01-01T00:00:00Z"' "$T/plans/$pid.json" > "$T/plans/$pid.json.tmp"
+  mv "$T/plans/$pid.json.tmp" "$T/plans/$pid.json"
+  plan::verify "$T/plans/$pid.json"
+  assert_nonzero "$?" "valid_until 改変は plan 検証で検出"
+  # plan_id 改変
+  jq -S -c '.plan_id = "aaaaaaaaaaaaaaaa"' "$T/plans/$pid.json" > "$T/plans/$pid.json.tmp"
+  mv "$T/plans/$pid.json.tmp" "$T/plans/$pid.json"
+  plan::verify "$T/plans/$pid.json"
+  assert_nonzero "$?" "plan_id 改変は plan 検証で検出"
+}
+
 case_plan_parser_rejects_bad_target() {
   setup_standard_fixture
   for bad in "2026-08-14 10:20:00" "2026-08-14T10:20:00" "2026-13-01T10:00:00Z" "not-a-date" "2026-08-14T25:00:00Z"; do
@@ -242,6 +261,13 @@ case_approval_verify() {
   make_claim frank "$T/priv2.pem" "$future" "$T/claim-f.json"
   approval::collect_and_verify "$plan_path" target-uuid-999 "$T/claim-e.json" "$T/claim-f.json"
   assert_nonzero "$?" "別 target UUID は拒否"
+  # R1 P1-01: 同一の検証鍵で署名した別名 actor 2 件は拒否（1 名の承認に等しい）
+  make_claim grace "$T/priv1.pem" "$future" "$T/claim-g.json"
+  make_claim heidi "$T/priv1.pem" "$future" "$T/claim-h.json"
+  cp "$T/pub1.pem" "$T/pubkeys/grace.pem"
+  cp "$T/pub1.pem" "$T/pubkeys/heidi.pem"
+  approval::collect_and_verify "$plan_path" target-uuid-001 "$T/claim-g.json" "$T/claim-h.json"
+  assert_nonzero "$?" "同一鍵 2 名分は拒否"
   # 署名対象の改変
   printf 'x' | dd of="$T/claim-a.json" bs=1 seek=3 conv=notrunc 2>/dev/null
   approval::verify_claim "$T/claim-a.json" "$T/pub1.pem"
@@ -255,6 +281,7 @@ run_case case_plan_rpo_missed
 run_case case_plan_lineage_mismatch
 run_case case_plan_binlog_gap
 run_case case_plan_tamper_detected
+run_case case_plan_tamper_valid_until_detected
 run_case case_plan_expiry
 run_case case_plan_parser_rejects_bad_target
 run_case case_approval_verify

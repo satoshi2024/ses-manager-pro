@@ -10,8 +10,19 @@
 
 PLAN_SCHEMA_VERSION=1
 
-# canonical JSON から SHA 計算用の内容（volatile フィールドを除外）を取り出す
+# canonical JSON から SHA 計算用の内容を取り出す。
+# 除外するのは実行時タイムスタンプ（created_at_utc）のみ。
+# valid_until_utc（期限）と plan_id は改変されると SHA 不一致になるため含める
+# （R1 P1-02: 期限バイパス・plan_id 改変の検出を保証する）。
 plan::content_for_sha() { # plan_json
+  printf '%s' "$1" | jq -S -c 'del(.created_at_utc)'
+}
+
+# plan_id 導出用（timezone 非依存かつ時刻非依存）。
+# 同一 target からは常に同一 plan_id になるよう、時刻系（created_at /
+# valid_until）と自身（plan_id）を除いた内容から導出する。
+# 改変検出は plan::content_for_sha（valid_until/plan_id を含む）が担う。
+plan::content_for_id() { # plan_json
   printf '%s' "$1" | jq -S -c 'del(.created_at_utc, .valid_until_utc, .plan_id)'
 }
 
@@ -21,10 +32,10 @@ plan::write() { # plan_json plans_dir
   mkdir -p "$plans_dir"
   local canonical
   canonical=$(printf '%s' "$plan_json" | jq -S -c .)
-  local sha_content
-  sha_content=$(plan::content_for_sha "$canonical")
+  local id_content
+  id_content=$(plan::content_for_id "$canonical")
   local plan_id
-  plan_id=$(printf '%s' "$sha_content" | sha256sum | cut -c1-16)
+  plan_id=$(printf '%s' "$id_content" | sha256sum | cut -c1-16)
   canonical=$(printf '%s' "$canonical" | jq -S -c --arg id "$plan_id" '. + {plan_id: $id}')
   local sha
   sha=$(printf '%s' "$(plan::content_for_sha "$canonical")" | sha256sum | awk '{print $1}')

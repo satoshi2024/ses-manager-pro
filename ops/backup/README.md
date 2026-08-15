@@ -82,6 +82,8 @@ source 現行 coordinate の差で判定する。古い file の存在だけで�
 - `retention.sh --apply --report <report> --approval <c1> --approval <c2>`
   （report 再計算で一致確認 → 二者承認 → maintenance lock → forget --prune）
 - `RETENTION_ROLE=retention|admin` 以外では実行不可（writer は削除できない）
+- archiver の初回起点 `FULL_COORDINATE_FILE` は `backup-full` が書き出す（.env.backup で backup-data 上の共有 path を指定。欠如時は archiver が fail する）
+- restore target の provision には `RELOAD`（RESET MASTER）・`SYSTEM_VARIABLES_ADMIN`・`REPLICATION_APPLIER`・`LOCK TABLES` が必要
 - key rotation は `rotate-key.sh --new-key-file <file>`（旧・新の両キーで restore verify 成功時のみ切替え）。手順は `runbooks/key-rotation.md`
 
 ## 演習（restore drill）

@@ -92,6 +92,8 @@ printf 'marker-before-checkpoint\n' > "$ckpt_payload/uploads/published/marker-be
   export VALIDATE_TABLES="marker_test"
   export VALIDATE_MARKERS_JSON='{"table":"marker_test","before":"marker-before-checkpoint","after":"marker-after-checkpoint"}'
   export TARGET_HOST=10.0.0.9 TARGET_USER=restore-svc TARGET_PORT=3306
+  mkdir -p "$T/capath"
+  export TARGET_SSL_CAPATH="$T/capath" TARGET_TLS_MODE=VERIFY_CA
   export TARGET_PASSWORD_FILE="$T/pw" TARGET_DATABASE=ses_manager_db
   export TARGET_ALLOWLIST_FILE="$T/allowlist.txt"
   printf 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n' > "$T/allowlist.txt"

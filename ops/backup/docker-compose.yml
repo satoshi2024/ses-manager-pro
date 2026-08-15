@@ -37,7 +37,8 @@ services:
     <<: *backup-common
     entrypoint: ["/usr/local/bin/backup-full.sh"]
 
-  # 継続 binlog archive（常駐）
+  # 継続 binlog archive（常駐）。初回起点は backup-full が書き出す
+  # FULL_COORDINATE_FILE（.env.backup で backup-data 上の共有 path を指定）
   binlog:
     <<: *db-only
     entrypoint: ["/usr/local/bin/archive-binlog.sh"]

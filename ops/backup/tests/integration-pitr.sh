@@ -63,6 +63,11 @@ log "== 3. backup-full =="
 /usr/local/bin/backup-full.sh > "$EVID/backup-full.log" 2>&1 || fail "backup-full が失敗しました"
 log "backup-full OK"
 
+log "== 3.5 中間 DML（full と checkpoint の間の更新。replay 検証用） =="
+src_root "$MYSQL_DATABASE" \
+  -e "INSERT INTO marker_test (marker) VALUES ('marker-mid');" \
+  || fail "中間 DML 注入に失敗しました"
+
 log "== 4. archiver（stop-never）起動 =="
 BINLOG_RAW_DIR=${BINLOG_RAW_DIR:-"$WORK_DIR/raw"}
 BINLOG_IMMUTABLE_DIR=${BINLOG_IMMUTABLE_DIR:-"$WORK_DIR/immutable"}
@@ -100,6 +105,7 @@ tgt_root \
       CREATE USER IF NOT EXISTS 'restore-svc'@'%' IDENTIFIED BY 'restore-svc-pw';
       GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO 'restore-svc'@'%';
       GRANT REPLICATION_APPLIER ON *.* TO 'restore-svc'@'%';
+      GRANT RELOAD ON *.* TO 'restore-svc'@'%';   -- RESET MASTER（GTID リセット）に必要
       GRANT ALL ON ses_recovery_control.* TO 'restore-svc'@'%';
       GRANT CREATE, INSERT, SELECT, UPDATE, DELETE, DROP, INDEX, ALTER, CREATE VIEW, TRIGGER, EXECUTE, EVENT, LOCK TABLES ON $MYSQL_DATABASE.* TO 'restore-svc'@'%';" \
   || fail "target provision に失敗しました"
@@ -136,6 +142,8 @@ for a in alice bob; do
       issued_at_utc:$i,expires_at_utc:$e}' > "$WORK_DIR/claim-$a.json"
   /usr/local/lib/ses-backup/providers/approval-verifier-local.sh sign "$WORK_DIR/claim-$a.json" "$KEY"
 done
+# R1 P2: 署名秘密鍵は evidence に残さない（署名後すぐ削除）
+rm -f "$WORK_DIR/keys/priv1.pem" "$WORK_DIR/keys/priv2.pem"
 tgt_root ses_recovery_control \
   -e "INSERT INTO targets (uuid, allowlist_ref, plan_id, provisioned_at)
       VALUES ('$TGT_UUID', 'default', '$PLAN_ID', NOW())
@@ -177,6 +185,9 @@ TGT_MARKERS=$(MYSQL_PWD="$(cat "$WORK_DIR/restore-svc-pw")" mysql -h"$TGT_HOST" 
 printf '%s\n' "$TGT_MARKERS" > "$EVID/target-markers.txt"
 grep -qx 'marker-before-checkpoint' "$EVID/target-markers.txt" \
   || fail "target に before marker がありません"
+# 中間 DML が replay されていること（R1 P2: replay 不在の検出）
+grep -qx 'marker-mid' "$EVID/target-markers.txt" \
+  || fail "target に中間 DML（marker-mid）がありません（binlog replay が実行されていません）"
 if grep -qx 'marker-after-checkpoint' "$EVID/target-markers.txt"; then
   fail "target に after marker があります（復旧点より後のデータが含まれる）"
 fi
@@ -199,10 +210,11 @@ jq -n \
   --arg state "$(jq -r '.state' "$EVID/validate.json")" \
   --arg target_ts "$TARGET_TS" \
   --arg before_cnt "$(grep -c 'marker-before-checkpoint' "$EVID/target-markers.txt" || true)" \
+  --arg mid_cnt "$(grep -c 'marker-mid' "$EVID/target-markers.txt" || true)" \
   --arg after_cnt "$(grep -c 'marker-after-checkpoint' "$EVID/target-markers.txt" || true)" \
   --arg uploads_before "$(grep -c 'marker-before.txt' "$EVID/uploads-markers.txt" || true)" \
   --arg uploads_after "$(grep -c 'marker-after.txt' "$EVID/uploads-markers.txt" || true)" \
   '{state: "SUCCESS", plan_id: $plan_id, validation: $state, target_ts: $target_ts,
-    target_db: {before_marker: ($before_cnt|tonumber), after_marker: ($after_cnt|tonumber)},
+    target_db: {before_marker: ($before_cnt|tonumber), mid_dml_replayed: ($mid_cnt|tonumber), after_marker: ($after_cnt|tonumber)},
     uploads_staging: {before_marker: ($uploads_before|tonumber), after_marker: ($uploads_after|tonumber)}}' \
   | tee "$WORK_DIR/integration-summary.json"

@@ -132,7 +132,9 @@ main() {
   mkdir -p "$BACKUP_WORK_DIR"
   work="$BACKUP_WORK_DIR/full-$stamp"
   mkdir -p "$work/db"
-  trap 'rm -rf "$work"' EXIT
+  # R1 P1-03: 失敗時も静止解除（quiesce::release + DDL lock session 終了）を必ず実行する。
+  # trap を上書きせず、cleanup と work 削除を連結する（mysql-options の trap も保持）。
+  trap 'backup_full::cleanup; rm -rf "$work"' EXIT
   backup_full::ensure_repository || common::fail "restic repository を準備できません"
 
   if ! repository_lock::acquire exclusive "${BACKUP_LOCK_TIMEOUT:-120}" "backup-full"; then
@@ -279,6 +281,18 @@ main() {
   jq --arg snap "$snap" --arg status "VALID" --arg uploaded_at_utc "$(common::now_utc)" \
     '.status = $status | .restic_snapshot_id = $snap | .uploaded_at_utc = $uploaded_at_utc' \
     "$payload/metadata.json" > "$index_dir/full-$stamp.json"
+
+  # R1 P1-06: archiver の初回起点となる full coordinate を書き出す
+  if [[ -z "${FULL_COORDINATE_FILE:-}" ]]; then
+    common::fail "FULL_COORDINATE_FILE が未設定です（archiver の初回起点を失います）"
+  fi
+  if [[ -n "$BINLOG_START_FILE" ]]; then
+    printf '%s\n' "$BINLOG_START_FILE" > "$FULL_COORDINATE_FILE.tmp"
+    mv "$FULL_COORDINATE_FILE.tmp" "$FULL_COORDINATE_FILE"
+    chmod 600 "$FULL_COORDINATE_FILE"
+  else
+    common::fail "full の binlog start coordinate を取得できません"
+  fi
 
   local result
   result=$(jq -n \

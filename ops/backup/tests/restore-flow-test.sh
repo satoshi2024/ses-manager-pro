@@ -35,6 +35,8 @@ setup_restore() {
   export PLANS_DIR="$T/plans" INDEX_DIR="$T/index" BINLOG_INDEX="$T/binlog/binlog-index.json"
   export BACKUP_WORK_DIR="$T/work"
   export TARGET_HOST=10.0.0.9 TARGET_PORT=3306 TARGET_USER='restore-svc' TARGET_PASSWORD_FILE="$T/pw"
+  mkdir -p "$T/capath"
+  export TARGET_SSL_CAPATH="$T/capath" TARGET_TLS_MODE=VERIFY_CA
   export TARGET_DATABASE=ses_manager_db SOURCE_HOST=10.0.0.1
   export TARGET_ALLOWLIST_FILE="$T/allowlist.txt" STAGING_ROOT="$T/staging"
   printf '%s\n' "$TARGET_UUID" > "$T/allowlist.txt"
@@ -162,6 +164,57 @@ case_restore_normal_flow() {
   assert_contains "$mb_line" "binlog.000010" "binlog 1"
   assert_contains "$mb_line" "binlog.000011" "binlog 2"
   assert_contains "$mb_line" "binlog.000012" "binlog 3"
+  # R1 P0-01: import 前に RESET MASTER（GTID リセット）が発行されること
+  if grep -q "RESET MASTER" "$FAKE_ARGV_LOG"; then
+    test_assert "RESET MASTER を発行（再 restore の沈黙スキップ防止）"
+  else
+    test_fail "RESET MASTER を発行（再 restore の沈黙スキップ防止）" "argv log に RESET MASTER がない"
+  fi
+}
+
+case_restore_reset_master_fail() {
+  setup_restore
+  build_backup_fixture
+  make_claims
+  # RESET MASTER を失敗させると restore は中断（fail closed）
+  export FAKE_RESET_MASTER_RC=1
+  local out=""
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_nonzero "$?" "RESET MASTER 失敗は非 0"
+  assert_contains "$out" "RESET MASTER" "理由"
+  unset FAKE_RESET_MASTER_RC
+}
+
+case_restore_tls_disabled_rejected() {
+  setup_restore
+  build_backup_fixture
+  make_claims
+  export TARGET_TLS_MODE=DISABLED
+  local out=""
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_nonzero "$?" "TLS DISABLED は拒否"
+  assert_contains "$out" "VERIFY_CA / VERIFY_IDENTITY" "理由"
+  unset TARGET_TLS_MODE
+}
+
+case_restore_binlog_sha_mismatch() {
+  setup_restore
+  build_backup_fixture
+  make_claims
+  # plan の binlog SHA を改変（sidecar も同じ方式で再計算）→ replay 前に拒否
+  local plan_path="$T/plans/$PLAN_ID.json"
+  local content
+  content=$(jq -S -c '.binlog_replay.files[0].sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' "$plan_path")
+  # shellcheck disable=SC1091
+  . "$LIB/plan.sh"
+  local sha
+  sha=$(printf '%s' "$(plan::content_for_sha "$content")" | sha256sum | awk '{print $1}')
+  printf '%s' "$content" > "$plan_path"
+  printf '%s\n' "$sha" > "$plan_path.sha256"
+  local out=""
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_nonzero "$?" "binlog SHA 不一致は非 0"
+  assert_contains "$out" "SHA が一致しません" "理由"
 }
 
 case_restore_guard_reject() {
@@ -212,6 +265,9 @@ case_restore_mid_binlog_failure() {
 }
 
 run_case case_restore_normal_flow
+run_case case_restore_reset_master_fail
+run_case case_restore_tls_disabled_rejected
+run_case case_restore_binlog_sha_mismatch
 run_case case_restore_guard_reject
 run_case case_restore_approval_missing
 run_case case_restore_mid_binlog_failure

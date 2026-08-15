@@ -28,6 +28,7 @@ setup_validate() {
   export MYSQL_PASSWORD_FILE="$T/pw" MYSQL_SSL_CAPATH="$T/capath" MYSQL_TLS_MODE=VERIFY_CA
   export MYSQL_CLIENT_BIN="$FIXTURES/mysql"
   export TARGET_HOST=10.0.0.9 TARGET_PORT=3306 TARGET_USER='restore-svc' TARGET_PASSWORD_FILE="$T/pw"
+  export TARGET_SSL_CAPATH="$T/capath" TARGET_TLS_MODE=VERIFY_CA
   export TARGET_DATABASE=ses_manager_db PLANS_DIR="$T/plans" BACKUP_WORK_DIR="$T/work" INDEX_DIR="$T/index"
   export BINLOG_INDEX="$T/binlog/binlog-index.json"
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
@@ -55,6 +56,7 @@ make_plan() {
     '{schema_version:1, plan_id:$id, kind:"restore-plan", state:"READY",
       requested_target:"2026-08-14T09:15:00Z", rpo_seconds:0,
       source_server_uuid:"11111111-2222-3333-4444-555555555555",
+      effective_checkpoint:{time:"2026-08-14T09:15:00Z", index:"checkpoint-fixture"},
       target:{allowlist_ref:"default", min_approvals:2},
       valid_until_utc:"2099-01-01T00:00:00Z"}' > "$T/plans/plan-008.json"
   local sha
@@ -106,6 +108,22 @@ case_validate_normal() {
   assert_contains "$VAL_OUT" '"markers": "PASS"' "markers PASS"
   assert_contains "$VAL_OUT" '"uploads_hash": "PASS"' "uploads hash PASS"
   assert_contains "$VAL_OUT" '"uploads_references": "PASS"' "references PASS"
+}
+
+case_validate_decoy_checkpoint_ignored() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  # R1 P1-04: plan が参照しない checkpoint index（flyway failed のデコイ）が
+  # あっても、検証は plan の effective_checkpoint.index のみを読む
+  jq -n '{kind:"checkpoint", status:"VALID", flyway_max_success:"99",
+    critical_table_counts:{marker_test:999}, uploads:{inventory:[]},
+    consistency_time_utc:"2026-08-14T09:15:00Z"}' \
+    > "$T/work/index/checkpoint-aaa.json"
+  run_validate
+  assert_zero "$VAL_RC" "デコイ checkpoint は検証に影響しない（exit 0）"
+  assert_contains "$VAL_OUT" '"state": "READY_FOR_CUTOVER"' "READY_FOR_CUTOVER"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（plan の checkpoint 由来）"
+  assert_contains "$VAL_OUT" '"counts": "PASS"' "counts PASS（plan の checkpoint 由来）"
 }
 
 case_validate_flyway_failed() {
@@ -191,6 +209,7 @@ case_validate_no_smoke_script() {
 }
 
 run_case case_validate_normal
+run_case case_validate_decoy_checkpoint_ignored
 run_case case_validate_flyway_failed
 run_case case_validate_flyway_version_mismatch
 run_case case_validate_count_mismatch

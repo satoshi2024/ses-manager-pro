@@ -70,6 +70,15 @@ main() {
   common::require_env SOURCE_HOST
   TARGET_PORT=${TARGET_PORT:-3306}
 
+  # R1 P1-05: 復元先への接続は VERIFY 系 TLS のみ許可（DISABLED/平文は拒否）
+  case "${TARGET_TLS_MODE:-VERIFY_CA}" in
+    VERIFY_IDENTITY|VERIFY_CA) TARGET_TLS_MODE_SAFE=${TARGET_TLS_MODE:-VERIFY_CA} ;;
+    *)
+      restore::fail "TARGET_TLS_MODE は VERIFY_CA / VERIFY_IDENTITY のみ許可されます（受信: ${TARGET_TLS_MODE:-未設定}）"
+      ;;
+  esac
+  [[ -n "${TARGET_SSL_CAPATH:-}" ]] || restore::fail "TARGET_SSL_CAPATH が未設定です（VERIFY 系 TLS には CA 証明書が必要）"
+
   export RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE
 
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
@@ -87,7 +96,7 @@ main() {
     echo "user=$TARGET_USER"
     echo "port=$TARGET_PORT"
     echo "password=$(head -n1 "$TARGET_PASSWORD_FILE")"
-    echo "ssl-mode=${TARGET_TLS_MODE:-VERIFY_CA}"
+    echo "ssl-mode=$TARGET_TLS_MODE_SAFE"
     [[ -n "${TARGET_SSL_CAPATH:-}" ]] && echo "ssl-capath=$TARGET_SSL_CAPATH"
   } > "$target_optfile"
   chmod 600 "$target_optfile"
@@ -96,6 +105,14 @@ main() {
 
   # target guard（plan・allowlist・marker・空 DB・default 拒否）
   target_guard::run "$plan_json" "$TARGET_DATABASE" || restore::fail "target guard に失敗しました"
+
+  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
+  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
+  # target guard が source と同一 UUID を拒否済み）。
+  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
+    --execute "RESET MASTER;" 2>/dev/null; then
+    restore::fail "target の GTID 状態をリセットできません（RESET MASTER）。再 restore の正しさを保証できません"
+  fi
 
   # 二者承認（target UUID を claim に bind）
   local target_uuid
@@ -146,6 +163,13 @@ main() {
     local found
     found=$(find "$STAGE_DIR/binlog-$i" -name "$bfile" -type f -print -quit 2>/dev/null)
     [[ -n "$found" ]] || restore::fail "binlog file が見つかりません: $bfile"
+    # R1 P2: replay 前に binlog file の SHA を plan（binlog index 由来）と照合する
+    local want_sha got_sha
+    want_sha=$(printf '%s' "$plan_json" | jq -r ".binlog_replay.files[$i].sha256 // empty")
+    if [[ -n "$want_sha" ]]; then
+      got_sha=$(sha256sum "$found" | awk '{print $1}')
+      [[ "$got_sha" == "$want_sha" ]] || restore::fail "binlog file の SHA が一致しません: $bfile"
+    fi
     cp -a -- "$found" "$binlog_dir/$bfile"
     rm -rf "$STAGE_DIR/binlog-$i"
   done

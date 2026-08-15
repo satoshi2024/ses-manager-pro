@@ -46,6 +46,15 @@ main() {
   common::require_env BACKUP_WORK_DIR
   TARGET_PORT=${TARGET_PORT:-3306}
 
+  # R1 P1-05: 検証先への接続は VERIFY 系 TLS のみ許可（DISABLED/平文は拒否）
+  case "${TARGET_TLS_MODE:-VERIFY_CA}" in
+    VERIFY_IDENTITY|VERIFY_CA) TARGET_TLS_MODE_SAFE=${TARGET_TLS_MODE:-VERIFY_CA} ;;
+    *)
+      validate_db::fail "TARGET_TLS_MODE は VERIFY_CA / VERIFY_IDENTITY のみ許可されます（受信: ${TARGET_TLS_MODE:-未設定}）"
+      ;;
+  esac
+  [[ -n "${TARGET_SSL_CAPATH:-}" ]] || validate_db::fail "TARGET_SSL_CAPATH が未設定です（VERIFY 系 TLS には CA 証明書が必要）"
+
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
   plan::verify "$plan_path" || validate_db::fail "plan の検証に失敗しました"
   local state
@@ -54,7 +63,7 @@ main() {
   local plan_json
   plan_json=$(cat "$plan_path")
 
-  # target 接続（restore と同じ option file 方式）
+  # target 接続（restore と同様の option file 方式）
   target_optfile=$(mktemp)
   {
     echo '[client]'
@@ -62,21 +71,26 @@ main() {
     echo "port=$TARGET_PORT"
     echo "database=$TARGET_DATABASE"
     echo "password=$(head -n1 "$TARGET_PASSWORD_FILE")"
-    echo "ssl-mode=${TARGET_TLS_MODE:-VERIFY_CA}"
+    echo "ssl-mode=$TARGET_TLS_MODE_SAFE"
     [[ -n "${TARGET_SSL_CAPATH:-}" ]] && echo "ssl-capath=$TARGET_SSL_CAPATH"
   } > "$target_optfile"
   chmod 600 "$target_optfile"
   TARGET_OPT_ARGS=(--defaults-extra-file="$target_optfile" -h "$TARGET_HOST")
   trap 'rm -f "$target_optfile"' EXIT
 
-  # checkpoint metadata（uploads inventory と flyway version の出所）
-  local ckpt_index
-  ckpt_index=$(find "$BACKUP_WORK_DIR/index" -name "checkpoint-*.json" 2>/dev/null | head -1)
-  local flyway_expected="" uploads_inv="[]"
-  if [[ -n "$ckpt_index" ]]; then
-    flyway_expected=$(jq -r '.flyway_max_success // empty' "$ckpt_index")
-    uploads_inv=$(jq -r '.uploads.inventory // []' "$ckpt_index" 2>/dev/null)
+  # R1 P1-04: checkpoint metadata は plan が参照する checkpoint の index file に限定
+  # （find | head -1 の任意 file ではなく、plan の effective_checkpoint.index を読む）
+  local ckpt_file
+  ckpt_file=$(printf '%s' "$plan_json" | jq -r '.effective_checkpoint.index // empty' | sed 's/\.json$//')
+  local ckpt_index=""
+  if [[ -n "$ckpt_file" && -f "$BACKUP_WORK_DIR/index/$ckpt_file.json" ]]; then
+    ckpt_index="$BACKUP_WORK_DIR/index/$ckpt_file.json"
+  else
+    validate_db::fail "plan の effective_checkpoint の index file がありません: $ckpt_file（検証は plan の checkpoint に限定）"
   fi
+  local flyway_expected="" uploads_inv="[]"
+  flyway_expected=$(jq -r '.flyway_max_success // empty' "$ckpt_index")
+  uploads_inv=$(jq -r '.uploads.inventory // []' "$ckpt_index" 2>/dev/null)
 
   local checks_json="{}"
   local ok=true

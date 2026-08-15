@@ -50,6 +50,7 @@ approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
   local plan_path=$1 target_uuid=$2 claim1=$3 claim2=$4
   local plan_sha
   plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  local KEY1=""
 
   local actor1="" actor2=""
   for claim in "$claim1" "$claim2"; do
@@ -91,6 +92,18 @@ approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
       echo "approval: claim の署名検証に失敗しました: $claim" >&2
       return 1
     }
+    # R1 P1-01: 2 名の承認は「異なる検証鍵」で署名されていること（同一鍵の
+    # 別名 actor で二者承認を充足できない）。鍵の内容で比較する。
+    if [[ -z "$KEY1" ]]; then
+      KEY1=$(sha256sum "$pubkey" | awk '{print $1}')
+    else
+      local k2
+      k2=$(sha256sum "$pubkey" | awk '{print $1}')
+      if [[ "$k2" == "$KEY1" ]]; then
+        echo "approval: 同一の検証鍵による 2 件の承認は受け付けません（1 名の承認に等しい）: $c_actor" >&2
+        return 1
+      fi
+    fi
   done
   return 0
 }

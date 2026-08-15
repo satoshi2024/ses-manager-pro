@@ -71,6 +71,15 @@ main() {
   cur=$(cutover::read_state)
   cutover::guard_transition "$cur" "read-only-smoke-passed" || cutover::fail "現在の state から cutover を開始できません（state=$cur）"
 
+  # R1 P1-05: cutover 対象への接続も VERIFY 系 TLS のみ許可
+  case "${TARGET_TLS_MODE:-VERIFY_CA}" in
+    VERIFY_IDENTITY|VERIFY_CA) TARGET_TLS_MODE_SAFE=${TARGET_TLS_MODE:-VERIFY_CA} ;;
+    *)
+      cutover::fail "TARGET_TLS_MODE は VERIFY_CA / VERIFY_IDENTITY のみ許可されます（受信: ${TARGET_TLS_MODE:-未設定}）"
+      ;;
+  esac
+  [[ -n "${TARGET_SSL_CAPATH:-}" ]] || cutover::fail "TARGET_SSL_CAPATH が未設定です（VERIFY 系 TLS には CA 証明書が必要）"
+
   # target UUID（claim の bind 検証に使用）
   local target_uuid_optfile
   target_uuid_optfile=$(mktemp)
@@ -81,7 +90,7 @@ main() {
     echo "port=$TARGET_PORT"
     echo "database=$TARGET_DATABASE"
     echo "password=$(head -n1 "$TARGET_PASSWORD_FILE")"
-    echo "ssl-mode=${TARGET_TLS_MODE:-VERIFY_CA}"
+    echo "ssl-mode=$TARGET_TLS_MODE_SAFE"
     [[ -n "${TARGET_SSL_CAPATH:-}" ]] && echo "ssl-capath=$TARGET_SSL_CAPATH"
   } > "$target_uuid_optfile"
   chmod 600 "$target_uuid_optfile"

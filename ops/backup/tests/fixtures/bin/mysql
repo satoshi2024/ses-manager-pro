@@ -130,6 +130,11 @@ case "$query" in
   *CREATE*DATABASE*)
     exit 0
     ;;
+  *RESET*MASTER*)
+    # R1 P0-01: 再 restore の GTID リセット（restore.sh が import 前に発行）
+    printf '%s\n' "$*" >> "${FAKE_RESET_MASTER_LOG:-/dev/null}"
+    exit "${FAKE_RESET_MASTER_RC:-0}"
+    ;;
   *MySQL\ dump*|--*)
     # dump import（stdin の先頭行が SQL コメント）は成功として扱う
     exit 0

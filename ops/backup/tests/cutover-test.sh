@@ -67,6 +67,8 @@ EOF
   # fake mysql（target UUID）
   export MYSQL_CLIENT_BIN="$HERE/fixtures/bin/mysql"
   export TARGET_HOST=10.0.0.9 TARGET_USER=restore-svc TARGET_PORT=3306
+  mkdir -p "$T/capath"
+  export TARGET_SSL_CAPATH="$T/capath" TARGET_TLS_MODE=VERIFY_CA
   printf '%s\n' "$FAKE_PW" > "$T/pw"
   export TARGET_PASSWORD_FILE="$T/pw" TARGET_DATABASE=ses_manager_db
   export FAKE_UUID='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -173,6 +175,17 @@ case_rollback_after_write_enabled_forbidden() {
   assert_contains "$OUT" "禁止" "理由を表示"
 }
 
+case_rollback_state_file_missing_forbidden() {
+  setup_cutover
+  # R1 P1-07: state file が存在しない（write-enabled 後に削除された可能性）場合は
+  # rollback を許可しない（unknown 扱い）
+  rm -f "$T/state.json"
+  export OLD_SMOKE_RC=0
+  OUT=$("$ROLLBACK" --plan "$PLAN_ID" 2>&1)
+  assert_nonzero "$?" "state file 欠如の rollback は拒否"
+  assert_contains "$OUT" "CUTOVER_STATE_FILE" "理由を表示"
+}
+
 case_rollback_normal() {
   setup_cutover
   jq -n --arg p "$PLAN_ID" '{state:"read-only-smoke-passed", plan_id:$p}' > "$T/state.json"
@@ -208,6 +221,7 @@ run_case case_cutover_write_enable_fail
 run_case case_cutover_already_write_enabled
 run_case case_cutover_no_smoke_script
 run_case case_rollback_after_write_enabled_forbidden
+run_case case_rollback_state_file_missing_forbidden
 run_case case_rollback_normal
 run_case case_rollback_from_single_writer
 run_case case_rollback_old_env_fail

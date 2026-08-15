@@ -90,6 +90,7 @@ docker run --rm --network "$NET" \
   -e TARGET_SSL_CAPATH=/work/capath-tgt -e TARGET_TLS_MODE=VERIFY_CA \
   -e BACKUP_REPOSITORY=/work/repo -e RESTIC_PASSWORD_FILE=/work/repo-password \
   -e RESTIC_REPOSITORY=/work/repo \
+  -e FULL_COORDINATE_FILE=/work/full-coordinate \
   -e BACKUP_WORK_DIR=/work/work -e PLANS_DIR=/work/plans -e UPLOADS_DIR=/work/uploads \
   -e UPLOADS_STAGING_PARENT=/work/staging \
   -e REPLICA_HEARTBEAT_DIR=/work/heartbeats -e SCHEDULER_ACK_DIR=/work/scheduler \
@@ -155,16 +156,17 @@ if [[ "$STATE" != "SUCCESS" ]]; then
   echo "FAIL: state=$STATE" >&2
   exit 1
 fi
-for k in target_db.before_marker target_db.after_marker uploads_staging.before_marker uploads_staging.after_marker; do
+for k in target_db.before_marker target_db.mid_dml_replayed target_db.after_marker \
+  uploads_staging.before_marker uploads_staging.after_marker; do
   V=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration jq -r ".$k" /work/integration-summary.json)
   case "$k" in
-    target_db.before_marker|uploads_staging.before_marker) [[ "$V" == "1" ]] || { echo "FAIL: $k=$V" >&2; exit 1; } ;;
+    target_db.before_marker|target_db.mid_dml_replayed|uploads_staging.before_marker) [[ "$V" == "1" ]] || { echo "FAIL: $k=$V" >&2; exit 1; } ;;
     *) [[ "$V" == "0" ]] || { echo "FAIL: $k=$V" >&2; exit 1; } ;;
   esac
 done
 
-echo "== secret scan（evidence から合成パスワードが漏れていないこと） =="
-if grep -rl "$INTEGRATION_SRC_PW\|$INTEGRATION_TGT_PW" "$WORK/evidence" 2>/dev/null \
+echo "== secret scan（evidence から合成パスワード・署名秘密鍵が漏れていないこと） =="
+if grep -rl "$INTEGRATION_SRC_PW\|$INTEGRATION_TGT_PW\|PRIVATE KEY" "$WORK/evidence" 2>/dev/null \
   | grep -vE "src-password|tgt-password"; then
   echo "FAIL: evidence に secret が含まれます" >&2
   exit 1

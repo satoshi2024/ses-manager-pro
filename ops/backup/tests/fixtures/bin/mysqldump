@@ -16,7 +16,7 @@ done
 
 if [[ -n "${FAKE_DUMP_FILE:-}" && -f "$FAKE_DUMP_FILE" ]]; then
   cat "$FAKE_DUMP_FILE"
-  exit 0
+  exit "${FAKE_DUMP_RC:-0}"
 fi
 
 # 既定の fixture dump（--source-data=2 相当）
@@ -29,7 +29,7 @@ cat <<'EOF'
 
 -- CHANGE MASTER TO MASTER_LOG_FILE='binlog.000010', MASTER_LOG_POS=154;
 -- GTID state at the beginning of the backup 11111111-2222-3333-4444-555555555555:1-42
-
--- Dump completed on 2026-08-14  1:00:00
 EOF
+exit "${FAKE_DUMP_RC:-0}"
+
 exit 0

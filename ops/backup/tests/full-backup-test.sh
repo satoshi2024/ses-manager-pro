@@ -44,6 +44,8 @@ setup_full() {
   export PREFLIGHT_MIN_FREE_BYTES=1 QUIESCE_DEADLINE_SECONDS=20 QUIESCE_STALE_SECONDS=60
   export APP_COMMIT=test-commit-abc FLYWAY_VERSION=42 CRITICAL_TABLES=sys_user
   export BACKUP_TOOL_IMAGE_DIGEST=sha256:unit-test-digest
+  # R1 P1-06: full coordinate は必須（archiver の初回起点）
+  export FULL_COORDINATE_FILE="$T/full-coordinate"
   export FAKE_GET_LOCK_HOLD=1
   export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK
@@ -74,8 +76,14 @@ case_backup_full_normal() {
   local code=$?
   assert_zero "$code" "full backup 成功"
   assert_contains "$out" '"status": "VALID"' "result status VALID"
-  assert_contains "$out" 'binlog.000010' "coordinate file が metadata と一致"
+  assert_contains "$out" 'binlog.000010' "coordinate file は metadata と一致"
   assert_contains "$out" '"position": 154' "coordinate position"
+  # R1 P1-06: full coordinate file が書き出されていること
+  if [[ -f "$FULL_COORDINATE_FILE" ]] && grep -qx 'binlog.000010' "$FULL_COORDINATE_FILE"; then
+    test_assert "FULL_COORDINATE_FILE を書き出し（archiver の初回起点）"
+  else
+    test_fail "FULL_COORDINATE_FILE を書き出し（archiver の初回起点）" "coordinate file が正しくない"
+  fi
   # restic に kind=full の snapshot
   local snaps=""
   snaps=$(RESTIC_REPOSITORY="$BACKUP_REPOSITORY" RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
@@ -252,6 +260,21 @@ case_backup_full_restic_failure() {
   teardown_full
 }
 
+case_backup_full_failure_releases_quiesce() {
+  setup_full
+  # R1 P1-03: 失敗時にも静止解除（DDL lock session 終了）が必ず走ること。
+  # quiesce 取得後に dump を失敗させ、release が実行されることを確認する
+  export QUIESCE_STATE_DIR="$T/quiesce-state"
+  export FAKE_DUMP_RC=1
+  local out=""
+  out=$("$BACKUP_FULL" 2>&1)
+  local code=$?
+  assert_nonzero "$code" "dump 失敗で backup-full は非 0"
+  assert_no_file "$QUIESCE_STATE_DIR/ddl-session.pid" "失敗後も DDL session pid が残らない（quiesce 解放済み）"
+  unset QUIESCE_STATE_DIR FAKE_DUMP_RC
+  teardown_full
+}
+
 case_backup_full_no_secret_leak() {
   setup_full
   "$BACKUP_FULL" > /dev/null 2>&1 || true
@@ -270,6 +293,7 @@ run_case case_backup_full_coord_parse_failure
 run_case case_backup_full_quiesce_failure
 run_case case_backup_full_uploads_symlink
 run_case case_backup_full_restic_failure
+run_case case_backup_full_failure_releases_quiesce
 run_case case_backup_full_no_secret_leak
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

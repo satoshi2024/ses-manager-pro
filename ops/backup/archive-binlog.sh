@@ -112,20 +112,32 @@ binlog_archive::resolve_start() {
       start=$STATE_LAST_FILE
     fi
   else
-    # 最初の full coordinate（FULL_COORDINATE_FILE）か、無ければ現最新
-    if [[ -n "${FULL_COORDINATE_FILE:-}" ]]; then
-      local cs
-      cs=$(binlog::suffix "$FULL_COORDINATE_FILE")
-      local e2
-      e2=$(binlog::suffix "$current")
-      if [[ -n "$cs" && 10#$cs -le 10#$e2 ]]; then
-        start=$FULL_COORDINATE_FILE
-      else
-        echo "archive-binlog: FULL_COORDINATE_FILE が source より新しい: $FULL_COORDINATE_FILE" >&2
-        return 1
-      fi
+    # 初回起動は full coordinate（FULL_COORDINATE_FILE）から開始する。
+    # R1 P1-06: 未設定・欠落の場合は黙って現行から開始せず失敗する
+    # （先行 binlog が未アーカイブのまま健康状態が偽装されるのを防ぐ）。
+    if [[ -z "${FULL_COORDINATE_FILE:-}" ]]; then
+      echo "archive-binlog: 初回起動には FULL_COORDINATE_FILE が必要です（backup-full が書き込みます）" >&2
+      return 1
+    fi
+    if [[ ! -f "$FULL_COORDINATE_FILE" ]]; then
+      echo "archive-binlog: FULL_COORDINATE_FILE がありません: $FULL_COORDINATE_FILE（backup-full を先に実行してください）" >&2
+      return 1
+    fi
+    local coord
+    coord=$(head -n1 "$FULL_COORDINATE_FILE")
+    [[ -n "$coord" ]] || {
+      echo "archive-binlog: FULL_COORDINATE_FILE が空です: $FULL_COORDINATE_FILE" >&2
+      return 1
+    }
+    local cs
+    cs=$(binlog::suffix "$coord")
+    local e2
+    e2=$(binlog::suffix "$current")
+    if [[ -n "$cs" && 10#$cs -le 10#$e2 ]]; then
+      start=$coord
     else
-      start=$current
+      echo "archive-binlog: FULL_COORDINATE_FILE が source より新しい: $coord" >&2
+      return 1
     fi
   fi
   echo "$start"
@@ -227,7 +239,7 @@ case "$MODE" in
 Usage: archive-binlog.sh [--stop-never|--once|--help]
 環境変数: BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, MYSQL_HOST, MYSQL_USER,
 MYSQL_PASSWORD_FILE, BINLOG_RAW_DIR, BINLOG_STATE, BINLOG_SERVER_ID(任意),
-FULL_COORDINATE_FILE(任意)
+FULL_COORDINATE_FILE(初回起動に必須。backup-full が書き出す coordinate file のパス)
 EOF
     exit 0 ;;
   *) echo "Usage: archive-binlog.sh [--stop-never|--once|--help]" >&2; exit 2 ;;
