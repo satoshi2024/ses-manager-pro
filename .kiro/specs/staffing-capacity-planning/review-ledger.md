@@ -4,8 +4,9 @@
 
 - **T075 F1: 完了**（commit `a691f77e`）
 - **T076 F2: 完了**（commit `ec880114`）
-- **T077 A1: 完了（REVIEW待ち）** 2026-08-16
-- T078〜T080: 未着手
+- **T077 A1: 完了**（commit `6e0ddfc9`）
+- **T078 B1: 完了（REVIEW待ち）** 2026-08-16
+- T079〜T080: 未着手
 
 ## READINESS（着手時）
 
@@ -86,7 +87,76 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 
 - T075: `a691f77e` feat(staffing): T075 F1 position/allocation/scenario DDL（V103・過配賦日単位判定・例外承認・scenario isolation）
 - T076: `ec880114` feat(staffing): T076 F2 proposal/contract/availability統合（actual同期・需給集計・更新/退職/休暇反映）
-- T077: （本ledger更新と同じcommitに含める）
+- T077: `6e0ddfc9` feat(staffing): T077 A1 position board/allocation timeline（D&D・UI rollback・同時配置CAS）
+- T078: （本ledger更新と同じcommitに含める）
+
+---
+
+## TASK CONTRACT T078（B1. 需給heatmap/KPI）
+
+- requirements/AC: R3.1（月別×skill/role/location別の需要・供給・不足・余剰・bench cost表示）、R5
+- 決定表はdesign.md §5の確定済み3表をそのまま実装（読み替えなし）
+
+### 実装内容
+
+- **集計**（`StaffingHeatmapService`）:
+  - 需要FTE = position（required_count × allocation_percent）を月内稼働日数（法人既定=平日）比で按分
+  - 供給FTE = `StaffingCapacityService.supply` と同一口径（actual+plan。社内/待機は案件需給に寄与しない）
+  - 不足=max(0, 需要-供給)、余剰=max(0, 供給-需要)、bench cost = (1.0 − 供給FTE) × 希望単価
+  - 全社合計はrole次元の内訳合計から構築（各次元は分割性を持つためΣ=全社）
+  - 24か月上限・window超過は拒否（design §4/§5.4）
+  - グループ帰属の分割性: 供給は要員の「主要スキル」（proficiency降順・id昇順の先頭）／
+    配置positionのrole/location、需要はpositionのrole/location/skills_json先頭
+  - **HR mask**: benchCost・drilldownの単価をHRロールでnull（design §5.3）
+  - scope: DataScopeService.allowedEngineerIds/allowedProjectIdsをSQL境界で適用
+- **API**: `/api/analytics/staffing-heatmap`（既存analytics menuのapi_prefix配下・新規権限seed不要）＋drilldown
+- **UI**: `/analytics/staffing-heatmap`（analytics indexからリンク）、staffing-heatmap.js
+  （次元タブ・不足セルクリックでdrilldownモーダル）
+
+### 実装の具体化（判定・根拠）
+
+1. bench costの単価はengineer.expectedUnitPrice（希望単価）を使用（社内原価テーブルは
+   人事領域のため、需給計画のKPIとして希望単価ベースと明記）。
+2. skill次元の分割性: 要員が複数スキルを持つ場合も主要スキル1件へ帰属（Σ=全社を保証）。
+3. 応答はグループ×月のグリッドのみ（engineer×dayの直積を作らない。セル数上限testで固定）。
+
+## 変更file（T078）
+
+| 種別 | file |
+|---|---|
+| service | `service/staffing/StaffingHeatmapService`(+Impl) |
+| dto | `dto/staffing/HeatmapDto`、`dto/staffing/ShortfallDrilldownDto` |
+| controller | `StaffingHeatmapApiController`（/api/analytics配下）、`AnalyticsPageController`（page追加） |
+| UI | `templates/analytics/staffing-heatmap.html`、`static/js/modules/staffing-heatmap.js`、analytics/index.htmlにリンク |
+| 修正 | `StaffingCapacityServiceImpl.sumPlanFte` にallocation_type='案件'フィルタ追加（社内/待機は案件需給に寄与しない。T076の実装方針を明示化） |
+| message | 4バンドルへ staffing.heatmap.* / common.reload 追加 |
+| test | `StaffingHeatmapServiceTest`（5件）、`StaffingHeatmapApiControllerTest`（4件） |
+
+## Test evidence（T078）
+
+| 実行 | 結果 |
+|---|---|
+| 直接回帰: staffing 10クラス（59件）＋Contract/Proposal(56)＋AllMappers(133)＋MigrationIntegrity(27)＋MessageBundle(4)＋JsSyntaxCheck(1) | 279/0/0/0 PASS |
+| `git diff --check` | exit 0（コミット前に実施） |
+
+受入条件の実測:
+- 全社合計=内訳合計（skill/role/locationの3次元すべてで需要・供給・bench cost一致）
+- 需要FTE = 2人×100%×22/22日=2.00、期間比で2人×100%×11/22日=1.00
+- 24か月を超える要求・from>toは拒否（horizonExceeded/invalidPeriod）
+- HRにはbenchCostがmask（null）、管理者には表示
+- 50要員+24か月でセル数≤300（engineer×dayに比例しない）
+- drilldownは需要（position）と供給（engineer）を返す
+
+## Demo（T078）
+
+- 全社合計と内訳合計の一致・Java需要不足のdrilldownはservice/API testで実証済み。
+- 実ブラウザDemo（desktop/390px・heatmap表示・drilldown操作）はM task（T080）で実施する。
+
+## Risk
+
+- 需要側のskill名はposition.skills_json（自由入力）とm_skill_tag（要員側）の名寄せが完全には
+  一致しない可能性がある。不足の検出はrole/location次元が確実（両側ともposition属性で一致）。
+- bench costは希望単価ベース（人事原価と異なる旨をUI凡例に明記せず、ledgerで管理）。
 
 ---
 

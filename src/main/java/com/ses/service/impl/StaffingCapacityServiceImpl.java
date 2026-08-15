@@ -184,10 +184,12 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
 
     private BigDecimal sumPlanFte(Long engineerId, Long calendarId, LocalDate monthStart, LocalDate monthEnd,
                                   LocalDate windowEnd, int availableDays) {
-        // WHERE句でplan（source_contract_id IS NULL）だけを選択（design §5.4の排他）
+        // WHERE句でplan（source_contract_id IS NULL）だけを選択（design §5.4の排他）。
+        // 供給FTEは案件（position付き）のみ。社内/待機は案件需給に寄与しない。
         List<AllocationPlan> plans = allocationMapper.selectList(new LambdaQueryWrapper<AllocationPlan>()
                 .eq(AllocationPlan::getEngineerId, engineerId)
                 .isNull(AllocationPlan::getSourceContractId)
+                .eq(AllocationPlan::getAllocationType, AllocationPlan.TYPE_PROJECT)
                 .eq(AllocationPlan::getStatus, STATUS_CONFIRMED)
                 .le(AllocationPlan::getStartDate, monthEnd)
                 .and(w -> w.isNull(AllocationPlan::getEndDate)

@@ -45,7 +45,7 @@
     D&D失敗時のUI rollback、mobile 390px。
   - **Demo**: 兼務配置と過配賦拒否。D&D中にAPIを失敗させカードが元位置へ戻ることを確認。
 
-- [ ] B1. 需給heatmap/KPI
+- [x] B1. 需給heatmap/KPI
   - **Objective**: 月別のskill/role/location別の需要・供給・不足・余剰・bench costが見え、
     不足からdrilldownできる。全社合計と内訳の合計が一致する。
   - **実装ガイダンス**: skill/role/location/月aggregate、bench cost。

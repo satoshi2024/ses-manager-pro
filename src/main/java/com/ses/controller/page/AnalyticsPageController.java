@@ -17,4 +17,9 @@ public class AnalyticsPageController {
     public String availabilityCalendar() {
         return "analytics/availability-calendar";
     }
+
+    @GetMapping("/staffing-heatmap")
+    public String staffingHeatmap() {
+        return "analytics/staffing-heatmap";
+    }
 }
