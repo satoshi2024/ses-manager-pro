@@ -1,3 +1,6 @@
+## R10最終Review（Phase A・R25契約A・983b71ac・2026-08-14/15）: T066 technical PASS・S10 PASS・S12 READY
+
+R10 最終Review（Phase A・R25契約A・983b71ac）: T066 technical PASS・S10 PASS・S12 READYを認定。P1-6 watermark preview（"PREVIEW" watermark・archive 0/delivery 0・営業403・ComplianceDocumentApiTest 16/0/0/0）、G2GatePhaseAE2ETest完全パス 1/0/0/0、G2GateBrowserPhaseATest（実Chrome・desktop/390px・9 tabs・console error 0）1/0/0/0×2、evidence SHA-256（299e7f86/17be2509）をsummary.jsonと照合一致、CI 1958/0/0/0 skip 0（head=983b71ac）を独立確認。P2 note×3（報告書SHA誤記・RENEWED_FROM_CONTRACT_ID logged error他track・browser初回transient）。B gate（G2_PRODUCTION_AUTHORIZATION）は未達・ACTIVE/formal delivery fail-closed維持。production authorizationなし。次: PR #76 merge → main CI → S12着手可（staffing-capacity-planning・V103）
 ## Phase A（R25契約A・S10_TECHNICAL_ACCEPTANCE）完了記録（2026-08-14/15）
 
 - **P1-6 watermark preview**: contract detail法定帳票cardにプレビューボタン追加（watermark付きPDF・新規タブinline・archive 0/delivery 0）＋direct regression 2件（watermark/archive 0/delivery 0・営業403）
