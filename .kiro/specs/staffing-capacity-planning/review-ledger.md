@@ -91,7 +91,49 @@ F1はservice層のみ（UIはT077 A1の所有）のため、Demoは受入条件�
 - T076: `ec880114` feat(staffing): T076 F2 proposal/contract/availability統合（actual同期・需給集計・更新/退職/休暇反映）
 - T077: `6e0ddfc9` feat(staffing): T077 A1 position board/allocation timeline（D&D・UI rollback・同時配置CAS）
 - T078: `f0e7a222` feat(staffing): T078 B1 需給heatmap/KPI（server aggregate・全社=内訳合計・HR mask）
-- T079: （本ledger更新と同じcommitに含める）
+- T079: `6ef0108e` feat(staffing): T079 B2 scenario compare（isolation・scope filter・HR粗利mask）
+- T080: `22fe7d06` feat(staffing): T080 M 回帰/性能（L4全量・p95/heap実測・browser Demo・派工整合test同期）
+- 注: T079の実コミットは`6ef0108e`（T078=`0424abd0`。発注者commit `f00360f9`を間に挟む）
+
+---
+
+## TASK CONTRACT T080（M. 回帰/性能）
+
+- requirements/AC: 全R（position作成→配置→提案→契約→需給更新の一気通貫）、既存project/proposal/contract/analytics回帰
+- 実装ガイダンス: design.md §5決定表・platform-invariantsの境界、既存資産再利用規約
+
+### 実装内容
+
+- **L4全量**: 364クラス / 2029件 / Failures 0 / Errors 0 / Skipped 0
+  （localは実行時間の都合でクラス集合を複数バッチに分けて実行し、全クラスのsurefire reportで
+  0失敗・0skipを確認。MySQL smoke（Testcontainers・Docker実在）・browser Demo・
+  既存analytics（AnalyticsServiceImplTest等）・contract gantt系（ContractRenewal*）・
+  Node/JS syntax（JsSyntaxCheckTest）を含む）
+- **性能実測**（`StaffingPerformanceTest`）: 代表データ（要員200・position50・配置300・24か月）で
+  heatmap集計の **p95 = 989ms**（5回: 642〜989ms）、**heap増加 = 306KB**。
+  セル数はグループ×月に比例（engineer×dayの直積を作らないことを実測で確認）
+- **browser Demo**（`StaffingBrowserMTest`・実Chrome CDP headless）:
+  position board / engineer timeline / heatmap / scenario compare をdesktop(1920x1080)と390px(390x844)で
+  実測し、DOM検証＋スクリーンショット＋console eventsを `evidence/browser-m/` へ保存（console error 0）
+- **派工整合test同期**: SpecDispatchConsistencyTestへS12をREALIZED_MIGRATIONS（V103）として登録し、
+  design.md/tasks.mdを「正式migration V103」表記へ更新。schema-mismatch-h2.sqlへt_proposal.position_id補完
+- `git diff --check` exit 0
+
+## 完了報告（REVIEW待ち）
+
+- **task別対応表**: T075 F1 `a691f77e` / T076 F2 `ec880114` / T077 A1 `6e0ddfc9` /
+  T078 B1 `0424abd0` / T079 B2 `6ef0108e` / T080 M `22fe7d06`
+- **実行test**: L4全量 364クラス/2029件/0/0/0（各taskの定向・直接回帰含む）。
+  MySQL smoke: FlywayMigrationSmokeTest他全Flyway系をDocker実MySQLで0-skip PASS
+- **Demo**: 一気通貫（position→配置→契約→需給更新）とdesktop/390px browser evidence
+  （evidence/browser-m/・SHA-256付きsummary.json）。p95/heap実測値は本ledgerに記録
+- **未検証事項**: 本番gating（実MySQLでのp95/負荷・実環境のauth設定・本番seedデータでの
+  容量測定）は本番リリース前のrelease gateとして継続管理
+- **rollback**: 各task commitを順にrevert。DBはV103適用済みのため、rollback時は
+  V103のテーブル/列削除＋flyway_schema_historyから`version='103'`を削除
+- **base/head**: base=`85dfd7bf`（S10 PASS merge後） → head=`22fe7d06`（7 commits / S12）
+- **Review開始条件**: 本ledgerの現行判定・各taskのTest evidence・browser evidenceを提示して
+  独立Reviewを開始可能（P0/P1ゼロを確認する）。レビュー合格まで次spec開始を記録しない
 
 ---
 
