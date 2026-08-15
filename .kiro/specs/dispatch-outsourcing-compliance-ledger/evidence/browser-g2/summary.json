@@ -1,0 +1,12 @@
+{
+  "runId" : "browser-g2-20260815021406",
+  "baseUrl" : "http://localhost:50767",
+  "desktop-png" : "desktop-compliance-gate.png",
+  "desktop-png-sha256" : "299e7f86ff6444c4193dc68f79ed247a11dbc1ee622f64577aeefaf6e6405dc9",
+  "desktop-finalUrl" : "http://localhost:50767/compliance-gate",
+  "desktop-consoleCount" : 3,
+  "mobile390-png" : "mobile390-compliance-gate.png",
+  "mobile390-png-sha256" : "17be25093b575828b3185684666b1f29bb950223aa5ccfbb698de96115aeff58",
+  "mobile390-finalUrl" : "http://localhost:50767/compliance-gate",
+  "mobile390-consoleCount" : 3
+}

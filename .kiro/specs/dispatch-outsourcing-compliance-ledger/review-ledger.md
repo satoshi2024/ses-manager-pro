@@ -1,3 +1,13 @@
+## R10最終Review（Phase A・R25契約A・983b71ac・2026-08-14/15）: T066 technical PASS・S10 PASS・S12 READY
+
+R10 最終Review（Phase A・R25契約A・983b71ac）: T066 technical PASS・S10 PASS・S12 READYを認定。P1-6 watermark preview（"PREVIEW" watermark・archive 0/delivery 0・営業403・ComplianceDocumentApiTest 16/0/0/0）、G2GatePhaseAE2ETest完全パス 1/0/0/0、G2GateBrowserPhaseATest（実Chrome・desktop/390px・9 tabs・console error 0）1/0/0/0×2、evidence SHA-256（299e7f86/17be2509）をsummary.jsonと照合一致、CI 1958/0/0/0 skip 0（head=983b71ac）を独立確認。P2 note×3（報告書SHA誤記・RENEWED_FROM_CONTRACT_ID logged error他track・browser初回transient）。B gate（G2_PRODUCTION_AUTHORIZATION）は未達・ACTIVE/formal delivery fail-closed維持。production authorizationなし。次: PR #76 merge → main CI → S12着手可（staffing-capacity-planning・V103）
+## Phase A（R25契約A・S10_TECHNICAL_ACCEPTANCE）完了記録（2026-08-14/15）
+
+- **P1-6 watermark preview**: contract detail法定帳票cardにプレビューボタン追加（watermark付きPDF・新規タブinline・archive 0/delivery 0）＋direct regression 2件（watermark/archive 0/delivery 0・営業403）
+- **Phase A fixture**: G2GatePhaseAE2ETest（TEST/DEVELOPMENT fixture・mapping→approval→subject→qualification→SUBMITTED→verification×4→adoption APPROVED→ACTIVE完全パス・架空専門家はtest内限定）
+- **browser目視**: G2GateBrowserPhaseATest（実Chrome CDP・desktop 1920x1080/390x844・9 tabs DOM検証・console error 0・evidence/browser-g2/保存・SHA-256 manifest）
+- **L1-L4**: 回帰154/154・PR #76 CI 31823283517 = **1958/0/0/0 skip 0・BUILD SUCCESS**（MySQL smoke含む・browser目視もCI実行）
+- 最終Review PacketをR10へ提出
 ## R10判定（R25 stratification delta v2 311720fc・2026-08-14）: ACCEPTED
 
 R10 R25-P1-01 stratification delta v2（311720fc・docs-only・+67・non-md 0・diff-check PASS）: ACCEPTED。CHANGES_REQUIRED 3点（§0 supersession: accepted v3 §7 item 1-5→B移管・6-8→A読み替え・S10 PASS条件一意化／§3.1 FM-C-28 divergence記録＋gate B引き継ぎ／§5 technical PASS名称区分）を確認し解消。A（S10_TECHNICAL_ACCEPTANCE）達成でT066 technical PASS・S10 PASS・S12 READY、B（G2_PRODUCTION_AUTHORIZATION）は人間証跡12-step別gate・ACTIVE/formal delivery fail-closed維持。新規issueなし。次: PR #75 merge → Phase A → 最終Review Packet → T066 technical PASS/S10 PASS/S12 READY → B gate（production authorization）。production authorizationなし

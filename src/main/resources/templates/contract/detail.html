@@ -452,9 +452,16 @@
                 <div class="card bg-card border-dark shadow-sm mt-4 d-none" id="cd-documents-card">
                     <div class="card-header border-dark bg-transparent d-flex justify-content-between align-items-center py-3">
                         <h6 class="mb-0 text-white fw-bold"><i class="bi bi-file-earmark-pdf me-2 text-danger"></i><th:block th:text="#{cpp.documents}">法定帳票・交付</th:block></h6>
-                        <button class="btn btn-sm btn-outline-primary py-0 px-2" id="cd-doc-generate-btn" onclick="ContractCompliance.generateDocument()" disabled>
-                            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{cpp.document.generate}">帳票を生成</th:block>
-                        </button>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-warning py-0 px-2" id="cd-doc-preview-btn"
+                                    onclick="ContractCompliance.previewDocument()" disabled
+                                    title="watermark付きプレビュー（archive 0・delivery 0）">
+                                <i class="bi bi-eye me-1"></i><th:block th:text="#{cpp.document.preview}">プレビュー</th:block>
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2" id="cd-doc-generate-btn" onclick="ContractCompliance.generateDocument()" disabled>
+                                <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{cpp.document.generate}">帳票を生成</th:block>
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body p-3">
                         <form class="row g-2 mb-3" id="cd-doc-form">
