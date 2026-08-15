@@ -281,12 +281,50 @@ CREATE TABLE t_project_skill (
 
 
 -- ============================================================
+-- 8.5 t_project_position (案件ポジション/募集枠。staffing-capacity-planning / S12)
+-- t_proposal/t_contractのFK先のため、先に定義する。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS t_project_position (
+  id                 BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  project_id         BIGINT       NOT NULL                   COMMENT '案件ID',
+  position_no        VARCHAR(50)  NOT NULL                   COMMENT 'ポジション番号（案件内一意）',
+  role_name          VARCHAR(200) NOT NULL                   COMMENT '役割名',
+  required_count     INT          NOT NULL DEFAULT 1         COMMENT '募集人数',
+  skills_json        TEXT                                    COMMENT '必須/歓迎skillのJSON配列',
+  unit_price_min     DECIMAL(10,0)                           COMMENT '単価帯下限(円/月)',
+  unit_price_max     DECIMAL(10,0)                           COMMENT '単価帯上限(円/月)',
+  start_date         DATE                                    COMMENT '開始日（inclusive）',
+  end_date           DATE                                    COMMENT '終了日（inclusive・NULL=open end: 計画window末まで）',
+  location           VARCHAR(255)                            COMMENT '勤務地',
+  allocation_percent DECIMAL(5,2)  NOT NULL DEFAULT 100      COMMENT '想定稼働率(%)',
+  priority           VARCHAR(20)                             COMMENT '優先度',
+  status             VARCHAR(20)  NOT NULL DEFAULT '募集中'  COMMENT '募集中/候補選定/充足/保留/取消',
+  version            INT          NOT NULL DEFAULT 0         COMMENT '楽観ロック',
+  created_by         BIGINT                                  COMMENT '作成者ID',
+  created_at         DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at         DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag       TINYINT      NOT NULL DEFAULT 0         COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_project_position_no (project_id, position_no),
+  INDEX idx_project_position_status (status),
+  INDEX idx_project_position_period (start_date, end_date),
+  CONSTRAINT chk_project_position_count CHECK (required_count >= 1),
+  CONSTRAINT chk_project_position_percent CHECK (allocation_percent > 0 AND allocation_percent <= 100),
+  CONSTRAINT chk_project_position_price CHECK (unit_price_min IS NULL OR unit_price_max IS NULL OR unit_price_min <= unit_price_max),
+  CONSTRAINT chk_project_position_period CHECK (end_date IS NULL OR start_date IS NULL OR start_date <= end_date),
+  CONSTRAINT chk_project_position_status CHECK (status IN ('募集中','候補選定','充足','保留','取消')),
+  CONSTRAINT fk_project_position_project FOREIGN KEY (project_id) REFERENCES t_project(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='案件ポジション（募集枠）';
+
+
+-- ============================================================
 -- 9. t_proposal (提案テーブル)
 -- ============================================================
 CREATE TABLE t_proposal (
   id                  BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
   engineer_id         BIGINT       NOT NULL                   COMMENT '要員ID',
   project_id          BIGINT       NOT NULL                   COMMENT '案件ID',
+  position_id         BIGINT                                  COMMENT 'ポジションID（staffing-capacity-planning）',
   proposed_unit_price DECIMAL(10,0)                           COMMENT '提案単価(万円)',
   status              ENUM('書類選考中','一次面接','二次面接','結果待ち','成約','見送り') DEFAULT '書類選考中' COMMENT '選考ステータス',
   skill_sheet_path    VARCHAR(500)                            COMMENT 'スキルシートファイルパス',
@@ -311,6 +349,9 @@ CREATE TABLE t_proposal (
   CONSTRAINT fk_proposal_project
     FOREIGN KEY (project_id) REFERENCES t_project(id)
     ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_proposal_position
+    FOREIGN KEY (position_id) REFERENCES t_project_position(id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
   CONSTRAINT fk_proposal_proposed_by
     FOREIGN KEY (proposed_by) REFERENCES sys_user(id)
     ON UPDATE CASCADE ON DELETE SET NULL
@@ -350,6 +391,7 @@ CREATE TABLE t_contract (
   proposal_id           BIGINT                                 COMMENT '提案ID',
   engineer_id           BIGINT       NOT NULL                  COMMENT '要員ID',
   project_id            BIGINT       NOT NULL                  COMMENT '案件ID',
+  position_id           BIGINT                                 COMMENT 'ポジションID（staffing-capacity-planning）',
   customer_id           BIGINT       NOT NULL                  COMMENT '顧客ID',
   contract_type         ENUM('準委任','請負','派遣')            COMMENT '契約形態',
   start_date            DATE         NOT NULL                  COMMENT '契約開始日',
@@ -394,6 +436,9 @@ CREATE TABLE t_contract (
   CONSTRAINT fk_contract_project
     FOREIGN KEY (project_id) REFERENCES t_project(id)
     ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_contract_position
+    FOREIGN KEY (position_id) REFERENCES t_project_position(id)
+    ON UPDATE CASCADE ON DELETE SET NULL,
   CONSTRAINT fk_contract_customer
     FOREIGN KEY (customer_id) REFERENCES m_customer(id)
     ON UPDATE CASCADE ON DELETE RESTRICT,
@@ -2330,3 +2375,89 @@ CREATE TABLE t_compliance_external_review_adoption_event (
   CONSTRAINT fk_g2_adoption_mapping FOREIGN KEY (tenant_id, mapping_id)
     REFERENCES m_compliance_mapping_version(tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================
+-- 39. 要員配置・需給計画（staffing-capacity-planning / S12 / V103）
+-- V1統合baseline。legacy DBへはV103が同じshapeを順方向追加する。
+-- approval_request_idのFKはV103のガード付きADD CONSTRAINTで追加される
+-- （t_approval_requestはV75所属のため、V1ではFKを張れない）。
+-- allocation_type×position_idの整合CHECKはMySQLではCHECK+FK同一列併用不可
+-- （Error 3823相当）のためV1/V103には置かず、V103のtriggerで担保する
+-- （H2はCHECKで担保。V102_1と同一の重担保方式）。
+-- ============================================================
+
+-- ---- 3) 配置計画 ----
+-- position_id IS NULLは「社内/待機」という業務値（未割当ではない）。
+-- source_contract_id IS NOT NULLの行はactual（契約由来）。需給集計SQLのWHERE句でplanと排他する。
+CREATE TABLE IF NOT EXISTS t_allocation_plan (
+  id                 BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  engineer_id        BIGINT       NOT NULL                   COMMENT '要員ID',
+  position_id        BIGINT                                  COMMENT 'ポジションID（NULL=社内/待機）',
+  allocation_type    VARCHAR(20)  NOT NULL DEFAULT '案件'    COMMENT '案件/社内/待機',
+  start_date         DATE         NOT NULL                   COMMENT '開始日（inclusive）',
+  end_date           DATE                                    COMMENT '終了日（inclusive・NULL=open end: 計画window末まで）',
+  allocation_percent DECIMAL(5,2) NOT NULL                   COMMENT '配賦率(%)',
+  status             VARCHAR(20)  NOT NULL DEFAULT '下書き'  COMMENT '下書き/確定/破棄',
+  source_contract_id BIGINT                                  COMMENT '実契約ID（NOT NULL=actual。planと排他）',
+  exception_reason   VARCHAR(1000)                           COMMENT '過配賦例外の理由（例外時必須）',
+  approval_request_id BIGINT                                 COMMENT '過配賦例外の承認申請ID（例外時必須）',
+  version            INT          NOT NULL DEFAULT 0         COMMENT '楽観ロック',
+  created_by         BIGINT                                  COMMENT '作成者ID',
+  created_at         DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at         DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag       TINYINT      NOT NULL DEFAULT 0         COMMENT '論理削除フラグ',
+  INDEX idx_allocation_plan_engineer_period (engineer_id, start_date, end_date),
+  INDEX idx_allocation_plan_position (position_id),
+  INDEX idx_allocation_plan_status (status),
+  INDEX idx_allocation_plan_source_contract (source_contract_id),
+  CONSTRAINT chk_allocation_plan_period CHECK (end_date IS NULL OR start_date <= end_date),
+  CONSTRAINT chk_allocation_plan_percent CHECK (allocation_percent > 0 AND allocation_percent <= 100),
+  CONSTRAINT chk_allocation_plan_status CHECK (status IN ('下書き','確定','破棄')),
+  CONSTRAINT fk_allocation_plan_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_allocation_plan_position FOREIGN KEY (position_id) REFERENCES t_project_position(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_allocation_plan_contract FOREIGN KEY (source_contract_id) REFERENCES t_contract(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='要員配置計画';
+
+-- ---- 4) 仮配置scenario（本データを変更しない） ----
+CREATE TABLE IF NOT EXISTS t_staffing_scenario (
+  id               BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  owner_user_id    BIGINT       NOT NULL                   COMMENT '作成者ID（閲覧scopeの起点）',
+  name             VARCHAR(200) NOT NULL                   COMMENT 'scenario名',
+  base_date        DATE         NOT NULL                   COMMENT '実データcopy基準日（snapshot）',
+  shared_flag      TINYINT      NOT NULL DEFAULT 0         COMMENT '共有フラグ（1=同一組織scope内で共有）',
+  assumptions_json TEXT                                    COMMENT '仮定メモのJSON',
+  created_at       DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at       DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag     TINYINT      NOT NULL DEFAULT 0         COMMENT '論理削除フラグ',
+  INDEX idx_staffing_scenario_owner (owner_user_id),
+  CONSTRAINT fk_staffing_scenario_owner FOREIGN KEY (owner_user_id) REFERENCES sys_user(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='需給計画シナリオ';
+
+-- ---- 5) scenario内の仮配置（日単位） ----
+-- datesは対象日のISO日付JSON配列（昇順・重複なし・[base_date, window末]の範囲）。
+-- scenario操作は本テーブルのみを更新し、t_allocation_plan/契約/提案へ一切書き込まない（R3.3）。
+CREATE TABLE IF NOT EXISTS t_staffing_scenario_allocation (
+  id          BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  scenario_id BIGINT       NOT NULL                   COMMENT 'scenarioID',
+  engineer_id BIGINT       NOT NULL                   COMMENT '要員ID',
+  position_id BIGINT                                  COMMENT 'ポジションID（NULL=社内/待機）',
+  dates       TEXT         NOT NULL                   COMMENT '対象日のJSON配列（ISO日付・昇順・重複なし）',
+  percent     DECIMAL(5,2) NOT NULL                   COMMENT '配賦率(%)',
+  created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '作成日時',
+  updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag TINYINT     NOT NULL DEFAULT 0         COMMENT '論理削除フラグ',
+  INDEX idx_scenario_alloc_scenario (scenario_id),
+  INDEX idx_scenario_alloc_engineer (engineer_id),
+  CONSTRAINT chk_scenario_alloc_percent CHECK (percent > 0 AND percent <= 100),
+  CONSTRAINT fk_scenario_alloc_scenario FOREIGN KEY (scenario_id) REFERENCES t_staffing_scenario(id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_scenario_alloc_engineer FOREIGN KEY (engineer_id) REFERENCES t_engineer(id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_scenario_alloc_position FOREIGN KEY (position_id) REFERENCES t_project_position(id)
+    ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='シナリオ仮配置';

@@ -9,7 +9,7 @@
 > **Migration**: 本specの予約番号は **V103**。dispatch（V84/V85＋G2 follow-up V102）とattendance（V83/V91/V98）の両方がPASS・merge済み後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] F1. position/allocation/scenario DDL
+- [x] F1. position/allocation/scenario DDL
   - **Objective**: 案件に役割・必須skill・単価帯・稼働率を持つ複数positionを登録でき、
     要員の期間別allocationを計画できる。同一期間の配賦率合計が100%を超える配置は拒否され、
     例外は理由と承認が必須になる。scenarioは実データを変更しない。

@@ -35,6 +35,9 @@ public class Proposal extends BaseEntity {
     @NotNull(message = "案件は必須です")
     private Long projectId;
 
+    /** ポジションID（staffing-capacity-planning。NULL=ポジション未紐付き） */
+    private Long positionId;
+
     /** 提案単価 */
     @PositiveOrZero(message = "提案単価は0以上で入力してください")
     private BigDecimal proposedUnitPrice;
