@@ -139,7 +139,7 @@
   - **Evidence:** dependency graph before/after、deleted IDs、retained restore proof、IAM negative result、key IDs/rotation result（key value は不可）。
   - **失敗/rollback:** dependency 不明なら削除 0。prune failure は repository repair を自動実行せず、通常 job を停止して runbook へ移行。
 
-- [ ] **HFP-03-011 — Docker integration/CI と偽 green 防止を追加する**
+- [x] **HFP-03-011 — Docker integration/CI と偽 green 防止を追加する**
 
   - **依存:** HFP-03-005〜HFP-03-010
   - **対応要求:** HFP-03-RQ-011

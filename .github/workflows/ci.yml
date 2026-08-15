@@ -65,3 +65,31 @@ jobs:
           name: surefire-reports
           path: target/surefire-reports/
           retention-days: 7
+
+  # HFP-03-011: 実 MySQL（source/target 別コンテナ）での PITR integration suite。
+  # Docker が無ければ失敗する（skip/BLOCKED は認めない契約）。
+  backup-integration:
+    name: backup integration (real MySQL PITR)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Docker is available
+        run: |
+          if ! docker info > /dev/null 2>&1; then
+            echo "Error: Docker is not available. backup integration suite would be skipped."
+            exit 1
+          fi
+
+      # preflight -> full -> checkpoint -> PITR restore -> validate（before/after marker 照合）
+      - name: Run backup integration suite
+        run: bash ops/backup/tests/run-integration.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-integration-evidence
+          path: ops/backup/tests/.integration-work/evidence/
+          retention-days: 7

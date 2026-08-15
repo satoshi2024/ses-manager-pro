@@ -59,4 +59,24 @@ fi
 if [ "$test_status" -ne 0 ]; then
   exit "$test_status"
 fi
-exit "$skip_status"
+
+echo
+echo "=== HFP-03-011: backup integration suite（実 MySQL PITR） ==="
+if [ "$docker_ok" -eq 1 ]; then
+  echo "Docker あり -> integration suite を実行します（数分かかります）"
+  if bash ops/backup/tests/run-integration.sh; then
+    echo "integration suite: SUCCESS"
+    integration_status=0
+  else
+    echo "integration suite: FAIL（CI と同じ判定で失敗扱い）" >&2
+    integration_status=1
+  fi
+else
+  echo "Docker なし -> integration suite は実行できません（CI では必須・失敗扱い）" >&2
+  integration_status=1
+fi
+
+if [ "$skip_status" -ne 0 ] || [ "$integration_status" -ne 0 ]; then
+  exit 1
+fi
+exit 0
