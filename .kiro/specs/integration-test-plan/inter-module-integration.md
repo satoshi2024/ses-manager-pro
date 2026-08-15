@@ -120,7 +120,7 @@
 
 ### 3.8 MOD-10 ↔ MOD-14: BP 空き情報、キャパシティ、KPI
 
-本族は S12 capacity を必要とするため `FUTURE_GATE(S12) / BLOCKED(M-PASS)` である。既存 BP 一覧と dashboard の存在だけで本族を PASS にしない。
+本族は S12 capacity を必要とするため `FUTURE_GATE(S12) / BLOCKED(M-PASS)` である。既存 BP 一覧と dashboard の存在だけで本族を PASS にしない。なお Position/Allocation/StaffingScenario の route は現行実装に存在するため、本族の smoke（route 存在・CRUD・基本遷移）は current scope として実行し、S12 spec の受入判定と capacity 計算の業務 gate は中央 ledger に従う。ITa では MOD10-29、UI では `UI-05-05` がこの現行 smoke に対応する。
 
 | ID | 分岐 | 前提・操作 | 期待 UI/API・DB・不変条件 | 個別証跡 |
 |---|---|---|---|---|

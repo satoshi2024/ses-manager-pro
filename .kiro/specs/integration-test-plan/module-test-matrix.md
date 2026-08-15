@@ -39,8 +39,9 @@
 | `D` | DB/ロールバック/監査 | 正確な行数・値・関連行、失敗時0更新、現行フィルタの対象methodに対する監査結果 |
 | `P` | 300人規模/性能 | V100母集団で件数、クエリ数、応答時間、メモリを計測 |
 | `U` | UI | 表示、再読込、エラー復元、キーボード、モバイルの代表導線 |
+| `I` | 操作/UX | クリック・連打・ドラッグ&ドロップ・back/forward・再読込・IME・モバイル/タッチ・キーボード・network 変調等の適用可能プリミティブを `ui-real-user-simulation.md` の UI ID へ mapping し、全 page × プリミティブ組合せを網羅 |
 
-各モジュールは適用可能な全次元を最低1回含める。非適用は理由と承認者をインベントリへ記録し、黙って分母から除外しない。性能環境はMySQL 8、同一JVM/heap、同一ブラウザ、同一V100 snapshotへ固定し、25→50→100→300 VUの段階負荷を用いる。環境固有の初回baselineを保存したうえで、標準JSON GETは `p95 ≤ max(1秒, baseline×1.20)`、更新系は `p95 ≤ max(1.5秒, baseline×1.20)`、PDF/Excel/一括処理は `p95 ≤ max(10秒, baseline×1.20)`、全試験でHTTP 5xx率0、想定外4xx率0とする。一覧のSQL回数が返却件数に比例して増えた場合は時間内でもFAILとする。
+各モジュールは適用可能な全次元を最低1回含める。非適用は理由と承認者をインベントリへ記録し、黙って分母から除外しない。ただし `U` は最低 1 回で密度を満たさない。全 page と適用可能な操作プリミティブ（`I` 次元）を `ui-real-user-simulation.md` の UI 実操作レイヤーへ mapping し、本マトリクスの U 行はその mapping 先を示す。ランダム探索（モンキー）は `monkey-testing.md` が担い、本マトリクスのケースと別レイヤーで実行する。性能環境はMySQL 8、同一JVM/heap、同一ブラウザ、同一V100 snapshotへ固定し、25→50→100→300 VUの段階負荷を用いる。環境固有の初回baselineを保存したうえで、標準JSON GETは `p95 ≤ max(1秒, baseline×1.20)`、更新系は `p95 ≤ max(1.5秒, baseline×1.20)`、PDF/Excel/一括処理は `p95 ≤ max(10秒, baseline×1.20)`、全試験でHTTP 5xx率0、想定外4xx率0とする。一覧のSQL回数が返却件数に比例して増えた場合は時間内でもFAILとする。
 
 現行 `ApiAuditFilter` の対象は `/api/**` の `POST/PUT/DELETE` とdownload系 `GET` であり、`PATCH` は対象外である。またCSRF欠落/不正は先行する `CsrfFilter` で終了し、同filterの監査を必ず通るとは限らない。従って、CSRF試験のoracleは `403` と業務更新0件とし、監査行の有無はfilter chain実測を保存する。要件がCSRF拒否やPATCHも監査対象とする場合は、結果を捏造せずinventory gap/defectとしてExitを止める。メニュー権限拒否は `MenuPermissionFilter` 自身が記録する `PERMISSION_DENIED` と突合する。
 
@@ -82,6 +83,10 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD01-11 | C,P | 有効297アカウントを段階的に並列ログインし、同一ユーザー同時login上限も試験 | active session数、revoke数、一意性、DB pool待ちを採取 | 3無効は常に拒否。deadlock/500なし、p95とエラー率が基準内 |
 | MOD01-12 | U,A | login/MFA/user/監査画面をキーボード、狭幅、session切れ、失敗後再送で操作 | UI操作とAPI/監査のcorrelationを保存 | focus可視、モーダル復元、二重送信防止、秘密値のDOM/画面残留なし |
 | MOD01-13 | S,A,D | tenant識別を改変したrequest、別tenant fixtureのsession hash/user IDを使う失効・参照を実行 | 自tenant以外の`sys_user`/`t_user_session`/MFA/監査行は更新・返却0件 | request値でtenantを切替できず、存在有無を漏らさない |
+| MOD01-14 | A,D | break-glass incident をPENDING→ACTIVE→CLOSEDへ遷移させ、`recordRequired` 監査失敗時と非管理者の作成/承認/close を直送 | 監査保存失敗時は503かつ break-glass 業務を実行しない。非管理者は0更新 | 緊急アクセス中の全 request が監査される。ACTIVE 中の session 操作が監査と一致 |
+| MOD01-15 | A,D,U | `MfaEnforcementFilter` により MFA 必須ユーザーが未設定のまま `/api/**` とページへアクセスし、設定後に復帰 | MFA 未設定時は業務 API/ページとも遮断され、設定後にのみ許可 | MFA 強制がロール/メニュー権限と直交して正しく作用する |
+| MOD01-16 | E,C,D | 通知 outbox（`t_notification_outbox`）の claim→PROCESSING→SENT/RETRY/FAILED を確認し、二重 worker 処理を実行 | 同一 claim は1 worker のみ。RETRY 上限5回後に FAILED かつ再処理可能 | 通知が二重送信されず、失敗は DLQ/再開可能状態で記録される |
+| MOD01-17 | A,D | `ApiAuditFilter` 対象（POST/PUT/DELETE + download GET）と対象外（参照 GET）を代表 API で確認し、download GET の監査を照合 | 対象操作には audit row、対象外には row なし。download は `FILE_DOWNLOAD` | 監査対象/非対象の境界が frozen 契約どおりで、PATCH 等を監査済みと捏造しない |
 
 ---
 
@@ -103,6 +108,11 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD02-08 | C,D | 同一候補者へ同一engineerを再送、別engineerを2セッション同時link | 同一再送は1関連のまま、競合は片方だけ成功。重複関連0件 | 冪等成功又は409を仕様どおり返し、二重要員化しない |
 | MOD02-09 | A,S | 管理者/営業/HRと、マネージャー/要員で画面・API直URLを試験 | 拒否操作は更新0件。候補者がdata scope非適用ならその理由をS inventoryに明記 | menu/permission定義どおり許可し、未定義の候補者スコープを推測しない |
 | MOD02-10 | E,D,U | 候補者を論理削除し、存在しないIDのdetail/update/deleteも試験 | `deleted_flag=1`; activity履歴は保持。不存在は更新0件 | 一覧から消え、直URLは404 JSON/エラー画面。履歴を物理消去しない |
+| MOD02-11 | N,D,X | resume ingestion を `取込待ち→抽出中→要確認→確定済` へ遷移させ、upload/paste の両経路を実行 | `t_resume_ingestion.status` が status CAS で遷移し、confirm で確定済 1 件 | review 画面で差分/error 行を操作でき、二重 confirm は冪等 |
+| MOD02-12 | E,C,D | resume ingestion の parse 失敗、必須項目欠落、confirm 二重送信、reparse 中 confirm、failpoint | 失敗時は抽出対象0件、確定済0。二重 confirm でも1件のまま | 状態機械どおり 4xx/409 で拒否し、全 rollback 後も再処理可能 |
+| MOD02-13 | A,X,D | `/api/files/**` の upload/download/rescan を、拡張子偽装・上限超過・scan 未完了・権限なしで実行 | CLEAN かつ ACL 合格のみ download 可。scan 状態が保存され孤児 blob 0 | 秘密 path 非表示、infected/unscanned は download 拒否、再 scan 可能 |
+| MOD02-14 | N,B,A,D | skill-tags の CRUD と重複、100/101 文字、権限（管理者/HR/マネージャー許可、営業/要員拒否） | 不正時0更新。重複名は4xx。非許可は403 | タグ一覧が candidate/engineer の skill 入力と連動する |
+| MOD02-15 | N,A,D | skillsheet-templates の一覧取得をロール別で実行し、要員のスキルシート生成 API と比較 | テンプレート一覧が全ロールの表示権限どおり。生成 PDF は当該要員のスコープ内 | テンプレートが空/無効時は 4xx で失敗し、デフォルト導線へ fallback |
 
 ---
 
@@ -126,6 +136,13 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD03-10 | C,D | 2セッションで別営業を同時に主担当化/割当 | active primaryの件数が最終的に1、重複active 0件 | 一方を直列化/競合拒否し、deadlock時もtransaction全rollback |
 | MOD03-11 | D,E | 要員削除時に現任担当、account link、契約/提案等の参照ガードを試験 | 許可された関連だけ解除/論理削除。拒否時は全表不変 | 孤児行や不可視履歴を作らず、失敗監査を残す |
 | MOD03-12 | P,U | 255件一覧、複合filter、detailのcareer/skill/sales履歴を反復表示 | SQL回数、p95、payload、heapを採取しN+1有無を確認 | 基準内で描画し、狭幅/キーボードでも履歴操作可能 |
+| MOD03-13 | N,A,S,D | followups の CRUD と完了を、担当営業/管理者で実行し、担当外 ID を直送 | 担当外は0更新・404。完了済み followup の再編集は拒否 | 一覧・detail・子操作が同じ scope で一貫する |
+| MOD03-14 | N,S,D | retention-risk を担当外/asOf 指定で取得し、退場予定との整合を確認 | 担当外は404/0件。リスク評価が退場予定・契約終了と一致 | retention-risk の母集団が scope と asOf に従う |
+| MOD03-15 | N,S,D | engineer の proposal-history を担当外 ID で取得 | 担当外は404/0件。履歴が実在提案と一致 | proposal-history が親 engineer の scope を継承する |
+| MOD03-16 | N,A,D | account-link の current/candidates/link/unlink を管理者/HR で実行し、非許可ロールと二重 link を試験 | link は1件のみ、unlink 後 current が消える。重複 link は4xx | 要員アカウント紐付けが IDOR なく、非許可は403 |
+| MOD03-17 | N,B,E,D,X | engineer CSV export/import（形式、100/101 行、エラー行、部分不正、ヘッダ欠落、scope 外混入） | 全行 commit または行別エラー方針どおり全 rollback。import 後行数が SQL 突合で一致 | CSV 経路も Bean Validation 相当。export が scope 内のみで、injection 無害化 |
+| MOD03-18 | N,A,S,D | bp-affiliations の assign/history/active を実行し、重複 active と非許可を試験 | 同一期間の active は1件。非許可は403。履歴は保持 | BP 所属が engineer の scope と一貫し、二重 active を作らない |
+| MOD03-19 | N,C,D | `/api/engineers/{engineerId}/allocations`（実装済み）の saveDraft/confirm/discard/revise を通常・二重送信で実行 | 下書き→確定→破棄の遷移と version CAS が整合。確定後 revise は新区間を生成 | 同一区間の二重確定 0、stale 更新は 409 で失われない |
 
 ---
 
@@ -150,6 +167,10 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD04-10 | C,D | 受注商談を2セッションで同時に案件・見積へ変換し再送 | source_opportunity_idごとに`project`/`quotation`各1件、商談link一致 | 一度だけ生成し、部分生成時は全rollback又は既存を冪等返却 |
 | MOD04-11 | D,S | 顧客summary/KPIの案件・提案・成約・失注を既知fixtureで計算 | 分子分母、0件時null、scope内集計を独立SQLで突合 | sales01にsales02の金額/件数を混在させない |
 | MOD04-12 | P,U | 300人データの顧客/連絡先/リード/商談をfilter・scroll・KPI表示 | p95、SQL回数、payload、ブラウザ描画時間を保存 | N+1なし、200件上限/ページングが機能しモバイルでも操作可能 |
+| MOD04-13 | N,S,D | customer timeline を担当/非担当で取得し、activity/contact/商談との整合を確認 | 担当外は404/0件。timeline 要素が各 source と一致 | timeline が顧客 scope を継承し、時系列が壊れない |
+| MOD04-14 | N,A,S,D | sales activity の CRUD・complete を担当営業で実行し、担当外 ID と非許可ロールを直送 | 担当外は0更新・404。complete は1回だけ有効 | activity が顧客/担当 scope と一致し、監査に記録される |
+| MOD04-15 | N,S,D | follow-ups 一覧を期日・担当・完了有無で取得し、scope 外を確認 | 返却集合が期日条件と担当 scope の積集合と一致 | follow-up が未完了かつ担当内のみ返る |
+| MOD04-16 | N,B,A,D,X | contacts の duplicates/recipients/export を実行し、PII mask と CSV injection を確認 | duplicates が正規化キーで検出。export は権限どおり mask。injection 文字は無害化 | recipients が有効期間内の contact のみで、PII が漏れない |
 
 ---
 
@@ -171,6 +192,10 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD05-08 | D,A | mock/rule provider双方で同一入力を反復し、別営業の要員を混ぜる | `t_ai_match_score` 等へのINSERTがないことを確認 | 固定「5名」等を期待せず実結果件数をfixtureから算出、scope外0件 |
 | MOD05-09 | P | 255要員×案件の逆引きmatchingをcold/warmで複数回実行 | p50/p95、SQL回数、heap、結果件数・順序を保存 | N+1/全件entity再読込を検出し基準内、timeout/500なし |
 | MOD05-10 | U | filter→detail→matching modal→結果選択をkeyboard/狭幅/0件/失敗で操作 | DB不変、画面console error 0 | score理由・不足skillを読め、modal focusとerror復元が正しい |
+| MOD05-11 | N,D,X | project ingestion を `取込待ち→抽出中→要確認→確定済` へ遷移させ、upload/paste の両経路と二重 confirm を実行 | status CAS で遷移。確定済 1 件、重複 0 | review 差分・error 行を操作でき、reparse 後も再確認可能 |
+| MOD05-12 | N,B,C,D | `/api/projects/{projectId}/board|positions`（実装済み）の一覧/作成/更新/status 遷移/削除を実行 | 遷移 matrix（募集中→候補選定/充足/保留/取消）と version CAS が整合。削除済みは一覧に出ない | 同一 position の二重遷移 0、stale 更新 409、充足数の自動整合 |
+| MOD05-13 | N,B,A,D,X | project export-csv と engineer export-csv を scope 内/外、0件、特殊文字で実行 | CSV 行数・合計が API と一致。scope 外行 0 | export がページング上限を超えず、injection 無害化 |
+| MOD05-14 | E,C,D | AI 系 endpoint（match/engineer-to-projects、matching/project/{id}、chat、proposal-draft）の provider 例外・scope 外・並行要求を実行 | 書込み0件、秘密key/個人情報が監査本文に残らない。scope 外は0件 | 400/404/500 を規約どおり返し、画面は手動入力へ fallback |
 
 ---
 
@@ -224,6 +249,9 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD07-16 | N,E,C,D,U | **BLOCKED(G2/T066)** findingを未確認→acknowledged→対応中→解消、例外申請/承認/根拠添付し、解消と例外承認を同時実行 | status/action/evidence/versionの履歴を突合し、current findingは最大1、競合側0更新 | 許可遷移と理由/証拠必須を強制し、法的適否の自動判定や履歴上書きをしない |
 | MOD07-17 | C,E,D | **BLOCKED(G2/T066)** 同一operation keyの同payload/異payload、PROCESSING lease中、commit後response喪失、rollback後retryを実行 | operation ledgerのrequest hash/state/result reference/failure retryabilityが1業務結果へ収束 | 進行中409、成功再送200同一結果、異payload/retry不可を決定的に拒否し、外部副作用を重複させない |
 | MOD07-18 | P,U | 300人データで実装済み契約page/filter/gantt/renewal、FR-10 finding、PDFを計測。G2/T066依存画面はBLOCKED件数を別掲 | p95/SQL回数/payload/生成時間、件数、BLOCKED inventoryを独立突合 | 実装済み範囲はN+1なし・page化・PDF表示正常。未解除G2を性能PASSやS10全体PASSへ混ぜない |
+| MOD07-19 | N,B,A,D | 契約の options/check-active/renewal-calendar を取得し、generate-renewals（管理者）を二重実行、export CSV を scope 内/外で実行 | calendar/check-active が実在契約と一致。renewals は冪等で重複契約 0 | 更新系の管理者限定、参照系の scope が inventory どおり |
+| MOD07-20 | N,E,D | 実装済み compliance 系の profile detail/save と compliance-findings の ack/in-progress/resolve/exception 遷移を実行（非 G2 範囲） | profile 保存が version 整合。finding 遷移が許可 matrix どおりで競合側0更新 | FR-10 系 finding と G2/T066 系を分離し、未受入 G2 を PASS に混ぜない |
+| MOD07-21 | A,S,D | 契約 scope 外の compliance-profile/findings/documents/check-active を直送 | 担当外は全経路0更新・404 | 契約子 resource が親契約の scope を継承し IDOR を防ぐ |
 
 ---
 
@@ -284,6 +312,7 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD09-16 | A,C,E,D | **BLOCKED(M-PASS/S16)** webhookの署名なし/改竄、delivered後sent、同event重複、cancelled後deliveredを実行 | 署名検証、provider event ID一意、受信順序history、invoice正本不変を突合 | 偽造は拒否、重複は冪等、逆順はstatus後退させず監査可能 |
 | MOD09-17 | A,C,E,D,X | **BLOCKED(M-PASS/S16)** inbound XMLへXXE、巨大/invalid schema、同message ID、同supplier invoice no/hashを投入し、正常文書をarchive→候補match→人手review | 原本XML/PDF hash、scan/schema状態、候補link、review actorを確定保存先へ突合 | 外部entityを展開せず重複archiveなし。受信だけで発注/検収/支払済へ自動遷移しない |
 | MOD09-18 | N,C,D,X,U | **BLOCKED(M-PASS/S16)** 送信済invoiceを訂正/取消し、旧messageを表示/downloadしながら再送を競合実行 | 新旧message/version/link、XML/validation/receipt/webhook artifactをappend-onlyで突合 | 訂正/取消は新履歴を作り旧messageを上書きしない。UIで各版とprovider結果を追跡可能 |
+| MOD09-19 | N,B,A,D,X | reminder-templates/recipient-candidates/reminders 一覧・個別/一括督促送信を scope 内/外、宛先なし、mail 失敗で実行 | mail delivery の成功/失敗が記録され、invoice 本体不変。bulk の scope 外は除外される | 宛先 PII を権限どおり mask し、失敗分のみ安全に再送可能 |
 
 ---
 
@@ -320,6 +349,11 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD10-22 | N,A,C,D,U | **BLOCKED(M-PASS/S13)** BPがavailability更新/停止、注文条件閲覧、invoice/report提出、銀行口座変更申請を実行 | review前後version、source org、approval requestを突合し、内部金額/支払status更新0 | 自社分だけ操作し、銀行変更は承認前にactive化せず、BPが支払状態を改変できない |
 | MOD10-23 | E,A,D,X | **BLOCKED(M-PASS/S13)** DTOへ原価/role/tenant/paid等の余剰fieldを混入し、拡張子偽装・infected/unscanned fileをupload/download | allow-list bind結果、quarantine/scan/hash、孤児blob、access auditを突合 | mass assignmentを拒否/無視し、CLEANかつACL合格fileだけdownload、storage key/PII非表示 |
 | MOD10-24 | B,C,P,U | **BLOCKED(M-PASS/S13)** login/invite/download/upload/acceptanceを閾値直前/直後と300主体で並列実行し、通知失敗も注入 | rate-limit key、request/action一意、audit/notification/outbox、p95を実装契約へ突合 | tenant間でlimitを共有せず、二重accept/download漏洩/500なし。失敗通知を業務commitと混同しない |
+| MOD10-25 | N,B,D | BP price-negotiations を REQUESTED→RESPONDED→AGREED/REJECTED へ遷移させ、境界（金額0/負/上限、期限切れ）を実行 | 遷移 matrix どおり status 更新。不正時0更新 | 交渉履歴が保持され、合意後の単価が terms に反映される |
+| MOD10-26 | N,A,D | risk-summary と generate-risk-notifications（管理者）を実行し、通知生成の冪等と scope を確認 | 通知は business key ごと1件。非管理者は403 | risk 母集団が実在 BP と一致し、通知重複 0 |
+| MOD10-27 | N,E,C,D | bp-migrations の run/exceptions/resolve（管理者）を単一実行・重複実行で試験 | run は冪等、exceptions が漏れなく一覧化され resolve で解消 | 移行が二重適用されず、失敗例外は再開可能 |
+| MOD10-28 | N,E,A,D | BP 会社の compliance-check を、必須文書あり/なし、期限切れ、非許可で実行 | 文書不足は fail-closed、非許可は403 | compliance gate が BP 登録と連動し、未検証 BP をアクティブにしない |
+| MOD10-29 | N,B,C,D | **実装済み S12 部分の現行 smoke**：position/allocation/staffing-scenario の route が実在し、CRUD・遷移・version CAS が基本動作する | route inventory と一致、遷移 matrix と version が整合、重複 0 | S12 spec の受入判定は中央 ledger に従う。本 ID は現行実装の smoke であり S12 PASS を宣言しない |
 
 ---
 
@@ -403,6 +437,10 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD14-10 | B,E,D | 予算JSON/CSVで0、負数、200/201行、列不足、不正日付、stale versionを取込 | 200行まで全件commit、1行でも不正なら方針どおり全rollback | CSV経路もBean Validation同等、injection無害化 |
 | MOD14-11 | C,D | 月次締めsnapshotと組織異動/予算更新を同時実行 | snapshotのasOf所属・source一意、同月重複0 | 締め時点の管理会計を再現できる |
 | MOD14-12 | P,U | 300人KPI、25営業performance、組織drilldown/exportをcold/warmで計測 | p95/SQL回数/cache hit/payload/CSV件数を保存 | 基準内、N+1なし、グラフ/表/keyboard/狭幅が正常 |
+| MOD14-13 | N,S,D | analytics の utilization-trend/bench/availability-timeline を scope 内/外、300人データで取得 | 集計が独立 SQL と一致。scope 外 0、N+1 なし | グラフ値と一覧値が一致し、別営業のデータを混ぜない |
+| MOD14-14 | N,S,P | staffing-heatmap/drilldown/compare（実装済み）を scope 内/外で取得し、300人×期間の性能を計測 | series hash が決定的。scope 外 0、p95/SQL回数/heap を保存 | ヒートマップと一覧が同一母集団で、cross-user cache なし |
+| MOD14-15 | N,A,B,D | cashflow forecast/export を管理者/マネージャーで実行し、営業/要員と月境界を確認 | 金額が source（契約/請求/入金）と一致。非許可は403 | forecast の範囲・丸めが fixture と一致し、scope 外金額 0 |
+| MOD14-16 | N,B,E,D | batch-operations の preview/apply（engineers/projects）を、preview と apply の一致、0件、不正 status、scope 外混入で実行 | apply 結果が preview と一致。不正行は行別方針どおり。監査に記録 | バッチ適用が transaction 単位で rollback でき、二重適用 0 |
 
 ---
 
@@ -428,10 +466,55 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 | MOD15-12 | E,C,D | 未確定工数、理由なし差戻し、請求済検収取消、同時検収を実行 | 不正時acceptance/invoice不変、同時操作は1件だけ成功 | 409/4xx、二重検収/請求後取消なし |
 | MOD15-13 | N,E,D,X | 文書登録→版追加→確定→download。scan未完了、同hash、stale versionも試験 | version連番、sha256、scan status、access log、storage key整合 | CLEAN版だけdownload、重複/競合を拒否しアクセス監査を残す |
 | MOD15-14 | A,C,D,P,U | retention前後、legal hold、申請者自身の廃棄承認、同時承認/実行を試験し、300人規模のinbox/文書一覧も計測 | hold中/期限前/自己承認は0更新。承認済だけ物理blob処理し台帳/監査保持。p95/件数保存 | 職務分離とscopeを守り、二重廃棄なし、一覧page/keyboard/狭幅も基準内 |
+| MOD15-15 | N,B,A,D | approval の responsibilities/delegations を CRUD し、期間逆転・重複・非管理者を試験 | 不正時0更新。委任期限外の代理承認は拒否 | 承認者・委任が inbox の振り分けと一致し、代理承認の期間が強制される |
+| MOD15-16 | N,A,D,X | approval requests の CSV export と documents の export/zip を scope 内/外・0件・特殊文字で実行 | export 行数が API と一致。管理者限定 zip はダウンロード監査が残る | download が権限・scope どおりで、CSV injection 無害化 |
+| MOD15-17 | N,A,D | `/api/my/acceptances` を要員本人で取得し、非要員と他要員 ID を直送 | 本人分のみ返却。非要員は403、他要員指定は404 | 要員ポータルの検収一覧が本人 scope に限定される |
 
 ---
 
-## 16. 完了判定と証跡
+## 16. MOD-16: 給与連携（freee OAuth・給与明細）・MOD-17: タスク/通知/検索/共通基盤
+
+### 16.1 MOD-16: 給与連携
+
+- 実装済み画面: `/payroll`
+- 実装済みAPI: `/api/payroll/**`, `/integrations/freee/**`
+- 実装済みDB: `freee_connection`, `freee_employee_link`（給与明細は外部取得、ローカル明細表は実在扱いしない）
+- freee は OAuth 連携であり、attendance provider（MOD-08 の mock/freee）と分離する。`ai.provider` 等の adapter 固定は manifest に記録する。
+
+| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+|---|---|---|---|---|
+| MOD16-01 | N,D | 管理者が `/integrations/freee/authorize` → callback の OAuth フローを stub で成功させ、`/api/payroll/status` を確認 | `freee_connection` に token（暗号化）が保存され、status が接続済み。token 原文が DB/DOM/log に露出しない | authorize/callback が正しく遷移し、再認証不要で給与 API が利用可能 |
+| MOD16-02 | E,D | 未設定/revoked の connection で employees/statements を取得し、401→refresh→再401 を注入 | refresh は規定回数だけ実行され、再401 は接続切れとして 401/4xx を返す | 失敗状態が画面に表示され、再認証導線へ誘導される |
+| MOD16-03 | N,B,D | `/api/payroll/employees` と `/api/payroll/statements` を取得し、link/unlink を実行 | employees/statements の件数・金額・period が stub fixture と一致。link 後は employee 紐付けが1件 | 給与明細が正しく表示され、link 変更が即時に反映される |
+| MOD16-04 | A,S,D | 給与 API を営業/マネージャー/要員で直送し、link 中の engineer が scope 外の場合を試験 | 非許可は403、scope 外の給与情報は返却・更新0件 | 給与・PII が最小権限（管理者/HR）に限定され、他ロールへ漏れない |
+| MOD16-05 | C,E,D | refresh の並行競合ガード、timeout、429、5xx、不正 payload を注入 | 同時 refresh は1回だけ実行され、失敗時は重複 token 更新0 | 並行 refresh で token 不整合を起こさず、retry 可能/不可が区別される |
+| MOD16-06 | P,U | 300人規模の給与一覧/明細表示を計測し、狭幅・キーボード操作を確認 | p95/SQL回数/payload を保存。外部 call がキャッシュされる | 一覧が基準内で描画され、外部 API を毎回呼ばない |
+
+### 16.2 MOD-17: タスク・通知・検索・共通基盤
+
+- 実装済み画面: `/todo`
+- 実装済みAPI: `/api/tasks/**`, `/api/notifications/**`, `/api/search`, `/api/autocomplete/**`, `/api/files/**`, `/api/saved-views/**`, `/api/profile/**`, `/api/permission-groups/**`, `/api/identity-providers/**`, `/api/security/break-glass/**`
+- 実装済みDB: `t_task`, `t_notification`, `t_notification_read`, `t_notification_outbox`, `t_mail_delivery`, `saved_view`, `permission_group`, `permission_group_action`, `user_permission_group`, `identity_provider`, `user_external_identity`, `break_glass_incident`, `file_security_metadata`
+- 本モジュールは横断基盤であり、各 endpoint の許可・scope・監査は inventory から mapping して判定する。要員ロールは `/api/notifications/**`, `/api/profile/**` のみ許可される点を正とする。
+
+| テストID | 次元 | 実行条件・操作 | DB/外部断言 | 期待結果 |
+|---|---|---|---|---|
+| MOD17-01 | N,B,D,U | tasks の CRUD・status 遷移（NOT_STARTED→IN_PROGRESS→COMPLETED/CANCELLED）・overdue・page を 4 管理ロールで実行 | 遷移 matrix と version が整合。終端状態から再開は拒否。通知/タスク連動が1件 | タスク一覧が再読込後も同値で、終端状態の誤再開がない |
+| MOD17-02 | N,A,D | notifications の page/unread-count/read/read-all を要員を含む全ロールで実行し、`generate`（管理者限定）を二重実行 | read 済みは再 read で変化なし。generate は business key ごと1件 | 未読数が操作に連動し、他ユーザーの通知は返却0件 |
+| MOD17-03 | N,S,D,U | `/api/search` を keyword・0件・特殊文字・scope 内/外で実行し、300人データで計測 | 返却集合が scope の積集合と一致。p95/SQL回数 を保存 | グローバル検索が scope を漏らさず、N+1 なしで基準内 |
+| MOD17-04 | N,A,S,D | autocomplete 全 endpoint（engineers/customers/projects/options/organizations/cost-centers/users 等）を scope 内/外・非許可で実行 | users は管理者のみ、その他は scope 注入どおり。空入力は 0件または全件規則どおり | 候補一覧が権限・scope どおりで、PII を余分に返さない |
+| MOD17-05 | N,A,D | files の upload/download/rescan を MIME・サイズ上限・拡張子偽装・scan 状態・ACL で実行 | CLEAN かつ ACL 合格のみ download。access 監査が download に記録される | 秘密 path 非表示、infected/unscanned は拒否、権限外は403/404 |
+| MOD17-06 | N,A,D | saved-views の CRUD をユーザー別・ロール別で実行し、他ユーザーの view ID を直送 | 自分以外の view は404/0更新。削除済み view は一覧から消える | 保存ビューがユーザー間で分離され、scope 漏れ0 |
+| MOD17-07 | N,B,E,D | profile のパスワード変更を旧パスワード誤り・新パスワード同一・二重送信で実行 | 変更後は旧パスワードでログイン不可、他 session が失効する（revoke 規則どおり） | パスワード変更が session へ正しく波及し、監査に記録される |
+| MOD17-08 | N,A,D | permission-groups の一覧・ユーザー割当・replace を管理者で実行し、非管理者と action 権限連動を確認 | replace は transaction で全置換。非管理者は403。権限変更が次 request から即時反映 | permission group が menu/action 権限と連動し、監査可能 |
+| MOD17-09 | N,E,A,D | identity-providers の external identity provision を、重複・未設定 provider・非許可で実行 | 重複は idempotent または 409。非許可は403。監査に記録 | 外部 identity が重複作成されず、連携失敗は再実行可能 |
+| MOD17-10 | N,B,C,D | break-glass の作成→承認→ACTIVE→close/expire を、期間境界（1/120/121分）、二重承認、同時 close で実行 | PENDING→ACTIVE→CLOSED の遷移と監査（recordRequired）が整合。二重承認は1件 | 緊急アクセスが監査強制つきで期限切れ、延長・revoke が正しく作用する |
+| MOD17-11 | C,D,X | notification outbox の claim→PROCESSING→SENT/RETRY/FAILED を2 worker・failpoint で実行 | claim は1 worker のみ。上限5回で FAILED かつ再開可能。重複送信0 | 通知配信が冪等で、worker 多重起動で二重送信しない |
+| MOD17-12 | C,D | ShedLock 対象 scheduler（10種）の単一実行・重複起動・例外時を確認し、スケジュールと ShedLock の一致を検証 | `shedlock` 表の lock が同時に1インスタンスのみ。失敗後も次回実行が回復 | 多重起動・重複処理・deadlock がなく、lock 切れで再取得できる |
+
+---
+
+## 17. 完了判定と証跡
 
 各テストIDは、入力fixture、実行主体、HTTP request/response、画面capture、実行前後SQL、監査correlation、所要時間を1組で保存する。`DBデータ反映先`欄の記載だけではDB検証済みとしない。
 
@@ -440,7 +523,8 @@ M-PASS前のケースは `BLOCKED(M-PASS)` であり、PASS/FAIL及び実行済�
 1. 当該コミットの `R/T/V/A/S/W/X` inventoryがレビュー済みで、設計カバレッジが100%である。
 2. `BLOCKED`/`NOT_RUN`を分母へ残した実行カバレッジが100%である。従って全体Exit時にはM-PASS未解除ケースが0件である。
 3. 合格率が100%（FAIL 0件）である。
-4. 適用可能な強制次元 `N/B/E/A/S/C/D/P/U` が全て少なくとも1件PASSしている。
+4. 適用可能な強制次元 `N/B/E/A/S/C/D/P/U/I` が全て少なくとも1件PASSしている。
 5. 300人性能結果は件数、p95、SQL回数、エラー率を数値で満たし、目視の「速い」で判定していない。
+6. 横断レイヤー（`ui-real-user-simulation.md`、`monkey-testing.md`）はモジュール完了判定に含めず、各仕様書の完了条件と gate で別に判定する。UI ID への mapping（`I` 次元）は設計カバレッジの一部として本マトリクスに trace する。
 
 本書のテストID数は機械集計し、重複0件をCIで確認する。テストID数そのものは品質ゲートではなく、インベントリ分母に対する設計・実行証跡が品質ゲートである。

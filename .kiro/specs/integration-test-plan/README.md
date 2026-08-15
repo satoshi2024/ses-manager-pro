@@ -5,9 +5,9 @@
 
 ## 1. 厳格 Review の結論
 
-- Review 前版の `module-test-matrix.md` に定義されていた論理テスト ID は **43 件**だけであり、旧 `schedule-and-resources.md` の「400+ ケース」を裏付けるケース台帳は存在しなかった。ITb 12 項目と E2E 7 項目も、多くが同じ操作の再記述だった。本改訂では frozen inventory からモジュール内 **150+**、ITb **36**、E2E **21** の論理定義へ展開するが、定義数を実行数や合格 evidence へ読み替えない。
+- Review 前版の `module-test-matrix.md` に定義されていた論理テスト ID は **43 件**だけであり、旧 `schedule-and-resources.md` の「400+ ケース」を裏付けるケース台帳は存在しなかった。ITb 12 項目と E2E 7 項目も、多くが同じ操作の再記述だった。本改訂では frozen inventory からモジュール内 **250+**、ITb **36**、E2E **21**、UI 実操作 **80+**、モンキー **45+ ID** の論理定義へ展開するが、定義数を実行数や合格 evidence へ読み替えない。
 - 「合格率 100%」は、実行対象にしたケースが全て合格したという意味にすぎない。ケース密度、画面網羅率、API 網羅率、分岐網羅率を表さない。1 件だけ実行して合格しても合格率は 100% になる。
-- Review 前版の「全 36 画面」は frozen inventory に基づく数字ではなかった。現行ツリーには `templates` が 67 ファイル（layout/error を除いても 63）、page controller が 40 クラス、`@GetMapping` が 68 箇所あり、画面・redirect・互換経路・詳細画面をどう数えるかも未定義だった。build 対象 commit ごとに route/template inventory を自動生成して分母を固定する。
+- Review 前版の「全 36 画面」は frozen inventory に基づく数字ではなかった。現行ツリーは `templates` が 70 ファイル（layout/error を除いても 66）、page controller が 42 クラス、`@GetMapping` が 71 箇所（URL 約 75）、API は 84 個の `@RestController` に **489 端点**（GET 215 / POST 172 / PUT 70 / DELETE 32 / PATCH 0）、状態機は 45 状態フィールド、`@Version` は 52 エンティティ、DataScope 呼出は 104 箇所ある。画面・redirect・互換経路・詳細画面をどう数えるかも定義済みであり、build 対象 commit ごとに route/template inventory を自動生成して分母を固定する。**設計カバレッジ 100% は、この frozen 分母に対する全 inventory 項目の test ID mapping を指す。**
 - Review 前版には実在しない経路（例: `/crm/list`、`/audit-log/list`、`/engineer/detail/{id}`、`/project/detail/{id}`、`/attendance/overtime-alert`、`/invoice/jp-pint`、`/accounting/export`、`/portal/engineer-self`、`/ai/feedback-learning`）が含まれていた。現行実装の例は `/crm/leads`、`/crm/opportunities`、`/audit-log`、`/engineer/detail?id=...`、`/project/detail?id=...`、`/work-record/attendance`、`/invoice`、`/reconciliation` である。
 - Review 前版にはテーブル名・状態値の不一致もあった。例として、顧客は `m_customer`、候補者履歴は `t_candidate_activity`、AI 実行ログは `t_ai_log`、月次締めは `m_system_config` の `closing.confirmed-months` JSON であり、旧版記載の `t_customer`、`t_candidate_history`、`t_ai_match_score`、`t_monthly_closing` ではない。勤怠状態も `SUBMITTED` / `APPROVED` ではなく `入力中` / `提出済` / `差戻し` / `確定` である。
 - 候補者の「要員化」は自動 INSERT ではない。`/api/candidates/{id}/convert-to-engineer` は初期値を返し、要員を手動確認・登録した後に候補者へ紐付ける。候補者ステージは `応募受付`〜`入社` であり、`要員化済` という状態はない。
@@ -17,6 +17,7 @@
 - S10〜S17 は一括して「並行開発済み」と扱えない。中央実行台帳では S10 は `IN PROGRESS`、S11 のみ `PASS`、S12〜S17 は `NOT READY` である。未実装機能を PASS 対象へ含めてはならない。
 - 300 人データは機能データ量であり、300 同時接続の負荷試験を意味しない。`V100` の存在だけでは、同時ログイン、同時更新、デッドロック、p95/p99、DB pool 枯渇を検証したことにならない。
 - JaCoCo は `pom.xml` で `prepare-agent` と `report` のみ設定され、`check` 閾値はない。そのため、現状の build は 95% 未達でも失敗しない。手元の `target/site/jacoco/jacoco.csv` は参考値として line **70.79%**、branch **53.44%** だが、対象 commit に紐付いていないため release evidence には使用しない。
+- 旧版の「U 次元」はモジュールごとに最低 1 回という条件で、実ブラウザ操作の密度を担保していなかった。本改訂では、操作プリミティブ inventory を分母にした **UI 実操作シミュレーション**（`ui-real-user-simulation.md`、実ユーザーのクリック・連打・ドラッグ・back/forward・再読込・IME・モバイル操作を再現）と、設計ケースでは到達しない入力を seed 固定ランダムで検証する **モンキーテスト**（`monkey-testing.md`、UI ランダム操作 / API フズィング / 状態機械・並行ランダム）を追加した。UI レイヤーは「操作・表示・復帰」、モンキーは「検出・異常率・探索カバレッジ」で判定し、ITa/ITb/E2E の API・DB oracle と混ぜない。
 
 ## 2. Source of Truth と freeze 規則
 
@@ -65,6 +66,8 @@ freeze 後に実装や migration が変わった場合、差分 inventory を再
 | 状態遷移 | 許可される全 edge、禁止 edge、同一状態の冪等性、履歴、通知、承認待ち、同時更新 conflict |
 | 複数表 transaction | 各落盤先、途中例外、全 rollback、再試行、採番/unique conflict、外部 side effect との整合 |
 | file/PDF/CSV/XML | MIME、filename、文字コード、schema/項目、金額・丸め、0件、大容量、権限、再実行、ブラウザ download、目視 evidence |
+| 操作/UX（UI 実操作レイヤー） | クリック/連打、ドラッグ&ドロップ、back/forward、再読込、IME、モバイル/タッチ、キーボード、ネットワーク変調、セッション変動、入力保持、空/読込/エラー 3 態、二重送信、focus/aria。全 page × 適用可能プリミティブを `ui-real-user-simulation.md` へ mapping |
+| ランダム探索（モンキー） | ランダム操作・入力を seed 固定で大量実行し、500/未捕捉例外/白画面/想定外 4xx、DB invariant 違反、権限突破、UI 破壊を検出。時間予算・検出数・異常率・探索カバレッジで報告し、合格率には換算しない |
 | 外部 adapter | disabled/未設定、stub success、timeout、4xx、429、5xx、不正 payload、retry、idempotency、secret 非漏洩、callback/webhook 重複 |
 | batch/concurrency | 単一実行、重複 scheduler、複数 JVM lock、同一行競合、異なる行並行、deadlock retry、最終整合、pool timeout |
 
@@ -85,9 +88,9 @@ freeze 後に実装や migration が変わった場合、差分 inventory を再
 
 JaCoCo の C0/C1 は上記の業務 coverage と別の指標である。95% を目標にする場合は、まず対象 package、除外、基準 commit、現行値を freeze し、`jacoco:check` を build に設定して機械的に fail させる。設定前の「95%」は exit gate ではなく未承認目標値として扱う。
 
-## 7. 15 モジュールの現行 readiness
+## 7. 17 モジュールの現行 readiness
 
-以下は 15 分類そのものを廃止せず、現行実装と roadmap readiness を分離したもの。`現行実装あり` は、そのモジュールの既存部分が自動的に PASS であることを意味しない。
+以下は 17 分類をそのまま拡張し、現行実装と roadmap readiness を分離したもの。`現行実装あり` は、そのモジュールの既存部分が自動的に PASS であることを意味しない。**実在 inventory と計画の突合結果**: 計画初版では Analytics・給与(freee)・Resume/Project 取込・Todo/Tasks・検索/Autocomplete・Files・Saved Views・Break-glass・Permission Groups・Identity Provider・Batch Operations・BP Migration・Cashflow・Skill Tags・Followups/Retention・Customer Timeline/Activities 等の実装済み機能が欠落しており、これらを MOD-01〜15 の拡張と新設 MOD-16/17 で補完した。また S12 の Position/Allocation/Staffing は実装済み route が存在するため、現行 smoke（MOD10-29 等）を current scope に置き、S12 spec の受入判定は中央 ledger に従う。
 
 | MOD | 現行の実在入口（代表） | Review 時点の扱い |
 |---|---|---|
@@ -105,7 +108,9 @@ JaCoCo の C0/C1 は上記の業務 coverage と別の指標である。95% を�
 | MOD-12 S14 要員 portal v2 | — | **S14 は NOT READY**。既存 `/my/timesheet` を S14 portal v2 の完成証拠にしない |
 | MOD-13 S17 AI feedback | — | **S17 は NOT READY**。feedback 学習画面/表を実在扱いしない |
 | MOD-14 組織/管理会計/歩合/dashboard | `/dashboard`, `/dashboard/profit`, `/organization`, `/management-accounting`, `/sales-performance`, `/system-config` | 現行実装あり。歩合は照会時算出、設定は system-config、snapshot 表なし |
-| MOD-15 承認/帳票/受注/検収/文書 | `/approval`, `/approval/requests`, `/approval/routes`, `/quotation`, `/sales-order`, `/acceptance`, `/document/list` | 現行実装あり。実在 route、action、participant、approval adapter の関連を正として修正 |
+| MOD-15 承認/帳票/受注/検収/文書 | `/approval`, `/approval/requests`, `/approval/routes`, `/quotation`, `/sales-order`, `/acceptance`, `/document/list` | 現行実装あり。実在 route、action、participant、approval adapter の関連を正として修正。responsibilities/delegations、export、`/api/my/acceptances` を追加 |
+| MOD-16 給与連携/freee | `/payroll`, `/integrations/freee/authorize|callback`, `/api/payroll/**` | 現行実装あり。OAuth フロー、token 暗号化、refresh 並行ガード、権限（管理者/HR）を追加。attendance provider（MOD-08）とは分離 |
+| MOD-17 タスク/通知/検索/共通基盤 | `/todo`, `/api/tasks/**`, `/api/notifications/**`, `/api/search`, `/api/autocomplete/**`, `/api/files/**`, `/api/saved-views/**`, `/api/profile/**`, `/api/permission-groups/**`, `/api/identity-providers/**`, `/api/security/break-glass/**` | 現行実装あり。横断基盤として全 endpoint の許可・scope・監査を inventory mapping で判定。要員は notifications/profile のみ許可 |
 
 S10〜S17 の判定を変更できるのは、各 spec の完了チェック、独立 Review、必要な MySQL/browser evidence、中央実行台帳への反映が揃った場合だけである。結合テスト計画側だけで `PASS` や `READY` へ昇格しない。
 
@@ -119,8 +124,10 @@ S10〜S17 の判定を変更できるのは、各 spec の完了チェック、�
 
 ## 9. 本版の構成と実行順序
 
-1. **Inventory freeze**: 対象 commit から page/API/template/menu/action/table/state/adapter inventory と環境 manifest を生成し、分母と SHA-256 を固定する。差分が出た場合は後続のケース展開を先に更新する。
-2. **モジュール内 150+ ケース**: `module-test-matrix.md` で 15 モジュールを §5 の観点へ展開する。150 は設計下限であり、frozen inventory から必要になったケースを削って合わせない。S10、S12〜S17 の未到達部分は `FUTURE_GATE` / `BLOCKED_NOT_READY` として定義だけを分離し、実行済みや PASS に数えない。
+1. **Inventory freeze**: 対象 commit から page/API/template/menu/action/table/state/adapter inventory と環境 manifest を生成し、分母と SHA-256 を固定する。操作プリミティブ inventory（`I`）も本ステップで固定する。差分が出た場合は後続のケース展開を先に更新する。
+2. **モジュール内 250+ ケース**: `module-test-matrix.md` で 17 モジュールを §5 の観点へ展開する。現行 tree の実在 inventory（489 API / 71 page route / 45 状態機 / 52 @Version / 104 DataScope 呼出）から機械集計した ID が分母であり、250 は設計下限である。S10、S12〜S17 の未到達部分は `FUTURE_GATE` / `BLOCKED_NOT_READY` として定義だけを分離し、実行済みや PASS に数えない。
 3. **ITb 36 連携**: `inter-module-integration.md` で source→target、API/service、FK/DB、transaction、permission/scope、通知/監査、失敗/rollback を組にして 36 連携を定義する。未実装 target への連携は future gate として現行 completion 分母から分離する。
 4. **E2E 21 シナリオ**: `e2e-business-scenarios.md` で実装済み貫通、異常/回復、security/scope、external adapter、競合/負荷を 21 シナリオへ分ける。300 人 dataset の機能 E2E と同時実行負荷試験は別 run/evidence にする。
-5. **Schedule と exit gate**: `schedule-and-resources.md` は確定した論理ケース数、実行 instance 数、環境数、future/blocked 数、再試験率から工数を算出する。150+/36/21 の文書化だけでは entry/exit 条件を満たさず、§6 の coverage、CI skip 0、defect gate、実行 evidence が揃った時点で初めて完了判定する。JaCoCo 95% は commit 固定と `jacoco:check` 実装後にだけ強制 gate とする。
+5. **UI 実操作シミュレーション**: `ui-real-user-simulation.md` で全 page をブラウザで実操作し（スモーク・モジュール別・横断 UX パターン・E2E リプレイ）、U 次元の密度を `I` inventory と browser matrix（Chromium/Firefox/WebKit × desktop/tablet/mobile）で担保する。判定は操作・表示・復帰のみで、API/DB oracle は他レイヤーに委ねる。
+6. **モンキーテスト**: `monkey-testing.md` で UI ランダム操作、API フズィング、状態機械・並行ランダムを seed 固定・時間予算で実行し、500/例外/白画面、DB invariant 違反、権限突破を検出する。発見は defect 台帳へ載せ、合格率の対象にしない。
+7. **Schedule と exit gate**: `schedule-and-resources.md` は確定した論理ケース数、実行 instance 数、環境数、future/blocked 数、再試験率から工数を算出する。工数式には `H_UI`（UI 実操作）と `H_MT`（モンキー）を含める。250+/36/21/80+ の文書化だけでは entry/exit 条件を満たさず、§6 の coverage、CI skip 0、defect gate、実行 evidence、UI レイヤーとモンキーの完了条件が揃った時点で初めて完了判定する。JaCoCo 95% は commit 固定と `jacoco:check` 実装後にだけ強制 gate とする。

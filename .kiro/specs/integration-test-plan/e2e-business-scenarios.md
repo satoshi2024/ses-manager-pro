@@ -1,6 +1,6 @@
 # SES Manager Pro 300 人規模 業務 E2E 実行仕様
 
-本書は、300 人規模のデータ母集団上で、全 15 モジュールを横断する 7 業務シナリオを検証する。各シナリオは正常、拒否、障害からの回復の 3 分岐を持ち、**一意な E2E ID は計 21 件**である。
+本書は、300 人規模のデータ母集団上で、全 17 モジュールを横断する 7 業務シナリオを検証する。各シナリオは正常、拒否、障害からの回復の 3 分岐を持ち、**一意な E2E ID は計 21 件**である。
 
 300 人はデータ母集団の大きさであり、同時接続数ではない。機能 E2E のブラウザ操作を 300 個並べても性能試験にはならない。同時負荷は `schedule-and-resources.md` の負荷 profile に従い、HTTP load runner と server/DB telemetry で別に測定する。
 
@@ -26,6 +26,7 @@ seed validator は既存 `admin` を含む総アカウント 300 とロール別
 2. case fixture は natural key と `RUN_ID` で作成し、解決した DB ID を `fixture-manifest.json` に保存する。固定 ID を推測しない。
 3. UI route、API、status、table、外部 callback は候補 build の `interface-contract.json` を正本とする。以下の path は候補 build で route inventory と一致した場合のみ使用する。
 4. 失敗注入は QA profile の failpoint または Toxiproxy/mock で行う。本番 profile へテスト用 header や bypass を公開しない。
+5. ブラウザ操作の忠実度（クリック・連打・ドラッグ、back/forward、再読込、IME、モバイル/タッチ、network 変調からの復帰）は `ui-real-user-simulation.md` の UI 実操作レイヤーが検証し、本書の business/DB oracle とは証跡と判定を分離する。E2E-07 の「代表 UI trace 1 本」制限は本書の範囲であり、UI レイヤーの instance 展開を制限しない。ランダム入力・操作の探索は `monkey-testing.md` が担う。
 
 ### 1.3 必須証跡
 
@@ -63,7 +64,7 @@ Review 時点の current scope はシナリオ 1、2、3、7 の 12 ID である
 
 | E2E ID | 分岐・操作 | 期待 UI/API | DB と不変条件 | 証跡 | cleanup |
 |---|---|---|---|---|---|
-| `E2E-01-N` | 正常。`HR` が `/candidate/list` で候補者を登録し、定義順に `入社` まで遷移する。初期値を確認・補完してエンジニアを作成・紐付け、`SALES_A` を主担当にする。新規契約を生成し `/sales-performance?month=2026-07` を照会する。 | 全 API 200。候補者、要員、担当、契約が各画面で同じ名称・単価を表示。歩合は `(800,000-600,000)×15%=30,000` 円。 | `t_candidate.current_stage='入社'` と `converted_engineer_id`、`t_candidate_activity` の順序、`t_engineer` 1、active `t_engineer_sales` 1、`t_contract.sales_user_id=SALES_A`。snapshot table への書込は期待せず、照会値を手計算と比較。 | 共通証跡に加え、candidate→engineer→contract ID chain、歩合 calculation JSON。 | case DB 破棄、通知/mailbox/cache reset。 |
+| `E2E-01-N` | 正常。`HR` が `/candidate/list` で候補者を登録し、定義順に `入社` まで遷移する。初期値を確認・補完してエンジニアを作成・紐付け、`SALES_A` を主担当にする。新規契約を生成し `/sales-performance?month=2026-07` を照会する。最後に `/payroll` で給与連携 status と従業員一覧を確認する（MOD-16 smoke）。 | 全 API 200。候補者、要員、担当、契約が各画面で同じ名称・単価を表示。歩合は `(800,000-600,000)×15%=30,000` 円。給与一覧に変換した要員が現れる（link 後のみ）。 | `t_candidate.current_stage='入社'` と `converted_engineer_id`、`t_candidate_activity` の順序、`t_engineer` 1、active `t_engineer_sales` 1、`t_contract.sales_user_id=SALES_A`。snapshot table への書込は期待せず、照会値を手計算と比較。給与側は `freee_employee_link` が1件。 | 共通証跡に加え、candidate→engineer→contract ID chain、歩合 calculation JSON、payroll status/employee 表示。 | case DB 破棄、通知/mailbox/cache reset。 |
 | `E2E-01-R` | 拒否。`応募受付` から `入社` へ飛び越す操作と、disabled `s300.sales07` の主担当指定を行う。 | 各 API 400。画面に具体的な遷移/担当拒否理由。 | candidate stage 不変、engineer/assignment/contract 新規 0、active primary 数不変。 | 2 subcase の request/response、DB 差分 0、拒否監査。 | case DB 破棄、session reset。 |
 | `E2E-01-REC` | 回復。エンジニア作成成功後、候補者紐付け request を network timeout にする。画面を再読込し、同じ自然キーの既存エンジニアを選び同じ operation key で紐付けを再実行する。 | timeout を成功表示しない。再試行は 200 で同じエンジニア詳細へ遷移。 | timeout 時は候補者 link 未更新、作成済みエンジニア 1。回復後は link 1、エンジニア 1、重複 activity 0。各 API の transaction 内に部分更新 0。 | proxy log、timeout screenshot、再試行 response、重複検査。 | case DB 破棄、proxy failpoint reset。 |
 
@@ -73,7 +74,7 @@ Review 時点の current scope はシナリオ 1、2、3、7 の 12 ID である
 
 | E2E ID | 分岐・操作 | 期待 UI/API | DB と不変条件 | 証跡 | cleanup |
 |---|---|---|---|---|---|
-| `E2E-02-N` | 正常。`SALES_A` が CRM 商談→案件→AI matching→提案→見積を作り、`MANAGER` が全承認段階を順に処理する。注文・明細から契約ドラフトを作成し、CloudSign へ送信、署名 callback を受信する。 | 商談、案件、提案、見積、注文、契約、文書の画面に同一 business chain を表示。最終文書は `SIGNED`。 | `t_opportunity→t_project.source_opportunity_id→t_proposal.source_opportunity_id→t_quotation→t_sales_order/line→t_contract→t_contract_document` が 1 本につながる。`t_approval_request/action/participant` の順序・actor が一致し、active contract/document は各 1。 | ID chain JSON、AI mock payload、承認 timeline、署名 callback 検証、PDF checksum。 | case DB、CloudSign/mock mailbox、保存 PDF を `RUN_ID` で削除。 |
+| `E2E-02-N` | 正常。`SALES_A` が CRM 商談→案件→AI matching→提案→見積を作り、`MANAGER` が全承認段階を順に処理する。注文・明細から契約ドラフトを作成し、CloudSign へ送信、署名 callback を受信する。成約通知はベルで未読が増え、そこからタスクを作成し `/todo` に反映する（MOD-17 smoke）。 | 商談、案件、提案、見積、注文、契約、文書の画面に同一 business chain を表示。最終文書は `SIGNED`。通知→タスクが1件で連動する。 | `t_opportunity→t_project.source_opportunity_id→t_proposal.source_opportunity_id→t_quotation→t_sales_order/line→t_contract→t_contract_document` が 1 本につながる。`t_approval_request/action/participant` の順序・actor が一致し、active contract/document は各 1。通知→`t_task` が業務キーで1件。 | ID chain JSON、AI mock payload、承認 timeline、署名 callback 検証、PDF checksum、通知→タスク trace。 | case DB、CloudSign/mock mailbox、保存 PDF を `RUN_ID` で削除。 |
 | `E2E-02-R` | 拒否。`SALES_B` が `SALES_A` の商談 ID を指定して案件/見積を作る。併せて第 1 段階未承認のまま第 2 段階承認を送る。 | scope 違反は 404、承認順序違反は 409。相手の名称・金額を response に含めない。 | project/quotation/order/contract 新規 0。approval status/action 件数不変。 | tampered request、404/409 response、水平権限と状態機械 assertion。 | case DB 破棄、両 actor session reset。 |
 | `E2E-02-REC` | 回復。CloudSign create 成功後、応答を timeout にする。外部 operation key を検索して同じ document を回収し、callback を再送する。 | 画面は不明状態を成功扱いせず「照会/再試行」を提示。回復後 `SIGNED`、通知 1 件。 | local contract document 1、`external_doc_id=CS-{RUN_ID}` 1、document version 1、重複署名依頼 0。契約状態は失われない。 | CloudSign request/search/callback log、timeout と回復 UI、件数 assertion。 | case DB、CloudSign mock、object storage reset。 |
 
@@ -137,6 +138,6 @@ Review 時点の current scope はシナリオ 1、2、3、7 の 12 ID である
 
 1. **Current completion** は current 12 ID が重複なく全件 `PASS` で、future 9 ID を理由付き `BLOCKED(M-PASS)` として報告した状態である。**Full-plan completion** は M-PASS 後に 21 `E2E-*` ID が全件 `PASS` した場合だけ宣言する。拒否・回復分岐や future を正常分岐へ合算・削除しない。
 2. 全ケースで build/seed/fixture checksum と必須証跡が揃い、第三者が `E2E-BASE-300` から同じ期待値を再現できる。
-3. 全 15 モジュールについて requirement→E2E ID→route/action→DB invariant→evidence の trace が 1 件以上あり、重要な金額・権限・状態遷移は ITa/ITb にも下位ケースを持つ。
+3. 全 17 モジュールについて requirement→E2E ID→route/action→DB invariant→evidence の trace が 1 件以上あり（MOD-16 給与は E2E-01、MOD-17 タスク/通知は E2E-02 の sub-assertion、MOD-03〜15 はシナリオ 1〜7、MOD-01 は E2E-06/07）、重要な金額・権限・状態遷移は ITa/ITb にも下位ケースを持つ。
 4. データ越境、金額/貸借不一致、二重請求・二重支払、署名/文書の orphan、rollback/補償不成立は 1 件でも P0 として試験を停止する。
 5. cleanup が全件成功し、残存 case DB、session、mock state、外部 file が 0。

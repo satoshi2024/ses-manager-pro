@@ -19,8 +19,10 @@
 | `N_ITA` | `module-test-matrix.md` の重複しない論理 ID。固定値を手入力せず機械集計する |
 | `N_ITB_CURRENT / FULL` | current 24 / full 36 ID |
 | `N_E2E_CURRENT / FULL` | current 12 / full 21 ID |
+| `N_UI` | `ui-real-user-simulation.md` の重複しない UI 実操作論理 ID（スモーク・モジュール別・横断 UX・E2E リプレイ。機械集計） |
+| `I_MT` | モンキーテストの実行予算（モジュール別×種別×seed）と検出数・異常率（`monkey-testing.md`） |
 | `I_*` | 論理 ID × actor/role × browser × data partition × adapter ×境界値× concurrency profile の実行 instance |
-| `D_CURRENT` | current scope の frozen requirement/route/action/transition/validation/write/external inventory 総数 |
+| `D_CURRENT` | current scope の frozen requirement/route/action/transition/validation/write/external/interaction inventory 総数 |
 | `D_FUTURE` | M-PASS 待ち inventory 総数。`BLOCKED` のまま分母に残す |
 | `D_FULL` | `D_CURRENT + D_FUTURE` |
 
@@ -61,6 +63,7 @@ M-PASS 前のケースは `BLOCKED(M-PASS)` とし、実行済み/PASS に数え
 | Isolation/reset | `E2E-BASE-300` snapshot、ケース DB clone/破棄、mock/mailbox/storage/cache reset の rehearsal 合格 |
 | Fixture/oracle | `TEST_MONTH=2026-07`、`AS_OF=2026-08-17T09:00:00+09:00`、自然キー、期待金額、owner、adapter response を持つ manifest |
 | Evidence pipeline | case ID ごとの request/response、DB before/after、screenshot/download、log、metrics を build SHA に結び付けて保存できる |
+| UI harness | `ops/e2e/ui-sim/`（Playwright、`ops/e2e/scale-300/run-e2e.mjs` 拡張）。browser matrix（Chromium/Firefox/WebKit × desktop/tablet/mobile）、trace/video/screenshot/console 収集、network shaping（offline/slow/timeout/5xx）の rehearsal 合格 |
 | Observability | correlation ID、HTTP status/latency、JVM/GC、Tomcat queue、Hikari pool、DB CPU/lock/deadlock/slow query、外部 stub call を同一時刻軸で追跡可能 |
 | Defect baseline | open defect の severity/owner/再現 ID が確定し、P0/P1 0。既知 P2 は scope と waiver を明示 |
 
@@ -77,6 +80,11 @@ M-PASS 前のケースは `BLOCKED(M-PASS)` とし、実行済み/PASS に数え
 | API/DB 中心 ITa 論理ケースの補完・automation・初回証跡 | 1.25 h / ID |
 | UI/状態遷移/role matrix を含む ITa | 2.00 h / ID |
 | file/external/concurrency を含む ITa | 3.00 h / ID |
+| UI 実操作 スモーク（`UI-00-*`、route 毎） | 0.25 h / route |
+| UI 実操作 モジュール別（`UI-<MOD>-nn`） | 2.00 h / ID |
+| UI 実操作 横断 UX（`UI-XX-nn`）/ E2E リプレイ（`UI-E2E-nn`） | 2.50 / 3.00 h / ID |
+| UI harness 整備（browser matrix・trace/video/network shaping 共通基盤） | 48 h |
+| モンキーテスト（harness + 実行予算 + triage） | 32 h + 3.9 h / モジュール（実行 3.0h + triage 0.9h） |
 | ITb | 2.50 h × 36 = 90 h（full-plan） |
 | E2E | 4.00 h × 21 = 84 h（full-plan） |
 | Security matrix 実行・review | 24 h の harness + 0.08 h × `I_SEC` cell |
@@ -91,15 +99,17 @@ M-PASS 前のケースは `BLOCKED(M-PASS)` とし、実行済み/PASS に数え
 ### 4.2 計算式
 
 ```text
-H_ITA   = Σ(クラス別 ITa ID 数 × pilot 校正単価)
-H_VAR   = H_ITA + 2.50×N_ITB + 4.00×N_E2E + 0.08×I_SEC + 8×N_PERF
+H_UI   = 48 + 0.25×N_SMK + 2.00×N_UI_MOD + 2.50×N_UI_CROSS + 3.00×N_UI_E2E
+H_MT   = 32 + 3.9×N_MODULE
+H_ITA  = Σ(クラス別 ITa ID 数 × pilot 校正単価)
+H_VAR  = H_ITA + H_UI + H_MT + 2.50×N_ITB + 4.00×N_E2E + 0.08×I_SEC + 8×N_PERF
 H_FIXED = 40 + 72 + 4×N_MODULE + 24 + 32 + 40
 H_BUFFER = 0.30×H_VAR
 H_TOTAL = H_FIXED + H_VAR + H_BUFFER
 営業日 = ceil(H_TOTAL / (参加 test FTE × 1日実効6h))
 ```
 
-例として、full-plan で `N_ITA=150`、平均 1.50 h、`I_SEC=600`、15 module、7 profile と仮置きした場合だけを計算すると、`H_FIXED=268h`、`H_VAR=503h`、buffer 約 151h、計 **約 922h** となる。後述の 5.0 test FTE（30 実効 h/日）では **約 31 営業日**であり、M-PASS 待ちと開発修正を含まない。この例は commitment ではないが、根拠のない 20 営業日では収まらないことを示す。実際の forecast は frozen `N_ITA/I_SEC` と pilot 実測値で置き換える。
+例として、full-plan で `N_ITA=257`（実在 inventory から機械集計した現行 ID 数。平均 1.50 h）、`N_SMK=75`（route inventory 参照）、`N_UI_MOD=50`、`N_UI_CROSS=15`、`N_UI_E2E=7`、`N_ITB=36`、`N_E2E=21`、`I_SEC=800`、`N_MODULE=17`、`N_PERF=7` と仮置きした場合、`H_FIXED=276h`、`H_UI=225h`、`H_MT=98h`、`H_ITA=386h`、`H_VAR≈1,003h`、buffer 約 301h、計 **約 1,580h** となる。後述の 5.0 test FTE（30 実効 h/日）では **約 53 営業日**であり、M-PASS 待ちと開発修正を含まない。これは frozen inventory（489 API / 71 route / 45 状態機 / 52 @Version / 104 DataScope 呼出）へ設計カバレッジ 100% を張るための規模であり、旧構成例（約 922h）の約 1.7 倍である。この例は commitment ではないが、**設計カバレッジ 100% を達成する密度を 20 営業日で実行する根拠は存在しない**ことを示す。実際の forecast は frozen `N_ITA/N_UI/I_MT/I_SEC` と pilot 実測値で置き換える。
 
 ## 5. 体制と実効 capacity
 
@@ -113,7 +123,7 @@ H_TOTAL = H_FIXED + H_VAR + H_BUFFER
 | DBA/Infra | 0.25（別 capacity） | MySQL clone、監視、負荷環境、backup/restore |
 | Product/業務責任者 | 0.25（別 capacity） | 金額・法令・scope oracle、P2 waiver、最終受入 |
 
-test FTE の日次 capacity は会議・triage・環境待ちを除いた 6 h/FTE で計算し、8 h を全て実行時間として扱わない。特定の 1 名しか mock、DB、帳票を扱えない場合は、その skill bottleneck で critical path を再計算する。
+test FTE の日次 capacity は会議・triage・環境待ちを除いた 6 h/FTE で計算し、8 h を全て実行時間として扱わない。特定の 1 名しか mock、DB、帳票を扱えない場合は、その skill bottleneck で critical path を再計算する。UI 実操作とモンキーの harness は SDET が整備・保守し、triage と三現証拠（video/screenshot/DB 前後）は QA engineer が担当する。Playwright・フズィングの専任が不足する場合は、その育成・支援を critical path に明示する。
 
 ## 6. 実行 wave と依存関係
 
@@ -126,7 +136,9 @@ test FTE の日次 capacity は会議・triage・環境待ちを除いた 6 h/FT
 | W2 ITa | 各 module M-PASS | `H_ITA`。ready module から開始可 | module inventory の設計/実行/合格率 100% |
 | W3 ITb | 両端 module の W2 合格 | current 24 ID、M-PASS 後に future 12 ID。full 90h | current/full の status を分離、対象 ID 全 PASS |
 | W4 E2E | 参加する全 module/ITb 合格 | current 12 ID、M-PASS 後に future 9 ID。full 84h | current/full の status を分離、対象 ID 全 PASS |
+| W4b UI 実操作 | 対象モジュールの W2 合格、W4 の E2E 正常系で導線確定 | harness 48h + スモーク + モジュール別/横断 UX/E2E リプレイ（`H_UI`） | UI-00 全 route 100%、全 UI ID PASS、console/pageerror/白画面 0 |
 | W5 Security | frozen route/action/owner fixture | harness 24h + cell 工数。W2 と一部並行可 | security gate 合格、P0/P1 0 |
+| W5b モンキー | 当該モジュール W2 合格。全モジュール掃引は W5 後 | harness 32h + 予算 3.9h × 17 module + triage（`H_MT`） | 検出 P0/P1 0、invariant 違反 0、予算消化（skip 0） |
 | W6 Performance | 機能 smoke 合格、専用環境 | harness 32h + 7 profile×8h。機能実行と環境を分離 | profile 別基準、DB 整合、capacity report 合格 |
 | W7 Defect/Regression | 修正 build ごと | 30% 初期 buffer を burn-down。影響 module→ITb→E2E→security/perf の順 | reopen 0、flake 未解決 0 |
 | W8 Report | 全 gate 合格 | reconciliation/report 40h | evidence index、coverage、defect、残 risk の sign-off |
@@ -197,6 +209,7 @@ read profile の標準 mix は list/search 45%、detail 20%、timesheet read/sav
 3. 同じ ITb 連携族 3 ID と直接上流・下流の連携族。
 4. 関連 E2E の正常/拒否/回復 3 ID。
 5. SQL、cache、thread、外部 retry に影響する場合は該当性能 profile。
+6. 影響画面・モジュールの UI 実操作 ID（`ui-real-user-simulation.md`）の再実行。モンキー発見 defect は再現 seed のリプレイと最小再現ケースの再実行を必須とする。
 
 rerun で偶然 PASS した flaky test は close しない。root cause、修正 commit、少なくとも 3 回の連続再現不能と関連回帰 evidence を必要とする。
 
@@ -217,18 +230,20 @@ W1 で clean candidate build を実行し、commit SHA、test result、JaCoCo XM
 ### 11.1 Current completion
 
 1. `D_CURRENT` の設計 coverage、実行 coverage、合格率が全 inventory 種別で 100%。
-2. current ITa、ITb 24 ID、E2E 12 ID と適用 instance が全 PASS。
-3. future ITa/ITb 12/E2E 9 と S10/S16 追加 instance を `BLOCKED(M-PASS)` として ID、依存 spec、owner、見込みを欠落なく報告。
-4. current security/performance/CI/defect/evidence/cleanup gate が全て合格。
+2. current ITa、ITb 24 ID、E2E 12 ID、UI 実操作 current ID（スモーク・モジュール別・横断・リプレイ）と適用 instance が全 PASS。
+3. モンキーテストが current scope の全モジュールで予算を消化し、検出 P0/P1 0、invariant 違反 0、想定外 500/例外/白画面 0。
+4. future ITa/ITb 12/E2E 9、UI future 3、モンキー BLOCKED ID を `BLOCKED(M-PASS)` として ID、依存 spec、owner、見込みを欠落なく報告。
+5. current security/performance/CI/defect/evidence/cleanup gate が全て合格。
 
 ### 11.2 Full-plan completion
 
 1. `D_FULL` の設計 coverage、実行 coverage、合格率が全て 100%。`BLOCKED/NOT_RUN` 0。
-2. ITa の frozen 全 ID、ITb 36 ID、E2E 21 ID、security cell、7 性能 profile が全て証跡付き PASS。
-3. P0/P1 0、security/金額/法令 P2 0、その他 P2/P3 は承認 waiver 付き。
-4. clean candidate SHA で CI skip 0、coverage gate は W1 で承認・実装した基準を合格。
-5. case DB、session、mock state、mailbox、object storage、cache の残存 0。evidence index のリンク切れ 0。
-6. QA lead、開発責任者、Product/業務責任者が scope、残 risk、性能 capacity、defect waiver を sign-off。
+2. ITa の frozen 全 ID、ITb 36 ID、E2E 21 ID、UI 実操作全 ID（browser matrix の instance 展開込み）、security cell、7 性能 profile が全て証跡付き PASS。
+3. モンキーテストが全モジュールで予算を消化し skip 0、検出 P0/P1 0、security/金額/法令 P2 0、invariant 違反 0。探索カバレッジと異常率を報告。
+4. P0/P1 0、security/金額/法令 P2 0、その他 P2/P3 は承認 waiver 付き。
+5. clean candidate SHA で CI skip 0、coverage gate は W1 で承認・実装した基準を合格。
+6. case DB、session、mock state、mailbox、object storage、cache の残存 0。evidence index のリンク切れ 0。
+7. QA lead、開発責任者、Product/業務責任者が scope、残 risk、性能 capacity、defect waiver を sign-off。
 
 ### 11.3 日次 forecast
 
