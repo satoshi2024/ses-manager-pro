@@ -1034,3 +1034,56 @@ fix delta `586f495f..203960a9`（6 file、+205/−2）。AC13/AC15に新規証�
 - 未達/未実行Acceptance: HFP-01-AC13（BLOCKED）、HFP-01-AC15（BLOCKED）— 唯一の原因は`FREEE_*` credential未提供
 - 最小の次アクション: (1) `FREEE_*`提供 → HFP-01-011（sandbox E2E＋AC13 desktop/390px実ブラウザDemo）実行 → Round 4でその証跡のみReview → `REVIEWABLE`判定候補。(2) REV-009は次回差分で1行置換（任意）。(3) merge後はmerge delta・共有consumer・main回帰を直接Reviewして最終PASS
 - 最終Verdict: **BLOCKED**（PRE_MERGE。P0/P1=0・AC01〜12 PASS・自動gate全green。残gateは外部credential依存のみで、これはPASS/REVIEWABLEではない）
+
+---
+
+## HFP-01-REVIEW-20260816-01（独立Review Round 4: REV-009のfix delta）
+
+| 項目 | 値 |
+|---|---|
+| Reviewer | 独立Review AI（Round 1〜3と同一Reviewer） |
+| 対象Run | HFP-01-RUN-20260815-02/03（REV-009対応） |
+| base / reviewed head | `203960a9`（Round 3対象head） / `c3400aa0`（fix delta後のhead） |
+| merge状態 / merge commit | PRE_MERGE / N/A |
+| 開始 / 終了（JST） | 2026-08-16 01:30 / 2026-08-16 04:00 |
+| 独立再実行環境 | Windows / Temurin 17.0.20 / bundled Maven 3.9.6 / Node v24.18.0 / Docker 29.6.2 |
+| Verdict | **BLOCKED**（REV-009はVERIFIED_CLOSED。新規P0/P1なし。AC13/AC15はfreee sandbox credential未提供のため実行不能のまま） |
+
+### Round 4スコープ
+
+fix delta `203960a9..c3400aa0`（3 file、+146/−3）。REV-009の判定のみ。AC13/AC15に新規証跡なし。
+
+#### Finding判定
+
+| ID | Severity | Round 3 | Round 4判定 | 根拠（Reviewer自身の再実行） |
+|---|---|---|---|---|
+| HFP-01-REV-009 | NOTE | OPEN | **VERIFIED_CLOSED** | `executeWithRetry`の`re_authorization_required`経路が`connectionMapper.updateConnectionStatus(c.getId(), 'REAUTH_REQUIRED')`（connection_status/updated_atのみのtargeted UPDATE）へ置換されたことをdiffで確認。private `markReauthRequired`はunit testフォールバック専用とコメント明記。`FreeeHrContractTest.seedConnectionWithCaptor`が`updateConnectionStatus`をモックしstatus引数を捕捉する形へ更新。freee回帰147/0/0/0・並行refresh+MySQL smoke 5/0/0/0・verify-like-ci 1997/0/0/0を再実行し全green |
+
+#### Acceptance trace（差分なし）
+
+| Acceptance | 状態 |
+|---|---|
+| HFP-01-AC01〜AC12 / AC14 | PASS（維持。Round 1〜3判定＋本Roundの回帰再実行） |
+| HFP-01-AC13 | BLOCKED（credential未提供の継続。新規証跡なし） |
+| HFP-01-AC15 | BLOCKED（同上。HFP-01-011/HFP-G01 OPENのまま） |
+
+#### 再実行したgate（Round 4）
+
+| Gate | Command | 結果 |
+|---|---|---|
+| freee関連全回帰 | 16 class（ConcurrentRefresh除く） | 147 / 0 / 0 / 0 PASS |
+| 並行refresh＋MySQL smoke | `FreeeConcurrentRefreshTest,FlywayMigrationSmokeTest,FlywayV102_2FreeeCompanyBoundarySmokeTest` | 5 / 0 / 0 / 0 PASS（実MySQL） |
+| verify-like-ci（単独run） | `scripts/verify-like-ci.ps1` | aggregate 1997 / 0 / 0 / 0 / BUILD SUCCESS / exit 0（351 XML・testcase 1997を独立確認） |
+
+#### 環境注記
+
+- Round 4のverify-like-ci初回試行は、実行途中（Flyway系Testcontainers test帯）でDocker上のMySQL container接続が切れ（`CommunicationsException`）、suiteが途中停止（146/351 XML・BUILD SUCCESSなし）した。これはtest失敗ではなく環境要因である。並行して別セッションのmvn buildが走っていたため、それが終了するのを待ち、Docker volume prune（26.6GB）後に再実行して上記の完全な結果を得た。初回試行の部分XMLは再実行前の`mvn clean`で消去済み。
+
+#### Verdict根拠
+
+- 未解決P0/P1: **0**
+- 未管理Acceptance: 0
+- OPEN Finding: **なし**（REV-001〜009すべてVERIFIED_CLOSED）
+- 未達/未実行Acceptance: HFP-01-AC13（BLOCKED）、HFP-01-AC15（BLOCKED）— 唯一の原因は`FREEE_*` credential未提供
+- 最小の次アクション: (1) `FREEE_*`提供 → HFP-01-011（sandbox E2E＋AC13 desktop/390px実ブラウザDemo）実行 → Round 5でその証跡のみReview → `REVIEWABLE`判定候補。(2) merge後はmerge済みcommitでmerge delta・共有consumer・main回帰を直接Reviewして最終PASS
+- 最終Verdict: **BLOCKED**（PRE_MERGE。全Finding CLOSED・AC01〜12/14 PASS・自動gate全green。残gateは外部credential依存のみ）
