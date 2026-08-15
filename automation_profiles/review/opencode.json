@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/deepseek-v4-pro",
+  "permission": {
+    "edit": "deny",
+    "bash": "deny",
+    "read": "allow"
+  },
+  "agent": {
+    "build": {
+      "variant": "max",
+      "prompt": "你是资深 Code Reviewer，禁止修改代码。负责检查 Git 改动，并严格对比 .opencode/task_bridge.json 中的 task_description、impl_summary 以及 review_criteria 中的每一条标准。若全部通过则将 current_turn 改为 'impl' 且 status 改为 'DONE'；若有任意不通过，请将具体退回意见写入 review_feedback 并将 current_turn 改为 'impl'。"
+    }
+  }
+}
