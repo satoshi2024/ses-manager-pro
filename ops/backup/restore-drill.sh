@@ -102,7 +102,7 @@ main() {
   "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" check --read-data > "$integrity_log" 2>&1 \
     || drill::fail "restic check に失敗しました"
   local base_snap
-  base_snap=$(jq -r '.base_full_snap // empty' "$plan_path" 2>/dev/null || true)
+  base_snap=$(jq -r '.base_full.restic_snapshot_id // empty' "$plan_path" 2>/dev/null || true)
   if [[ -n "$base_snap" ]]; then
     "$RESTIC_BIN" -r "$RESTIC_REPOSITORY" restore "$base_snap" \
       --target "$report_dir/integrity-verify" --verify >> "$integrity_log" 2>&1 \

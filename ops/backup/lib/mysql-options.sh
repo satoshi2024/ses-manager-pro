@@ -73,6 +73,7 @@ mysql_options::init() {
 
   # shellcheck disable=SC2034  # 他 script が source して参照する共有配列
   MYSQL_OPT_ARGS=(--defaults-extra-file="$MYSQL_OPTFILE")
-  trap _mysql_options::cleanup EXIT
+  # R2 P2-04: 呼び出し元の trap に上書きされないよう連結する
+  common::trap_add _mysql_options::cleanup
   return 0
 }

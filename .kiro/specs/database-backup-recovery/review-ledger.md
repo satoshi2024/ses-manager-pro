@@ -136,6 +136,12 @@ task status は `NOT_STARTED / IN_PROGRESS / REVIEWABLE / PASS / FAIL / BLOCKED`
 | HFP-03-R1-P2-03 | P2 | RQ-008 | `rotate-key.sh`（restic key add/remove 欠如） | — | 旧キーが repository に残存 | `restic key add --new-password-file` + 切替後に旧キー remove | FIXED_BY_IMPLEMENTER |
 | HFP-03-R1-P2-04 | P2 | RQ-008 | `backup-full.sh`（trap 上書きで option file 残置） | — | 秘密 option file の残置 | trap 連結（cleanup + rm -rf work）で mysql-options の trap を保持 | FIXED_BY_IMPLEMENTER |
 | HFP-03-R1-P2-05 | P2 | RQ-011 | `integration-pitr.sh`（DML replay 不在） | — | replay が実データで検証されない | full と checkpoint の間に marker-mid を注入し target で照合（mid_dml_replayed=1） | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-01 | P2 | RQ-006/007 | `restore.sh`（RESET MASTER が承認検証より前） | — | 未承認 plan で target が変更され得る | RESET MASTER を `approval::collect_and_verify` の後に移動 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-02 | P2 | RQ-008 | `rotate-key.sh`（key add 前に新キー verify） | 実 restic repo で rc=1（review 実測） | 新キー切替が常に失敗 | 順序を old verify → key add → new verify → 切替 → post verify → old key remove に変更。argv 順序の回帰テスト追加 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-03 | P2 | RQ-008 | `backup-full.sh` trap（option file cleanup 欠如） | 失敗後 `/tmp` に option file 残置（review 実測） | 秘密 option file の残置 | `common::trap_add`（dispatcher）で trap を連結。全 script の trap を trap_add 化し、失敗後 option file 非残置の回帰テスト追加 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-04 | P2 | RQ-008 | 旧 evidence の合成 `restore-svc-pw` | evidence 3 件に残存（review 実測） | 秘密の混在 | 既存 evidence から除去 + demo の後処理（restore-svc-pw/target-password/mysql-password 削除）を追加 | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-05 | P2 | RQ-011 | `backup-full.sh`（counts が静止解除後に採取） | — | counts が dump と不一致になり得る | counts 採取を静止解除前に移動（dump と同じ静止区間の値） | FIXED_BY_IMPLEMENTER |
+| HFP-03-R2-P2-06 | P2 | RQ-012 | `restore-drill.sh`（`.base_full_snap` key 名誤り） | — | integrity の base verify が常にスキップ | `.base_full.restic_snapshot_id` に修正 | FIXED_BY_IMPLEMENTER |
 
 Severity は P0（production 破壊/復元不能）、P1（RPO/RTO/security/整合性）、P2（限定的な運用性/監視）、NOTE（要件を破らない非必須改善）とする。P0/P1 または未管理 acceptance が残る場合は全体 PASS にしない。P2/NOTEを延期する場合は発注者承認、owner、期限、release影響を記録する。
 
@@ -210,6 +216,8 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | `ops/backup/tests/.integration-work/evidence/restore.log`（R1 fix 後） | `8a6be1352287edd925f5e277ab8e3c30fbb66ffbf8fd7c7a734d02b14a318159` | 同上 | 同上 | 同上 |
 | `ops/backup/tests/.integration-work/evidence/target-markers.txt`（R1 fix 後） | `882206ab345b62bcacb119186743cf57fd79687fe50812a687d95fb0f3a49062` | 同上 | 同上 | 同上 |
 | `ops/backup/tests/.integration-work/evidence/drill-report.json`（R1 fix 後） | `b206c6b0c0f75fb3c546c91fb2512523dd14558ad93e74291999250c0a79c56f` | 同上（drill: rpo=60s total=6s rto_ok/rpo_ok=true、segments 5） | 同上 | 同上 |
+| `ops/backup/tests/.integration-work/evidence/drill-report.json`（R2 fix 後） | `6018be470971856204f9072ae0e8aa8e86e36fb6666dcf9b748abb150d4befa7` | R2 修正後の integration + drill | 同上 | 同上 |
+| `ops/backup/tests/.integration-work/evidence/integration-summary.json`（R2 fix 後） | `55eca6637ea5da0dc89e80f425b96be602ef9b7286448b714f2e30e3d9662a30` | 同上（mid_dml_replayed=1） | 同上 | 同上 |
 
 ## 8. Final decision history（追記）
 
@@ -217,5 +225,7 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 |---|---|---|---|---|
 | 2026-08-15T16:00Z | 独立 Reviewer（Round 1） | FAIL（PRE_MERGE） | P0-01 / P1-01〜07 / P2×5（§6 参照） | head 4a8cf440 で攻撃的検証 7 件実測。GATE-03/05/06/07 FAIL、PROD-001〜008 BLOCKED |
 | 2026-08-15T17:30Z | 実装担当（AI） | R1 findings 修正完了（FIXED_BY_IMPLEMENTER のみ。VERIFIED_CLOSED は Reviewer のみ） | なし（修正待ちは Reviewer の Round 2） | unit 446 assert 全 PASS + shellcheck 0 + integration（mid_dml_replayed=1 / drill RPO 60s）成功。§6 の各 finding に修正内容と回帰テストを追記。Round 2 では OPEN issue + fix delta + direct regression を依頼 |
+| 2026-08-15T18:00Z | 独立 Reviewer（Round 2） | REVIEWABLE（PRE_MERGE） | 残る OPEN は P2（P2-03 順序 / P2-04 trap / P2-02 evidence / P2-06・P2-07 DEFERRED 提案 / 新規 R2-P2-01） | P0/P1 全 VERIFIED_CLOSED。unit 426 assert 全 PASS、GATE-01〜05/07/08 PASS。PROD-001〜008 未確定のため production-ready とは判定しない |
+| 2026-08-15T19:00Z | 実装担当（AI） | R2 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 後の独立 Review） | R2-P2-01（RESET MASTER を承認後に移動）/ P2-02（rotate-key 順序）/ P2-03（trap_add dispatcher + option file 回帰）/ P2-04（evidence の restore-svc-pw 除去 + demo 後処理）/ P2-05（counts 静止区間内採取）/ P2-06（drill base_full 修正）。unit 428 assert 全 PASS + shellcheck 0 + integration SUCCESS（mid_dml_replayed=1） |
 
 Decisionは`REVIEWABLE / PASS / FAIL / BLOCKED`のいずれかとする。`REVIEWABLE`はmerge前、`PASS`はmerge済みcommitとmerge deltaを独立Reviewした場合だけ使用する。

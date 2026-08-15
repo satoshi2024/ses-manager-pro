@@ -271,6 +271,10 @@ case_backup_full_failure_releases_quiesce() {
   local code=$?
   assert_nonzero "$code" "dump 失敗で backup-full は非 0"
   assert_no_file "$QUIESCE_STATE_DIR/ddl-session.pid" "失敗後も DDL session pid が残らない（quiesce 解放済み）"
+  # R2 P2-04: trap 連結により option file（秘密）が残らないこと
+  local leftover
+  leftover=$(ls "$TMPDIR"/ses-backup-mysql.* 2>/dev/null | wc -l)
+  assert_eq "0" "$leftover" "失敗後も option file が残らない（trap 連結）"
   unset QUIESCE_STATE_DIR FAKE_DUMP_RC
   teardown_full
 }

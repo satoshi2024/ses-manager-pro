@@ -406,6 +406,16 @@ EOF
   assert_nonzero "$?" "新キー restore 失敗は非 0"
   assert_eq "old-key-value" "$(cat "$T/pw-file")" "キーは切替わらない"
   assert_contains "$OUT" "切替えません" "理由"
+  # 新キー verify は key add より後（実 restic repo では key add 前の新キーは
+  # 読めないため。R2 P2-03）
+  local add_ln restore_new_ln
+  add_ln=$(grep -n "key add" "$FAKE_RESTIC_ARGV_LOG" | head -1 | cut -d: -f1)
+  restore_new_ln=$(grep -n "restore" "$FAKE_RESTIC_ARGV_LOG" | tail -1 | cut -d: -f1)
+  if [[ -n "$add_ln" && -n "$restore_new_ln" && "$add_ln" -lt "$restore_new_ln" ]]; then
+    test_assert "key add は新キー verify より前"
+  else
+    test_fail "key add は新キー verify より前" "順序不正（add=$add_ln restore=$restore_new_ln）"
+  fi
 
   # 両方成功 → 切替える
   unset FAKE_NEW_KEY_FAIL

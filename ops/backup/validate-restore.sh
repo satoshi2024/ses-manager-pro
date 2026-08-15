@@ -76,7 +76,7 @@ main() {
   } > "$target_optfile"
   chmod 600 "$target_optfile"
   TARGET_OPT_ARGS=(--defaults-extra-file="$target_optfile" -h "$TARGET_HOST")
-  trap 'rm -f "$target_optfile"' EXIT
+  common::trap_add 'rm -f "$target_optfile"'
 
   # R1 P1-04: checkpoint metadata は plan が参照する checkpoint の index file に限定
   # （find | head -1 の任意 file ではなく、plan の effective_checkpoint.index を読む）

@@ -106,7 +106,7 @@ main() {
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   work="$BACKUP_WORK_DIR/checkpoint-$stamp"
   mkdir -p "$work"
-  trap 'rm -rf "$work"; checkpoint::cleanup' EXIT
+  common::trap_add 'rm -rf "$work"; checkpoint::cleanup'
   restic::ensure_repository "$RESTIC_BIN" "$work/restic.log" \
     || common::fail "restic repository を準備できません"
 

@@ -74,7 +74,7 @@ uploads_local::snapshot() {
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   local staging="$staging_parent/uploads-snap-$stamp-$$"
   mkdir -p "$staging"
-  trap 'rm -rf "$staging"' EXIT
+  common::trap_add 'rm -rf "$staging"'
 
   # 通常 file のみ複製（検査済み）
   local entry=""

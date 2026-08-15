@@ -17,6 +17,38 @@ common::require_env() { # var_name
   [[ -n "${!v:-}" ]] || common::fail "$v が未設定です"
 }
 
+# EXIT trap を連結する（後から設定された trap が既存の trap を上書きしない。
+# R2 P2-04: mysql-options 等の trap が呼び出し元の trap で失われるのを防ぐ）
+# 実装: handler を配列に蓄積し、単一の dispatcher trap で順に評価する。
+# 既存の trap（他 lib 由来）があれば初回に dispatcher へ移す。
+declare -a _COMMON_TRAP_HANDLERS=()
+_COMMON_TRAP_INIT=0
+common::trap_add() { # handler
+  local handler=$1
+  if [[ "${_COMMON_TRAP_INIT:-0}" == "0" ]]; then
+    local current
+    current=$(trap -p EXIT 2>/dev/null || true)
+    if [[ -n "$current" ]]; then
+      local existing
+      existing=${current#trap -- }
+      existing=${existing% EXIT}
+      existing=${existing#\'}
+      existing=${existing%\'}
+      _COMMON_TRAP_HANDLERS+=("$existing")
+    fi
+    _COMMON_TRAP_INIT=1
+  fi
+  _COMMON_TRAP_HANDLERS+=("$handler")
+  trap common::_trap_run EXIT
+}
+
+common::_trap_run() {
+  local h
+  for h in "${_COMMON_TRAP_HANDLERS[@]:-}"; do
+    eval "$h"
+  done
+}
+
 # 既知の秘密値パターンを redaction する（URL の userinfo、password= 等）
 common::redact() {
   sed -E \

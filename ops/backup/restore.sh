@@ -101,24 +101,25 @@ main() {
   } > "$target_optfile"
   chmod 600 "$target_optfile"
   TARGET_OPT_ARGS=(--defaults-extra-file="$target_optfile" -h "$TARGET_HOST")
-  trap 'rm -f "$target_optfile"; restore::cleanup' EXIT
+  common::trap_add 'rm -f "$target_optfile"; restore::cleanup'
 
   # target guard（plan・allowlist・marker・空 DB・default 拒否）
   target_guard::run "$plan_json" "$TARGET_DATABASE" || restore::fail "target guard に失敗しました"
-
-  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
-  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
-  # target guard が source と同一 UUID を拒否済み）。
-  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "RESET MASTER;" 2>/dev/null; then
-    restore::fail "target の GTID 状態をリセットできません（RESET MASTER）。再 restore の正しさを保証できません"
-  fi
 
   # 二者承認（target UUID を claim に bind）
   local target_uuid
   target_uuid=$(target_guard::target_uuid) || restore::fail "target UUID を取得できません"
   approval::collect_and_verify "$plan_path" "$target_uuid" "$CLAIM1" "$CLAIM2" \
     || restore::fail "承認が不足または不正です"
+
+  # R1 P0-01: 同一 target への再 restore でも replay が沈黙スキップされないよう、
+  # import 前に gtid_executed / binlog をリセットする（専用 recovery target 限定。
+  # target guard が source と同一 UUID を拒否済み）。
+  # R2 P2-01: 承認検証の後に実行する（未承認 plan で target を変更しない）。
+  if ! "$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
+    --execute "RESET MASTER;" 2>/dev/null; then
+    restore::fail "target の GTID 状態をリセットできません（RESET MASTER）。再 restore の正しさを保証できません"
+  fi
 
   # staging（失敗時は read-only に隔離）
   STAGE_DIR="$STAGING_ROOT/$(basename "$plan_path" .json)-$(date -u +%Y%m%dT%H%M%SZ)"

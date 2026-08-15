@@ -59,11 +59,8 @@ main() {
   rotate::restore_verify "$RESTIC_PASSWORD_FILE" "$snap" old \
     || rotate::fail "旧キーでの restore verify に失敗しました（中断）"
 
-  # 2) 新キーで restore verify（旧・新の両方が読めることを確認）
-  rotate::restore_verify "$NEW_KEY_FILE" "$snap" new \
-    || rotate::fail "新キーでの restore verify に失敗しました（切替えません）"
-
-  # 3) R1 P2: repository に新キーを追加（restic key add。旧キーは残したまま）
+  # 2) R2 P2-03: 新キーを repository に追加してから verify する
+  #    （key add 前の新キー verify は実 restic repo では必ず失敗するため）
   local add_log
   add_log="$TMPDIR/key-add.log"
   if ! RESTIC_PASSWORD_FILE="$RESTIC_PASSWORD_FILE" \
@@ -71,6 +68,10 @@ main() {
       --new-password-file "$NEW_KEY_FILE" > "$add_log" 2>&1; then
     rotate::fail "restic key add に失敗しました（切替えません）: $(common::redact < "$add_log")"
   fi
+
+  # 3) 新キーで restore verify（旧・新の両方が読めることを確認）
+  rotate::restore_verify "$NEW_KEY_FILE" "$snap" new \
+    || rotate::fail "新キーでの restore verify に失敗しました（切替えません）"
 
   # 4) 切替（atomic。新キーを一時 file に書いて rename）
   local tmp

@@ -133,8 +133,8 @@ main() {
   work="$BACKUP_WORK_DIR/full-$stamp"
   mkdir -p "$work/db"
   # R1 P1-03: 失敗時も静止解除（quiesce::release + DDL lock session 終了）を必ず実行する。
-  # trap を上書きせず、cleanup と work 削除を連結する（mysql-options の trap も保持）。
-  trap 'backup_full::cleanup; rm -rf "$work"' EXIT
+  # R2 P2-04: trap は連結（mysql-options の option file cleanup を失わない）。
+  common::trap_add 'backup_full::cleanup; rm -rf "$work"'
   backup_full::ensure_repository || common::fail "restic repository を準備できません"
 
   if ! repository_lock::acquire exclusive "${BACKUP_LOCK_TIMEOUT:-120}" "backup-full"; then
@@ -183,30 +183,8 @@ main() {
   UPLOADS_STAGING_DIR=$(jq -r '.staging_dir // empty' "$uploads_snap")
   [[ -n "$UPLOADS_SNAPSHOT_ID" ]] || common::fail "uploads snapshot ID を取得できません"
 
-  # 静止解除
-  if ! quiesce::release; then
-    echo "[backup-full] 重大: 静止解除に失敗しました" >&2
-    QUIESCED=0
-    common::fail "静止解除失敗（incident 扱い）"
-  fi
-  QUIESCED=0
-
-  # staging: uploads staging を work 配下の payload へ移す
-  local payload="$work/payload"
-  mkdir -p "$payload/uploads" "$payload/db"
-  cp -a "$UPLOADS_STAGING_DIR"/. "$payload/uploads/"
-  cp "$uploads_snap" "$payload/uploads-snapshot.json"
-  cp "$dump_file" "$payload/db/database.sql"
-
-  # metadata（dump と同じ静止区間の整合時刻）
-  DATABASE_FINGERPRINT=$(metadata::db_fingerprint "${ENVIRONMENT:-unknown}" "$MYSQL_DATABASE")
-  SOURCE_LINEAGE=$(metadata::lineage "$SOURCE_SERVER_UUID" "$DATABASE_FINGERPRINT")
-  KIND=full
-  STATUS=PENDING
-  UPLOADS_SNAPSHOT_ID="$UPLOADS_SNAPSHOT_ID"
-  metadata::build "$work" "$payload/metadata.json"
-
-  # 主要 table count（read-only。失敗しても metadata は書ける）
+  # R2 P2-06: 主要 table count は静止区間内（解除前）に採取する
+  # （dump と同じ静止区間の値として metadata に載せる。失敗しても metadata は書ける）
   if [[ -n "${CRITICAL_TABLES:-}" ]]; then
     local counts='{}'
     local t=""
@@ -227,6 +205,29 @@ main() {
     done
     METADATA_TABLE_COUNTS_JSON=$counts
   fi
+
+  # 静止解除
+  if ! quiesce::release; then
+    echo "[backup-full] 重大: 静止解除に失敗しました" >&2
+    QUIESCED=0
+    common::fail "静止解除失敗（incident 扱い）"
+  fi
+  QUIESCED=0
+
+  # staging: uploads staging を work 配下の payload へ移す
+  local payload="$work/payload"
+  mkdir -p "$payload/uploads" "$payload/db"
+  cp -a "$UPLOADS_STAGING_DIR"/. "$payload/uploads/"
+  cp "$uploads_snap" "$payload/uploads-snapshot.json"
+  cp "$dump_file" "$payload/db/database.sql"
+
+  # metadata（dump と同じ静止区間の整合時刻。counts は静止区間内に採取済み）
+  DATABASE_FINGERPRINT=$(metadata::db_fingerprint "${ENVIRONMENT:-unknown}" "$MYSQL_DATABASE")
+  SOURCE_LINEAGE=$(metadata::lineage "$SOURCE_SERVER_UUID" "$DATABASE_FINGERPRINT")
+  KIND=full
+  STATUS=PENDING
+  UPLOADS_SNAPSHOT_ID="$UPLOADS_SNAPSHOT_ID"
+  metadata::build "$work" "$payload/metadata.json"
   # metadata を table counts 込みで再生成
   if [[ -n "${METADATA_TABLE_COUNTS_JSON:-}" ]]; then
     metadata::build "$work" "$payload/metadata.json"

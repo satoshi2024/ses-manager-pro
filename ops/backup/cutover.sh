@@ -51,7 +51,7 @@ main() {
   common::require_env TARGET_PASSWORD_FILE
   common::require_env TARGET_DATABASE
   TARGET_PORT=${TARGET_PORT:-3306}
-  trap 'rm -f "${TARGET_OPTFILE:-}"' EXIT
+  common::trap_add 'rm -f "${TARGET_OPTFILE:-}"'
 
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
   [[ -f "$plan_path" ]] || cutover::fail "plan がありません: $plan_path"
