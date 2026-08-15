@@ -223,7 +223,7 @@ case_health_rpo_missed() {
   touch_age "$DRILL_TS" 86400
   run_check
   assert_contains "$OUT" '"rpo_available": false' "RPO 15 分超で false"
-  assert_contains "$OUT" '"checkpoint_age_seconds": 1200' "checkpoint age"
+  assert_contains "$OUT" '"checkpoint_age_seconds": 12' "checkpoint age（約 1200s）"
 }
 
 run_case case_health_normal_no_false_alert

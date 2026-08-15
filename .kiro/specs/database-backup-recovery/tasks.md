@@ -127,7 +127,7 @@
   - **Evidence:** redacted approval claims/signature result、ticket、old/new fingerprint、stop/read-only/write timestamps、rollback/commit result。
   - **失敗/rollback:** read-only 中だけ旧環境へ rollback。write 解放後は自動 rollback せず incident commander へ移管する。
 
-- [ ] **HFP-03-010 — dependency-aware retention、暗号鍵、削除耐性を実装する**
+- [x] **HFP-03-010 — dependency-aware retention、暗号鍵、削除耐性を実装する**
 
   - **依存:** HFP-03-003、HFP-03-004、HFP-03-006
   - **対応要求:** HFP-03-RQ-008、HFP-03-RQ-009
