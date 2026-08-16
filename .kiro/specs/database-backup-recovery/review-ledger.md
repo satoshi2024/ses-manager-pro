@@ -1,4 +1,6 @@
-# Review Ledger — HFP-03 正式データバックアップ・PITR
+#| 2026-08-16T09:00Z | 独立 Reviewer（Final Round） | FAIL（merge 済み commit `e892c5bd` を直接 review） | HFP-03-RF-P1-01: main の `.gitignore` に未解決の merge conflict marker が混入 | merge tree は reviewed head `1e34f47e` と完全一致、backup unit 430 assert / integration SUCCESS / merge 以降の backup file 変更なし。`.gitignore` の marker のみが FAIL 理由 |
+| 2026-08-16T09:30Z | 実装担当（AI） | RF-P1-01 修正完了（FIXED_BY_IMPLEMENTER） | fix delta の再 Review 待ち（問題なければ最終 PASS 付与予定） | `.gitignore` を marker なしの union（`.integration-work` + 機密情報 block）に修正し main `4dca8a46` へ push。marker 0 を確認済み |
+ Review Ledger — HFP-03 正式データバックアップ・PITR
 
 > この ledger は追記式で使用する。checkbox や自己申告だけで PASS にしない。secret、raw dump、個人データ、秘密 URL は記録しない。
 
