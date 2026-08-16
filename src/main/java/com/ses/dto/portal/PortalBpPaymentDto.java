@@ -9,7 +9,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * BP portal向け発注/作業実績DTO（field-inventory §3.2。自社分のみ。他階層・社内情報を含まない）。
+ * BP portal向け発注/作業実績DTO（field-inventory §3.2。自社分のみ。
+ * 社内情報・他社情報・要員個人情報を含まない。S13-R1-P2-02: engineerName/contractNoはallow-list外のため公開しない）。
  */
 @Data
 @Builder
@@ -24,8 +25,6 @@ public class PortalBpPaymentDto {
     private LocalDateTime paidDate;
     private LocalDateTime receivedConfirmedAt;
     private String workRecordStatus;
-    private String contractNo;
-    private String engineerName;
     /** 支払予定日（取引条件から算出。未確定ならnull） */
     private String paymentScheduleDate;
     /** 提出物（請求書/作業報告書）の件数 */

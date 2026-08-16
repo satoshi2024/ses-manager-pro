@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.PutMapping;
+import java.util.Map;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -41,11 +43,11 @@ public class PortalAuthApiController {
 
     /** MFA有効化（loginでMFA_SETUPを受けた後の続き）。成功時にsession cookieを発行する。 */
     @PostMapping("/mfa/complete")
-    public ApiResult<PortalMfaCompleteDto> completeMfa(@RequestParam("email") String email,
-                                                       @RequestParam("code") String code,
+    public ApiResult<PortalMfaCompleteDto> completeMfa(@RequestBody Map<String, String> body,
                                                        HttpServletRequest httpRequest,
                                                        HttpServletResponse httpResponse) {
-        return ApiResult.success(authService.completeMfa(email, code, httpRequest, httpResponse));
+        return ApiResult.success(authService.completeMfa(body.get("email"), body.get("code"),
+                httpRequest, httpResponse));
     }
 
     @PostMapping("/accept-invitation")
@@ -72,8 +74,17 @@ public class PortalAuthApiController {
                 .orgType(user.getOrgType())
                 .orgAdmin(user.isOrgAdmin())
                 .termsPending(user.isTermsPending())
+                .notifyEmail(user.getNotifyEmail() == null ? null : user.getNotifyEmail() != 0)
                 .permissions(user.getPermissions())
                 .build());
+    }
+
+    /** 通知設定の更新（R4.1: email通知設定）。 */
+    @PutMapping("/preferences")
+    public ApiResult<Void> updatePreferences(@RequestBody Map<String, Object> body) {
+        boolean notifyEmail = !Boolean.FALSE.equals(body.get("notifyEmail"));
+        authService.updatePreferences(authorizationService.requireUser().getPortalUserId(), notifyEmail);
+        return ApiResult.success(null);
     }
 
     @PostMapping("/logout")

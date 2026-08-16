@@ -29,6 +29,7 @@ import com.ses.service.SalesOrderPdfService;
 import com.ses.service.SalesOrderService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +48,7 @@ import java.util.Set;
  * 注文サービス実装。
  * 状態遷移（design §5.3）と見積→注文→契約の連携の唯一の権威。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOrder>
@@ -74,11 +76,13 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     private final ApprovalRequestMapper approvalRequestMapper;
     private final ContractService contractService;
     private final DataScopeService dataScopeService;
-    private final DocumentService documentService;
-    private final DocumentMapper documentMapper;
+    private final DocumentService documentService;    private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final SalesOrderPdfService salesOrderPdfService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    /** portal通知（R4.1）。portal未導入環境ではnull（Optional dependency） */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
+            portalNotificationServiceProvider;
 
     // ===== 一覧・詳細・scope =====
 
@@ -282,6 +286,23 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         }
         order.setStatus(newStatus);
         this.baseMapper.updateById(order);
+        // R4.1: 注文請の公開（注文請提出）を顧客portal組織へ通知（失敗は業務を妨げない）
+        if (StatusConstants.ORDER_ACK_SUBMITTED.equals(newStatus) && order.getCustomerId() != null) {
+            com.ses.service.portal.PortalNotificationService notification =
+                    portalNotificationServiceProvider.getIfAvailable();
+            if (notification != null) {
+                try {
+                    notification.notifyCustomerOrganization(order.getCustomerId(),
+                            "DOCUMENT_PUBLISHED_SALES_ORDER",
+                            "portal.notification.documentPublishedSalesOrder.subject",
+                            "portal.notification.documentPublishedSalesOrder.body",
+                            new Object[]{order.getOrderNo()}, "/portal/customer");
+                } catch (RuntimeException e) {
+                    log.warn("portal通知失敗: type=DOCUMENT_PUBLISHED_SALES_ORDER orderId={} error={}",
+                            id, e.getMessage());
+                }
+            }
+        }
         return order;
     }
 

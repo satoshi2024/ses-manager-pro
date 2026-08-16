@@ -55,6 +55,9 @@ public class PortalLoginUser implements UserDetails {
     /** 組織管理者フラグ（invitation発行・user管理が可能） */
     private boolean orgAdmin;
 
+    /** email通知設定（R4.1） */
+    private Integer notifyEmail;
+
     /** 個別付与権限キー（t_portal_user_permission） */
     private Set<String> permissions;
 

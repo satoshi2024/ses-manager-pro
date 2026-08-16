@@ -50,8 +50,12 @@ public interface PortalAdminService {
 
     PortalInvitation createInvitation(Long orgId, String email, String role, HttpServletRequest request);
 
+    /**
+     * 招待一覧。allowedOrgIds=null は全件（管理者）。営業は可視の顧客組織のみ
+     * （SQL境界で絞る。design §6.2）。
+     */
     com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalInvitation> invitations(
-            long current, long size, Long orgId);
+            long current, long size, Long orgId, Set<Long> allowedOrgIds);
 
     // ===== session =====
 
@@ -61,8 +65,11 @@ public interface PortalAdminService {
 
     // ===== access log =====
 
+    /**
+     * 監査ログ一覧。allowedOrgIds=null は全件（管理者）。営業は可視の顧客組織のみ（design §6.2）。
+     */
     com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalAccessLog> accessLogs(
-            long current, long size, Long orgId, String action);
+            long current, long size, Long orgId, String action, Set<Long> allowedOrgIds);
 
     // ===== 利用規約 =====
 

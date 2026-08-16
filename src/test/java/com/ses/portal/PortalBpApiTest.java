@@ -399,6 +399,25 @@ class PortalBpApiTest extends PortalTestSupport {
     }
 
     @Test
+    void 支払詳細は自社の任意の行を解決できる() throws Exception {
+        BpFixture bp = bpFixture();
+        long paymentA = seedBpPayment(bp.bpCompanyId());
+        long paymentB = seedBpPayment(bp.bpCompanyId());
+        MockCookie session = issueSession(bp.user());
+
+        // 最新でない行（id順で古い方）の詳細も200（S13-R1-P1-02）
+        long older = Math.min(paymentA, paymentB);
+        long newer = Math.max(paymentA, paymentB);
+        mockMvc.perform(get("/api/portal/bp/payments/" + newer).cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(newer));
+        mockMvc.perform(get("/api/portal/bp/payments/" + older).cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(older))
+                .andExpect(jsonPath("$.data.workMonth").value("2026-01"));
+    }
+
+    @Test
     void 公開DTOに社内情報が含まれない() throws Exception {
         BpFixture bp = bpFixture();
         long paymentId = seedBpPayment(bp.bpCompanyId());
@@ -409,6 +428,8 @@ class PortalBpApiTest extends PortalTestSupport {
                 .andExpect(jsonPath("$.data.records[0].costCenterId").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].parentPaymentId").doesNotExist())
                 .andExpect(jsonPath("$.data.records[0].remarks").doesNotExist())
-                .andExpect(jsonPath("$.data.records[0].workRecordId").doesNotExist());
+                .andExpect(jsonPath("$.data.records[0].workRecordId").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].contractNo").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].engineerName").doesNotExist());
     }
 }

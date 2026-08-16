@@ -36,6 +36,9 @@ public class PortalUser extends BaseEntity {
     /** MFA方針（既定REQUIRED=全user必須） */
     private String mfaPolicy;
 
+    /** email通知設定（1=通知する。R4.1。portal self-serviceで変更可） */
+    private Integer notifyEmail;
+
     /** TOTP secret暗号化値（平文は保存しない） */
     private String totpSecretEncrypted;
 

@@ -40,4 +40,9 @@ public interface PortalAuthService {
      * logout: 現在のsessionを失効させcookieを削除する。
      */
     void logout(HttpServletRequest httpRequest, HttpServletResponse httpResponse);
+
+    /**
+     * 通知設定を更新する（R4.1: email通知設定。1=通知する）。
+     */
+    void updatePreferences(Long portalUserId, boolean notifyEmail);
 }

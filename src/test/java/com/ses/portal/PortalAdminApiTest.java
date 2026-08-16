@@ -128,13 +128,13 @@ class PortalAdminApiTest extends PortalTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[*].type").value(org.hamcrest.Matchers.everyItem(
                         org.hamcrest.Matchers.is("CUSTOMER"))));
-        // BP組織のuser一覧・招待発行は404秘匿
+        // BP組織のuser一覧・招待発行は404秘匿（招待発行は管理者限定: S13-R1-P2-01 → 営業は403）
         mockMvc.perform(get("/api/portal-admin/orgs/" + bpOrgId + "/users").with(salesUser()))
                 .andExpect(status().isNotFound());
         mockMvc.perform(post("/api/portal-admin/orgs/" + bpOrgId + "/invitations").with(salesUser()).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"x@example.com\",\"role\":\"MEMBER\"}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isForbidden());
         // 組織作成・MFA reset・規約発行は管理者のみ
         mockMvc.perform(post("/api/portal-admin/orgs").with(salesUser()).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"type\":\"CUSTOMER\",\"customerId\":1}"))
@@ -306,9 +306,11 @@ class PortalAdminApiTest extends PortalTestSupport {
 
     @Test
     void 検収提出で顧客組織へ通知され重複送信は抑止される() throws Exception {
-        // 顧客A: portal user（通知宛先）
+        // 顧客A: portal user（通知宛先）＋通知オフのuser（P1-03: notify_email=0は送信しない）
         PortalOrganization orgA = createCustomerOrg("ntf-" + unique());
         UserFixture userA = readyUser(orgA, "ntf-" + unique() + "@example.com");
+        PortalUser noNotify = createUser(orgA, "ntf-off-" + unique() + "@example.com");
+        jdbcTemplate.update("UPDATE t_portal_user SET notify_email = 0 WHERE id = ?", noNotify.getId());
 
         // 契約・勤怠・検収を用意し、内部submitで通知が発火する
         long engineerId = insertEngineer();
@@ -330,6 +332,12 @@ class PortalAdminApiTest extends PortalTestSupport {
         // 検収提出通知がMailService経由で顧客組織のACTIVE userへ送信される（R4.1）
         org.mockito.Mockito.verify(mailService, org.mockito.Mockito.times(1))
                 .send(org.mockito.ArgumentMatchers.eq(userA.user().getEmail()),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.isNull());
+        // notify_email=0のuserへは送信されない（P1-03: 通知設定）
+        org.mockito.Mockito.verify(mailService, org.mockito.Mockito.never())
+                .send(org.mockito.ArgumentMatchers.eq(noNotify.getEmail()),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.isNull());
@@ -355,6 +363,85 @@ class PortalAdminApiTest extends PortalTestSupport {
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void 停止時に未使用招待が失効し営業の一覧はDataScopeで絞られる() throws Exception {
+        // --- 停止時invitation失効（S13-R1-P0-01の補完） ---
+        long orgId = insertCustomerOrg();
+        String email = "expire-invite-" + unique() + "@example.com";
+        mockMvc.perform(post("/api/portal-admin/orgs/" + orgId + "/invitations").with(adminUser()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"role\":\"MEMBER\"}"))
+                .andExpect(status().isOk());
+        PortalUser user = createUser(organizationMapper.selectById(orgId), email);
+        mockMvc.perform(put("/api/portal-admin/users/" + user.getId() + "/status").with(adminUser()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"SUSPENDED\"}"))
+                .andExpect(status().isOk());
+        // 停止後: 未使用invitationが失効（expires_at < now）
+        java.time.LocalDateTime expiresAt = jdbcTemplate.queryForObject(
+                "SELECT expires_at FROM t_portal_invitation WHERE email = ?", java.time.LocalDateTime.class, email);
+        assertTrue(expiresAt.isBefore(java.time.LocalDateTime.now().plusMinutes(1)),
+                "停止時に未使用招待が失効するはず（S13-R1-P0-01）");
+
+        // --- 営業DataScope: orgIdなしの招待/access-logs一覧（S13-R1-P1-01） ---
+        // 実在営業user＋担当契約からDataScopeを解決する
+        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status) "
+                + "VALUES (?, 'x', '営業A', '営業', 1)", "sales-scope-" + unique());
+        long salesUserId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM sys_user", Long.class);
+        long orgB = insertCustomerOrg();
+        long orgC = insertCustomerOrg();
+        PortalOrganization orgBEntity = organizationMapper.selectById(orgB);
+        // 営業の担当顧客=orgBのcustomerのみ（契約sales_user_idで紐付け）
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+                "scope-e-" + unique());
+        long engineerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
+        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
+                "scope-p-" + unique(), orgBEntity.getCustomerId());
+        long projectId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
+        jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
+                        + " start_date, end_date, selling_price, cost_price, sales_user_id, acceptance_required)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, ?, 1)",
+                "SCOPE-C-" + unique(), engineerId, projectId, orgBEntity.getCustomerId(), salesUserId);
+        // orgBの招待1件・orgCの招待1件
+        mockMvc.perform(post("/api/portal-admin/orgs/" + orgB + "/invitations").with(adminUser()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"b-" + unique() + "@example.com\",\"role\":\"MEMBER\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/portal-admin/orgs/" + orgC + "/invitations").with(adminUser()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"c-" + unique() + "@example.com\",\"role\":\"MEMBER\"}"))
+                .andExpect(status().isOk());
+        // 監査ログ: orgBに1件作る
+        jdbcTemplate.update("INSERT INTO t_portal_access_log (portal_user_id, portal_org_id, email, org_type, action) "
+                + "VALUES (1, ?, 'b-user@example.com', 'CUSTOMER', 'DOWNLOAD_QUOTATION')", orgB);
+
+        try {
+            transactionTemplate.setPropagationBehavior(
+                    org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transactionTemplate.executeWithoutResult(status ->
+                    systemConfigService.put("scope.sales-own-data-only", "true", "test"));
+
+            // 営業（DataScope有効）: 自担当顧客（orgB）の招待のみ・access logもorgBのみ
+            var salesPrincipal = user(String.valueOf(salesUserId)).roles("営業");
+            mockMvc.perform(get("/api/portal-admin/invitations").with(salesPrincipal))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.total").value(1))
+                    .andExpect(jsonPath("$.data.records[0].portalOrgId").value(orgB));
+            mockMvc.perform(get("/api/portal-admin/access-logs").with(salesPrincipal))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.total").value(1))
+                    .andExpect(jsonPath("$.data.records[0].portalOrgId").value(orgB));
+            // 他顧客（orgC）の招待詳細指定も404
+            mockMvc.perform(get("/api/portal-admin/invitations").param("orgId", String.valueOf(orgC))
+                            .with(salesPrincipal))
+                    .andExpect(status().isNotFound());
+        } finally {
+            transactionTemplate.setPropagationBehavior(
+                    org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transactionTemplate.executeWithoutResult(status ->
+                    systemConfigService.put("scope.sales-own-data-only", "false", "test"));
+        }
     }
 
     private long insertEngineer() {

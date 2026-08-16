@@ -11,6 +11,7 @@
 <header class="portal-header">
     <span class="portal-header-brand" th:text="#{app.title}">SES管理プロ</span>
     <span class="portal-header-user" id="portalHeaderUser"></span>
+    <label class="portal-notify-toggle"><input type="checkbox" id="notifyEmailToggle"> <span th:text="#{portal.notification.preferenceLabel}">通知</span></label>
     <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton"
             th:text="#{portal.logout}">ログアウト</button>
 </header>

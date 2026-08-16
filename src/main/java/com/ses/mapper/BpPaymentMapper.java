@@ -30,13 +30,9 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             p.status AS status,
             p.paid_date AS paidDate,
             p.received_confirmed_at AS receivedConfirmedAt,
-            w.status AS workRecordStatus,
-            c.contract_no AS contractNo,
-            e.full_name AS engineerName
+            w.status AS workRecordStatus
         FROM t_bp_payment p
         LEFT JOIN t_work_record w ON w.id = p.work_record_id
-        LEFT JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
-        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         WHERE p.bp_company_id = #{bpCompanyId}
           AND p.deleted_flag = 0
           <if test="status != null and status != ''">AND p.status = #{status}</if>
@@ -56,6 +52,27 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
             + " AND received_confirmed_at IS NULL AND status = '未払' AND deleted_flag = 0")
     int confirmReceipt(@Param("id") Long id, @Param("bpCompanyId") Long bpCompanyId,
                        @Param("now") java.time.LocalDateTime now);
+
+    /**
+     * BP portal用の支払詳細（SQL境界: id AND bp_company_id。S13-R1-P1-02）。
+     * 一覧の並びに依存せず、自社の任意の行を1件解決する。
+     */
+    @Select("""
+        SELECT
+            p.id AS id,
+            w.work_month AS workMonth,
+            w.actual_hours AS actualHours,
+            p.amount AS amount,
+            p.status AS status,
+            p.paid_date AS paidDate,
+            p.received_confirmed_at AS receivedConfirmedAt,
+            w.status AS workRecordStatus
+        FROM t_bp_payment p
+        LEFT JOIN t_work_record w ON w.id = p.work_record_id
+        WHERE p.id = #{id} AND p.bp_company_id = #{bpCompanyId} AND p.deleted_flag = 0
+        """)
+    com.ses.dto.portal.PortalBpPaymentDto selectPortalDetailById(@Param("id") Long id,
+                                                                 @Param("bpCompanyId") Long bpCompanyId);
 
     @Select("""
         <script>

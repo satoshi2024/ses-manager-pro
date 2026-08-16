@@ -66,6 +66,12 @@
     color: #d8e2ee;
 }
 
+.portal-notify-toggle {
+    font-size: 0.8rem;
+    color: #d8e2ee;
+    white-space: nowrap;
+}
+
 .portal-container {
     max-width: 720px;
     margin: 0 auto;

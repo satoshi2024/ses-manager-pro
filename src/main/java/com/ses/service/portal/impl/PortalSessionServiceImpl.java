@@ -152,6 +152,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
                 .orgStatus(org.getStatus())
                 .userStatus(user.getStatus())
                 .orgAdmin(permissions.contains(PERMISSION_ORG_ADMIN))
+                .notifyEmail(user.getNotifyEmail())
                 .permissions(permissions)
                 .build();
         // 規約同意待ちフラグ（同意versionが現行未満なら同意画面へ強制）

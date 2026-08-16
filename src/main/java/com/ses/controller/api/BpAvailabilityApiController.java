@@ -43,24 +43,16 @@ public class BpAvailabilityApiController {
 
     /**
      * 内部営業のreview（R3.1: portal提出→review→有効化）。未確認→提案可能（approved）/ 未確認→却下。
+     * 状態CASはservice層（design §6.3・S13-R1-P2-10）。二重reviewの敗者は409。
      * 同一メニュー（bp-availability）のapi_prefix配下のため、既存のメニュー権限で保護される。
      */
     @PostMapping("/{id}/review")
     public ApiResult<BpAvailability> review(@PathVariable Long id, @RequestBody ReviewRequest request) {
+        bpAvailabilityService.review(id, Boolean.TRUE.equals(request.isApproved()), request.getComment());
         BpAvailability availability = bpAvailabilityService.getById(id);
         if (availability == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        if (!com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_PENDING.equals(availability.getStatus())) {
-            throw com.ses.common.exception.BusinessException.of(409, "error.portal.bp.availabilityReviewed");
-        }
-        String next = Boolean.TRUE.equals(request.isApproved())
-                ? com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_ACTIVE
-                : com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_REJECTED;
-        availability.setStatus(next);
-        availability.setRemarks(request.getComment() == null || request.getComment().isBlank()
-                ? availability.getRemarks() : request.getComment().trim());
-        bpAvailabilityService.updateById(availability);
         return ApiResult.success(availability);
     }
 

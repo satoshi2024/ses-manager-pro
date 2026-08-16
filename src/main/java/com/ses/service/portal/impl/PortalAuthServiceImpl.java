@@ -164,6 +164,18 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         sessionService.revokeCurrent(httpRequest, httpResponse);
     }
 
+    @Override
+    @Transactional
+    public void updatePreferences(Long portalUserId, boolean notifyEmail) {
+        PortalUser user = userMapper.selectById(portalUserId);
+        if (user == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        userMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PortalUser>()
+                .eq("id", portalUserId)
+                .set("notify_email", notifyEmail ? 1 : 0));
+    }
+
     private boolean termsPending(Long portalUserId) {
         String current = systemConfigService.getString("portal.terms.current-version", "1");
         String consented = termsConsentMapper.latestConsentedVersion(portalUserId);
@@ -173,7 +185,8 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private PortalUser createOrReactivateUser(PortalInvitation invitation,
                                               PortalAcceptInvitationRequest request) {
         String email = normalizeEmail(request.getEmail());
-        PortalUser existing = userMapper.selectByEmail(email);
+        // 論理削除済みを含めて既存userを確認する（email UNIQUEはdeleted行も保持するため）
+        PortalUser existing = userMapper.selectByEmailIncludingDeleted(email);
         if (existing == null) {
             PortalUser user = new PortalUser();
             user.setPortalOrgId(invitation.getPortalOrgId());
@@ -185,23 +198,34 @@ public class PortalAuthServiceImpl implements PortalAuthService {
             userMapper.insert(user);
             return user;
         }
+        // 論理削除済み（過去に削除されたアカウント）はreactivate可能。statusは無関係（deleted行優先）
+        if (Integer.valueOf(1).equals(existing.getDeletedFlag())) {
+            return reactivate(existing, invitation, request);
+        }
         if ("ACTIVE".equals(existing.getStatus())) {
             throw BusinessException.of(409, "error.portal.invite.alreadyRegistered");
         }
-        // 論理削除済みemailはreactivate（email UNIQUEはdeleted行も保持するため。
-        // @TableLogic付きupdateByIdはdeleted行を除外するため、raw UpdateWrapperで更新する）
-        userMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PortalUser>()
-                .eq("id", existing.getId())
-                .set("display_name", request.getDisplayName().trim())
-                .set("password_hash", PASSWORD_ENCODER.encode(request.getPassword()))
-                .set("status", "ACTIVE")
-                .set("mfa_enabled_at", null)
-                .set("totp_secret_encrypted", null)
-                .set("totp_secret_key_version", null)
-                .set("recovery_code_hash", null)
-                .set("recovery_code_used_at", null)
-                .set("last_used_step", null)
-                .set("deleted_flag", 0));
+        if ("SUSPENDED".equals(existing.getStatus())) {
+            // 停止されたuserは招待受諾で自己復活できない（S13-R1-P0-01）。
+            // 復活は管理者の明示操作（B1: 停止/再開）のみ。停止前に発行された未使用invitationも
+            // 停止時に失効済みのため、この経路は成立しない。
+            throw BusinessException.of(409, "error.portal.invite.suspended");
+        }
+        // その他の状態（例: データ不整合）はreactivate（SUSPENDED以外の非ACTIVE）
+        return reactivate(existing, invitation, request);
+    }
+
+    /**
+     * reactivate: 論理削除済み・非ACTIVE userを招待の組織で再活性化する。
+     * S13-R1-P0-01: portal_org_id は必ず invitation の組織へ付け替える（組織跨ぎの残留を防ぐ）。
+     */
+    private PortalUser reactivate(PortalUser existing, PortalInvitation invitation,
+                                  PortalAcceptInvitationRequest request) {
+        int updated = userMapper.reactivate(existing.getId(), invitation.getPortalOrgId(),
+                request.getDisplayName().trim(), PASSWORD_ENCODER.encode(request.getPassword()));
+        if (updated == 0) {
+            throw BusinessException.of(409, "error.portal.invite.alreadyRegistered");
+        }
         sessionService.revokeAllForUser(existing.getId(), "REACTIVATE");
         return userMapper.selectById(existing.getId());
     }

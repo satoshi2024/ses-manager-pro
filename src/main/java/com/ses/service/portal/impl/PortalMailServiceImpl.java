@@ -43,9 +43,11 @@ public class PortalMailServiceImpl implements PortalMailService {
     }
 
     private String portalBaseUrl() {
-        String domain = systemConfigService.getString("portal.base-domain", "localhost");
+        // portal.base-domain は host[:port] を含めて設定できる（S13-R1-P2-06: ポート固定を廃止）。
+        // 未設定時は開発既定 localhost:8080。
+        String domain = systemConfigService.getString("portal.base-domain", "localhost:8080");
         String scheme = requireHttps ? "https" : "http";
-        return scheme + "://" + domain + ":8080";
+        return scheme + "://" + domain;
     }
 
     private String mask(String value) {

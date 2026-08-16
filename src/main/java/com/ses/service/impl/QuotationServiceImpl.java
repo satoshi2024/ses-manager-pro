@@ -12,6 +12,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.ContractService;
 import com.ses.service.QuotationService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
@@ -27,6 +28,7 @@ import java.util.Set;
 /**
  * 見積サービス実装。
  */
+@Slf4j
 @Service
 public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation> implements QuotationService {
 
@@ -48,6 +50,10 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
 
     @Autowired
     private EngineerMapper engineerMapper;
+
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
+            portalNotificationServiceProvider;
 
     // ContractServiceImpl も QuotationMapperではないがドラフトはContract側で生成。循環回避のため Lazy。
     @Autowired
@@ -155,6 +161,21 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         }
         q.setStatus(newStatus);
         this.updateById(q);
+        // R4.1: 見積の公開（提出済）を顧客portal組織へ通知（失敗は業務を妨げない）
+        if ("提出済".equals(newStatus) && q.getCustomerId() != null) {
+            com.ses.service.portal.PortalNotificationService notification =
+                    portalNotificationServiceProvider.getIfAvailable();
+            if (notification != null) {
+                try {
+                    notification.notifyCustomerOrganization(q.getCustomerId(), "DOCUMENT_PUBLISHED_QUOTATION",
+                            "portal.notification.documentPublishedQuotation.subject",
+                            "portal.notification.documentPublishedQuotation.body",
+                            new Object[]{q.getQuotationNo()}, "/portal/customer");
+                } catch (RuntimeException e) {
+                    log.warn("portal通知失敗: type=DOCUMENT_PUBLISHED_QUOTATION id={} error={}", id, e.getMessage());
+                }
+            }
+        }
     }
 
     @Override

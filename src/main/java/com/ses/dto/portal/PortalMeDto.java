@@ -20,5 +20,7 @@ public class PortalMeDto {
     private String orgType;
     private boolean orgAdmin;
     private boolean termsPending;
+    /** email通知設定（R4.1） */
+    private Boolean notifyEmail;
     private Set<String> permissions;
 }

@@ -90,4 +90,25 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
                .set(BpAvailability::getStatus, "失効");
         this.update(wrapper);
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void review(Long id, boolean approved, String comment) {
+        // 状態CAS（design §6.3）: 未確認→提案可能/却下。二重reviewの敗者は0件で409。
+        String next = approved
+                ? com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_ACTIVE
+                : com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_REJECTED;
+        boolean updated = this.update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpAvailability>()
+                .eq(BpAvailability::getId, id)
+                .eq(BpAvailability::getStatus, com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_PENDING)
+                .set(BpAvailability::getStatus, next)
+                .set(comment != null && !comment.isBlank(), BpAvailability::getRemarks, comment == null ? null : comment.trim()));
+        if (!updated) {
+            BpAvailability availability = this.getById(id);
+            if (availability == null) {
+                throw BusinessException.of(404, "error.bpAvailability.notFound");
+            }
+            throw BusinessException.of(409, "error.portal.bp.availabilityReviewed");
+        }
+    }
 }

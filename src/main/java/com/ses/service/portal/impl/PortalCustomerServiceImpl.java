@@ -50,6 +50,9 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
             List.of("提出済", "受注", "失注");
     private static final List<String> VISIBLE_INVOICE_STATUSES =
             List.of("送付済", "一部入金", "入金済");
+    /** 注文請は「注文請提出」以降のみ公開（下書き・受領確認は社内検討中のため非公開） */
+    private static final List<String> VISIBLE_SALES_ORDER_STATUSES =
+            List.of("注文請提出", "契約化", "完了");
 
     private final QuotationMapper quotationMapper;
     private final SalesOrderMapper salesOrderMapper;
@@ -111,10 +114,12 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
         if (customerId == null) {
             return new Page<>(current, Math.min(size, 1000), 0);
         }
+        // field-inventory §3.1: 注文請は「注文請提出済み行」のみ公開（S13-R1-P2-03）
         Page<SalesOrder> page = salesOrderMapper.selectPage(
                 new Page<>(current, Math.min(size, 1000)),
                 new LambdaQueryWrapper<SalesOrder>()
                         .eq(SalesOrder::getCustomerId, customerId)
+                        .in(SalesOrder::getStatus, VISIBLE_SALES_ORDER_STATUSES)
                         .orderByDesc(SalesOrder::getId));
         Page<PortalSalesOrderDto> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(o -> PortalSalesOrderDto.builder()

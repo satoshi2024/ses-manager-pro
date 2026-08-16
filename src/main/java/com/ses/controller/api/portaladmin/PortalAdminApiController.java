@@ -53,6 +53,17 @@ public class PortalAdminApiController {
         return null; // 全顧客
     }
 
+    /** 営業の可視portal組織ID集合（null=全件（管理者）、空集合=0件）。一覧のSQL境界に使う。 */
+    private Set<Long> salesOrgIds() {
+        if (isAdmin()) {
+            return null;
+        }
+        Set<Long> customerIds = salesCustomerIds();
+        return adminService.orgs(1, 1000, customerIds, false).getRecords().stream()
+                .map(PortalOrganization::getId)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
     // ===== 組織 =====
 
     @GetMapping("/orgs")
@@ -80,7 +91,7 @@ public class PortalAdminApiController {
         return ApiResult.success(null);
     }
 
-    // ===== user =====
+    // ===== user（停止/再開・org-adminは管理者のみ。営業は参照のみ: design §6.2） =====
 
     @GetMapping("/orgs/{orgId}/users")
     public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalUser>> users(
@@ -93,6 +104,7 @@ public class PortalAdminApiController {
 
     @PutMapping("/users/{id}/status")
     public ApiResult<Void> setUserStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        requireAdmin();
         assertUserVisible(id);
         adminService.setUserStatus(id, (String) body.get("status"));
         return ApiResult.success(null);
@@ -107,17 +119,19 @@ public class PortalAdminApiController {
 
     @PutMapping("/users/{id}/org-admin")
     public ApiResult<Void> setOrgAdmin(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        requireAdmin();
         assertUserVisible(id);
         adminService.setUserOrgAdmin(id, Boolean.TRUE.equals(body.get("orgAdmin")));
         return ApiResult.success(null);
     }
 
-    // ===== 招待 =====
+    // ===== 招待（発行は管理者のみ。営業は自担当顧客の一覧参照のみ: design §6.2） =====
 
     @PostMapping("/orgs/{orgId}/invitations")
     public ApiResult<PortalInvitation> createInvitation(@PathVariable Long orgId,
                                                         @RequestBody Map<String, Object> body,
                                                         HttpServletRequest request) {
+        requireAdmin();
         assertOrgVisible(orgId);
         return ApiResult.success(adminService.createInvitation(orgId,
                 (String) body.get("email"), (String) body.get("role"), request));
@@ -131,10 +145,10 @@ public class PortalAdminApiController {
         if (orgId != null) {
             assertOrgVisible(orgId);
         }
-        return ApiResult.success(adminService.invitations(current, size, orgId));
+        return ApiResult.success(adminService.invitations(current, size, orgId, salesOrgIds()));
     }
 
-    // ===== session =====
+    // ===== session（失効は管理者のみ） =====
 
     @GetMapping("/users/{id}/sessions")
     public ApiResult<List<PortalSession>> sessions(@PathVariable Long id) {
@@ -144,6 +158,7 @@ public class PortalAdminApiController {
 
     @PostMapping("/users/{id}/sessions/revoke")
     public ApiResult<Void> revokeSession(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        requireAdmin();
         assertUserVisible(id);
         adminService.revokeSession(longOrNull(body.get("sessionId")), id);
         return ApiResult.success(null);
@@ -160,7 +175,7 @@ public class PortalAdminApiController {
         if (orgId != null) {
             assertOrgVisible(orgId);
         }
-        return ApiResult.success(adminService.accessLogs(current, size, orgId, action));
+        return ApiResult.success(adminService.accessLogs(current, size, orgId, action, salesOrgIds()));
     }
 
     // ===== 利用規約 =====

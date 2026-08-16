@@ -179,25 +179,32 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Transactional(rollbackFor = Exception.class)
     public PortalBpSubmissionDto submitDocument(Long paymentId, Long bpCompanyId, String originalName,
                                                 String contentType, byte[] content) {
-        BpPaymentRow scope = requirePayment(paymentId, bpCompanyId);
         if (content == null || content.length == 0) {
             throw BusinessException.of(400, "error.portal.bp.documentRequired");
         }
         if (content.length > 10L * 1024 * 1024) {
             throw BusinessException.of(400, "error.portal.bp.documentTooLarge");
         }
-        String businessKey = "BP_PORTAL_SUBMISSION:" + paymentId + ":" + UUID.randomUUID();
+        // SQL境界（id AND bp_company_id）で対象行を解決（他BPのIDは404秘匿。R4.3）
+        PortalBpPaymentDto scope = paymentMapper.selectPortalDetailById(paymentId, bpCompanyId);
+        if (scope == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        // 同一内容の再送は冪等に同一文書を返す（S13-R1-P2-04: businessKey=paymentId:contentHash）
+        String contentHash = com.ses.common.util.SecurityHashUtil.sha256(
+                java.util.Base64.getEncoder().encodeToString(content));
+        String businessKey = "BP_PORTAL_SUBMISSION:" + paymentId + ":" + contentHash;
         // t_document_version.created_by はNOT NULL。portal principalには内部user IDがないため、
         // BPの担当営業（内部user）を明示的に作成者として指定する（監査の一貫性。R4.2）
         BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
         DocumentRegisterRequest req = DocumentRegisterRequest.builder()
                 .documentType("BP_SUBMISSION")
-                .title("BP提出物: " + scope.contractNo + " / " + scope.workMonth)
+                .title("BP提出物: " + (scope.getWorkMonth() == null ? "未確定" : scope.getWorkMonth()))
                 .counterpartyType("BP")
                 .counterpartyId(bpCompanyId)
                 .counterpartyNameSnapshot(null)
                 .transactionDate(LocalDate.now(clock))
-                .amount(scope.amount)
+                .amount(scope.getAmount())
                 .direction("INCOMING")
                 .sourceType("RECEIVED")
                 .originalName(originalName)
@@ -214,7 +221,8 @@ public class PortalBpServiceImpl implements PortalBpService {
         } catch (java.io.IOException e) {
             throw BusinessException.of(500, "error.portal.bp.documentSaveFailed");
         }
-        documentService.confirm(doc.getId());
+        // S13-R1-P2-04: portalはconfirmしない（DRAFTのまま。内部側のreview後に確定する）。
+        // download gateはscan CLEANのみでDRAFTでも利用可能。
         return toSubmissionDto(doc.getId(), doc.getTitle(), originalName, true);
     }
 
@@ -245,11 +253,8 @@ public class PortalBpServiceImpl implements PortalBpService {
 
     @Override
     public PortalBpPaymentDto payment(Long paymentId, Long bpCompanyId) {
-        Page<PortalBpPaymentDto> page = paymentMapper.selectPortalPageDto(
-                new Page<>(1, 1), bpCompanyId, null);
-        // SQL境界で対象行を絞って返す（ID直接指定でも自社分のみ）
-        PortalBpPaymentDto dto = page.getRecords().stream()
-                .filter(p -> p.getId().equals(paymentId)).findFirst().orElse(null);
+        // SQL境界（id AND bp_company_id）で1行解決（S13-R1-P1-02: 一覧の並びに依存しない）
+        PortalBpPaymentDto dto = paymentMapper.selectPortalDetailById(paymentId, bpCompanyId);
         if (dto == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -262,7 +267,10 @@ public class PortalBpServiceImpl implements PortalBpService {
 
     @Override
     public List<BpBankAccountDto> bankAccounts(Long bpCompanyId) {
-        return bpCompanyService.getBankAccounts(bpCompanyId);
+        List<BpBankAccountDto> accounts = bpCompanyService.getBankAccounts(bpCompanyId);
+        // 内部user ID（approvedBy）をportalへ露出しない（S13-R1-P2-13）
+        accounts.forEach(account -> account.setApprovedBy(null));
+        return accounts;
     }
 
     @Override
@@ -287,18 +295,13 @@ public class PortalBpServiceImpl implements PortalBpService {
 
     // ===== ヘルパー =====
 
-    private record BpPaymentRow(Long id, String workMonth, String contractNo,
-                                java.math.BigDecimal amount) {
-    }
-
-    private BpPaymentRow requirePayment(Long paymentId, Long bpCompanyId) {
+    private void requirePayment(Long paymentId, Long bpCompanyId) {
         com.ses.entity.BpPayment payment = paymentMapper.selectOne(new LambdaQueryWrapper<com.ses.entity.BpPayment>()
                 .eq(com.ses.entity.BpPayment::getId, paymentId)
                 .eq(com.ses.entity.BpPayment::getBpCompanyId, bpCompanyId));
         if (payment == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        return new BpPaymentRow(payment.getId(), null, null, payment.getAmount());
     }
 
     private PortalBpAvailabilityDto toAvailabilityDto(BpAvailability a) {

@@ -161,6 +161,8 @@ public class PortalAdminServiceImpl implements PortalAdminService {
         }
         if ("SUSPENDED".equals(status)) {
             sessionService.revokeAllForUser(userId, "SUSPEND");
+            // 停止されたuserの未使用invitationを失効させる（S13-R1-P0-01: 自己復活経路の遮断）
+            invitationMapper.expireActiveByEmail(user.getEmail(), LocalDateTime.now(clock));
         }
     }
 
@@ -207,6 +209,12 @@ public class PortalAdminServiceImpl implements PortalAdminService {
         if (!"ACTIVE".equals(org.getStatus())) {
             throw BusinessException.of(409, "error.portal.org.suspended");
         }
+        // G3: 初回組織管理者は内部管理者が発行する。既にACTIVEな組織管理者が存在する組織への
+        // ADMIN招待は、組織管理者の承認（現行運用: 内部管理者経由の手続き）を必要とするため
+        // 直接発行を拒否する（S13-R1-P2-09）。
+        if ("ADMIN".equals(role) && hasActiveOrgAdmin(orgId)) {
+            throw BusinessException.of(409, "error.portal.admin.orgAdminExists");
+        }
         String normalizedEmail = email.trim().toLowerCase(java.util.Locale.ROOT);
         if (invitationMapper.countActiveInvitation(orgId, normalizedEmail, LocalDateTime.now(clock)) > 0) {
             throw BusinessException.of(409, "error.portal.admin.invitationExists");
@@ -229,14 +237,15 @@ public class PortalAdminServiceImpl implements PortalAdminService {
     }
 
     @Override
-    public Page<PortalInvitation> invitations(long current, long size, Long orgId) {
+    public Page<PortalInvitation> invitations(long current, long size, Long orgId, Set<Long> allowedOrgIds) {
         if (orgId != null) {
             requireOrg(orgId);
         }
-        return invitationMapper.selectPage(new Page<>(current, Math.min(size, 1000)),
-                new LambdaQueryWrapper<PortalInvitation>()
-                        .eq(orgId != null, PortalInvitation::getPortalOrgId, orgId)
-                        .orderByDesc(PortalInvitation::getId));
+        LambdaQueryWrapper<PortalInvitation> wrapper = new LambdaQueryWrapper<PortalInvitation>()
+                .eq(orgId != null, PortalInvitation::getPortalOrgId, orgId)
+                .orderByDesc(PortalInvitation::getId);
+        applyOrgScope(wrapper, allowedOrgIds, PortalInvitation::getPortalOrgId);
+        return invitationMapper.selectPage(new Page<>(current, Math.min(size, 1000)), wrapper);
     }
 
     @Override
@@ -256,12 +265,27 @@ public class PortalAdminServiceImpl implements PortalAdminService {
     }
 
     @Override
-    public Page<PortalAccessLog> accessLogs(long current, long size, Long orgId, String action) {
-        return accessLogMapper.selectPage(new Page<>(current, Math.min(size, 1000)),
-                new LambdaQueryWrapper<PortalAccessLog>()
-                        .eq(orgId != null, PortalAccessLog::getPortalOrgId, orgId)
-                        .eq(StringUtils.hasText(action), PortalAccessLog::getAction, action)
-                        .orderByDesc(PortalAccessLog::getId));
+    public Page<PortalAccessLog> accessLogs(long current, long size, Long orgId, String action,
+                                            Set<Long> allowedOrgIds) {
+        LambdaQueryWrapper<PortalAccessLog> wrapper = new LambdaQueryWrapper<PortalAccessLog>()
+                .eq(orgId != null, PortalAccessLog::getPortalOrgId, orgId)
+                .eq(StringUtils.hasText(action), PortalAccessLog::getAction, action)
+                .orderByDesc(PortalAccessLog::getId);
+        applyOrgScope(wrapper, allowedOrgIds, PortalAccessLog::getPortalOrgId);
+        return accessLogMapper.selectPage(new Page<>(current, Math.min(size, 1000)), wrapper);
+    }
+
+    /** 営業scope: 可視組織ID集合（null=全件、空集合=0件）をSQL条件へ適用する。 */
+    private <T> void applyOrgScope(LambdaQueryWrapper<T> wrapper, Set<Long> allowedOrgIds,
+                                   com.baomidou.mybatisplus.core.toolkit.support.SFunction<T, ?> orgIdGetter) {
+        if (allowedOrgIds == null) {
+            return;
+        }
+        if (allowedOrgIds.isEmpty()) {
+            wrapper.eq(orgIdGetter, -1L);
+            return;
+        }
+        wrapper.in(orgIdGetter, allowedOrgIds);
     }
 
     @Override
@@ -292,6 +316,20 @@ public class PortalAdminServiceImpl implements PortalAdminService {
             throw BusinessException.of(404, "error.scope.notFound");
         }
         return org;
+    }
+
+    /** 組織にACTIVEな組織管理者（org.admin権限を持つACTIVE user）が存在するか。 */
+    private boolean hasActiveOrgAdmin(Long orgId) {
+        List<Long> userIds = userMapper.selectList(new LambdaQueryWrapper<PortalUser>()
+                        .eq(PortalUser::getPortalOrgId, orgId)
+                        .eq(PortalUser::getStatus, "ACTIVE"))
+                .stream().map(PortalUser::getId).toList();
+        if (userIds.isEmpty()) {
+            return false;
+        }
+        return permissionMapper.selectCount(new LambdaQueryWrapper<PortalUserPermission>()
+                .in(PortalUserPermission::getUserId, userIds)
+                .eq(PortalUserPermission::getPermissionKey, PortalSessionServiceImpl.PERMISSION_ORG_ADMIN)) > 0;
     }
 
     private PortalUser requireUser(Long userId) {

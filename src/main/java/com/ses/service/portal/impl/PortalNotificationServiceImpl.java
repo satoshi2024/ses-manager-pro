@@ -64,7 +64,8 @@ public class PortalNotificationServiceImpl implements PortalNotificationService 
         List<PortalUser> users = userMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PortalUser>()
                         .eq(PortalUser::getPortalOrgId, org.getId())
-                        .eq(PortalUser::getStatus, "ACTIVE"));
+                        .eq(PortalUser::getStatus, "ACTIVE")
+                        .ne(PortalUser::getNotifyEmail, 0));
         String subject = messageSource.getMessage(subjectKey, args, Locale.JAPANESE);
         String body = messageSource.getMessage(bodyKey, args, Locale.JAPANESE);
         for (PortalUser user : users) {

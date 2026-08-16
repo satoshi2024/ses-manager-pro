@@ -35,4 +35,12 @@ public interface PortalInvitationMapper extends BaseMapper<PortalInvitation> {
             + " AND email = #{email} AND used_at IS NULL AND expires_at > #{now} AND deleted_flag = 0")
     long countActiveInvitation(@Param("portalOrgId") Long portalOrgId, @Param("email") String email,
                                @Param("now") LocalDateTime now);
+
+    /**
+     * emailの未使用・未期限切れ招待を失効させる（user停止時に呼ぶ。S13-R1-P0-01）。
+     * 停止されたuserが停止前発行のinvitationで自己復活する経路を塞ぐ。
+     */
+    @Update("UPDATE t_portal_invitation SET expires_at = #{now}"
+            + " WHERE email = #{email} AND used_at IS NULL AND expires_at > #{now} AND deleted_flag = 0")
+    int expireActiveByEmail(@Param("email") String email, @Param("now") LocalDateTime now);
 }

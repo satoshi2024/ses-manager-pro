@@ -242,6 +242,21 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
         invoice.setStatus(status);
         this.updateById(invoice);
+        // R4.1: 請求書の公開（送付済）を顧客portal組織へ通知（失敗は業務を妨げない）
+        if ("送付済".equals(status) && invoice.getCustomerId() != null) {
+            com.ses.service.portal.PortalNotificationService notification =
+                    portalNotificationServiceProvider.getIfAvailable();
+            if (notification != null) {
+                try {
+                    notification.notifyCustomerOrganization(invoice.getCustomerId(), "DOCUMENT_PUBLISHED_INVOICE",
+                            "portal.notification.documentPublishedInvoice.subject",
+                            "portal.notification.documentPublishedInvoice.body",
+                            new Object[]{invoice.getInvoiceNo()}, "/portal/customer");
+                } catch (RuntimeException e) {
+                    log.warn("portal通知失敗: type=DOCUMENT_PUBLISHED_INVOICE id={} error={}", id, e.getMessage());
+                }
+            }
+        }
     }
 
     // ===== 債権管理（ar-management / P2） =====

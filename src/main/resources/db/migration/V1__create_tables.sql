@@ -2501,6 +2501,7 @@ CREATE TABLE IF NOT EXISTS t_portal_user (
   password_hash          VARCHAR(255) COMMENT 'パスワードhash（招待受諾時に設定。BCrypt）',
   status                 VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT '状態: ACTIVE / SUSPENDED（停止時はsession失効）',
   mfa_policy             VARCHAR(20)  NOT NULL DEFAULT 'REQUIRED' COMMENT 'MFA方針（既定REQUIRED=全user必須）',
+  notify_email           TINYINT      NOT NULL DEFAULT 1 COMMENT 'email通知設定（1=通知する。R4.1）',
   totp_secret_encrypted  VARCHAR(255) COMMENT 'TOTP secret暗号化値（平文は保存しない）',
   totp_secret_key_version VARCHAR(64) COMMENT 'TOTP secretの暗号鍵version',
   mfa_enabled_at         DATETIME     COMMENT 'MFA設定完了日時（NULL=未設定でlogin不可）',

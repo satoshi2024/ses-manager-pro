@@ -49,6 +49,7 @@ CREATE TABLE t_portal_user (
   password_hash          VARCHAR(255),
   status                 VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   mfa_policy             VARCHAR(20) NOT NULL DEFAULT 'REQUIRED',
+  notify_email           TINYINT NOT NULL DEFAULT 1,
   totp_secret_encrypted  VARCHAR(255),
   totp_secret_key_version VARCHAR(64),
   mfa_enabled_at         DATETIME,

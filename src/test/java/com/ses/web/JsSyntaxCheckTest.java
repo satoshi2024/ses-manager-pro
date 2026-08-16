@@ -25,6 +25,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class JsSyntaxCheckTest {
 
     private static final Path JS_ROOT = Paths.get("src/main/resources/static/js");
+    /** portal専用JS（内部とは別ディレクトリ。S13-R1-P2-12: 検査対象へ追加） */
+    private static final Path PORTAL_JS_ROOT = Paths.get("src/main/resources/static/portal/js");
 
     @Test
     void allJsModulesParse() throws IOException, InterruptedException {
@@ -33,26 +35,29 @@ class JsSyntaxCheckTest {
         } else {
             assumeTrue(nodeAvailable(), "Node.js が利用できないため JS 構文検査をskipします");
         }
-        assumeTrue(Files.isDirectory(JS_ROOT), "JSディレクトリが存在しません: " + JS_ROOT);
 
         List<String> failures = new ArrayList<>();
-        List<Path> jsFiles;
-        try (Stream<Path> paths = Files.walk(JS_ROOT)) {
-            jsFiles = paths.filter(p -> p.toString().endsWith(".js")).toList();
-        }
-        assertTrue(!jsFiles.isEmpty(), "検査対象のJSファイルが見つかりません");
-
-        for (Path js : jsFiles) {
-            Process p = new ProcessBuilder("node", "--check", js.toString())
-                    .redirectErrorStream(true)
-                    .start();
-            String output = new String(p.getInputStream().readAllBytes());
-            boolean finished = p.waitFor(30, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
-                failures.add(js + " : 検査がタイムアウトしました");
-            } else if (p.exitValue() != 0) {
-                failures.add(js + " : " + output.trim());
+        for (Path root : List.of(JS_ROOT, PORTAL_JS_ROOT)) {
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+            List<Path> jsFiles;
+            try (Stream<Path> paths = Files.walk(root)) {
+                jsFiles = paths.filter(p -> p.toString().endsWith(".js")).toList();
+            }
+            assertTrue(!jsFiles.isEmpty(), "検査対象のJSファイルが見つかりません: " + root);
+            for (Path js : jsFiles) {
+                Process p = new ProcessBuilder("node", "--check", js.toString())
+                        .redirectErrorStream(true)
+                        .start();
+                String output = new String(p.getInputStream().readAllBytes());
+                boolean finished = p.waitFor(30, TimeUnit.SECONDS);
+                if (!finished) {
+                    p.destroyForcibly();
+                    failures.add(js + " : 検査がタイムアウトしました");
+                } else if (p.exitValue() != 0) {
+                    failures.add(js + " : " + output.trim());
+                }
             }
         }
 

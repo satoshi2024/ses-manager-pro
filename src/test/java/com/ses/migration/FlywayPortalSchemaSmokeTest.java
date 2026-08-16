@@ -1,4 +1,4 @@
-package com.ses.migration;
+﻿package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
@@ -56,6 +56,7 @@ class FlywayPortalSchemaSmokeTest {
             assertColumnExists(statement, "t_portal_user", "totp_secret_encrypted");
             assertColumnExists(statement, "t_portal_user", "recovery_code_hash");
             assertColumnExists(statement, "t_portal_user", "version");
+            assertColumnExists(statement, "t_portal_user", "notify_email");
             assertColumnExists(statement, "t_portal_invitation", "token_hash");
             assertColumnExists(statement, "t_portal_invitation", "used_at");
             assertColumnExists(statement, "t_portal_session", "token_hash");
@@ -207,7 +208,7 @@ class FlywayPortalSchemaSmokeTest {
         Flyway.configure()
                 .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("104_3")
+                .target("104_4")
                 .load()
                 .migrate();
 
@@ -229,7 +230,7 @@ class FlywayPortalSchemaSmokeTest {
             Flyway.configure()
                     .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                     .locations("classpath:db/migration")
-                    .target("104_3")
+                    .target("104_4")
                     .load()
                     .migrate();
             String freshShape = portalShape(MYSQL.createConnection(""));

@@ -143,8 +143,9 @@
                     return;
                 }
                 $(this).prop('disabled', true);
-                postJson('/api/portal/auth/mfa/complete?email=' + encodeURIComponent(pendingEmail)
-                    + '&code=' + encodeURIComponent(code), null)
+                // コードはURLクエリではなくbodyで送る（proxy/access logに残さない: S13-R1-P2-07）
+                postJson('/api/portal/auth/mfa/complete',
+                    {email: pendingEmail, code: code})
                     .done(function (res) {
                         if (!res || res.code !== 200) {
                             showError('loginError', res ? res.message : 'MFAの有効化に失敗しました');
@@ -320,10 +321,22 @@
                     if (res.data.termsPending) {
                         window.location.href = '/portal/terms';
                     }
+                    $('#notifyEmailToggle').prop('checked', res.data.notifyEmail !== false);
                 }).fail(function () {
                     window.location.href = '/portal/login';
                 });
             }
+
+            $('#notifyEmailToggle').on('change', function () {
+                const notifyEmail = $(this).is(':checked');
+                self.request({url: '/api/portal/auth/preferences', method: 'PUT',
+                        contentType: 'application/json', data: JSON.stringify({notifyEmail: notifyEmail})})
+                    .done(function (res) {
+                        if (res.code !== 200) {
+                            $('#notifyEmailToggle').prop('checked', !notifyEmail);
+                        }
+                    });
+            });
 
             $('#logoutButton').on('click', function () {
                 self.request({url: '/api/portal/auth/logout', method: 'POST'}).always(function () {
@@ -602,10 +615,22 @@
                     if (res.data.termsPending) {
                         window.location.href = '/portal/terms';
                     }
+                    $('#notifyEmailToggle').prop('checked', res.data.notifyEmail !== false);
                 }).fail(function () {
                     window.location.href = '/portal/login';
                 });
             }
+
+            $('#notifyEmailToggle').on('change', function () {
+                const notifyEmail = $(this).is(':checked');
+                self.request({url: '/api/portal/auth/preferences', method: 'PUT',
+                        contentType: 'application/json', data: JSON.stringify({notifyEmail: notifyEmail})})
+                    .done(function (res) {
+                        if (res.code !== 200) {
+                            $('#notifyEmailToggle').prop('checked', !notifyEmail);
+                        }
+                    });
+            });
 
             $('#logoutButton').on('click', function () {
                 self.request({url: '/api/portal/auth/logout', method: 'POST'}).always(function () {
@@ -639,10 +664,8 @@
                             ? '<span class="portal-badge">支払済 ' + escapeHtml(p.paidDate || '') + '</span>'
                             : '<span class="portal-badge">' + escapeHtml(p.status || '') + '</span>';
                         return '<div class="portal-card portal-row">'
-                            + '<div class="portal-row-title">' + escapeHtml(p.workMonth || '-') + ' '
-                            + escapeHtml(p.contractNo || '') + ' ' + paid + '</div>'
-                            + '<div class="portal-muted">要員: ' + escapeHtml(p.engineerName || '-')
-                            + ' / 工数: ' + escapeHtml(p.actualHours == null ? '-' : p.actualHours) + 'h'
+                            + '<div class="portal-row-title">' + escapeHtml(p.workMonth || '-') + ' ' + paid + '</div>'
+                            + '<div class="portal-muted">工数: ' + escapeHtml(p.actualHours == null ? '-' : p.actualHours) + 'h'
                             + ' / 金額: ' + money(p.amount) + '</div>'
                             + '<div class="portal-muted">支払予定: ' + escapeHtml(p.paymentScheduleDate || '未確定')
                             + ' / 提出物: ' + p.submissionCount + '件</div>'
