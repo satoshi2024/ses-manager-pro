@@ -115,6 +115,32 @@ class StaffingBrowserMTest {
             assertTrue(columns >= 1, "[" + viewport + "] ポジション列が表示される");
             saveShot(browser, evidenceDir, viewport + "-position-board.png", summary);
 
+            // D&Dで過配賦になる移動を試み、カードが元の列へ戻ることを実証する（S12-R1-P2-07）
+            int beforeP1 = browser.evaluate(
+                    "document.querySelectorAll('.staff-drop-column[data-position-id=\"" + demo.positionId + "\"] .staff-alloc-card').length").asInt(-1);
+            boolean rollbackOk = browser.evaluate(
+                    "(function(){" +
+                    "var card = document.querySelector('.staff-alloc-card[draggable=\"true\"]');" +
+                    "if(!card) return false;" +
+                    "var from = card.closest('.staff-drop-column');" +
+                    "var target = document.querySelectorAll('.staff-drop-column')[1];" +
+                    "if(!from || !target || from === target) return false;" +
+                    "var dt = new DataTransfer();" +
+                    "card.dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt}));" +
+                    "target.dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:dt}));" +
+                    "target.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));" +
+                    "card.dispatchEvent(new DragEvent('dragend', {bubbles:true, dataTransfer:dt}));" +
+                    "return true;})()").asBoolean(false);
+            assertTrue(rollbackOk, "[" + viewport + "] D&Dイベントを発行できる");
+            // 過配賦（100%+50%>100%）でAPIが拒否し、カードが元の列へ戻る
+            waitFor(browser, "(function(){var c = document.querySelector('.staff-alloc-card[draggable=\"true\"]');"
+                    + "return c && c.closest('.staff-drop-column') && "
+                    + "c.closest('.staff-drop-column').getAttribute('data-position-id') === '" + demo.positionId + "';})()");
+            int afterP1 = browser.evaluate(
+                    "document.querySelectorAll('.staff-drop-column[data-position-id=\"" + demo.positionId + "\"] .staff-alloc-card').length").asInt(-1);
+            summary.put(viewport + "-p1CardsBefore", beforeP1);
+            summary.put(viewport + "-p1CardsAfterRollback", afterP1);
+
             // ---- 3. 要員詳細: 配置計画タブ ----
             browser.navigate(baseUrl + "/engineer/detail?id=" + demo.engineerId);
             waitFor(browser, "document.getElementById('staffing-tab') !== null");
@@ -132,14 +158,34 @@ class StaffingBrowserMTest {
             assertTrue(heatRows > 1, "[" + viewport + "] ヒートマップのrole表が描画される");
             saveShot(browser, evidenceDir, viewport + "-heatmap.png", summary);
 
-            // ---- 5. シナリオ比較 ----
+            // ---- 5. シナリオ比較: UI経由で仮配置を追加して比較（S12-R1-P1-05） ----
             browser.navigate(baseUrl + "/analytics/staffing-scenario-compare");
             waitFor(browser, "document.getElementById('scenario-select') !== null");
             waitFor(browser, "document.getElementById('scenario-select').options.length >= 1");
             browser.evaluate("document.getElementById('scenario-select').value = '" + demo.scenarioId + "'; true");
+            browser.evaluate("document.getElementById('scenario-select').dispatchEvent(new Event('change', {bubbles: true})); true");
+            waitFor(browser, "document.getElementById('scenario-alloc-list') !== null");
+            waitFor(browser, "document.getElementById('scenario-alloc-list').rows.length >= 1");
+            // UI経由で仮配置を追加する（要員・対象日・配賦率を入力して保存）
+            browser.evaluate("document.getElementById('scenario-alloc-add').click(); true");
+            waitFor(browser, "document.getElementById('saa-engineerId') !== null && document.getElementById('saa-engineerId').options.length >= 1");
+            browser.evaluate("(function(){document.getElementById('saa-engineerId').selectedIndex = 0;"
+                    + "document.getElementById('saa-from').value = '2026-09-08';"
+                    + "document.getElementById('saa-to').value = '2026-09-08';"
+                    + "document.getElementById('saa-percent').value = '50';"
+                    + "var sel = document.getElementById('saa-engineerId');"
+                    + "window.__saaDiag = 'idx=' + sel.selectedIndex + ' val=' + sel.value + ' opt0=' + (sel.options.length ? sel.options[0].value : 'none');"
+                    + "document.getElementById('scenario-alloc-save').click();return true;})()");
+            browser.evaluate("document.getElementById('scenario-alloc-save').click(); true");
+            waitFor(browser, "document.getElementById('scenario-alloc-list').rows.length >= 2");
+            int allocRows = browser.evaluate("document.getElementById('scenario-alloc-list').rows.length").asInt(0);
+            assertTrue(allocRows >= 2, "[" + viewport + "] UI経由の仮配置追加が一覧に反映される");
+            // 比較実行
             browser.evaluate("document.getElementById('scenario-compare-btn').click(); true");
             waitFor(browser, "document.getElementById('scenario-compare-result') !== null "
                     + "&& !document.getElementById('scenario-compare-result').classList.contains('d-none')");
+            saveShot(browser, evidenceDir, viewport + "-scenario-compare.png", summary);
+            summary.put(viewport + "-scenarioAllocRows", allocRows);
             saveShot(browser, evidenceDir, viewport + "-scenario-compare.png", summary);
 
             // ---- 6. コンソールイベント保存 ----
@@ -176,7 +222,17 @@ class StaffingBrowserMTest {
         }
         String url = browser.evaluate("window.location.href").asText("");
         String body = browser.evaluate("document.body ? document.body.innerText.slice(0, 300) : '(no body)'").asText("");
-        throw new AssertionError("waitFor timeout: " + jsExpression + " url=" + url + " body=" + body);
+        String diag = browser.evaluate("(function(){"
+                + "var m = document.getElementById('scenarioAllocationModal');"
+                + "var s = document.getElementById('saa-engineerId');"
+                + "var c = document.getElementById('scenario-alloc-list');"
+                + "var e = document.getElementById('scenario-error');"
+                + "return 'modal=' + (m ? (m.classList.contains('show') ? 'shown' : 'hidden') : 'null')"
+                + " + ' select=' + (s ? s.options.length : 'null')"
+                + " + ' rows=' + (c ? c.rows.length : 'null')"
+                + " + ' error=' + (e ? e.innerText : 'null')"
+                + " + ' diag=' + (window.__saaDiag || 'none');})()").asText("");
+        throw new AssertionError("waitFor timeout: " + jsExpression + " url=" + url + " body=" + body + " diag=" + diag);
     }
 
     private String sha256(byte[] data) throws Exception {
@@ -234,6 +290,17 @@ class StaffingBrowserMTest {
         position.setEndDate(LocalDate.of(2026, 12, 31));
         positionMapper.insert(position);
 
+        // D&D rollback検証用の第2ポジション（P2・同一engineerに50%確定配置）
+        ProjectPosition position2 = new ProjectPosition();
+        position2.setProjectId(projectId);
+        position2.setPositionNo("P2");
+        position2.setRoleName("テストエンジニア");
+        position2.setRequiredCount(1);
+        position2.setAllocationPercent(new BigDecimal("100"));
+        position2.setStartDate(LocalDate.of(2026, 9, 1));
+        position2.setEndDate(LocalDate.of(2026, 12, 31));
+        positionMapper.insert(position2);
+
         AllocationPlan plan = new AllocationPlan();
         plan.setEngineerId(engineerId);
         plan.setPositionId(position.getId());
@@ -242,6 +309,16 @@ class StaffingBrowserMTest {
         plan.setEndDate(LocalDate.of(2026, 12, 31));
         plan.setAllocationPercent(new BigDecimal("100"));
         allocationService.saveDraft(plan);
+
+        // P2側に50%の確定配置（過配賦D&Dの拒否対象）
+        AllocationPlan plan2 = new AllocationPlan();
+        plan2.setEngineerId(engineerId);
+        plan2.setPositionId(position2.getId());
+        plan2.setAllocationType(AllocationPlan.TYPE_PROJECT);
+        plan2.setStartDate(LocalDate.of(2026, 9, 1));
+        plan2.setEndDate(LocalDate.of(2026, 12, 31));
+        plan2.setAllocationPercent(new BigDecimal("50"));
+        allocationService.confirm(allocationService.saveDraft(plan2).getId());
 
         // 契約（actual）: ポジション紐付けでactual allocationが作られる
         Contract contract = new Contract();
@@ -274,7 +351,7 @@ class StaffingBrowserMTest {
         allocationB.setDates("[\"2026-09-01\",\"2026-09-02\",\"2026-09-03\"]");
         scenarioService.upsertAllocation(allocationB);
 
-        return new DemoData(projectId, engineerId, scenario.getId());
+        return new DemoData(projectId, engineerId, position.getId(), scenario.getId());
     }
 
     private StaffingScenario scenario(String name, String suffix) {
@@ -285,6 +362,6 @@ class StaffingBrowserMTest {
         return s;
     }
 
-    private record DemoData(long projectId, long engineerId, long scenarioId) {
+    private record DemoData(long projectId, long engineerId, long positionId, long scenarioId) {
     }
 }
