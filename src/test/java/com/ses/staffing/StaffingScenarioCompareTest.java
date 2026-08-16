@@ -160,28 +160,19 @@ class StaffingScenarioCompareTest {
     }
 
     @Test
-    void scenarioの仮配置一覧は閲覧者のscopeでfilterされる() {
+    void scenarioの仮配置一覧はscope無しの閲覧者には全件返る() {
         StaffingScenario s = scenarioService.create(scenario("S1"));
         scenarioService.upsertAllocation(alloc(s.getId(), engineerId1, positionId, 100, "[\"2026-09-01\"]"));
         scenarioService.upsertAllocation(alloc(s.getId(), engineerId2, positionId, 100, "[\"2026-09-02\"]"));
         s.setSharedFlag(1);
         scenarioService.update(s);
 
-        // 閲覧者scope無し（管理者・全件）では2件見える
+        // scope非発動（管理者）では2件見える
         List<AllocationCardDto> all = compareService.visibleAllocations(s.getId());
         assertEquals(2, all.size());
 
-        // scopeをmockして要員1名のみ許可すると、共有scenarioでもその要員の行だけが見える
-        com.ses.service.security.DataScopeService scoped = org.mockito.Mockito.mock(
-                com.ses.service.security.DataScopeService.class);
-        org.mockito.Mockito.when(scoped.isScoped()).thenReturn(true);
-        org.mockito.Mockito.when(scoped.allowedEngineerIds()).thenReturn(java.util.Set.of(engineerId1));
-        // 手動でfilterロジックを再現（serviceはDataScopeServiceをDIするため、注入差し替えは
-        // 軽量なslice test側で実施する。ここでは全件系APIのscope非依存を確認）
-        List<AllocationCardDto> filtered = all.stream()
-                .filter(c -> c.getEngineerId().equals(engineerId1))
-                .toList();
-        assertEquals(1, filtered.size());
+        // scope filterのSQL境界適用はStaffingScenarioScopeTest（mock scope）で検証する
+        // （S12-R1-P1-02: 本testでは再実装せず、専用testでservice自体を検証）
     }
 
     // ---------------------------------------------------------------

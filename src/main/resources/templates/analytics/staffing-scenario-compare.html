@@ -45,11 +45,83 @@
                     <button type="button" class="btn btn-sm btn-outline-success" id="scenario-save-btn"><i class="bi bi-check-lg me-1"></i><span th:text="#{common.save}">保存</span></button>
                     <button type="button" class="btn btn-sm btn-outline-danger" id="scenario-delete-btn"><i class="bi bi-trash me-1"></i><span th:text="#{common.delete}">削除</span></button>
                 </div>
+                <div id="scenario-allocations" class="mb-3 d-none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0 text-white fw-bold small"><i class="bi bi-person-plus me-1 text-accent-green"></i><span th:text="#{staffing.scenario.allocations}">仮配置</span></h6>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="scenario-alloc-add"><i class="bi bi-plus-lg me-1"></i><span th:text="#{staffing.scenario.allocAdd}">仮配置追加</span></button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle small">
+                            <thead><tr>
+                                <th th:text="#{staffing.timeline.engineer}">要員</th>
+                                <th th:text="#{staffing.timeline.position}">ポジション</th>
+                                <th th:text="#{staffing.timeline.percent}">配賦率(%)</th>
+                                <th th:text="#{staffing.scenario.allocDates}">対象日</th>
+                                <th class="text-end" th:text="#{common.actions}">操作</th>
+                            </tr></thead>
+                            <tbody id="scenario-alloc-list"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div id="scenario-compare-result" class="compare-scroll d-none">
                     <table class="compare-table" id="scenario-compare-table"></table>
                     <div class="text-muted small mt-2" th:text="#{staffing.scenario.isolation}">シナリオ操作は配置計画・契約・提案を変更しません</div>
                 </div>
                 <div id="scenario-error" class="text-danger py-3 d-none"></div>
+            </div>
+        </div>
+
+        <!-- 仮配置編集モーダル（T079 B2・S12-R1-P1-05） -->
+        <div class="modal fade" id="scenarioAllocationModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content bg-card border-dark shadow-lg">
+                    <div class="modal-header border-dark bg-dark">
+                        <h5 class="modal-title text-white fw-bold"><i class="bi bi-person-plus me-2 text-accent-green"></i><span th:text="#{staffing.scenario.allocAdd}">仮配置</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <form id="scenario-alloc-form">
+                            <input type="hidden" id="saa-id">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small"><span th:text="#{staffing.timeline.engineer}">要員</span> <span class="text-danger">*</span></label>
+                                    <select id="saa-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark"></select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{staffing.timeline.project}">案件</label>
+                                    <select id="saa-projectId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                        <option value="">—</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small" th:text="#{staffing.timeline.position}">ポジション（空=社内/待機）</label>
+                                    <select id="saa-positionId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                        <option value="">—</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small"><span th:text="#{staffing.scenario.allocFrom}">対象開始日</span> <span class="text-danger">*</span></label>
+                                    <input type="date" id="saa-from" class="form-control form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small"><span th:text="#{staffing.scenario.allocTo}">対象終了日</span> <span class="text-danger">*</span></label>
+                                    <input type="date" id="saa-to" class="form-control form-control-dark bg-secondary text-white border-dark">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small"><span th:text="#{staffing.timeline.percent}">配賦率(%)</span> <span class="text-danger">*</span></label>
+                                    <input type="number" id="saa-percent" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" max="100" value="100">
+                                </div>
+                            </div>
+                            <div class="text-muted small" th:text="#{staffing.scenario.allocNote}">対象日は開始日〜終了日の全日に適用されます（日単位の仮配置）</div>
+                        </form>
+                    </div>
+                    <div class="modal-footer border-dark bg-dark">
+                        <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                        <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" id="scenario-alloc-save"><span th:text="#{common.save}">保存</span></button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

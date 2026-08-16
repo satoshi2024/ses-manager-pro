@@ -24,13 +24,14 @@ import java.time.YearMonth;
 public class StaffingHeatmapApiController {
 
     private final StaffingHeatmapService heatmapService;
+    private final com.ses.service.staffing.StaffingClock clock;
 
     /** 需給heatmap（当月〜24か月）。from/to指定で範囲を絞れる（最大24か月・window内）。 */
     @GetMapping("/staffing-heatmap")
     public ApiResult<HeatmapDto> heatmap(
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to) {
-        LocalDate asOf = LocalDate.now();
+        LocalDate asOf = clock.today();
         if (from == null && to == null) {
             return ApiResult.success(heatmapService.heatmap(asOf));
         }
@@ -46,6 +47,6 @@ public class StaffingHeatmapApiController {
             @RequestParam String dimension,
             @RequestParam String group) {
         return ApiResult.success(heatmapService.drilldown(
-                YearMonth.parse(month), dimension, group, LocalDate.now()));
+                YearMonth.parse(month), dimension, group, clock.today()));
     }
 }

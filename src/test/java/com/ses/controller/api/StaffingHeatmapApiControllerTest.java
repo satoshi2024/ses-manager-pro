@@ -81,7 +81,11 @@ class StaffingHeatmapApiControllerTest {
     void HRにはbenchCostがmaskされて返る() throws Exception {
         mockMvc.perform(get("/api/analytics/staffing-heatmap"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totals[0].benchCost").doesNotExist());
+                .andExpect(jsonPath("$.data.totals[0].benchCost").doesNotExist())
+                // 次元行の全セルでもmask（S12-R1-P1-01）
+                .andExpect(jsonPath("$.data.role[0].cells[0].benchCost").doesNotExist())
+                .andExpect(jsonPath("$.data.skill[0].cells[0].benchCost").doesNotExist())
+                .andExpect(jsonPath("$.data.location[0].cells[0].benchCost").doesNotExist());
     }
 
     @Test

@@ -1,6 +1,38 @@
 # Review Ledger — 要員配置・需給計画（S12 staffing-capacity-planning）
 
-## 現行判定
+## 現行判定（Round 2 fix delta）
+
+- **S12-R1: FAIL（P0=0/P1=6/P2=7/NOTE=3）→ 全P1・主要P2をFIXED_BY_IMPLEMENTERで修正済み。Round 2再Review待ち**
+- 修正delta: （本ledger更新と同じcommitに含める）
+
+## Issue Register（S12-R1 → FIXED_BY_IMPLEMENTER）
+
+| ID | severity | 修正内容 | 検証 |
+|---|---|---|---|
+| S12-R1-P1-01 | P1 | heatmap次元行（skill/role/location）のbenchCostをHRでmask（`toRows`へmaskCost伝播）。JSのBC表示はbenchCost nullで自動非表示 | StaffingHeatmapServiceTest（次元行のnull assert）＋API test（role/skill/locationセル） |
+| S12-R1-P1-02 | P1 | scenario要員filterをSQL境界へ（`in(engineer_id, allowed)`・空は`1=0`）。`listVisible`に組織scope適用（マネージャーはownerがscope配下の共有のみ）。mock scopeでservice自体を検証する`StaffingScenarioScopeTest`新設 | StaffingScenarioScopeTest（SQL境界filter・組織scope可視性） |
+| S12-R1-P1-03 | P1 | `ContractRenewalServiceImpl.buildDraft`が`original.getPositionId()`を引き継ぐ。更新ドラフトのactual行・旧契約終了時の破棄・新ドラフト稼動中の確定をtest化 | StaffingContractSyncTest（更新ドラフト経路） |
+| S12-R1-P1-04 | P1 | V103 legacy shapeの実MySQL検証（`FlywayStaffingSchemaSmokeTest`にtarget 102_3→103の二段upgrade＋fresh/legacy shape比較）。**検出bug: V103のtriggerがCREATE TABLE前でlegacy失敗** → triggerブロックをCREATE TABLE後に移動 | FlywayStaffingSchemaSmokeTest 2/2（fresh＋legacy） |
+| S12-R1-P1-05 | P1 | scenario比較ページに仮配置編集UI（要員×案件×position×期間×配賦率→upsert/delete）を追加。browser demoをUI経由の仮配置追加＋一覧反映に更新 | StaffingBrowserMTest（UI操作・scenarioAllocRows≥2） |
+| S12-R1-P1-06 | P1 | `AllocationApiController.saveDraft/revise`でpositionId→projectの`assertAllowedProject`を追加（cross-scope write防止） | StaffingApiScopeTest（scope外positionへの配置404） |
+| S12-R1-P2-01 | P2 | ledgerの「console error 0」主張を訂正。証跡のerrorイベントは既存account-link機能の500（`/api/engineers/{id}/account-link/candidates`・S12非関係・V32自己サービス機能の既知問題としてledger管理。S12外のため修正せず） | evidence/browser-mのconsole保存＋本ledger |
+| S12-R1-P2-02 | P2 | API controllerの`LocalDate.now()`を`StaffingClock.today()`（tenant TZ）へ。scenario createのbaseDate未指定時はclock.today()で補完。JSのdates生成をUTC変換しない実装へ | StaffingHeatmapApiController/StaffingScenarioApiController/StaffingScenarioServiceImpl |
+| S12-R1-P2-03 | P2 | `StaffingScenarioAllocation.positionId`に`FieldStrategy.ALWAYS`（案件→社内/待機のNULLクリア可） | StaffingScenarioServiceTest |
+| S12-R1-P2-04 | P2 | heatmap需要から「取消」positionを除外（`activeInMonth`にstatus条件） | StaffingHeatmapServiceTest |
+| S12-R1-P2-05 | P2 | boardの社内/待機列を閲覧者のscope（allowedEngineerIds）でSQL境界filter | StaffingBoardServiceImpl |
+| S12-R1-P2-06 | P2 | 決定表§5.3のnotification列（マネージャー: 不足/過配賦・営業: 充足/不足・HR: 採用需要）は**未実装のまま明示的にbacklog管理**（handbook §10: P2はbacklog移行可。要件追加が必要なため本specではUI/API完成を優先） | ledger記録 |
+| S12-R1-P2-07 | P2 | D&D失敗時のUI rollbackを実ブラウザで実証（demoにP2列・50%確定配置を追加し、100%カードの過配賦D&D→API拒否→元列へ復帰をCDPで検証） | StaffingBrowserMTest（p1CardsBefore=AfterRollback=2） |
+| S12-R1-NOTE-01/02/03 | NOTE | ledgerへ記録: (1) actual+planで100%超は仕様方針どおり（KPI表示に注意をledgerで管理）。(2) scenario compareの稼働日数は平日ベース（m_work_calendar参照はcapacity口径と別。ledgerの口径主張を訂正）。(3) 過配賦draft保存ごとに新規承認request（上書き）を仕様として記録 | ledger記録 |
+
+## 補足（Round 2 fix deltaの検証）
+
+- 直接回帰: staffing 11クラス＋Contract/Proposal/Renewal系＋AllMappers＋MigrationIntegrity＋MessageBundle＋JsSyntaxCheck（295件/0/0/0）
+- MySQL smoke: FlywayStaffingSchemaSmokeTest 2/2（fresh＋legacy・shape一致）
+- browser: StaffingBrowserMTest（desktop/390px・UI仮配置追加・D&D rollback・evidence再生成）
+
+---
+
+## 過去記録（Round 1 まで）
 
 - **T075 F1: 完了**（commit `a691f77e`）
 - **T076 F2: 完了**（commit `ec880114`）

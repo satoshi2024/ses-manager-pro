@@ -102,6 +102,7 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
         draft.setEngineerId(original.getEngineerId());
         draft.setProjectId(original.getProjectId());
         draft.setCustomerId(original.getCustomerId());
+        draft.setPositionId(original.getPositionId());
         draft.setContractType(original.getContractType());
         draft.setStartDate(original.getEndDate().plusDays(1));
         draft.setEndDate(null);

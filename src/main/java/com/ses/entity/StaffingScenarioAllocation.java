@@ -1,5 +1,6 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.DecimalMax;
@@ -29,7 +30,8 @@ public class StaffingScenarioAllocation extends BaseEntity {
     @NotNull(message = "要員は必須です")
     private Long engineerId;
 
-    /** ポジションID（NULL=社内/待機） */
+    /** ポジションID（NULL=社内/待機）。案件→社内/待機へ変更できるようALWAYS（S12-R1-P2-03）。 */
+    @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Long positionId;
 
     /** 対象日のJSON配列（ISO日付・昇順・重複なし） */

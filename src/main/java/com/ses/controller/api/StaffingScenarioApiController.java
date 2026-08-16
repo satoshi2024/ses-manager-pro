@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -32,6 +31,7 @@ public class StaffingScenarioApiController {
 
     private final StaffingScenarioService scenarioService;
     private final StaffingScenarioCompareService compareService;
+    private final com.ses.service.staffing.StaffingClock clock;
 
     /** 可視なscenario一覧（ownerまたは共有）。 */
     @GetMapping
@@ -84,6 +84,6 @@ public class StaffingScenarioApiController {
     @GetMapping("/compare")
     public ApiResult<List<StaffingScenarioCompareService.ScenarioMonthDto>> compare(
             @RequestParam List<Long> scenarioIds) {
-        return ApiResult.success(compareService.compare(scenarioIds, LocalDate.now()));
+        return ApiResult.success(compareService.compare(scenarioIds, clock.today()));
     }
 }

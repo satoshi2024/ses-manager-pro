@@ -87,7 +87,7 @@ window.SES_staffing = (function () {
                 const select = $('#sa-engineerId');
                 select.empty();
                 (res.data || []).forEach(function (e) {
-                    $('<option>').val(e.value).text(e.label || e.value).appendTo(select);
+                    $('<option>').val(e.id).text(e.name || e.id).appendTo(select);
                 });
                 const current = $('#sa-engineer-name').data('engineer-id');
                 if (current != null) { select.val(String(current)); }

@@ -25,6 +25,98 @@ class FlywayStaffingSchemaSmokeTest {
             .withUsername("root")
             .withPassword("ses");
 
+    /** legacy path検証用: V102_3適用済みDBへV103を適用する（S12-R1-P1-04）。 */
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> LEGACY_MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_staffing_legacy")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @Test
+    void V102_3適用済みlegacyDBへV103を順方向適用できる() throws Exception {
+        // 既存DB（staffing導入前shape）をV102_3まで適用してからV103を適用する。
+        // 現在のV1はstaffing統合済みのため、V102_3適用後にstaffing追加分を除去して
+        // 「staffing導入前のlegacy shape」を再現し、V103のguarded DDLを単独で適用する。
+        Flyway.configure()
+                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("102_3")
+                .load()
+                .migrate();
+
+        try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // ---- staff導入前shapeへの復元 ----
+            statement.executeUpdate("ALTER TABLE t_proposal DROP FOREIGN KEY fk_proposal_position");
+            statement.executeUpdate("ALTER TABLE t_contract DROP FOREIGN KEY fk_contract_position");
+            statement.executeUpdate("ALTER TABLE t_proposal DROP COLUMN position_id");
+            statement.executeUpdate("ALTER TABLE t_contract DROP COLUMN position_id");
+            statement.executeUpdate("DROP TABLE t_staffing_scenario_allocation");
+            statement.executeUpdate("DROP TABLE t_staffing_scenario");
+            statement.executeUpdate("DROP TABLE t_allocation_plan");
+            statement.executeUpdate("DROP TABLE t_project_position");
+        }
+
+        // ---- V103をlegacy DBへ順方向適用 ----
+        Flyway.configure()
+                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("103")
+                .load()
+                .migrate();
+
+        try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            for (String table : new String[]{
+                    "t_project_position", "t_allocation_plan", "t_staffing_scenario",
+                    "t_staffing_scenario_allocation"}) {
+                assertTableExists(statement, table);
+            }
+            // guarded ADD COLUMN/FK/triggerがlegacy経路でも適用される
+            assertColumnExists(statement, "t_proposal", "position_id");
+            assertColumnExists(statement, "t_contract", "position_id");
+            assertForeignKeyExists(statement, "t_allocation_plan", "fk_allocation_plan_approval");
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.triggers "
+                            + "WHERE trigger_schema=DATABASE() AND trigger_name='trg_allocation_plan_type_guard'"));
+            // fresh（V1統合baseline）とlegacy（V103順方向適用）でshapeが一致する
+            // （fresh側のmigrateは実行順に依存しないようここでも保証する）
+            Flyway.configure()
+                    .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                    .locations("classpath:db/migration")
+                    .target("103")
+                    .load()
+                    .migrate();
+            String freshShape = schemaShape(MYSQL.createConnection(""));
+            String legacyShape = schemaShape(LEGACY_MYSQL.createConnection(""));
+            assertEquals(freshShape, legacyShape, "fresh/legacyでstaffingテーブルのshapeが一致する");
+        }
+    }
+
+    /** staffing関連テーブル/列の定義を連結してfresh/legacy比較用のfingerprintを作る。 */
+    private String schemaShape(Connection connection) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT table_name, column_name, column_type, is_nullable, column_default "
+                             + "FROM information_schema.columns "
+                             + "WHERE table_schema = DATABASE() AND table_name IN "
+                             + "('t_project_position','t_allocation_plan','t_staffing_scenario','t_staffing_scenario_allocation',"
+                             + "'t_proposal','t_contract') "
+                             + "AND column_name IN ('position_id','project_id','position_no','role_name','required_count',"
+                             + "'skills_json','unit_price_min','unit_price_max','start_date','end_date','location',"
+                             + "'allocation_percent','priority','status','version','engineer_id','allocation_type',"
+                             + "'source_contract_id','exception_reason','approval_request_id','owner_user_id','name',"
+                             + "'base_date','shared_flag','assumptions_json','scenario_id','dates','percent') "
+                             + "ORDER BY table_name, ordinal_position")) {
+            while (rs.next()) {
+                sb.append(rs.getString(1)).append('|').append(rs.getString(2)).append('|')
+                        .append(rs.getString(3)).append('|').append(rs.getString(4)).append('|')
+                        .append(rs.getString(5)).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
     @Test
     void V103のposition配置scenarioのshapeと境界制約がMySQLで成立する() throws Exception {
         Flyway.configure()

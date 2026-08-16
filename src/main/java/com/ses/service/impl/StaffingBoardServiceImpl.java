@@ -42,6 +42,7 @@ public class StaffingBoardServiceImpl implements StaffingBoardService {
     private final EngineerMapper engineerMapper;
     private final ProjectMapper projectMapper;
     private final ApprovalRequestMapper approvalRequestMapper;
+    private final com.ses.service.security.DataScopeService dataScopeService;
 
     @Override
     @Transactional(readOnly = true)
@@ -56,10 +57,19 @@ public class StaffingBoardServiceImpl implements StaffingBoardService {
                                 positions.stream().map(ProjectPosition::getId).toList())
                         .ne(AllocationPlan::getStatus, STATUS_DISCARDED)
                         .orderByAsc(AllocationPlan::getStartDate));
-        List<AllocationPlan> bench = allocationMapper.selectList(new LambdaQueryWrapper<AllocationPlan>()
+        // 社内/待機列は閲覧者のscope内の要員に限定する（S12-R1-P2-05・heatmapと同一母集団）
+        Set<Long> allowedEngineers = dataScopeService.isScoped() ? dataScopeService.allowedEngineerIds() : null;
+        LambdaQueryWrapper<AllocationPlan> benchQuery = new LambdaQueryWrapper<AllocationPlan>()
                 .isNull(AllocationPlan::getPositionId)
-                .ne(AllocationPlan::getStatus, STATUS_DISCARDED)
-                .orderByAsc(AllocationPlan::getStartDate));
+                .ne(AllocationPlan::getStatus, STATUS_DISCARDED);
+        if (allowedEngineers != null) {
+            if (allowedEngineers.isEmpty()) {
+                benchQuery.apply("1 = 0");
+            } else {
+                benchQuery.in(AllocationPlan::getEngineerId, allowedEngineers);
+            }
+        }
+        List<AllocationPlan> bench = allocationMapper.selectList(benchQuery.orderByAsc(AllocationPlan::getStartDate));
 
         Map<Long, AllocationCardDto> cards = toCards(concat(allocations, bench));
         Map<Long, ProjectPosition> positionById = positions.stream()

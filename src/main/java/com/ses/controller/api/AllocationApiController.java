@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.staffing.AllocationCardDto;
 import com.ses.entity.AllocationPlan;
+import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.staffing.AllocationPlanService;
 import com.ses.service.staffing.StaffingBoardService;
@@ -30,6 +31,7 @@ public class AllocationApiController {
     private final AllocationPlanService allocationService;
     private final StaffingBoardService boardService;
     private final DataScopeService dataScopeService;
+    private final ProjectPositionMapper positionMapper;
 
     /** 要員の配置タイムライン（破棄済みを除く）。 */
     @GetMapping("/{engineerId}/allocations")
@@ -41,11 +43,13 @@ public class AllocationApiController {
     /**
      * 配置の下書き保存（新規または既存下書きの更新）。過配賦は例外理由と承認が必須。
      * 入力検証はservice層で行う（engineerIdはパスから設定されるためentityの@Validは使わない）。
+     * position_idの案件scopeも検証する（S12-R1-P1-06: cross-scope write防止）。
      */
     @PostMapping("/{engineerId}/allocations")
     public ApiResult<AllocationCardDto> saveDraft(@PathVariable Long engineerId,
                                                   @RequestBody AllocationPlan allocation) {
         dataScopeService.assertAllowedEngineer(engineerId);
+        assertAllowedPosition(allocation.getPositionId());
         allocation.setEngineerId(engineerId);
         return ApiResult.success(boardService.card(allocationService.saveDraft(allocation).getId()));
     }
@@ -70,6 +74,19 @@ public class AllocationApiController {
     public ApiResult<AllocationCardDto> revise(@PathVariable Long engineerId, @PathVariable Long allocationId,
                                                @RequestBody AllocationPlan newAllocation) {
         dataScopeService.assertAllowedEngineer(engineerId);
+        assertAllowedPosition(newAllocation.getPositionId());
         return ApiResult.success(boardService.card(allocationService.revise(allocationId, newAllocation).getId()));
+    }
+
+    /** position_idが指定された場合、その案件がDataScope内か検証する（cross-scope write防止）。 */
+    private void assertAllowedPosition(Long positionId) {
+        if (positionId == null) {
+            return;
+        }
+        com.ses.entity.ProjectPosition position = positionMapper.selectById(positionId);
+        if (position == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.staffing.positionNotFound");
+        }
+        dataScopeService.assertAllowedProject(position.getProjectId());
     }
 }

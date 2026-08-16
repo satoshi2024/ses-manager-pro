@@ -62,7 +62,6 @@ public class StaffingScenarioCompareServiceImpl implements StaffingScenarioCompa
         if (scenarioIds == null || scenarioIds.isEmpty()) {
             throw BusinessException.of(400, "error.staffing.scenarioNotFound");
         }
-        Set<Long> allowedEngineers = viewerAllowedEngineers();
         boolean maskCost = ROLE_HR.equals(SecurityUtils.currentRole());
 
         YearMonth from = YearMonth.from(asOf);
@@ -75,13 +74,8 @@ public class StaffingScenarioCompareServiceImpl implements StaffingScenarioCompa
                 throw BusinessException.of(404, "error.staffing.scenarioNotFound");
             }
             requireVisible(scenario);
-            List<StaffingScenarioAllocation> allocations =
-                    scenarioAllocationMapper.selectList(new LambdaQueryWrapper<StaffingScenarioAllocation>()
-                            .eq(StaffingScenarioAllocation::getScenarioId, scenarioId));
-            // 閲覧者scopeで要員をfilter（scenario経由のscope迂回を防ぐ）
-            List<StaffingScenarioAllocation> scoped = allocations.stream()
-                    .filter(a -> allowedEngineers == null || allowedEngineers.contains(a.getEngineerId()))
-                    .toList();
+            // 閲覧者scopeで要員をfilterする（SQL境界・scenario経由のscope迂回を防ぐ）
+            List<StaffingScenarioAllocation> scoped = scopedAllocations(scenarioId);
             Map<Long, Engineer> engineers = loadEngineers(scoped);
             Map<Long, ProjectPosition> positions = loadPositions(scoped);
 
@@ -105,14 +99,8 @@ public class StaffingScenarioCompareServiceImpl implements StaffingScenarioCompa
             throw BusinessException.of(404, "error.staffing.scenarioNotFound");
         }
         requireVisible(scenario);
-        Set<Long> allowedEngineers = viewerAllowedEngineers();
-        List<StaffingScenarioAllocation> allocations =
-                scenarioAllocationMapper.selectList(new LambdaQueryWrapper<StaffingScenarioAllocation>()
-                        .eq(StaffingScenarioAllocation::getScenarioId, scenarioId)
-                        .orderByAsc(StaffingScenarioAllocation::getId));
-        List<StaffingScenarioAllocation> scoped = allocations.stream()
-                .filter(a -> allowedEngineers == null || allowedEngineers.contains(a.getEngineerId()))
-                .toList();
+        // 閲覧者scopeで要員をfilterする（SQL境界）
+        List<StaffingScenarioAllocation> scoped = scopedAllocations(scenarioId);
         Map<Long, Engineer> engineers = loadEngineers(scoped);
         Map<Long, ProjectPosition> positions = loadPositions(scoped);
 
@@ -142,6 +130,25 @@ public class StaffingScenarioCompareServiceImpl implements StaffingScenarioCompa
     }
 
     // ---------------------------------------------------------------
+
+    /**
+     * 閲覧者のscope（DataScope/組織scope）で要員をSQL境界でfilterした仮配置一覧。
+     * null=全件、空集合はDB側で0件（platform-invariants §2.2）。
+     */
+    private List<StaffingScenarioAllocation> scopedAllocations(Long scenarioId) {
+        Set<Long> allowed = dataScopeService.isScoped() ? dataScopeService.allowedEngineerIds() : null;
+        LambdaQueryWrapper<StaffingScenarioAllocation> query =
+                new LambdaQueryWrapper<StaffingScenarioAllocation>()
+                        .eq(StaffingScenarioAllocation::getScenarioId, scenarioId);
+        if (allowed != null) {
+            if (allowed.isEmpty()) {
+                query.apply("1 = 0");
+            } else {
+                query.in(StaffingScenarioAllocation::getEngineerId, allowed);
+            }
+        }
+        return scenarioAllocationMapper.selectList(query.orderByAsc(StaffingScenarioAllocation::getId));
+    }
 
     private MonthAgg aggregate(Long scenarioId, List<StaffingScenarioAllocation> scoped,
                                Map<Long, Engineer> engineers, Map<Long, ProjectPosition> positions,

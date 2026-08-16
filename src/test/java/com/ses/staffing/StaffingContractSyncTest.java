@@ -26,7 +26,7 @@ import java.util.List;
 import static com.ses.entity.AllocationPlan.STATUS_CONFIRMED;
 import static com.ses.entity.AllocationPlan.STATUS_DISCARDED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -41,6 +41,12 @@ class StaffingContractSyncTest {
 
     @Autowired
     private ContractService contractService;
+
+    @Autowired
+    private com.ses.service.ContractRenewalService renewalService;
+
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     @Autowired
     private ProposalService proposalService;
@@ -130,6 +136,67 @@ class StaffingContractSyncTest {
         contractService.saveWithBusinessRules(contract);
         contractService.removeById(contract.getId());
         assertEquals(STATUS_DISCARDED, actualsOf(contract.getId()).get(0).getStatus());
+    }
+
+    @Test
+    void 契約更新ドラフトがpositionIdを引き継ぎactualが維持される() {
+        // processSingleRenewalはREQUIRES_NEWのため、fixtureごとcommitしたtxで用意する
+        org.springframework.transaction.support.TransactionTemplate setupTx =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        setupTx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        Contract contract = setupTx.execute(s -> {
+            String suffix = String.valueOf(System.nanoTime());
+            jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T076renew-" + suffix);
+            long customerId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T076renew-" + suffix);
+            jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
+                    + "VALUES (?, ?, '募集中')", "T076renew-prj-" + suffix, customerId);
+            long projectRow = jdbcTemplate.queryForObject(
+                    "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T076renew-prj-" + suffix);
+            jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) "
+                    + "VALUES (?, '正社員', 'Bench')", "T076renew-eng-" + suffix);
+            long engRow = jdbcTemplate.queryForObject(
+                    "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T076renew-eng-" + suffix);
+            jdbcTemplate.update("INSERT INTO t_project_position "
+                    + "(project_id, position_no, role_name, required_count, allocation_percent, status, version) "
+                    + "VALUES (?, 'P1', 'Javaエンジニア', 1, 100, '募集中', 0)", projectRow);
+            long posRow = jdbcTemplate.queryForObject(
+                    "SELECT id FROM t_project_position WHERE project_id = ?", Long.class, projectRow);
+            Contract c = new Contract();
+            c.setEngineerId(engRow);
+            c.setProjectId(projectRow);
+            c.setCustomerId(customerId);
+            c.setContractType("準委任");
+            c.setStartDate(LocalDate.of(2026, 9, 1));
+            c.setEndDate(LocalDate.of(2026, 9, 30));
+            c.setSellingPrice(new BigDecimal("800000"));
+            c.setCostPrice(new BigDecimal("600000"));
+            c.setPositionId(posRow);
+            c.setAutoRenew(1);
+            contractService.saveWithBusinessRules(c);
+            return c;
+        });
+        assertEquals(1, actualsOf(contract.getId()).size());
+
+        // 更新ドラフト生成（S12-R1-P1-03: position_idを引き継ぐ）
+        boolean processed = renewalService.processSingleRenewal(contract);
+        assertTrue(processed);
+        Contract draft = contractService.list(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getRenewedFromContractId, contract.getId()))
+                .stream().findFirst().orElse(null);
+        assertNotNull(draft);
+        assertEquals(contract.getPositionId(), draft.getPositionId(),
+                "更新ドラフトは元契約のposition_idを引き継ぐ");
+        // ドラフト（準備中）にもactual行が作られる
+        assertEquals(1, actualsOf(draft.getId()).size());
+
+        // 旧契約を稼動中→終了へ（旧actualは破棄）、ドラフト稼動中（新actualは確定のまま）
+        contractService.changeStatus(contract.getId(), "稼動中", null);
+        contractService.changeStatus(contract.getId(), "終了", null);
+        assertEquals(STATUS_DISCARDED, actualsOf(contract.getId()).get(0).getStatus());
+        contractService.changeStatus(draft.getId(), "稼動中", null);
+        assertEquals(STATUS_CONFIRMED, actualsOf(draft.getId()).get(0).getStatus());
+        assertEquals(draft.getPositionId(), actualsOf(draft.getId()).get(0).getPositionId());
     }
 
     @Test

@@ -5,24 +5,6 @@
 -- 本migrationは過去のmigrationを変更しない（V1/V102_3等は不変）。
 -- ============================================================
 
--- ---- 0) allocation_type×position_idの整合ガード（trigger） ----
--- MySQL 8はCHECKとFKの同一列併用不可（Error 3823相当）のため、
--- t_allocation_planの当該整合はBEFORE INSERT triggerで担保する（V102_1と同一の重担保方式。
--- H2はCHECK制約で担保する）。mysql CLIは複数回のDELIMITER切り替えを処理できないため先頭に置く。
-DELIMITER $$
-DROP TRIGGER IF EXISTS trg_allocation_plan_type_guard$$
-CREATE TRIGGER trg_allocation_plan_type_guard BEFORE INSERT ON t_allocation_plan
-FOR EACH ROW
-BEGIN
-  IF NEW.allocation_type = '案件' AND NEW.position_id IS NULL THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'allocation_type/position_id inconsistent';
-  END IF;
-  IF NEW.allocation_type IN ('社内','待機') AND NEW.position_id IS NOT NULL THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'allocation_type/position_id inconsistent';
-  END IF;
-END$$
-DELIMITER ;
-
 -- ---- 1) 案件ポジション ----
 CREATE TABLE IF NOT EXISTS t_project_position (
   id                 BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
@@ -150,6 +132,25 @@ SET @staffing_alloc_approval_fk_sql := IF(
 PREPARE staffing_alloc_approval_fk_stmt FROM @staffing_alloc_approval_fk_sql;
 EXECUTE staffing_alloc_approval_fk_stmt;
 DEALLOCATE PREPARE staffing_alloc_approval_fk_stmt;
+
+-- ---- 3.5) allocation_type×position_idの整合ガード（trigger） ----
+-- MySQL 8はCHECKとFKの同一列併用不可（Error 3823相当）のため、
+-- t_allocation_planの当該整合はBEFORE INSERT triggerで担保する（V102_1と同一の重担保方式。
+-- H2はCHECK制約で担保する）。legacy DBではt_allocation_planが本migrationで作成されるため、
+-- CREATE TABLEの後に配置する（S12-R1-P1-04で検出: 先頭配置だとテーブル不存在で失敗）。
+DELIMITER $$
+DROP TRIGGER IF EXISTS trg_allocation_plan_type_guard$$
+CREATE TRIGGER trg_allocation_plan_type_guard BEFORE INSERT ON t_allocation_plan
+FOR EACH ROW
+BEGIN
+  IF NEW.allocation_type = '案件' AND NEW.position_id IS NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'allocation_type/position_id inconsistent';
+  END IF;
+  IF NEW.allocation_type IN ('社内','待機') AND NEW.position_id IS NOT NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'allocation_type/position_id inconsistent';
+  END IF;
+END$$
+DELIMITER ;
 
 -- ---- 4) 仮配置scenario（本データを変更しない） ----
 CREATE TABLE IF NOT EXISTS t_staffing_scenario (

@@ -186,7 +186,16 @@ class StaffingHeatmapServiceTest {
         HeatmapDto hr = heatmapService.heatmap(LocalDate.of(2026, 8, 1),
                 YearMonth.of(2026, 9), YearMonth.of(2026, 9));
         for (HeatmapDto.MonthCell cell : hr.getTotals()) {
-            assertNull(cell.getBenchCost(), "HRにはbench costを表示しない");
+            assertNull(cell.getBenchCost(), "HRにはtotalsのbench costを表示しない");
+        }
+        // 次元行（skill/role/location）の全セルでもmaskされている（S12-R1-P1-01）
+        for (String dimension : List.of("skill", "role", "location")) {
+            for (HeatmapDto.DimensionRow row : rowsOf(hr, dimension)) {
+                for (HeatmapDto.MonthCell cell : row.getCells()) {
+                    assertNull(cell.getBenchCost(),
+                            "HRには" + dimension + "次元行のbench costを表示しない: " + row.getGroup());
+                }
+            }
         }
 
         authenticate("admin-user", "管理者");
@@ -195,6 +204,11 @@ class StaffingHeatmapServiceTest {
         assertTrue(admin.getTotals().stream()
                         .anyMatch(cell -> cell.getBenchCost() != null && cell.getBenchCost().signum() > 0),
                 "管理者にはbench cost（待機要員のコスト）が表示される");
+        // 管理者には次元行のbench costも表示される
+        boolean dimensionCostVisible = rowsOf(admin, "skill").stream()
+                .flatMap(row -> row.getCells().stream())
+                .anyMatch(cell -> cell.getBenchCost() != null && cell.getBenchCost().signum() > 0);
+        assertTrue(dimensionCostVisible, "管理者には次元行のbench costも表示される");
     }
 
     @Test

@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 仮配置シナリオの実装（R3.3・scenario isolation）。
@@ -37,6 +38,8 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     private final EngineerMapper engineerMapper;
     private final ProjectPositionMapper positionMapper;
     private final ObjectMapper objectMapper;
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeProvider;
+    private final StaffingClock clock;
 
     @Override
     @Transactional
@@ -49,7 +52,8 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
             throw BusinessException.of(400, "error.staffing.scenarioNameRequired");
         }
         if (scenario.getBaseDate() == null) {
-            throw BusinessException.of(400, "error.staffing.baseDateRequired");
+            // 未指定時はtenantタイムゾーンの"今日"を基準日にする（S12-R1-P2-02）
+            scenario.setBaseDate(clock.today());
         }
         scenario.setId(null);
         scenario.setOwnerUserId(owner);
@@ -104,10 +108,25 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
         if (userId == null) {
             return List.of();
         }
-        return scenarioMapper.selectList(new LambdaQueryWrapper<StaffingScenario>()
-                .eq(StaffingScenario::getOwnerUserId, userId)
-                .or(w -> w.eq(StaffingScenario::getSharedFlag, 1))
-                .orderByDesc(StaffingScenario::getUpdatedAt));
+        LambdaQueryWrapper<StaffingScenario> query = new LambdaQueryWrapper<>();
+        query.eq(StaffingScenario::getOwnerUserId, userId)
+                .or(w -> {
+                    w.eq(StaffingScenario::getSharedFlag, 1);
+                    // 組織scope有効（マネージャー）では、共有scenarioはownerが組織scope配下の
+                    // ユーザーのものだけ表示する（design §5.3・S12-R1-P1-02）
+                    com.ses.service.security.OrganizationScopeService scope =
+                            organizationScopeProvider.getIfAvailable();
+                    if (scope != null && !scope.hasFullAccess()) {
+                        Set<Long> allowedUsers = scope.allowedUserIds(LocalDate.now());
+                        if (allowedUsers.isEmpty()) {
+                            w.apply("1 = 0");
+                        } else {
+                            w.in(StaffingScenario::getOwnerUserId, allowedUsers);
+                        }
+                    }
+                })
+                .orderByDesc(StaffingScenario::getUpdatedAt);
+        return scenarioMapper.selectList(query);
     }
 
     @Override

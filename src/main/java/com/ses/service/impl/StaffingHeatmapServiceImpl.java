@@ -240,9 +240,9 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
                 total.benchCost = add(total.benchCost, cell.getValue().benchCost);
             }
         }
-        List<HeatmapDto.DimensionRow> skillRows = toRows(skillAcc, months);
-        List<HeatmapDto.DimensionRow> roleRows = toRows(roleAcc, months);
-        List<HeatmapDto.DimensionRow> locationRows = toRows(locationAcc, months);
+        List<HeatmapDto.DimensionRow> skillRows = toRows(skillAcc, months, maskCost);
+        List<HeatmapDto.DimensionRow> roleRows = toRows(roleAcc, months, maskCost);
+        List<HeatmapDto.DimensionRow> locationRows = toRows(locationAcc, months, maskCost);
         List<HeatmapDto.MonthCell> totalCells = new ArrayList<>();
         for (YearMonth month : months) {
             MonthAccum acc = totals.getOrDefault(month, new MonthAccum());
@@ -254,14 +254,15 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
     }
 
     private List<HeatmapDto.DimensionRow> toRows(Map<String, Map<YearMonth, MonthAccum>> acc,
-                                                 List<YearMonth> months) {
+                                                 List<YearMonth> months, boolean maskCost) {
         List<HeatmapDto.DimensionRow> rows = new ArrayList<>();
         for (Map.Entry<String, Map<YearMonth, MonthAccum>> entry : acc.entrySet()) {
             List<HeatmapDto.MonthCell> cells = new ArrayList<>();
             for (YearMonth month : months) {
                 MonthAccum cell = entry.getValue().getOrDefault(month, new MonthAccum());
                 cells.add(new HeatmapDto.MonthCell(String.valueOf(month),
-                        cell.demand, cell.supply, shortfallOf(cell), surplusOf(cell), cell.benchCost));
+                        cell.demand, cell.supply, shortfallOf(cell), surplusOf(cell),
+                        maskCost ? null : cell.benchCost));
             }
             rows.add(new HeatmapDto.DimensionRow(entry.getKey(), cells));
         }
@@ -314,6 +315,10 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
     }
 
     private boolean activeInMonth(ProjectPosition position, YearMonth month) {
+        // 取消済みpositionは需要・不足に計上しない（S12-R1-P2-04）
+        if (ProjectPosition.STATUS_CANCELLED.equals(position.getStatus())) {
+            return false;
+        }
         LocalDate monthStart = month.atDay(1);
         LocalDate monthEnd = month.atEndOfMonth();
         if (position.getStartDate() != null && position.getStartDate().isAfter(monthEnd)) {

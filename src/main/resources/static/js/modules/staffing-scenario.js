@@ -109,8 +109,11 @@ $(function () {
             $('#scenario-manage').removeClass('d-none');
             $('#scenario-name').val(s ? s.name : '');
             $('#scenario-shared').prop('checked', !!(s && s.sharedFlag === 1));
+            $('#scenario-allocations').removeClass('d-none');
+            loadScenarioAllocations();
         } else {
             $('#scenario-manage').addClass('d-none');
+            $('#scenario-allocations').addClass('d-none');
         }
     });
 
@@ -174,5 +177,200 @@ $(function () {
     });
 
     $('#scenario-compare-btn').on('click', compare);
+
+    // ---------------- 仮配置編集（S12-R1-P1-05） ----------------
+
+    function loadScenarioAllocations() {
+        if (selectedId == null) { return; }
+        $.ajax({
+            url: '/api/analytics/staffing-scenarios/' + selectedId + '/allocations',
+            method: 'GET',
+            success: function (res) {
+                if (res.code !== 200) { return; }
+                const rows = res.data || [];
+                const $tbody = $('#scenario-alloc-list').empty();
+                if (rows.length === 0) {
+                    $tbody.append('<tr><td colspan="5" class="text-muted">' + t('staffing.scenario.allocEmpty', '仮配置はありません') + '</td></tr>');
+                }
+                rows.forEach(function (a) {
+                    const name = a.positionId
+                        ? (a.positionNo || '') + ' ' + (a.roleName || '')
+                        : t('staffing.timeline.internal', '社内/待機');
+                    $tbody.append(
+                        '<tr>' +
+                        '  <td>' + SES.escapeHtml(a.engineerName || '—') + '</td>' +
+                        '  <td>' + SES.escapeHtml(name) + '</td>' +
+                        '  <td>' + (a.allocationPercent != null ? a.allocationPercent : '') + '</td>' +
+                        '  <td>' + (a.startDate || '—') + ' 〜 ' + (a.endDate || '—') + '</td>' +
+                        '  <td class="text-end">' +
+                        '    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 saa-edit" data-id="' + a.id + '" data-engineer="' + a.engineerId + '" data-position="' + (a.positionId || '') + '" data-project="' + (a.projectId || '') + '" data-from="' + (a.startDate || '') + '" data-to="' + (a.endDate || '') + '" data-percent="' + (a.allocationPercent != null ? a.allocationPercent : 100) + '" title="' + t('staffing.timeline.edit', '編集') + '"><i class="bi bi-pencil"></i></button>' +
+                        '    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 saa-delete" data-id="' + a.id + '" title="' + t('staffing.timeline.discard', '削除') + '"><i class="bi bi-trash"></i></button>' +
+                        '  </td>' +
+                        '</tr>'
+                    );
+                });
+            }
+        });
+    }
+
+    function openScenarioAllocationModal(alloc) {
+        $('#saa-id').val(alloc ? alloc.id : '');
+        $('#saa-from').val(alloc ? alloc.startDate : '');
+        $('#saa-to').val(alloc ? alloc.endDate : '');
+        $('#saa-percent').val(alloc ? alloc.allocationPercent : 100);
+        $('#saa-projectId').val('');
+        $('#saa-positionId').empty().append('<option value="">—</option>');
+        loadScenarioEngineerOptions(alloc ? alloc.engineerId : '');
+        loadScenarioProjectOptions(alloc ? alloc.projectId : '', alloc ? alloc.positionId : '');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('scenarioAllocationModal')).show();
+    }
+
+    function loadScenarioProjectOptions(selectedProjectId, selectedPositionId) {
+        $.ajax({
+            url: '/api/projects/options',
+            method: 'GET',
+            success: function (res) {
+                if (res.code !== 200 || !res.data) { return; }
+                const $select = $('#saa-projectId').empty().append('<option value="">—</option>');
+                (res.data || []).forEach(function (p) {
+                    $('<option>').val(p.id).text(p.name || p.id).appendTo($select);
+                });
+                if (selectedProjectId) {
+                    $select.val(String(selectedProjectId));
+                    loadScenarioPositionOptions(selectedProjectId, selectedPositionId);
+                }
+            }
+        });
+    }
+
+    function loadScenarioPositionOptions(projectId, selectedPositionId) {
+        if (!projectId) {
+            $('#saa-positionId').empty().append('<option value="">—</option>');
+            return;
+        }
+        $.ajax({
+            url: '/api/projects/' + projectId + '/positions',
+            method: 'GET',
+            success: function (res) {
+                if (res.code !== 200) { return; }
+                const $select = $('#saa-positionId').empty().append('<option value="">—</option>');
+                (res.data || []).forEach(function (p) {
+                    $('<option>').val(p.id).text(p.positionNo + ' ' + (p.roleName || '') + (p.status ? ' [' + p.status + ']' : '')).appendTo($select);
+                });
+                if (selectedPositionId) { $select.val(String(selectedPositionId)); }
+            }
+        });
+    }
+
+    function loadScenarioEngineerOptions(selectedEngineerId) {
+        $.ajax({
+            url: '/api/engineers/options',
+            method: 'GET',
+            success: function (res) {
+                if (res.code !== 200 || !res.data) { return; }
+                const $select = $('#saa-engineerId').empty();
+                (res.data || []).forEach(function (e) {
+                    $('<option>').val(e.id).text(e.name || e.id).appendTo($select);
+                });
+                if (selectedEngineerId) { $select.val(String(selectedEngineerId)); }
+            }
+        });
+    }
+
+    function saveScenarioAllocation() {
+        const engineerId = $('#saa-engineerId').val();
+        const from = $('#saa-from').val();
+        const to = $('#saa-to').val();
+        if (!engineerId || !from || !to) {
+            showError(t('staffing.scenario.allocRequired', '要員と対象日は必須です'));
+            return;
+        }
+        if (to < from) {
+            showError(t('error.staffing.invalidPeriod', '終了日は開始日以降を指定してください'));
+            return;
+        }
+        // 対象日を日単位で列挙（UTC変換で日付がずれないよう入力値をそのまま使う。上限は24か月）
+        const dates = [];
+        const d = new Date(from + 'T12:00:00');
+        const last = new Date(to + 'T12:00:00');
+        const fmt = function (day) {
+            return day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0')
+                + '-' + String(day.getDate()).padStart(2, '0');
+        };
+        while (d <= last && dates.length <= 4000) {
+            dates.push(fmt(d));
+            d.setDate(d.getDate() + 1);
+        }
+        const payload = {
+            id: $('#saa-id').val() ? Number($('#saa-id').val()) : null,
+            engineerId: Number(engineerId),
+            positionId: $('#saa-positionId').val() ? Number($('#saa-positionId').val()) : null,
+            percent: Number($('#saa-percent').val()),
+            dates: JSON.stringify(dates)
+        };
+        $.ajax({
+            url: '/api/analytics/staffing-scenarios/' + selectedId + '/allocations',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function (res) {
+                if (res.code !== 200) {
+                    showError(res.message || t('error.systemError', 'エラーが発生しました'));
+                    return;
+                }
+                bootstrap.Modal.getInstance(document.getElementById('scenarioAllocationModal')).hide();
+                loadScenarioAllocations();
+            },
+            error: function (xhr) {
+                showError((xhr.responseJSON && (xhr.responseJSON.message || xhr.responseJSON.error)) || t('error.systemError', 'エラーが発生しました'));
+            }
+        });
+    }
+
+    function deleteScenarioAllocation(allocationId) {
+        Swal.fire({
+            title: t('staffing.scenario.allocDeleteConfirm', '仮配置を削除しますか'),
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: t('common.ok', 'OK'),
+            cancelButtonText: t('common.cancel', 'キャンセル')
+        }).then(function (result) {
+            if (!result.isConfirmed) { return; }
+            $.ajax({
+                url: '/api/analytics/staffing-scenarios/' + selectedId + '/allocations/' + allocationId,
+                method: 'DELETE',
+                success: function (res) {
+                    if (res.code !== 200) {
+                        showError(res.message || t('error.systemError', 'エラーが発生しました'));
+                        return;
+                    }
+                    loadScenarioAllocations();
+                }
+            });
+        });
+    }
+
+    $(document).on('click', '#scenario-alloc-add', function () {
+        openScenarioAllocationModal(null);
+    });
+    $(document).on('change', '#saa-projectId', function () {
+        loadScenarioPositionOptions($(this).val(), '');
+    });
+    $(document).on('click', '.saa-edit', function () {
+        openScenarioAllocationModal({
+            id: Number($(this).data('id')),
+            engineerId: $(this).data('engineer'),
+            positionId: $(this).data('position'),
+            projectId: $(this).data('project'),
+            startDate: $(this).data('from'),
+            endDate: $(this).data('to'),
+            allocationPercent: $(this).data('percent')
+        });
+    });
+    $(document).on('click', '.saa-delete', function () {
+        deleteScenarioAllocation(Number($(this).data('id')));
+    });
+    $('#scenario-alloc-save').on('click', saveScenarioAllocation);
+
     loadScenarios();
 });
