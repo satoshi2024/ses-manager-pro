@@ -82,7 +82,7 @@
     terms更新後の再同意強制、contact失効連動でのaccess失効。
   - **Demo**: 規約改定後再同意。外部URLをreturn URLに入れて拒否されることを確認。
 
-- [ ] M. penetration/回帰/運用
+- [x] M. penetration/回帰/運用
   - **Objective**: 顧客A/顧客B/BPの3組織で相互漏洩がなく、portal停止と復旧が訓練できる。
     内部の既存機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、
