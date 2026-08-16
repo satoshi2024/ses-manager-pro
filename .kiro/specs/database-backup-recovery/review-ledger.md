@@ -1,6 +1,4 @@
-#| 2026-08-16T09:00Z | 独立 Reviewer（Final Round） | FAIL（merge 済み commit `e892c5bd` を直接 review） | HFP-03-RF-P1-01: main の `.gitignore` に未解決の merge conflict marker が混入 | merge tree は reviewed head `1e34f47e` と完全一致、backup unit 430 assert / integration SUCCESS / merge 以降の backup file 変更なし。`.gitignore` の marker のみが FAIL 理由 |
-| 2026-08-16T09:30Z | 実装担当（AI） | RF-P1-01 修正完了（FIXED_BY_IMPLEMENTER） | fix delta の再 Review 待ち（問題なければ最終 PASS 付与予定） | `.gitignore` を marker なしの union（`.integration-work` + 機密情報 block）に修正し main `4dca8a46` へ push。marker 0 を確認済み |
- Review Ledger — HFP-03 正式データバックアップ・PITR
+# Review Ledger — HFP-03 正式データバックアップ・PITR
 
 > この ledger は追記式で使用する。checkbox や自己申告だけで PASS にしない。secret、raw dump、個人データ、秘密 URL は記録しない。
 
@@ -234,5 +232,7 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | 2026-08-15T20:00Z | 独立 Reviewer（Round 3） | REVIEWABLE（PRE_MERGE）維持 | OPEN は P2×2（R3-P2-01 TMPDIR / R2-P2-04 evidence password 残存） | R2 残 P2 を実測検証（rotate-key 実 repo で ROTATED 完走 / trap 連結 / counts 静止区間 / RESET MASTER 順序 / 主要 attack 再回帰）。VERIFIED_CLOSED 21 件。GATE-06 は PROD-007 未確定で BLOCKED 継続 |
 | 2026-08-15T20:30Z | 実装担当（AI） | R3 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 済み commit + merge delta + main 上の回帰の独立 Review 後） | R3-P2-01（${TMPDIR:-/tmp} 化、retention.sh の同種箇所も。TMPDIR 未設定 rotation の回帰テスト追加）/ R2-P2-04 残存分（evidence の全 password file 除去 + demo 後処理に repo-password 追加）。unit 430 assert 全 PASS + shellcheck 0 |
 | 2026-08-16T08:00Z | 実装担当（AI） | MERGED（main e892c5bd） | 最終 PASS は Reviewer による merge delta の独立 Review 待ち | merge-prep: origin/main 取り込み（衝突は .gitignore のみ解消）→ mvn -B clean test BUILD SUCCESS（2030 test / 0 fail / 0 err / **skip 0**）→ backup unit 430 assert 全 PASS + shellcheck 0 → integration SUCCESS（mid_dml_replayed=1 / drill rpo=60s / secret scan 0）→ main へ merge + push |
+| 2026-08-16T09:00Z | 独立 Reviewer（Final Round） | FAIL（merge 済み commit `e892c5bd` を直接 review） | HFP-03-RF-P1-01: main の `.gitignore` に未解決の merge conflict marker が混入 | merge tree は reviewed head `1e34f47e` と完全一致、backup unit 430 assert / integration SUCCESS / merge 以降の backup file 変更なし。`.gitignore` の marker のみが FAIL 理由 |
+| 2026-08-16T09:30Z | 実装担当（AI） | RF-P1-01 修正完了（FIXED_BY_IMPLEMENTER） | fix delta の再 Review 待ち（問題なければ最終 PASS 付与予定） | `.gitignore` を marker なしの union（`.integration-work` + 機密情報 block）に修正し main `4dca8a46` へ push。marker 0 を確認済み |
 
 Decisionは`REVIEWABLE / PASS / FAIL / BLOCKED`のいずれかとする。`REVIEWABLE`はmerge前、`PASS`はmerge済みcommitとmerge deltaを独立Reviewした場合だけ使用する。
