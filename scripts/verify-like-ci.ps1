@@ -88,4 +88,21 @@ if ($skipped.Count -gt 0) {
 }
 
 if ($testStatus -ne 0) { exit $testStatus }
-exit $skipStatus
+
+Write-Host ''
+Write-Host '=== HFP-03-011: backup integration suite（実 MySQL PITR） ==='
+$integrationStatus = 1
+if ($dockerOk) {
+    Write-Host 'Docker あり -> integration suite を実行します（数分かかります）'
+    if (bash ops/backup/tests/run-integration.sh) {
+        Write-Host 'integration suite: SUCCESS'
+        $integrationStatus = 0
+    } else {
+        Write-Host 'integration suite: FAIL（CI と同じ判定で失敗扱い）'
+    }
+} else {
+    Write-Host 'Docker なし -> integration suite は実行できません（CI では必須・失敗扱い）'
+}
+
+if ($skipStatus -ne 0 -or $integrationStatus -ne 0) { exit 1 }
+exit 0

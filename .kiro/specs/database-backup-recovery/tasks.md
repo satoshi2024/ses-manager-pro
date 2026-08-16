@@ -11,7 +11,7 @@
 
 ## Task 一覧
 
-- [ ] **HFP-03-001 — production baseline と toolchain contract を固定する**
+- [x] **HFP-03-001 — production baseline と toolchain contract を固定する**
 
   - **依存:** なし
   - **対応要求:** HFP-03-RQ-001、HFP-03-RQ-008
@@ -27,7 +27,7 @@
   - **Evidence:** `target/backup-recovery-evidence/<run-id>/HFP-03-001/` に version、digest、preflight JSON、test log、secret scan を保存。
   - **失敗/rollback:** production topology 未確定、互換 client 未固定、secret 漏洩が 1 件でもあれば BLOCKED/FAIL。既存 image へ自動 fallback しない。
 
-- [ ] **HFP-03-002 — 排他 lock、権限分離、書込み静止 provider を実装する**
+- [x] **HFP-03-002 — 排他 lock、権限分離、書込み静止 provider を実装する**
 
   - **依存:** HFP-03-001
   - **対応要求:** HFP-03-RQ-002、HFP-03-RQ-006、HFP-03-RQ-008、HFP-03-RQ-009
@@ -43,7 +43,7 @@
   - **Evidence:** lock timeline、quiesce acknowledgement、negative test exit code、role grant redacted report。
   - **失敗/rollback:** 静止解除失敗は重大 incident として traffic を勝手に再開しない。snapshot は INVALID 隔離。既存 production data は変更しない。
 
-- [ ] **HFP-03-003 — 一貫 full backup と完全 manifest を実装する**
+- [x] **HFP-03-003 — 一貫 full backup と完全 manifest を実装する**
 
   - **依存:** HFP-03-001、HFP-03-002
   - **対応要求:** HFP-03-RQ-002、HFP-03-RQ-003
@@ -55,7 +55,7 @@
   - **Evidence:** snapshot ID、manifest SHA、coordinate、quiesce window、restore verification、test log。raw dump/個人データは evidence に含めない。
   - **失敗/rollback:** verify 前の snapshot を VALID 登録しない。app write 静止を bounded cleanup で解除し、不完全 staging を隔離する。
 
-- [ ] **HFP-03-004 — 継続 binlog archive と 15 分整合 checkpoint を実装する**
+- [x] **HFP-03-004 — 継続 binlog archive と 15 分整合 checkpoint を実装する**
 
   - **依存:** HFP-03-002、HFP-03-003
   - **対応要求:** HFP-03-RQ-004、HFP-03-RQ-005
@@ -67,7 +67,7 @@
   - **Evidence:** source/current/closed coordinate、file list/size/SHA、checkpoint ID、lag 秒、negative logs。
   - **失敗/rollback:** gap を検出したら `RPO_UNAVAILABLE` と重大 alert。黙って次 file から再開せず、新しい full 取得の運用判断まで停止する。
 
-- [ ] **HFP-03-005 — watermark 監視と alert contract を実装する**
+- [x] **HFP-03-005 — watermark 監視と alert contract を実装する**
 
   - **依存:** HFP-03-003、HFP-03-004
   - **対応要求:** HFP-03-RQ-010、HFP-03-RQ-012
@@ -79,7 +79,7 @@
   - **Evidence:** 各状態の JSON/exit code、alert receipt/redacted routing、recovery timestamp。
   - **失敗/rollback:** monitor 自体が repository/source を読めない場合も OK を返さず UNKNOWN/CRITICAL。alert routing 未接続は BLOCKED。
 
-- [ ] **HFP-03-006 — UTC target から不変 restore plan を生成する**
+- [x] **HFP-03-006 — UTC target から不変 restore plan を生成する**
 
   - **依存:** HFP-03-003、HFP-03-004
   - **対応要求:** HFP-03-RQ-005、HFP-03-RQ-006
@@ -91,7 +91,7 @@
   - **Evidence:** requested/effective time、RPO 秒、selected IDs/start-stop coordinate、plan SHA、timezone matrix、approval verifier result。署名秘密は保存しない。
   - **失敗/rollback:** ambiguity/dependency/RPO/approval 不正では plan を APPLYABLE にしない。既存 plan を書換えず新 plan ID を作る。
 
-- [ ] **HFP-03-007 — recovery target guard と staging restore を実装する**
+- [x] **HFP-03-007 — recovery target guard と staging restore を実装する**
 
   - **依存:** HFP-03-006
   - **対応要求:** HFP-03-RQ-003、HFP-03-RQ-006、HFP-03-RQ-007
@@ -103,7 +103,7 @@
   - **Evidence:** target fingerprint、guard report、restic/manifest result、replay start-stop、mysql connection count、source before/after SHA。接続秘密は除外。
   - **失敗/rollback:** target を `FAILED_RESTORE` として隔離し公開しない。再試行は別の空 target/DB で行い、途中 DB を再利用しない。
 
-- [ ] **HFP-03-008 — DB/uploads/application validation を実装する**
+- [x] **HFP-03-008 — DB/uploads/application validation を実装する**
 
   - **依存:** HFP-03-007
   - **対応要求:** HFP-03-RQ-007、HFP-03-RQ-011
@@ -115,7 +115,7 @@
   - **Evidence:** validation JSON、Flyway/count/reference/hash summary、read-only smoke result、app build SHA。
   - **失敗/rollback:** production pointer は変更しない。FAILED staging は調査用 read-only、期限後に承認付き cleanup。
 
-- [ ] **HFP-03-009 — production cutover/rollback と二者承認を実装する**
+- [x] **HFP-03-009 — production cutover/rollback と二者承認を実装する**
 
   - **依存:** HFP-03-006、HFP-03-008
   - **対応要求:** HFP-03-RQ-006、HFP-03-RQ-007、HFP-03-RQ-012
@@ -127,7 +127,7 @@
   - **Evidence:** redacted approval claims/signature result、ticket、old/new fingerprint、stop/read-only/write timestamps、rollback/commit result。
   - **失敗/rollback:** read-only 中だけ旧環境へ rollback。write 解放後は自動 rollback せず incident commander へ移管する。
 
-- [ ] **HFP-03-010 — dependency-aware retention、暗号鍵、削除耐性を実装する**
+- [x] **HFP-03-010 — dependency-aware retention、暗号鍵、削除耐性を実装する**
 
   - **依存:** HFP-03-003、HFP-03-004、HFP-03-006
   - **対応要求:** HFP-03-RQ-008、HFP-03-RQ-009
@@ -139,7 +139,7 @@
   - **Evidence:** dependency graph before/after、deleted IDs、retained restore proof、IAM negative result、key IDs/rotation result（key value は不可）。
   - **失敗/rollback:** dependency 不明なら削除 0。prune failure は repository repair を自動実行せず、通常 job を停止して runbook へ移行。
 
-- [ ] **HFP-03-011 — Docker integration/CI と偽 green 防止を追加する**
+- [x] **HFP-03-011 — Docker integration/CI と偽 green 防止を追加する**
 
   - **依存:** HFP-03-005〜HFP-03-010
   - **対応要求:** HFP-03-RQ-011
@@ -151,7 +151,7 @@
   - **Evidence:** CI URL/artifact SHA、test report、skip count、secret scan、source invariance report。
   - **失敗/rollback:** CI job を optional/allow-failure にしない。既存 CI を壊す場合は原因を直し、test を削除/skip して green にしない。
 
-- [ ] **HFP-03-012 — 実 restore drill、RPO/RTO、runbook を完了する**
+- [x] **HFP-03-012 — 実 restore drill、RPO/RTO、runbook を完了する**
 
   - **依存:** HFP-03-001〜HFP-03-011
   - **対応要求:** HFP-03-RQ-010、HFP-03-RQ-011、HFP-03-RQ-012

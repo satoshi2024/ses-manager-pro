@@ -1,0 +1,106 @@
+# HFP-03-011 integration suite（実 MySQL PITR の自動検証）
+#
+# - pinned MySQL 8.0.36（source/target を別コンテナ・専用 network で分離）
+# - host port を公開しない（internal network）
+# - パスワードは env（INTEGRATION_SRC_PW / INTEGRATION_TGT_PW）から注入する
+#   synthetic secret（repo には値を書かない）
+# - tool イメージは ops/backup/Dockerfile から build
+# - 共有 work ディレクトリ（INTEGRATION_WORK_DIR）に evidence を出力
+name: ses-backup-integration
+
+x-mysql-common: &mysql-common
+  image: mysql:8.0.36
+  networks: [ses-bkup]
+  restart: "no"
+
+services:
+  source:
+    <<: *mysql-common
+    container_name: ses-bkup-int-source
+    command:
+      - --log-bin=/var/lib/mysql/binlog
+      - --server-id=100
+      - --binlog-format=ROW
+      - --binlog-checksum=CRC32
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=86400
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INTEGRATION_SRC_PW:?INTEGRATION_SRC_PW required}
+      MYSQL_DATABASE: ses_manager_db
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${INTEGRATION_SRC_PW}"]
+      interval: 2s
+      timeout: 3s
+      retries: 90
+
+  target:
+    <<: *mysql-common
+    container_name: ses-bkup-int-target
+    command:
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INTEGRATION_TGT_PW:?INTEGRATION_TGT_PW required}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${INTEGRATION_TGT_PW}"]
+      interval: 2s
+      timeout: 3s
+      retries: 90
+
+  tool:
+    image: ses-backup-tool:integration
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ses-bkup-int-tool
+    networks: [ses-bkup]
+    volumes:
+      - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw
+    environment:
+      WORK_DIR: /work
+    command: ["sleep", "infinity"]
+
+  # quiesce protocol の scheduler 相当（stop 要求に ack を返すデーモン）
+  scheduler:
+    image: ses-backup-tool:integration
+    container_name: ses-bkup-int-scheduler
+    networks: [ses-bkup]
+    volumes:
+      - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw
+    command:
+      - bash
+      - -c
+      - |
+        while :; do
+          if [[ -f /work/scheduler/scheduler.stop-request ]]; then
+            touch /work/scheduler/scheduler.stopped
+            rm -f /work/scheduler/scheduler.stop-request
+          fi
+          sleep 1
+        done
+
+  # quiesce protocol の replica 相当（heartbeat 更新 + 静止 ack）
+  replica:
+    image: ses-backup-tool:integration
+    container_name: ses-bkup-int-replica
+    networks: [ses-bkup]
+    volumes:
+      - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw
+    command:
+      - bash
+      - -c
+      - |
+        while :; do
+          touch /work/heartbeats/app1.heartbeat
+          if [[ -f /work/heartbeats/app1.quiesce-requested ]]; then
+            touch /work/heartbeats/app1.quiesced
+            rm -f /work/heartbeats/app1.quiesce-requested
+          fi
+          sleep 1
+        done
+
+networks:
+  ses-bkup:
+    driver: bridge
+    internal: true

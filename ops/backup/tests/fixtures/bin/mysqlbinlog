@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# HFP-03 unit test 用の fake mysqlbinlog。
+# モード判定は --read-from-remote-server 優先（--verify-binlog-checksum は
+# remote 中にも付くため、remote なら archive 動作をする）。
+set -uo pipefail
+
+if [[ -n "${FAKE_ARGV_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_ARGV_LOG"
+fi
+
+remote=0
+verify=0
+result_dir=""
+initial=""
+for arg in "$@"; do
+  case "$arg" in
+    --version)
+      printf '%s\n' "${FAKE_MYSQLBINLOG_VERSION_LINE:-mysqlbinlog  Ver 8.0.46 for Linux on x86_64 (MySQL Community Server - GPL)}"
+      exit 0
+      ;;
+    --read-from-remote-server) remote=1 ;;
+    --verify-binlog-checksum) verify=1 ;;
+    --result-file=*) result_dir=${arg#--result-file=} ;;
+    --connection-server-id=*)
+      CONN_SERVER_ID=${arg#--connection-server-id=}
+      if [[ -n "${FAKE_SERVER_ID_LOG:-}" ]]; then
+        printf '%s\n' "$CONN_SERVER_ID" >> "$FAKE_SERVER_ID_LOG"
+      fi
+      ;;
+    --host=*|--port=*|--user=*|--raw|--stop-never|--force-read) : ;;
+    *)
+      if [[ "$arg" == binlog.* ]]; then
+        initial=$arg
+      fi
+      ;;
+  esac
+done
+
+if (( remote )); then
+  if [[ -n "${FAKE_ARCHIVE_FILES:-}" ]]; then
+    mkdir -p "$result_dir"
+    for f in $FAKE_ARCHIVE_FILES; do
+      printf 'fake-binlog-content-%s\n' "$f" > "$result_dir/$f"
+    done
+  fi
+  exit "${FAKE_ARCHIVE_RC:-0}"
+fi
+
+if (( verify )); then
+  exit "${FAKE_BINLOG_VERIFY_RC:-0}"
+fi
+
+# replay（--start-position / --stop-position 付き）
+if [[ -n "${FAKE_REPLAY_RC:-}" ]]; then
+  exit "$FAKE_REPLAY_RC"
+fi
+
+# それ以外（lock 保持 session 等）は stdin から query を読む
+IFS= read -r query || true
+case "$query" in
+  *GET_LOCK*)
+    printf '%s\n' "${FAKE_GET_LOCK:-1}"
+    if [[ "${FAKE_GET_LOCK_HOLD:-0}" == "1" && "${FAKE_GET_LOCK:-1}" == "1" ]]; then
+      while :; do sleep 1; done
+    fi
+    exit 0
+    ;;
+esac
+exit 0

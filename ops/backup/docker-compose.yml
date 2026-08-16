@@ -1,19 +1,73 @@
+# ============================================================
+# HFP-03 バックアップ job 定義（docker compose）
+#
+# 前提:
+#   - .env.backup に接続先/リポジトリ等を設定（secret 値は書かない）
+#   - secrets/mysql-password, secrets/restic-password を配置（0600）
+#   - secrets/mysql-capath/ に hashed CA ディレクトリを配置
+#     （c_rehash 済み: <subject_hash>.0 ファイル）
+#   - ツールイメージは Dockerfile からビルドし、evidence に digest を記録する。
+#     production では digest pin（image: ses-backup-tool@sha256:...）へ差し替える。
+# ============================================================
+x-backup-common: &backup-common
+  build: .
+  image: ses-backup-tool:8.0.46
+  env_file: [.env.backup]
+  secrets: [mysql_password, restic_password]
+  volumes:
+    - backup-data:/var/lib/ses-backup
+    - uploads:/app/uploads:ro
+    - ./secrets/mysql-capath:/etc/mysql-ssl-ca:ro
+
+x-db-only: &db-only
+  <<: *backup-common
+  volumes:
+    - backup-data:/var/lib/ses-backup
+    - ./secrets/mysql-capath:/etc/mysql-ssl-ca:ro
+
 services:
+  # 環境契約検査（read-only）。deploy 前・障害時の事前確認に使う
+  preflight:
+    <<: *backup-common
+    entrypoint: ["/usr/local/bin/preflight.sh"]
+    command: ["--json"]
+
+  # 日次 full（02:00 Asia/Tokyo 想定の scheduler から実行）
   backup:
-    build: .
-    env_file: [.env.backup]
-    secrets: [restic_password, mysql_password]
-    volumes: [backup-data:/var/lib/ses-backup, uploads:/app/uploads:ro]
+    <<: *backup-common
     entrypoint: ["/usr/local/bin/backup-full.sh"]
+
+  # 継続 binlog archive（常駐）。初回起点は backup-full が書き出す
+  # FULL_COORDINATE_FILE（.env.backup で backup-data 上の共有 path を指定）
   binlog:
-    build: .
-    env_file: [.env.backup]
-    secrets: [restic_password, mysql_password]
-    volumes: [backup-data:/var/lib/ses-backup]
+    <<: *db-only
     entrypoint: ["/usr/local/bin/archive-binlog.sh"]
+
+  # 15 分間隔 checkpoint（DB/uploads 整合点）
+  checkpoint:
+    <<: *backup-common
+    entrypoint: ["/usr/local/bin/create-checkpoint.sh"]
+
+  # 閉じた binlog の immutable snapshot（checkpoint 連動）
+  snapshot-binlog:
+    <<: *db-only
+    entrypoint: ["/usr/local/bin/snapshot-binlog.sh"]
+
+  # watermark 監視（alert routing は外部 scheduler/monitor で受ける）
+  check:
+    <<: *db-only
+    entrypoint: ["/usr/local/bin/check-backup.sh"]
+    command: ["--json"]
+
+  # 依存を壊さない retention（専用 role / maintenance 専用）
+  retention:
+    <<: *db-only
+    entrypoint: ["/usr/local/bin/retention.sh"]
+
 secrets:
-  restic_password: {file: ./secrets/restic-password}
   mysql_password: {file: ./secrets/mysql-password}
+  restic_password: {file: ./secrets/restic-password}
+
 volumes:
   uploads: {}
   backup-data: {}

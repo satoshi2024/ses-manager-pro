@@ -46,17 +46,32 @@
 ## 4. production で未確定のため BLOCKED の項目
 
 以下は HFP-03-001 で owner と実測しない限り production gate を PASS にしない。
+**2026-08-14 時点: production 環境への接続・計測は行っていないため、全項目 BLOCKED のまま。**
+production 固有値を推測せず、unit/Docker 隔離での実装と検証のみ進める。
 
-| Baseline ID | 未確定値 |
-|---|---|
-| HFP-03-PROD-001 | MySQL server exact version/image、`@@server_uuid`、GTID/binlog/checksum/compression/TLS/retention。 |
-| HFP-03-PROD-002 | 全 table engine と非 app writer の有無。 |
-| HFP-03-PROD-003 | uploads が Docker volume/LVM/EBS/S3 等のどれか、atomic snapshot と versioning の可否。 |
-| HFP-03-PROD-004 | app replica/scheduler/traffic drain/DDL change-lock の実運用手段。 |
-| HFP-03-PROD-005 | S3 互換 backend、IAM、versioning/immutability、repository size/throughput。 |
-| HFP-03-PROD-006 | 二者承認 identity/signature verifier と change-ticket system。 |
-| HFP-03-PROD-007 | 匿名化した代表profile ID/SHA。DB総bytes/rowsと上位table分布、uploads file数/総bytes/size分布、15分/日次binlog量、CPU/RAM/storage IOPS・throughput/network、利用可能maintenance window、RTO区間予算。synthetic fixtureは各容量をbaseline未満にせず上限+10%以内、上位分布は±10%、restore環境はproductionより高性能にしない。 |
-| HFP-03-PROD-008 | alert routing、運用 owner、incident commander、四半期 drill owner。 |
+| Baseline ID | 未確定値 | 状態 | 確定に必要な証跡 |
+|---|---|---|---|
+| HFP-03-PROD-001 | MySQL server exact version/image、`@@server_uuid`、GTID/binlog/checksum/compression/TLS/retention。 | BLOCKED | production owner による `preflight.sh --json` 出力（redacted） |
+| HFP-03-PROD-002 | 全 table engine と非 app writer の有無。 | BLOCKED | 同上（engine 検査含む） |
+| HFP-03-PROD-003 | uploads が Docker volume/LVM/EBS/S3 等のどれか、atomic snapshot と versioning の可否。 | BLOCKED | storage owner の inventory |
+| HFP-03-PROD-004 | app replica/scheduler/traffic drain/DDL change-lock の実運用手段。 | BLOCKED | deployment owner の inventory |
+| HFP-03-PROD-005 | S3 互換 backend、IAM、versioning/immutability、repository size/throughput。 | BLOCKED | infra owner の inventory |
+| HFP-03-PROD-006 | 二者承認 identity/signature verifier と change-ticket system。 | BLOCKED | security owner の決定 |
+| HFP-03-PROD-007 | 匿名化した代表profile ID/SHA。DB総bytes/rowsと上位table分布、uploads file数/総bytes/size分布、15分/日次binlog量、CPU/RAM/storage IOPS・throughput/network、利用可能maintenance window、RTO区間予算。synthetic fixtureは各容量をbaseline未満にせず上限+10%以内、上位分布は±10%、restore環境はproductionより高性能にしない。 | BLOCKED | production owner の匿名 profile + ID/SHA |
+| HFP-03-PROD-008 | alert routing、運用 owner、incident commander、四半期 drill owner。 | BLOCKED | 運用組織の決定 |
+
+## 4.1 HFP-03-001 で確定した事実（隔離環境・一次資料ベース）
+
+| 項目 | 確定値 | 根拠 |
+|---|---|---|
+| 隔離 source イメージ | `mysql:8.0.36@sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964` | docker inspect（2026-08-14 実測） |
+| ツールイメージ | `ses-backup-tool:8.0.46`（Oracle MySQL apt client 8.0.46 + restic 0.17.3） | evidence `tool-image-digest.txt` |
+| MySQL apt 署名鍵 | mysql-apt-config 0.8.33 同梱鍵は 2025-10-22 で期限切れ（EXPKEYSIG）。`RPM-GPG-KEY-mysql-2025` の更新鍵（有効期限 2027-10-23）を import して解決。 | Dockerfile コメント + research.md |
+| mysqlbinlog の所在 | MySQL 8.0.46 Debian package では `mysql-community-client-core` に無く、`mysql-community-server-core` に含まれる。 | dpkg -L 実測（research.md） |
+| client TLS | MySQL 8.0.46 client は `--ssl-ca` + `VERIFY_CA/VERIFY_IDENTITY` で `SSL_CTX_set_default_verify_paths failed` になる（実測）。hashed `ssl-capath` では VERIFY_CA/VERIFY_IDENTITY が機能する。 | dbg-ssl 実測（research.md） |
+| 隔離環境 TLS | source は自動生成自己署名 CA。client は hashed capath + VERIFY_CA で接続（VERIFY_IDENTITY は server cert の CN/SAN が host 名と一致しないため不可 → 隔離環境は期限付き VERIFY_CA を許容、production は host naming を満たす CA を用意する） | HFP-03-001 Demo |
+| BL-012 廃止 | `MYSQL_PWD` は preflight/mysql-options で使用検出すると拒否（exit 18）。mode 0600 option file + `--defaults-extra-file` 先頭配置へ移行。 | preflight-test.sh |
+| BL-013 対応 | Alpine の MariaDB 系 `mysql-client` を廃止。Oracle MySQL apt の exact version を base digest 固定で導入。`mysql/mysqlbinlog/mysqldump --version` を preflight で検証。 | preflight.sh / Dockerfile |
 
 ## 5. task別の変更前 safety baseline test
 
