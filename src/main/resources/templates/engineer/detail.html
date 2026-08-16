@@ -161,6 +161,9 @@
                         <li class="nav-item" role="presentation">
                             <button class="nav-link text-muted border-transparent hover-text-white" id="proposal-history-tab" data-bs-toggle="tab" data-bs-target="#proposal-history-tab-pane" type="button" role="tab" aria-controls="proposal-history-tab-pane" aria-selected="false"><i class="bi bi-file-earmark-check me-2"></i><th:block th:text="#{engineer.proposalHistory}">提案履歴</th:block></button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link text-muted border-transparent hover-text-white" id="staffing-tab" data-bs-toggle="tab" data-bs-target="#staffing-tab-pane" type="button" role="tab" aria-controls="staffing-tab-pane" aria-selected="false"><i class="bi bi-calendar-range me-2"></i><th:block th:text="#{staffing.timeline.title}">配置計画</th:block></button>
+                        </li>
                     </ul>
                 </div>
                 <div class="card-body p-4">
@@ -207,6 +210,17 @@
                                         <!-- Populated via JS -->
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="staffing-tab-pane" role="tabpanel" aria-labelledby="staffing-tab" tabindex="0">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0 text-white fw-bold" th:text="#{staffing.timeline.title}">配置計画タイムライン</h6>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="SES_staffing.openAllocationModal({ engineerId: currentEngineerId, engineerName: currentEngineerName, projectId: null })">
+                                    <i class="bi bi-plus-lg me-1"></i><span th:text="#{staffing.timeline.add}">配置追加</span>
+                                </button>
+                            </div>
+                            <div id="staffing-timeline-body">
+                                <div class="text-muted small py-2" th:text="#{common.loading}">読み込み中...</div>
                             </div>
                         </div>
                     </div>
@@ -469,6 +483,76 @@
         </div>
     </div>
 
+    <!-- 配置計画モーダル（staffing-capacity-planning T077） -->
+    <div class="modal fade" id="staffingAllocationModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-calendar-range me-2 text-accent-green"></i><span th:text="#{staffing.timeline.title}">配置計画</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="staffing-allocation-form">
+                        <input type="hidden" id="sa-id">
+                        <div class="mb-3 d-none" id="sa-engineer-select-wrap">
+                            <label class="form-label text-muted small"><span th:text="#{staffing.timeline.engineer}">要員</span> <span class="text-danger">*</span></label>
+                            <select id="sa-engineerId" class="form-select form-select-dark bg-secondary text-white border-dark"></select>
+                        </div>
+                        <div class="mb-3" id="sa-engineer-name-wrap">
+                            <label class="form-label text-muted small" th:text="#{staffing.timeline.engineer}">要員</label>
+                            <div class="text-white fw-bold" id="sa-engineer-name" data-engineer-id="">—</div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small"><span th:text="#{staffing.timeline.type}">配置種別</span> <span class="text-danger">*</span></label>
+                                <select id="sa-type" class="form-select form-select-dark bg-secondary text-white border-dark" onchange="SES_staffing.onTypeChanged()">
+                                    <option value="案件" th:text="#{staffing.timeline.type.project}">案件</option>
+                                    <option value="社内" th:text="#{staffing.timeline.type.internal}">社内</option>
+                                    <option value="待機" th:text="#{staffing.timeline.type.bench}">待機</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.timeline.startDate}">開始日</label>
+                                <input type="date" id="sa-startDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.timeline.endDate}">終了日</label>
+                                <input type="date" id="sa-endDate" class="form-control form-control-dark bg-secondary text-white border-dark">
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4" id="sa-project-wrap">
+                                <label class="form-label text-muted small" th:text="#{staffing.timeline.project}">案件</label>
+                                <select id="sa-projectId" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="">—</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4" id="sa-position-wrap">
+                                <label class="form-label text-muted small" th:text="#{staffing.timeline.position}">ポジション</label>
+                                <select id="sa-positionId" class="form-select form-select-dark bg-secondary text-white border-dark"></select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{staffing.timeline.percent}">配賦率(%)</label>
+                                <input type="number" id="sa-percent" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" max="100" value="100">
+                            </div>
+                        </div>
+                        <div class="mb-3 d-none" id="sa-internal-hint">
+                            <div class="text-muted small" th:text="#{staffing.timeline.internalHint}">社内/待機はポジションを指定せずに登録します</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{staffing.timeline.exceptionReason}">例外理由（過配賦時のみ）</label>
+                            <input type="text" id="sa-exceptionReason" class="form-control form-control-dark bg-secondary text-white border-dark">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="SES_staffing.saveAllocation()" th:text="#{common.save}">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Skill Sheet Export Modal -->
     <div class="modal fade" id="skillSheetModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -511,6 +595,7 @@
     <script th:src="@{/js/modules/ai-matching.js}"></script>
     <script th:src="@{/js/modules/ai-skillsheet.js}"></script>
     <script th:src="@{/js/modules/engineer-account-link.js}"></script>
+    <script th:src="@{/js/modules/staffing.js}"></script>
 </th:block>
 
 </body>

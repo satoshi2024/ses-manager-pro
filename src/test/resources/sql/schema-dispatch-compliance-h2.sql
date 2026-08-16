@@ -1,5 +1,8 @@
 -- T061 F1 R5 H2 schema. Mirrors the V1/V84 MySQL shape; document/contact/sys_user/engineer
 -- FKs and DB triggers are omitted for H2 (immutability enforced by mapper INSERT/SELECT-only boundary).
+DROP TABLE IF EXISTS t_compliance_reviewer_qualification CASCADE;
+DROP TABLE IF EXISTS m_compliance_verification_method CASCADE;
+DROP TABLE IF EXISTS m_compliance_verification_source CASCADE;
 DROP TABLE IF EXISTS t_document_delivery CASCADE;
 DROP TABLE IF EXISTS t_compliance_operation_ledger CASCADE;
 DROP TABLE IF EXISTS t_compliance_mapping_status_event CASCADE;
@@ -764,6 +767,30 @@ CREATE TABLE IF NOT EXISTS m_compliance_external_reviewer_type (
   updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
   UNIQUE(tenant_id, type_code), UNIQUE(tenant_id, id), CHECK(credential_required IN (0,1)), CHECK(enabled IN (0,1))
 );
+-- V102_3: dynamic policy列（§8 NULL=UNCONFIGURED）
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS qualification_verification_required TINYINT NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS active_status_verification_required TINYINT NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS verification_source_id BIGINT NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS verification_method_id BIGINT NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS max_age_days INT NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS effective_from DATE NULL;
+ALTER TABLE m_compliance_external_reviewer_type ADD COLUMN IF NOT EXISTS effective_to DATE NULL;
+CREATE TABLE IF NOT EXISTS m_compliance_verification_source (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  source_code VARCHAR(50) NOT NULL, source_name VARCHAR(200) NOT NULL, official_url VARCHAR(1000),
+  enabled TINYINT NOT NULL DEFAULT 1, effective_from DATE, effective_to DATE, sort_order INT NOT NULL DEFAULT 0,
+  created_by BIGINT, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT,
+  updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
+  UNIQUE(tenant_id, source_code), UNIQUE(tenant_id, id), CHECK(enabled IN (0,1))
+);
+CREATE TABLE IF NOT EXISTS m_compliance_verification_method (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  method_code VARCHAR(50) NOT NULL, method_name VARCHAR(200) NOT NULL, description VARCHAR(1000),
+  enabled TINYINT NOT NULL DEFAULT 1, effective_from DATE, effective_to DATE, sort_order INT NOT NULL DEFAULT 0,
+  created_by BIGINT, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT,
+  updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
+  UNIQUE(tenant_id, method_code), UNIQUE(tenant_id, id), CHECK(enabled IN (0,1))
+);
 CREATE INDEX IF NOT EXISTS idx_g2_reviewer_type_enabled ON m_compliance_external_reviewer_type(tenant_id, enabled, sort_order);
 
 CREATE TABLE IF NOT EXISTS m_compliance_mapping_review_requirement_group (
@@ -785,6 +812,9 @@ CREATE TABLE IF NOT EXISTS m_compliance_mapping_review_requirement_type (
    CONSTRAINT fk_g2_review_type_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
    CONSTRAINT fk_g2_review_type_reviewer FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id)
 );
+-- V102_3: frozen snapshot列（freeze時確定・§8）
+ALTER TABLE m_compliance_mapping_review_requirement_type ADD COLUMN IF NOT EXISTS qualification_verification_required_snapshot TINYINT NOT NULL DEFAULT 0;
+ALTER TABLE m_compliance_mapping_review_requirement_type ADD COLUMN IF NOT EXISTS active_status_verification_required_snapshot TINYINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_g2_review_type_reviewer ON m_compliance_mapping_review_requirement_type(tenant_id, reviewer_type_id);
 
 CREATE TABLE IF NOT EXISTS t_compliance_responsible_assignment (
@@ -805,7 +835,7 @@ CREATE TABLE IF NOT EXISTS t_compliance_mapping_approval_event (
   mapping_version VARCHAR(50) NOT NULL, mapping_hash CHAR(64) NOT NULL, review_policy_hash CHAR(64) NOT NULL, assignment_id BIGINT NOT NULL,
   workplace_id_snapshot BIGINT NOT NULL, actor_id BIGINT NOT NULL, actor_display_name_snapshot VARCHAR(200) NOT NULL, actor_role_snapshot VARCHAR(50) NOT NULL,
   action VARCHAR(20) NOT NULL, event_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, occurred_at TIMESTAMP(6) NOT NULL,
-  reason VARCHAR(1000), evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  reason VARCHAR(1000), evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64), evidence_scan_status VARCHAR(30),
    operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
    UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), CHECK(action IN ('APPROVE','REJECT','REVOKE')),
    CONSTRAINT fk_g2_approval_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
@@ -826,7 +856,7 @@ CREATE TABLE IF NOT EXISTS t_compliance_external_review_event (
   review_chain_id VARCHAR(36) NOT NULL, target_event_id BIGINT, supersedes_event_id BIGINT, reviewed_at TIMESTAMP(6) NOT NULL, valid_until TIMESTAMP(6), recorded_at TIMESTAMP(6) NOT NULL,
   evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64), recorded_by BIGINT NOT NULL,
   operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
-   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), CHECK(action IN ('APPROVED','REJECTED','REVOKED')),
+   UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), CHECK(action IN ('SUBMITTED','APPROVED','REJECTED','REVOKED')),
    CONSTRAINT fk_g2_external_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
    CONSTRAINT fk_g2_external_group FOREIGN KEY (tenant_id, requirement_group_id) REFERENCES m_compliance_mapping_review_requirement_group(tenant_id, id),
    CONSTRAINT fk_g2_external_reviewer_type FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id),
@@ -867,3 +897,103 @@ CREATE TABLE IF NOT EXISTS t_compliance_operation_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_g2_operation_lease ON t_compliance_operation_ledger(tenant_id, state, lease_until);
 CREATE INDEX IF NOT EXISTS idx_g2_operation_result ON t_compliance_operation_ledger(tenant_id, result_reference_type, result_reference_id);
+-- R23-P1-01: reviewer subject / verification / adoption events (H2 mirror of V102_1)
+CREATE TABLE IF NOT EXISTS t_compliance_external_reviewer_subject (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  subject_code VARCHAR(100) NOT NULL, display_name VARCHAR(200) NOT NULL, organization_name VARCHAR(200) NOT NULL,
+  person_fingerprint_snapshot CHAR(64) NOT NULL, fingerprint_key_version VARCHAR(64) NOT NULL,
+  created_by BIGINT, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0, UNIQUE(tenant_id, subject_code), UNIQUE(tenant_id, id),
+  CHECK(CHAR_LENGTH(person_fingerprint_snapshot) = 64)
+);
+-- V102_3: subject×資格association（subject CREATE後に定義）
+CREATE TABLE IF NOT EXISTS t_compliance_reviewer_qualification (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  reviewer_subject_id BIGINT NOT NULL, reviewer_type_id BIGINT NOT NULL,
+  registration_identifier_masked_snapshot VARCHAR(255), registration_identifier_label VARCHAR(200),
+  enabled TINYINT NOT NULL DEFAULT 1, created_by BIGINT, created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT, updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP, deleted_flag TINYINT NOT NULL DEFAULT 0,
+  UNIQUE(tenant_id, reviewer_subject_id, reviewer_type_id), UNIQUE(tenant_id, id), CHECK(enabled IN (0,1)),
+  CONSTRAINT fk_g2_qualification_subject FOREIGN KEY (tenant_id, reviewer_subject_id) REFERENCES t_compliance_external_reviewer_subject(tenant_id, id),
+  CONSTRAINT fk_g2_qualification_type FOREIGN KEY (tenant_id, reviewer_type_id) REFERENCES m_compliance_external_reviewer_type(tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS t_compliance_external_reviewer_verification_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  reviewer_type_id BIGINT NOT NULL, reviewer_type_code_snapshot VARCHAR(100) NOT NULL, reviewer_type_name_snapshot VARCHAR(200) NOT NULL,
+  reviewer_subject_id BIGINT NOT NULL, person_fingerprint_snapshot CHAR(64) NOT NULL, qualification_fingerprint_snapshot CHAR(64) NOT NULL,
+  fingerprint_key_version VARCHAR(64) NOT NULL, verification_kind VARCHAR(20) NOT NULL, result VARCHAR(20) NOT NULL,
+  method_code VARCHAR(50) NOT NULL, authority_source_code VARCHAR(50) NOT NULL, authority_source_name VARCHAR(200) NOT NULL,
+  official_url_reference_snapshot VARCHAR(1000), registration_identifier_encrypted CLOB,
+  registration_identifier_key_version VARCHAR(64), registration_identifier_cipher_format VARCHAR(20), registration_identifier_masked_snapshot VARCHAR(255),
+  checked_at TIMESTAMP(6) NOT NULL, source_data_as_of TIMESTAMP(6), max_age_days_snapshot INT, valid_until TIMESTAMP(6), checked_by BIGINT NOT NULL,
+  evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  review_policy_version VARCHAR(50), review_policy_hash CHAR(64), mapping_id BIGINT, mapping_version VARCHAR(50), mapping_hash CHAR(64),
+  external_review_event_id BIGINT, external_review_chain_id VARCHAR(36), submitted_review_event_id BIGINT NOT NULL,
+  revoked_verification_event_id BIGINT, supersedes_verification_event_id BIGINT,
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
+  created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id),
+  CHECK(verification_kind IN ('IDENTITY','QUALIFICATION','ACTIVE_STATUS','REVIEW_AUTHORSHIP')),
+  CHECK(result IN ('VERIFIED','FAILED','INCONCLUSIVE','REVOKED')),
+  CHECK(CHAR_LENGTH(person_fingerprint_snapshot) = 64 AND CHAR_LENGTH(qualification_fingerprint_snapshot) = 64),
+  CHECK((registration_identifier_encrypted IS NULL AND registration_identifier_key_version IS NULL
+      AND registration_identifier_cipher_format IS NULL AND registration_identifier_masked_snapshot IS NULL)
+    OR (registration_identifier_encrypted IS NOT NULL AND registration_identifier_key_version IS NOT NULL
+      AND registration_identifier_cipher_format IS NOT NULL AND registration_identifier_masked_snapshot IS NOT NULL)),
+  CHECK((evidence_document_id IS NULL AND evidence_document_version_id IS NULL
+      AND evidence_document_version IS NULL AND evidence_document_hash IS NULL)
+    OR (evidence_document_id IS NOT NULL AND evidence_document_version_id IS NOT NULL
+      AND evidence_document_version IS NOT NULL AND evidence_document_hash IS NOT NULL)),
+  CHECK((result = 'REVOKED' AND revoked_verification_event_id IS NOT NULL)
+    OR (result <> 'REVOKED' AND revoked_verification_event_id IS NULL)),
+  CHECK((verification_kind = 'REVIEW_AUTHORSHIP'
+      AND review_policy_version IS NOT NULL AND review_policy_hash IS NOT NULL
+      AND mapping_id IS NOT NULL AND mapping_version IS NOT NULL AND mapping_hash IS NOT NULL
+      AND external_review_event_id IS NOT NULL AND external_review_chain_id IS NOT NULL)
+    OR (verification_kind <> 'REVIEW_AUTHORSHIP'
+      AND review_policy_version IS NULL AND review_policy_hash IS NULL
+      AND mapping_id IS NULL AND mapping_version IS NULL AND mapping_hash IS NULL
+      AND external_review_event_id IS NULL AND external_review_chain_id IS NULL)),
+  CONSTRAINT fk_g2_verification_subject FOREIGN KEY (tenant_id, reviewer_subject_id) REFERENCES t_compliance_external_reviewer_subject(tenant_id, id),
+  CONSTRAINT fk_g2_verification_submitted FOREIGN KEY (tenant_id, submitted_review_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id),
+  CONSTRAINT fk_g2_verification_revoked FOREIGN KEY (tenant_id, revoked_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_verification_supersedes FOREIGN KEY (tenant_id, supersedes_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_verification_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id),
+  CONSTRAINT fk_g2_verification_review FOREIGN KEY (tenant_id, external_review_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS t_compliance_external_review_adoption_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+  action VARCHAR(20) NOT NULL, review_chain_id VARCHAR(36) NOT NULL, submitted_review_event_id BIGINT NOT NULL, revoked_adoption_event_id BIGINT,
+  identity_verification_event_id BIGINT, qualification_verification_event_id BIGINT, active_status_verification_event_id BIGINT,
+  authorship_verification_event_id BIGINT, mapping_id BIGINT, mapping_version VARCHAR(50), mapping_hash CHAR(64),
+  review_policy_version VARCHAR(50), review_policy_hash CHAR(64),
+  evidence_document_id BIGINT, evidence_document_version_id BIGINT, evidence_document_version VARCHAR(100), evidence_document_hash CHAR(64),
+  adopted_at TIMESTAMP(6) NOT NULL, adopted_by BIGINT NOT NULL,
+  operation_id VARCHAR(36) NOT NULL, correlation_id VARCHAR(100) NOT NULL, idempotency_key VARCHAR(200) NOT NULL,
+  created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+  -- V102_3 R23-R1-P1-01: 初回adoption一意化（APPROVED/REJECTEDのみ非NULLの生成列）
+  first_slot BIGINT GENERATED ALWAYS AS (CASE WHEN action IN ('APPROVED','REJECTED') THEN submitted_review_event_id ELSE NULL END),
+  UNIQUE(tenant_id, idempotency_key), UNIQUE(tenant_id, id), UNIQUE(tenant_id, first_slot),
+  CHECK(action IN ('SUBMITTED','APPROVED','REJECTED','REVOKED')),
+  CHECK((action = 'APPROVED'
+      AND identity_verification_event_id IS NOT NULL AND authorship_verification_event_id IS NOT NULL
+      AND mapping_id IS NOT NULL AND mapping_version IS NOT NULL AND mapping_hash IS NOT NULL
+      AND review_policy_version IS NOT NULL AND review_policy_hash IS NOT NULL
+      AND evidence_document_id IS NOT NULL AND evidence_document_version_id IS NOT NULL
+      AND evidence_document_version IS NOT NULL AND evidence_document_hash IS NOT NULL)
+    OR (action <> 'APPROVED'
+      AND identity_verification_event_id IS NULL AND authorship_verification_event_id IS NULL
+      AND mapping_id IS NULL AND mapping_version IS NULL AND mapping_hash IS NULL
+      AND review_policy_version IS NULL AND review_policy_hash IS NULL
+      AND evidence_document_id IS NULL AND evidence_document_version_id IS NULL
+      AND evidence_document_version IS NULL AND evidence_document_hash IS NULL)),
+  CHECK((action = 'REVOKED' AND revoked_adoption_event_id IS NOT NULL)
+    OR (action <> 'REVOKED' AND revoked_adoption_event_id IS NULL)),
+  CONSTRAINT fk_g2_adoption_submitted FOREIGN KEY (tenant_id, submitted_review_event_id) REFERENCES t_compliance_external_review_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_revoked FOREIGN KEY (tenant_id, revoked_adoption_event_id) REFERENCES t_compliance_external_review_adoption_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_identity FOREIGN KEY (tenant_id, identity_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_qualification FOREIGN KEY (tenant_id, qualification_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_active_status FOREIGN KEY (tenant_id, active_status_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_authorship FOREIGN KEY (tenant_id, authorship_verification_event_id) REFERENCES t_compliance_external_reviewer_verification_event(tenant_id, id),
+  CONSTRAINT fk_g2_adoption_mapping FOREIGN KEY (tenant_id, mapping_id) REFERENCES m_compliance_mapping_version(tenant_id, id)
+);

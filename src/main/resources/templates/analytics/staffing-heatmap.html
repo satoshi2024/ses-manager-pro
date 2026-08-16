@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{staffing.heatmap.title}">需給ヒートマップ - SES Manager Pro</title>
+</head>
+<body>
+    <th:block layout:fragment="page-css">
+        <style>
+            .heatmap-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+            .heatmap-table th, .heatmap-table td {
+                padding: 4px 6px;
+                border: 1px solid var(--bs-border-color);
+                text-align: right;
+                white-space: nowrap;
+            }
+            .heatmap-table th { background-color: var(--bs-tertiary-bg); }
+            .heatmap-table td.group { text-align: left; font-weight: bold; }
+            .heatmap-table tr.total-row td { background-color: var(--bs-tertiary-bg); font-weight: bold; }
+            .cell-shortfall { color: #ff8a8a; font-weight: bold; cursor: pointer; text-decoration: underline dotted; }
+            .cell-surplus { color: #7fd8a8; }
+            .heatmap-scroll { overflow-x: auto; }
+        </style>
+    </th:block>
+
+    <div layout:fragment="content" class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h3 mb-0 text-light"><i class="bi bi-grid-3x3-gap-fill me-2 text-accent-green"></i><span th:text="#{staffing.heatmap.title}">需給ヒートマップ</span></h1>
+            <a href="/analytics" class="btn btn-outline-secondary text-muted hover-text-white border-dark">
+                <i class="bi bi-arrow-left me-1"></i><span th:text="#{common.back}">戻る</span>
+            </a>
+        </div>
+
+        <div class="card bg-card border-dark shadow-sm">
+            <div class="card-header bg-transparent border-dark d-flex justify-content-between align-items-center py-2">
+                <ul class="nav nav-tabs card-header-tabs border-dark" id="heatmapTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active text-light border-dark bg-dark" id="role-tab" data-bs-toggle="tab" data-bs-target="#role-pane" type="button" role="tab"><i class="bi bi-person-badge me-1"></i><span th:text="#{staffing.heatmap.dim.role}">役割</span></button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-muted" id="skill-tab" data-bs-toggle="tab" data-bs-target="#skill-pane" type="button" role="tab"><i class="bi bi-tools me-1"></i><span th:text="#{staffing.heatmap.dim.skill}">スキル</span></button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-muted" id="location-tab" data-bs-toggle="tab" data-bs-target="#location-pane" type="button" role="tab"><i class="bi bi-geo-alt me-1"></i><span th:text="#{staffing.heatmap.dim.location}">勤務地</span></button>
+                    </li>
+                </ul>
+                <span class="text-muted small" id="heatmap-asof"></span>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-2 mb-2 align-items-center flex-wrap">
+                    <label class="form-label text-muted small mb-0" th:text="#{staffing.heatmap.range}">期間</label>
+                    <input type="month" class="form-control form-control-sm bg-dark text-white border-secondary" style="width: 150px;" id="hm-from">
+                    <span class="text-muted">〜</span>
+                    <input type="month" class="form-control form-control-sm bg-dark text-white border-secondary" style="width: 150px;" id="hm-to">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="hm-reload"><i class="bi bi-arrow-clockwise me-1"></i><span th:text="#{common.reload}">再読込</span></button>
+                    <span class="text-muted small ms-auto" th:text="#{staffing.heatmap.legend}">不足（赤）をクリックでドリルダウン</span>
+                </div>
+                <div class="tab-content" id="heatmapTabsContent">
+                    <div class="tab-pane fade show active" id="role-pane" role="tabpanel"><div class="heatmap-scroll"><table class="heatmap-table" id="role-table"></table></div></div>
+                    <div class="tab-pane fade" id="skill-pane" role="tabpanel"><div class="heatmap-scroll"><table class="heatmap-table" id="skill-table"></table></div></div>
+                    <div class="tab-pane fade" id="location-pane" role="tabpanel"><div class="heatmap-scroll"><table class="heatmap-table" id="location-table"></table></div></div>
+                </div>
+                <div id="heatmap-error" class="text-danger py-3 d-none"></div>
+            </div>
+        </div>
+
+        <!-- drilldown modal -->
+        <div class="modal fade" id="heatmapDrilldownModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-content bg-card border-dark shadow-lg">
+                    <div class="modal-header border-dark bg-dark">
+                        <h5 class="modal-title text-white fw-bold"><i class="bi bi-search me-2 text-accent-green"></i><span id="hd-title"></span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-3">
+                        <h6 class="text-muted small fw-bold mb-2" th:text="#{staffing.heatmap.drilldown.positions}">需要（ポジション）</h6>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-dark table-hover align-middle small">
+                                <thead><tr>
+                                    <th th:text="#{staffing.board.positionNo}">番号</th>
+                                    <th th:text="#{staffing.board.roleName}">役割</th>
+                                    <th th:text="#{staffing.heatmap.project}">案件</th>
+                                    <th th:text="#{staffing.board.requiredCount}">人数</th>
+                                    <th th:text="#{staffing.board.filledCount}">状態</th>
+                                    <th th:text="#{staffing.heatmap.unitPrice}">単価帯</th>
+                                </tr></thead>
+                                <tbody id="hd-positions"></tbody>
+                            </table>
+                        </div>
+                        <h6 class="text-muted small fw-bold mb-2" th:text="#{staffing.heatmap.drilldown.engineers}">供給（要員）</h6>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover align-middle small">
+                                <thead><tr>
+                                    <th th:text="#{staffing.timeline.engineer}">要員</th>
+                                    <th th:text="#{staffing.heatmap.drilldown.skill}">主要スキル</th>
+                                    <th th:text="#{staffing.heatmap.drilldown.supplyFte}">供給FTE</th>
+                                    <th th:text="#{staffing.heatmap.unitPrice}">単価</th>
+                                </tr></thead>
+                                <tbody id="hd-engineers"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <th:block layout:fragment="page-js">
+        <script th:src="@{/js/modules/staffing-heatmap.js}"></script>
+    </th:block>
+</body>
+</html>

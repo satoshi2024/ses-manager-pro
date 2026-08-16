@@ -6,6 +6,11 @@ $(function () {
         return;
     }
 
+    // staffing-capacity-planning（T077）: 募集ポジションボード
+    if (window.SES_staffing) {
+        SES_staffing.initProjectBoard(projectId);
+    }
+
     $.ajax({
         url: '/api/projects/' + projectId,
         method: 'GET',

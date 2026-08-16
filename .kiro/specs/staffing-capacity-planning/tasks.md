@@ -6,10 +6,10 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。
 > 時間/scope/状態の判断は `design.md` §5「決定表」を正とし、そこに無い論点はplatform-invariantsの既定解に従う。
 >
-> **Migration**: 本specの予約番号は **V103**。dispatch（V84/V85＋G2 follow-up V102）とattendance（V83/V91/V98）の両方がPASS・merge済み後に着手する。
+> **Migration**: 本specの正式migrationは **V103**（実装済み。V1統合baseline・H2・MySQL smokeに同期済み）。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] F1. position/allocation/scenario DDL
+- [x] F1. position/allocation/scenario DDL
   - **Objective**: 案件に役割・必須skill・単価帯・稼働率を持つ複数positionを登録でき、
     要員の期間別allocationを計画できる。同一期間の配賦率合計が100%を超える配置は拒否され、
     例外は理由と承認が必須になる。scenarioは実データを変更しない。
@@ -23,7 +23,7 @@
   - **Demo**: 兼務50%+50%を登録し、60%+50%が拒否されることを確認。
     1日だけ重複する60%+50%も拒否されることを確認。
 
-- [ ] F2. proposal/contract/availability統合
+- [x] F2. proposal/contract/availability統合
   - **Objective**: 提案と契約がpositionへ紐付き、契約成立でpositionの充足人数が自動更新される。
     退職予定・休暇・契約終了・更新decisionがcapacityへ反映され、同一契約がplanとactualで二重計上されない。
   - **実装ガイダンス**: position link、actual allocation、renewal/leave/retirement。
@@ -35,7 +35,7 @@
     稼働率がdashboard KPIと一致すること。
   - **Demo**: 提案→契約でposition充足。同じ契約がplanとactualで二重に数えられないことを提示。
 
-- [ ] A1. position board/allocation timeline
+- [x] A1. position board/allocation timeline
   - **Objective**: 案件詳細のposition boardと要員timelineで配置を確認・変更でき、
     過配賦になる操作はその場で拒否される。D&Dが失敗したらカードが元に戻る。
   - **実装ガイダンス**: project/engineer画面、**drag操作は失敗時にUI rollback**（design §3）。
@@ -45,7 +45,7 @@
     D&D失敗時のUI rollback、mobile 390px。
   - **Demo**: 兼務配置と過配賦拒否。D&D中にAPIを失敗させカードが元位置へ戻ることを確認。
 
-- [ ] B1. 需給heatmap/KPI
+- [x] B1. 需給heatmap/KPI
   - **Objective**: 月別のskill/role/location別の需要・供給・不足・余剰・bench costが見え、
     不足からdrilldownできる。全社合計と内訳の合計が一致する。
   - **実装ガイダンス**: skill/role/location/月aggregate、bench cost。
@@ -56,7 +56,7 @@
     HRからbench costがmaskされること、大量データでheapが増えないこと。
   - **Demo**: Java需要不足をdrilldown。全社合計と内訳合計が一致することを提示。
 
-- [ ] B2. scenario compare
+- [x] B2. scenario compare
   - **Objective**: 仮配置のscenarioを作って2案の稼働率・粗利を比較でき、
     scenario操作が実契約・実提案・実配置計画を一切変更しない。
   - **実装ガイダンス**: clone/仮配置/比較/共有、**本データ非更新**。
@@ -66,7 +66,7 @@
     owner/共有の区別、共有scenario内の要員一覧が閲覧者scopeでfilterされること。
   - **Demo**: 2scenarioの稼働率/粗利差。scenario操作前後で実データのハッシュが変わらないことを提示。
 
-- [ ] M. 回帰/性能
+- [x] M. 回帰/性能
   - **Objective**: position作成から需給更新までが一気通貫で動き、代表データ量でp95とheapが実測される。
     既存のproject/proposal/contract/analytics機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、MySQL、代表データ量でp95/heap実測、

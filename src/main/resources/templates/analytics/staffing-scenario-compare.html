@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{staffing.scenario.title}">シナリオ比較 - SES Manager Pro</title>
+</head>
+<body>
+    <th:block layout:fragment="page-css">
+        <style>
+            .compare-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+            .compare-table th, .compare-table td {
+                padding: 4px 8px;
+                border: 1px solid var(--bs-border-color);
+                text-align: right;
+                white-space: nowrap;
+            }
+            .compare-table th.scenario-name { text-align: left; font-weight: bold; }
+            .compare-scroll { overflow-x: auto; }
+        </style>
+    </th:block>
+
+    <div layout:fragment="content" class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h3 mb-0 text-light"><i class="bi bi-arrow-left-right me-2 text-accent-green"></i><span th:text="#{staffing.scenario.title}">シナリオ比較</span></h1>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="scenario-add"><i class="bi bi-plus-lg me-1"></i><span th:text="#{staffing.scenario.add}">シナリオ作成</span></button>
+                <a href="/analytics" class="btn btn-outline-secondary text-muted hover-text-white border-dark btn-sm">
+                    <i class="bi bi-arrow-left me-1"></i><span th:text="#{common.back}">戻る</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="card bg-card border-dark shadow-sm">
+            <div class="card-header bg-transparent border-dark py-2 d-flex align-items-center gap-2 flex-wrap">
+                <label class="form-label text-muted small mb-0" th:text="#{staffing.scenario.select}">シナリオ</label>
+                <select id="scenario-select" class="form-select form-select-sm bg-dark text-white border-secondary" style="width: 240px;" multiple></select>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="scenario-compare-btn"><i class="bi bi-graph-up me-1"></i><span th:text="#{staffing.scenario.compare}">比較</span></button>
+                <span class="text-muted small ms-auto" th:text="#{staffing.scenario.note}">実データは変更されません</span>
+            </div>
+            <div class="card-body">
+                <div id="scenario-manage" class="mb-3 d-flex gap-2 flex-wrap align-items-center d-none">
+                    <input type="text" id="scenario-name" class="form-control form-control-sm bg-dark text-white border-secondary" style="width: 220px;" th:placeholder="#{staffing.scenario.namePlaceholder}" placeholder="シナリオ名">
+                    <label class="form-check-label text-muted small"><input type="checkbox" class="form-check-input me-1" id="scenario-shared"><span th:text="#{staffing.scenario.shared}">共有</span></label>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="scenario-save-btn"><i class="bi bi-check-lg me-1"></i><span th:text="#{common.save}">保存</span></button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="scenario-delete-btn"><i class="bi bi-trash me-1"></i><span th:text="#{common.delete}">削除</span></button>
+                </div>
+                <div id="scenario-compare-result" class="compare-scroll d-none">
+                    <table class="compare-table" id="scenario-compare-table"></table>
+                    <div class="text-muted small mt-2" th:text="#{staffing.scenario.isolation}">シナリオ操作は配置計画・契約・提案を変更しません</div>
+                </div>
+                <div id="scenario-error" class="text-danger py-3 d-none"></div>
+            </div>
+        </div>
+    </div>
+
+    <th:block layout:fragment="page-js">
+        <script th:src="@{/js/modules/staffing-scenario.js}"></script>
+    </th:block>
+</body>
+</html>

@@ -49,3 +49,14 @@
 ## 完了条件
 
 上記1〜5の確認・決定が揃った後、R10がM PASS判定 → S10 PASS → S12解放。
+
+## 6. R25契約A（S10_TECHNICAL_ACCEPTANCE）達成記録（2026-08-15・R10最終Review認定）
+
+- **R10最終Review（Phase A・R25契約A・983b71ac→merge 9885da21）: T066 technical PASS・S10 PASS・S12 READYを認定**。
+- 本認定は**production authorizationを除く技術受入**としてのS10 PASS（R25契約A）。G2_PRODUCTION_AUTHORIZATION（B gate）は未達のまま・ACTIVE/formal delivery fail-closed維持。
+- 技術受入の内訳:
+  - P1-6 watermark preview（"PREVIEW" watermark・archive 0/delivery 0・営業403）
+  - G2GatePhaseAE2ETest完全パス（TEST/DEVELOPMENT fixture・mapping→approval→subject→review→verification×4→adoption→ACTIVE）
+  - G2GateBrowserPhaseATest（実Chrome CDP・desktop/390px・9 tabs・console error 0）
+  - evidence（browser-g2・SHA-256 299e7f86/17be2509）・CI 1958/0/0/0 skip 0
+- **残（B gate・人間証跡12-step）**: 証跡1〜5（実在assignment・実actor承認・実在資格保有者Review・人間確認・exact CLEAN evidence）＋FM-C-28 divergence含む実在専門家確認。取得後にproduction authorization判定。

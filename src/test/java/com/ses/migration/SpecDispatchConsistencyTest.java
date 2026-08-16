@@ -67,15 +67,16 @@ class SpecDispatchConsistencyTest {
             "approval-workflow-internal-control", List.of(75, 76, 77, 78, 79),
             "order-acceptance-workflow", List.of(80, 81),
             "attendance-leave-overtime-compliance", List.of(83),
-            "dispatch-outsourcing-compliance-ledger", List.of(84));
+            "dispatch-outsourcing-compliance-ledger", List.of(84),
+            "staffing-capacity-planning", List.of(103));
 
     /** S10の正式V84とは別に、R19-P1-01受理後のG2 follow-upはV102へ追加する。 */
     private static final Map<String, List<Integer>> FOLLOW_UP_MIGRATIONS = Map.of(
             "dispatch-outsourcing-compliance-ledger", List.of(102));
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
-    private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|10|11)正式migration V(\\d+(?:/V\\d+)*)");
-    private static final Pattern TASKS_REALIZED = Pattern.compile("(?:(?:S(?:07|10|11))|本spec)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
+    private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|10|11|12)正式migration V(\\d+(?:/V\\d+)*)");
+    private static final Pattern TASKS_REALIZED = Pattern.compile("(?:(?:S(?:07|10|11|12))|本spec)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);

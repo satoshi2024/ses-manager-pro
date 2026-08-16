@@ -36,4 +36,14 @@ node_modules/
 .kiro/specs/scale-300-e2e/evidence/desktop/
 .kiro/specs/scale-300-e2e/evidence/mobile/
 .kiro/specs/scale-300-e2e/round2/evidence/full/
+<<<<<<< HEAD
 ops/backup/tests/.integration-work/
+=======
+
+# ===== 機密情報（APIキー等）は絶対にコミットしない =====
+**/auth.json
+**/.env
+**/.env.*
+*.pem
+*.key
+>>>>>>> origin/main
