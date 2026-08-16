@@ -73,13 +73,21 @@
 | P2-12 | JsSyntaxCheckTest拡張・マーカーなし確認 | JsSyntaxCheckTest（portal/js含む1/0/0/0） | FIXED |
 | P2-13 | approvedBy null化・他 | PortalBpApiTest（口座回帰） | FIXED |
 
-## 現行判定（R13-R1対応後）
+## R13-R2対応（BOM除去）と現行判定
 
-## 現行判定（R13-R1対応後）
+**S13-R2-P1-01（fix deltaがFlywayPortalSchemaSmokeTest.javaへBOM混入）→ FIXED_BY_IMPLEMENTER**
+
+- 原因: R1 fix roundでsmoke testのtarget書き換え（104_3→104_4）にPowerShell `Set-Content -Encoding UTF8`（BOM付与）を使用し、BOM除去パスから漏れた。committed blob（`git diff`で確認）にもBOMが含まれていた（Reviewのbyte検証は正しい）。
+- 修正: `git diff`でBOM差分のみを確認後、BOM除去（1byte）。他ファイルへのBOM混入は全`*.java`走査で0件確認済み。
+- 再検証（同一Head・標準環境 `mvn -q test -o`）:
+  - FlywayPortalSchemaSmokeTest **2/0/0/0**（実MySQL 8.0、V104.4 fresh/legacy）
+  - portal全 **48/0/0/0**（AuthFlow 6・Admin 10・Bp 9・Customer 6・ScopeMatrix 15・RateLimit 2）
+  - MigrationScriptIntegrityTest 27/0/0/0・MessageBundleConsistencyTest 4/0/0/0・JsSyntaxCheckTest 1/0/0/0（portal/js含む）
+- cosmetic: review-ledger.mdの「現行判定」見出し重複・`SalesOrderServiceImpl`の2フィールド同一行整形は本対応で解消。
 
 | 日付 | 判定 | Base | Head | P0 | P1 | P2 | 備考 |
 |---|---|---|---|---|---|---|---|
-| 2026-08-16 | FIX完了・再Review待ち（R2） | 3c908d61（T087） | （R1 fix commit） | 0（FIXED） | 0（FIXED） | 13（8 FIXED・2 DEFERRED・1 VERIFIED・部分1） | R1指摘のP0×1・P1×3を修正済み。fix delta＋direct regression完了 |
+| 2026-08-17 | R2-P1-01 FIXED・R3（OPEN issueのみ）待ち | 3c908d61（T087） | （R2 fix commit） | 0 | 0（FIXED） | 13（8 FIXED・2 DEFERRED・1 VERIFIED・部分1） | BOM除去＋同一Headでsmoke/portal/静的検査を再実行し証跡再提出 |
 
 ## Review Packet（T087分）
 
