@@ -1,9 +1,18 @@
 # Review Ledger — 要員配置・需給計画（S12 staffing-capacity-planning）
 
-## 現行判定（Round 2 fix delta）
+## 現行判定
 
-- **S12-R1: FAIL（P0=0/P1=6/P2=7/NOTE=3）→ 全P1・主要P2をFIXED_BY_IMPLEMENTERで修正済み。Round 2再Review待ち**
-- 修正delta: （本ledger更新と同じcommitに含める）
+- **S12-R2（fix delta 3af17e38..d1d7fac1）: PASS（P0=0/P1=0/P2=2/NOTE=3・open release gates=0）**
+- S12-R2残P2（P2-02 JS側 baseDate UTC・P2-08 double-click）は本ラウンドで修正済み（下記）
+- **S12 staffing-capacity-planning: 完了（PASS転記済み。中央ledger row 39参照）**
+- 次spec: S13 external-customer-bp-portal READINESS開始可
+
+## Round 2 後の追加fix（P2-02 JS側・P2-08）
+
+| ID | 修正 | 検証 |
+|---|---|---|
+| S12-R2-P2-02（JS側） | scenario保存payloadからbaseDateを除去（サーバー既定=tenant TZの今日へ委譲）。server側の`clock.today()`補完と組み合わせて完全修復 | `StaffingScenarioServiceTest.baseDate未指定時はtenantタイムゾーンの今日が基準日になる`（Asia/Tokyo固定assert） |
+| S12-R2-P2-08 | `saveScenarioAllocation`にin-flightガード（`window.__saaSaving`＋保存中disable・成功/失敗で解除） | 直接回帰21件/0/0/0（scenario 5クラス＋browser＋JS syntax＋message） |
 
 ## Issue Register（S12-R1 → FIXED_BY_IMPLEMENTER）
 

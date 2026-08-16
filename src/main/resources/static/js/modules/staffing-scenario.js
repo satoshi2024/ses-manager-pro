@@ -118,10 +118,10 @@ $(function () {
     });
 
     $('#scenario-save-btn').on('click', function () {
+        // baseDateは送らない（サーバーがtenantタイムゾーンの今日を既定にする。S12-R2-P2-02）
         const payload = {
             id: selectedId,
             name: $('#scenario-name').val(),
-            baseDate: new Date().toISOString().slice(0, 10),
             sharedFlag: $('#scenario-shared').is(':checked') ? 1 : 0
         };
         const method = selectedId ? 'PUT' : 'POST';
@@ -278,10 +278,16 @@ $(function () {
     }
 
     function saveScenarioAllocation() {
+        // 二重クリック・再入防止（S12-R2-P2-08）
+        if (window.__saaSaving) { return; }
+        window.__saaSaving = true;
+        $('#scenario-alloc-save').prop('disabled', true);
         const engineerId = $('#saa-engineerId').val();
         const from = $('#saa-from').val();
         const to = $('#saa-to').val();
         if (!engineerId || !from || !to) {
+            window.__saaSaving = false;
+            $('#scenario-alloc-save').prop('disabled', false);
             showError(t('staffing.scenario.allocRequired', '要員と対象日は必須です'));
             return;
         }
@@ -314,6 +320,8 @@ $(function () {
             contentType: 'application/json',
             data: JSON.stringify(payload),
             success: function (res) {
+                window.__saaSaving = false;
+                $('#scenario-alloc-save').prop('disabled', false);
                 if (res.code !== 200) {
                     showError(res.message || t('error.systemError', 'エラーが発生しました'));
                     return;
@@ -322,6 +330,8 @@ $(function () {
                 loadScenarioAllocations();
             },
             error: function (xhr) {
+                window.__saaSaving = false;
+                $('#scenario-alloc-save').prop('disabled', false);
                 showError((xhr.responseJSON && (xhr.responseJSON.message || xhr.responseJSON.error)) || t('error.systemError', 'エラーが発生しました'));
             }
         });

@@ -108,6 +108,15 @@ class StaffingScenarioServiceTest {
     }
 
     @Test
+    void baseDate未指定時はtenantタイムゾーンの今日が基準日になる() {
+        StaffingScenario s = new StaffingScenario();
+        s.setName("S2");
+        StaffingScenario created = scenarioService.create(s);
+        assertEquals(LocalDate.now(java.time.ZoneId.of("Asia/Tokyo")), created.getBaseDate(),
+                "baseDate未指定はサーバー（tenant TZ）の今日で補完される（S12-R2-P2-02）");
+    }
+
+    @Test
     void scenario操作の前後で実データが不変である() {
         // 実データ側に1件の配置を入れておく
         jdbcTemplate.update("INSERT INTO t_allocation_plan "
