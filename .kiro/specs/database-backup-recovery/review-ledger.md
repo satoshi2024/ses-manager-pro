@@ -9,7 +9,7 @@
 | Run ID | 20260814-hfp03 |
 | Base commit | 841e10aaf67deb295d5b3397321f30e9d08c0fce（origin/main） |
 | Reviewed commit/diff | 実装中（HFP-03-001〜逐次追記） |
-| Merge status / merge commit | PRE_MERGE / N/A |
+| Merge status / merge commit | MERGED / `e892c5bd`（2026-08-16、`Merge branch 'codex/hfp-03-backup-pitr'`、74 file / +10,196） |
 | Implementation actor | HFP-03 実装 AI（codex/hfp-03-backup-pitr） |
 | Independent reviewer | NOT_SET |
 | Started/finished UTC | 2026-08-14T03:00Z / NOT_SET |
@@ -230,6 +230,7 @@ finding status は `OPEN / FIXED_BY_IMPLEMENTER / VERIFIED_CLOSED / REJECTED / D
 | 2026-08-15T18:00Z | 独立 Reviewer（Round 2） | REVIEWABLE（PRE_MERGE） | 残る OPEN は P2（P2-03 順序 / P2-04 trap / P2-02 evidence / P2-06・P2-07 DEFERRED 提案 / 新規 R2-P2-01） | P0/P1 全 VERIFIED_CLOSED。unit 426 assert 全 PASS、GATE-01〜05/07/08 PASS。PROD-001〜008 未確定のため production-ready とは判定しない |
 | 2026-08-15T19:00Z | 実装担当（AI） | R2 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 後の独立 Review） | R2-P2-01（RESET MASTER を承認後に移動）/ P2-02（rotate-key 順序）/ P2-03（trap_add dispatcher + option file 回帰）/ P2-04（evidence の restore-svc-pw 除去 + demo 後処理）/ P2-05（counts 静止区間内採取）/ P2-06（drill base_full 修正）。unit 428 assert 全 PASS + shellcheck 0 + integration SUCCESS（mid_dml_replayed=1） |
 | 2026-08-15T20:00Z | 独立 Reviewer（Round 3） | REVIEWABLE（PRE_MERGE）維持 | OPEN は P2×2（R3-P2-01 TMPDIR / R2-P2-04 evidence password 残存） | R2 残 P2 を実測検証（rotate-key 実 repo で ROTATED 完走 / trap 連結 / counts 静止区間 / RESET MASTER 順序 / 主要 attack 再回帰）。VERIFIED_CLOSED 21 件。GATE-06 は PROD-007 未確定で BLOCKED 継続 |
-| 2026-08-15T20:30Z | 実装担当（AI） | R3 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 済み commit + merge delta + main 上の回帰の独立 Review 後） | R3-P2-01（`${TMPDIR:-/tmp}` 化、retention.sh の同種箇所も。TMPDIR 未設定 rotation の回帰テスト追加）/ R2-P2-04 残存分（evidence の全 password file 除去 + demo 後処理に repo-password 追加）。unit 430 assert 全 PASS + shellcheck 0 |
+| 2026-08-15T20:30Z | 実装担当（AI） | R3 P2 修正完了（FIXED_BY_IMPLEMENTER） | なし（最終 PASS は merge 済み commit + merge delta + main 上の回帰の独立 Review 後） | R3-P2-01（${TMPDIR:-/tmp} 化、retention.sh の同種箇所も。TMPDIR 未設定 rotation の回帰テスト追加）/ R2-P2-04 残存分（evidence の全 password file 除去 + demo 後処理に repo-password 追加）。unit 430 assert 全 PASS + shellcheck 0 |
+| 2026-08-16T08:00Z | 実装担当（AI） | MERGED（main e892c5bd） | 最終 PASS は Reviewer による merge delta の独立 Review 待ち | merge-prep: origin/main 取り込み（衝突は .gitignore のみ解消）→ mvn -B clean test BUILD SUCCESS（2030 test / 0 fail / 0 err / **skip 0**）→ backup unit 430 assert 全 PASS + shellcheck 0 → integration SUCCESS（mid_dml_replayed=1 / drill rpo=60s / secret scan 0）→ main へ merge + push |
 
 Decisionは`REVIEWABLE / PASS / FAIL / BLOCKED`のいずれかとする。`REVIEWABLE`はmerge前、`PASS`はmerge済みcommitとmerge deltaを独立Reviewした場合だけ使用する。
