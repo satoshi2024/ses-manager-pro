@@ -6,6 +6,7 @@
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS received_confirmed_at DATETIME;
 
 -- ---- 1) ポータル組織 ----
+DROP TABLE IF EXISTS t_portal_session CASCADE;
 DROP TABLE IF EXISTS t_portal_terms_consent CASCADE;
 DROP TABLE IF EXISTS t_portal_user_permission CASCADE;
 DROP TABLE IF EXISTS t_portal_invitation CASCADE;
@@ -23,9 +24,7 @@ CREATE TABLE m_portal_organization (
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag  TINYINT NOT NULL DEFAULT 0,
   CONSTRAINT chk_portal_org_type CHECK (type IN ('CUSTOMER','BP')),
-  CONSTRAINT chk_portal_org_status CHECK (status IN ('ACTIVE','SUSPENDED')),
-  CONSTRAINT fk_portal_org_customer FOREIGN KEY (customer_id) REFERENCES m_customer (id),
-  CONSTRAINT fk_portal_org_bp FOREIGN KEY (bp_company_id) REFERENCES m_bp_company (id)
+  CONSTRAINT chk_portal_org_status CHECK (status IN ('ACTIVE','SUSPENDED'))
 );
 CREATE UNIQUE INDEX uk_portal_org_customer ON m_portal_organization(customer_id);
 CREATE UNIQUE INDEX uk_portal_org_bp ON m_portal_organization(bp_company_id);
@@ -45,6 +44,7 @@ CREATE TABLE t_portal_user (
   mfa_enabled_at         DATETIME,
   recovery_code_hash     VARCHAR(255),
   recovery_code_used_at  DATETIME,
+  last_used_step         BIGINT,
   last_login_at          DATETIME,
   version                INT NOT NULL DEFAULT 0,
   created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -100,3 +100,23 @@ CREATE TABLE t_portal_terms_consent (
   CONSTRAINT fk_portal_terms_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
 );
 CREATE UNIQUE INDEX uk_portal_terms_consent ON t_portal_terms_consent(user_id, terms_version);
+
+-- ---- 6) ポータルsession（V104_1） ----
+CREATE TABLE t_portal_session (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id       BIGINT NOT NULL,
+  token_hash    CHAR(64) NOT NULL,
+  issued_at     DATETIME NOT NULL,
+  last_seen_at  DATETIME NOT NULL,
+  idle_expires_at DATETIME NOT NULL,
+  expires_at    DATETIME NOT NULL,
+  ip_hash       VARCHAR(64),
+  user_agent    VARCHAR(512),
+  revoked_at    DATETIME,
+  revoked_reason VARCHAR(100),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_portal_session_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
+);
+CREATE UNIQUE INDEX uk_portal_session_token_hash ON t_portal_session(token_hash);
+CREATE INDEX idx_portal_session_user ON t_portal_session(user_id);
+CREATE INDEX idx_portal_session_revoked ON t_portal_session(revoked_at);

@@ -102,6 +102,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("compliance.template.INDIVIDUAL_CONTRACT.version", ConfigSchema.integer(1, null));
         // T066 M（外部専門家Review P2-2）: 派遣先通知書の猶予日数（派遣開始日から）。法定値gate確認待ちのconfig既定値
         SCHEMAS.put("compliance.delivery.notice-grace-days", ConfigSchema.integer(0, null));
+        // S13 T082/T086: ポータル利用規約versionと公開host（管理者が更新。V104でseed）
+        SCHEMAS.put("portal.terms.current-version", ConfigSchema.string());
+        SCHEMAS.put("portal.base-domain", ConfigSchema.string());
     }
 
     private void ensureLoaded() {

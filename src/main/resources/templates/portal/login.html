@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{portal.login.title}">ポータル ログイン</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body">
+<main class="portal-card-container" role="main">
+    <h1 class="portal-brand" th:text="#{app.title}">SES管理プロ</h1>
+
+    <!-- ログインフォーム -->
+    <section class="portal-card" id="loginSection" aria-label="ログイン">
+        <h2 th:text="#{portal.login.title}">ログイン</h2>
+        <div class="alert alert-danger d-none" id="loginError" role="alert" aria-live="polite"></div>
+        <form id="loginForm" novalidate>
+            <div class="mb-3">
+                <label for="loginEmail" class="form-label" th:text="#{portal.email}">メールアドレス</label>
+                <input type="email" class="form-control" id="loginEmail" name="email" autocomplete="username"
+                       required aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="loginPassword" class="form-label" th:text="#{portal.password}">パスワード</label>
+                <input type="password" class="form-control" id="loginPassword" name="password"
+                       autocomplete="current-password" required aria-required="true">
+            </div>
+            <div class="mb-3 d-none" id="mfaCodeGroup">
+                <label for="loginMfaCode" class="form-label" th:text="#{portal.mfa.code}">6桁コード</label>
+                <input type="text" class="form-control" id="loginMfaCode" name="mfaCode" inputmode="numeric"
+                       autocomplete="one-time-code" aria-describedby="mfaHelp">
+                <div class="form-text" id="mfaHelp" th:text="#{portal.mfa.help}">認証アプリの6桁コードを入力してください</div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100" id="loginButton"
+                    th:text="#{portal.login.button}">ログイン</button>
+        </form>
+        <p class="portal-note mt-3">
+            <a th:href="@{/portal/accept-invitation}" th:text="#{portal.login.acceptInvitationLink}">招待を受けた方はこちら</a>
+        </p>
+    </section>
+
+    <!-- MFA初期設定 -->
+    <section class="portal-card d-none" id="mfaSetupSection" aria-label="MFA設定">
+        <h2 th:text="#{portal.mfa.setupTitle}">認証アプリの設定</h2>
+        <p th:text="#{portal.mfa.setupGuide}">認証アプリ（Google Authenticator等）で下のQRコードまたは秘密鍵を登録してください。</p>
+        <div id="mfaQr" class="portal-qr" aria-hidden="true"></div>
+        <p class="text-break" id="mfaSecretLabel"></p>
+        <div class="mb-3">
+            <label for="mfaSetupCode" class="form-label" th:text="#{portal.mfa.code}">6桁コード</label>
+            <input type="text" class="form-control" id="mfaSetupCode" inputmode="numeric">
+        </div>
+        <div class="alert alert-warning d-none" id="mfaRecovery" role="alert">
+            <strong th:text="#{portal.mfa.recoveryTitle}">復旧コード（1回限り）</strong>
+            <div id="mfaRecoveryCode" class="portal-recovery"></div>
+            <div th:text="#{portal.mfa.recoveryNote}">このコードは一度しか使えません。安全な場所に保管してください。</div>
+        </div>
+        <button type="button" class="btn btn-primary w-100" id="mfaSetupButton"
+                th:text="#{portal.mfa.enableButton}">有効化</button>
+        <button type="button" class="btn btn-link w-100" id="mfaSetupBack"
+                th:text="#{portal.mfa.back}">戻る</button>
+    </section>
+
+    <p class="portal-support">
+        <span th:text="#{portal.support.line}">ご不明な点は担当営業までお問い合わせください。</span>
+    </p>
+</main>
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>PortalAuth.initLoginPage();</script>
+</body>
+</html>

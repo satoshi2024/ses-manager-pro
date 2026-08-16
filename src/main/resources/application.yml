@@ -209,6 +209,27 @@ app:
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
+  # ===== 外部顧客/BPポータル（S13。内部管理画面と分離したchain/session/rate limit: G3） =====
+  portal:
+    # portal session cookie名（内部JSESSIONIDと分離）
+    session-cookie-name: ${PORTAL_SESSION_COOKIE:PORTAL_SESSION}
+    # session絶対期限（時間）
+    session-max-lifetime-hours: ${PORTAL_SESSION_MAX_HOURS:12}
+    # sessionアイドル期限（分）
+    session-idle-timeout-minutes: ${PORTAL_SESSION_IDLE_MINUTES:30}
+    # 同一userの同時session上限
+    session-max-concurrent: ${PORTAL_SESSION_MAX_CONCURRENT:5}
+    rate-limit:
+      # login API（IPあたり/分）
+      login-per-minute: ${PORTAL_RATE_LOGIN:10}
+      # 招待受諾API（IPあたり/分）
+      invite-per-minute: ${PORTAL_RATE_INVITE:10}
+      # download API（userあたり/分）
+      download-per-minute: ${PORTAL_RATE_DOWNLOAD:60}
+      # upload API（userあたり/分）
+      upload-per-minute: ${PORTAL_RATE_UPLOAD:20}
+      # 検収API（userあたり/分）
+      acceptance-per-minute: ${PORTAL_RATE_ACCEPTANCE:20}
   # ===== PDF設定 =====
   pdf:
     # PDF出力用のCJKフォントパス（明示指定用）。

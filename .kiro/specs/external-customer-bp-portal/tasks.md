@@ -23,7 +23,7 @@
   - **テスト要件**: L0。matrixの全画面×全fieldに公開可否が付いていること、
     公開文書種別がG8 allow-listと一致すること、`git diff --check` exit 0。
 
-- [ ] F1. portal org/user/invite/consent DDL
+- [x] F1. portal org/user/invite/consent DDL
   - **Objective**: 顧客組織/BP組織とportal userを登録し、期限付き1回限りの招待tokenで参加できる。
     token再利用・期限切れ・email不一致は拒否される。全portal userにTOTP MFAと規約同意が要求される。
   - **実装ガイダンス**: **V104**/V1/H2(`sql/schema-portal-h2.sql`)/MySQL smoke、token/hash/session/permission。
@@ -36,7 +36,7 @@
     tokenが平文でDB/ログに残らないこと。
   - **Demo**: 招待→登録→MFA設定→規約同意。同じtokenを2回使って2回目が拒否されることを確認。
 
-- [ ] F2. 専用security chain/DTO boundary
+- [x] F2. 専用security chain/DTO boundary
   - **Objective**: portal userが内部URL・内部APIへ到達できず、
     顧客Aが顧客B/BPのID・URL・fileを一切取得できない。公開DTOに原価・粗利・営業memoが構造的に含まれない。
   - **実装ガイダンス**: `/portal/**`・`/api/portal/**`専用`SecurityFilterChain`と`PortalLoginUser`（design §2）。

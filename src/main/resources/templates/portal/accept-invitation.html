@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{portal.accept.title}">招待の受諾</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body">
+<main class="portal-card-container" role="main">
+    <h1 class="portal-brand" th:text="#{app.title}">SES管理プロ</h1>
+    <section class="portal-card" aria-label="招待の受諾">
+        <h2 th:text="#{portal.accept.title}">招待の受諾</h2>
+        <p th:text="#{portal.accept.guide}">招待メールのリンクから届いた登録情報を入力してください。</p>
+        <div class="alert alert-danger d-none" id="acceptError" role="alert" aria-live="polite"></div>
+        <form id="acceptForm" novalidate>
+            <div class="mb-3">
+                <label for="acceptEmail" class="form-label" th:text="#{portal.email}">メールアドレス</label>
+                <input type="email" class="form-control" id="acceptEmail" autocomplete="username" required
+                       aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="acceptDisplayName" class="form-label" th:text="#{portal.displayName}">表示名</label>
+                <input type="text" class="form-control" id="acceptDisplayName" autocomplete="name" required
+                       aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="acceptPassword" class="form-label" th:text="#{portal.password}">パスワード（8文字以上）</label>
+                <input type="password" class="form-control" id="acceptPassword" autocomplete="new-password"
+                       minlength="8" required aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="acceptPasswordConfirm" class="form-label" th:text="#{portal.passwordConfirm}">パスワード（確認）</label>
+                <input type="password" class="form-control" id="acceptPasswordConfirm" autocomplete="new-password"
+                       minlength="8" required aria-required="true">
+            </div>
+            <button type="submit" class="btn btn-primary w-100" id="acceptButton"
+                    th:text="#{portal.accept.button}">登録してログインへ</button>
+        </form>
+        <p class="portal-note mt-3">
+            <a th:href="@{/portal/login}" th:text="#{portal.login.back}">ログイン画面へ戻る</a>
+        </p>
+    </section>
+</main>
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>PortalAuth.initAcceptPage();</script>
+</body>
+</html>

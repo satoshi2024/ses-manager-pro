@@ -51,6 +51,9 @@ public class PortalUser extends BaseEntity {
     /** recovery code使用日時（NULL=未使用） */
     private LocalDateTime recoveryCodeUsedAt;
 
+    /** 最後に受理したTOTP step（同一コードの再使用をCASで拒否） */
+    private Long lastUsedStep;
+
     /** 最終login日時 */
     private LocalDateTime lastLoginAt;
 

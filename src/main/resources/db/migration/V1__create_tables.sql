@@ -9,6 +9,7 @@
 -- ============================================================
 -- テーブル削除（依存関係の逆順）
 -- ============================================================
+DROP TABLE IF EXISTS t_portal_session;
 DROP TABLE IF EXISTS t_portal_terms_consent;
 DROP TABLE IF EXISTS t_portal_user_permission;
 DROP TABLE IF EXISTS t_portal_invitation;
@@ -2504,6 +2505,7 @@ CREATE TABLE IF NOT EXISTS t_portal_user (
   mfa_enabled_at         DATETIME     COMMENT 'MFA設定完了日時（NULL=未設定でlogin不可）',
   recovery_code_hash     VARCHAR(255) COMMENT '1回限りrecovery codeのhash',
   recovery_code_used_at  DATETIME     COMMENT 'recovery code使用日時（NULL=未使用）',
+  last_used_step         BIGINT       COMMENT '最後に受理したTOTP step（同一コードの再使用をCASで拒否）',
   last_login_at          DATETIME     COMMENT '最終login日時',
   version                INT          NOT NULL DEFAULT 0 COMMENT '楽観ロック',
   created_at             DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
@@ -2560,3 +2562,25 @@ CREATE TABLE IF NOT EXISTS t_portal_terms_consent (
   CONSTRAINT fk_portal_terms_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータル利用規約同意';
+
+-- ---- 7) ポータルsession（S13 T083 F2。V1 fresh baseline; V104_1がlegacy forward migration） ----
+-- 生tokenは保存せずSHA-256 hashのみ保存する。内部t_user_session（V63）と同じ設計方針。
+CREATE TABLE IF NOT EXISTS t_portal_session (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  user_id       BIGINT       NOT NULL COMMENT 'portal user ID',
+  token_hash    CHAR(64)     NOT NULL COMMENT 'session tokenのSHA-256 hash（生tokenは保存しない）',
+  issued_at     DATETIME     NOT NULL COMMENT '発行日時',
+  last_seen_at  DATETIME     NOT NULL COMMENT '最終アクセス日時',
+  idle_expires_at DATETIME   NOT NULL COMMENT 'アイドル期限（未達なら失効）',
+  expires_at    DATETIME     NOT NULL COMMENT '絶対期限（既定12時間）',
+  ip_hash       VARCHAR(64)  COMMENT '接続元IPのSHA-256 hash（監査用。R4.2）',
+  user_agent    VARCHAR(512) COMMENT 'User-Agent（監査・一覧表示用）',
+  revoked_at    DATETIME     COMMENT '失効日時。NULL=有効',
+  revoked_reason VARCHAR(100) COMMENT '失効理由（LOGOUT / SUSPEND / ORG_SUSPEND / MFA_RESET / ADMIN / EXPIRED）',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  UNIQUE KEY uk_portal_session_token_hash (token_hash),
+  INDEX idx_portal_session_user (user_id),
+  INDEX idx_portal_session_revoked (revoked_at),
+  CONSTRAINT fk_portal_session_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータルセッション';

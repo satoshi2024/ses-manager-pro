@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{portal.terms.title}">利用規約</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body">
+<main class="portal-card-container" role="main">
+    <h1 class="portal-brand" th:text="#{app.title}">SES管理プロ</h1>
+    <section class="portal-card portal-terms" aria-label="利用規約">
+        <h2 th:text="#{portal.terms.title}">利用規約</h2>
+        <p class="portal-version" th:text="#{portal.terms.versionLabel(${termsVersion})}">Version 1</p>
+        <div class="portal-terms-body">
+            <p th:text="#{portal.terms.body.1}">本規約は、本ポータルの利用条件を定めるものです。</p>
+            <p th:text="#{portal.terms.body.2}">お客様または協力会社様は、本ポータルを自社の契約・検収・請求等の確認用途に限り利用できます。</p>
+            <p th:text="#{portal.terms.body.3}">本ポータルから取得した情報は、第三者へ開示・提供してはなりません。</p>
+            <p th:text="#{portal.terms.body.4}">セキュリティ上の問題を発見した場合は、直ちに担当営業へご連絡ください。</p>
+        </div>
+        <div class="alert alert-danger d-none" id="termsError" role="alert" aria-live="polite"></div>
+        <button type="button" class="btn btn-primary w-100" id="termsAgreeButton"
+                th:text="#{portal.terms.agree}">同意して利用する</button>
+        <button type="button" class="btn btn-link w-100" id="termsDeclineButton"
+                th:text="#{portal.terms.decline}">同意しない（ログアウト）</button>
+    </section>
+</main>
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>
+    PortalAuth.initTermsPage({
+        termsVersion: /*[[${termsVersion}]]*/ '1'
+    });
+</script>
+</body>
+</html>

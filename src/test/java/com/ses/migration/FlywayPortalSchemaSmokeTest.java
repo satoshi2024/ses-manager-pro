@@ -47,7 +47,7 @@ class FlywayPortalSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String table : new String[]{
                     "m_portal_organization", "t_portal_user", "t_portal_invitation",
-                    "t_portal_user_permission", "t_portal_terms_consent"}) {
+                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session"}) {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "m_portal_organization", "customer_id");
@@ -57,6 +57,8 @@ class FlywayPortalSchemaSmokeTest {
             assertColumnExists(statement, "t_portal_user", "version");
             assertColumnExists(statement, "t_portal_invitation", "token_hash");
             assertColumnExists(statement, "t_portal_invitation", "used_at");
+            assertColumnExists(statement, "t_portal_session", "token_hash");
+            assertColumnExists(statement, "t_portal_session", "revoked_at");
             assertColumnExists(statement, "t_bp_payment", "received_confirmed_at");
             // UNIQUE/CHECK/FK
             assertIndexExists(statement, "m_portal_organization", "uk_portal_org_customer");
@@ -65,11 +67,13 @@ class FlywayPortalSchemaSmokeTest {
             assertIndexExists(statement, "t_portal_invitation", "uk_portal_invite_token_hash");
             assertIndexExists(statement, "t_portal_user_permission", "uk_portal_user_permission");
             assertIndexExists(statement, "t_portal_terms_consent", "uk_portal_terms_consent");
+            assertIndexExists(statement, "t_portal_session", "uk_portal_session_token_hash");
             assertCheckExists(statement, "m_portal_organization", "chk_portal_org_type");
             assertCheckExists(statement, "t_portal_user", "chk_portal_user_status");
             assertCheckExists(statement, "t_portal_invitation", "chk_portal_invite_role");
             assertForeignKeyExists(statement, "t_portal_user", "fk_portal_user_org");
             assertForeignKeyExists(statement, "t_portal_terms_consent", "fk_portal_terms_user");
+            assertForeignKeyExists(statement, "t_portal_session", "fk_portal_session_user");
 
             // ---- seed ----
             assertEquals(1, queryInt(statement,
@@ -175,6 +179,8 @@ class FlywayPortalSchemaSmokeTest {
 
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             // ---- portal導入前shapeへの復元 ----
+            statement.executeUpdate("ALTER TABLE t_portal_session DROP FOREIGN KEY fk_portal_session_user");
+            statement.executeUpdate("DROP TABLE t_portal_session");
             statement.executeUpdate("ALTER TABLE t_portal_terms_consent DROP FOREIGN KEY fk_portal_terms_user");
             statement.executeUpdate("ALTER TABLE t_portal_user_permission DROP FOREIGN KEY fk_portal_user_perm_user");
             statement.executeUpdate("ALTER TABLE t_portal_invitation DROP FOREIGN KEY fk_portal_invite_org");
@@ -186,24 +192,25 @@ class FlywayPortalSchemaSmokeTest {
             statement.executeUpdate("DROP TABLE t_portal_invitation");
             statement.executeUpdate("DROP TABLE t_portal_user");
             statement.executeUpdate("DROP TABLE m_portal_organization");
+            // t_portal_sessionはV104_1が初めて追加するテーブル（target(103_1)時点では存在しない）。
             // t_bp_payment.received_confirmed_at はV104が初めて追加する列のため、
             // target(103_1)時点では存在せずDROP不要（V104のガード付きADDが存在判定する）。
             statement.executeUpdate("DELETE FROM m_menu WHERE menu_key='portal-admin'");
             statement.executeUpdate("DELETE FROM m_system_config WHERE config_key LIKE 'portal.%'");
         }
 
-        // ---- V104をlegacy DBへ順方向適用 ----
+        // ---- V104/V104_1をlegacy DBへ順方向適用 ----
         Flyway.configure()
                 .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("104")
+                .target("104_1")
                 .load()
                 .migrate();
 
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String table : new String[]{
                     "m_portal_organization", "t_portal_user", "t_portal_invitation",
-                    "t_portal_user_permission", "t_portal_terms_consent"}) {
+                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session"}) {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "t_bp_payment", "received_confirmed_at");
@@ -214,7 +221,7 @@ class FlywayPortalSchemaSmokeTest {
             Flyway.configure()
                     .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                     .locations("classpath:db/migration")
-                    .target("104")
+                    .target("104_1")
                     .load()
                     .migrate();
             String freshShape = portalShape(MYSQL.createConnection(""));
@@ -232,7 +239,7 @@ class FlywayPortalSchemaSmokeTest {
                              + "FROM information_schema.columns "
                              + "WHERE table_schema = DATABASE() AND table_name IN "
                              + "('m_portal_organization','t_portal_user','t_portal_invitation',"
-                             + "'t_portal_user_permission','t_portal_terms_consent') "
+                             + "'t_portal_user_permission','t_portal_terms_consent','t_portal_session') "
                              + "ORDER BY table_name, ordinal_position")) {
             while (rs.next()) {
                 sb.append(rs.getString(1)).append('|').append(rs.getString(2)).append('|')
