@@ -137,6 +137,10 @@ public class DocumentServiceImpl implements DocumentService {
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
+            // portal等の内部ログインuser以外からの登録時は作成者を明示指定できる（NOT NULL列対応）
+            if (request.getCreatedBy() != null) {
+                version.setCreatedBy(request.getCreatedBy());
+            }
             documentVersionMapper.insert(version);
 
             if (request.getTargetType() != null && request.getTargetId() != null) {
@@ -209,6 +213,9 @@ public class DocumentServiceImpl implements DocumentService {
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
+            if (request.getCreatedBy() != null) {
+                version.setCreatedBy(request.getCreatedBy());
+            }
             documentVersionMapper.insert(version);
 
             if ("CONFIRMED".equals(doc.getStatus())) {

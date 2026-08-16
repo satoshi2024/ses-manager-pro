@@ -1,4 +1,4 @@
-﻿package com.ses.migration;
+package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;

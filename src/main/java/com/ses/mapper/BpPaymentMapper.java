@@ -16,6 +16,47 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
     @Select("SELECT * FROM t_bp_payment WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     BpPayment selectByIdForUpdate(@Param("id") Long id);
 
+    /**
+     * BP portal用: 自社（bp_company_id）の発注/作業実績一覧（SQL境界。design §6.2）。
+     * 自社分の金額のみ。他BPの階層・社内情報は返さない。
+     */
+    @Select("""
+        <script>
+        SELECT
+            p.id AS id,
+            w.work_month AS workMonth,
+            w.actual_hours AS actualHours,
+            p.amount AS amount,
+            p.status AS status,
+            p.paid_date AS paidDate,
+            p.received_confirmed_at AS receivedConfirmedAt,
+            w.status AS workRecordStatus,
+            c.contract_no AS contractNo,
+            e.full_name AS engineerName
+        FROM t_bp_payment p
+        LEFT JOIN t_work_record w ON w.id = p.work_record_id
+        LEFT JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        WHERE p.bp_company_id = #{bpCompanyId}
+          AND p.deleted_flag = 0
+          <if test="status != null and status != ''">AND p.status = #{status}</if>
+        ORDER BY w.work_month DESC, p.id DESC
+        </script>
+        """)
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalBpPaymentDto> selectPortalPageDto(
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalBpPaymentDto> page,
+            @Param("bpCompanyId") Long bpCompanyId,
+            @Param("status") String status);
+
+    /**
+     * 受領確認の一回性CAS（R3.2）。自社分・未払・未確認のみ設定できる。更新0件=既に確認済み。
+     */
+    @org.apache.ibatis.annotations.Update("UPDATE t_bp_payment SET received_confirmed_at = #{now}"
+            + " WHERE id = #{id} AND bp_company_id = #{bpCompanyId}"
+            + " AND received_confirmed_at IS NULL AND status = '未払' AND deleted_flag = 0")
+    int confirmReceipt(@Param("id") Long id, @Param("bpCompanyId") Long bpCompanyId,
+                       @Param("now") java.time.LocalDateTime now);
+
     @Select("""
         <script>
         SELECT

@@ -547,6 +547,325 @@
 
             loadHeader();
             loadTab(currentTab);
+        },
+
+        /** BPポータル画面（発注・実績/空き要員/口座変更） */
+        initBpPage: function () {
+            const self = this;
+            let currentTab = 'payments';
+
+            function escapeHtml(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            function money(value) {
+                if (value == null) {
+                    return '-';
+                }
+                return Number(value).toLocaleString('ja-JP') + ' 円';
+            }
+
+            function showError(message) {
+                $('#portalError').text(message).removeClass('d-none');
+                $('#portalSuccess').addClass('d-none');
+            }
+
+            function showSuccess(message) {
+                $('#portalSuccess').text(message).removeClass('d-none');
+                $('#portalError').addClass('d-none');
+            }
+
+            function hideAlerts() {
+                $('#portalError').addClass('d-none').text('');
+                $('#portalSuccess').addClass('d-none').text('');
+            }
+
+            function loadHeader() {
+                $.get('/api/portal/auth/me').done(function (res) {
+                    if (!res || res.code !== 200) {
+                        window.location.href = '/portal/login';
+                        return;
+                    }
+                    $('#portalHeaderUser').text(res.data.displayName + '（BP）');
+                    if (res.data.termsPending) {
+                        window.location.href = '/portal/terms';
+                    }
+                }).fail(function () {
+                    window.location.href = '/portal/login';
+                });
+            }
+
+            $('#logoutButton').on('click', function () {
+                self.request({url: '/api/portal/auth/logout', method: 'POST'}).always(function () {
+                    window.location.href = '/portal/login';
+                });
+            });
+
+            $('.portal-tab').on('click', function () {
+                currentTab = $(this).data('tab');
+                $('.portal-tab').removeClass('active');
+                $(this).addClass('active');
+                $('.portal-tab-panel').addClass('d-none');
+                $('#tab-' + currentTab).removeClass('d-none');
+                hideAlerts();
+                if (currentTab === 'payments') { loadPayments(); }
+                if (currentTab === 'availabilities') { loadAvailabilities(); }
+                if (currentTab === 'bank') { loadBankAccounts(); }
+            });
+
+            // ===== 発注・実績 =====
+            function loadPayments() {
+                $.get('/api/portal/bp/payments?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (p) {
+                        const confirmBtn = (!p.receivedConfirmedAt && p.status === '未払')
+                            ? '<button type="button" class="btn btn-sm btn-outline-success" data-confirm-id="'
+                                + p.id + '">受領確認</button>' : '';
+                        const submitBtn = '<button type="button" class="btn btn-sm btn-outline-primary" data-submit-id="'
+                            + p.id + '" data-title="' + escapeHtml(p.workMonth || '') + '">提出</button>';
+                        const paid = p.status === '支払済'
+                            ? '<span class="portal-badge">支払済 ' + escapeHtml(p.paidDate || '') + '</span>'
+                            : '<span class="portal-badge">' + escapeHtml(p.status || '') + '</span>';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(p.workMonth || '-') + ' '
+                            + escapeHtml(p.contractNo || '') + ' ' + paid + '</div>'
+                            + '<div class="portal-muted">要員: ' + escapeHtml(p.engineerName || '-')
+                            + ' / 工数: ' + escapeHtml(p.actualHours == null ? '-' : p.actualHours) + 'h'
+                            + ' / 金額: ' + money(p.amount) + '</div>'
+                            + '<div class="portal-muted">支払予定: ' + escapeHtml(p.paymentScheduleDate || '未確定')
+                            + ' / 提出物: ' + p.submissionCount + '件</div>'
+                            + '<div class="portal-row-actions">' + confirmBtn + submitBtn + '</div></div>';
+                    }).join('');
+                    $('#paymentList').html(rows || '<p class="portal-muted">表示できる発注はありません</p>');
+                    $('[data-confirm-id]').on('click', function () {
+                        confirmReceipt($(this).data('confirm-id'));
+                    });
+                    $('[data-submit-id]').on('click', function () {
+                        openSubmissionModal($(this).data('submit-id'), $(this).data('title'));
+                    });
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            function confirmReceipt(id) {
+                self.request({url: '/api/portal/bp/payments/' + id + '/confirm-receipt', method: 'POST'})
+                    .done(function (res) {
+                        if (res.code !== 200) { showError(res.message); return; }
+                        showSuccess('受領確認しました');
+                        loadPayments();
+                    })
+                    .fail(function (xhr) {
+                        showError(xhr.responseJSON && xhr.responseJSON.message
+                            ? xhr.responseJSON.message : '受領確認に失敗しました');
+                    });
+            }
+
+            function openSubmissionModal(id, title) {
+                $('#submissionModalError').addClass('d-none');
+                $('#submissionModalTitle').text('提出 ' + title);
+                $('#submissionFile').val('');
+                loadSubmissions(id);
+                bootstrap.Modal.getOrCreateInstance('#submissionModal').show();
+                $('#submissionUploadButton').off('click').on('click', function () {
+                    uploadSubmission(id);
+                });
+            }
+
+            function loadSubmissions(id) {
+                $.get('/api/portal/bp/payments/' + id + '/submissions').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data || []).map(function (s) {
+                        const dl = s.downloadable
+                            ? '<a class="btn btn-sm btn-outline-primary" href="/api/portal/bp/payments/' + id
+                                + '/submissions/' + s.documentId + '/download" target="_blank" rel="noopener">DL</a>' : '';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(s.originalName || s.title || '') + '</div>'
+                            + '<div class="portal-row-actions">' + dl + '</div></div>';
+                    }).join('');
+                    $('#submissionList').html(rows || '<p class="portal-muted">提出物はありません</p>');
+                }).fail(function () { showError('提出物の読み込みに失敗しました'); });
+            }
+
+            function uploadSubmission(id) {
+                const fileInput = $('#submissionFile')[0];
+                if (!fileInput.files || !fileInput.files[0]) {
+                    $('#submissionModalError').text('ファイルを選択してください').removeClass('d-none');
+                    return;
+                }
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                const csrf = readCookie('XSRF-TOKEN-PORTAL');
+                $.ajax({
+                    url: '/api/portal/bp/payments/' + id + '/submissions',
+                    method: 'POST',
+                    headers: csrf ? {'X-XSRF-TOKEN-PORTAL': csrf} : {},
+                    data: formData,
+                    processData: false,
+                    contentType: false
+                }).done(function (res) {
+                    if (res.code !== 200) {
+                        $('#submissionModalError').text(res.message).removeClass('d-none');
+                        return;
+                    }
+                    loadSubmissions(id);
+                    loadPayments();
+                }).fail(function (xhr) {
+                    let message = '提出に失敗しました';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        message = xhr.responseJSON.message;
+                    }
+                    $('#submissionModalError').text(message).removeClass('d-none');
+                });
+            }
+
+            // ===== 空き要員 =====
+            function loadAvailabilities() {
+                $.get('/api/portal/bp/availabilities?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (a) {
+                        const edit = (a.status === '未確認' || a.status === '却下')
+                            ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-edit-id="' + a.id
+                                + '">編集</button>' : '';
+                        const stop = a.status === '提案可能'
+                            ? '<button type="button" class="btn btn-sm btn-outline-danger" data-stop-id="' + a.id
+                                + '">停止</button>' : '';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(a.initialName)
+                            + ' <span class="portal-badge">' + escapeHtml(a.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(a.skillsJson || '')
+                            + ' / ' + money(a.unitPrice) + '</div>'
+                            + '<div class="portal-row-actions">' + edit + stop + '</div></div>';
+                    }).join('');
+                    $('#availabilityList').html(rows || '<p class="portal-muted">登録した空き要員はありません</p>');
+                    $('[data-edit-id]').on('click', function () {
+                        openAvailabilityModal($(this).data('edit-id'));
+                    });
+                    $('[data-stop-id]').on('click', function () {
+                        stopAvailability($(this).data('stop-id'));
+                    });
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            $('#availabilityAddButton').on('click', function () {
+                openAvailabilityModal(null);
+            });
+
+            function openAvailabilityModal(id) {
+                $('#availabilityModalError').addClass('d-none');
+                $('#availabilityModalTitle').text(id ? '空き要員を編集' : '空き要員を登録');
+                $('#avName').val('');
+                $('#avSkills').val('');
+                $('#avUnitPrice').val('');
+                $('#avAvailableFrom').val('');
+                $('#avExperience').val('');
+                $('#avRemarks').val('');
+                if (id) {
+                    $.get('/api/portal/bp/availabilities?current=1&size=100').done(function (res) {
+                        const item = (res.data.records || []).find(function (a) { return a.id === id; });
+                        if (item) {
+                            $('#avName').val(item.initialName || '');
+                            $('#avSkills').val(item.skillsJson || '');
+                            $('#avUnitPrice').val(item.unitPrice == null ? '' : item.unitPrice);
+                            $('#avAvailableFrom').val(item.availableFrom || '');
+                            $('#avExperience').val(item.experienceYears == null ? '' : item.experienceYears);
+                            $('#avRemarks').val(item.remarks || '');
+                        }
+                    });
+                }
+                bootstrap.Modal.getOrCreateInstance('#availabilityModal').show();
+                $('#availabilitySaveButton').off('click').on('click', function () {
+                    saveAvailability(id);
+                });
+            }
+
+            function saveAvailability(id) {
+                const payload = {
+                    initialName: $('#avName').val().trim(),
+                    skillsJson: $('#avSkills').val().trim() || null,
+                    unitPrice: $('#avUnitPrice').val() ? Number($('#avUnitPrice').val()) : null,
+                    availableFrom: $('#avAvailableFrom').val() || null,
+                    experienceYears: $('#avExperience').val() ? Number($('#avExperience').val()) : null,
+                    remarks: $('#avRemarks').val().trim() || null
+                };
+                const url = id ? '/api/portal/bp/availabilities/' + id : '/api/portal/bp/availabilities';
+                const method = id ? 'PUT' : 'POST';
+                self.request({url: url, method: method, contentType: 'application/json', data: JSON.stringify(payload)})
+                    .done(function (res) {
+                        if (res.code !== 200) {
+                            $('#availabilityModalError').text(res.message).removeClass('d-none');
+                            return;
+                        }
+                        bootstrap.Modal.getInstance('#availabilityModal').hide();
+                        loadAvailabilities();
+                    })
+                    .fail(function (xhr) {
+                        $('#availabilityModalError').text(
+                            xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : '保存に失敗しました'
+                        ).removeClass('d-none');
+                    });
+            }
+
+            function stopAvailability(id) {
+                self.request({url: '/api/portal/bp/availabilities/' + id + '/stop', method: 'POST'})
+                    .done(function (res) {
+                        if (res.code !== 200) { showError(res.message); return; }
+                        showSuccess('停止しました');
+                        loadAvailabilities();
+                    })
+                    .fail(function (xhr) {
+                        showError(xhr.responseJSON && xhr.responseJSON.message
+                            ? xhr.responseJSON.message : '停止に失敗しました');
+                    });
+            }
+
+            // ===== 口座変更 =====
+            function loadBankAccounts() {
+                $.get('/api/portal/bp/bank-accounts').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data || []).map(function (b) {
+                        return '<div class="portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(b.maskedLabel || '')
+                            + ' <span class="portal-badge">' + escapeHtml(b.approvalStatus || '') + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(b.bankName || '') + ' '
+                            + escapeHtml(b.branchName || '') + ' / ' + escapeHtml(b.accountHolder || '') + '</div>'
+                            + '</div>';
+                    }).join('');
+                    $('#bankAccountList').html(rows
+                        ? '<h3 class="portal-list-heading">登録済み口座</h3>' + rows
+                        : '<p class="portal-muted">登録済み口座はありません</p>');
+                }).fail(function () { showError('口座の読み込みに失敗しました'); });
+            }
+
+            $('#bankAccountForm').on('submit', function (event) {
+                event.preventDefault();
+                const payload = {
+                    bankName: $('#bankName').val().trim(),
+                    branchName: $('#branchName').val().trim(),
+                    accountType: $('#accountType').val(),
+                    accountNumber: $('#accountNumber').val().trim(),
+                    accountHolder: $('#accountHolder').val().trim()
+                };
+                if (!payload.bankName || !payload.branchName || !payload.accountNumber || !payload.accountHolder) {
+                    showError('すべての項目を入力してください');
+                    return;
+                }
+                self.request({url: '/api/portal/bp/bank-accounts', method: 'POST',
+                        contentType: 'application/json', data: JSON.stringify(payload)})
+                    .done(function (res) {
+                        if (res.code !== 200) { showError(res.message); return; }
+                        showSuccess('口座変更を申請しました。内部承認後に反映されます。');
+                        $('#bankAccountForm')[0].reset();
+                        loadBankAccounts();
+                    })
+                    .fail(function (xhr) {
+                        showError(xhr.responseJSON && xhr.responseJSON.message
+                            ? xhr.responseJSON.message : '申請に失敗しました');
+                    });
+            });
+
+            loadHeader();
+            loadPayments();
         }
     };
 

@@ -22,6 +22,15 @@ public class ApprovalTargetAdapterRegistry {
 
     public ApprovalRequest request(String requestType, String targetType, Long targetId,
                                    Map<String, Object> command) {
+        return request(requestType, targetType, targetId, command, SecurityUtils.currentUserId());
+    }
+
+    /**
+     * 申請者を明示指定するoverload（portal等、内部ログインuser以外が申請する場合）。
+     * 申請者は内部sys_userでなければならない（承認routeの解決・承認者通知に使用される）。
+     */
+    public ApprovalRequest request(String requestType, String targetType, Long targetId,
+                                   Map<String, Object> command, Long applicantId) {
         ApprovalTargetAdapter adapter = adapters.stream()
                 .filter(a -> a.supportedRequestTypes().contains(requestType))
                 .findFirst()
@@ -30,7 +39,7 @@ public class ApprovalTargetAdapterRegistry {
         adapter.validateBeforeRequest(snapshot);
         String idempotencyKey = key(requestType, targetType, targetId, command);
         return engine.request(new ApprovalRequestCommand(requestType, targetType, targetId,
-                snapshot.targetVersion(), SecurityUtils.currentUserId(), snapshot.organizationId(),
+                snapshot.targetVersion(), applicantId, snapshot.organizationId(),
                 snapshot.amountSnapshot(), snapshot.payload(), snapshot.diff(), idempotencyKey));
     }
 

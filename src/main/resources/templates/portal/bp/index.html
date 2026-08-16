@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{portal.bp.title}">BPポータル</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body">
+<header class="portal-header">
+    <span class="portal-header-brand" th:text="#{app.title}">SES管理プロ</span>
+    <span class="portal-header-user" id="portalHeaderUser"></span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton"
+            th:text="#{portal.logout}">ログアウト</button>
+</header>
+
+<nav class="portal-tabs" aria-label="メニュー">
+    <button type="button" class="portal-tab active" data-tab="payments"
+            th:text="#{portal.bp.tab.payments}">発注・実績</button>
+    <button type="button" class="portal-tab" data-tab="availabilities"
+            th:text="#{portal.bp.tab.availabilities}">空き要員</button>
+    <button type="button" class="portal-tab" data-tab="bank"
+            th:text="#{portal.bp.tab.bank}">口座変更</button>
+</nav>
+
+<main class="portal-container" role="main">
+    <div class="alert alert-danger d-none" id="portalError" role="alert" aria-live="polite"></div>
+    <div class="alert alert-success d-none" id="portalSuccess" role="alert" aria-live="polite"></div>
+
+    <!-- 発注・作業実績（受領確認・請求書/作業報告書の提出・支払状況） -->
+    <section id="tab-payments" class="portal-tab-panel">
+        <h2 th:text="#{portal.bp.payments.title}">発注・作業実績</h2>
+        <p class="portal-muted" th:text="#{portal.bp.payments.guide}">発注内容の受領確認、請求書/作業報告書の提出、支払状況の確認ができます。</p>
+        <div class="portal-list" id="paymentList"></div>
+    </section>
+
+    <!-- 空き要員 -->
+    <section id="tab-availabilities" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.bp.availabilities.title}">空き要員</h2>
+        <p class="portal-muted" th:text="#{portal.bp.availabilities.guide}">登録した要員は内部営業の確認後に有効化されます。</p>
+        <button type="button" class="btn btn-primary mb-3" id="availabilityAddButton"
+                th:text="#{portal.bp.availability.add}">空き要員を登録</button>
+        <div class="portal-list" id="availabilityList"></div>
+    </section>
+
+    <!-- 口座変更 -->
+    <section id="tab-bank" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.bp.bank.title}">口座変更申請</h2>
+        <p class="portal-muted" th:text="#{portal.bp.bank.guide}">申請した口座は内部承認後に支払先へ反映されます。</p>
+        <div class="portal-card mb-3" id="bankAccountList"></div>
+        <form id="bankAccountForm" class="portal-card">
+            <h3 th:text="#{portal.bp.bank.new}">新しい口座の申請</h3>
+            <div class="mb-3">
+                <label for="bankName" class="form-label" th:text="#{portal.bp.bank.name}">銀行名</label>
+                <input type="text" class="form-control" id="bankName" required aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="branchName" class="form-label" th:text="#{portal.bp.bank.branch}">支店名</label>
+                <input type="text" class="form-control" id="branchName" required aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="accountType" class="form-label" th:text="#{portal.bp.bank.type}">口座種別</label>
+                <select class="form-select" id="accountType">
+                    <option value="ORDINARY">普通</option>
+                    <option value="CURRENT">当座</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="accountNumber" class="form-label" th:text="#{portal.bp.bank.number}">口座番号</label>
+                <input type="text" class="form-control" id="accountNumber" required aria-required="true">
+            </div>
+            <div class="mb-3">
+                <label for="accountHolder" class="form-label" th:text="#{portal.bp.bank.holder}">口座名義</label>
+                <input type="text" class="form-control" id="accountHolder" required aria-required="true">
+            </div>
+            <button type="submit" class="btn btn-primary w-100" th:text="#{portal.bp.bank.submit}">申請する</button>
+        </form>
+    </section>
+</main>
+
+<!-- 空き要員モーダル -->
+<div class="modal fade" id="availabilityModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="availabilityModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="availabilityModalError" role="alert" aria-live="polite"></div>
+                <div class="mb-3">
+                    <label for="avName" class="form-label" th:text="#{portal.bp.availability.name}">氏名</label>
+                    <input type="text" class="form-control" id="avName" required aria-required="true">
+                </div>
+                <div class="mb-3">
+                    <label for="avSkills" class="form-label" th:text="#{portal.bp.availability.skills}">スキル/経歴</label>
+                    <textarea class="form-control" id="avSkills" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="avUnitPrice" class="form-label" th:text="#{portal.bp.availability.unitPrice}">単価（円）</label>
+                    <input type="number" class="form-control" id="avUnitPrice" min="0" required aria-required="true">
+                </div>
+                <div class="mb-3">
+                    <label for="avAvailableFrom" class="form-label" th:text="#{portal.bp.availability.availableFrom}">稼働可能日</label>
+                    <input type="date" class="form-control" id="avAvailableFrom">
+                </div>
+                <div class="mb-3">
+                    <label for="avExperience" class="form-label" th:text="#{portal.bp.availability.experience}">経験年数</label>
+                    <input type="number" class="form-control" id="avExperience" min="0">
+                </div>
+                <div class="mb-3">
+                    <label for="avRemarks" class="form-label" th:text="#{portal.bp.availability.remarks}">備考</label>
+                    <textarea class="form-control" id="avRemarks" rows="2" maxlength="1000"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="availabilitySaveButton"
+                        th:text="#{portal.save}">登録</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        th:text="#{portal.close}">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 提出モーダル -->
+<div class="modal fade" id="submissionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="submissionModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="submissionModalError" role="alert" aria-live="polite"></div>
+                <p th:text="#{portal.bp.submission.guide}">請求書または作業報告書のPDFを選択してください（10MBまで）。</p>
+                <div class="mb-3">
+                    <input type="file" class="form-control" id="submissionFile" accept=".pdf,.PDF" required
+                           aria-required="true">
+                </div>
+                <div class="portal-list" id="submissionList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="submissionUploadButton"
+                        th:text="#{portal.bp.submission.upload}">提出</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        th:text="#{portal.close}">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>PortalAuth.initBpPage();</script>
+</body>
+</html>

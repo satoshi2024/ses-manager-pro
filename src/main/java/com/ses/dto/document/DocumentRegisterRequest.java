@@ -66,6 +66,13 @@ public class DocumentRegisterRequest {
     /** 差替理由（訂正・差替時） */
     private String changeReason;
 
+    /**
+     * 作成者（内部sys_user ID。任意）。
+     * 内部ログインuser以外（portal等）が登録する場合に明示指定する。
+     * 未指定時は従来どおり認証userから自動補完される。
+     */
+    private Long createdBy;
+
     // ---- 業務リンク情報 ----
 
     /** 紐付け先エンティティ種別（CONTRACT/CUSTOMER/PROJECT等） */

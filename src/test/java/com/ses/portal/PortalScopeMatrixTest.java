@@ -80,7 +80,10 @@ class PortalScopeMatrixTest extends PortalTestSupport {
                 Arguments.of("GET", "/api/portal/customer/sales-orders", "CUSTOMER"),
                 Arguments.of("GET", "/api/portal/customer/contracts", "CUSTOMER"),
                 Arguments.of("GET", "/api/portal/customer/acceptances", "CUSTOMER"),
-                Arguments.of("GET", "/api/portal/customer/invoices", "CUSTOMER")
+                Arguments.of("GET", "/api/portal/customer/invoices", "CUSTOMER"),
+                Arguments.of("GET", "/api/portal/bp/payments", "BP"),
+                Arguments.of("GET", "/api/portal/bp/availabilities", "BP"),
+                Arguments.of("GET", "/api/portal/bp/bank-accounts", "BP")
         );
     }
 
