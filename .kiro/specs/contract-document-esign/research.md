@@ -29,6 +29,14 @@
 
 実装着手時と HFP-02-09 sandbox E2E 前に再取得する。version または SHA が変わったら、固定 fixture/typed DTO/error mapping の差分を Review するまで provider adapter の更新を止める。
 
+### 2.2 再取得記録（HFP-02-00 実施時）
+
+| 取得日 | 結果 | 根拠 |
+|---|---|---|
+| 2026-08-14 | **不変**（version 0.36.0 / SHA-256 `f832681318e67b9fb5fe9a0bb368a570762401dcd4a62b98a934deebb192a240` / Last-Modified 2026-08-04 09:40:39 UTC / raw length 147111 bytes） | `curl.exe -s -o` で保存した生 bytes の SHA-256。`Invoke-WebRequest` は gzip 自動展開で hash が変わるため、以後は curl 生 bytes で固定する |
+
+HFP-02-00 で OpenAPI 本体から抽出した契約詳細を §3 の表へ反映済み（http status 別の error 値、`errorModel={error,message}`、429 は 800 request/token/min 超過で 60 秒ブロック、`GET /documents/{id}/certificate` は締結済み以外 404、decline は `PUT /documents/{id}/decline` で comment 1000 文字以内、participant は name のみ required だが 400 説明は email/name 空・不正を error とする）。fixture は `src/test/resources/cloudsign/cloudsign-openapi-0.36.0-fixture.json` と `CloudSignOpenApiFixtureSchemaTest` で固定する。
+
 ## 3. 公式契約で確認済みの事実
 
 ### HFP-02-EV-F01 — 認証は OAuth ではない

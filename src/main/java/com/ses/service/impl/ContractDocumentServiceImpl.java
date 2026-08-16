@@ -7,7 +7,6 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.TemplateRenderer;
 import com.ses.entity.*;
 import com.ses.mapper.*;
-import com.ses.service.CloudSignClient;
 import com.ses.service.ContractDocumentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,8 +23,8 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     
     private final ContractTemplateMapper templates;
     private final com.ses.mapper.ContractMapper contracts;
-    private final com.ses.service.CloudSignClient cloudSign;
     private final com.ses.common.util.PdfFontUtils pdfFontUtils;
+    private final com.ses.config.CloudSignProperties cloudSignProperties;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.mapper.FileSecurityMetadataMapper> metadataMapperProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.security.FileScanner> fileScannerProvider;
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.DocumentService> documentServiceProvider;
@@ -125,61 +124,107 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     }
 
     @Override
-    public void send(Long id) {
+    @org.springframework.transaction.annotation.Transactional
+    public ContractDocument queueSend(Long id, com.ses.dto.cloudsign.ConfirmedSendRequest request) {
+        // kill switch: enabled=falseの間は新規queue受付も停止する（HFP-02-AC-12-03）
+        if (!cloudSignProperties.isEnabled()) {
+            throw BusinessException.of("error.contract.document.cloudsignNotConfigured");
+        }
         ContractDocument d = getById(id);
         if (d == null) {
             throw BusinessException.of("error.contract.document.notFound");
         }
-        if (!"下書き".equals(d.getStatus())) {
+        // 確認済みpayloadが現在の書類/契約と一致することを検証（HFP-02-AC-03-04/05）
+        Contract c = contracts.selectById(d.getContractId());
+        if (c == null || !Objects.equals(c.getContractNo(), request.contractNo())) {
+            throw BusinessException.of("error.contract.document.payloadChanged");
+        }
+        if (!Objects.equals(d.getTemplateVersion(), request.templateVersion())
+                || !Objects.equals(d.getRecipientName(), request.recipientName())
+                || !Objects.equals(d.getRecipientEmail(), request.recipientEmail())) {
+            throw BusinessException.of("error.contract.document.payloadChanged");
+        }
+        // 送信直前に原本PDFの存在・正規化path・magic/終端・size・保存hash一致を検査（HFP-02-AC-03-01）
+        verifySourcePdf(d);
+
+        String payloadHash = com.ses.service.cloudsign.CloudSignPayloadHasher.hash(request);
+        String currentState = d.getDispatchState();
+        if (com.ses.common.enums.DispatchState.QUEUED.name().equals(currentState)
+                && Objects.equals(d.getSendPayloadSha256(), payloadHash)
+                && d.getOperationId() != null) {
+            // 同一payloadの再queue（二重クリック）は既存operationを返す（冪等）
+            return d;
+        }
+        if (currentState != null && !com.ses.common.enums.DispatchState.NONE.name().equals(currentState)) {
             throw BusinessException.of("error.contract.document.invalidState");
         }
-        
-        CloudSignClient.Result r = cloudSign.send(d);
-        d.setCloudsignDocumentId(r.documentId());
-        d.setCloudsignFileId(r.fileId());
-        d.setStatus(r.status());
-        d.setSentAt(java.time.LocalDateTime.now());
-        updateById(d);
+        if (d.getSendPayloadSha256() != null && !d.getSendPayloadSha256().equals(payloadHash)) {
+            // queue後に原本/宛先が変わった（HFP-02-AC-03-05）
+            throw BusinessException.of("error.contract.document.payloadChanged");
+        }
+        String operationId = d.getOperationId() != null ? d.getOperationId()
+                : java.util.UUID.randomUUID().toString();
+        int updated = baseMapper.casQueue(id, safeVersion(d), operationId, payloadHash);
+        if (updated == 0) {
+            // 並列requestが先にqueueした可能性: 再読込して同じoperationなら成功扱い
+            ContractDocument reloaded = getById(id);
+            if (reloaded != null
+                    && com.ses.common.enums.DispatchState.QUEUED.name().equals(reloaded.getDispatchState())
+                    && Objects.equals(reloaded.getSendPayloadSha256(), payloadHash)) {
+                return reloaded;
+            }
+            throw BusinessException.of("error.contract.document.invalidState");
+        }
+        ContractDocument queued = getById(id);
+        log.info("契約書の送信をqueue受付: docId={} operationId={} payloadHashPrefix={}",
+                id, operationId, payloadHash.substring(0, 8));
+        return queued;
     }
 
-    @Override
-    @org.springframework.transaction.annotation.Transactional
-    public void sync(Long id) {
-        ContractDocument d = getById(id);
-        if (d == null) {
-            throw BusinessException.of("error.contract.document.notFound");
+    private static int safeVersion(ContractDocument doc) {
+        return doc.getVersion() == null ? 0 : doc.getVersion();
+    }
+
+    /** 送信原本PDFの事前検証（存在・正規化path・PDF magic/EOF・size・保存hash一致）。 */
+    private void verifySourcePdf(ContractDocument d) {
+        if (d.getPdfPath() == null || d.getPdfSha256() == null) {
+            throw BusinessException.of("error.contract.document.sourceMissing");
         }
-        
-        CloudSignClient.Result r = cloudSign.status(d.getCloudsignDocumentId());
-        d.setStatus(r.status());
-        d.setCloudsignFileId(r.fileId());
-        d.setLastSyncedAt(java.time.LocalDateTime.now());
-        
         try {
-            if (r.signedPdf() != null && r.signedPdf().length > 0) {
-                Path p = safePath(id, "signed-" + id + ".pdf");
-                Files.createDirectories(p.getParent());
-                Files.write(p, r.signedPdf(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-                scanAndRecordExternalFile(p, r.signedPdf(), d.getId());
-                d.setSignedPdfPath(p.toString());
-                d.setPdfSha256(hex(MessageDigest.getInstance("SHA-256").digest(r.signedPdf())));
-                registerSignedPdfToLedger(d, r.signedPdf(), p);
+            Path root = Paths.get(uploadBase).toAbsolutePath().normalize();
+            Path target = Paths.get(d.getPdfPath()).toAbsolutePath().normalize();
+            if (!target.startsWith(root)) {
+                throw BusinessException.of("error.contract.document.sourceInvalid");
             }
-            if (r.certificate() != null && r.certificate().length > 0) {
-                Path p = safePath(id, "certificate-" + id + ".dat");
-                Files.createDirectories(p.getParent());
-                Files.write(p, r.certificate(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-                scanAndRecordExternalFile(p, r.certificate(), d.getId());
-                d.setCertificatePath(p.toString());
-                registerCertificateToLedger(d, r.certificate(), p);
+            if (!Files.isRegularFile(target)) {
+                throw BusinessException.of("error.contract.document.sourceMissing");
+            }
+            byte[] bytes = Files.readAllBytes(target);
+            if (bytes.length == 0 || !isPdfBytes(bytes)) {
+                throw BusinessException.of("error.contract.document.sourceInvalid");
+            }
+            String current = hex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            if (!current.equals(d.getPdfSha256())) {
+                throw BusinessException.of("error.contract.document.sourceChanged");
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            throw BusinessException.of("error.contract.document.fileSaveFailed", e.getMessage());
+            throw BusinessException.of("error.contract.document.sourceInvalid");
         }
-        
-        updateById(d);
+    }
+
+    private static boolean isPdfBytes(byte[] data) {
+        if (data.length < 8) {
+            return false;
+        }
+        if (data[0] != 0x25 || data[1] != 0x50 || data[2] != 0x44 || data[3] != 0x46 || data[4] != 0x2D) {
+            return false;
+        }
+        String tail = new String(data, Math.max(0, data.length - 1024), Math.min(data.length, 1024),
+                java.nio.charset.StandardCharsets.ISO_8859_1);
+        int eof = tail.lastIndexOf("%%EOF");
+        return eof >= 0 && tail.substring(eof + 5).trim().isEmpty();
     }
 
     @Override
@@ -189,7 +234,8 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             throw BusinessException.of("error.contract.document.notFound");
         }
         
-        String p = d.getSignedPdfPath() != null ? d.getSignedPdfPath() : d.getPdfPath();
+        // 送信原本（ローカル生成物）のみ。signed/certificateはCloudSignArtifactServiceが別経路で返す。
+        String p = d.getPdfPath();
         if (p == null) {
             throw BusinessException.of("error.contract.document.fileNotFound");
         }
@@ -260,70 +306,6 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         }
     }
 
-    private void scanAndRecordExternalFile(Path filePath, byte[] data, Long documentId) {
-        com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
-        com.ses.service.security.FileScanner scanner = fileScannerProvider.getIfAvailable();
-        String storedName = relativeStoredName(filePath);
-        com.ses.service.security.FileScanResult result = null;
-        if (scanner != null) {
-            try {
-                result = scanner.scan(filePath, com.ses.common.enums.FileKind.SKILL_SHEET);
-            } catch (RuntimeException e) {
-                result = com.ses.service.security.FileScanResult.unavailable("scanner failed");
-            }
-        } else {
-            result = com.ses.service.security.FileScanResult.unavailable("scanner is not configured");
-        }
-
-        if (result != null && result.status() != com.ses.service.security.FileScanResult.Status.CLEAN) {
-            if (mapper != null) {
-                FileSecurityMetadata metadata = new FileSecurityMetadata();
-                metadata.setTenantId("default");
-                metadata.setStoredName(storedName);
-                metadata.setFileKind("CONTRACT_DOCUMENT");
-                metadata.setStorageState("QUARANTINED");
-                metadata.setScanStatus(result.status().name());
-                metadata.setRejectionReason(result.reason());
-                metadata.setOwnerType("CONTRACT_DOCUMENT");
-                metadata.setOwnerId(documentId);
-                metadata.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
-                metadata.setCreatedAt(java.time.LocalDateTime.now());
-                metadata.setUpdatedAt(java.time.LocalDateTime.now());
-                if (mapper.insert(metadata) != 1) {
-                    throw BusinessException.of("error.file.saveFailed");
-                }
-            }
-            throw BusinessException.of("error.file.scanRejected");
-        }
-
-        if (mapper != null) {
-            FileSecurityMetadata metadata = mapper.selectByStoredName("default", storedName);
-            if (metadata == null) {
-                metadata = new FileSecurityMetadata();
-                metadata.setTenantId("default");
-                metadata.setStoredName(storedName);
-                metadata.setFileKind("CONTRACT_DOCUMENT");
-                metadata.setStorageState("PUBLISHED");
-                metadata.setScanStatus("CLEAN");
-                metadata.setOwnerType("CONTRACT_DOCUMENT");
-                metadata.setOwnerId(documentId);
-                metadata.setCreatedBy(com.ses.common.util.SecurityUtils.currentUserId());
-                metadata.setCreatedAt(java.time.LocalDateTime.now());
-                metadata.setUpdatedAt(java.time.LocalDateTime.now());
-                if (mapper.insert(metadata) != 1) {
-                    throw BusinessException.of("error.file.saveFailed");
-                }
-            } else {
-                metadata.setStorageState("PUBLISHED");
-                metadata.setScanStatus("CLEAN");
-                metadata.setUpdatedAt(java.time.LocalDateTime.now());
-                if (mapper.updateById(metadata) != 1) {
-                    throw BusinessException.of("error.file.saveFailed");
-                }
-            }
-        }
-    }
-
     private void registerToDocumentLedger(ContractDocument doc, Contract contract) {
         com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
         if (docService == null || doc.getPdfPath() == null) {
@@ -357,70 +339,6 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             }
         } catch (Exception e) {
             log.warn("[帳票連携] 法定文書台帳への自動登録に失敗しました: contractId={} error={}", contract.getId(), e.getMessage());
-        }
-    }
-
-    private void registerSignedPdfToLedger(ContractDocument doc, byte[] pdfBytes, Path pdfPath) {
-        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
-        if (docService == null || pdfBytes == null || pdfBytes.length == 0) {
-            return;
-        }
-        try {
-            Contract contract = contracts.selectById(doc.getContractId());
-            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                    .documentType("SIGNED_PDF")
-                    .title("署名済 PDF: " + Objects.toString(doc.getCloudsignDocumentId(), "ID:" + doc.getId()))
-                    .documentNo(contract != null ? contract.getContractNo() : null)
-                    .counterpartyType("CUSTOMER")
-                    .counterpartyId(contract != null ? contract.getCustomerId() : null)
-                    .transactionDate(doc.getSentAt() != null ? doc.getSentAt().toLocalDate() : java.time.LocalDate.now())
-                    .amount(contract != null ? contract.getSellingPrice() : null)
-                    .direction("OUTGOING")
-                    .originalName(pdfPath.getFileName().toString())
-                    .contentType("application/pdf")
-                    .sourceType("SIGNED")
-                    .businessKey("CONTRACT:" + doc.getContractId())
-                    .versionDiscriminator("signed-v1")
-                    .externalId(doc.getCloudsignDocumentId())
-                    .targetType("CONTRACT")
-                    .targetId(doc.getContractId())
-                    .build();
-
-            docService.registerGenerated(req, new java.io.ByteArrayInputStream(pdfBytes));
-        } catch (Exception e) {
-            log.warn("[帳票連携] 署名済PDFの台帳登録失敗: docId={} error={}", doc.getId(), e.getMessage());
-        }
-    }
-
-    private void registerCertificateToLedger(ContractDocument doc, byte[] certBytes, Path certPath) {
-        com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
-        if (docService == null || certBytes == null || certBytes.length == 0) {
-            return;
-        }
-        try {
-            Contract contract = contracts.selectById(doc.getContractId());
-            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                    .documentType("ESIGN_CERT")
-                    .title("合意締結証明書: " + Objects.toString(doc.getCloudsignDocumentId(), "ID:" + doc.getId()))
-                    .documentNo(contract != null ? contract.getContractNo() : null)
-                    .counterpartyType("CUSTOMER")
-                    .counterpartyId(contract != null ? contract.getCustomerId() : null)
-                    .transactionDate(doc.getLastSyncedAt() != null ? doc.getLastSyncedAt().toLocalDate() : java.time.LocalDate.now())
-                    .amount(contract != null ? contract.getSellingPrice() : null)
-                    .direction("INCOMING")
-                    .originalName(certPath.getFileName().toString())
-                    .contentType("application/octet-stream")
-                    .sourceType("CERTIFICATE")
-                    .businessKey("CONTRACT:" + doc.getContractId())
-                    .versionDiscriminator("cert-v1")
-                    .externalId(doc.getCloudsignDocumentId())
-                    .targetType("CONTRACT")
-                    .targetId(doc.getContractId())
-                    .build();
-
-            docService.registerGenerated(req, new java.io.ByteArrayInputStream(certBytes));
-        } catch (Exception e) {
-            log.warn("[帳票連携] 合意締結証明書の台帳登録失敗: docId={} error={}", doc.getId(), e.getMessage());
         }
     }
 }

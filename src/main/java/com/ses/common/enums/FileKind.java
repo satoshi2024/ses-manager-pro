@@ -38,7 +38,15 @@ public enum FileKind {
     /** 外部要員メール: eml / txt、最大10MB */
     BP_EMAIL(
             Set.of("eml", "txt"),
-            10L * 1024 * 1024);
+            10L * 1024 * 1024),
+
+    /**
+     * 電子契約の署名済みPDF・合意締結証明書（HFP-02-06）。
+     * 公式body上限50MBを自システム上限とする。SKILL_SHEETを代用しない。
+     */
+    CONTRACT_PDF(
+            Set.of("pdf"),
+            50L * 1024 * 1024);
 
     private final Set<String> allowedExtensions;
     private final long maxBytes;

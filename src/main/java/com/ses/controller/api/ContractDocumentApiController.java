@@ -1,17 +1,31 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.dto.contractdocument.CloudSignOperationDto;
+import com.ses.dto.contractdocument.ContractDocumentDetailDto;
+import com.ses.dto.contractdocument.ContractDocumentListDto;
 import com.ses.entity.ContractDocument;
 import com.ses.entity.ContractTemplate;
 import com.ses.mapper.ContractTemplateMapper;
 import com.ses.service.ContractDocumentService;
+import com.ses.service.cloudsign.CloudSignArtifactService;
+import com.ses.service.cloudsign.CloudSignSyncService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import org.springframework.http.*;
 
+/**
+ * 契約書API（HFP-02-07）。
+ * entityを返さずallow-list DTOのみ。list/detail/artifact downloadはno-store。
+ * 送信/syncはqueue受付または状態同期であり、provider完了を偽装しない。
+ */
 @RestController
 @RequestMapping("/api/contract-documents")
 @RequiredArgsConstructor
@@ -20,12 +34,16 @@ public class ContractDocumentApiController {
     private final ContractTemplateMapper templates;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final CloudSignSyncService cloudSignSyncService;
+    private final CloudSignArtifactService cloudSignArtifactService;
+    private final com.ses.mapper.ContractMapper contractMapper;
+    private final com.ses.mapper.CustomerMapper customerMapper;
 
     /** 書類IDから契約IDを解決し、親契約のスコープを検証する（R3R-31/32）。 */
     private void assertDocumentAllowed(Long documentId) {
         ContractDocument doc = service.getById(documentId);
         if (doc == null) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+            throw BusinessException.of(404, "error.scope.notFound");
         }
         assertContractVisible(doc.getContractId());
     }
@@ -38,7 +56,7 @@ public class ContractDocumentApiController {
                 : organizationScopeService.intersectWithDataScope(
                         organizationScopeService.allowedContractIds(java.time.LocalDate.now()), dataIds);
         if (allowed != null && !allowed.contains(contractId)) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+            throw BusinessException.of(404, "error.scope.notFound");
         }
         dataScopeService.assertAllowedContract(contractId);
     }
@@ -61,42 +79,114 @@ public class ContractDocumentApiController {
         return ApiResult.success(template);
     }
 
+    /** detail DTOへ親契約の契約番号と宛先会社（顧客名）を解決して付与する。 */
+    private ContractDocumentDetailDto detailOf(ContractDocument doc) {
+        String contractNo = null;
+        String company = null;
+        com.ses.entity.Contract contract = doc.getContractId() == null ? null
+                : contractMapper.selectById(doc.getContractId());
+        if (contract != null) {
+            contractNo = contract.getContractNo();
+            if (contract.getCustomerId() != null) {
+                com.ses.entity.Customer customer = customerMapper.selectById(contract.getCustomerId());
+                if (customer != null) {
+                    company = customer.getCompanyName();
+                }
+            }
+        }
+        return ContractDocumentDetailDto.of(doc, contractNo, company);
+    }
+
     @GetMapping("/contract/{contractId}")
     @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
-    public ApiResult<List<ContractDocument>> list(@PathVariable Long contractId) {
+    public ResponseEntity<ApiResult<List<ContractDocumentListDto>>> list(@PathVariable Long contractId) {
         assertContractVisible(contractId);
-        return ApiResult.success(service.lambdaQuery().eq(ContractDocument::getContractId, contractId).list());
+        List<ContractDocumentListDto> rows = service.lambdaQuery()
+                .eq(ContractDocument::getContractId, contractId)
+                .list()
+                .stream()
+                .map(ContractDocumentListDto::of)
+                .toList();
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(ApiResult.success(rows));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
+    public ResponseEntity<ApiResult<ContractDocumentDetailDto>> detail(@PathVariable Long id) {
+        assertDocumentAllowed(id);
+        ContractDocument doc = service.getById(id);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(ApiResult.success(detailOf(doc)));
     }
 
     @PostMapping
     @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
-    public ApiResult<ContractDocument> create(@RequestParam Long contractId,
-                                               @RequestParam Long templateId,
-                                               @RequestParam String recipientName,
-                                               @RequestParam String recipientEmail) {
+    public ApiResult<ContractDocumentDetailDto> create(@RequestParam Long contractId,
+                                                       @RequestParam Long templateId,
+                                                       @RequestParam String recipientName,
+                                                       @RequestParam String recipientEmail) {
         assertContractVisible(contractId);
-        return ApiResult.success(service.create(contractId, templateId, recipientName, recipientEmail));
+        ContractDocument created = service.create(contractId, templateId, recipientName, recipientEmail);
+        return ApiResult.success(detailOf(created));
     }
 
     @PostMapping("/{id}/send")
     @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
-    public ApiResult<Boolean> send(@PathVariable Long id) {
+    public ApiResult<CloudSignOperationDto> send(@PathVariable Long id,
+                                                 @RequestBody com.ses.dto.cloudsign.ConfirmedSendRequest request) {
         assertDocumentAllowed(id);
-        service.send(id);
-        return ApiResult.success(true);
+        // durable queue受付であり、provider送信完了ではない（HFP-02-AC-10-02）
+        ContractDocument queued = service.queueSend(id, request);
+        return ApiResult.success("送信処理を受け付けました", new CloudSignOperationDto(
+                queued.getId(), queued.getOperationId(), queued.getDispatchState()));
     }
 
     @PostMapping("/{id}/sync")
-    @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
-    public ApiResult<Boolean> sync(@PathVariable Long id) {
+    @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
+    public ResponseEntity<ApiResult<ContractDocumentDetailDto>> sync(@PathVariable Long id) {
         assertDocumentAllowed(id);
-        service.sync(id);
-        return ApiResult.success(true);
+        // HRは参照のみ（HFP-02-AC-08-01）。manual syncも更新系のためHRは拒否。
+        cloudSignSyncService.syncDocument(id);
+        ContractDocument doc = service.getById(id);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(ApiResult.success(detailOf(doc)));
     }
-    @GetMapping("/{id}/download")
+
+    /** 三artifact別download（source/signed/certificate）。no-store・attachment・scope検証済み。 */
+    @GetMapping("/{id}/artifacts/{kind}")
     @PreAuthorize("hasAnyRole('管理者','営業','HR','マネージャー')")
-    public ResponseEntity<byte[]> download(@PathVariable Long id) {
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> artifact(
+            @PathVariable Long id, @PathVariable String kind) {
         assertDocumentAllowed(id);
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).body(service.download(id));
+        ContractDocument doc = service.getById(id);
+        switch (kind) {
+            case "source" -> {
+                return attachment(new java.io.ByteArrayInputStream(service.download(id)),
+                        "document-" + id + ".pdf");
+            }
+            case "signed" -> {
+                CloudSignArtifactService.ArtifactDownload signed = cloudSignArtifactService.downloadSigned(doc);
+                return attachment(signed.stream(), signed.fileName());
+            }
+            case "certificate" -> {
+                CloudSignArtifactService.ArtifactDownload cert = cloudSignArtifactService.downloadCertificate(doc);
+                return attachment(cert.stream(), cert.fileName());
+            }
+            default -> throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private ResponseEntity<org.springframework.core.io.InputStreamResource> attachment(
+            java.io.InputStream body, String fileName) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + fileName + "\"")
+                .body(new org.springframework.core.io.InputStreamResource(body));
     }
 }

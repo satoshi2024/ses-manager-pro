@@ -229,6 +229,35 @@ ai:
   # model: gpt-4o
   # max-tokens: 4096
 
+# ===== CloudSign（電子署名。本番enableはHFP-02総合gate PASS後） =====
+cloudsign:
+  # kill switch。falseの間は新規queue/dispatch/pollが動かない（ローカルPDF参照は維持）。
+  enabled: ${CLOUDSIGN_ENABLED:false}
+  # 接続先環境（SANDBOX / PRODUCTION）。公式allow-listのみ。
+  environment: ${CLOUDSIGN_ENVIRONMENT:sandbox}
+  # 公式allow-list外のURLを設定しない（prodで任意URLは拒否される）。
+  base-url: ${CLOUDSIGN_BASE_URL:}
+  # client ID（secret）。env/secret managerから注入する。平文をDB/log/APIへ出さない。
+  client-id: ${CLOUDSIGN_CLIENT_ID:}
+  # token有効期限(3600秒)から引く安全余裕
+  token-safety-margin-seconds: ${CLOUDSIGN_TOKEN_SAFETY_MARGIN_SECONDS:60}
+  connect-timeout-ms: ${CLOUDSIGN_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${CLOUDSIGN_READ_TIMEOUT_MS:15000}
+  # 公式 body 50MB 上限と自システム上限の小さい方
+  max-pdf-bytes: ${CLOUDSIGN_MAX_PDF_BYTES:52428800}
+  # 同一token毎分のrequest上限（公式800を超えない）
+  rate-limit-per-minute: ${CLOUDSIGN_RATE_LIMIT_PER_MINUTE:500}
+  # mutation後のprovider反映待機（公式ガイド: 数秒〜10秒）
+  mutation-reflect-wait-ms: ${CLOUDSIGN_MUTATION_REFLECT_WAIT_MS:3000}
+  poll-batch-size: ${CLOUDSIGN_POLL_BATCH_SIZE:50}
+  stale-claim-minutes: ${CLOUDSIGN_STALE_CLAIM_MINUTES:15}
+  max-attempts: ${CLOUDSIGN_MAX_ATTEMPTS:5}
+  instance-id: ${CLOUDSIGN_INSTANCE_ID:}
+  # dispatch workerの実行cron（ShedLock付き）
+  dispatch-cron: ${CLOUDSIGN_DISPATCH_CRON:*/5 * * * * *}
+  # 状態pollingの実行cron（ShedLock付き）
+  poll-cron: ${CLOUDSIGN_POLL_CRON:0 */2 * * * *}
+
 # ===== freee連携（HFP-01: 給与・賞与参照。S11勤怠/S15会計も同じOAuth基盤を利用） =====
 # 秘密値は環境変数からのみ供給する。api-base-url はS11/S15が使う会計API等の共通resource base（意味不変）。
 # OAuthはaccounts host、人事労務APIはhr host へ分離する（HFP-01-R02/R03）。
