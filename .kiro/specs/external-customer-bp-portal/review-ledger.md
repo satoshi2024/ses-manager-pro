@@ -89,6 +89,28 @@
 |---|---|---|---|---|---|---|---|
 | 2026-08-17 | R2-P1-01 FIXED・R3（OPEN issueのみ）待ち | 3c908d61（T087） | （R2 fix commit） | 0 | 0（FIXED） | 13（8 FIXED・2 DEFERRED・1 VERIFIED・部分1） | BOM除去＋同一Headでsmoke/portal/静的検査を再実行し証跡再提出 |
 
+## 現行判定（R3最終）
+
+| 日付 | 判定 | Base | Head | P0 | P1 | P2 | 備考 |
+|---|---|---|---|---|---|---|---|
+| 2026-08-17 | **CONDITIONAL PASS** | 009b6965 | d408b3ec | 0 | 0 | 2（deferred） | release gates=G-1〜G-4（browser Demo・法務承認・DNS/SMTP・承認route）。中央ledgerへ転記済み・S14解放 |
+
+## R3判定記録（独立Review AI）
+
+- 確認: `fa3d696c..d408b3ec` はledger＋BOM除去のみ。byte検証でBOMなし・全src走査0件。
+- 独立再実行（同一Head・JDK17標準環境）: FlywayPortalSchemaSmokeTest 2/0/0/0（実MySQL 8.0 fresh/legacy）・portal 48/0/0/0・EXIT 0。
+- R1指摘の最終状態: P0-01/P1-01/P1-02/P1-03 VERIFIED_CLOSED。P2 11件FIXED・2件DEFERRED（P2-05/11）。
+- 判定文: `CONDITIONAL PASS: P0=0 / P1=0 / P2=2(deferred) / release gates=G-1〜G-4`
+
+## 本番release gates（G-1〜G-4）
+
+| Gate | 内容 | owner/期限 |
+|---|---|---|
+| G-1 | 実browser desktop/390px Demo | 主実装／本番release前 |
+| G-2 | 利用規約の外部法務承認（G3） | 発注者／本番release前 |
+| G-3 | `portal.<base-domain>` の実DNS/証明書/配備・SMTP実送信・`require-https` | 主実装／本番release前 |
+| G-4 | 承認engine `bp_bank_account.change` route設定 | 運用／本番運用前 |
+
 ## Review Packet（T087分）
 
 - handbook version: v2.0
