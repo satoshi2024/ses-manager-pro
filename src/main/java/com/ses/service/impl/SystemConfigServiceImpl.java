@@ -105,6 +105,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         // S13 T082/T086: ポータル利用規約versionと公開host（管理者が更新。V104でseed）
         SCHEMAS.put("portal.terms.current-version", ConfigSchema.string());
         SCHEMAS.put("portal.base-domain", ConfigSchema.string());
+        // S14 (engineer-self-service-portal-v2 / V105): サーベイ匿名閾値と経費の会計連携provider
+        SCHEMAS.put("survey.min-answers", ConfigSchema.integer(1, null));
+        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("mock", "freee"));
     }
 
     private void ensureLoaded() {

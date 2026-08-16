@@ -231,6 +231,9 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
             case "INVOICE" -> "/invoice?id=" + id;
             case "BP_PAYMENT" -> "/bp-company/list?id=" + id;
             case "MONTHLY_CLOSING" -> "/monthly-closing";
+            // S14 engineer-self-service-portal-v2（T089/T091）
+            case "CHANGE_REQUEST" -> "/engineer-change-requests?id=" + id;
+            case "EXPENSE_REQUEST" -> "/expenses?id=" + id;
             default -> null;
         };
     }

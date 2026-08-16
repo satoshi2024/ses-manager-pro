@@ -39,6 +39,9 @@ public class FileScopeValidationService {
     private final BpAvailabilityIngestionMapper bpAvailabilityIngestionMapper;
     private final ObjectProvider<DocumentVersionMapper> documentVersionMapperProvider;
     private final ObjectProvider<DocumentLinkMapper> documentLinkMapperProvider;
+    private final ObjectProvider<com.ses.mapper.DocumentMapper> documentMapperProvider;
+    private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
+    private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     private final DataScopeService dataScopeService;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
 
@@ -97,6 +100,25 @@ public class FileScopeValidationService {
             String scanStatus = documentVersion.getScanStatus();
             if (scanStatus == null || !"CLEAN".equals(scanStatus)) {
                 throw BusinessException.of(403, "error.file.scanNotReady");
+            }
+
+            // S14 (engineer-self-service-portal-v2): 文書種別ごとの専用規則（decision table §6.2）。
+            // PRIVATE_NOTE（1on1 confidential相談）はHR/管理者のみ。RECEIPT（経費領収書）は
+            // 本人/管理者/マネージャー（配下）のみで、営業・HRは不可視（給与・経費は営業不可視）。
+            String documentType = documentTypeOf(documentVersion.getDocumentId());
+            if ("PRIVATE_NOTE".equals(documentType)) {
+                String role = SecurityUtils.currentRole();
+                if (!"HR".equals(role) && !"管理者".equals(role)) {
+                    throw BusinessException.of(403, "error.forbidden");
+                }
+                return;
+            }
+            if ("RECEIPT".equals(documentType)) {
+                Long engineerId = linkedEngineerId(documentVersion.getDocumentId());
+                if (engineerId == null || !canViewReceipt(engineerId)) {
+                    throw BusinessException.of(403, "error.forbidden");
+                }
+                return;
             }
 
             // P1-03: メニュー権限判定
@@ -174,5 +196,52 @@ public class FileScopeValidationService {
                 || !menuCacheService.getMenuKeysByRole(role).contains(menuKey)) {
             throw BusinessException.of(403, "error.forbidden");
         }
+    }
+
+    /** 文書のdocument_typeを解決する（不変条件violation時はfail-closedでnull）。 */
+    private String documentTypeOf(Long documentId) {
+        com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+        if (documentMapper == null || documentId == null) {
+            return null;
+        }
+        com.ses.entity.Document document = documentMapper.selectById(documentId);
+        return document == null ? null : document.getDocumentType();
+    }
+
+    /** 文書のENGINEER linkから要員IDを解決する（複数あれば先頭。無ければnull）。 */
+    private Long linkedEngineerId(Long documentId) {
+        DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+        if (linkMapper == null || documentId == null) {
+            return null;
+        }
+        return linkMapper.selectList(new QueryWrapper<DocumentLink>()
+                        .eq("document_id", documentId).eq("target_type", "ENGINEER").last("LIMIT 1"))
+                .stream().map(DocumentLink::getTargetId).findFirst().orElse(null);
+    }
+
+    /** 経費領収書の閲覧可否: 本人 / 管理者 / マネージャー（組織scope ∩ DataScope の配下）。 */
+    private boolean canViewReceipt(Long engineerId) {
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return true;
+        }
+        if ("要員".equals(role)) {
+            com.ses.service.EngineerAccountLinkService linkService = engineerAccountLinkServiceProvider.getIfAvailable();
+            Long ownEngineerId = linkService == null ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+            return engineerId.equals(ownEngineerId);
+        }
+        if ("マネージャー".equals(role)) {
+            com.ses.service.security.OrganizationScopeService scopeService = organizationScopeServiceProvider.getIfAvailable();
+            if (scopeService == null) {
+                return false;
+            }
+            if (scopeService.hasFullAccess()) {
+                return true;
+            }
+            java.util.Set<Long> allowed = scopeService.allowedEngineerIds(java.time.LocalDate.now());
+            return allowed != null && allowed.contains(engineerId);
+        }
+        // 営業・HR・その他はdecision table §6.2により不可視（給与・経費は営業不可視）
+        return false;
     }
 }

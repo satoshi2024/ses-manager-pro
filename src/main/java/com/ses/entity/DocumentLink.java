@@ -27,4 +27,13 @@ public class DocumentLink extends BaseEntity {
 
     /** リンク先エンティティID */
     private Long targetId;
+
+    /**
+     * スキルシート確認日時（NULL=未確認。S14 engineer-self-service-portal-v2）。
+     * 客先提出前チェックの対象（design §6.1）。確認ごとに更新する。
+     */
+    private java.time.LocalDateTime skillSheetConfirmedAt;
+
+    /** 確認時のdocument version（t_document_version.version_no相当） */
+    private String skillSheetConfirmedVersion;
 }

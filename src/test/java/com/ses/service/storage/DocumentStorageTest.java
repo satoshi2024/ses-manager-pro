@@ -59,6 +59,9 @@ class DocumentStorageTest {
                 bpAvailabilityIngestionMapper,
                 documentVersionMapperProvider,
                 mock(ObjectProvider.class),
+                mock(ObjectProvider.class),
+                mock(ObjectProvider.class),
+                mock(ObjectProvider.class),
                 mock(com.ses.service.security.DataScopeService.class),
                 mock(ObjectProvider.class)
         );

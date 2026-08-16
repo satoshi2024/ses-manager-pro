@@ -14,7 +14,7 @@
 | G6 | yes | 雇用勤怠の正（本システム/freee/客先） | 本システムを雇用勤怠の正、客先工数分離、freeeはdownstream/照合 | attendance | 決定済（2026-07-26） |
 | G7 | no | 承認金額閾値と承認者 | 組織上長→財務/管理者。閾値は設定画面で管理 | approval | 未決 |
 | G8 | no | 顧客/BPポータルで公開する文書種別 | 顧客=見積/注文請/契約/検収/請求、BP=発注/検収/BP請求/支払状況 | portal | 決定済（2026-08-16、S13 T081で推奨既定を採用・記録） |
-| G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 未決 |
+| G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 決定済（2026-08-17、S14にて推奨既定を採用・記録。詳細は engineer-self-service-portal-v2/review-ledger.md の「G9 決定記録」） |
 | G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 未決 |
 
 ## G2 R21 canonical payload sync docs-only fix（2026-08-11）

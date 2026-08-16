@@ -37,6 +37,12 @@ public final class ActionPermissionResolver {
             Map.entry("dashboard", "dashboard"),
             Map.entry("documents", "document"),
             Map.entry("email-templates", "email"),
+            // engineer-self-service-portal-v2(S14/V105)。未登録のままだと/api/engineer-change-requests等が
+            // 管理者を含む全roleで403になる（CRM-R2-P1-01と同じ罠）。V105の権限seedと対にする。
+            Map.entry("engineer-change-requests", "engineer-change-request"),
+            Map.entry("expense-requests", "expense-request"),
+            Map.entry("one-on-ones", "one-on-one"),
+            Map.entry("surveys", "survey"),
             Map.entry("engineers", "engineer"),
             Map.entry("files", "file"),
             Map.entry("identity-providers", "identity-provider"),
