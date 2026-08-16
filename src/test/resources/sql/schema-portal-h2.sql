@@ -5,6 +5,15 @@
 -- ---- t_bp_payment.received_confirmed_at（V104。t_bp_paymentはV5 replayで存在） ----
 ALTER TABLE t_bp_payment ADD COLUMN IF NOT EXISTS received_confirmed_at DATETIME;
 
+-- ---- t_invoice portal列（V104_2。t_invoiceはV5 replayで存在） ----
+ALTER TABLE t_invoice ADD COLUMN IF NOT EXISTS received_confirmed_at DATETIME;
+ALTER TABLE t_invoice ADD COLUMN IF NOT EXISTS payment_expected_date DATE;
+ALTER TABLE t_invoice ADD COLUMN IF NOT EXISTS portal_inquiry VARCHAR(1000);
+
+-- V5 replayのt_invoice.status ENUMには'一部入金'（V28）が無いため、portalのIN絞り込みで
+-- H2のENUMチェックに失敗する。H2のENUM型をV28適用後MySQLと同じ値域へ拡張する。
+ALTER TABLE t_invoice ALTER COLUMN status SET DATA TYPE ENUM('未送付','送付済','一部入金','入金済');
+
 -- ---- 1) ポータル組織 ----
 DROP TABLE IF EXISTS t_portal_session CASCADE;
 DROP TABLE IF EXISTS t_portal_terms_consent CASCADE;

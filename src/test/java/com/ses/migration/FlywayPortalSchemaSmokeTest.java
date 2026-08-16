@@ -1,4 +1,4 @@
-package com.ses.migration;
+﻿package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
@@ -60,6 +60,9 @@ class FlywayPortalSchemaSmokeTest {
             assertColumnExists(statement, "t_portal_session", "token_hash");
             assertColumnExists(statement, "t_portal_session", "revoked_at");
             assertColumnExists(statement, "t_bp_payment", "received_confirmed_at");
+            assertColumnExists(statement, "t_invoice", "received_confirmed_at");
+            assertColumnExists(statement, "t_invoice", "payment_expected_date");
+            assertColumnExists(statement, "t_invoice", "portal_inquiry");
             // UNIQUE/CHECK/FK
             assertIndexExists(statement, "m_portal_organization", "uk_portal_org_customer");
             assertIndexExists(statement, "m_portal_organization", "uk_portal_org_bp");
@@ -203,7 +206,7 @@ class FlywayPortalSchemaSmokeTest {
         Flyway.configure()
                 .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("104_1")
+                .target("104_2")
                 .load()
                 .migrate();
 
@@ -214,6 +217,9 @@ class FlywayPortalSchemaSmokeTest {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "t_bp_payment", "received_confirmed_at");
+            assertColumnExists(statement, "t_invoice", "received_confirmed_at");
+            assertColumnExists(statement, "t_invoice", "payment_expected_date");
+            assertColumnExists(statement, "t_invoice", "portal_inquiry");
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM m_menu WHERE menu_key='portal-admin'"));
 
@@ -221,7 +227,7 @@ class FlywayPortalSchemaSmokeTest {
             Flyway.configure()
                     .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                     .locations("classpath:db/migration")
-                    .target("104_1")
+                    .target("104_2")
                     .load()
                     .migrate();
             String freshShape = portalShape(MYSQL.createConnection(""));

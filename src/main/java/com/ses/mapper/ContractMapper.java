@@ -230,6 +230,89 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT * FROM t_contract WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Contract selectByIdForUpdate(@org.apache.ibatis.annotations.Param("id") Long id);
 
+    /**
+     * 顧客ポータル用の契約一覧（SQL境界: customer_id。design §6.2）。
+     * 原価・売上・営業情報はDTOへ出さない（field-inventory §3.1）。
+     * esignStatusは最新の契約書cloudsign_status（業務状態への変換はJava側）。
+     */
+    @Select("""
+        <script>
+        SELECT
+            c.id AS id,
+            c.contract_no AS contractNo,
+            c.contract_type AS contractType,
+            c.status AS status,
+            c.start_date AS startDate,
+            c.end_date AS endDate,
+            c.contract_date AS contractDate,
+            c.job_description AS jobDescription,
+            c.work_location AS workLocation,
+            c.inspection_due_date AS inspectionDueDate,
+            c.payment_due_date AS paymentDueDate,
+            c.payment_method AS paymentMethod,
+            c.settlement_hours_min AS settlementHoursMin,
+            c.settlement_hours_max AS settlementHoursMax,
+            c.acceptance_required AS acceptanceRequired,
+            e.full_name AS engineerName,
+            p.project_name AS projectName,
+            (SELECT cd.cloudsign_status FROM t_contract_document cd
+              WHERE cd.contract_id = c.id ORDER BY cd.id DESC LIMIT 1) AS esignStatus,
+            EXISTS (
+                SELECT 1 FROM t_document_link dl
+                INNER JOIN t_document_version dv ON dv.document_id = dl.document_id
+                    AND dv.scan_status = 'CLEAN' AND dv.deleted_flag = 0
+                WHERE dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
+            ) AS contractDocumentAvailable
+        FROM t_contract c
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+        WHERE c.deleted_flag = 0
+          AND c.customer_id = #{customerId}
+          <if test="status != null and status != ''">AND c.status = #{status}</if>
+        ORDER BY c.id DESC
+        </script>
+        """)
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalContractDto> selectPortalPageDto(
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalContractDto> page,
+            @org.apache.ibatis.annotations.Param("customerId") Long customerId,
+            @org.apache.ibatis.annotations.Param("status") String status);
+
+    /** 顧客ポータル用の契約詳細（SQL境界。不一致は0件→404秘匿）。 */
+    @Select("""
+        SELECT
+            c.id AS id,
+            c.contract_no AS contractNo,
+            c.contract_type AS contractType,
+            c.status AS status,
+            c.start_date AS startDate,
+            c.end_date AS endDate,
+            c.contract_date AS contractDate,
+            c.job_description AS jobDescription,
+            c.work_location AS workLocation,
+            c.inspection_due_date AS inspectionDueDate,
+            c.payment_due_date AS paymentDueDate,
+            c.payment_method AS paymentMethod,
+            c.settlement_hours_min AS settlementHoursMin,
+            c.settlement_hours_max AS settlementHoursMax,
+            c.acceptance_required AS acceptanceRequired,
+            e.full_name AS engineerName,
+            p.project_name AS projectName,
+            (SELECT cd.cloudsign_status FROM t_contract_document cd
+              WHERE cd.contract_id = c.id ORDER BY cd.id DESC LIMIT 1) AS esignStatus,
+            EXISTS (
+                SELECT 1 FROM t_document_link dl
+                INNER JOIN t_document_version dv ON dv.document_id = dl.document_id
+                    AND dv.scan_status = 'CLEAN' AND dv.deleted_flag = 0
+                WHERE dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
+            ) AS contractDocumentAvailable
+        FROM t_contract c
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+        WHERE c.id = #{id} AND c.deleted_flag = 0 AND c.customer_id = #{customerId}
+        """)
+    com.ses.dto.portal.PortalContractDto selectPortalDetailDto(@org.apache.ibatis.annotations.Param("id") Long id,
+            @org.apache.ibatis.annotations.Param("customerId") Long customerId);
+
     /** 単価列のみを部分更新する（同期/改定が他項目を旧値で上書きしないようにする / R3R-29）。 */
     @org.apache.ibatis.annotations.Update(
             "UPDATE t_contract SET selling_price = #{sellingPrice}, cost_price = #{costPrice}, "

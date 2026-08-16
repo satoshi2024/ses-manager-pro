@@ -34,6 +34,21 @@ public class PortalPageController {
 
     @GetMapping("/portal")
     public String index() {
-        return "portal/index";
+        org.springframework.security.core.Authentication authentication =
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof com.ses.portal.PortalLoginUser user) {
+            if ("CUSTOMER".equals(user.getOrgType())) {
+                return "redirect:/portal/customer";
+            }
+            if ("BP".equals(user.getOrgType())) {
+                return "redirect:/portal/bp";
+            }
+        }
+        return "redirect:/portal/login";
+    }
+
+    @GetMapping("/portal/customer")
+    public String customer() {
+        return "portal/customer/index";
     }
 }

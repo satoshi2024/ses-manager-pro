@@ -267,6 +267,72 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         }
     }
 
+    @Override
+    public Page<com.ses.dto.portal.PortalAcceptanceDto> portalPage(long current, long size, Long customerId,
+                                                                   String workMonth, String status) {
+        if (customerId == null) {
+            return new Page<>(current, Math.min(size, 1000), 0);
+        }
+        return baseMapper.selectPortalPageDto(new Page<>(current, Math.min(size, 1000)),
+                customerId, workMonth, status);
+    }
+
+    @Override
+    public Acceptance portalGet(Long acceptanceId, Long expectedCustomerId) {
+        Acceptance acceptance = baseMapper.selectPortalByIdForUpdate(acceptanceId, expectedCustomerId);
+        if (acceptance == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        return acceptance;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Acceptance portalAccept(Long acceptanceId, Long customerContactId, Long expectedCustomerId) {
+        // SQL境界（t_acceptance × t_contract.customer_id）でロック取得。不一致は0件→404秘匿（R4.3）
+        Acceptance acceptance = baseMapper.selectPortalByIdForUpdate(acceptanceId, expectedCustomerId);
+        if (acceptance == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!StatusConstants.ACCEPTANCE_SUBMITTED.equals(acceptance.getStatus())) {
+            throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
+                    acceptance.getStatus(), StatusConstants.ACCEPTANCE_ACCEPTED);
+        }
+        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        com.ses.entity.CustomerContact contact = null;
+        if (customerContactId != null) {
+            contact = resolveEffectiveContact(customerContactId, contract == null ? null : contract.getCustomerId());
+        }
+        acceptance.setStatus(StatusConstants.ACCEPTANCE_ACCEPTED);
+        acceptance.setCustomerContactId(customerContactId);
+        acceptance.setCustomerContactNameSnapshot(contact == null ? null : contact.getName());
+        acceptance.setAcceptedAt(LocalDateTime.now());
+        acceptance.setRejectComment(null);
+        baseMapper.updateById(acceptance);
+        return acceptance;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Acceptance portalReject(Long acceptanceId, String comment, Long expectedCustomerId) {
+        Acceptance acceptance = baseMapper.selectPortalByIdForUpdate(acceptanceId, expectedCustomerId);
+        if (acceptance == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!StatusConstants.ACCEPTANCE_SUBMITTED.equals(acceptance.getStatus())) {
+            throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
+                    acceptance.getStatus(), StatusConstants.ACCEPTANCE_REJECTED);
+        }
+        if (!StringUtils.hasText(comment)) {
+            throw BusinessException.of(400, "error.acceptance.rejectCommentRequired");
+        }
+        acceptance.setStatus(StatusConstants.ACCEPTANCE_REJECTED);
+        acceptance.setRejectComment(comment.trim());
+        acceptance.setAcceptedAt(null);
+        baseMapper.updateById(acceptance);
+        return acceptance;
+    }
+
     // ===== 内部ヘルパー =====
 
     private void applySnapshot(Acceptance acceptance, WorkRecord workRecord) {

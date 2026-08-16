@@ -68,41 +68,68 @@ class PortalScopeMatrixTest extends PortalTestSupport {
     }
 
     /**
-     * 全endpoint × 全org session matrix（F2時点のendpoint。A1/A2で拡張する）。
+     * 全endpoint × 全org session matrix（F2+A1時点。A2でBP側endpointを追加する）。
      * 各orgは自分自身の情報しか見えない（応答に他orgのemailが含まれない）。
+     * 顧客endpointはCUSTOMER orgのみ・BP orgは403（逆も同様）。
      */
     static Stream<Arguments> portalEndpoints() {
         return Stream.of(
-                Arguments.of("GET", "/api/portal/auth/me"),
-                Arguments.of("GET", "/portal"),
-                Arguments.of("GET", "/portal/terms")
+                Arguments.of("GET", "/api/portal/auth/me", "ALL"),
+                Arguments.of("GET", "/portal/terms", "ALL"),
+                Arguments.of("GET", "/api/portal/customer/quotations", "CUSTOMER"),
+                Arguments.of("GET", "/api/portal/customer/sales-orders", "CUSTOMER"),
+                Arguments.of("GET", "/api/portal/customer/contracts", "CUSTOMER"),
+                Arguments.of("GET", "/api/portal/customer/acceptances", "CUSTOMER"),
+                Arguments.of("GET", "/api/portal/customer/invoices", "CUSTOMER")
         );
     }
 
     @ParameterizedTest
     @MethodSource("portalEndpoints")
-    void 各組織sessionは自組織の情報だけを参照できる(String method, String path) throws Exception {
+    void 各組織sessionは自組織の情報だけを参照できる(String method, String path, String allowedOrgType) throws Exception {
         Matrix m = matrix();
         var sessions = List.of(
-                new Object[]{"customerA", m.userA()},
-                new Object[]{"customerB", m.userB()},
-                new Object[]{"bp", m.userBp()});
+                new Object[]{"customerA", m.userA(), "CUSTOMER"},
+                new Object[]{"customerB", m.userB(), "CUSTOMER"},
+                new Object[]{"bp", m.userBp(), "BP"});
 
         for (Object[] entry : sessions) {
             String orgName = (String) entry[0];
             UserFixture fixture = (UserFixture) entry[1];
-            var result = mockMvc.perform(get(path).cookie(fixture.sessionCookie()))
-                    .andExpect(status().isOk())
-                    .andReturn();
-            String body = result.getResponse().getContentAsString();
-            // 他組織のemailが応答に含まれない（IDORなし）
-            for (Object[] other : sessions) {
-                if (other[0] != entry[0]) {
-                    assertFalse(body.contains(((UserFixture) other[1]).user().getEmail()),
-                            orgName + " の応答に他組織のemailが含まれています: " + body);
+            String sessionOrgType = (String) entry[2];
+            boolean allowed = "ALL".equals(allowedOrgType) || allowedOrgType.equals(sessionOrgType);
+            if (allowed) {
+                var result = mockMvc.perform(get(path).cookie(fixture.sessionCookie()))
+                        .andExpect(status().isOk())
+                        .andReturn();
+                String body = result.getResponse().getContentAsString();
+                // 他組織のemailが応答に含まれない（IDORなし）
+                for (Object[] other : sessions) {
+                    if (other[0] != entry[0]) {
+                        assertFalse(body.contains(((UserFixture) other[1]).user().getEmail()),
+                                orgName + " の応答に他組織のemailが含まれています: " + body);
+                    }
                 }
+            } else {
+                // 他種別orgは403（顧客endpointへBP、BP endpointへ顧客）
+                mockMvc.perform(get(path).cookie(fixture.sessionCookie()))
+                        .andExpect(status().isForbidden());
             }
         }
+    }
+
+    @Test
+    void ログイン後のportalは自組織種別の画面へリダイレクトする() throws Exception {
+        Matrix m = matrix();
+        mockMvc.perform(get("/portal").cookie(m.userA().sessionCookie()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/portal/customer"));
+        mockMvc.perform(get("/portal").cookie(m.userBp().sessionCookie()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/portal/bp"));
+        // BPの顧客画面は403（org typeが違う）
+        mockMvc.perform(get("/api/portal/customer/quotations").cookie(m.userBp().sessionCookie()))
+                .andExpect(status().isForbidden());
     }
 
     @Test

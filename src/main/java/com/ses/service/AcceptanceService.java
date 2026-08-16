@@ -43,4 +43,29 @@ public interface AcceptanceService extends IService<Acceptance> {
 
     /** 検収が現在のscopeで参照可能か検証する（404秘匿）。 */
     void assertAllowedAcceptance(Long acceptanceId);
+
+    /**
+     * 顧客ポータルからの検収（提出済→検収済、R2.2）。
+     * 内部のDataScope/ロール判定の代わりに expectedCustomerId でSQL境界認可を行い、
+     * order specの状態CAS（提出済→検収済）をそのまま使う（design §6.3）。
+     * portal側で独自の検収テーブル・状態機械を作らない。
+     */
+    Acceptance portalAccept(Long acceptanceId, Long customerContactId, Long expectedCustomerId);
+
+    /**
+     * 顧客ポータルからの差戻し（提出済→差戻し、R2.2）。理由必須。同様にSQL境界認可＋状態CAS。
+     */
+    Acceptance portalReject(Long acceptanceId, String comment, Long expectedCustomerId);
+
+    /**
+     * 顧客ポータル用の検収一覧（自組織のcustomer_idに紐づく契約の検収のみ。SQL境界）。
+     * list/detail/download/accept/rejectで同一母集団（design §6.2）。
+     */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalAcceptanceDto> portalPage(
+            long current, long size, Long customerId, String workMonth, String status);
+
+    /**
+     * 顧客ポータル用の検収詳細（自組織のcustomer_idに紐づく検収のみ。不一致は404秘匿）。
+     */
+    Acceptance portalGet(Long acceptanceId, Long expectedCustomerId);
 }

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="#{portal.customer.title}">顧客ポータル</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body">
+<header class="portal-header">
+    <span class="portal-header-brand" th:text="#{app.title}">SES管理プロ</span>
+    <span class="portal-header-user" id="portalHeaderUser"></span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton"
+            th:text="#{portal.logout}">ログアウト</button>
+</header>
+
+<nav class="portal-tabs" aria-label="メニュー">
+    <button type="button" class="portal-tab active" data-tab="acceptances"
+            th:text="#{portal.customer.tab.acceptances}">検収</button>
+    <button type="button" class="portal-tab" data-tab="contracts"
+            th:text="#{portal.customer.tab.contracts}">契約</button>
+    <button type="button" class="portal-tab" data-tab="invoices"
+            th:text="#{portal.customer.tab.invoices}">請求</button>
+    <button type="button" class="portal-tab" data-tab="quotations"
+            th:text="#{portal.customer.tab.quotations}">見積</button>
+    <button type="button" class="portal-tab" data-tab="sales-orders"
+            th:text="#{portal.customer.tab.salesOrders}">注文請</button>
+</nav>
+
+<main class="portal-container" role="main">
+    <div class="alert alert-danger d-none" id="portalError" role="alert" aria-live="polite"></div>
+
+    <!-- 検収 -->
+    <section id="tab-acceptances" class="portal-tab-panel">
+        <h2 th:text="#{portal.customer.acceptances.title}">月次作業報告・検収</h2>
+        <p class="portal-muted" th:text="#{portal.customer.acceptances.guide}">作業報告を確認し、検収または差戻しを行ってください。</p>
+        <div class="portal-list" id="acceptanceList"></div>
+    </section>
+
+    <!-- 契約 -->
+    <section id="tab-contracts" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.customer.contracts.title}">契約</h2>
+        <div class="portal-list" id="contractList"></div>
+    </section>
+
+    <!-- 請求 -->
+    <section id="tab-invoices" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.customer.invoices.title}">請求</h2>
+        <p class="portal-muted" th:text="#{portal.customer.invoices.guide}">受領確認・支払予定日・問い合わせを登録できます。</p>
+        <div class="portal-list" id="invoiceList"></div>
+    </section>
+
+    <!-- 見積 -->
+    <section id="tab-quotations" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.customer.quotations.title}">見積</h2>
+        <div class="portal-list" id="quotationList"></div>
+    </section>
+
+    <!-- 注文請 -->
+    <section id="tab-sales-orders" class="portal-tab-panel d-none">
+        <h2 th:text="#{portal.customer.salesOrders.title}">注文請</h2>
+        <div class="portal-list" id="salesOrderList"></div>
+    </section>
+</main>
+
+<!-- 検収操作モーダル -->
+<div class="modal fade" id="acceptanceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="acceptanceModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="portal-detail" id="acceptanceModalBody"></dl>
+                <div class="alert alert-danger d-none" id="acceptanceModalError" role="alert" aria-live="polite"></div>
+                <div class="mb-3 d-none" id="rejectCommentGroup">
+                    <label for="rejectComment" class="form-label" th:text="#{portal.customer.rejectComment}">差戻し理由</label>
+                    <textarea class="form-control" id="rejectComment" rows="3" maxlength="1000"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-success" id="acceptButton"
+                        th:text="#{portal.customer.accept}">検収する</button>
+                <button type="button" class="btn btn-warning" id="rejectButton"
+                        th:text="#{portal.customer.reject}">差戻す</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        th:text="#{portal.close}">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 請求登録モーダル -->
+<div class="modal fade" id="invoiceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="invoiceModalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="portal-detail" id="invoiceModalBody"></dl>
+                <div class="alert alert-danger d-none" id="invoiceModalError" role="alert" aria-live="polite"></div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="invoiceReceived">
+                    <label class="form-check-label" for="invoiceReceived"
+                           th:text="#{portal.customer.invoice.received}">受領確認済みにする</label>
+                </div>
+                <div class="mb-3">
+                    <label for="invoicePaymentDate" class="form-label"
+                           th:text="#{portal.customer.invoice.paymentDate}">支払予定日</label>
+                    <input type="date" class="form-control" id="invoicePaymentDate">
+                </div>
+                <div class="mb-3">
+                    <label for="invoiceInquiry" class="form-label"
+                           th:text="#{portal.customer.invoice.inquiry}">問い合わせ</label>
+                    <textarea class="form-control" id="invoiceInquiry" rows="3" maxlength="1000"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="invoiceSaveButton"
+                        th:text="#{portal.save}">登録</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                        th:text="#{portal.close}">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>PortalAuth.initCustomerPage();</script>
+</body>
+</html>

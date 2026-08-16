@@ -31,6 +31,13 @@ public class Invoice {
     private LocalDate issuedDate;
     private LocalDate paidDate;
     private LocalDate dueDate;
+    /** 受領確認日時（顧客portalが一度だけ設定。R2.3） */
+    private LocalDateTime receivedConfirmedAt;
+    /** 支払予定日（顧客portalが登録。R2.3） */
+    private LocalDate paymentExpectedDate;
+    /** 請求に関する問い合わせ（顧客portalが登録。R2.3） */
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private String portalInquiry;
     private String remarks;
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;

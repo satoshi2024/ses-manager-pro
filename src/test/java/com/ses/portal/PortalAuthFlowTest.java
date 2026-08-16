@@ -124,7 +124,6 @@ class PortalAuthFlowTest extends PortalTestSupport {
                 .andExpect(jsonPath("$.data.termsPending").value(true));
         mockMvc.perform(get("/portal").cookie(session)).andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/portal/terms"));
-
         // 規約同意（version不一致は拒否、現行一致で成功）
         mockMvc.perform(portalPost("/api/portal/auth/consent", csrf).cookie(session)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -135,11 +134,12 @@ class PortalAuthFlowTest extends PortalTestSupport {
                         .content("{\"termsVersion\":\"1\"}"))
                 .andExpect(status().isOk());
 
-        // 同意後: termsPending=false・index画面へ
+        // 同意後: termsPending=false・自組織のportal画面（顧客→/portal/customer）へ
         mockMvc.perform(get("/api/portal/auth/me").cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.termsPending").value(false));
-        mockMvc.perform(get("/portal").cookie(session)).andExpect(status().isOk());
+        mockMvc.perform(get("/portal").cookie(session)).andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/portal/customer"));
 
         // 再ログイン（password + TOTP）。completeで使ったstepより大きいstepのコードを使う
         // （last_used_step CASは同一step以下の再使用を拒否するため）
@@ -327,7 +327,6 @@ class PortalAuthFlowTest extends PortalTestSupport {
                     .andExpect(status().is3xxRedirection())
                     .andExpect(redirectedUrl("/portal/terms"));
             mockMvc.perform(get("/portal/terms").cookie(fixture.sessionCookie())).andExpect(status().isOk());
-
             // 旧versionでの同意は拒否、現行で同意 → termsPending false
             CsrfPair csrf = fetchPortalCsrf(mockMvc);
             mockMvc.perform(portalPost("/api/portal/auth/consent", csrf).cookie(fixture.sessionCookie())

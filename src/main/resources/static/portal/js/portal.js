@@ -272,6 +272,281 @@
         request: function (options) {
             options.headers = Object.assign({}, csrfHeader(), options.headers || {});
             return $.ajax(options);
+        },
+
+        /** 顧客ポータル画面（契約/検収/請求/見積/注文請） */
+        initCustomerPage: function () {
+            const self = this;
+            let currentTab = 'acceptances';
+
+            function escapeHtml(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            function money(value) {
+                if (value == null) {
+                    return '-';
+                }
+                return Number(value).toLocaleString('ja-JP') + ' 円';
+            }
+
+            function showError(message) {
+                $('#portalError').text(message).removeClass('d-none');
+            }
+
+            function hideError() {
+                $('#portalError').addClass('d-none').text('');
+            }
+
+            function loadHeader() {
+                $.get('/api/portal/auth/me').done(function (res) {
+                    if (!res || res.code !== 200) {
+                        window.location.href = '/portal/login';
+                        return;
+                    }
+                    $('#portalHeaderUser').text(res.data.displayName + '（顧客）');
+                    if (res.data.termsPending) {
+                        window.location.href = '/portal/terms';
+                    }
+                }).fail(function () {
+                    window.location.href = '/portal/login';
+                });
+            }
+
+            $('#logoutButton').on('click', function () {
+                self.request({url: '/api/portal/auth/logout', method: 'POST'}).always(function () {
+                    window.location.href = '/portal/login';
+                });
+            });
+
+            $('.portal-tab').on('click', function () {
+                currentTab = $(this).data('tab');
+                $('.portal-tab').removeClass('active');
+                $(this).addClass('active');
+                $('.portal-tab-panel').addClass('d-none');
+                $('#tab-' + currentTab).removeClass('d-none');
+                hideError();
+                loadTab(currentTab);
+            });
+
+            function loadTab(tab) {
+                const loaders = {
+                    quotations: loadQuotations,
+                    'sales-orders': loadSalesOrders,
+                    contracts: loadContracts,
+                    acceptances: loadAcceptances,
+                    invoices: loadInvoices
+                };
+                (loaders[tab] || function () {} )();
+            }
+
+            // ===== 見積 =====
+            function loadQuotations() {
+                $.get('/api/portal/customer/quotations?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (q) {
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(q.title)
+                            + ' <span class="portal-badge">' + escapeHtml(q.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(q.quotationNo || '')
+                            + ' / ' + money(q.unitPrice) + '</div>'
+                            + '<div class="portal-row-actions">'
+                            + '<a class="btn btn-sm btn-outline-primary" href="/api/portal/customer/quotations/'
+                            + q.id + '/download" target="_blank" rel="noopener">PDF</a>'
+                            + '</div></div>';
+                    }).join('');
+                    $('#quotationList').html(rows || '<p class="portal-muted">表示できる見積はありません</p>');
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            // ===== 注文請 =====
+            function loadSalesOrders() {
+                $.get('/api/portal/customer/sales-orders?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (o) {
+                        const pdf = o.acknowledgementAvailable
+                            ? '<a class="btn btn-sm btn-outline-primary" href="/api/portal/customer/sales-orders/'
+                                + o.id + '/acknowledgement/download" target="_blank" rel="noopener">注文請PDF</a>' : '';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(o.orderNo || '')
+                            + ' <span class="portal-badge">' + escapeHtml(o.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(o.customerPoNo || '') + ' / '
+                            + money(o.totalAmountSnapshot) + '</div>'
+                            + '<div class="portal-row-actions">' + pdf + '</div></div>';
+                    }).join('');
+                    $('#salesOrderList').html(rows || '<p class="portal-muted">表示できる注文請はありません</p>');
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            // ===== 契約 =====
+            function loadContracts() {
+                $.get('/api/portal/customer/contracts?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (c) {
+                        const doc = c.contractDocumentAvailable
+                            ? '<a class="btn btn-sm btn-outline-primary" href="/api/portal/customer/contracts/'
+                                + c.id + '/document/download" target="_blank" rel="noopener">契約書PDF</a>' : '';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(c.contractNo || '')
+                            + ' <span class="portal-badge">' + escapeHtml(c.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(c.engineerName || '') + ' / '
+                            + escapeHtml(c.projectName || '') + '</div>'
+                            + '<div class="portal-muted">' + escapeHtml(c.jobDescription || '') + '</div>'
+                            + '<div class="portal-muted">電子署名: ' + escapeHtml(c.esignStatus || '未実施') + '</div>'
+                            + '<div class="portal-row-actions">' + doc + '</div></div>';
+                    }).join('');
+                    $('#contractList').html(rows || '<p class="portal-muted">表示できる契約はありません</p>');
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            // ===== 検収 =====
+            function loadAcceptances() {
+                $.get('/api/portal/customer/acceptances?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (a) {
+                        const doc = a.documentAvailable
+                            ? '<a class="btn btn-sm btn-outline-primary" href="/api/portal/customer/acceptances/'
+                                + a.id + '/document/download" target="_blank" rel="noopener">検収書PDF</a>' : '';
+                        const operate = a.status === '提出済'
+                            ? '<button type="button" class="btn btn-sm btn-success" data-acceptance-id="' + a.id
+                                + '" data-month="' + escapeHtml(a.workMonth) + '">検収</button>'
+                                + '<button type="button" class="btn btn-sm btn-warning" data-reject-id="' + a.id
+                                + '" data-month="' + escapeHtml(a.workMonth) + '">差戻し</button>' : '';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(a.workMonth) + ' '
+                            + escapeHtml(a.contractNo || '')
+                            + ' <span class="portal-badge">' + escapeHtml(a.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(a.engineerName || '') + ' / '
+                            + money(a.amountSnapshot) + '</div>'
+                            + (a.rejectComment ? '<div class="portal-reject-comment">差戻し理由: '
+                                + escapeHtml(a.rejectComment) + '</div>' : '')
+                            + '<div class="portal-row-actions">' + operate + doc + '</div></div>';
+                    }).join('');
+                    $('#acceptanceList').html(rows || '<p class="portal-muted">表示できる検収はありません</p>');
+                    $('[data-acceptance-id]').on('click', function () {
+                        openAcceptanceModal($(this).data('acceptance-id'), $(this).data('month'), 'accept');
+                    });
+                    $('[data-reject-id]').on('click', function () {
+                        openAcceptanceModal($(this).data('reject-id'), $(this).data('month'), 'reject');
+                    });
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            function openAcceptanceModal(id, month, mode) {
+                $('#acceptanceModalError').addClass('d-none');
+                $('#rejectCommentGroup').toggleClass('d-none', mode !== 'reject');
+                $('#acceptanceModalTitle').text('検収 ' + month + '（' + id + '）');
+                $('#acceptButton').prop('disabled', mode !== 'accept');
+                $('#rejectButton').prop('disabled', mode !== 'reject');
+                bootstrap.Modal.getOrCreateInstance('#acceptanceModal').show();
+                $('#acceptButton').off('click').on('click', function () {
+                    submitAcceptance(id, 'accept', null);
+                });
+                $('#rejectButton').off('click').on('click', function () {
+                    const comment = $('#rejectComment').val().trim();
+                    if (!comment) {
+                        $('#acceptanceModalError').text('差戻し理由を入力してください').removeClass('d-none');
+                        return;
+                    }
+                    submitAcceptance(id, 'reject', comment);
+                });
+            }
+
+            function submitAcceptance(id, mode, comment) {
+                const url = '/api/portal/customer/acceptances/' + id + '/' + mode;
+                const data = mode === 'reject' ? {comment: comment} : {};
+                self.request({url: url, method: 'POST', contentType: 'application/json', data: JSON.stringify(data)})
+                    .done(function (res) {
+                        if (res.code !== 200) {
+                            $('#acceptanceModalError').text(res.message).removeClass('d-none');
+                            return;
+                        }
+                        bootstrap.Modal.getInstance('#acceptanceModal').hide();
+                        loadAcceptances();
+                    })
+                    .fail(function (xhr) {
+                        let message = '操作に失敗しました';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            message = xhr.responseJSON.message;
+                        }
+                        $('#acceptanceModalError').text(message).removeClass('d-none');
+                    });
+            }
+
+            // ===== 請求 =====
+            function loadInvoices() {
+                $.get('/api/portal/customer/invoices?current=1&size=100').done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const rows = (res.data.records || []).map(function (inv) {
+                        const received = inv.receivedConfirmedAt ? '受領確認済み' : '未確認';
+                        return '<div class="portal-card portal-row">'
+                            + '<div class="portal-row-title">' + escapeHtml(inv.invoiceNo || '')
+                            + ' <span class="portal-badge">' + escapeHtml(inv.status) + '</span></div>'
+                            + '<div class="portal-muted">' + escapeHtml(inv.billingMonth || '') + ' / '
+                            + money(inv.total) + ' / ' + received + '</div>'
+                            + '<div class="portal-row-actions">'
+                            + '<a class="btn btn-sm btn-outline-primary" href="/api/portal/customer/invoices/'
+                            + inv.id + '/download" target="_blank" rel="noopener">請求書PDF</a>'
+                            + '<button type="button" class="btn btn-sm btn-outline-secondary" data-invoice-id="'
+                            + inv.id + '">受領確認・登録</button></div></div>';
+                    }).join('');
+                    $('#invoiceList').html(rows || '<p class="portal-muted">表示できる請求はありません</p>');
+                    $('[data-invoice-id]').on('click', function () {
+                        openInvoiceModal($(this).data('invoice-id'));
+                    });
+                }).fail(function (xhr) { if (!self.handleTermsRequired(xhr)) showError('読み込みに失敗しました'); });
+            }
+
+            function openInvoiceModal(id) {
+                $('#invoiceModalError').addClass('d-none');
+                $.get('/api/portal/customer/invoices/' + id).done(function (res) {
+                    if (res.code !== 200) { showError(res.message); return; }
+                    const inv = res.data;
+                    $('#invoiceModalTitle').text('請求 ' + (inv.invoiceNo || id));
+                    $('#invoiceModalBody').html(
+                        '<dt>請求月</dt><dd>' + escapeHtml(inv.billingMonth || '-') + '</dd>'
+                        + '<dt>合計</dt><dd>' + money(inv.total) + '</dd>'
+                        + '<dt>状態</dt><dd>' + escapeHtml(inv.status) + '</dd>'
+                        + '<dt>支払期日</dt><dd>' + escapeHtml(inv.dueDate || '-') + '</dd>');
+                    $('#invoiceReceived').prop('checked', !!inv.receivedConfirmedAt);
+                    $('#invoicePaymentDate').val(inv.paymentExpectedDate || '');
+                    $('#invoiceInquiry').val(inv.portalInquiry || '');
+                    bootstrap.Modal.getOrCreateInstance('#invoiceModal').show();
+                });
+                $('#invoiceSaveButton').off('click').on('click', function () {
+                    saveInvoice(id);
+                });
+            }
+
+            function saveInvoice(id) {
+                const payload = {
+                    receivedConfirmed: $('#invoiceReceived').is(':checked'),
+                    paymentExpectedDate: $('#invoicePaymentDate').val() || null,
+                    inquiry: $('#invoiceInquiry').val().trim() || null
+                };
+                self.request({url: '/api/portal/customer/invoices/' + id + '/register', method: 'POST',
+                        contentType: 'application/json', data: JSON.stringify(payload)})
+                    .done(function (res) {
+                        if (res.code !== 200) {
+                            $('#invoiceModalError').text(res.message).removeClass('d-none');
+                            return;
+                        }
+                        bootstrap.Modal.getInstance('#invoiceModal').hide();
+                        loadInvoices();
+                    })
+                    .fail(function (xhr) {
+                        let message = '登録に失敗しました';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            message = xhr.responseJSON.message;
+                        }
+                        $('#invoiceModalError').text(message).removeClass('d-none');
+                    });
+            }
+
+            loadHeader();
+            loadTab(currentTab);
         }
     };
 

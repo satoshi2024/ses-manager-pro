@@ -126,6 +126,44 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
     @Select("SELECT * FROM t_acceptance WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Acceptance selectByIdForUpdate(@Param("id") Long id);
 
+    /** 顧客ポータル用: 自組織customer_id配下の検収一覧（SQL境界。design §6.2）。 */
+    @Select("""
+        <script>
+        SELECT
+            a.id AS id,
+            a.work_month AS workMonth,
+            a.status AS status,
+            a.submitted_at AS submittedAt,
+            a.accepted_at AS acceptedAt,
+            a.reject_comment AS rejectComment,
+            a.hours_snapshot AS hoursSnapshot,
+            a.amount_snapshot AS amountSnapshot,
+            a.customer_contact_name_snapshot AS customerContactNameSnapshot,
+            c.contract_no AS contractNo,
+            e.full_name AS engineerName,
+            (a.document_id IS NOT NULL) AS documentAvailable
+        FROM t_acceptance a
+        INNER JOIN t_contract c ON c.id = a.contract_id AND c.deleted_flag = 0
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        WHERE a.deleted_flag = 0
+          AND c.customer_id = #{customerId}
+          <if test="workMonth != null and workMonth != ''">AND a.work_month = #{workMonth}</if>
+          <if test="status != null and status != ''">AND a.status = #{status}</if>
+        ORDER BY a.work_month DESC, a.id DESC
+        </script>
+        """)
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalAcceptanceDto> selectPortalPageDto(
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.ses.dto.portal.PortalAcceptanceDto> page,
+            @Param("customerId") Long customerId,
+            @Param("workMonth") String workMonth,
+            @Param("status") String status);
+
+    /** 顧客ポータル用: 自組織customer_id配下の検収詳細（不一致は0件→404秘匿）。 */
+    @Select("SELECT a.* FROM t_acceptance a "
+            + "INNER JOIN t_contract c ON c.id = a.contract_id AND c.deleted_flag = 0 "
+            + "WHERE a.id = #{id} AND a.deleted_flag = 0 AND c.customer_id = #{customerId} FOR UPDATE")
+    Acceptance selectPortalByIdForUpdate(@Param("id") Long id, @Param("customerId") Long customerId);
+
     @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 LIMIT 1")
     Acceptance selectByContractAndMonth(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);
 
