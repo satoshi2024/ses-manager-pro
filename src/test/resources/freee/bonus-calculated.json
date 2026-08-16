@@ -1,0 +1,27 @@
+{
+  "employee_payroll_statements": [
+    {
+      "id": 9101,
+      "company_id": 123,
+      "employee_id": 502,
+      "employee_name": "従業員 乙",
+      "employee_display_name": "従業員乙",
+      "employee_num": "E-502",
+      "pay_date": "2026-07-10",
+      "fixed": true,
+      "calc_status": "calculated",
+      "calculated_at": "2026-07-05T10:00:00+09:00",
+      "total_deduction_amount": "100000",
+      "net_payment_amount": "400000",
+      "gross_payment_amount": "500000",
+      "allowances": [
+        { "name": "賞与", "amount": "500000" }
+      ],
+      "deductions": [
+        { "name": "所得税", "amount": "40000" },
+        { "name": "社会保険料", "amount": "60000" }
+      ]
+    }
+  ],
+  "total_count": 1
+}

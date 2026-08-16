@@ -96,6 +96,8 @@ public class ApiAuditFilter extends OncePerRequestFilter {
 
     /**
      * 記録対象か判定する（/api/** かつ 更新系メソッド）。
+     * /api/payroll/** はHFP-01専用監査（PAYROLL_* / FREEE_* fixed code）がcontrollerで記録するため除外し、
+     * 1 request = 1 audit rowを保つ（design §12.3）。
      */
     private boolean isAuditTarget(HttpServletRequest request) {
         if (isBreakGlassRequest(request)) {
@@ -103,6 +105,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         }
         String uri = request.getRequestURI();
         if (uri == null || !uri.startsWith("/api/")) {
+            return false;
+        }
+        if (uri.startsWith("/api/payroll")) {
             return false;
         }
         String method = request.getMethod();

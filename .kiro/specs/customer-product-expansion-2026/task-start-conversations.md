@@ -3848,7 +3848,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. position/allocation/scenario DDL
   - **Objective**: F1. position/allocation/scenario DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V110/V1/H2/smoke、状態/区間/競合service。
+  - **実装ガイダンス**: V103/V1/H2/smoke、状態/区間/競合service。
   - **テスト要件**: 50+50/60+50、期間、scenario isolation。
   - **Demo**: F1. position/allocation/scenario DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4206,7 +4206,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. portal org/user/invite/consent DDL
   - **Objective**: F1. portal org/user/invite/consent DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V111/V1/H2/smoke、token/hash/session/permission。
+  - **実装ガイダンス**: V104/V1/H2/smoke、token/hash/session/permission。
   - **テスト要件**: token/reuse/expiry/email/tenant/停止。
   - **Demo**: F1. portal org/user/invite/consent DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4512,7 +4512,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. change/expense/1on1/survey DDL
   - **Objective**: F1. change/expense/1on1/survey DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V112/V1/H2/smoke、本人scope、field allowlist。
+  - **実装ガイダンス**: V105/V1/H2/smoke、本人scope、field allowlist。
   - **テスト要件**: A/B、JSON不正、状態、version競合。
   - **Demo**: F1. change/expense/1on1/survey DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -4870,7 +4870,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. connection/mapping/job DDLと既存connection移行
   - **Objective**: F1. connection/mapping/job DDLと既存connection移行 を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V113/V1/H2/smoke、暗号/token race/outbox。
+  - **実装ガイダンス**: V106/V1/H2/smoke、暗号/token race/outbox。
   - **テスト要件**: unique/rotation/claim/CAS/tenant。
   - **Demo**: F1. connection/mapping/job DDLと既存connection移行 の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -5279,7 +5279,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. participant/digital invoice/event DDL
   - **Objective**: F1. participant/digital invoice/event DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V114/V1/H2/smoke、state/idempotency。
+  - **実装ガイダンス**: V107/V1/H2/smoke、state/idempotency。
   - **テスト要件**: unique/status/event order。
   - **Demo**: F1. participant/digital invoice/event DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 
@@ -5637,7 +5637,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 【担当task原文】
 - [ ] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: F1. version/run/item/feedback/outcome/evaluation DDL を完了し、requirementsに定義した利用者効果を検証可能にする。
-  - **実装ガイダンス**: V115/V1/H2/smoke、legacy移行方針。
+  - **実装ガイダンス**: V108/V1/H2/smoke、legacy移行方針。
   - **テスト要件**: active一意、trace、tenant、保存期限。
   - **Demo**: F1. version/run/item/feedback/outcome/evaluation DDL の成果を対象利用者またはレビュー担当者へ提示し、受入条件との対応を確認する。
 

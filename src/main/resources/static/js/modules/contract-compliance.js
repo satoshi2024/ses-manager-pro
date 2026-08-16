@@ -87,6 +87,7 @@ const ContractCompliance = (function () {
             $('#cd-documents-card').removeClass('d-none');
             if (detail.canEdit) {
                 $('#cd-doc-generate-btn').prop('disabled', false);
+                $('#cd-doc-preview-btn').prop('disabled', false);
             }
             loadDocuments();
         }
@@ -305,9 +306,34 @@ const ContractCompliance = (function () {
         });
     }
 
-    function downloadDelivery(deliveryId) {
-        window.open('/api/contracts/' + contractId + '/compliance-documents/' + deliveryId + '/download', '_blank');
-    }
+function downloadDelivery(deliveryId) {
+window.open('/api/contracts/' + contractId + '/compliance-documents/' + deliveryId + '/download', '_blank');
+}
+
+// P1-6: watermark preview（archive 0・delivery 0・新規タブでinline表示）
+function previewDocument() {
+const documentType = $('#cd-doc-type').val();
+if (!documentType) {
+Toast.warning(SES.i18n.t('cpp.document.selectType', '帳票種別を選択してください'));
+return;
+}
+$.ajax({
+url: '/api/contracts/' + contractId + '/compliance-documents/preview',
+method: 'POST',
+contentType: 'application/json',
+data: JSON.stringify({ documentType: documentType, deliveryMethod: 'NONE' }),
+xhrFields: { responseType: 'blob' },
+success: function (blob, status, xhr) {
+const url = URL.createObjectURL(blob);
+window.open(url, '_blank');
+setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+},
+error: function (err) {
+Toast.error((err.responseJSON && err.responseJSON.message)
+|| SES.i18n.t('js.common.error_network', '通信エラー'));
+}
+});
+}
 
     // ===== finding対応（T065 B2） =====
 
@@ -378,11 +404,12 @@ const ContractCompliance = (function () {
         });
     }
 
-    return {
-        init: init, save: save,
-        generateDocument: generateDocument, confirmDelivery: confirmDelivery, downloadDelivery: downloadDelivery,
-        ackFinding: ackFinding, resolveFinding: resolveFinding, exceptionFinding: exceptionFinding
-    };
+return {
+init: init, save: save,
+generateDocument: generateDocument, previewDocument: previewDocument,
+confirmDelivery: confirmDelivery, downloadDelivery: downloadDelivery,
+ackFinding: ackFinding, resolveFinding: resolveFinding, exceptionFinding: exceptionFinding
+};
 })();
 
 $(function () {

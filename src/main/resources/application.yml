@@ -258,6 +258,18 @@ cloudsign:
   # 状態pollingの実行cron（ShedLock付き）
   poll-cron: ${CLOUDSIGN_POLL_CRON:0 */2 * * * *}
 
+# ===== freee連携（HFP-01: 給与・賞与参照。S11勤怠/S15会計も同じOAuth基盤を利用） =====
+# 秘密値は環境変数からのみ供給する。api-base-url はS11/S15が使う会計API等の共通resource base（意味不変）。
+# OAuthはaccounts host、人事労務APIはhr host へ分離する（HFP-01-R02/R03）。
+freee:
+  client-id: ${FREEE_CLIENT_ID:}
+  client-secret: ${FREEE_CLIENT_SECRET:}
+  redirect-uri: ${FREEE_REDIRECT_URI:http://localhost:8080/integrations/freee/callback}
+  api-base-url: ${FREEE_API_BASE_URL:https://api.freee.co.jp}
+  hr-api-base-url: ${FREEE_HR_API_BASE_URL:https://api.freee.co.jp/hr}
+  oauth-base-url: ${FREEE_OAUTH_BASE_URL:https://accounts.secure.freee.co.jp/public_api}
+  token-encryption-key: ${FREEE_TOKEN_ENCRYPTION_KEY:change-me-change-me-change-me-1234}
+
 # ===== G2外部Review資格credential暗号化（§6.5） =====
 # 値はdeployment secret storeから注入すること。prodプロファイルでは未設定・不正な鍵で起動時にfail-fastする。
 # dev/testプロファイルは未設定時、テスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
@@ -269,3 +281,13 @@ compliance:
       # 鍵バージョンごとのAES-256鍵（32バイトをunpadded base64urlで指定。'='padding・空白禁止）
       keys:
         # v1: ${COMPLIANCE_CREDENTIAL_KEY_V1:}
+
+# ===== G2 reviewer fingerprint HMAC鍵（§9・R23-P1-01） =====
+# tenant別専用key namespace: compliance.gate.fingerprint-keys.{tenantId}
+# 値はdeployment secret storeから注入すること。prodプロファイルではtenant設定の欠損・不正で起動時にfail-fastする。
+# dev/testプロファイルはtenant未設定時のみテスト用の既定鍵v1へフォールバックする（本番へ持ち込まないこと）。
+    fingerprint-keys:
+      # default:
+      #   current-key-version: ${COMPLIANCE_FINGERPRINT_CURRENT_KEY_VERSION:}
+      #   keys:
+      #     v1: ${COMPLIANCE_FINGERPRINT_KEY_V1:}

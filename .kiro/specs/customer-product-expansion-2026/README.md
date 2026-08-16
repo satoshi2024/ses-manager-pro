@@ -53,12 +53,12 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 9 | `order-acceptance-workflow` | 見積→注文→注文請→月次検収→請求の閉ループ | XL | **V80（実在）＋V81（R10順方向修復）** | **PASS**・code/evidence Head `7caa5e6`・Packet/current merged HeadはPacket同期commit（main=origin/main）・R12 P2はprovenance記述のみ |
 | 10 | `dispatch-outsourcing-compliance-ledger` | 派遣/準委任の台帳・明示書・抵触日・偽装請負予防 | XXL | **V84/V85実在＋V102 G2 follow-up予約** | T060〜T065 PASS、T066/R19-P1-01はR21 canonical payload sync docs-only reworkをR10 Review中。P1-01 OPEN、P2-02 VERIFIED_CLOSED、P1-02/P1-03/P1-04/P2-01 VERIFIED_CLOSED |
 | 11 | `attendance-leave-overtime-compliance` | 雇用勤怠・休暇・36協定警告 | XXL | **V83** | 仕様済み・G6決定済み |
-| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V110** | 仕様済み・S10 PASS待ち |
-| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V111** | 仕様済み・G3決定済み |
-| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V112** | 仕様済み |
-| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V113** | 仕様済み・G4決定済み |
-| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V114** | 仕様済み・G5決定済み |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V115** | 仕様済み |
+| 12 | `staffing-capacity-planning` | 募集枠・兼務・配賦率・将来需給 | XL | **V103** | 仕様済み・S10 PASS待ち |
+| 13 | `external-customer-bp-portal` | 顧客検収・文書受渡し・BP請求/空き要員更新 | XXL | **V104** | 仕様済み・G3決定済み |
+| 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V105** | 仕様済み |
+| 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V106** | 仕様済み・G4決定済み |
+| 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V107** | 仕様済み・G5決定済み |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V108** | 仕様済み |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
@@ -76,19 +76,12 @@ S11=V83/V91/V98（実在）、S12=V103、S13=V104、S14=V105、S15=V106、S16=V1
 V82はV83実在後に予約されていたため欠番として保持し、後から補填しない。
 過去migrationの編集やout-of-order適用は禁止する。
 
-2026-08-14にHFP-02（contract-document-esign / CloudSign本番署名閉ループ）が**V109**を実在させた。
-S12〜S17の予約（V103〜V108）は実在latest V109以下となるため、全予約表を次の未使用番号へ繰り上げ、
-**S12=V110、S13=V111、S14=V112、S15=V113、S16=V114、S17=V115**とする。
-各specのdesign.md / tasks.md / 派工対話 / parallel-execution-plan / dependency-matrix / COPY-INDEXを
-同一差分で更新する（`SpecDispatchConsistencyTest`が検証する）。
-HFP-02の次に採番が必要なspec（例: HFP-01 payroll）は着手時の`latest + 1`（現時点ではV116）を使う。
-
 履歴: 2026-08-09にS11の方式A追補（R2-P1-02）へ発注者割当の**V91**を実在させた時点では、S12〜S17をV92〜V97へ繰り上げた。
 この過去予約は現行正本ではない。V91は`t_employee_attendance_break`（休憩区間）専用であり、S12〜S17が流用しない。
 
 2026-08-11のread-only inventoryでcommon latest V101、`migration-dev/V100__seed_r3_scale_300.sql`実在を確認した。
 common V99は永久欠番、V100は欠番ではなくdev locationの実在versionでcommon再利用禁止、common V101は既存用途を維持する。
-R19-P1-01のS10 G2 follow-upをV102、そのdependency後のS12〜S17をV110〜V115とする（2026-08-14: HFP-02 V109実在に伴い繰り上げ）。
+R19-P1-01のS10 G2 follow-upをV102、そのdependency後のS12〜S17をV103〜V108とする。
 R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とする前にV102を作成しない。
 
 2026-08-09時点でS09はcode/evidence Head `7caa5e6a25b21a21a7d7d02961ace7245b33fb47`を対象とし、Packet同期commit（`git log -1 -- <path>`で解決、`main`=`origin/main`）でRound 12 independent diff reReviewのPASS記録をmerge済みである。R12-P2-01はPacket provenance記述のみである。

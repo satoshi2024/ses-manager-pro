@@ -47,12 +47,14 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
+    private final com.ses.mapper.ProjectPositionMapper positionMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
     private final com.ses.service.compliance.LaborComplianceService laborComplianceService;
     private final com.ses.service.AuditLogService auditLogService;
     private final com.ses.service.BpComplianceService bpComplianceService;
     private final com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
+    private final com.ses.service.staffing.StaffingContractSyncService staffingSync;
 
     /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -72,11 +74,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of("error.contract.hasWorkRecord");
         }
         boolean removed = super.removeById(id);
-        // 削除で稼動中契約・オープン提案が無くなった場合は要員を Bench に戻す
-        // （releaseIfIdle が両方を確認してから判定するため安全。稼動中契約は元々削除不可）。
+        // 契約削除後、要員が稼働中契約を持たなくなった場合は Bench に戻す
+        // （releaseIfIdle は承認済み・稼働中以外の契約も参照するため安全に呼べる。実際の判定はメソッド内）。
         if (removed && target.getEngineerId() != null) {
             engineerStatusService.releaseIfIdle(target.getEngineerId());
         }
+        // staffing-capacity-planning: actual allocationを破棄する
+        staffingSync.removeActual(contractId);
         return removed;
     }
 
@@ -131,6 +135,17 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             }
             if (!Objects.equals(project.getCustomerId(), c.getCustomerId())) {
                 throw BusinessException.of("error.contract.projectCustomerMismatch");
+            }
+        }
+
+        // staffing-capacity-planning: ポジション紐付けは案件配下の実在ポジションに限定する
+        if (c.getPositionId() != null) {
+            com.ses.entity.ProjectPosition position = positionMapper.selectById(c.getPositionId());
+            if (position == null) {
+                throw BusinessException.of(404, "error.staffing.positionNotFound");
+            }
+            if (c.getProjectId() != null && !Objects.equals(position.getProjectId(), c.getProjectId())) {
+                throw BusinessException.of(400, "error.staffing.positionProjectMismatch");
             }
         }
 
@@ -198,6 +213,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (contract.getSalesUserId() != null) {
             invalidateScope();
         }
+
+        // staffing-capacity-planning: 契約作成（準備中）をactual allocationへ同期する
+        staffingSync.syncActual(contract.getId());
 
         return checkComplianceAndRecord(contract, "POST");
     }
@@ -269,6 +287,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (!Objects.equals(old.getSalesUserId(), contract.getSalesUserId())) {
             invalidateScope();
         }
+
+        // staffing-capacity-planning: 契約のperiod/position/status変化をactual allocationへ同期する
+        staffingSync.syncActual(contract.getId());
 
         return checkComplianceAndRecord(contract, "PUT");
     }
@@ -343,6 +364,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 engineerStatusService.releaseIfIdle(contract.getEngineerId());
             }
         }
+        // staffing-capacity-planning: 状態遷移をactual allocationへ同期する（終了/解約→破棄）
+        staffingSync.syncActual(contract.getId());
     }
 
     @Override
@@ -372,13 +395,14 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 proposal.getEngineerId(),
                 proposal.getProjectId(),
                 project.getCustomerId(),
-                // 売上単価は提案の提示単価を引継ぐ。NULL時は0(ドラフトのため後で編集)。
+                // 提案単価は案件提示額の参考値であるため、0(ドラフトの初期値)とはしない
                 proposal.getProposedUnitPrice(),
                 null, null,
-                "提案#" + proposal.getId() + "の成約により自動生成",
+                "提案#" + proposal.getId() + "の成約による自動生成",
                 proposal.getId(),
                 null,
-                null);
+                null,
+                proposal.getPositionId());
         return buildAndSaveDraft(src);
     }
 
@@ -415,6 +439,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 "見積#" + quotation.getQuotationNo() + "の受注により自動生成",
                 null,
                 quotation.getId(),
+                null,
                 null);
         return buildAndSaveDraft(src);
     }
@@ -455,7 +480,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 "注文#" + order.getOrderNo() + "明細" + line.getLineNo() + "の契約化により自動生成",
                 null,
                 order.getQuotationId(),
-                line.getId());
+                line.getId(),
+                null);
         return buildAndSaveDraft(src);
     }
 
@@ -469,6 +495,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         contract.setProposalId(src.proposalId());
         contract.setQuotationId(src.quotationId());
         contract.setOrderLineId(src.orderLineId());
+        contract.setPositionId(src.positionId());
         contract.setEngineerId(src.engineerId());
         contract.setProjectId(src.projectId());
         contract.setCustomerId(src.customerId());
@@ -676,6 +703,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             String remarks,
             Long proposalId,
             Long quotationId,
-            Long orderLineId) {
+            Long orderLineId,
+            Long positionId) {
     }
 }

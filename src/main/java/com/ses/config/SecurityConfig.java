@@ -20,6 +20,7 @@ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.http.HttpMethod;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -154,7 +155,23 @@ public class SecurityConfig {
                     "/api/audit-logs/**",
                     "/api/contracts/generate-renewals",
                     "/api/autocomplete/users",
-                    // G2 gate（Phase A step 3）: mapping version等の管理は管理者のみ
+                    // G2 gate approval（R23-P1-01 §5・P0-2）: 管理者・HR・マネージャーはapproval画面へ入れる。
+                    // ただしserviceでcurrent assignment.user_id == currentUserIdを必須にする（§5）。
+                    // 具体的パターンを先にマッチさせる（/** 管理者限定より前に置かないと到達不能）。
+                    // page/APIのapproval・read系を管理者・HR・マネージャーへ開放。
+                    "/api/compliance-gate/approvals",
+                    "/api/compliance-gate/capabilities",
+                    "/api/compliance-gate/mappings/*/external-reviews",
+                    "/api/compliance-gate/mappings/*/verifications",
+                    "/api/compliance-gate/submitted-reviews/*/verifications",
+                    "/api/compliance-gate/submitted-reviews/*/adoptions"
+                ).hasAnyRole("管理者", "HR", "マネージャー")
+                // subjectsのGET（閲覧）はHR/マネージャー可・POST（作成・P0-4）は管理者のみ
+                .requestMatchers(HttpMethod.GET, "/api/compliance-gate/subjects")
+                .hasAnyRole("管理者", "HR", "マネージャー")
+                // G2 gate（Phase A step 3・R23-P1-01）: type/policy/assignment/external review/verification/adoption管理は管理者のみ
+                .requestMatchers(
+                    "/compliance-gate/**",
                     "/api/compliance-gate/**"
                 ).hasRole("管理者")
                 // 新雇用勤怠の管理画面/API。営業には客先工数のwork-record権限があっても見せない。
@@ -166,6 +183,11 @@ public class SecurityConfig {
                 .hasAnyRole("管理者", "HR", "マネージャー")
                 // 要員本人のマイ勤怠は要員ロールのみ（本人の画面。管理側は勤怠グリッドで到達する）
                 .requestMatchers("/my/**", "/api/my/**").hasRole("要員")
+                // ===== HFP-01: freee給与連携の静的境界（menu権限は第三層。UI非表示だけを境界にしない） =====
+                // OAuth認可・callback・解除は管理者のみ（callbackも有効な管理者sessionを要求）
+                .requestMatchers("/integrations/freee/**").hasRole("管理者")
+                // 給与page/APIは管理者・HRのみ
+                .requestMatchers("/payroll/**", "/api/payroll/**").hasAnyRole("管理者", "HR")
                 // ===== 要員を含む全認証ユーザーが利用できる共通経路 =====
                 // 新たに認証ユーザー全体向け機能を追加する場合は必ずここへ追記すること。
                 //   /                    ← ロール別振り分けルーター（LoginSuccessHandler が全ロールを / へ送る）

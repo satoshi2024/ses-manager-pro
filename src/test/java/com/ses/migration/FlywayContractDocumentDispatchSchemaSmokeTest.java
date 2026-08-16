@@ -14,17 +14,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * HFP-02-02: V109（t_contract_document のadditive schema）をfresh/legacy両shapeで検証する。
+ * HFP-02-02: V103_1（t_contract_document のadditive schema）をfresh/legacy両shapeで検証する。
  *
  * <ul>
  *   <li>fresh: 空DBから全migrationを通しで適用し、追加列・索引・default値を確認</li>
- *   <li>legacy: 公開済みlatest(V102)実形状へlegacy行を入れ、V109適用後も
+ *   <li>legacy: 公開済みlatest(V102)実形状へlegacy行を入れ、V103_1適用後も
  *       既存のlocal PDF/CloudSign IDが保持され、新列が安全なdefaultで埋まることを確認</li>
- *   <li>V109のchecksumがflyway historyに記録されること</li>
+ *   <li>V103_1のchecksumがflyway historyに記録されること</li>
  * </ul>
  *
- * <p>採番: S12〜S17 が V103〜V108 を予約済みのため、HFP-02 は V109（実在latest V102 の次で、
- * 全予約の次）を使用する。
+ * <p>採番: 当初 V109（S12〜S17 の V103〜V108 予約を避けて全予約の次）を採番し、S12〜S17文書の
+ * 予約を V110〜V115 へ繰り上げたが、merge-prepで main 側に S12 の V103 が実在していることから
+ * **V103_1（Flyway表記 V103.1）** へ再採番し、予約繰上げ文書は main の状態へ復旧した。
+ * 順序は V103 < V103.1 < V104（S13予約）で、SpecDispatchConsistencyTest と両立する。
  */
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayContractDocumentDispatchSchemaSmokeTest {
@@ -53,7 +55,7 @@ class FlywayContractDocumentDispatchSchemaSmokeTest {
     };
 
     @Test
-    void V109は空DBからの全migration適用で追加列と索引を成立させる() throws Exception {
+    void V103_1は空DBからの全migration適用で追加列と索引を成立させる() throws Exception {
         Flyway.configure()
                 .dataSource(FRESH.getJdbcUrl(), FRESH.getUsername(), FRESH.getPassword())
                 .locations("classpath:db/migration")
@@ -83,17 +85,17 @@ class FlywayContractDocumentDispatchSchemaSmokeTest {
             // fresh適用時のchecksum記録
             try (ResultSet rs = st.executeQuery(
                     "SELECT success, checksum FROM flyway_schema_history "
-                            + "WHERE version = '109' ORDER BY installed_rank DESC LIMIT 1")) {
-                assertTrue(rs.next(), "Flyway historyにV109が存在するはず");
-                assertEquals(1, rs.getInt("success"), "V109はsuccessであるはず");
+                            + "WHERE version = '103.1' ORDER BY installed_rank DESC LIMIT 1")) {
+                assertTrue(rs.next(), "Flyway historyにV103.1が存在するはず");
+                assertEquals(1, rs.getInt("success"), "V103.1はsuccessであるはず");
                 org.junit.jupiter.api.Assertions.assertNotNull(rs.getObject("checksum"),
-                        "V109のchecksumが記録されるはず");
+                        "V103.1のchecksumが記録されるはず");
             }
         }
     }
 
     @Test
-    void V109はV102実形状のlegacy行を保持し安全なdefaultで埋める() throws Exception {
+    void V103_1はV102実形状のlegacy行を保持し安全なdefaultで埋める() throws Exception {
         // 公開済みlatest(V102)実形状を構築
         Flyway.configure()
                 .dataSource(LEGACY.getJdbcUrl(), LEGACY.getUsername(), LEGACY.getPassword())
@@ -118,7 +120,7 @@ class FlywayContractDocumentDispatchSchemaSmokeTest {
                     + "FROM t_contract c, m_contract_template t WHERE c.contract_no='CON-2026-0001' LIMIT 1");
         }
 
-        // V109適用
+        // V103_1適用
         Flyway.configure()
                 .dataSource(LEGACY.getJdbcUrl(), LEGACY.getUsername(), LEGACY.getPassword())
                 .locations("classpath:db/migration")

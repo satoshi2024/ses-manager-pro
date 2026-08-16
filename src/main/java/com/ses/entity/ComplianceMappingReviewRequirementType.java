@@ -16,6 +16,9 @@ public class ComplianceMappingReviewRequirementType extends BaseEntity {
     private String reviewerTypeNameSnapshot;
     private String credentialLabelSnapshot;
     private Integer credentialRequiredSnapshot;
+    /** §8: freeze時に確定するsnapshot。 */
+    private Integer qualificationVerificationRequiredSnapshot;
+    private Integer activeStatusVerificationRequiredSnapshot;
     private Long createdBy;
     private Long updatedBy;
 }

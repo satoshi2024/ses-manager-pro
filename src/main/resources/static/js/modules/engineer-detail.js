@@ -5,6 +5,10 @@ $(document).ready(function() {
     
     if (id) {
         loadEngineerDetail(id);
+        // staffing-capacity-planning（T077）: 配置計画タイムライン
+        if (typeof SES_staffing !== 'undefined') {
+            SES_staffing.initEngineerTimeline(Number(id));
+        }
     } else {
         renderEngineerLoadError(400, SES.i18n.t('error.noEngineerId'));
     }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/deepseek-v4-flash",
+  "permission": {
+    "edit": "allow",
+    "bash": "allow",
+    "read": "allow"
+  },
+  "agent": {
+    "build": {
+      "variant": "max",
+      "prompt": "你是高级开发工程师，负责根据 .opencode/task_bridge.json 中的 task_description 需求和 review_criteria 标准进行代码修改。修改完成后，将总结写入 task_bridge.json 中的 impl_summary 字段，并将 current_turn 修改为 'review'。"
+    }
+  }
+}

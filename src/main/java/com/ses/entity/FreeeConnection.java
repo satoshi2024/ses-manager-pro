@@ -15,4 +15,6 @@ public class FreeeConnection extends BaseEntity {
     private String refreshTokenEncrypted;
     private LocalDateTime tokenExpiresAt;
     private Long connectedBy;
+    /** 接続状態: CONNECTED / REAUTH_REQUIRED。DISCONNECTEDは行なし、MISCONFIGUREDは設定から導出。 */
+    private String connectionStatus;
 }

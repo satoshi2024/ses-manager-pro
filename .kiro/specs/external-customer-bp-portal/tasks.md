@@ -7,7 +7,7 @@
 > ただし**本specは§2（認可母集団）の既定解が適用できない唯一のspec**である。portal userは`sys_user`ではなく、
 > DataScope・組織scope・menu権限のいずれも持たない。母集団の解決は `design.md` §6「決定表」を正とする。
 >
-> **Migration**: 本specの予約番号は **V111**。staffing(V110)のmerge後に着手する。
+> **Migration**: 本specの予約番号は **V104**。staffing(V103)のmerge後に着手する。
 > `SecurityConfig.java`は本specの統合担当が先に変更・mergeし、engineer portal(S14)はその後。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
@@ -26,7 +26,7 @@
 - [ ] F1. portal org/user/invite/consent DDL
   - **Objective**: 顧客組織/BP組織とportal userを登録し、期限付き1回限りの招待tokenで参加できる。
     token再利用・期限切れ・email不一致は拒否される。全portal userにTOTP MFAと規約同意が要求される。
-  - **実装ガイダンス**: **V111**/V1/H2(`sql/schema-portal-h2.sql`)/MySQL smoke、token/hash/session/permission。
+  - **実装ガイダンス**: **V104**/V1/H2(`sql/schema-portal-h2.sql`)/MySQL smoke、token/hash/session/permission。
     招待tokenは256bit random、DBは**SHA-256 hashのみ保存**、URL log/mailerでmask（design §2）。
     **一回性はDB CASで保証**（`UPDATE ... WHERE used_at IS NULL`、design §6.3）。
     アプリ側の「存在チェック→更新」にしない。

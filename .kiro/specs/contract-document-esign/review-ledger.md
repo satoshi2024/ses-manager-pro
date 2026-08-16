@@ -278,3 +278,27 @@
 | 日時 | command | tests | failure | error | skip | 結果 |
 |---|---|---:|---:|---:|---:|---|
 | 2026-08-14 | mvn -B test -Dtest=CloudSignDispatchIntegrationTest,ContractDocumentDispatchStateTest,ContractDocumentApiControllerTest,CloudSignSyncIntegrationTest,CloudSignArtifactIntegrationTest,CloudSignClientContractTest,CloudSignRateLimiterTest | 78 | 0 | 0 | 0 | PASS |
+---
+
+## 8. merge-prep記録（2026-08-16・merge coordinator）
+
+### 8.1 main取り込みと採番訂正
+
+- main `5246783a`（HFP-01 merge済み `ec6df710` を含む）を `codex/hfp-02-contract-cloudsign` へmerge（git merge main）。
+- 衝突: `src/main/resources/application.yml` / `messages×4` / `.kiro/specs/staffing-capacity-planning/tasks.md`。いずれも main 側を正として手動merge（cloudsign設定と6 message keyをmain版へ追加。S12文書はmain版へ復旧）。
+- **V109 → V103_1 へ再採番**（git mv。未適用のため安全）。理由: main 側に S12 の V103 が実在し、当初の「S12〜S17 予約を V110〜V115 へ繰り上げる」docs変更が main の実態（S13〜S17 = V104〜V108）と衝突したため。V103_1 なら予約docs変更を一切必要とせず、順序 V103 < V103.1 < V104 で SpecDispatchConsistencyTest と両立する。S12〜S17 文書（customer-product-expansion-2026 配下）の繰上げ差分は main 版へ復旧済み。
+- FlywayContractDocumentDispatchSchemaSmokeTest: history検証を `version='103.1'` へ更新。
+- ApiAuditFilter: HFP-01の `/api/payroll` 除外（main経由）と HFP-02の artifact download判定が両立することを確認。
+
+### 8.2 検証gate（本記録執筆後に実行）
+
+| Gate | Command | 結果 |
+|---|---|---|
+| migration契約 | `ReviewerVerificationMigrationOrderContractTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest` | 実行して記録 |
+| cloudsign全suite | `CloudSign*` + contract-document関連 | 実行して記録 |
+| MySQL smoke | `FlywayContractDocumentDispatchSchemaSmokeTest,FlywayMigrationSmokeTest,FlywayV102_4FreeeCompanyBoundarySmokeTest` | 実行して記録 |
+| 全suite | `scripts/verify-like-ci.ps1` | 実行して記録 |
+
+### 8.3 状態
+
+- G2（sandbox E2E）・G5（production canary/運用承認）は従来どおり BLOCKED。G6（merge delta Review）は main merge 後に実施。

@@ -26,6 +26,7 @@ CREATE TABLE t_proposal (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   engineer_id         BIGINT,
   project_id          BIGINT,
+  position_id         BIGINT,
   proposed_unit_price DECIMAL(10,0),
   status              VARCHAR(20) DEFAULT '書類選考中',
   skill_sheet_path    VARCHAR(500),

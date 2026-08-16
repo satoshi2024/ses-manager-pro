@@ -1,8 +1,10 @@
 # Design — 要員配置・需給計画
 
 > Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+>
+> S12正式migration V103（実装済み。V1統合baselineとH2/MySQL smokeに同期済み）。
 
-## 1. DDL（予約V110）
+## 1. DDL（予約V103）
 
 - `t_project_position(id, project_id, position_no, role_name, required_count, skills_json,
   unit_price_min/max, start/end_date, location, allocation_percent, priority, status, version)`。

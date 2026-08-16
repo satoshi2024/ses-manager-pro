@@ -9,6 +9,7 @@ import com.ses.entity.ComplianceMappingReviewRequirementType;
 import com.ses.entity.ComplianceMappingSource;
 import com.ses.entity.ComplianceMappingVersion;
 import com.ses.entity.ComplianceResponsibleAssignment;
+import com.ses.entity.DocumentVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ComplianceMappingApprovalEventMapper;
 import com.ses.mapper.ComplianceMappingReviewRequirementGroupMapper;
@@ -47,10 +48,17 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
     private final ComplianceMappingApprovalEventMapper approvalEventMapper;
     private final ComplianceMappingCanonicalizer canonicalizer;
     private final SysUserMapper sysUserMapper;
+    private final com.ses.service.compliance.ComplianceGateEvidenceResolver evidenceResolver;
+    private final com.ses.service.compliance.ComplianceTenantResolver tenantResolver;
+
+    private String tenantId() {
+        return tenantResolver.currentTenantId();
+    }
 
     @Override
     @Transactional
-    public ComplianceMappingApprovalEvent approve(Long mappingId, Long workplaceId, String reason, Long evidenceDocumentId) {
+    public ComplianceMappingApprovalEvent approve(Long mappingId, Long workplaceId, String reason,
+                                                  Long evidenceDocumentId, Long evidenceDocumentVersionId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -61,6 +69,8 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         if (!StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "compliance.gate.findingNoteRequired");
         }
+        // P0-5: exact CLEAN evidence（§4-5/6・evidence NULL/不存在/non-CLEAN/hash不正は拒否）
+        DocumentVersion evidence = evidenceResolver.resolve(tenantId(), evidenceDocumentId, evidenceDocumentVersionId);
         Long actorId = SecurityUtils.currentUserId();
         if (actorId == null) {
             throw BusinessException.of(403, "error.accessDenied");
@@ -68,7 +78,7 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         // 実actor=現行open assignmentの指名者（同一workplace）
         List<ComplianceResponsibleAssignment> open = assignmentMapper.selectList(
                 new LambdaQueryWrapper<ComplianceResponsibleAssignment>()
-                        .eq(ComplianceResponsibleAssignment::getTenantId, "default")
+                        .eq(ComplianceResponsibleAssignment::getTenantId, tenantId())
                         .eq(ComplianceResponsibleAssignment::getWorkplaceId, workplaceId)
                         .eq(ComplianceResponsibleAssignment::getActiveSlot, 1));
         if (open.isEmpty() || !actorId.equals(open.get(0).getUserId())) {
@@ -83,19 +93,19 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         String mappingHash = canonicalizer.computeMappingHash(version, sources);
         List<ComplianceMappingReviewRequirementGroup> groups = requirementGroupMapper.selectList(
                 new LambdaQueryWrapper<ComplianceMappingReviewRequirementGroup>()
-                        .eq(ComplianceMappingReviewRequirementGroup::getTenantId, "default")
+                        .eq(ComplianceMappingReviewRequirementGroup::getTenantId, tenantId())
                         .eq(ComplianceMappingReviewRequirementGroup::getMappingId, mappingId));
         List<Long> groupIds = groups.stream().map(ComplianceMappingReviewRequirementGroup::getId).toList();
         List<ComplianceMappingReviewRequirementType> types = groupIds.isEmpty() ? List.of() :
                 requirementTypeMapper.selectList(
                         new LambdaQueryWrapper<ComplianceMappingReviewRequirementType>()
-                                .eq(ComplianceMappingReviewRequirementType::getTenantId, "default")
+                                .eq(ComplianceMappingReviewRequirementType::getTenantId, tenantId())
                                 .in(ComplianceMappingReviewRequirementType::getRequirementGroupId, groupIds));
         String reviewPolicyHash = canonicalizer.computeReviewPolicyHash(groups, types);
 
         SysUser actor = sysUserMapper.selectById(actorId);
         ComplianceMappingApprovalEvent event = new ComplianceMappingApprovalEvent();
-        event.setTenantId("default");
+        event.setTenantId(tenantId());
         event.setMappingId(mappingId);
         event.setMappingVersion(version.getMappingVersion());
         event.setMappingHash(mappingHash);
@@ -109,7 +119,12 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         event.setEventChainId(UUID.randomUUID().toString());
         event.setOccurredAt(LocalDateTime.now());
         event.setReason(reason);
-        event.setEvidenceDocumentId(evidenceDocumentId);
+        // P0-5: exact evidence snapshot（document id・exact version id・version・SHA-256・scan）
+        event.setEvidenceDocumentId(evidence.getDocumentId());
+        event.setEvidenceDocumentVersionId(evidence.getId());
+        event.setEvidenceDocumentVersion(String.valueOf(evidence.getVersionNo()));
+        event.setEvidenceDocumentHash(evidence.getSha256());
+        event.setEvidenceScanStatus(evidence.getScanStatus());
         event.setOperationId(UUID.randomUUID().toString());
         event.setCorrelationId(UUID.randomUUID().toString());
         event.setIdempotencyKey("MAPPING:APPROVE:" + mappingId + ":" + actorId + ":" + mappingHash + ":" + reviewPolicyHash);
@@ -121,3 +136,5 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
         return event;
     }
 }
+
+// P1-2 tenant resolver追加

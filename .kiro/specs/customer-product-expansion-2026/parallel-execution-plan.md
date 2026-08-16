@@ -61,14 +61,14 @@ Wave 4: AI feedback
 | 1-B | approval（T041〜T047）単独 | BP/CRM完了 | V75〜V79 | S07正式migration（承認DDL/menu/SLA/round・participant・outbox）。Contract/Invoice/BP payment共通経路を変更 |
 | 2-A | order（T054〜T059）単独 | approval完了 | V80＋V81修復 | 契約・請求状態機械の基礎。V80は変更せずV81を順方向適用 |
 | 2-B | dispatch（T060〜T066）とattendance（T067〜T074） | order独立Review合格、G2/G6確定 | V84 / V83（S11実在） | Contract担当メソッドと雇用勤怠テーブルを分離。V82は欠番 |
-| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V110 | proposal/contract/availabilityを統合参照。S10/S11双方PASSまでNOT READY |
-| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V111→V112 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
-| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V113 | Freee adapter、invoice、BP paymentを変更 |
-| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V114 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
-| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V115 | 学習指標の母集団とPII境界を先に固定 |
+| 2-C | staffing（T075〜T080）単独 | dispatch/attendance完了 | V103 | proposal/contract/availabilityを統合参照。S10/S11双方PASSまでNOT READY |
+| 3-A | external portal（T081〜T087）とengineer portal（T088〜T093）は条件付き | Wave 2完了、G3/G8/G9方針確定 | V104→V105 | `SecurityConfig.java`はexternal portal統合担当のみが先に変更・merge |
+| 3-B | accounting（T094〜T101）単独 | portal系、order、BP、archive完了、G4確定 | V106 | Freee adapter、invoice、BP paymentを変更 |
+| 3-C | JP PINT（T102〜T108）単独 | accounting完了、G5確定 | V107 | CanonicalInvoiceと会計/請求境界を固定後に開始 |
+| 4 | AI feedback（T109〜T115）単独 | CRM、proposal、staffing、outcome source完了 | V108 | 学習指標の母集団とPII境界を先に固定 |
 
 > **採番の正本は `README.md` の予約表**であり、S07の正式migrationはV75〜V79、S09はV80＋V81、
-> S10=V84/V85実在＋V102 G2 follow-up、S11=V83/V91/V98実在、S12〜S17=V110〜V115である。
+> S10=V84/V85実在＋V102 G2 follow-up、S11=V83/V91/V98実在、S12〜S17=V103〜V108である。
 > common V99は永久欠番、V100は`migration-dev`実在のためcommon再利用禁止、common V101は既存用途を維持する。
 > R10がS10 decision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とする前にV102を作成しない。
 > 永続環境は個別read-only証跡をpacketへ記録し、着手時は必ず全Flyway locationの実ファイルを再確認する。

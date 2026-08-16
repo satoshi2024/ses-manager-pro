@@ -1,0 +1,8 @@
+{
+  "access_token": "fixture-access-token",
+  "refresh_token": "fixture-refresh-token",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "",
+  "company_id": 123
+}

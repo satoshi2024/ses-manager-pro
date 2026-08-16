@@ -786,7 +786,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 2
-- Migration: V110（S10 V84/V85＋G2 follow-up V102、S11 V83/V91/V98を反映。S10/S11双方PASS後に全Flyway locationを再確認）
+- Migration: V103（S10 V84/V85＋G2 follow-up V102、S11 V83/V91/V98を反映。S10/S11双方PASS後に全Flyway locationを再確認）
 - 先行条件: dispatchとattendanceが両方完了・merge済み。
 - Decision gate: 募集枠、兼務、配賦率、scenarioの業務口径を確認。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -856,7 +856,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V111（S10 V102、S12 V110を反映。common V99永久欠番、migration-dev V100実在、common V101既存用途維持）
+- Migration: V104（S10 V102、S12 V103を反映。common V99永久欠番、migration-dev V100実在、common V101既存用途維持）
 - 先行条件: Wave 2、identity、archive完了。engineer portalより先にsecurity chainをmerge。
 - Decision gate: G3（domain/本人確認/利用規約）確定、G8は決定または推奨既定を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -930,7 +930,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V112（S10 V102、S12 V110、S13 V111を反映。着手時に全Flyway locationを再確認）
+- Migration: V105（S10 V102、S12 V103、S13 V104を反映。着手時に全Flyway locationを再確認）
 - 先行条件: external portalのsecurity chainが先にmerge済み。attendance/staffingの公開interface固定済み。
 - Decision gate: G9は決定または推奨既定を記録。給与・勤怠・privacyの本人scopeを固定。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1001,7 +1001,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V113（S10 V102、S12〜S14 V110〜V112を反映。着手時に全Flyway locationを再確認）
+- Migration: V106（S10 V102、S12〜S14 V103〜V105を反映。着手時に全Flyway locationを再確認）
 - 先行条件: portal系、order、BP、archive完了・merge済み。
 - Decision gate: G4（freee plan/API/仕訳の正）確定、G9の経費方針を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1071,7 +1071,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 3
-- Migration: V114（S10 V102、S12〜S15 V110〜V113を反映。着手時に全Flyway locationを再確認）
+- Migration: V107（S10 V102、S12〜S15 V103〜V106を反映。着手時に全Flyway locationを再確認）
 - 先行条件: accounting-payment-integration完了・merge済み。
 - Decision gate: G5（Certified Service Provider、sandbox、認証、文書種別）が正式決定済み。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
@@ -1141,7 +1141,7 @@ S03〜S17は `test-execution-policy-s03-s17.md` を必須適用する。通常Ta
 
 【開始条件】
 - Wave: Wave 4
-- Migration: V115（S10 V102、S12〜S16 V110〜V114を反映。着手時に全Flyway locationを再確認）
+- Migration: V108（S10 V102、S12〜S16 V103〜V107を反映。着手時に全Flyway locationを再確認）
 - 先行条件: CRM、proposal、staffing、outcome sourceが完了・merge済み。
 - Decision gate: G10はmock/rule継続または実provider/DPA/PII許可を記録。
 未達ならproduction変更をせず、blocker、影響task、必要な発注者回答、再開条件を報告して停止してください。
